@@ -25,13 +25,6 @@ fn temp_storage_root(name: &str) -> std::path::PathBuf {
 fn bundled_backend_script(path: &str) -> String {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let script_path = root.join(path);
-    let script_path = if script_path.exists() {
-        script_path
-    } else if let Some(suffix) = path.strip_prefix("../../../../packages/modules/backend/core/") {
-        root.join("../../../../modules/backend").join(suffix)
-    } else {
-        script_path
-    };
     std::fs::read_to_string(script_path).unwrap()
 }
 
@@ -740,9 +733,7 @@ fn backend_state_snapshot_updates_after_command() {
 
 #[test]
 fn shell_theme_backend_accepts_current_payload() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/shell-theme/src/main.luau",
-    );
+    let script = bundled_backend_script("tests/fixtures/shell-theme/src/main.luau");
     let mut ctx = BackendScriptContext::new("@mesh/shell-theme");
     ctx.load_script(&script).unwrap();
     ctx.call_init().unwrap();
@@ -793,9 +784,7 @@ fn shell_theme_backend_accepts_current_payload() {
 
 #[test]
 fn shell_theme_backend_initializes_from_configured_current_theme() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/shell-theme/src/main.luau",
-    );
+    let script = bundled_backend_script("tests/fixtures/shell-theme/src/main.luau");
     let mut ctx = BackendScriptContext::new_with_settings(
         "@mesh/shell-theme",
         serde_json::json!({ "__shell": { "theme": "mesh-default-light" } }),
@@ -816,9 +805,7 @@ fn shell_theme_backend_initializes_from_configured_current_theme() {
 
 #[test]
 fn shell_theme_backend_treats_tokyo_night_as_dark() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/shell-theme/src/main.luau",
-    );
+    let script = bundled_backend_script("tests/fixtures/shell-theme/src/main.luau");
     let mut ctx = BackendScriptContext::new_with_settings(
         "@mesh/shell-theme",
         serde_json::json!({
@@ -841,9 +828,7 @@ fn shell_theme_backend_treats_tokyo_night_as_dark() {
 
 #[test]
 fn shell_theme_backend_does_not_infer_darkness_from_theme_id() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/shell-theme/src/main.luau",
-    );
+    let script = bundled_backend_script("tests/fixtures/shell-theme/src/main.luau");
     let mut ctx = BackendScriptContext::new_with_settings(
         "@mesh/shell-theme",
         serde_json::json!({
@@ -869,9 +854,7 @@ fn shell_theme_backend_does_not_infer_darkness_from_theme_id() {
 
 #[test]
 fn shell_theme_backend_preserves_shell_authored_dark_state() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/shell-theme/src/main.luau",
-    );
+    let script = bundled_backend_script("tests/fixtures/shell-theme/src/main.luau");
     let mut ctx = BackendScriptContext::new("@mesh/shell-theme");
     ctx.load_script(&script).unwrap();
     ctx.call_init().unwrap();
@@ -897,9 +880,7 @@ fn shell_theme_backend_preserves_shell_authored_dark_state() {
 
 #[test]
 fn bundled_audio_provider_exports_state() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/pipewire-audio/src/main.luau",
-    );
+    let script = bundled_backend_script("../../../../modules/backend/pipewire-audio/src/main.luau");
     let mut ctx = BackendScriptContext::new("@mesh/pipewire-audio");
     ctx.load_script(&script).unwrap();
 
@@ -919,9 +900,7 @@ fn bundled_audio_provider_exports_state() {
 
 #[test]
 fn bundled_network_provider_exports_state() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/networkmanager-network/src/main.luau",
-    );
+    let script = bundled_backend_script("tests/fixtures/networkmanager-network/src/main.luau");
     let mut ctx = BackendScriptContext::new("@mesh/networkmanager");
     ctx.load_script(&script).unwrap();
 
@@ -952,9 +931,7 @@ fn bundled_network_provider_exports_state() {
 
 #[test]
 fn bundled_device_provider_normalizes_linux_system_information() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/device-info/src/main.luau",
-    );
+    let script = bundled_backend_script("../../../../modules/backend/device-info/src/main.luau");
     let mut ctx = BackendScriptContext::new_with_capabilities(
         "@mesh/device-info",
         [
@@ -1048,9 +1025,8 @@ end
 
 #[test]
 fn bundled_brightness_provider_reads_and_controls_the_backlight() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/backlight-brightness/src/main.luau",
-    );
+    let script =
+        bundled_backend_script("../../../../modules/backend/backlight-brightness/src/main.luau");
     let mut ctx = BackendScriptContext::new("@mesh/backlight-brightness");
     ctx.load_script(&script).unwrap();
     ctx.ensure_lua()
@@ -1115,9 +1091,7 @@ end
 
 #[test]
 fn hyprland_workspace_command_waits_for_event_state_instead_of_rereading() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/hyprland-wm/src/main.luau",
-    );
+    let script = bundled_backend_script("../../../../modules/backend/hyprland-wm/src/main.luau");
     let mut ctx = BackendScriptContext::new("@mesh/hyprland-wm");
     ctx.load_script(&script).unwrap();
     ctx.ensure_lua()
@@ -1175,9 +1149,7 @@ end
 
 #[test]
 fn hyprland_stream_events_query_only_missing_fields_and_emit_selectively() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/hyprland-wm/src/main.luau",
-    );
+    let script = bundled_backend_script("../../../../modules/backend/hyprland-wm/src/main.luau");
     let mut ctx = BackendScriptContext::new("@mesh/hyprland-wm");
     ctx.load_script(&script).unwrap();
     ctx.ensure_lua().unwrap()
@@ -1306,35 +1278,35 @@ fn bundled_backend_scripts_expose_required_host_api_surface() {
     for (module_id, path) in [
         (
             "@mesh/pipewire-audio",
-            "../../../../packages/modules/backend/core/pipewire-audio/src/main.luau",
+            "../../../../modules/backend/pipewire-audio/src/main.luau",
         ),
         (
             "@mesh/pulseaudio-audio",
-            "../../../../packages/modules/backend/core/pulseaudio-audio/src/main.luau",
+            "../../../../modules/backend/pulseaudio-audio/src/main.luau",
         ),
         (
             "@mesh/networkmanager",
-            "../../../../packages/modules/backend/core/networkmanager-network/src/main.luau",
+            "tests/fixtures/networkmanager-network/src/main.luau",
         ),
         (
             concat!("@mesh/", "upo", "wer"),
             concat!(
-                "../../../../packages/modules/backend/core/",
+                "../../../../modules/backend/",
                 "upo",
                 "wer-power/src/main.luau"
             ),
         ),
         (
             "@mesh/backlight-brightness",
-            "../../../../packages/modules/backend/core/backlight-brightness/src/main.luau",
+            "../../../../modules/backend/backlight-brightness/src/main.luau",
         ),
         (
             "@mesh/shell-theme",
-            "../../../../packages/modules/backend/core/shell-theme/src/main.luau",
+            "tests/fixtures/shell-theme/src/main.luau",
         ),
         (
             "@mesh/device-info",
-            "../../../../packages/modules/backend/core/device-info/src/main.luau",
+            "../../../../modules/backend/device-info/src/main.luau",
         ),
     ] {
         let script = bundled_backend_script(path);
@@ -1401,9 +1373,8 @@ fn bundled_backend_scripts_expose_required_host_api_surface() {
 
 #[test]
 fn bundled_pulseaudio_backend_does_not_restore_high_frequency_exec_polling() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/pulseaudio-audio/src/main.luau",
-    );
+    let script =
+        bundled_backend_script("../../../../modules/backend/pulseaudio-audio/src/main.luau");
     assert!(
         script.contains("mesh.exec_stream(\"pactl\", { \"subscribe\" })"),
         "PulseAudio should consume pactl's event stream instead of polling for every change"
@@ -1421,9 +1392,7 @@ fn bundled_pulseaudio_backend_does_not_restore_high_frequency_exec_polling() {
 
 #[test]
 fn bundled_pipewire_backend_skips_successful_write_readback_when_streaming() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/pipewire-audio/src/main.luau",
-    );
+    let script = bundled_backend_script("../../../../modules/backend/pipewire-audio/src/main.luau");
     let mut ctx = BackendScriptContext::new_with_capabilities(
         "@mesh/pipewire-audio",
         [
@@ -1476,9 +1445,8 @@ end
 
 #[test]
 fn bundled_pulseaudio_backend_skips_successful_write_readback_when_streaming() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/pulseaudio-audio/src/main.luau",
-    );
+    let script =
+        bundled_backend_script("../../../../modules/backend/pulseaudio-audio/src/main.luau");
     let mut ctx = BackendScriptContext::new("@mesh/pulseaudio-audio");
     ctx.load_script(&script).unwrap();
     ctx.ensure_lua()
@@ -2145,9 +2113,11 @@ fn backend_command_result_conversion_failure_is_reported() {
         "error message should identify command-result conversion stage: {err}"
     );
     assert_eq!(
-        ctx.take_service_state_snapshot().unwrap(),
-        Some(serde_json::json!({ "value": "old" })),
-        "failed result conversion must roll back state"
+        ctx.take_service_state_snapshot()
+            .unwrap()
+            .map(super::BackendState::into_payload),
+        Some(serde_json::json!({ "value": "new" })),
+        "failed result conversion leaves private state intact"
     );
 }
 
@@ -2195,9 +2165,7 @@ fn backend_command_runtime_error_becomes_failed_result() {
 
 #[test]
 fn reference_media_provider_reads_config_and_exports_state() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/reference-media/src/main.luau",
-    );
+    let script = bundled_backend_script("tests/fixtures/reference-media/src/main.luau");
     let mut ctx = BackendScriptContext::new_with_settings(
         "@mesh/reference-media",
         serde_json::json!({
@@ -2239,9 +2207,7 @@ fn reference_media_provider_reads_config_and_exports_state() {
 
 #[test]
 fn reference_media_provider_command_updates_state() {
-    let script = bundled_backend_script(
-        "../../../../packages/modules/backend/core/reference-media/src/main.luau",
-    );
+    let script = bundled_backend_script("tests/fixtures/reference-media/src/main.luau");
     let mut ctx = BackendScriptContext::new("@mesh/reference-media");
     ctx.load_script(&script).unwrap();
     ctx.call_init().unwrap();
@@ -2559,7 +2525,7 @@ end
     let BackendTaskRun { state, errors, .. } = ctx.run_due_tasks(std::time::Instant::now());
     assert!(errors.is_empty(), "{errors:?}");
     let state = state.unwrap();
-    assert_eq!(state["done"], true, "{state}");
+    assert_eq!(state["done"], true, "{state:?}");
     assert_eq!(state["output"], "done");
     assert_eq!(ctx.pending_task_count(), 0);
     drop(ctx);
@@ -2618,7 +2584,7 @@ end
     let BackendTaskRun { state, errors, .. } = ctx.run_due_tasks(std::time::Instant::now());
     assert!(errors.is_empty(), "{errors:?}");
     let state = state.unwrap();
-    assert_eq!(state["done"], true, "{state}");
+    assert_eq!(state["done"], true, "{state:?}");
     assert_eq!(state["response"], "reply");
     peer.join().unwrap();
     drop(ctx);
@@ -2748,7 +2714,7 @@ impl FinishedCommand for BackendScriptContext {
                 module_id: "@test/backend".to_string(),
                 message,
             }),
-            None => Ok(outcome.state),
+            None => Ok(outcome.state.map(super::BackendState::into_payload)),
         }
     }
 
@@ -2844,9 +2810,8 @@ async fn suspended_poll_stays_in_flight_until_its_host_call_returns() {
     std::fs::write(root.join("start"), "").unwrap();
     ctx.call_init().unwrap();
     let _ = settle(&mut ctx).await;
-    let state = ctx.run_poll().unwrap().unwrap();
+    assert!(ctx.run_poll().unwrap().is_none());
     assert!(ctx.poll_in_flight());
-    assert_eq!(state["polls"], 1);
     std::fs::write(root.join("poll"), "").unwrap();
     let run = settle(&mut ctx).await;
     assert_eq!(run.polls.len(), 1);
@@ -2934,7 +2899,7 @@ fn settled_poll(ctx: &mut BackendScriptContext) -> serde_json::Value {
         }
         state = run.state.or(state);
     }
-    state.unwrap()
+    state.unwrap().into_payload()
 }
 
 #[test]
@@ -3014,4 +2979,93 @@ end
     );
     assert_eq!(workspaces[1]["index"], serde_json::json!(2));
     assert_eq!(workspaces[1]["focused"], serde_json::json!(false));
+}
+
+#[test]
+fn failed_command_preserves_table_identity_without_publishing() {
+    let mut ctx = BackendScriptContext::new("@test/command-publication");
+    ctx.load_script(
+        r#"
+state = { value = 0 }
+local captured = state
+function start(self) end
+function on_command_fail(self)
+    state.value = 1
+    mesh.service.emit({ value = 99 })
+    error("failed")
+end
+function on_command_check(self)
+    assert(state == captured)
+    state.value += 1
+    return { ok = true }
+end
+"#,
+    )
+    .unwrap();
+    assert_eq!(ctx.call_init().unwrap().unwrap()["value"], 0);
+    let failed = ctx
+        .run_command_finished("fail", &serde_json::json!({}))
+        .unwrap();
+    assert!(failed.error.is_some());
+    assert!(failed.state.is_none());
+    let success = ctx
+        .run_command_finished("check", &serde_json::json!({}))
+        .unwrap();
+    assert_eq!(success.state.unwrap()["value"], 2);
+}
+
+#[test]
+fn task_publication_keeps_the_last_success_before_a_failure() {
+    let mut ctx = BackendScriptContext::new("@test/task-publication");
+    ctx.load_script(
+        r#"
+state = { value = 0 }
+function start(self)
+    task.delay(0, function() state.value = 1 end)
+    task.delay(0, function()
+        state.value = 2
+        mesh.service.emit({ value = 99 })
+        error("failed task")
+    end)
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+    let run = ctx.run_due_tasks(std::time::Instant::now());
+    assert_eq!(run.errors.len(), 1);
+    assert_eq!(run.state.unwrap()["value"], 1);
+    let run = ctx.run_due_tasks(std::time::Instant::now());
+    assert!(run.state.is_none());
+}
+
+#[test]
+fn suspended_command_failure_does_not_publish_partial_state() {
+    let mut ctx = BackendScriptContext::new("@test/suspended-publication");
+    ctx.load_script(
+        r#"
+state = { value = 0 }
+function start(self) end
+function on_command_fail(self)
+    state.value = 1
+    mesh.service.emit({ value = 99 })
+    task.sleep(0)
+    state.value = 2
+    error("failed after yield")
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+    let run = ctx
+        .run_command_with_result("fail", &serde_json::json!({}))
+        .unwrap();
+    assert!(matches!(
+        run,
+        BackendCommandRun::Suspended { state: None, .. }
+    ));
+    let run = ctx.run_due_tasks(std::time::Instant::now());
+    assert!(run.state.is_none());
+    assert_eq!(run.commands.len(), 1);
+    assert!(run.commands[0].1.as_ref().unwrap().error.is_some());
 }

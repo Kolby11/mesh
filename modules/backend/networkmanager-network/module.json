@@ -1,0 +1,44 @@
+{
+  "name": "@mesh/networkmanager-network",
+  "version": "0.1.0",
+  "description": "NetworkManager provider over nmcli: connectivity, primary connection and Wi-Fi networks.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:nmcli:[\"monitor\"]",
+        "exec.argv:nmcli:[\"networking\",\"connectivity\"]",
+        "exec.argv:nmcli:[\"radio\",\"wifi\"]",
+        "exec.argv:nmcli:[\"-t\",\"-f\",\"TYPE,STATE,CONNECTION,DEVICE\",\"device\"]",
+        "exec.argv:nmcli:[\"-t\",\"-f\",\"ACTIVE,SSID,SIGNAL,SECURITY\",\"device\",\"wifi\",\"list\",\"--rescan\",\"no\"]"
+      ],
+      "optionalCapabilities": [
+        "exec.argv:nmcli:[\"radio\",\"wifi\",\"*\"]",
+        "exec.argv:nmcli:[\"device\",\"wifi\",\"rescan\"]",
+        "exec.argv:nmcli:[\"device\",\"wifi\",\"connect\",\"*\"]"
+      ],
+      "binaries": [
+        {
+          "name": "nmcli",
+          "reason": "Read and control NetworkManager.",
+          "packages": { "arch": "networkmanager", "debian": "network-manager", "fedora": "NetworkManager", "nixos": "networkmanager" }
+        }
+      ],
+      "modules": {
+        "@mesh/network-interface": "^1.0.0"
+      }
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.network",
+        "version": "1.0",
+        "provider": "networkmanager",
+        "label": "NetworkManager",
+        "priority": 100
+      }
+    ]
+  }
+}

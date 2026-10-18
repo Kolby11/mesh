@@ -246,7 +246,7 @@ fn display_list_preserves_disjoint_changed_entry_damage_rects() {
 #[test]
 fn display_list_selects_blurred_background_outside_layout_bounds() {
     let mut root = node(1, "box", 20.0, 20.0, 20.0, 20.0);
-    root.computed_style.filter = VisualFilter { blur_radius: 4.0 };
+    root.computed_style.filter = VisualFilter::blur(4.0);
 
     let mut list = RetainedDisplayList::default();
     list.update(&root, 80, 80, false, true);
@@ -269,7 +269,7 @@ fn display_list_selects_blurred_background_outside_layout_bounds() {
 #[test]
 fn display_list_effect_visual_clip_includes_shadow_and_filter_overflow() {
     let mut root = node(1, "box", 20.0, 20.0, 20.0, 20.0);
-    root.computed_style.filter = VisualFilter { blur_radius: 4.0 };
+    root.computed_style.filter = VisualFilter::blur(4.0);
     root.computed_style.box_shadow = BoxShadow {
         offset_x: 10.0,
         offset_y: 0.0,
@@ -1080,5 +1080,62 @@ fn sparse_batch_metrics_beat_the_ordered_walk() {
     assert!(
         index_elapsed * 4 < walk_elapsed,
         "patching a handful of nodes must beat the whole ordered walk by a wide margin"
+    );
+}
+
+#[test]
+fn exported_visual_damage_uses_ancestor_transform_and_scroll() {
+    let mut root = node(1, "box", 0.0, 0.0, 200.0, 200.0);
+    root.computed_style.transform.translate_x = 30.0;
+    let mut scroller = node(2, "scroll", 10.0, 10.0, 80.0, 60.0);
+    scroller.computed_style.overflow_y = Overflow::Scroll;
+    scroller.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+        y: 20.0,
+        max_y: 100.0,
+        content_height: 160.0,
+        ..Default::default()
+    });
+    scroller
+        .children
+        .push(node(3, "box", 15.0, 40.0, 20.0, 10.0));
+    root.children.push(scroller);
+    let mut objects = crate::RenderObjectTree::default();
+    objects.update(&root);
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 300, 300, false, true);
+    let surface = DamageRect {
+        x: 0,
+        y: 0,
+        width: 300,
+        height: 300,
+    };
+    assert_eq!(
+        list.visual_damage_rects(surface)[&3],
+        DamageRect {
+            x: 45,
+            y: 20,
+            width: 20,
+            height: 10
+        }
+    );
+    root.children[0].scroll_metrics.as_mut().unwrap().y = 25.0;
+    let dirty = objects.update(&root);
+    list.update_with_dirty_nodes(
+        &root,
+        dirty,
+        objects.dirty_node_ids(),
+        300,
+        300,
+        false,
+        true,
+    );
+    assert_eq!(
+        list.visual_damage_rects(surface)[&3],
+        DamageRect {
+            x: 45,
+            y: 15,
+            width: 20,
+            height: 10
+        }
     );
 }

@@ -957,6 +957,7 @@ fn ready_render_work_without_progress_backs_off_instead_of_spinning() {
     shell.next_frontend_reload_check = later;
     shell.next_theme_reload_check = later;
     shell.next_shell_settings_reload_check = later;
+    shell.next_watch_reconcile = later;
 
     shell.render_stalled = false;
     assert_eq!(shell.next_runtime_sleep(false), Duration::ZERO);

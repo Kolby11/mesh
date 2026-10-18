@@ -8,6 +8,18 @@
 use mesh_core_capability::{Capability, CapabilityCatalog, CapabilitySet};
 use serde_json::Value;
 
+/// A renderer-neutral sink for effects produced by a frontend runtime.
+///
+/// Shells implement this contract with an adapter that supplies the concrete
+/// request queue and policy. The ABI does not expose that queue or its policy
+/// specific request variants to compiler-facing callers.
+pub trait FrontendEffectSink {
+    type Request;
+    type Error;
+
+    fn publish(&mut self, effect: ScopedFrontendEffect) -> Result<Self::Request, Self::Error>;
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EffectSource {
     pub module_id: String,

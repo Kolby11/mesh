@@ -102,16 +102,10 @@ impl SurfaceTarget {
 pub(super) struct ChildSurface {
     pub(super) target: SurfaceTarget,
     pub(super) kind: ChildSurfaceKind,
-    // `node_key` and `anchor_rect` are written when a child surface is derived
-    // and consumed by the child reconcile/positioner pass (popup placement +
-    // re-matching a node to its surface across re-renders), which is not yet
-    // wired — allow until that lands.
-    #[allow(dead_code)]
     /// Stable `_mesh_key` of the originating `WidgetNode`.
     pub(super) node_key: String,
     /// Trigger-to-surface identity after this child is promoted as a popup.
     pub(super) popover_relationship: Option<PopoverSurfaceRelationship>,
-    #[allow(dead_code)]
     /// Anchor rectangle in the parent surface's coordinate space.
     pub(super) anchor_rect: (i32, i32, i32, i32),
     /// Extra buffer padding (left, top, right, bottom) reserved for
@@ -396,7 +390,6 @@ pub(super) struct ServiceCallRoute {
     pub(super) instance_id: String,
     pub(super) module_id: String,
     pub(super) generation: u64,
-    pub(super) identity: BackendIdentity,
 }
 
 /// Per-(interface, command) leading+trailing throttle state for coalescable
@@ -419,21 +412,6 @@ pub(super) struct LatestServiceState {
 }
 
 impl LatestServiceState {
-    pub(super) fn new(
-        interface: String,
-        provider_id: String,
-        generation: u64,
-        state: serde_json::Value,
-    ) -> Self {
-        Self {
-            interface,
-            provider_id,
-            generation,
-            identity: BackendIdentity::default(),
-            state,
-        }
-    }
-
     pub(super) fn new_with_identity(
         interface: String,
         provider_id: String,
@@ -566,14 +544,11 @@ pub(super) enum ProfileWriteOperation {
         provider_id: String,
     },
     ProviderSelection {
-        graph_path: PathBuf,
         interface: String,
         provider_id: String,
     },
     ModuleEnabled {
-        graph_path: PathBuf,
         module_id: String,
-        enabled: bool,
         active_profile_id: Option<String>,
     },
 }

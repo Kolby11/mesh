@@ -2,6 +2,13 @@
 
 This workspace keeps browser-like concerns split by crate:
 
+- `mesh-core-files` owns contained, bounded file reads; theme, locale and
+  resources share its descriptor-relative reader.
+- `mesh-core-config` owns shared configuration paths, settings persistence,
+  and the advisory control-plane lock.
+- `mesh-core-module` owns package install/uninstall plans, composition/profile
+  persistence, and profile-aware settings projection; it depends on config,
+  while config does not depend on module.
 - `mesh-core-component` parses `.mesh` single-file components into source ASTs.
 - `mesh-core-frontend` compiles `.mesh` source and builds `WidgetNode` trees.
 - `mesh-core-animation` owns easing, interpolation, transitions, and keyframes.
@@ -16,7 +23,6 @@ This workspace keeps browser-like concerns split by crate:
   owning declarations.
 - `mesh-core-frontend-abi` owns renderer-neutral frontend effects, caller
   identity, and capability-scoped host contracts.
-- `mesh-core-frontend-host` owns only renderer-neutral frontend host contracts.
 - `mesh-core-frontend-shell-adapter` owns the component host lifecycle and
   shell-side adapters that lower the neutral ABI into renderer and surface
   operations.
@@ -29,12 +35,13 @@ surface-policy -> no runtime boundary crates
 render -> elements + icon
 frontend -> component + elements + module + theme
 frontend-abi -> capability
-frontend-host -> frontend-abi
-frontend-shell-adapter -> frontend-host + capability + config + debug + diagnostics + elements + locale + render + scripting + theme + wayland
+frontend-shell-adapter -> frontend-abi + capability + config + debug + diagnostics + elements + locale + render + scripting + theme + wayland
 animation -> elements
 interaction -> elements + module
 surface-config -> component + module + wayland + config + surface-policy
-module -> surface-policy
+module -> surface-policy + icon
+icon -> resources
+theme + locale + resources -> files
 presentation -> render + surface-policy
 shell -> all boundary crates as orchestration glue
 ```

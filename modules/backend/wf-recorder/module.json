@@ -1,0 +1,38 @@
+{
+  "name": "@mesh/wf-recorder",
+  "version": "0.1.0",
+  "description": "Screen recording provider over wf-recorder; recordings land in the XDG videos directory.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:wf-recorder:[\"-f\",\"*\"]",
+        "exec.argv:pkill:[\"-INT\",\"-x\",\"wf-recorder\"]",
+        "exec.argv:pgrep:[\"-x\",\"wf-recorder\"]",
+        "exec.argv:sh:[\"-c\",\"d=\\\"${XDG_VIDEOS_DIR:-$HOME/Videos}/Recordings\\\"; mkdir -p \\\"$d\\\" && printf '%s' \\\"$d\\\"\"]"
+      ],
+      "binaries": [
+        {
+          "name": "wf-recorder",
+          "reason": "Record the screen on wlroots-family compositors.",
+          "packages": { "arch": "wf-recorder", "debian": "wf-recorder", "fedora": "wf-recorder", "nixos": "wf-recorder" }
+        }
+      ],
+      "modules": {
+        "@mesh/recorder-interface": "^1.0.0"
+      }
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.recorder",
+        "version": "1.0",
+        "provider": "wf-recorder",
+        "label": "wf-recorder",
+        "priority": 100
+      }
+    ]
+  }
+}

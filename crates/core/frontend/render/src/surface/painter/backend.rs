@@ -331,6 +331,15 @@ pub(crate) enum PainterCommand {
         filter: PainterFilter,
         clip: ClipRect,
     },
+    /// Paint the shell backdrop source, refracted, into a rounded rect.
+    /// `frame` places the surface on its output, in device pixels.
+    DrawBackdropRefraction {
+        rect: ClipRect,
+        radii: Corners,
+        filter: VisualFilter,
+        frame: crate::surface::backdrop::BackdropFrame,
+        clip: ClipRect,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -884,9 +893,7 @@ impl SkiaPaintBackend {
                     clip,
                 } => {
                     if self.diagnose_excessive_blur(
-                        VisualFilter {
-                            blur_radius: shadow.blur_radius,
-                        },
+                        VisualFilter::blur(shadow.blur_radius),
                         diagnostics,
                     ) {
                         continue;
@@ -898,6 +905,42 @@ impl SkiaPaintBackend {
                         *shadow,
                         effective_clip(*clip, &clip_stack),
                     );
+                }
+                PainterCommand::DrawBackdropRefraction {
+                    rect,
+                    radii,
+                    filter,
+                    frame,
+                    clip,
+                } => {
+                    let clip = effective_clip(*clip, &clip_stack);
+                    if clip.width <= 0 || clip.height <= 0 {
+                        continue;
+                    }
+                    let save_count = canvas.save();
+                    canvas.clip_rect(
+                        Rect::from_xywh(
+                            clip.x as f32,
+                            clip.y as f32,
+                            clip.width as f32,
+                            clip.height as f32,
+                        ),
+                        None,
+                        false,
+                    );
+                    crate::surface::backdrop::draw_refraction(
+                        canvas,
+                        Rect::from_xywh(
+                            rect.x as f32,
+                            rect.y as f32,
+                            rect.width as f32,
+                            rect.height as f32,
+                        ),
+                        *radii,
+                        *filter,
+                        *frame,
+                    );
+                    canvas.restore_to_count(save_count);
                 }
                 PainterCommand::ApplyFilter {
                     rect,

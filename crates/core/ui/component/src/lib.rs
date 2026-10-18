@@ -39,8 +39,7 @@ use lightningcss::{
 };
 
 pub use mesh_core_expression::{
-    CompiledExpression, ExpressionCompileError, ExpressionEvaluationError,
-    SharedCompiledExpression, compile_expression,
+    CompiledExpression, ExpressionCompileError, SharedCompiledExpression, compile_expression,
 };
 
 /// A parsed authoring-time import from a `.mesh` script block.

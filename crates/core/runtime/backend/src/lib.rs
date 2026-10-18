@@ -1,8 +1,8 @@
 use mesh_core_capability::CapabilitySet;
 pub use mesh_core_runtime::BackendIdentity;
 use mesh_core_scripting::{
-    BackendCommandRun, BackendScriptContext, BackendScriptError, StreamEvent, StreamEventKind,
-    StreamHandle,
+    BackendCommandRun, BackendScriptContext, BackendScriptError, BackendState, StreamEvent,
+    StreamEventKind, StreamHandle,
 };
 use serde_json::Value as JsonValue;
 use std::collections::HashMap;
@@ -771,7 +771,7 @@ async fn run_backend_service(
 
     let mut interval_ms = bounded_poll_interval_ms(&ctx);
     let mut tick = make_interval(interval_ms, true);
-    let mut last_payload: Option<serde_json::Value> = None;
+    let mut last_state_fingerprint: Option<u64> = None;
     let mut consecutive_poll_failures = 0;
     let mut consecutive_stream_failures = 0;
     let stream_state = ctx.stream_state();
@@ -788,7 +788,7 @@ async fn run_backend_service(
             &tx,
             &service_name,
             &module_id,
-            &mut last_payload,
+            &mut last_state_fingerprint,
             payload,
             &identity_handle,
         )
@@ -866,7 +866,7 @@ async fn run_backend_service(
                 }
                 refresh_interval(&ctx, &mut interval_ms, &mut tick);
                 if let Some(payload) = run.state {
-                    if !publish_changed_update(&tx, &service_name, &module_id, &mut last_payload, payload, &identity_handle).await { break; }
+                    if !publish_changed_update(&tx, &service_name, &module_id, &mut last_state_fingerprint, payload, &identity_handle).await { break; }
                 }
                 if !publish_script_events(&tx, &service_name, &module_id, ctx.drain_events(), &identity_handle).await { break; }
                 if stop { break; }
@@ -880,7 +880,7 @@ async fn run_backend_service(
                     &service_name,
                     &module_id,
                     &identity_handle,
-                    &mut last_payload,
+                    &mut last_state_fingerprint,
                     &mut interval_ms,
                     &mut tick,
                     &mut consecutive_stream_failures,
@@ -925,7 +925,7 @@ async fn run_backend_service(
                     &tx,
                     &service_name,
                     &module_id,
-                    &mut last_payload,
+                    &mut last_state_fingerprint,
                     payload,
                     &identity_handle,
                 ).await {
@@ -1094,7 +1094,7 @@ async fn run_backend_service(
                                     &tx,
                                     &service_name,
                                     &module_id,
-                                    &mut last_payload,
+                                    &mut last_state_fingerprint,
                                     payload,
                                     &identity_handle,
                                 ).await {
@@ -1134,7 +1134,7 @@ async fn run_backend_service(
                                     &tx,
                                     &service_name,
                                     &module_id,
-                                    &mut last_payload,
+                                    &mut last_state_fingerprint,
                                     payload,
                                     &identity_handle,
                                 ).await {
@@ -1337,7 +1337,7 @@ async fn dispatch_stream_events(
     service_name: &Arc<str>,
     module_id: &Arc<str>,
     identity_handle: &std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
-    last_payload: &mut Option<serde_json::Value>,
+    last_state_fingerprint: &mut Option<u64>,
     active_interval_ms: &mut u64,
     tick: &mut tokio::time::Interval,
     stream_failures: &mut u32,
@@ -1353,7 +1353,7 @@ async fn dispatch_stream_events(
                 tx,
                 service_name,
                 module_id,
-                last_payload,
+                last_state_fingerprint,
                 ctx,
                 active_interval_ms,
                 tick,
@@ -1386,7 +1386,7 @@ async fn dispatch_stream_events(
                             tx,
                             service_name,
                             module_id,
-                            last_payload,
+                            last_state_fingerprint,
                             ctx,
                             active_interval_ms,
                             tick,
@@ -1412,7 +1412,7 @@ async fn dispatch_stream_events(
                         tx,
                         service_name,
                         module_id,
-                        last_payload,
+                        last_state_fingerprint,
                         ctx,
                         active_interval_ms,
                         tick,
@@ -1430,7 +1430,7 @@ async fn dispatch_stream_events(
                         tx,
                         service_name,
                         module_id,
-                        last_payload,
+                        last_state_fingerprint,
                         ctx,
                         active_interval_ms,
                         tick,
@@ -1450,7 +1450,7 @@ async fn dispatch_stream_events(
             tx,
             service_name,
             module_id,
-            last_payload,
+            last_state_fingerprint,
             ctx,
             active_interval_ms,
             tick,
@@ -1466,11 +1466,11 @@ async fn dispatch_stream_events(
 }
 
 async fn publish_stream_callback_result(
-    result: Result<Option<serde_json::Value>, BackendScriptError>,
+    result: Result<Option<BackendState>, BackendScriptError>,
     tx: &BackendEventSender,
     service_name: &Arc<str>,
     module_id: &Arc<str>,
-    last_payload: &mut Option<serde_json::Value>,
+    last_state_fingerprint: &mut Option<u64>,
     ctx: &mut BackendScriptContext,
     active_interval_ms: &mut u64,
     tick: &mut tokio::time::Interval,
@@ -1486,7 +1486,7 @@ async fn publish_stream_callback_result(
                 tx,
                 service_name,
                 module_id,
-                last_payload,
+                last_state_fingerprint,
                 payload,
                 identity_handle,
             )
@@ -1594,39 +1594,27 @@ async fn publish_changed_update(
     tx: &BackendEventSender,
     service_name: &Arc<str>,
     module_id: &Arc<str>,
-    last_payload: &mut Option<serde_json::Value>,
-    payload: serde_json::Value,
+    last_state_fingerprint: &mut Option<u64>,
+    payload: BackendState,
     identity_handle: &std::sync::Arc<std::sync::RwLock<mesh_core_runtime::BackendIdentity>>,
 ) -> bool {
-    if Some(&payload) == last_payload.as_ref() {
+    let fingerprint = payload.fingerprint();
+    if Some(fingerprint) == *last_state_fingerprint {
         return true;
     }
-    if let Err(message) = mesh_core_runtime::validate_json(
-        &payload,
-        MAX_COMMAND_PAYLOAD_BYTES,
-        MAX_COMMAND_JSON_DEPTH,
-        "service state payload",
-    ) {
-        let _ = tx
-            .send(BackendServiceEvent::Failed {
-                service: Arc::clone(service_name),
-                source_module: Arc::clone(module_id),
-                stage: "state".to_string(),
-                message,
-                identity: backend_identity(identity_handle),
-            })
-            .await;
-        return false;
+    let sent = tx
+        .send(BackendServiceEvent::Update(BackendServiceUpdate {
+            service: Arc::clone(service_name),
+            source_module: Arc::clone(module_id),
+            payload: payload.into_payload(),
+            identity: backend_identity(identity_handle),
+        }))
+        .await
+        .is_ok();
+    if sent {
+        *last_state_fingerprint = Some(fingerprint);
     }
-    last_payload.replace(payload.clone());
-    tx.send(BackendServiceEvent::Update(BackendServiceUpdate {
-        service: Arc::clone(service_name),
-        source_module: Arc::clone(module_id),
-        payload,
-        identity: backend_identity(identity_handle),
-    }))
-    .await
-    .is_ok()
+    sent
 }
 
 fn bounded_poll_interval_ms(ctx: &BackendScriptContext) -> u64 {
@@ -1660,6 +1648,59 @@ fn refresh_interval(
 mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
+
+    #[tokio::test]
+    async fn validated_state_suppresses_duplicates_and_tracks_only_delivered_updates() {
+        let mut context = BackendScriptContext::new_with_settings_and_capabilities(
+            "@test/state-fingerprint",
+            serde_json::json!({}),
+            CapabilitySet::default(),
+        );
+        context.load_script("state = { nested = { value = 1 } } function start() end function on_poll() state.nested.value += 1 end").unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let sender = BackendEventSender::Unbounded(tx);
+        let service = Arc::from("test");
+        let module = Arc::from("@test/state-fingerprint");
+        let identity = Arc::new(std::sync::RwLock::new(BackendIdentity::default()));
+        let mut last = None;
+        let initial = context.call_init().unwrap().unwrap();
+        assert!(
+            publish_changed_update(&sender, &service, &module, &mut last, initial, &identity).await
+        );
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            BackendServiceEvent::Update(_)
+        ));
+        let duplicate = context.take_service_state_snapshot().unwrap().unwrap();
+        assert!(
+            publish_changed_update(&sender, &service, &module, &mut last, duplicate, &identity)
+                .await
+        );
+        assert!(rx.try_recv().is_err());
+        let changed = context.run_poll().unwrap().unwrap();
+        assert!(
+            publish_changed_update(&sender, &service, &module, &mut last, changed, &identity).await
+        );
+        let BackendServiceEvent::Update(update) = rx.try_recv().unwrap() else {
+            panic!("expected changed state")
+        };
+        assert_eq!(update.payload["nested"]["value"], 2);
+        let delivered = last;
+        drop(rx);
+        let undelivered = context.run_poll().unwrap().unwrap();
+        assert!(
+            !publish_changed_update(
+                &sender,
+                &service,
+                &module,
+                &mut last,
+                undelivered,
+                &identity
+            )
+            .await
+        );
+        assert_eq!(last, delivered);
+    }
 
     fn cmd(name: &str, value: i64, coalesce: bool) -> BackendServiceCommand {
         BackendServiceCommand {
@@ -1977,6 +2018,13 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
             "../../../../modules/backend/{module_slug}/src/main.luau"
         ))
+    }
+
+    fn fixture_backend_script_path(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../scripting/tests/fixtures")
+            .join(name)
+            .join("src/main.luau")
     }
 
     async fn next_update(
@@ -2572,7 +2620,7 @@ mod tests {
 
     #[tokio::test]
     async fn shell_theme_backend_runs_through_runtime_loop() {
-        let script_path = bundled_backend_script_path("shell-theme");
+        let script_path = fixture_backend_script_path("shell-theme");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (update_tx, mut update_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -3305,7 +3353,7 @@ end
 
     #[tokio::test]
     async fn reference_media_backend_emits_initial_state() {
-        let script_path = bundled_backend_script_path("reference-media");
+        let script_path = fixture_backend_script_path("reference-media");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (update_tx, mut update_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -3361,7 +3409,7 @@ end
 
     #[tokio::test]
     async fn reference_media_backend_command_returns_result_and_updated_state() {
-        let script_path = bundled_backend_script_path("reference-media");
+        let script_path = fixture_backend_script_path("reference-media");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
@@ -3445,7 +3493,7 @@ end
 
     #[tokio::test]
     async fn reference_media_invalid_command_returns_module_scoped_failure() {
-        let script_path = bundled_backend_script_path("reference-media");
+        let script_path = fixture_backend_script_path("reference-media");
         let script = std::fs::read_to_string(script_path).unwrap();
         let (event_tx, mut event_rx) = mpsc::unbounded_channel();
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();

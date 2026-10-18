@@ -1106,14 +1106,6 @@ pub fn verify_provenance(
         .collect()
 }
 
-/// Module ids that still require `module_id`, so uninstall can refuse.
-pub fn dependents(module_id: &str, lock: &MeshLock) -> Vec<String> {
-    lock.modules
-        .get(module_id)
-        .map(|entry| entry.requested_by.iter().cloned().collect())
-        .unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1829,27 +1821,5 @@ mod tests {
         assert_eq!(kept.changed().count(), 0);
 
         std::fs::remove_dir_all(&repository).ok();
-    }
-
-    #[test]
-    fn uninstall_refuses_while_something_still_requires_the_module() {
-        let mut lock = MeshLock::new();
-        lock.modules.insert(
-            "@me/shared".into(),
-            LockedModule {
-                version: "1.0.0".into(),
-                source: ModuleSource::Path {
-                    path: "shared".into(),
-                },
-                revision: None,
-                digest: "sha256:0".into(),
-                trust: Default::default(),
-                signature: None,
-                dependencies: BTreeMap::new(),
-                requested_by: BTreeSet::from(["@me/desk".to_string()]),
-            },
-        );
-        assert_eq!(dependents("@me/shared", &lock), vec!["@me/desk"]);
-        assert!(dependents("@me/absent", &lock).is_empty());
     }
 }

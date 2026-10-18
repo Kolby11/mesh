@@ -178,50 +178,6 @@ fn complete_interface_proxy(
         return items;
     }
 
-    let shape = registry.interface_shape(iface_name);
-
-    // State fields from backend script analysis
-    if let Some(shape) = shape {
-        for field in &shape.state_fields {
-            if !field.starts_with(prefix) {
-                continue;
-            }
-            items.push(CompletionItem {
-                label: field.clone(),
-                kind: Some(CompletionItemKind::FIELD),
-                detail: Some(format!("{iface_name} state")),
-                documentation: Some(Documentation::MarkupContent(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: format!(
-                        "State field emitted by the `{iface_name}` backend service.\n\nRead as `{var_name}.{field}`."
-                    ),
-                })),
-                ..Default::default()
-            });
-        }
-
-        // Commands from backend script analysis
-        for cmd in &shape.commands {
-            if !cmd.starts_with(prefix) {
-                continue;
-            }
-            items.push(CompletionItem {
-                label: cmd.clone(),
-                kind: Some(CompletionItemKind::METHOD),
-                detail: Some(format!("{iface_name} command")),
-                insert_text: Some(format!("{cmd}()")),
-                insert_text_format: Some(Fmt::PLAIN_TEXT),
-                documentation: Some(Documentation::MarkupContent(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: format!(
-                        "Sends the `{cmd}` command to the `{iface_name}` backend service.\n\nCall as `{var_name}.{cmd}()`."
-                    ),
-                })),
-                ..Default::default()
-            });
-        }
-    }
-
     // Always include on_change
     if "on_change".starts_with(prefix) {
         items.push(CompletionItem {
@@ -274,17 +230,6 @@ pub(crate) fn service_member_markdown(
         return None;
     }
 
-    let shape = registry.interface_shape(interface)?;
-    if shape.state_fields.iter().any(|field| field == member) {
-        return Some(format!(
-            "**`{var_name}.{member}`**\n\nState field emitted by the `{interface}` backend service.\n\nRead as `{var_name}.{member}`."
-        ));
-    }
-    if shape.commands.iter().any(|command| command == member) {
-        return Some(format!(
-            "**`{var_name}.{member}`**\n\nSends the `{member}` command to the `{interface}` backend service.\n\nCall as `{var_name}.{member}()`."
-        ));
-    }
     None
 }
 
@@ -686,39 +631,6 @@ fn complete_import_member(
             ) {
                 items.push(item);
             }
-        }
-        return items;
-    }
-
-    if let Some(shape) = registry.interface_shape(canonical) {
-        let mut items: Vec<CompletionItem> = Vec::new();
-        for field in &shape.state_fields {
-            if let Some(item) = member_item(
-                field,
-                prefix,
-                &format!("{canonical} state"),
-                CompletionItemKind::FIELD,
-            ) {
-                items.push(item);
-            }
-        }
-        for cmd in &shape.commands {
-            if let Some(item) = member_item(
-                cmd,
-                prefix,
-                &format!("{canonical} command"),
-                CompletionItemKind::METHOD,
-            ) {
-                items.push(item);
-            }
-        }
-        if let Some(item) = member_item(
-            "on_change",
-            prefix,
-            "register change handler",
-            CompletionItemKind::METHOD,
-        ) {
-            items.push(item);
         }
         return items;
     }
@@ -1149,4 +1061,27 @@ pub(crate) fn element_ref_markdown(doc: &Document, ref_name: &str) -> Option<Str
             ElementRefSource::BindThis => "bind:this",
         }
     ))
+}
+
+#[cfg(test)]
+mod contract_completion_tests {
+    use super::*;
+
+    #[test]
+    fn absent_contract_does_not_offer_backend_result_fields() {
+        let source =
+            "<template><box /></template><script>local audio = require(\"mesh.audio\")</script>";
+        let document = Document::new(
+            tower_lsp::lsp_types::Url::parse("file:///contract-only.mesh").unwrap(),
+            source.into(),
+        );
+        let registry = ModuleRegistry::empty();
+        let items = complete_interface_proxy("audio", "", &document, &registry);
+        assert!(
+            !items
+                .iter()
+                .any(|item| matches!(item.label.as_str(), "ok" | "error"))
+        );
+        assert!(service_member_markdown("audio", "mesh.audio", "ok", &registry).is_none());
+    }
 }

@@ -111,6 +111,7 @@ pub struct FrontendRenderEngine {
     painter_layers: RefCell<PainterLayerStack>,
     blur_quality: Cell<BlurQuality>,
     backdrop_blur_policy: Cell<BackdropBlurPolicy>,
+    backdrop_frame: Cell<super::backdrop::BackdropFrame>,
 }
 
 #[derive(Default)]
@@ -161,6 +162,7 @@ impl FrontendRenderEngine {
             painter_layers: RefCell::new(PainterLayerStack::default()),
             blur_quality: Cell::new(BlurQuality::default()),
             backdrop_blur_policy: Cell::new(BackdropBlurPolicy::CompositorRegion),
+            backdrop_frame: Cell::new(super::backdrop::BackdropFrame::default()),
         }
     }
 
@@ -179,6 +181,7 @@ impl FrontendRenderEngine {
             painter_layers: RefCell::new(PainterLayerStack::default()),
             blur_quality: Cell::new(BlurQuality::default()),
             backdrop_blur_policy: Cell::new(BackdropBlurPolicy::CompositorRegion),
+            backdrop_frame: Cell::new(super::backdrop::BackdropFrame::default()),
         }
     }
 
@@ -198,6 +201,14 @@ impl FrontendRenderEngine {
 
     pub fn backdrop_blur_policy(&self) -> BackdropBlurPolicy {
         self.backdrop_blur_policy.get()
+    }
+
+    pub fn set_backdrop_frame(&self, frame: super::backdrop::BackdropFrame) {
+        self.backdrop_frame.set(frame);
+    }
+
+    pub(crate) fn backdrop_frame(&self) -> super::backdrop::BackdropFrame {
+        self.backdrop_frame.get()
     }
 
     pub fn set_tooltip_colors(&self, colors: TooltipPaintColors) {

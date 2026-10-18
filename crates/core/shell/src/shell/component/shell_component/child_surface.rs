@@ -1,8 +1,7 @@
-#![allow(dead_code)] // The non-diagnostic wrapper remains for component fixtures.
-
 use super::*;
 use crate::shell::PopoverTriggerReference;
 
+#[cfg(test)]
 pub(super) fn collect_child_surface_requests(
     root: &WidgetNode,
     node: &WidgetNode,
@@ -202,13 +201,6 @@ fn popover_anchor_attribute_value(popover: &WidgetNode) -> Option<&str> {
         }
     }
     None
-}
-
-pub(super) fn non_empty_attr<'a>(node: &'a WidgetNode, name: &str) -> Option<&'a str> {
-    node.attributes
-        .get(name)
-        .map(|value| value.trim())
-        .filter(|value| !value.is_empty())
 }
 
 pub(super) fn find_node_bounds_by_reference(

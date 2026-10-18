@@ -1,0 +1,48 @@
+{
+  "name": "@mesh/open-meteo-weather",
+  "version": "0.1.0",
+  "description": "Weather provider backed by the keyless Open-Meteo forecast API, located by settings or by IP.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:curl:[\"-sf\",\"--max-time\",\"15\",\"*\"]"
+      ],
+      "binaries": [
+        {
+          "name": "curl",
+          "reason": "Fetch forecasts from api.open-meteo.com and the IP location fallback.",
+          "packages": { "arch": "curl", "debian": "curl", "fedora": "curl", "nixos": "curl" }
+        }
+      ],
+      "modules": {
+        "@mesh/weather-interface": "^1.0.0"
+      }
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.weather",
+        "version": "1.0",
+        "provider": "open-meteo",
+        "label": "Open-Meteo",
+        "priority": 100
+      }
+    ],
+    "provides": {
+      "settings": {
+        "namespace": "@mesh/open-meteo-weather",
+        "schema": {
+          "latitude": { "type": "number", "description": "Forecast latitude; located by IP when unset." },
+          "longitude": { "type": "number", "description": "Forecast longitude; located by IP when unset." },
+          "location": { "type": "string", "description": "Display name for the configured coordinates." },
+          "unit": { "type": "string", "enum": ["C", "F"], "default": "C", "description": "Temperature unit." },
+          "interval_minutes": { "type": "number", "minimum": 5, "default": 15, "description": "Minutes between refreshes." },
+          "forecast_step_hours": { "type": "number", "minimum": 1, "maximum": 6, "default": 3, "description": "Hours between forecast points." }
+        }
+      }
+    }
+  }
+}

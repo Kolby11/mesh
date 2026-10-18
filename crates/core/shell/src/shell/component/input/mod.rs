@@ -317,7 +317,6 @@ impl FrontendSurfaceComponent {
                             self.active_scrollbar_drag = Some(ScrollbarDragState {
                                 node_id: hit.node_id,
                                 axis: hit.axis,
-                                axis_origin: hit.axis_origin,
                                 axis_direction: hit.axis_direction,
                                 grab_offset: pointer - hit.thumb_start,
                                 track_start: hit.track_start,

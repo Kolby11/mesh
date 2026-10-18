@@ -1,0 +1,28 @@
+{
+  "name": "@mesh/violet-glass",
+  "version": "0.1.0",
+  "description": "Violet glass theme: translucent magenta-violet surfaces, pink accents and monospace type.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "contributes": {
+      "themes": [
+        {
+          "id": "violet-glass",
+          "label": "Violet Glass",
+          "modes": {
+            "dark": "theme.css"
+          },
+          "default_mode": "dark",
+          "mode_metadata": {
+            "dark": {
+              "color_scheme": "dark",
+              "contrast": "normal"
+            }
+          },
+          "tokenContract": "1.0"
+        }
+      ]
+    }
+  }
+}

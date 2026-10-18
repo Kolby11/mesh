@@ -1,0 +1,49 @@
+{
+  "name": "@mesh/profile-switcher",
+  "version": "0.1.0",
+  "description": "Embeddable shell switcher: lists the installed profiles and switches between them live.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "interfaces": {
+        "mesh.packages": ">=1.0"
+      },
+      "modules": {
+        "@mesh/shell-ui-interface": ">=1.0.0",
+        "@mesh/profile-menu": ">=0.1.0"
+      },
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      },
+      "capabilities": [
+        "theme.read",
+        "service.packages.read"
+      ]
+    },
+    "iconRequirements": {
+      "required": [
+        "view-dual"
+      ]
+    },
+    "icons": {
+      "ignore_shell_default": true
+    },
+    "entry": "src/main.mesh",
+    "provides": {
+      "extensionPoints": {
+        "mesh.navigation.item": [
+          {
+            "id": "switcher",
+            "entry": "src/main.mesh"
+          }
+        ]
+      }
+    },
+    "accessibility": {
+      "role": "button"
+    }
+  }
+}

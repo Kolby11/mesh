@@ -9,7 +9,8 @@
       "modules": {
         "@mesh/composition-editor": ">=0.1.0",
         "@mesh/navigation-bar": ">=0.1.0",
-        "@mesh/settings": ">=0.1.0"
+        "@mesh/settings": ">=0.1.0",
+        "@mesh/profile-switcher": ">=0.1.0"
       }
     },
     "compose": {
@@ -35,7 +36,30 @@
         "mesh.brightness": "@mesh/backlight-brightness"
       },
       "resources": {
-        "icons": ["@mesh/icons-default"]
+        "icons": [
+          "@mesh/icons-material-symbols",
+          "@mesh/icons-default"
+        ]
+      },
+      "nodeSlots": {
+        "@mesh/navigation-bar#default": {
+          "start": {
+            "nodes": [
+              {
+                "id": "switcher",
+                "use": "@mesh/profile-switcher:switcher"
+              },
+              {
+                "id": "workspaces",
+                "use": "@mesh/navigation-bar:workspaces"
+              },
+              {
+                "id": "window-title",
+                "use": "@mesh/navigation-bar:window-title"
+              }
+            ]
+          }
+        }
       }
     }
   }

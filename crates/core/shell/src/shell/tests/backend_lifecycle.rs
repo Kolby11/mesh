@@ -18,6 +18,7 @@ fn backend_supervision_quarantines_provider_after_exhausted_restart_cycles() {
     // quarantined for the session.
     for cycle in 0..3u32 {
         let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+        *slot.identity.write().unwrap() = BackendIdentity::new(0, u64::from(cycle) + 1);
         shell.replace_backend_runtime("mesh.audio".to_string(), slot);
         shell.handle_backend_lifecycle(
             "mesh.audio".to_string(),
@@ -33,6 +34,7 @@ fn backend_supervision_quarantines_provider_after_exhausted_restart_cycles() {
 
     // Fourth consecutive failure exceeds the restart budget: quarantine.
     let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    *slot.identity.write().unwrap() = BackendIdentity::new(0, 4);
     shell.replace_backend_runtime("mesh.audio".to_string(), slot);
     shell.handle_backend_lifecycle(
         "mesh.audio".to_string(),
@@ -108,7 +110,7 @@ fn backend_failure_delivers_unavailable_state_and_health_event() {
     shell.register_component(Box::new(RecordingComponent::new(Arc::clone(&seen_events))));
     let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
     shell.replace_backend_runtime("mesh.audio".to_string(), slot);
-    shell.record_latest_service_state(&service_update(
+    shell.record_shell_service_state(&service_update(
         "mesh.audio",
         "@mesh/pipewire-audio",
         serde_json::json!({ "available": true, "percent": 75 }),
@@ -1579,7 +1581,7 @@ fn stale_backend_lifecycle_event_does_not_stop_current_provider() {
         shell
             .backend_runtime_status("mesh.audio", "@mesh/old-audio")
             .map(|entry| entry.status.as_str()),
-        Some("failed")
+        Some("stopped")
     );
 }
 
@@ -1825,7 +1827,7 @@ fn active_provider_failure_clears_latest_service_state() {
         "@mesh/pipewire-audio",
         serde_json::json!({ "available": true, "percent": 75, "muted": false }),
     );
-    shell.record_latest_service_state(&healthy_event);
+    shell.record_shell_service_state(&healthy_event);
     {
         let latest = shell.latest_service_state.get("mesh.audio").unwrap();
         assert_eq!(latest.state["available"], true);
@@ -1864,7 +1866,7 @@ fn stale_provider_failure_does_not_clear_new_provider_state() {
         "@mesh/new-audio",
         serde_json::json!({ "available": true, "percent": 50 }),
     );
-    shell.record_latest_service_state(&healthy_event);
+    shell.record_shell_service_state(&healthy_event);
 
     // Old (stale) provider reports failure — must NOT clear new provider's state.
     shell.handle_backend_lifecycle(
@@ -1882,4 +1884,27 @@ fn stale_provider_failure_does_not_clear_new_provider_state() {
         "stale provider failure must not replace new provider state"
     );
     assert_eq!(latest.state["available"], true);
+}
+
+#[test]
+fn default_identity_lifecycle_message_cannot_stop_a_live_incarnation() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    *slot.identity.write().unwrap() = BackendIdentity::new(shell.activation_generation, 17);
+    shell.replace_backend_runtime("mesh.audio".into(), slot);
+    shell.handle_backend_lifecycle_at_identity(
+        "mesh.audio".into(),
+        "@mesh/pipewire-audio".into(),
+        BackendIdentity::default(),
+        "poll".into(),
+        "failed".into(),
+        "stale message".into(),
+    );
+    assert!(shell.backend_runtimes.contains_key("mesh.audio"));
+    assert!(
+        shell
+            .backend_runtime_status("mesh.audio", "@mesh/pipewire-audio")
+            .is_none()
+    );
 }

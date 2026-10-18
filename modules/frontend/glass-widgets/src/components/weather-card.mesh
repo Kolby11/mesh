@@ -1,0 +1,246 @@
+<template>
+    <column class="card" class:card-idle={not available}>
+        <row class="top">
+            <icon class="hero" name={glyph} size="72" />
+            <column class="place">
+                <text class="location">{location}</text>
+                <text class="condition">{condition}</text>
+            </column>
+        </row>
+        <row class="bottom">
+            <column class="now">
+                <row class="temp-row">
+                    <text class="temp">{temperature}</text>
+                    <text class="degree">°</text>
+                </row>
+                <text class="feels">{feels}</text>
+            </column>
+            <row class="forecast">
+                {#for point in forecast key={point.key}}
+                    <column class="point">
+                        <text class="point-temp">{point.temperature}</text>
+                        <icon class="point-glyph" name={point.glyph} size="26" />
+                        <text class="point-time">{point.time}</text>
+                    </column>
+                {/for}
+            </row>
+        </row>
+    </column>
+</template>
+
+<script lang="luau">
+local weather = require("mesh.weather")
+
+local GLYPHS = {
+    clear = "weather-clear",
+    ["partly-cloudy"] = "weather-few-clouds",
+    cloudy = "weather-overcast",
+    fog = "weather-fog",
+    drizzle = "weather-showers-scattered",
+    rain = "weather-showers",
+    snow = "weather-snow",
+    storm = "weather-storm",
+}
+
+local LABELS = {
+    clear = "Clear", ["partly-cloudy"] = "Partly cloudy", cloudy = "Cloudy", fog = "Fog",
+    drizzle = "Drizzle", rain = "Rain", snow = "Snow", storm = "Thunderstorm",
+}
+
+available = false
+glyph = GLYPHS.cloudy
+location = "Weather"
+condition = "Loading…"
+temperature = "--"
+feels = ""
+forecast = {}
+
+local function hour(time)
+    local ok, value = pcall(os.date, "%H:00", time)
+    return ok and value or ""
+end
+
+effect(function()
+    available = weather.available == true
+    if not available then
+        return
+    end
+    local state = weather.condition or "cloudy"
+    glyph = (state == "clear" and weather.is_day == false) and "weather-clear-night" or GLYPHS[state] or GLYPHS.cloudy
+    location = (weather.location or "") ~= "" and weather.location or "Here"
+    condition = LABELS[state] or state
+    temperature = tostring(math.floor((weather.temperature or 0) + 0.5))
+    feels = "Feels " .. tostring(math.floor((weather.feels_like or 0) + 0.5)) .. "°"
+    local points = {}
+    for index, point in weather.hourly or {} do
+        points[#points + 1] = {
+            key = index,
+            temperature = tostring(math.floor((point.temperature or 0) + 0.5)) .. "°",
+            glyph = GLYPHS[point.condition] or GLYPHS.cloudy,
+            time = hour(point.time),
+        }
+    end
+    forecast = points
+end)
+</script>
+
+<style>
+    .card {
+        width: 588px;
+        height: 367px;
+        gap: 0;
+        padding: 25px 31px 25px 28px;
+        justify-content: space-between;
+        border-radius: 25px;
+        border: 1px solid var(--color-glass-rim);
+        background-image: linear-gradient(to bottom, #8a48ec3d, #36178a2e);
+        box-shadow: 0 20px 48px #0a021a73;
+        backdrop-filter: blur(6px) refract(40px 30px) dispersion(4px);
+        opacity: 1;
+        animation: card-in 620 cubic-bezier(0.05, 0.7, 0.1, 1) both;
+    }
+
+
+    .card-idle {
+        opacity: 0.72;
+    }
+
+    .top {
+        width: 100%;
+        justify-content: space-between;
+        align-items: flex-start;
+    }
+
+    .hero {
+        width: 101px;
+        height: 101px;
+        color: #ddd0f7;
+    }
+
+    .place {
+        gap: 0;
+        align-items: flex-end;
+    }
+
+    .location {
+        height: 34px;
+        font-size: 24px;
+        font-weight: 600;
+        color: #f8f0ff;
+        text-align: right;
+    }
+
+    .condition {
+        height: 28px;
+        font-size: 18px;
+        color: #e3cdfa;
+        text-align: right;
+    }
+
+    .bottom {
+        width: 100%;
+        justify-content: space-between;
+        align-items: flex-end;
+    }
+
+    .now {
+        gap: 2px;
+    }
+
+    .temp-row {
+        gap: 2px;
+        align-items: flex-start;
+    }
+
+    .temp {
+        height: 84px;
+        font-size: 76px;
+        font-weight: 700;
+        line-height: 1.1;
+        color: #fbf5ff;
+    }
+
+    .degree {
+        height: 50px;
+        font-size: 42px;
+        font-weight: 700;
+        color: #fbf5ff;
+    }
+
+    .feels {
+        height: 25px;
+        font-size: 17px;
+        font-weight: 500;
+        color: #e3cdfa;
+    }
+
+    .forecast {
+        gap: 20px;
+        align-items: flex-end;
+    }
+
+    .point {
+        gap: 6px;
+        align-items: center;
+    }
+
+
+    .point-temp {
+        height: 28px;
+        font-size: 20px;
+        font-weight: 600;
+        color: #f8f0ff;
+    }
+
+    .point-glyph {
+        width: 36px;
+        height: 36px;
+        color: #c8dcff;
+    }
+
+    .point-time {
+        height: 22px;
+        font-size: 15px;
+        font-weight: 500;
+        color: #f5ecff;
+    }
+
+    @keyframes card-in {
+        0% {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        100% {
+            opacity: 1;
+            transform: translateY(0px);
+        }
+    }
+
+    /* Motion: one vocabulary for the whole shell, all from theme tokens.
+    Containers lift by --animation-lift-hover and brighten their rim; controls
+    scale by --animation-scale-hover/-press and ring with the focus token. */
+
+    .card {
+        transform: translateY(0px);
+        transition-property: transform, border-color, opacity;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .card:hover {
+        transform: translateY(var(--animation-lift-hover));
+        border-color: var(--color-glass-rim-hover);
+    }
+
+    .point {
+        transform: translateY(0px);
+        transition-property: transform, border-color, opacity;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .point:hover {
+        transform: translateY(var(--animation-lift-hover));
+        border-color: var(--color-glass-rim-hover);
+    }
+</style>

@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-17
+**Updated:** 2026-10-18
 
 What is in flight right now. One page, overwritten as work moves. History and
 measurements are in [`log/`](log/README.md). Open work is in
@@ -8,9 +8,22 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
-- **Priority 4 landed (uncommitted):** CMP-07, CMP-02/08, A1, A7, A5 and
-  RES-06/RES-12 are in the working tree with log entries; not yet committed.
-  Inspector Ctrl+Tab and niri/Sway providers are unchecked live.
+- **Performance batch implemented:** shared reload maintenance,
+  blocking file-watch control, validated backend state/fingerprints, and direct
+  unrefracted wallpaper paint. Release gates pass; experiments and ranges are in
+  the performance log. Included in the workspace checkpoint.
+
+- **Priority 6 in progress:** dead-code/compatibility removal first, followed by
+  shared validation/LSP metadata and the remaining correctness fixes. Current
+  changes are included in the workspace checkpoint.
+
+- **Priority 5 implemented:** MOD-05/06/07/08/09/10/12,
+  SH-10 and RES-08. Shared core package engines, configuration paths/locks,
+  profile-aware CLI settings/locale, inherited removal deltas, safe composition
+  detachment and bounded manifest retention are validated. Live compositor
+  package activation has not been exercised.
+- **Priority 4 committed:** CMP-07, CMP-02/08, A1, A7, A5 and RES-06/RES-12
+  landed in `934c4648`. Inspector Ctrl+Tab and niri/Sway providers are unchecked live.
 
 - **D7 in progress:** shared theme alias resolutions and bounded color/number
   token projections, indexed literal operations, and narrow compound selector
@@ -30,7 +43,7 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Next
 
-- Priority 5 control-plane consolidation: MOD-05, then MOD-06.
+- Priority 6 dead code, duplication and small correctness fixes (starts with SH-07).
 - D8 event-driven backend host APIs, then the rest of D5 (dialog focus scope,
   menu typeahead).
 - Wave 5: the [in-surface blur engine](todos/pending/2026-09-30-in-surface-blur-engine.md).

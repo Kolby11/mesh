@@ -235,7 +235,7 @@ pub struct MeshModuleSection {
     /// Extension points **declared** by this module. Only `interface` modules
     /// may declare them: an extension point is a contract, like an interface,
     /// and lives with the other data-only contracts.
-    #[serde(default, rename = "extensionPoints", alias = "extension_points")]
+    #[serde(default, rename = "extensionPoints")]
     pub extension_points: HashMap<String, MeshExtensionPointDeclaration>,
     /// Composition modules only: what this composition selects.
     #[serde(default)]
@@ -259,7 +259,7 @@ pub struct MeshModuleSection {
     pub icon_pack: Option<manifest::IconPackSection>,
     #[serde(default)]
     pub font_pack: Option<manifest::FontPackSection>,
-    #[serde(default, rename = "iconRequirements", alias = "icon_requirements")]
+    #[serde(default, rename = "iconRequirements")]
     pub icon_requirements: manifest::IconRequirementsSection,
     #[serde(default)]
     pub accessibility: Option<manifest::AccessibilitySection>,
@@ -887,9 +887,9 @@ impl MeshModuleSection {
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct MeshI18nSupport {
-    #[serde(default, rename = "defaultLocale", alias = "default_locale")]
+    #[serde(default, rename = "defaultLocale")]
     pub default_locale: Option<String>,
-    #[serde(default, rename = "supportedLocales", alias = "supported_locales")]
+    #[serde(default, rename = "supportedLocales")]
     pub supported_locales: Vec<String>,
 }
 
@@ -1034,7 +1034,7 @@ pub struct MeshUses {
     pub modules: HashMap<String, DependencySpec>,
     #[serde(default)]
     pub interfaces: HashMap<String, String>,
-    #[serde(default, rename = "optionalInterfaces", alias = "optional_interfaces")]
+    #[serde(default, rename = "optionalInterfaces")]
     pub optional_interfaces: HashMap<String, String>,
     #[serde(default)]
     pub resources: MeshResourceUses,
@@ -1045,15 +1045,11 @@ pub struct MeshUses {
     pub sources: HashMap<String, super::SourceSpec>,
     #[serde(default)]
     pub capabilities: Vec<String>,
-    #[serde(
-        default,
-        rename = "optionalCapabilities",
-        alias = "optional_capabilities"
-    )]
+    #[serde(default, rename = "optionalCapabilities")]
     pub optional_capabilities: Vec<String>,
     #[serde(default)]
     pub binaries: Vec<manifest::BinaryDependency>,
-    #[serde(default, rename = "iconRequirements", alias = "icon_requirements")]
+    #[serde(default, rename = "iconRequirements")]
     pub icon_requirements: manifest::IconRequirementsSection,
 }
 
@@ -1335,7 +1331,7 @@ pub struct MeshProvidesDeclaration {
     pub interface: String,
     #[serde(default)]
     pub version: Option<String>,
-    #[serde(default, rename = "baseModule", alias = "base_module")]
+    #[serde(default, rename = "baseModule")]
     pub base_module: Option<String>,
     #[serde(default)]
     pub provider: Option<String>,
@@ -1568,7 +1564,7 @@ pub struct MeshProvides {
     pub layout: Vec<LayoutContribution>,
     /// Contributions to extension points hosted by other modules, keyed by the
     /// point's contract name.
-    #[serde(default, rename = "extensionPoints", alias = "extension_points")]
+    #[serde(default, rename = "extensionPoints")]
     pub extension_points: HashMap<String, Vec<manifest::ExtensionPointContribution>>,
     #[serde(default)]
     pub settings: Option<SettingsContribution>,
@@ -1631,7 +1627,7 @@ impl IconContribution {
 pub struct MeshContributes {
     #[serde(default)]
     pub layout: Vec<LayoutContribution>,
-    #[serde(default, rename = "extensionPoints", alias = "extension_points")]
+    #[serde(default, rename = "extensionPoints")]
     pub extension_points: HashMap<String, Vec<manifest::ExtensionPointContribution>>,
     #[serde(default)]
     pub settings: Option<SettingsContribution>,
@@ -1725,7 +1721,9 @@ impl MeshContributes {
                     validate_relative_path("icon contribution", &contribution.path)?;
                 }
                 IconContribution::Pack(contribution) => {
-                    validate_icon_pack(contribution)?;
+                    contribution
+                        .validate()
+                        .map_err(ModuleManifestError::Validation)?;
                 }
             }
         }
@@ -1765,76 +1763,6 @@ impl MeshContributes {
             self.keybinds.actions.entry(action_id).or_insert(action);
         }
     }
-}
-
-fn validate_icon_pack(pack: &manifest::IconPackSection) -> Result<(), ModuleManifestError> {
-    if !is_canonical_icon_identity(&pack.id) {
-        return Err(ModuleManifestError::Validation(
-            "mesh.contributes.icons[].id must be a canonical lowercase pack id".into(),
-        ));
-    }
-    let mut aliases = std::collections::HashSet::new();
-    for requirement in &pack.requires.fonts {
-        if !is_canonical_icon_identity(&requirement.alias) {
-            return Err(ModuleManifestError::Validation(
-                "mesh.contributes.icons[].requires.fonts aliases must be canonical lowercase ids"
-                    .into(),
-            ));
-        }
-        if !aliases.insert(&requirement.alias) {
-            return Err(ModuleManifestError::Validation(
-                "mesh.contributes.icons[].requires.fonts cannot contain duplicate aliases".into(),
-            ));
-        }
-    }
-    for (name, mapping) in &pack.mappings {
-        validate_icon_mapping(name, &mapping.target, "mappings")?;
-    }
-    for vocabulary in pack.vocabularies.keys() {
-        if vocabulary.trim().is_empty() {
-            return Err(ModuleManifestError::Validation(
-                "mesh.contributes.icons[].vocabularies cannot contain empty names".into(),
-            ));
-        }
-        for (name, mapping) in &pack.vocabularies[vocabulary] {
-            validate_icon_mapping(name, &mapping.target, "vocabularies")?;
-        }
-    }
-    Ok(())
-}
-
-fn is_canonical_icon_identity(value: &str) -> bool {
-    !value.is_empty()
-        && value.trim() == value
-        && value == value.to_ascii_lowercase()
-        && !value.contains('/')
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-}
-
-fn validate_icon_mapping(
-    name: &str,
-    target: &str,
-    section: &str,
-) -> Result<(), ModuleManifestError> {
-    if name.trim().is_empty() {
-        return Err(ModuleManifestError::Validation(format!(
-            "mesh.contributes.icons[].{section} cannot contain empty names"
-        )));
-    }
-    if target.trim().is_empty()
-        || Path::new(target).is_absolute()
-        || target.trim_start().starts_with("~/")
-        || target
-            .split_once('/')
-            .is_none_or(|(pack, name)| pack.is_empty() || name.is_empty())
-    {
-        return Err(ModuleManifestError::Validation(format!(
-            "mesh.contributes.icons[].{section} mapping '{name}' must use a pack/name target"
-        )));
-    }
-    Ok(())
 }
 
 fn validate_unique_contribution_ids<'a>(

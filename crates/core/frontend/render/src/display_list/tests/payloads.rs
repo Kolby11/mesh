@@ -78,11 +78,13 @@ fn display_payload_equality_falls_back_to_text_content() {
         src: Some(Arc::from("icons/search.svg")),
         name: Some(Arc::from("search")),
         size: Some(16),
+        multicolor: false,
     };
     let second = DisplayIconPaint {
         src: Some(Arc::from("icons/search.svg")),
         name: Some(Arc::from("search")),
         size: Some(16),
+        multicolor: false,
     };
 
     assert!(!Arc::ptr_eq(

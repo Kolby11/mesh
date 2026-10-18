@@ -2,7 +2,7 @@ use crate::FrontendCompositionResolver;
 
 use mesh_core_component::template::TemplateNode;
 use mesh_core_elements::VariableStore;
-use mesh_core_expression::{compile_expression, evaluate_preview};
+use mesh_core_expression::compile_expression;
 use serde_json;
 
 use super::*;
@@ -31,18 +31,30 @@ pub(super) fn evaluate_template_expression(
         return result.value;
     }
 
-    let mut variables = state.template_locals();
-    for name in state.keys() {
-        if !variables.contains_key(&name)
-            && let Some(value) = state.get_ref(&name).cloned().or_else(|| state.get(&name))
-        {
-            variables.insert(name, value);
+    #[cfg(test)]
+    {
+        let mut context = mesh_core_scripting::ScriptContext::new(
+            "@test/frontend-expression",
+            Default::default(),
+        )
+        .unwrap();
+        context
+            .compile_and_execute_component_with_compiled("", &[], &[compiled.clone()])
+            .unwrap();
+        for name in state.keys() {
+            if let Some(value) = state.get_ref(&name).cloned().or_else(|| state.get(&name)) {
+                if !value.is_null() {
+                    context.seed_context_global(&name, value).unwrap();
+                }
+            }
         }
+        context
+            .evaluate_compiled_template_expression(&compiled, &state.template_locals())
+            .map(|(value, _)| value)
+            .unwrap_or(serde_json::Value::Null)
     }
-    evaluate_preview(&compiled, &variables, &serde_json::Map::new(), |key| {
-        state.translate(key)
-    })
-    .unwrap_or(serde_json::Value::Null)
+    #[cfg(not(test))]
+    serde_json::Value::Null
 }
 
 pub(super) fn template_value_to_string(value: serde_json::Value) -> String {

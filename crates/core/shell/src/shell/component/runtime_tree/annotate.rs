@@ -482,7 +482,8 @@ pub(super) fn annotate_runtime_tree_inner(
         {
             use std::fmt::Write as _;
             if let Some(loop_identity) = child.loop_identity() {
-                let _ = write!(key, "/@loop:{loop_identity}");
+                key.push_str("/@loop:");
+                push_key_segment_escaped(key, loop_identity);
             } else {
                 let _ = write!(key, "/{index}");
             }
@@ -618,5 +619,20 @@ pub(in crate::shell::component) fn annotate_scroll_offsets_only(
     }
     for child in &mut node.children {
         annotate_scroll_offsets_only(child, scroll_offsets);
+    }
+}
+
+/// Loop identities embed their own `/` (`"key"/child/fragment`) and authored
+/// key values may contain `/` too, while every interaction path splits mesh
+/// keys on `/` to rebuild node ids (`runtime_node_id_for_key`). Escaping keeps
+/// the whole identity one segment, so hit-testing and annotation agree on the
+/// id of a `{#for}`-generated node.
+fn push_key_segment_escaped(key: &mut String, segment: &str) {
+    for ch in segment.chars() {
+        match ch {
+            '%' => key.push_str("%25"),
+            '/' => key.push_str("%2F"),
+            _ => key.push(ch),
+        }
     }
 }

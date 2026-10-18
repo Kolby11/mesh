@@ -290,6 +290,7 @@ impl FrontendRenderEngine {
                 w,
                 h,
                 style.color,
+                icon_paint.multicolor,
             );
         } else if let Some(name) = &icon_paint.name {
             match module_id {

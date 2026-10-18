@@ -1,0 +1,210 @@
+<template>
+    <row class="status">
+        <row class="pill chip" title="Input language" aria-label={"Language " .. language}>
+            <icon class="glyph" name="input-keyboard" size="13" />
+            <text class="label">{language}</text>
+        </row>
+        <row class="pill round" title={network_label} aria-label={network_label}>
+            <icon class="glyph" name={network_glyph} size="14" />
+        </row>
+        <button
+            class="pill chip chip-btn"
+            onclick={onToggleMute}
+            onscroll={onVolumeScroll}
+            title={volume_label}
+            aria-label={volume_label}
+        >
+            <icon class="glyph" name={volume_glyph} size="14" />
+            <text class="label">{volume_text}</text>
+        </button>
+        <row class="pill chip battery" class:battery-low={battery_low} title={battery_label} aria-label={battery_label}>
+            <icon class="glyph glyph-dark" name={battery_glyph} size="13" />
+            <text class="label label-dark">{battery_text}</text>
+        </row>
+    </row>
+</template>
+
+<script lang="luau">
+local audio = require("mesh.audio")
+local power = require("mesh.power")
+local network = require("mesh.network")
+
+language = string.upper(string.sub(mesh.locale.current() or "en", 1, 2))
+network_glyph = "network-wireless-offline"
+network_label = "Offline"
+volume_glyph = "audio-volume-high"
+volume_text = "--"
+volume_label = "Volume"
+battery_glyph = "battery-full"
+battery_text = "--"
+battery_label = "Battery"
+battery_low = false
+
+effect(function()
+    if network.available ~= true or network.kind == "none" then
+        network_glyph = "network-wireless-offline"
+        network_label = "Offline"
+    elseif network.kind == "ethernet" then
+        network_glyph = "network-wired"
+        network_label = "Wired"
+    else
+        local signal = network.signal or 0
+        network_glyph = signal >= 66 and "network-wireless-signal-excellent"
+            or signal >= 33 and "network-wireless-signal-ok"
+            or "network-wireless-signal-weak"
+        network_label = (network.ssid or "Wi-Fi") .. " · " .. tostring(signal) .. "%"
+    end
+end)
+
+effect(function()
+    if audio.available == false then
+        volume_text = "--"
+        volume_glyph = "audio-volume-muted"
+        return
+    end
+    local percent = math.floor(audio.percent or 0)
+    volume_text = tostring(percent) .. "%"
+    volume_glyph = (audio.muted or percent == 0) and "audio-volume-muted"
+        or percent < 50 and "audio-volume-medium"
+        or "audio-volume-high"
+    volume_label = audio.muted and "Muted" or ("Volume " .. volume_text)
+end)
+
+effect(function()
+    if power.available == false then
+        battery_text = "--"
+        return
+    end
+    local level = power.level or 0
+    if level <= 1 then
+        level *= 100
+    end
+    level = math.clamp(math.floor(level + 0.5), 0, 100)
+    battery_text = tostring(level) .. "%"
+    battery_low = level <= 15 and not power.charging
+    battery_glyph = power.charging and "battery-full-charging"
+        or level >= 90 and "battery-full"
+        or level >= 50 and "battery-good"
+        or level >= 20 and "battery-low"
+        or "battery-caution"
+    battery_label = "Battery " .. battery_text .. (power.charging and " · charging" or "")
+end)
+
+function onToggleMute()
+    audio.toggle_mute()
+end
+
+function onVolumeScroll(event)
+    local delta = event and (event.delta_y or event.dy or 0) or 0
+    if delta < 0 then
+        audio.volume_up()
+    elseif delta > 0 then
+        audio.volume_down()
+    end
+end
+</script>
+
+<style>
+    .status {
+        height: 100%;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .pill {
+        height: 36px;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--color-glass-rim);
+        background-image: linear-gradient(to bottom, #b468ff4d, #7a2ee033);
+        box-shadow: 0 4px 14px #14003259;
+        backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
+    }
+
+    .chip {
+        gap: 6px;
+        padding: 0 13px 0 10px;
+    }
+
+    .round {
+        width: 36px;
+        justify-content: center;
+    }
+
+    .chip-btn {
+    }
+
+
+
+    /* The battery is the one solid accent pill on the right, as in the
+    reference: pale pink glass with dark text. */
+    .pill.battery {
+        border: 1px solid #ffffff66;
+        background-image: linear-gradient(to bottom, #ffe3f4e6, #f5b6dccc);
+    }
+
+    .pill.battery-low {
+        background-image: linear-gradient(to bottom, #ff8fa3e6, #e2466acc);
+    }
+
+    .glyph {
+        width: 20px;
+        height: 20px;
+        color: #f5ecff;
+    }
+
+    .glyph-dark {
+        width: 18px;
+        height: 18px;
+        color: #3a1238;
+    }
+
+    .label {
+        height: 20px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #f5ecff;
+    }
+
+    .label-dark {
+        color: #3a1238;
+    }
+
+    /* Motion: one vocabulary for the whole shell, all from theme tokens.
+    Containers lift by --animation-lift-hover and brighten their rim; controls
+    scale by --animation-scale-hover/-press and ring with the focus token. */
+
+    .pill {
+        transform: translateY(0px);
+        transition-property: transform, border-color, opacity;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .pill:hover {
+        transform: translateY(var(--animation-lift-hover));
+        border-color: var(--color-glass-rim-hover);
+    }
+
+    .chip-btn {
+        transform: scale(1);
+        transition-property: transform, background-color, border-color, opacity;
+        transition-duration: var(--animation-duration-short);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .chip-btn:hover {
+        border-color: var(--color-glass-rim-hover);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .chip-btn:focus-visible {
+        border-color: var(--color-focus-ring);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .chip-btn:active {
+        transform: scale(var(--animation-scale-press));
+        transition-duration: var(--animation-duration-fast);
+    }
+</style>

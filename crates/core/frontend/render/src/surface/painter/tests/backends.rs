@@ -71,13 +71,13 @@ fn painter_command_contract_constructs_required_command_set() {
         PainterCommand::ApplyFilter {
             rect,
             radii: mesh_core_elements::style::Corners::all(4.0),
-            filter: PainterFilter::Backdrop(VisualFilter { blur_radius: 2.0 }),
+            filter: PainterFilter::Backdrop(VisualFilter::blur(2.0)),
             clip,
         },
         PainterCommand::ApplyFilter {
             rect,
             radii: mesh_core_elements::style::Corners::all(4.0),
-            filter: PainterFilter::Blur(VisualFilter { blur_radius: 2.0 }),
+            filter: PainterFilter::Blur(VisualFilter::blur(2.0)),
             clip,
         },
     ];

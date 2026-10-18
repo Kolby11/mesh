@@ -30,15 +30,15 @@ fn identical_service_state_is_deduplicated_before_delivery() {
         serde_json::json!({ "available": true, "percent": 65.0, "muted": false }),
     );
 
-    assert!(shell.record_latest_service_state(&event));
-    assert!(!shell.record_latest_service_state(&event));
+    assert!(shell.record_shell_service_state(&event));
+    assert!(!shell.record_shell_service_state(&event));
 
     let changed = service_update(
         "mesh.audio",
         "@mesh/pipewire-audio",
         serde_json::json!({ "available": true, "percent": 66.0, "muted": false }),
     );
-    assert!(shell.record_latest_service_state(&changed));
+    assert!(shell.record_shell_service_state(&changed));
 }
 
 #[test]
@@ -455,4 +455,22 @@ fn service_update_accepts_canonical_interface_name() {
 fn normalizes_service_names_from_interfaces() {
     assert_eq!(service_name_from_interface("mesh.audio"), "audio");
     assert_eq!(service_name_from_interface("audio"), "audio");
+}
+
+#[test]
+fn default_identity_does_not_match_a_live_provider_incarnation() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    let identity = BackendIdentity::new(shell.activation_generation, 17);
+    *slot.identity.write().unwrap() = identity;
+    shell.replace_backend_runtime("mesh.audio".into(), slot);
+    let event = service_update(
+        "mesh.audio",
+        "@mesh/pipewire-audio",
+        serde_json::json!({ "available": true }),
+    );
+    assert!(!shell.record_latest_service_state_at_identity(&event, BackendIdentity::default()));
+    assert!(shell.latest_service_state.get("mesh.audio").is_none());
+    assert!(shell.record_latest_service_state_at_identity(&event, identity));
 }

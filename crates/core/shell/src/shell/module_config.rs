@@ -14,10 +14,12 @@ static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 pub(super) struct ModuleConfigRollback {
     pub(super) path: PathBuf,
     pub(super) content: Vec<u8>,
+    control_plane_dir: PathBuf,
 }
 
 impl ModuleConfigRollback {
     pub(super) fn restore(self) -> Result<(), ModuleConfigWriteError> {
+        let _lock = control_plane_lock(&self.control_plane_dir)?;
         atomic_write(&self.path, &self.content)
     }
 }
@@ -66,6 +68,7 @@ pub(super) fn write_active_provider_selection(
         ));
     }
 
+    let _lock = control_plane_lock(path.parent().unwrap_or_else(|| Path::new(".")))?;
     let content = fs::read_to_string(path).map_err(|source| ModuleConfigWriteError::Read {
         path: path.to_path_buf(),
         source,
@@ -120,6 +123,7 @@ pub(super) fn write_composed_provider_selection(
         .load(&profile_id)
         .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?;
     let expected_revision = profile.revision;
+    profile.remove_providers.remove(interface);
     profile
         .providers
         .insert(interface.to_string(), provider_id.to_string());
@@ -140,6 +144,7 @@ pub(super) fn write_module_enabled(
         ));
     }
 
+    let _lock = control_plane_lock(path.parent().unwrap_or_else(|| Path::new(".")))?;
     let content = fs::read_to_string(path).map_err(|source| ModuleConfigWriteError::Read {
         path: path.to_path_buf(),
         source,
@@ -200,6 +205,10 @@ pub(super) fn write_module_enabled(
     Ok(ModuleConfigRollback {
         path: path.to_path_buf(),
         content: content.into_bytes(),
+        control_plane_dir: path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf(),
     })
 }
 
@@ -256,14 +265,15 @@ pub(super) fn write_composed_module_enabled(
             }
         }
         ModuleKind::Backend => {
-            if enabled {
-                profile.background_services.insert(module_id.to_string());
-            } else {
-                profile.background_services.remove(module_id);
-                profile
-                    .providers
-                    .retain(|_, provider| provider != module_id);
-            }
+            let graph = mesh_core_module::package::load_authoring_snapshot(path)
+                .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?;
+            profile
+                .set_background_service_enabled(
+                    module_id,
+                    enabled,
+                    graph.modules().into_iter().map(|node| &node.manifest),
+                )
+                .map_err(|error| ModuleConfigWriteError::InvalidSelection(error.to_string()))?;
         }
         _ => {
             return Err(ModuleConfigWriteError::InvalidSelection(format!(
@@ -279,6 +289,21 @@ pub(super) fn write_composed_module_enabled(
     Ok(ModuleConfigRollback {
         path: profile_path,
         content,
+        control_plane_dir: path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf(),
+    })
+}
+
+fn control_plane_lock(
+    directory: &Path,
+) -> Result<mesh_core_config::ControlPlaneLock, ModuleConfigWriteError> {
+    mesh_core_config::ControlPlaneLock::acquire(directory).map_err(|source| {
+        ModuleConfigWriteError::Write {
+            path: directory.join(".mesh-control-plane.lock"),
+            source,
+        }
     })
 }
 

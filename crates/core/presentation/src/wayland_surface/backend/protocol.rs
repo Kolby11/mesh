@@ -73,6 +73,9 @@ pub(super) fn map_anchor(cfg: &SurfaceConfig) -> Anchor {
         // If a left/right rail requests `height == 0`, layer-shell expects it
         // to be anchored to both top and bottom so the compositor can stretch
         // it vertically across the output.
+        // The same rule on the other axis: a top/bottom surface whose height
+        // spans fills the output (wallpapers, full-output backdrops).
+        Some(Edge::Top | Edge::Bottom) if cfg.wire_size.height.is_span() => Anchor::all(),
         Some(Edge::Top) => Anchor::TOP | Anchor::LEFT | Anchor::RIGHT,
         Some(Edge::Bottom) => Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT,
         Some(Edge::Left) if cfg.wire_size.height.is_span() => {

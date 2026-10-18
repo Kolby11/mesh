@@ -1764,10 +1764,11 @@ pub fn draw_icon_from_path_in_session(
     dest_w: i32,
     dest_h: i32,
     tint: Color,
+    multicolor: bool,
 ) {
     session.with_canvas(|canvas| {
         draw_icon_from_path_with_options_on_canvas(
-            canvas, path, dest_x, dest_y, dest_w, dest_h, tint, false,
+            canvas, path, dest_x, dest_y, dest_w, dest_h, tint, multicolor,
         );
     });
 }

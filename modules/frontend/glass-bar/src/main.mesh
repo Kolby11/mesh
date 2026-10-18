@@ -1,0 +1,153 @@
+<template>
+    <row class="bar">
+        <row class="cluster cluster-start">
+            <row class="pill pill-tight">
+                <button class="glyph-btn" onclick={onSettings} title="Settings" aria-label="Settings">
+                    <icon class="glyph" name="settings" size="15" />
+                </button>
+                <ProfileSwitcher trigger_hover="#ffffff2e" />
+                <button class="glyph-btn" onclick={onSearch} title="Search" aria-label="Search">
+                    <icon class="glyph" name="system-search" size="15" />
+                </button>
+            </row>
+            <Clock />
+            <Workspaces />
+        </row>
+
+        <row class="cluster cluster-center">
+            <NowPlaying />
+            <Recorder />
+            <Weather />
+        </row>
+
+        <row class="cluster cluster-end">
+            <Status />
+        </row>
+    </row>
+</template>
+
+<script lang="luau">
+local Clock = require("./components/clock.mesh")
+local Workspaces = require("./components/workspaces.mesh")
+local NowPlaying = require("./components/now-playing.mesh")
+local Recorder = require("./components/recorder.mesh")
+local Weather = require("./components/weather.mesh")
+local Status = require("./components/status.mesh")
+local ProfileSwitcher = require("@mesh/profile-switcher")
+
+function onSettings()
+    mesh.shell.show_surface("@mesh/settings")
+end
+
+function onSearch()
+    mesh.shell.show_surface("@mesh/settings")
+end
+</script>
+
+<style>
+    /* The bar itself is clear: only the pills are glass, so the wallpaper
+    shows between clusters as in a floating island layout. */
+    .bar {
+        width: 100%;
+        height: 42px;
+        margin: 8px 17px 0;
+        justify-content: space-between;
+        align-items: center;
+        gap: 11px;
+        background: transparent;
+        color: #f5ecff;
+    }
+
+    .cluster {
+        height: 100%;
+        flex-grow: 1;
+        flex-basis: 0;
+        min-width: 0;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .cluster-start {
+        justify-content: flex-start;
+    }
+
+    .cluster-center {
+        justify-content: center;
+    }
+
+    .cluster-end {
+        justify-content: flex-end;
+    }
+
+    .pill {
+        height: 36px;
+        align-items: center;
+        gap: 2px;
+        padding-inline: 6px;
+        border-radius: 999px;
+        border: 1px solid var(--color-glass-rim);
+        background-image: linear-gradient(to bottom, #b468ff4d, #7a2ee033);
+        box-shadow: 0 4px 14px #14003259;
+        backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
+    }
+
+    .glyph-btn {
+        width: 31px;
+        height: 31px;
+        padding: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 999px;
+        background: transparent;
+        color: #f5ecff;
+    }
+
+
+
+    .glyph {
+        width: 21px;
+        height: 21px;
+        color: #f5ecff;
+    }
+
+    /* Motion: one vocabulary for the whole shell, all from theme tokens.
+    Containers lift by --animation-lift-hover and brighten their rim; controls
+    scale by --animation-scale-hover/-press and ring with the focus token. */
+
+    .pill {
+        transform: translateY(0px);
+        transition-property: transform, border-color, opacity;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .pill:hover {
+        transform: translateY(var(--animation-lift-hover));
+        border-color: var(--color-glass-rim-hover);
+    }
+
+    .glyph-btn {
+        border-width: 1px;
+        border-style: solid;
+        border-color: transparent;
+        transform: scale(1);
+        transition-property: transform, background-color, border-color, opacity;
+        transition-duration: var(--animation-duration-short);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .glyph-btn:hover {
+        background-color: var(--color-glass-hover);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .glyph-btn:focus-visible {
+        border-color: var(--color-focus-ring);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .glyph-btn:active {
+        transform: scale(var(--animation-scale-press));
+        transition-duration: var(--animation-duration-fast);
+    }
+</style>

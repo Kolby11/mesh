@@ -1,0 +1,47 @@
+{
+  "name": "@mesh/apps-interface",
+  "version": "1.0.0",
+  "description": "Standard pinned and running application contract for docks and launchers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.apps",
+      "version": "1.0",
+      "domain": "apps",
+      "relationship": "base",
+      "contract": {
+        "state": [
+          { "name": "available", "type": "boolean", "description": "Whether application state is reachable" },
+          { "name": "apps", "type": "App[]", "description": "Pinned applications in order, followed by running unpinned ones" }
+        ],
+        "methods": [
+          { "name": "activate", "args": [{ "name": "id", "type": "string" }], "returns": "Result" }
+        ],
+        "events": [],
+        "types": {
+          "App": {
+            "fields": [
+              { "name": "id", "type": "string" },
+              { "name": "name", "type": "string" },
+              { "name": "icon", "type": "string" },
+              { "name": "pinned", "type": "boolean" },
+              { "name": "running", "type": "boolean" },
+              { "name": "focused", "type": "boolean" },
+              { "name": "windows", "type": "int" }
+            ]
+          }
+        },
+        "capabilities": {
+          "required": ["service.apps.read"],
+          "optional": ["service.apps.launch"],
+          "methods": { "activate": ["service.apps.launch"] },
+          "permissions": {
+            "service.apps.read": "standard",
+            "service.apps.launch": "elevated"
+          }
+        }
+      }
+    }
+  }
+}

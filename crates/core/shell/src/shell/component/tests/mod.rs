@@ -1063,3 +1063,88 @@ fn runtime_prop_sync_single_lock_beats_contains_then_get_mut() {
     assert_eq!(old_total, new_total);
     assert!(new_time < old_time);
 }
+
+#[test]
+fn child_settings_cache_refreshes_for_props_and_effective_settings() {
+    let mut surface = common::test_frontend_component("<template><box /></template>");
+    let mut child = surface.compiled.manifest.clone();
+    child.package.id = "@test/child-settings".into();
+    let component = mesh_core_component::parse_component(r#"<props>{ count = { type = "number", default = 7 } }</props><template><box /></template>"#).unwrap();
+    let first = surface.settings_json_for_component(&child, &component, Path::new("child.mesh"));
+    assert_eq!(
+        surface.settings_json_for_component(&child, &component, Path::new("child.mesh")),
+        first
+    );
+    assert_eq!(
+        surface.child_settings_cache.borrow()[&child.package.id].len(),
+        1
+    );
+    let settings = common::test_settings_store_with(
+        &child.package.id,
+        serde_json::json!({ "props": { "global": { "count": 12 } } }),
+    );
+    surface.apply_settings(&settings).unwrap();
+    assert!(surface.child_settings_cache.borrow().is_empty());
+    let second = surface.settings_json_for_component(&child, &component, Path::new("child.mesh"));
+    assert_eq!(second["props"]["global"]["count"].as_f64(), Some(12.0));
+    assert_ne!(first, second);
+    let changed = mesh_core_component::parse_component(r#"<props>{ count = { type = "number", default = 9 }, extra = { type = "bool", default = true } }</props><template><box /></template>"#).unwrap();
+    surface.prepare_runtimes_for_reload();
+    surface.settings_json_for_component(&child, &changed, Path::new("child.mesh"));
+    assert_eq!(
+        surface.child_settings_cache.borrow()[&child.package.id].len(),
+        1
+    );
+}
+
+#[test]
+#[ignore = "child settings resolution workload"]
+fn child_settings_resolution_workload() {
+    use std::hint::black_box;
+    let mut surface = common::test_frontend_component("<template><box /></template>");
+    let mut child = surface.compiled.manifest.clone();
+    child.package.id = "@test/child-settings-workload".into();
+    let props = (0..32)
+        .map(|index| format!("p{index} = {{ type = \"number\", default = {index} }},"))
+        .collect::<String>();
+    let component = mesh_core_component::parse_component(&format!(
+        "<props>{{{props}}}</props><template><box /></template>"
+    ))
+    .unwrap();
+    for filled in [false, true] {
+        let overrides = if filled {
+            serde_json::json!({ "props": { "global": (0..32).map(|index| (format!("p{index}"), serde_json::json!(index + 1))).collect::<serde_json::Map<_, _>>() } })
+        } else {
+            serde_json::json!({})
+        };
+        surface.settings = common::test_settings_store_with(&child.package.id, overrides);
+        for _ in 0..4 {
+            surface.child_settings_cache.borrow_mut().clear();
+            let start = Instant::now();
+            for _ in 0..2000 {
+                black_box(
+                    resolve_frontend_module_settings_with_props(
+                        &child.package.id,
+                        surface.settings.namespace(&child.package.id),
+                        &child,
+                        component.props.as_ref(),
+                    )
+                    .effective,
+                );
+            }
+            let uncached = start.elapsed();
+            let start = Instant::now();
+            for _ in 0..2000 {
+                black_box(surface.settings_json_for_component(
+                    &child,
+                    &component,
+                    Path::new("child.mesh"),
+                ));
+            }
+            eprintln!(
+                "child_settings overrides={filled} props=32 resolutions=2000 uncached={uncached:?} cached={:?}",
+                start.elapsed()
+            );
+        }
+    }
+}

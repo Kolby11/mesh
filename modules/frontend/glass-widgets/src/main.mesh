@@ -1,0 +1,62 @@
+<props>
+{
+    top_offset = { type = "size", default = "490px", label = "Distance from the top of the screen" },
+}
+</props>
+
+<template>
+    <row class="desk">
+        <box class="gap-left" />
+        <box class="slot">
+            <MediaCard />
+        </box>
+        <box class="gap-middle" />
+        <box class="slot slot-weather">
+            <WeatherCard />
+        </box>
+        <box class="gap-right" />
+    </row>
+</template>
+
+<script lang="luau">
+local MediaCard = require("./components/media-card.mesh")
+local WeatherCard = require("./components/weather-card.mesh")
+</script>
+
+<style>
+    /* One clear full-width surface on the bottom layer. A layer surface
+    anchors to edges, not points, so the cards are placed by splitting the
+    free width in the reference layout's proportions (left : middle : right
+    gaps of 515 : 93 : 473), which holds on any output width. */
+    .desk {
+        width: 100%;
+        margin-top: prop(top_offset);
+        align-items: flex-start;
+        gap: 0;
+        exclusive-zone: none;
+        background: transparent;
+    }
+
+    .gap-left {
+        flex-grow: 515;
+        flex-basis: 0;
+    }
+
+    .gap-middle {
+        flex-grow: 93;
+        flex-basis: 0;
+    }
+
+    .gap-right {
+        flex-grow: 473;
+        flex-basis: 0;
+    }
+
+    .slot {
+        flex-shrink: 0;
+    }
+
+    .slot-weather {
+        margin-top: 52px;
+    }
+</style>

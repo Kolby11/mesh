@@ -1,6 +1,6 @@
-//! A small, hand-authored editor description of the canonical `module.json` schema.
+//! Editor descriptions reconciled with the core manifest field declarations.
 //!
-//! This mirrors the runtime structs in `mesh_core_module` (`ModuleManifest` /
+//! Core serde declarations supply MESH keys and kinds (`ModuleManifest` /
 //! `MeshModuleSection` for per-module manifests and `RootModuleGraphManifest`
 //! for the workspace `config/module.json`). It supplies key completion, hover
 //! documentation, and structural editor hints. Parse and semantic validation
@@ -28,52 +28,56 @@ pub enum ManifestFlavor {
     RootConfig,
 }
 
-/// The valid `mesh.kind` values, matching `ModuleKind` (serde kebab-case).
-pub const MODULE_KINDS: &[&str] = &[
-    "ui",
-    "backend",
-    "interface",
-    "theme",
-    "icon-pack",
-    "font-pack",
-    "language-pack",
-    "library",
-    "composition",
-];
-
-/// A curated set of well-known capability strings. Capabilities are extensible
-/// (`<domain>.<action>`), so this drives completion only — unknown capabilities
-/// are never flagged as errors.
-pub const KNOWN_CAPABILITIES: &[&str] = &[
-    "shell.surface",
-    "shell.widget",
-    "service.audio.read",
-    "service.audio.control",
-    "service.network.read",
-    "service.media.read",
-    "service.power.read",
-    "service.notifications.post",
-    "service.hyprland.read",
-    "service.hyprland.control",
-    "service.debug.read",
-    "service.debug.control",
-    "service.settings.read",
-    "service.settings.control",
-    "service.packages.read",
-    "service.packages.control",
-    "theme.read",
-    "service.theme.control",
-    "locale.read",
-    "locale.write",
-    "exec.launch-app",
-    "exec.locale",
-];
-
 /// Resolve the schema root for a flavor.
 pub fn root(flavor: ManifestFlavor) -> Node {
-    match flavor {
+    let mut root = match flavor {
         ManifestFlavor::Module => module_root(),
         ManifestFlavor::RootConfig => root_config_root(),
+    };
+    reconcile_core_fields(
+        &mut root,
+        flavor == ManifestFlavor::RootConfig,
+        &mut Vec::new(),
+    );
+    root
+}
+
+fn reconcile_core_fields(node: &mut Node, root_graph: bool, path: &mut Vec<String>) {
+    let parts = path.iter().map(String::as_str).collect::<Vec<_>>();
+    if let Some(names) = mesh_core_module::package::manifest_field_names(root_graph, &parts) {
+        if !matches!(node.kind, Kind::Object(_)) {
+            node.kind = Kind::Object(Vec::new());
+            node.type_hint = "object".into();
+        }
+        if let Kind::Object(fields) = &mut node.kind {
+            if !path.is_empty() {
+                fields.retain(|field| names.contains(&field.name.as_str()));
+            }
+            for name in names {
+                if !fields.iter().any(|field| field.name == name) {
+                    fields.push(field(
+                        name,
+                        false,
+                        scalar("Declared by the core manifest contract.", "value"),
+                    ));
+                }
+            }
+        }
+    }
+    match &mut node.kind {
+        Kind::Object(fields) | Kind::OpenObject { fields, .. } => {
+            for field in fields {
+                path.push(field.name.clone());
+                reconcile_core_fields(&mut field.node, root_graph, path);
+                path.pop();
+            }
+        }
+        Kind::Array(element) | Kind::Map(element) => {
+            path.push("*".into());
+            reconcile_core_fields(element, root_graph, path);
+            path.pop();
+        }
+        _ => {}
     }
 }
 
@@ -110,7 +114,12 @@ fn capabilities_array(doc: &'static str) -> Node {
             "A capability string in `<domain>.<action>` form. Capabilities are \
                   extensible, so unknown values are allowed.",
             "capability",
-            Kind::Suggest(KNOWN_CAPABILITIES),
+            Kind::SuggestDiscovered(
+                mesh_core_capability::BUILTIN_CAPABILITIES
+                    .iter()
+                    .map(|(id, _)| (*id).to_string())
+                    .collect(),
+            ),
         ))),
     )
 }
@@ -231,7 +240,7 @@ fn mesh_section() -> Node {
                 node(
                     "The module role. Determines how the core loads and wires the module.",
                     "enum",
-                    Kind::Enum(MODULE_KINDS),
+                    Kind::Enum(mesh_core_module::package::module_kind_names()),
                 ),
             ),
             field(
@@ -646,6 +655,24 @@ fn compose_node() -> Node {
         "Composition modules only: what this composition selects. A composition \
          binds providers and composes roots; it never owns them.",
         vec![
+            field(
+                "removeBackgroundServices",
+                false,
+                node(
+                    "Inherited background services to remove.",
+                    "array",
+                    Kind::Array(Box::new(scalar("Module id.", "string"))),
+                ),
+            ),
+            field(
+                "removeProviders",
+                false,
+                node(
+                    "Inherited provider bindings to remove.",
+                    "array",
+                    Kind::Array(Box::new(scalar("Interface name.", "string"))),
+                ),
+            ),
             field(
                 "roots",
                 false,
@@ -1597,7 +1624,13 @@ fn root_config_root() -> Node {
                                         field(
                                             "kind",
                                             true,
-                                            node("Module kind.", "enum", Kind::Enum(MODULE_KINDS)),
+                                            node(
+                                                "Module kind.",
+                                                "enum",
+                                                Kind::Enum(
+                                                    mesh_core_module::package::module_kind_names(),
+                                                ),
+                                            ),
                                         ),
                                         field(
                                             "path",
@@ -1669,4 +1702,50 @@ fn root_config_root() -> Node {
             ),
         ],
     )
+}
+
+#[cfg(test)]
+mod core_schema_tests {
+    use super::*;
+
+    #[test]
+    fn canonical_mesh_keys_and_capabilities_come_from_core() {
+        let schema = root(ManifestFlavor::Module);
+        let Kind::Object(fields) = schema.kind else {
+            panic!("module object");
+        };
+        let mesh = fields
+            .into_iter()
+            .find(|field| field.name == "mesh")
+            .unwrap();
+        let Kind::Object(fields) = mesh.node.kind else {
+            panic!("mesh object");
+        };
+        let mut actual = fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>();
+        let mut expected =
+            mesh_core_module::package::manifest_field_names(false, &["mesh"]).unwrap();
+        actual.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(actual, expected);
+        assert!(actual.contains(&"fonts") && actual.contains(&"font_pack"));
+        assert!(!actual.contains(&"surfaceLayout") && !actual.contains(&"compatibility"));
+        let Kind::Array(capability) = capabilities_array("Capabilities").kind else {
+            panic!("array");
+        };
+        let Kind::SuggestDiscovered(capabilities) = capability.kind else {
+            panic!("suggestions");
+        };
+        assert!(capabilities.iter().any(|id| id == "service.wm.read"));
+        assert!(!capabilities.iter().any(|id| id == "service.hyprland.read"));
+        for capability in capabilities {
+            assert!(
+                mesh_core_capability::CapabilityCatalog::builtin()
+                    .validate(&capability)
+                    .is_ok()
+            );
+        }
+    }
 }

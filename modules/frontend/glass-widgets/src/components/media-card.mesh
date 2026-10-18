@@ -1,0 +1,275 @@
+<template>
+    <row class="card" class:card-idle={not has_track}>
+        <box class="art-frame">
+            <icon class="art" src={art} size="256" hidden={art == ""} />
+            <icon class="art-glyph" name="audio-x-generic" size="44" hidden={art ~= ""} />
+        </box>
+        <column class="body">
+            <text class="title">{title}</text>
+            <text class="artist">{artist}</text>
+            <row class="progress">
+                <text class="time">{position_text}</text>
+                <slider
+                    class="seek"
+                    value="{position}"
+                    min="0"
+                    max="{length}"
+                    onchange={onSeek}
+                    disabled={not has_track}
+                    aria-label="Seek"
+                />
+                <text class="time">{length_text}</text>
+            </row>
+            <row class="controls">
+                <button class="ctl" onclick={onPrevious} disabled={not has_track} aria-label="Previous track">
+                    <icon class="ctl-glyph" name="media-skip-backward" size="16" />
+                </button>
+                <button class="ctl ctl-main" onclick={onToggle} disabled={not has_track} aria-label={playing and "Pause" or "Play"}>
+                    <icon class="ctl-glyph" name={playing and "media-playback-pause" or "media-playback-start"} size="16" />
+                </button>
+                <button class="ctl" onclick={onNext} disabled={not has_track} aria-label="Next track">
+                    <icon class="ctl-glyph" name="media-skip-forward" size="16" />
+                </button>
+            </row>
+        </column>
+    </row>
+</template>
+
+<script lang="luau">
+local media = require("mesh.media")
+
+has_track = false
+playing = false
+title = "Nothing playing"
+artist = ""
+album = ""
+art = ""
+position = 0
+length = 1
+position_text = "00:00"
+length_text = "00:00"
+
+local function clock(seconds)
+    seconds = math.max(0, math.floor(seconds or 0))
+    return string.format("%02d:%02d", seconds // 60, seconds % 60)
+end
+
+local function position_now()
+    local value = media.position or 0
+    if media.state == "playing" then
+        value += os.time() - (media.updated_at or os.time())
+    end
+    local total = media.length or 0
+    return total > 0 and math.min(value, total) or value
+end
+
+local function update_progress()
+    position = math.floor(position_now())
+    position_text = clock(position)
+end
+
+effect(function()
+    has_track = media.available == true and (media.title or "") ~= ""
+    playing = has_track and media.state == "playing"
+    title = has_track and media.title or "Nothing playing"
+    artist = has_track and (media.artist or "") or ""
+    album = media.album or ""
+    art = has_track and (media.art_path or "") or ""
+    length = math.max(1, math.floor(media.length or 0))
+    length_text = clock(media.length)
+    update_progress()
+end)
+
+task.spawn(function()
+    while true do
+        task.sleep(1000)
+        if playing then
+            update_progress()
+        end
+    end
+end)
+
+function onSeek(value)
+    local target = tonumber(type(value) == "table" and value.value or value)
+    if target then
+        media.seek(target)
+    end
+end
+
+function onPrevious()
+    media.previous()
+end
+
+function onToggle()
+    media.play_pause()
+end
+
+function onNext()
+    media.next()
+end
+</script>
+
+<style>
+    .card {
+        width: 658px;
+        height: 199px;
+        gap: 20px;
+        padding: 17px 22px 17px 17px;
+        align-items: center;
+        border-radius: 25px;
+        border: 1px solid var(--color-glass-rim);
+        background-image: linear-gradient(to bottom, #a466f03d, #4a1fa02e);
+        box-shadow: 0 20px 48px #0a021a73;
+        backdrop-filter: blur(6px) refract(40px 30px) dispersion(4px);
+        opacity: 1;
+        animation: card-in 520 cubic-bezier(0.05, 0.7, 0.1, 1) both;
+    }
+
+
+    .card-idle {
+        opacity: 0.72;
+    }
+
+    .art-frame {
+        width: 162px;
+        height: 162px;
+        flex-shrink: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 20px;
+        border: 1px solid #ffffff33;
+        background: #ffffff1f;
+        box-shadow: 0 8px 22px #0a021a66;
+        overflow: hidden;
+    }
+
+    .art {
+        width: 162px;
+        height: 162px;
+        border-radius: 20px;
+    }
+
+    .art-glyph {
+        width: 62px;
+        height: 62px;
+        color: #e9d8ff;
+    }
+
+    .body {
+        flex-grow: 1;
+        min-width: 0;
+        gap: 2px;
+        justify-content: center;
+    }
+
+    .title {
+        height: 36px;
+        font-size: 27px;
+        font-weight: 600;
+        color: #f8f0ff;
+        text-overflow: ellipsis;
+    }
+
+    .artist {
+        height: 25px;
+        font-size: 17px;
+        color: #e3cdfa;
+        text-overflow: ellipsis;
+    }
+
+    .progress {
+        height: 34px;
+        margin-top: 6px;
+        align-items: center;
+        gap: 11px;
+    }
+
+    .time {
+        height: 22px;
+        font-size: 15px;
+        font-weight: 500;
+        color: #f5ecff;
+    }
+
+    .seek {
+        flex-grow: 1;
+        height: 31px;
+        padding: 0;
+        color: #efe4ff;
+    }
+
+    .controls {
+        height: 45px;
+        margin-top: 6px;
+        align-items: center;
+        gap: 13px;
+    }
+
+    .ctl {
+        width: 45px;
+        height: 42px;
+        padding: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 11px;
+        border: 1px solid #ffffff2e;
+        background-image: linear-gradient(to bottom, #d79bff4d, #9c58f033);
+    }
+
+
+
+    .ctl-glyph {
+        width: 22px;
+        height: 22px;
+        color: #fbf5ff;
+    }
+
+    @keyframes card-in {
+        0% {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+        100% {
+            opacity: 1;
+            transform: translateY(0px);
+        }
+    }
+
+    /* Motion: one vocabulary for the whole shell, all from theme tokens.
+    Containers lift by --animation-lift-hover and brighten their rim; controls
+    scale by --animation-scale-hover/-press and ring with the focus token. */
+
+    .card {
+        transform: translateY(0px);
+        transition-property: transform, border-color, opacity;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .card:hover {
+        transform: translateY(var(--animation-lift-hover));
+        border-color: var(--color-glass-rim-hover);
+    }
+
+    .ctl {
+        transform: scale(1);
+        transition-property: transform, background-color, border-color, opacity;
+        transition-duration: var(--animation-duration-short);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .ctl:hover {
+        border-color: var(--color-glass-rim-hover);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .ctl:focus-visible {
+        border-color: var(--color-focus-ring);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .ctl:active {
+        transform: scale(var(--animation-scale-press));
+        transition-duration: var(--animation-duration-fast);
+    }
+</style>

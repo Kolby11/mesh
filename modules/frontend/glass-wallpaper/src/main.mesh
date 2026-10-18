@@ -1,0 +1,16 @@
+<template>
+    <box class="wallpaper" aria-hidden="true" />
+</template>
+
+<style>
+    /* The shell backdrop image (`shell.render.backdrop.image`), cover-fit and
+    unrefracted. Every glass element refracts this same image, so the wallpaper
+    and what the glass bends always agree. */
+    .wallpaper {
+        width: 100%;
+        height: 100%;
+        exclusive-zone: ignore;
+        background: #120a24;
+        backdrop-filter: refract(0px 0px);
+    }
+</style>

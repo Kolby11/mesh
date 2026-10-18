@@ -1,7 +1,7 @@
 use mesh_core_elements::{
     AffineClipStack, AffineTransform, InteractionTarget, NodeEligibility, WidgetNode,
     child_transform, node_clip, node_eligibility, node_layout_bounds, node_transform,
-    root_transform, transformed_layout_at, transformed_offset,
+    root_transform,
 };
 
 mod focus;
@@ -86,21 +86,6 @@ pub(crate) fn intersect_bounds(a: ContentBounds, b: ContentBounds) -> Option<Con
     }
 }
 
-#[allow(dead_code)]
-pub(crate) fn node_rect_with_offset(
-    node: &WidgetNode,
-    offset_x: f32,
-    offset_y: f32,
-) -> ContentBounds {
-    let rect = transformed_layout_at(node, offset_x, offset_y);
-    (
-        rect.x,
-        rect.y,
-        rect.x + rect.width.max(0.0),
-        rect.y + rect.height.max(0.0),
-    )
-}
-
 pub(crate) fn node_rect_with_transform(
     node: &WidgetNode,
     transform: AffineTransform,
@@ -135,7 +120,7 @@ pub(crate) fn child_world_transform(
     node_world: AffineTransform,
     node: &WidgetNode,
 ) -> AffineTransform {
-    let scroll = node_scroll_offset(node);
+    let scroll = node.resolved_scroll_metrics();
     child_transform(node_world, node, scroll.x, scroll.y)
 }
 
@@ -151,48 +136,9 @@ pub(crate) fn push_node_clip(
     }
 }
 
-fn node_scroll_offset(node: &WidgetNode) -> ScrollOffsetState {
-    let scroll = node.resolved_scroll_metrics();
-    ScrollOffsetState {
-        x: scroll.x,
-        y: scroll.y,
-    }
-}
-
 pub(crate) fn node_clips_children(node: &WidgetNode) -> bool {
     node.computed_style.overflow_x.clips_contents()
         || node.computed_style.overflow_y.clips_contents()
-}
-
-#[allow(dead_code)]
-pub(crate) fn child_offsets_with_scroll(
-    node: &WidgetNode,
-    offset_x: f32,
-    offset_y: f32,
-) -> (f32, f32) {
-    let scroll = node_scroll_offset(node);
-    (offset_x - scroll.x, offset_y - scroll.y)
-}
-
-#[allow(dead_code)]
-pub(crate) fn apply_transform_offset(
-    node: &WidgetNode,
-    offset_x: f32,
-    offset_y: f32,
-) -> (f32, f32) {
-    transformed_offset(node, offset_x, offset_y)
-}
-
-#[allow(dead_code)]
-pub(crate) fn layout_contains_with_offset(
-    node: &WidgetNode,
-    x: f32,
-    y: f32,
-    offset_x: f32,
-    offset_y: f32,
-) -> bool {
-    let rect = transformed_layout_at(node, offset_x, offset_y);
-    x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
 }
 
 pub(crate) fn node_allows(node: &WidgetNode, target: InteractionTarget) -> bool {

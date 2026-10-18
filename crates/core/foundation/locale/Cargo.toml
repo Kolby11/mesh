@@ -6,11 +6,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+libc = { workspace = true }
+mesh-core-files = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-libc = { workspace = true }
 fixed_decimal = { workspace = true }
 icu_decimal = { workspace = true, features = ["alloc"] }
 icu_locale_core = { workspace = true }

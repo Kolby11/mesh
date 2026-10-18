@@ -1,14 +1,10 @@
-//! Shared compilation and evaluation for expressions embedded in `.mesh`
+//! Shared compilation for expressions embedded in `.mesh`
 //! templates.
 //!
 //! A component is parsed once into [`CompiledExpression`] values.  The live
-//! runtime registers those values as lexical Luau closures, while preview uses
-//! the same Luau expression body in a host environment.  Keeping the source
-//! and validation boundary shared prevents preview-only parsing from becoming
-//! a second template language.
+//! runtime registers those values as lexical Luau closures. Evaluation belongs
+//! to the runtime resolver, which owns the realm and callback budgets.
 
-use mlua::{Lua, LuaSerdeExt, Value as LuaValue};
-use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
@@ -29,14 +25,6 @@ pub enum ExpressionCompileError {
     ParserPanicked,
     #[error("could not start expression parser: {0}")]
     ParserThread(String),
-}
-
-#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
-pub enum ExpressionEvaluationError {
-    #[error("Luau expression failed: {0}")]
-    Lua(String),
-    #[error("Luau expression returned a value that cannot be represented as JSON: {0}")]
-    Json(String),
 }
 
 /// The validated, cacheable semantic unit shared by every template consumer.
@@ -257,88 +245,6 @@ fn first_non_ascii(source: &str) -> Option<(usize, char)> {
         .find(|(_, character)| !character.is_ascii())
 }
 
-/// Evaluate a compiled expression in a renderer-owned host environment.
-///
-/// The preview environment intentionally contains only JSON state and the
-/// locale function. It still executes through Luau, so truthiness, operators,
-/// indexing, concatenation, table literals, and translation calls use the same
-/// language semantics as live component closures.
-pub fn evaluate_preview<F>(
-    expression: &CompiledExpression,
-    variables: &Map<String, Value>,
-    locals: &Map<String, Value>,
-    translate: F,
-) -> Result<Value, ExpressionEvaluationError>
-where
-    F: Fn(&str) -> Option<String>,
-{
-    let lua = Lua::new();
-    let result = lua.scope(|scope| -> mlua::Result<Value> {
-        let translator = scope.create_function(|_, key: String| {
-            Ok(translate(&key).unwrap_or_else(|| format!("!!{key}")))
-        })?;
-        let environment = lua.globals();
-
-        for (name, value) in variables {
-            let value = json_to_lua(&lua, value)?;
-            environment.set(name.as_str(), value)?;
-        }
-        for (name, value) in locals {
-            let value = json_to_lua(&lua, value)?;
-            environment.set(name.as_str(), value)?;
-        }
-        environment.set("t", translator)?;
-
-        let value: LuaValue = lua
-            .load(format!("return ({})", expression.source()))
-            .set_name("mesh-template-preview")
-            .eval()?;
-        if matches!(value, LuaValue::Nil) {
-            return Ok(Value::Null);
-        }
-        lua.from_value(value)
-    });
-    result.map_err(|error| ExpressionEvaluationError::Lua(error.to_string()))
-}
-
-fn json_to_lua(lua: &Lua, value: &Value) -> mlua::Result<LuaValue> {
-    match value {
-        Value::Null => Ok(LuaValue::Nil),
-        Value::Bool(value) => Ok(LuaValue::Boolean(*value)),
-        Value::Number(number) => {
-            if let Some(value) = number.as_i64() {
-                Ok(LuaValue::Integer(value))
-            } else if let Some(value) = number.as_u64() {
-                i64::try_from(value).map(LuaValue::Integer).or_else(|_| {
-                    number.as_f64().map(LuaValue::Number).ok_or_else(|| {
-                        mlua::Error::external("JSON integer does not fit in Luau number")
-                    })
-                })
-            } else {
-                number
-                    .as_f64()
-                    .map(LuaValue::Number)
-                    .ok_or_else(|| mlua::Error::external("invalid JSON number"))
-            }
-        }
-        Value::String(value) => Ok(LuaValue::String(lua.create_string(value)?)),
-        Value::Array(values) => {
-            let table = lua.create_table_with_capacity(values.len(), 0)?;
-            for (index, value) in values.iter().enumerate() {
-                table.raw_set(index + 1, json_to_lua(lua, value)?)?;
-            }
-            Ok(LuaValue::Table(table))
-        }
-        Value::Object(values) => {
-            let table = lua.create_table_with_capacity(0, values.len())?;
-            for (name, value) in values {
-                table.raw_set(name.as_str(), json_to_lua(lua, value)?)?;
-            }
-            Ok(LuaValue::Table(table))
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -381,33 +287,6 @@ mod tests {
         let second = compile_expression("0 or 'fallback'").unwrap();
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(first.source(), "0 or 'fallback'");
-    }
-
-    #[test]
-    fn preview_uses_luau_truthiness_and_translation_host() {
-        let expression = compile_expression("t((enabled and 'nav.open') or fallback)").unwrap();
-        let variables = Map::from_iter([
-            ("enabled".into(), Value::Bool(true)),
-            ("fallback".into(), Value::String("missing".into())),
-        ]);
-        let value = evaluate_preview(&expression, &variables, &Map::new(), |key| {
-            (key == "nav.open").then(|| "Open".into())
-        })
-        .unwrap();
-        assert_eq!(value, Value::String("Open".into()));
-    }
-
-    #[test]
-    fn preview_treats_missing_and_null_values_as_luau_nil() {
-        let expression = compile_expression("nothing or fallback").unwrap();
-        let variables = Map::from_iter([
-            ("nothing".into(), Value::Null),
-            ("fallback".into(), Value::String("fallback".into())),
-        ]);
-        assert_eq!(
-            evaluate_preview(&expression, &variables, &Map::new(), |_| None).unwrap(),
-            Value::String("fallback".into())
-        );
     }
 
     #[test]
@@ -454,10 +333,6 @@ mod tests {
 
     #[test]
     fn unicode_string_literals_remain_valid_luau_expressions() {
-        let expression = compile_expression("'café'").unwrap();
-        assert_eq!(
-            evaluate_preview(&expression, &Map::new(), &Map::new(), |_| None).unwrap(),
-            Value::String("café".into())
-        );
+        assert_eq!(compile_expression("'café'").unwrap().source(), "'café'");
     }
 }

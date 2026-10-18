@@ -815,7 +815,7 @@ fn retained_effect_count_beats_command_scan() {
 fn frosted_node(id: NodeId, x: f32, y: f32, width: f32, height: f32) -> WidgetNode {
     let mut frosted = node(id, "box", x, y, width, height);
     frosted.computed_style.background_color = Color::TRANSPARENT;
-    frosted.computed_style.backdrop_filter = VisualFilter { blur_radius: 4.0 };
+    frosted.computed_style.backdrop_filter = VisualFilter::blur(4.0);
     frosted
 }
 
@@ -1081,9 +1081,7 @@ fn root_backdrop_filter_keeps_partial_damage_partial() {
 
 fn blurred_node(id: NodeId, x: f32, y: f32, w: f32, h: f32, radius: f32) -> WidgetNode {
     let mut node = node(id, "box", x, y, w, h);
-    node.computed_style.filter = VisualFilter {
-        blur_radius: radius,
-    };
+    node.computed_style.filter = VisualFilter::blur(radius);
     node
 }
 

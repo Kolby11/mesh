@@ -317,7 +317,7 @@ fn frosted_root_bar(button_color: Color) -> WidgetNode {
             a: 191,
         },
     );
-    root.computed_style.backdrop_filter = VisualFilter { blur_radius: 20.0 };
+    root.computed_style.backdrop_filter = VisualFilter::blur(20.0);
     let button = node(
         "box",
         LayoutRect {
@@ -419,7 +419,7 @@ fn blurred_parent_with_child(blur_radius: f32) -> WidgetNode {
         },
         Color::from_hex("#ff0000").unwrap(),
     );
-    parent.computed_style.filter = VisualFilter { blur_radius };
+    parent.computed_style.filter = VisualFilter::blur(blur_radius);
     parent.children = vec![node(
         "box",
         LayoutRect {
@@ -561,7 +561,7 @@ fn blur_layers_deeper_than_the_cap_paint_unblurred_with_a_diagnostic() {
     for _ in 0..(MAX_BLUR_LAYER_DEPTH + 1) {
         commands.push(PainterCommand::PushLayer(PainterLayer::blurred(
             full_clip(32, 32),
-            VisualFilter { blur_radius: 4.0 },
+            VisualFilter::blur(4.0),
             BlurQuality::default(),
         )));
     }
@@ -616,7 +616,7 @@ fn blur_layer_pass_cost() {
         },
         Color::from_hex("#ff0000").unwrap(),
     );
-    blurred.computed_style.filter = VisualFilter { blur_radius: 32.0 };
+    blurred.computed_style.filter = VisualFilter::blur(32.0);
     blurred.children = (0..16)
         .map(|index| {
             node(
@@ -637,9 +637,7 @@ fn blur_layer_pass_cost() {
     let measure = |radius: f32, quality: BlurQuality| {
         let mut root = root.clone();
         let mut children = root.children.to_vec();
-        children[0].computed_style.filter = VisualFilter {
-            blur_radius: radius,
-        };
+        children[0].computed_style.filter = VisualFilter::blur(radius);
         root.children = children.into();
         let mut list = RetainedDisplayList::default();
         list.update(&root, size, size, true, true);
@@ -755,7 +753,7 @@ fn backdrop_blur_scene(left_color: Color) -> WidgetNode {
         },
         Color::TRANSPARENT,
     );
-    frosted.computed_style.backdrop_filter = VisualFilter { blur_radius: 4.0 };
+    frosted.computed_style.backdrop_filter = VisualFilter::blur(4.0);
     root.children.push(left);
     root.children.push(right);
     root.children.push(frosted);

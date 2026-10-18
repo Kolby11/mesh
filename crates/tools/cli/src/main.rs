@@ -300,10 +300,10 @@ fn locale_read_model() -> (
     mesh_core_config::LocalePolicy,
 ) {
     let graph = load_authoring_snapshot();
-    let settings = mesh_core_config::load_shell_settings()
-        .unwrap_or_else(|error| exit_error(format!("failed to load locale settings: {error}")));
+    let preferences = load_profile_settings();
+    let settings = preferences.effective().shell();
     let policy = settings.i18n.policy;
-    let settings = mesh_core_config::resolve_shell_locale_settings(&settings);
+    let settings = mesh_core_config::resolve_shell_locale_settings(settings);
     let mut engine = mesh_core_locale::LocaleEngine::try_with_fallback_locale(
         settings.i18n.locale,
         settings.i18n.fallback_locale,
@@ -471,40 +471,8 @@ fn cmd_locale_set_system() {
 }
 
 fn cmd_locale_set_with_policy(requested: Option<String>, policy: mesh_core_config::LocalePolicy) {
-    let shared = load_settings_store();
-    let shared_revision = shared.revision();
-    let paths = profile_paths();
-    let active_profile_id = paths
-        .active_profile_id()
-        .unwrap_or_else(|error| exit_error(error));
-    let (settings, mut profile_commit) = if let Some(profile_id) = active_profile_id {
-        let profile = paths
-            .load(&profile_id)
-            .unwrap_or_else(|error| exit_error(error));
-        let mut effective = shared.to_value();
-        let root = effective
-            .as_object_mut()
-            .expect("settings store serializes an object");
-        for (namespace, overrides) in &profile.settings {
-            let target = root
-                .entry(namespace.clone())
-                .or_insert_with(|| serde_json::json!({}));
-            mesh_core_config::merge_json(target, overrides);
-        }
-        let effective =
-            mesh_core_config::SettingsStore::from_value(shared.path().to_path_buf(), effective)
-                .unwrap_or_else(|error| {
-                    exit_error(format!("failed to resolve profile settings: {error}"))
-                });
-        let expected_revision = profile.revision;
-        (
-            effective.shell().clone(),
-            Some((profile_id, profile, expected_revision)),
-        )
-    } else {
-        (shared.shell().clone(), None)
-    };
-    let settings = mesh_core_config::resolve_shell_locale_settings(&settings);
+    let mut preferences = load_profile_settings();
+    let settings = mesh_core_config::resolve_shell_locale_settings(preferences.effective().shell());
     let requested = requested.unwrap_or_else(|| {
         mesh_core_locale::system_locale().unwrap_or_else(|| settings.i18n.locale.clone())
     });
@@ -529,32 +497,10 @@ fn cmd_locale_set_with_policy(requested: Option<String>, policy: mesh_core_confi
             "fallback_locale": candidate.fallback_locale(),
         }
     });
-    if let Some((profile_id, mut profile, expected_revision)) = profile_commit.take() {
-        mesh_core_config::SettingsStore::load_from(shared.path())
-            .unwrap_or_else(|error| exit_error(format!("failed to recheck settings: {error}")))
-            .check_revision(shared_revision)
-            .unwrap_or_else(|error| {
-                exit_error(format!(
-                    "locale settings changed during preparation: {error}"
-                ))
-            });
-        let shell = profile
-            .settings
-            .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
-            .or_insert_with(|| serde_json::json!({}));
-        mesh_core_config::merge_json(shell, &locale_settings);
-        paths
-            .save_if_revision(&profile_id, &profile, expected_revision)
-            .unwrap_or_else(|error| {
-                exit_error(format!("failed to persist profile locale: {error}"))
-            });
-    } else {
-        let mut store = shared;
-        store.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &locale_settings);
-        store
-            .save_if_revision(shared_revision)
-            .unwrap_or_else(|error| exit_error(format!("failed to persist locale: {error}")));
-    }
+    preferences.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &locale_settings);
+    preferences
+        .save()
+        .unwrap_or_else(|error| exit_error(format!("failed to persist locale: {error}")));
     println!("active locale: {}", candidate.current());
 }
 
@@ -730,14 +676,7 @@ fn cmd_version() {
 }
 
 fn root_module_graph_path() -> std::path::PathBuf {
-    if let Ok(path) = std::env::var("MESH_MODULE_GRAPH_PATH")
-        && !path.trim().is_empty()
-    {
-        return path.into();
-    }
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../..")
-        .join("config/module.json")
+    mesh_core_config::default_module_graph_path()
 }
 
 fn load_authoring_snapshot_at(
@@ -767,13 +706,6 @@ fn save_profile_revision(
     paths
         .save_if_revision(profile_id, profile, profile.revision)
         .map(|_| ())
-}
-
-fn save_settings_revision(
-    store: &mut mesh_core_config::SettingsStore,
-) -> Result<(), mesh_core_config::ConfigError> {
-    let expected_revision = store.revision();
-    store.save_if_revision(expected_revision)
 }
 
 fn exit_error(message: impl std::fmt::Display) -> ! {
@@ -1022,283 +954,68 @@ fn cmd_install(args: &[String]) {
         0,
         "mesh-shell install <path-or-git-url>[#ref] [--available-only] [--profile <profile>] [--allow-elevated] [--allow-high]",
     );
+    let selected = args.iter().position(|arg| arg == "--profile").map(|index| {
+        args.get(index + 1)
+            .unwrap_or_else(|| exit_error("--profile requires a profile id"))
+            .as_str()
+    });
     let root_path = root_module_graph_path();
-    let config_dir = root_path
-        .parent()
-        .expect("root graph path has a parent directory")
-        .to_path_buf();
     let mut transaction = mesh_core_module::package::PackageTransaction::begin(
-        &config_dir,
+        root_path.parent().expect("root graph parent"),
         mesh_core_module::package::PackageOwner::Cli,
         mesh_core_module::package::PackageOperation::Install,
     )
     .unwrap_or_else(|error| exit_error(error));
-    let mut root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
-        .unwrap_or_else(|error| exit_error(error));
-    let modules_dir = config_dir.join(&root.modules_dir);
-    transaction
-        .protect_package_state(&root_path, &modules_dir)
-        .unwrap_or_else(|error| exit_error(error));
-    std::fs::create_dir_all(&modules_dir)
-        .unwrap_or_else(|error| exit_error(format!("failed to create modules directory: {error}")));
-    let source = transaction
-        .stage_module_source(source_arg)
-        .unwrap_or_else(|error| exit_error(error));
-    let source_path = source.path();
-    let manifest_path = source_path.join("module.json");
-    let manifest = mesh_core_module::package::ModuleManifest::from_path(&manifest_path)
-        .unwrap_or_else(|error| exit_error(error));
-
-    let allow_elevated = args.iter().any(|arg| arg == "--allow-elevated");
-    let allow_high = args.iter().any(|arg| arg == "--allow-high");
-    // An unloadable installed graph reviews against the closed host catalog.
-    let installed_catalog = load_authoring_snapshot_at(&root_path)
-        .map(|graph| graph.capability_catalog().clone())
-        .unwrap_or_default();
-    mesh_core_module::package::review_install(
-        &root.trust_policy,
-        source_path,
-        &manifest,
-        matches!(
-            source.source(),
-            mesh_core_module::package::ModuleSource::Git { .. }
-        ),
-        &installed_catalog,
+    let installed = match transaction.install_package(
+        &root_path,
+        source_arg,
+        selected,
+        args.iter().any(|arg| arg == "--available-only"),
         mesh_core_module::package::InstallApproval {
-            allow_elevated,
-            allow_high,
+            allow_elevated: args.iter().any(|arg| arg == "--allow-elevated"),
+            allow_high: args.iter().any(|arg| arg == "--allow-high"),
         },
-    )
-    .unwrap_or_else(|error| match error {
-        mesh_core_module::package::InstallReviewError::NeedsApproval { level, .. } => {
-            exit_error(format!(
-                "{error}; review it and repeat with {}",
-                if level == mesh_core_capability::PrivilegeLevel::High {
-                    "--allow-high"
-                } else {
-                    "--allow-elevated"
-                }
-            ))
+    ) {
+        Ok(installed) => installed,
+        Err(error) => {
+            if let Err(abort) = transaction.abort() {
+                exit_error(format!("{error}; rollback failed: {abort}"));
+            }
+            match error {
+                mesh_core_module::package::PackageInstallError::Review(
+                    mesh_core_module::package::InstallReviewError::NeedsApproval { level, .. },
+                ) => exit_error(format!(
+                    "{error}; review it and repeat with {}",
+                    if level == mesh_core_capability::PrivilegeLevel::High {
+                        "--allow-high"
+                    } else {
+                        "--allow-elevated"
+                    }
+                )),
+                error => exit_error(error),
+            }
         }
-        other => exit_error(other.to_string()),
-    });
-    let destination = mesh_core_module::package::module_install_path(&modules_dir, &manifest.name)
-        .unwrap_or_else(|error| exit_error(error));
-    if destination.exists() {
-        exit_error(format!(
-            "module {} is already installed at {}",
-            manifest.name,
-            destination.display()
-        ));
-    }
-    transaction
-        .protect(&destination)
-        .unwrap_or_else(|error| exit_error(error));
-
-    if let Err(error) = transaction.place_staged_module(&source, &destination) {
-        let _ = transaction.abort();
-        exit_error(format!("failed to install {}: {error}", manifest.name));
-    }
-
-    let approvals = root
-        .capability_approvals
-        .entry(manifest.name.clone())
-        .or_default();
-    for capability in &manifest.mesh.capabilities.required {
-        if !approvals.contains(capability) {
-            approvals.push(capability.clone());
+    };
+    if let Err(error) = installed
+        .plan
+        .select_if_missing(&mut transaction, &profile_paths())
+    {
+        if let Err(abort) = transaction.abort() {
+            exit_error(format!("{error}; rollback failed: {abort}"));
         }
-    }
-    approvals.sort();
-    approvals.dedup();
-    if !root.modules.is_empty() {
-        let relative = destination
-            .strip_prefix(&modules_dir)
-            .unwrap_or_else(|_| exit_error("installed module escaped the modules directory"))
-            .to_string_lossy()
-            .replace('\\', "/");
-        root.record_installed_module(
-            manifest.name.clone(),
-            mesh_core_module::package::InstalledModuleEntry {
-                kind: manifest.mesh.kind,
-                path: relative,
-                enabled: true,
-            },
-        );
-    }
-    if let Err(error) = transaction.save_root(&root_path, &root) {
-        let _ = transaction.abort();
         exit_error(error);
     }
-
-    let install_result = (|| -> Result<Option<String>, String> {
-        let graph = load_authoring_snapshot_at(&root_path).map_err(|error| error.to_string())?;
-        let installed = graph
-            .module(&manifest.name)
-            .ok_or_else(|| "installed module was not discovered".to_string())?;
-        if installed.kind != manifest.mesh.kind {
-            return Err("installed module kind changed while copying".into());
-        }
-        let installed_manifests = graph
-            .modules()
-            .into_iter()
-            .map(|module| module.manifest.clone())
-            .collect::<Vec<_>>();
-
-        use mesh_core_module::package::ModuleKind;
-
-        // Installing a composition selects it: the profile records `from` and
-        // inherits its roots, bindings, resources, and slot arrangement. It
-        // creates no root of its own — a composition binds, it never owns.
-        if manifest.mesh.kind == ModuleKind::Composition
-            && !args.iter().any(|arg| arg == "--available-only")
-        {
-            let paths = profile_paths();
-            let profile_id = args
-                .iter()
-                .position(|arg| arg == "--profile")
-                .and_then(|index| args.get(index + 1))
-                .cloned()
-                .or_else(|| paths.active_profile_id().ok().flatten())
-                .unwrap_or_else(|| mesh_core_module::package::DEFAULT_PROFILE_ID.to_string());
-            let mut profile = paths
-                .load_or_default(&profile_id)
-                .map_err(|error| error.to_string())?;
-            profile.from = Some(mesh_core_module::package::CompositionRef {
-                module: manifest.name.clone(),
-                version: Some(manifest.version.clone()),
-            });
-            transaction
-                .save_profile(&paths, &profile_id, &profile)
-                .map_err(|error| error.to_string())?;
-            if paths
-                .active_profile_id()
-                .map_err(|error| error.to_string())?
-                .is_none()
-            {
-                transaction
-                    .set_active_profile(&paths, &profile_id)
-                    .map_err(|error| error.to_string())?;
-            }
-            transaction
-                .record_module_lock(
-                    &manifest,
-                    &destination,
-                    &modules_dir,
-                    source.source(),
-                    source.revision(),
-                    &installed_manifests,
-                    true,
-                )
-                .map_err(|error| error.to_string())?;
-            return Ok(Some(format!(
-                "composition {} in profile {profile_id}",
-                manifest.name
-            )));
-        }
-
-        if args.iter().any(|arg| arg == "--available-only")
-            || !manifest.mesh.has_default_placement()
-        {
-            transaction
-                .record_module_lock(
-                    &manifest,
-                    &destination,
-                    &modules_dir,
-                    source.source(),
-                    source.revision(),
-                    &installed_manifests,
-                    false,
-                )
-                .map_err(|error| error.to_string())?;
-            return Ok(None);
-        }
-
-        let paths = profile_paths();
-        let explicit_profile = args
-            .iter()
-            .position(|arg| arg == "--profile")
-            .and_then(|index| args.get(index + 1))
-            .cloned();
-        let profile_id = explicit_profile.or_else(|| paths.active_profile_id().ok().flatten());
-        let Some(profile_id) = profile_id else {
-            // Legacy auto-discovery already activates new modules by default.
-            transaction
-                .record_module_lock(
-                    &manifest,
-                    &destination,
-                    &modules_dir,
-                    source.source(),
-                    source.revision(),
-                    &installed_manifests,
-                    false,
-                )
-                .map_err(|error| error.to_string())?;
-            return Ok(Some("legacy root graph (auto-enabled)".into()));
-        };
-        let mut profile = paths
-            .load_or_default(&profile_id)
-            .map_err(|error| error.to_string())?;
-        let instance_id = profile
-            .add_root(&manifest)
-            .map_err(|error| error.to_string())?;
-        let manifests = graph
-            .modules()
-            .into_iter()
-            .map(|module| &module.manifest)
-            .collect::<Vec<_>>();
-        profile
-            .active_module_ids(manifests)
-            .map_err(|error| error.to_string())?;
-        transaction
-            .save_profile(&paths, &profile_id, &profile)
-            .map_err(|error| error.to_string())?;
-        if paths
-            .active_profile_id()
-            .map_err(|error| error.to_string())?
-            .is_none()
-        {
-            transaction
-                .set_active_profile(&paths, &profile_id)
-                .map_err(|error| error.to_string())?;
-        }
-        transaction
-            .record_module_lock(
-                &manifest,
-                &destination,
-                &modules_dir,
-                source.source(),
-                source.revision(),
-                &installed_manifests,
-                false,
-            )
-            .map_err(|error| error.to_string())?;
-        Ok(Some(format!("{instance_id} in profile {profile_id}")))
-    })();
-
-    match install_result {
-        Ok(composition) => {
-            println!("installed {} at {}", manifest.name, destination.display());
-            if let Some(composition) = composition {
-                println!("activated {composition}; declared defaults remain inherited");
-            } else {
-                println!(
-                    "available but not independently activated ({:?})",
-                    manifest.mesh.kind
-                );
-            }
-        }
-        Err(error) => {
-            let _ = transaction.abort();
-            exit_error(format!(
-                "installation validation failed; transaction aborted: {error}"
-            ));
-        }
-    }
-
     transaction
         .commit()
         .unwrap_or_else(|error| exit_error(format!("failed to commit installation: {error}")));
+    println!(
+        "installed {} at {}",
+        installed.manifest.name,
+        installed.destination.display()
+    );
+    if let Some((id, _)) = &installed.plan.profile {
+        println!("activated in profile {id}");
+    }
 }
 
 /// Resolve `(root graph path, config dir, modules dir)` for lock-aware commands.
@@ -1509,134 +1226,20 @@ fn cmd_uninstall(args: &[String]) {
     let module_id = required_arg(args, 0, "mesh-shell uninstall <module-id>");
     mesh_core_module::package::ModuleId::parse(module_id).unwrap_or_else(|error| exit_error(error));
     let root_path = root_module_graph_path();
-    let config_dir = root_path
-        .parent()
-        .expect("root graph path has a parent directory")
-        .to_path_buf();
     let mut transaction = mesh_core_module::package::PackageTransaction::begin(
-        &config_dir,
+        root_path.parent().expect("root graph parent"),
         mesh_core_module::package::PackageOwner::Cli,
         mesh_core_module::package::PackageOperation::Uninstall,
     )
     .unwrap_or_else(|error| exit_error(error));
-    let mut root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
-        .unwrap_or_else(|error| exit_error(error));
-    let modules_dir = config_dir.join(&root.modules_dir);
-    transaction
-        .protect_package_state(&root_path, &modules_dir)
-        .unwrap_or_else(|error| exit_error(error));
-    let lock_path = config_dir.join("mesh.lock");
-    let mut lock = mesh_core_module::package::MeshLock::load_or_default(&lock_path)
-        .unwrap_or_else(|error| exit_error(error));
-    let force = args.iter().any(|arg| arg == "--force");
-
-    let dependents = update::dependents(module_id, &lock);
-    if !dependents.is_empty() && !force {
-        exit_error(format!(
-            "{module_id} is still required by {}; remove those first or repeat with --force",
-            dependents.join(", ")
-        ));
-    }
-
-    if !force
-        && root
-            .layout
-            .as_ref()
-            .is_some_and(|layout| layout.entrypoint.split(':').next() == Some(module_id))
-    {
-        exit_error(format!(
-            "{module_id} is the active layout module; select another layout or repeat with --force"
-        ));
-    }
-    if !force
-        && root
-            .providers
-            .values()
-            .any(|provider| provider == module_id)
-    {
-        exit_error(format!(
-            "{module_id} provides an active backend; select another provider or repeat with --force"
-        ));
-    }
-
-    let paths = mesh_core_module::package::ProfilePaths::from_root_graph(&root_path)
-        .unwrap_or_else(|error| exit_error(error));
-    let profile_ids = paths.list().unwrap_or_else(|error| exit_error(error));
-    for profile_id in &profile_ids {
-        let profile = paths
-            .load(profile_id)
-            .unwrap_or_else(|error| exit_error(error));
-        if profile.references_module(module_id) && !force {
-            exit_error(format!(
-                "{module_id} is referenced by profile {profile_id}; remove it from that profile or repeat with --force"
-            ));
+    if let Err(error) = transaction.uninstall_package(
+        &root_path,
+        module_id,
+        args.iter().any(|arg| arg == "--force"),
+    ) {
+        if let Err(abort) = transaction.abort() {
+            exit_error(format!("{error}; rollback failed: {abort}"));
         }
-    }
-
-    let explicit_inventory = !root.modules.is_empty();
-    let installed_at = match root.modules.get(module_id) {
-        Some(entry) => mesh_core_module::package::contained_path(
-            &modules_dir,
-            &entry.path,
-            "installed module path",
-        )
-        .unwrap_or_else(|error| exit_error(error)),
-        None => mesh_core_module::package::module_install_path(&modules_dir, module_id)
-            .unwrap_or_else(|error| exit_error(error)),
-    };
-
-    let root_changed = if force {
-        root.remove_module_references(module_id);
-        true
-    } else {
-        root.forget_uninstalled_module(module_id)
-    };
-    if explicit_inventory || root_changed {
-        if let Err(error) = transaction.save_root(&root_path, &root) {
-            let _ = transaction.abort();
-            exit_error(error);
-        }
-    }
-    if force {
-        for profile_id in profile_ids {
-            let mut profile = paths
-                .load(&profile_id)
-                .unwrap_or_else(|error| exit_error(error));
-            if !profile.references_module(module_id) {
-                continue;
-            }
-            let expected_revision = profile.revision;
-            profile.remove_module_references(module_id);
-            if let Err(error) = transaction.save_profile_if_revision(
-                &paths,
-                &profile_id,
-                &profile,
-                expected_revision,
-            ) {
-                let _ = transaction.abort();
-                exit_error(error);
-            }
-        }
-    }
-    if let Err(error) = transaction.remove(&installed_at) {
-        let _ = transaction.abort();
-        exit_error(format!(
-            "failed to remove {}: {error}",
-            installed_at.display()
-        ));
-    }
-    lock.modules.remove(module_id);
-    if lock
-        .composition
-        .as_ref()
-        .is_some_and(|composition| composition.module == module_id)
-    {
-        lock.composition = None;
-    }
-    let remaining_manifests = installed_manifests(&root_path);
-    lock.refresh_metadata(remaining_manifests.values());
-    if let Err(error) = transaction.save_lock(&mut lock, &modules_dir) {
-        let _ = transaction.abort();
         exit_error(error);
     }
     transaction
@@ -1718,22 +1321,19 @@ fn cmd_config(args: &[String]) {
     }
 }
 
-fn load_settings_store() -> mesh_core_config::SettingsStore {
-    match mesh_core_config::SettingsStore::load() {
-        Ok(store) => store,
-        Err(err) => {
-            eprintln!("failed to read settings: {err}");
-            std::process::exit(1);
-        }
-    }
+fn load_profile_settings() -> mesh_core_module::package::ProfileSettings {
+    let shared = mesh_core_config::SettingsStore::load().unwrap_or_else(|error| exit_error(error));
+    mesh_core_module::package::ProfileSettings::load(&root_module_graph_path(), shared)
+        .unwrap_or_else(|error| exit_error(error))
 }
 
 fn cmd_config_path() {
-    println!("{}", mesh_core_config::default_settings_path().display());
+    println!("{}", load_profile_settings().path().display());
 }
 
 fn cmd_config_show(namespace: Option<&str>) {
-    let store = load_settings_store();
+    let preferences = load_profile_settings();
+    let store = preferences.effective();
     let value = match namespace {
         Some(namespace) => store.namespace(namespace),
         None => store.to_value(),
@@ -1749,7 +1349,8 @@ fn cmd_config_show(namespace: Option<&str>) {
 /// Exits non-zero only for errors — a warning is something to know about, not a
 /// reason to fail a script.
 fn cmd_config_doctor() {
-    let store = load_settings_store();
+    let preferences = load_profile_settings();
+    let store = preferences.effective();
     let mut diagnostics: Vec<mesh_core_config::SettingsDiagnostic> = store.diagnostics().to_vec();
 
     // Module namespaces need manifests to validate against, so the module graph
@@ -1912,7 +1513,8 @@ fn cmd_config_eject(module_id: &str) {
         std::process::exit(1);
     };
 
-    let mut store = load_settings_store();
+    let mut preferences = load_profile_settings();
+    let store = preferences.effective();
     let manifest = module.manifest.clone().into_runtime_manifest();
     let module_path = module
         .manifest_path
@@ -1947,33 +1549,30 @@ fn cmd_config_eject(module_id: &str) {
     if props.as_object().is_some_and(|props| !props.is_empty()) {
         ejected["props"] = serde_json::json!({ "global": props });
     }
-    store.merge_namespace(module_id, &ejected);
-    if let Err(err) = save_settings_revision(&mut store) {
+    preferences.merge_namespace(module_id, &ejected);
+    let output_path = preferences.path();
+    let output = preferences.effective().namespace(module_id);
+    if let Err(err) = preferences.save() {
         eprintln!("failed to write settings: {err}");
         std::process::exit(1);
     }
 
     println!(
         "ejected {module_id} surface placement and exposed props into {}",
-        store.path().display()
+        output_path.display()
     );
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&store.namespace(module_id)).unwrap()
-    );
+    println!("{}", serde_json::to_string_pretty(&output).unwrap());
 }
 
 fn cmd_config_reset(namespace: &str) {
-    let mut store = load_settings_store();
-    if !store.has_namespace(namespace) {
-        println!("no stored overrides for {namespace}");
+    let mut preferences = load_profile_settings();
+    if !preferences.reset_namespace(namespace) {
+        println!("no stored overrides for {namespace} in the active settings layer");
         return;
     }
-    store.reset_namespace(namespace);
-    if let Err(err) = save_settings_revision(&mut store) {
-        eprintln!("failed to write settings: {err}");
-        std::process::exit(1);
-    }
+    preferences
+        .save()
+        .unwrap_or_else(|error| exit_error(format!("failed to write settings: {error}")));
     println!("cleared overrides for {namespace}; declared defaults apply again");
 }
 
@@ -1994,8 +1593,8 @@ fn cmd_help() {
     println!("  ipc       Send an IPC command to the running shell");
     println!("  ipc-socket-path  Print the shell IPC socket path");
     println!("  config    Inspect and edit the settings file");
-    println!("            path                 print the settings file path");
-    println!("            show [namespace]     print the whole file, or one namespace");
+    println!("            path                 print the active profile/settings file path");
+    println!("            show [namespace]     print effective settings, or one namespace");
     println!("            doctor               check the file for values MESH cannot use");
     println!("            eject <module-id>    write a module's effective surface and");
     println!("                                 exposed props, ready to hand-edit");

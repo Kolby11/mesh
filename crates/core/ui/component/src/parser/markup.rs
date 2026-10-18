@@ -563,6 +563,86 @@ fn mark_loop_component_refs(nodes: &mut [TemplateNode], inside_loop: bool) {
     }
 }
 
+fn authored_attribute_spans(
+    source: &str,
+    source_base: usize,
+    element: SourceSpan,
+    braces: &BraceLex,
+) -> HashMap<String, std::collections::VecDeque<SourceSpan>> {
+    let bytes = source.as_bytes();
+    let mut cursor = element.start.saturating_sub(source_base) + 1;
+    let end = element.end.saturating_sub(source_base).min(source.len());
+    let mut spans = HashMap::<String, std::collections::VecDeque<SourceSpan>>::new();
+    while cursor < end
+        && !bytes[cursor].is_ascii_whitespace()
+        && !matches!(bytes[cursor], b'>' | b'/')
+    {
+        cursor += 1;
+    }
+    while cursor < end {
+        while cursor < end && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor == end || matches!(bytes[cursor], b'>' | b'/') {
+            break;
+        }
+        let start = cursor;
+        while cursor < end
+            && !bytes[cursor].is_ascii_whitespace()
+            && !matches!(bytes[cursor], b'=' | b'>' | b'/')
+        {
+            cursor += 1;
+        }
+        let name_end = cursor;
+        while cursor < end && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if bytes.get(cursor) != Some(&b'=') {
+            break;
+        }
+        cursor += 1;
+        while cursor < end && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        let quote = bytes
+            .get(cursor)
+            .copied()
+            .filter(|byte| matches!(byte, b'\'' | b'"'));
+        if quote.is_some() {
+            cursor += 1;
+        }
+        while cursor < end {
+            if bytes[cursor] == b'{' {
+                if let Ok(index) = braces
+                    .tokens
+                    .binary_search_by_key(&cursor, |token| token.span.start)
+                {
+                    cursor = braces.tokens[index].span.end;
+                    if quote.is_none() {
+                        break;
+                    }
+                    continue;
+                }
+            }
+            if Some(bytes[cursor]) == quote {
+                cursor += 1;
+                break;
+            }
+            if quote.is_none()
+                && (bytes[cursor].is_ascii_whitespace() || matches!(bytes[cursor], b'>' | b'/'))
+            {
+                break;
+            }
+            cursor += 1;
+        }
+        spans
+            .entry(source[start..name_end].to_string())
+            .or_default()
+            .push_back(SourceSpan::new(source_base + start, source_base + cursor));
+    }
+    spans
+}
+
 fn parse_xml_attributes(
     source: &str,
     reader: &Reader<&[u8]>,
@@ -572,6 +652,7 @@ fn parse_xml_attributes(
     element_span: SourceSpan,
 ) -> Result<Vec<Attribute>, ParseError> {
     let mut attrs = Vec::new();
+    let mut authored_spans = authored_attribute_spans(source, source_base, element_span, braces);
 
     for attr in event.attributes().with_checks(false) {
         let attr = attr.map_err(|err| ParseError::InvalidTemplate {
@@ -579,6 +660,9 @@ fn parse_xml_attributes(
             span: element_span,
         })?;
         let name = decode_name(attr.key.as_ref());
+        let authored_span = authored_spans
+            .get_mut(&name)
+            .and_then(|spans| spans.pop_front());
         let value = attr
             .decode_and_unescape_value(reader.decoder())
             .map_err(|err| ParseError::InvalidTemplate {
@@ -647,13 +731,10 @@ fn parse_xml_attributes(
             name: attr_name,
             value: attr_value,
             quoted_expression,
-            // Dynamic attributes retain the exact brace expression range for
-            // compatibility with expression tooling. Static attributes have
-            // no token offsets from quick-xml, so anchor them to their owning
-            // element rather than dropping the location entirely.
             span: expression
                 .as_ref()
                 .map(|(_, span)| *span)
+                .or(authored_span)
                 .or(Some(element_span)),
         });
     }

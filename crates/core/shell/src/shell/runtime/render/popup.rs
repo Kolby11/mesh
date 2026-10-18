@@ -17,9 +17,14 @@ use super::*;
 /// buffer would make the window measurably larger than the UI inside it. A
 /// tooltip that needs to escape a window's bounds is an `xdg_popup`, the same
 /// primitive `<popover>` already promotes to.
+///
+/// The reserve is trailing (content at the buffer origin), so it is dropped on
+/// the axis of a bottom or right anchor: there it would sit between the content
+/// and the screen edge and push a dock off that edge by the reserve.
 pub(super) fn surface_geometry_with_overlay_reserve(
     surface_id: &str,
     role: SurfaceRole,
+    edge: Option<mesh_core_wayland::Edge>,
     width: u32,
     height: u32,
 ) -> (u32, u32, SurfacePadding) {
@@ -27,7 +32,12 @@ pub(super) fn surface_geometry_with_overlay_reserve(
         if surface_id == DEBUG_INSPECTOR_SURFACE_ID || role == SurfaceRole::Window {
             (0, 0)
         } else {
-            component::tooltip_overlay_extra_for_content(width, height)
+            let (extra_w, extra_h) = component::tooltip_overlay_extra_for_content(width, height);
+            match edge {
+                Some(mesh_core_wayland::Edge::Bottom) => (extra_w, 0),
+                Some(mesh_core_wayland::Edge::Right) => (0, extra_h),
+                _ => (extra_w, extra_h),
+            }
         };
     (
         width.saturating_add(extra_w),
@@ -179,4 +189,29 @@ pub(super) fn compute_opaque_rect_for_root(
         width: surface_width.max(1),
         height: surface_height.max(1),
     })
+}
+
+#[cfg(test)]
+mod overlay_reserve_tests {
+    use super::*;
+    use mesh_core_wayland::Edge;
+
+    #[test]
+    fn reserve_is_dropped_on_the_axis_of_a_bottom_or_right_anchor() {
+        let reserve = |edge| {
+            let (w, h, padding) =
+                surface_geometry_with_overlay_reserve("@test/dock", SurfaceRole::Layer, edge, 120, 80);
+            (w, h, padding.right, padding.bottom)
+        };
+        let (_, top_h, _, top_bottom) = reserve(Some(Edge::Top));
+        assert!(top_h > 80 && top_bottom > 0, "a top bar keeps room for tooltips below it");
+
+        let (_, bottom_h, bottom_right, bottom_bottom) = reserve(Some(Edge::Bottom));
+        assert_eq!((bottom_h, bottom_bottom), (80, 0), "a dock must sit on the bottom edge");
+        assert!(bottom_right > 0, "the width reserve is unaffected by a bottom anchor");
+
+        let (right_w, _, right_right, right_bottom) = reserve(Some(Edge::Right));
+        assert_eq!((right_w, right_right), (120, 0), "a right panel must sit on the right edge");
+        assert!(right_bottom > 0);
+    }
 }

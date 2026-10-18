@@ -465,6 +465,11 @@ is never selected or bound: the graph reports `missing_interface_contract` for
 it, required consumers are blocked, and the service catalog creates no
 contract-less binding.
 
+- **Provider eligibility.** Profile activation and graph selection use the
+  same version rule: an explicit offered version must equal the declared
+  contract version, and that version must satisfy the consumer's requirement.
+  An omitted offered version adopts the declared version. Matching a consumer
+  range alone does not make a different contract version eligible.
 - **Type grammar.** Every `type`/`returns` expression is validated at graph
   build: primitives (`string`, `int`, `float`, `boolean`, `object`, `any`),
   PascalCase named types declared under `contract.types` (plus the builtin
@@ -854,6 +859,22 @@ deliberate exceptions:
 - **A user may deactivate an inherited root but not delete it.** Deletion is not
   expressible in a delta layer, and an update would resurrect it anyway.
 
+Both composition layers and profiles accept `removeBackgroundServices`
+(module ids) and `removeProviders` (canonical interface names). Each layer
+subtracts those inherited entries before applying its own additions. A more
+specific explicit service or provider choice may restore an entry. Removing a
+provider binding clears that selection; ordinary dependency and sole-provider
+inference still apply. These removals never disable a required dependency.
+
+Profiles also persist `slots` overrides, so detaching a composition preserves
+extension-point replacement, suppression, and ordering. Forced uninstall of a
+composition, including an `extends` ancestor, resolves every affected profile
+before removal and stores its complete effective composition without `from`.
+Roots, settings, resources, and both kinds of slot overrides survive; orphaned
+root overrides remain stored as inactive roots. Profile revisions advance
+through the normal transaction. Forced removal of an
+inherited service uses subtraction deltas while retaining composition provenance.
+
 A user override keyed to a root the composition no longer declares is
 **retained and reported** (`orphaned_profile_override`), never dropped —
 discarding it would lose the user's work on every upstream rename.
@@ -1004,6 +1025,11 @@ default for a malformed argument.
   `on_poll(self)`, `on_command_<method>()` returning `{ ok = true }` /
   `{ ok = false, error = "…" }`, and fire declared events via
   `self.EventName:fire(payload)`.
+- **Shipped — recursive contract types.** Named types may recurse through an
+  optional field or an array, allowing finite trees and linked values. Required
+  scalar cycles are rejected. Structural validation checks every member, with a
+  depth limit of 64 and a traversal budget of 65,536 values per type check;
+  runtime JSON boundaries may impose stricter limits.
 - **Shipped — backend tasks.** Backends have the frontend `task` library
   (`task.spawn`, `task.delay`, `task.sleep`, `task.cancel`) once `start(self)`
   runs. `start`, `on_poll` and `on_command_<method>` run as coroutines, as do
@@ -1012,8 +1038,10 @@ default for a malformed argument.
   callback while a host worker runs, and other callbacks keep running. The
   provider becomes ready when `start` finishes; a poll that suspended
   finishes before the next poll starts; a suspended command replies when its
-  handler returns and is dropped if the caller cancels. Only a command that
-  fails before suspending has `state` rolled back. Stream hooks, `stop` and
+  handler returns and is dropped if the caller cancels. Only successful
+  callback completion publishes a service snapshot. Failed callbacks discard
+  pending publications while retaining private Luau mutations and table identity;
+  the next successful callback may publish those mutations. Stream hooks, `stop` and
   calls from contexts Luau cannot yield from (metamethods, `table.sort`
   comparators) still block.
 - Core-triggered service actions use that same declared method and generic

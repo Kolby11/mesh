@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Alternate style paths remain available to renderer fixtures.
-
 mod annotate;
 
 #[cfg(test)]
@@ -164,6 +162,7 @@ impl FrontendSurfaceComponent {
     /// (`:hover`/`:focus`/...). Derived from the same cache as
     /// `module_restyle_rules` (which sorts state rules last), so it stays in
     /// sync with imported modules and hot source reloads.
+    #[cfg(test)]
     pub(super) fn module_styles_have_state_rules(&mut self) -> bool {
         self.module_restyle_rules();
         self.cached_restyle_state_dependencies.mask != 0
@@ -211,6 +210,7 @@ impl FrontendSurfaceComponent {
         let (width, height) = layer_surface_request_size(
             self.surface_layout.edge,
             self.surface_layout.exclusive_zone,
+            self.surface_fills_output,
             (measured_width, measured_height),
         );
         // Content size only — the tooltip overlay reserve is added at the
@@ -1455,9 +1455,11 @@ impl FrontendSurfaceComponent {
 fn layer_surface_request_size(
     edge: mesh_core_wayland::Edge,
     exclusive_zone: i32,
+    fills_output: bool,
     measured_size: (u32, u32),
 ) -> (u32, u32) {
     match edge {
+        mesh_core_wayland::Edge::Top | mesh_core_wayland::Edge::Bottom if fills_output => (0, 0),
         mesh_core_wayland::Edge::Top | mesh_core_wayland::Edge::Bottom => (0, measured_size.1),
         // Only a docked side rail is anchored to both vertical edges. A
         // floating left/right surface needs its measured height; sending zero

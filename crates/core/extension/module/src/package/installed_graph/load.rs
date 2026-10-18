@@ -38,7 +38,8 @@ pub fn load_installed_module_graph_for_profile(
 
 /// Reload the installed graph while a module is being edited. A module whose
 /// `module.json` no longer loads keeps the manifest it had in `previous`, so
-/// a half-typed edit does not deactivate it; a `module_manifest_retained`
+/// a half-typed manifest edit does not deactivate it while the remaining source
+/// and any readable manifest identity are unchanged; a `module_manifest_retained`
 /// diagnostic carries the load error until the file is fixed. A module with
 /// no previous manifest is isolated as usual.
 pub fn load_installed_module_graph_retaining(
@@ -63,6 +64,16 @@ fn retained_manifest(
         .modules()
         .into_iter()
         .find(|node| node.manifest_path.parent() == Some(module_dir))?;
+    let digest = super::super::lock::module_source_digest(module_dir).ok()?;
+    if node.source_digest.as_deref() != Some(digest.as_str()) {
+        return None;
+    }
+    if let Ok(content) = std::fs::read(module_dir.join("module.json"))
+        && let Ok(document) = serde_json::from_slice::<serde_json::Value>(&content)
+        && document.get("name").and_then(serde_json::Value::as_str) != Some(node.id.as_str())
+    {
+        return None;
+    }
     Some(LoadedModuleManifest {
         manifest: node.manifest.clone(),
         path: node.manifest_path.clone(),
@@ -97,17 +108,44 @@ fn load_installed_module_graph_with(
         // and build the installed set from each module's own manifest. The root
         // file then holds only decisions — `disabled`, `providers`, `layout`,
         // `theme` — and a discovered module is enabled unless disabled there.
+        let discovered = discover_module_dirs_reporting(&modules_dir);
+        isolated.extend(discovered.skipped.into_iter().map(|(path, reason)| {
+            isolated_module_diagnostic(
+                display_relative(&path, &modules_dir),
+                "module_discovery_failed",
+                format!("module directory {} was skipped: {reason}", path.display()),
+            )
+        }));
         let module_dirs = if let Some((store, snapshot)) = &active_store {
-            snapshot_module_dirs(store, snapshot)?
+            let mut directories = snapshot_module_dirs(store, snapshot)?;
+            // A generation owns managed modules, not the unlocked authoring
+            // inventory. Keep untracked distribution/local sources available.
+            for directory in discovered.dirs {
+                let managed_path = snapshot.modules.keys().any(|id| {
+                    ModuleId::parse(id)
+                        .is_ok_and(|id| directory == modules_dir.join(id.relative_path()))
+                });
+                let manifest_path = directory.join("module.json");
+                let managed_name =
+                    super::super::validate_regular_file(&manifest_path, "module manifest")
+                        .ok()
+                        .and_then(|_| std::fs::read(&manifest_path).ok())
+                        .and_then(|content| {
+                            serde_json::from_slice::<serde_json::Value>(&content).ok()
+                        })
+                        .and_then(|document| {
+                            document
+                                .get("name")
+                                .and_then(serde_json::Value::as_str)
+                                .map(str::to_string)
+                        })
+                        .is_some_and(|name| snapshot.modules.contains_key(&name));
+                if !managed_path && !managed_name {
+                    directories.push(directory);
+                }
+            }
+            directories
         } else {
-            let discovered = discover_module_dirs_reporting(&modules_dir);
-            isolated.extend(discovered.skipped.into_iter().map(|(path, reason)| {
-                isolated_module_diagnostic(
-                    display_relative(&path, &modules_dir),
-                    "module_discovery_failed",
-                    format!("module directory {} was skipped: {reason}", path.display()),
-                )
-            }));
             discovered.dirs
         };
         let loaded_manifests = load_manifests(&module_dirs);
@@ -138,7 +176,10 @@ fn load_installed_module_graph_with(
             };
             let name = loaded.manifest.name.clone();
             let kind = loaded.manifest.mesh.kind;
-            let relative = if active_store.is_some() {
+            let relative = if active_store
+                .as_ref()
+                .is_some_and(|(_, snapshot)| snapshot.modules.contains_key(&name))
+            {
                 ModuleId::parse(&name)?.relative_path().to_string()
             } else {
                 module_dir

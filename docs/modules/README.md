@@ -26,6 +26,11 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/opacity-test` | surface | `src/main.mesh` | Opacity control surface without compositor blur (disabled by default) |
 | `@mesh/language-popover` | embedded | `src/main.mesh` | Embeddable language chooser |
 | `@mesh/theme-selector` | embedded | `src/main.mesh` | Embeddable theme chooser |
+| `@mesh/glass-bar` | surface | `src/main.mesh` | Floating top bar of glass pills: clock, workspaces, now playing, recording, weather, status |
+| `@mesh/glass-widgets` | surface | `src/main.mesh` | Bottom-layer desktop player and weather cards |
+| `@mesh/glass-dock` | surface | `src/main.mesh` | Bottom dock of pinned and running applications |
+| `@mesh/profile-switcher` | embedded | `src/main.mesh` | Shell switcher trigger; also a `mesh.navigation.item` contribution |
+| `@mesh/profile-menu` | embedded | `src/main.mesh` | Popover listing profiles; selecting one switches live via `mesh.packages` |
 
 ## Service providers
 
@@ -37,6 +42,11 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/upower-power` | backend | `src/main.luau` | Power state through UPower tooling |
 | `@mesh/hyprland-wm` | backend | `src/main.luau` | Hyprland shell/window-manager integration |
 | `@mesh/device-info` | backend | `src/main.luau` | Linux device information for system/settings surfaces |
+| `@mesh/mpris-media` | backend | `src/main.luau` | `mesh.media` through `playerctl`, with cached cover art |
+| `@mesh/open-meteo-weather` | backend | `src/main.luau` | `mesh.weather` from Open-Meteo, located by settings or IP |
+| `@mesh/networkmanager-network` | backend | `src/main.luau` | `mesh.network` through `nmcli` |
+| `@mesh/hyprland-apps` | backend | `src/main.luau` | `mesh.apps`: desktop entries joined with Hyprland clients |
+| `@mesh/wf-recorder` | backend | `src/main.luau` | `mesh.recorder` through `wf-recorder` |
 
 ## Interfaces and resource packs
 
@@ -47,6 +57,12 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/power-interface` | interface | `mesh.power` battery contract |
 | `@mesh/brightness-interface` | interface | `mesh.brightness` backlight contract |
 | `@mesh/device-interface` | interface | Base device-information interface for settings/system surfaces |
+| `@mesh/media-interface` | interface | `mesh.media` now-playing contract |
+| `@mesh/weather-interface` | interface | `mesh.weather` conditions and forecast contract |
+| `@mesh/network-interface` | interface | `mesh.network` connectivity and Wi-Fi contract |
+| `@mesh/apps-interface` | interface | `mesh.apps` pinned/running application contract |
+| `@mesh/recorder-interface` | interface | `mesh.recorder` screen-recording contract |
+| `@mesh/violet-glass` | theme | Violet glass palette with monospace type |
 | `@mesh/shell-ui-interface` | interface | Named UI extension-point contracts a host surface renders foreign module UI into |
 | `@mesh/icons-default` | icon-pack | Default semantic icon mappings |
 | `@mesh/icons-material-symbols` | icon-pack | Material Symbols font and codepoint mappings |
@@ -59,6 +75,7 @@ desktop layout. See [module-system §5](../spec/01-module-system.md).
 
 | Module | Kind | Contribution |
 | --- | --- | --- |
+| `@mesh/glass` | composition | Liquid-glass desktop: glass bar, desktop cards and dock in the violet glass theme |
 | `@mesh/desk` | composition | The default desktop: a top navigation bar and a settings window, bound to the PipeWire and backlight providers |
 
 ## Module anatomy

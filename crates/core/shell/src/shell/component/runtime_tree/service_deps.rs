@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Reverse dependency queries are retained for tree diagnostics.
-
 use super::*;
 
 /// Bidirectional index from widget nodes to the service fields they read.
@@ -39,6 +37,7 @@ impl NodeServiceFieldDependencies {
     }
 
     /// Returns `(service, field)` pairs that `node_id` reads. `None` if not tracked.
+    #[cfg(test)]
     pub(in crate::shell::component) fn fields_read_by_node(
         &self,
         node_id: NodeId,

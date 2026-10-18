@@ -62,18 +62,6 @@ impl Shell {
         state.running_since = Some(Instant::now());
     }
 
-    /// React to a terminal failure of the interface's current provider:
-    /// schedule a supervised restart with exponential backoff, or quarantine
-    /// the provider and fail over once its restart budget is exhausted.
-    pub(in crate::shell) fn supervise_backend_failure(
-        &mut self,
-        interface: &str,
-        provider_id: &str,
-    ) {
-        let identity = self.backend_identity_for_interface(interface);
-        self.supervise_backend_failure_at_identity(interface, provider_id, identity);
-    }
-
     pub(in crate::shell) fn supervise_backend_failure_at_identity(
         &mut self,
         interface: &str,
@@ -179,6 +167,7 @@ impl Shell {
     /// for the interface (config-selected first, then priority order) and
     /// respawn it. With every provider quarantined, the interface stays down
     /// with a health record until the shell restarts or config changes.
+    #[cfg(test)]
     pub(in crate::shell) fn handle_backend_restart_due(
         &mut self,
         interface: &str,
@@ -188,7 +177,10 @@ impl Shell {
         self.handle_backend_restart_due_at_identity(
             interface,
             provider_id,
-            mesh_core_backend::BackendIdentity::default(),
+            self.backend_supervision
+                .get(interface)
+                .map(|state| state.pending_identity)
+                .unwrap_or_default(),
             restart_generation,
         );
     }
@@ -206,10 +198,8 @@ impl Shell {
         if !state.restart_pending
             || state.restart_generation != restart_generation
             || state.pending_provider_id.as_deref() != Some(provider_id)
-            || (identity != mesh_core_backend::BackendIdentity::default()
-                && state.pending_identity != identity)
-            || (identity != mesh_core_backend::BackendIdentity::default()
-                && self.activation_generation != identity.activation_generation)
+            || state.pending_identity != identity
+            || self.activation_generation != identity.activation_generation
         {
             tracing::debug!(
                 interface,

@@ -1,0 +1,32 @@
+{
+  "name": "@mesh/profile-menu",
+  "version": "0.1.0",
+  "description": "Popover listing the installed shell profiles; selecting one switches to it live.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "interfaces": {
+        "mesh.packages": ">=1.0"
+      },
+      "resources": {
+        "icons": ["@mesh/icons-material-symbols"]
+      },
+      "capabilities": [
+        "theme.read",
+        "service.packages.read",
+        "service.packages.control"
+      ]
+    },
+    "iconRequirements": {
+      "required": ["object-select"]
+    },
+    "icons": {
+      "ignore_shell_default": true
+    },
+    "entry": "src/main.mesh",
+    "accessibility": {
+      "role": "menu"
+    }
+  }
+}

@@ -17,4 +17,6 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+mesh-core-scripting = { workspace = true }
+mesh-core-capability = { workspace = true }
 tempfile = "3"

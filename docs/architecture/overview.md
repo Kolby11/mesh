@@ -39,6 +39,12 @@ the installed graph, registers interface contracts and providers, compiles
 frontend roots, executes service/component Luau, renders surfaces, and handles
 Wayland events.
 
+Hot reload uses a managed filesystem watcher that blocks on inotify and a
+control eventfd; watch replacement and shutdown wake that wait directly. With
+a healthy watcher, theme, settings, frontend metadata, and watch-set maintenance
+share a two-second recovery deadline. Filesystem events request immediate
+checks, while an unavailable watcher retains the shorter metadata-poll fallback.
+
 During the profile migration, absence of `config/active-profile` preserves the
 legacy root-graph decisions. When it exists, `config/profiles/<id>.json` owns
 the desired composition: explicit roots/background services/providers/resources

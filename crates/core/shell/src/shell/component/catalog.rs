@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Catalog diagnostics are exposed to shell integration tests.
-
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
@@ -839,6 +837,7 @@ impl FrontendCatalog {
         self.modules.get(module_id)
     }
 
+    #[cfg(test)]
     pub(in crate::shell) fn diagnostics(&self) -> &[FrontendCatalogDiagnostic] {
         &self.diagnostics
     }

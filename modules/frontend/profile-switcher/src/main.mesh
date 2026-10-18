@@ -1,0 +1,82 @@
+<props>
+{
+    trigger_hover = { type = "color", default = "var(--color-surface-container-high)", label = "Trigger hover background" },
+}
+</props>
+
+<template>
+    <stack class="switcher">
+        <button
+            ref="profileButton"
+            class="trigger"
+            aria-haspopup="true"
+            title={"Shell: " .. active_label}
+            aria-label={"Switch shell, current " .. active_label}
+        >
+            <icon class="trigger-glyph" name="view-dual" size="18" />
+        </button>
+        <ProfileMenu />
+    </stack>
+</template>
+
+<script lang="luau">
+local packages = require("mesh.packages")
+local ProfileMenu = require("@mesh/profile-menu")
+
+active_label = ""
+
+effect(function()
+    local active = packages.active_profile or ""
+    active_label = active ~= "" and (string.upper(string.sub(active, 1, 1)) .. string.sub(active, 2)) or "none"
+end)
+</script>
+
+<style>
+
+    .switcher {
+        height: 100%;
+        aspect-ratio: 1;
+        flex-shrink: 0;
+    }
+
+    .trigger {
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: var(--radius-full);
+        border-width: 1px;
+        border-style: solid;
+        border-color: transparent;
+        background: transparent;
+        color: var(--color-on-surface);
+        transform: scale(1);
+        transition-property: transform, background-color, border-color;
+        transition-duration: var(--animation-duration-short);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .trigger:hover,
+    .trigger:expanded {
+        background: prop(trigger_hover);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .trigger:focus-visible {
+        border-color: var(--color-primary);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .trigger:active {
+        transform: scale(var(--animation-scale-press));
+        transition-duration: var(--animation-duration-fast);
+    }
+
+    .trigger-glyph {
+        width: 18px;
+        height: 18px;
+        color: inherit;
+    }
+
+</style>

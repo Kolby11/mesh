@@ -91,59 +91,116 @@ const ICON_REGISTRY_CACHE_MAX_BYTES: usize = 8 * 1024 * 1024;
 const ICON_WARNED_MISS_CAPACITY: usize = 2048;
 const ICON_WARNED_MISS_MAX_BYTES: usize = 256 * 1024;
 
-fn validate_bindings(bindings: &IconPackBindings) -> Result<()> {
-    validate_canonical_identity(&bindings.pack_id, "icon pack id")?;
-    validate_reference(&bindings.module_id, "icon pack module id")?;
-    if bindings.mappings.len() > crate::MAX_ICON_PACK_MAPPINGS {
+/// Borrowed declaration shared by manifest, tooling and prepared binding validation.
+pub struct IconPackValidation<'a> {
+    pub pack_id: &'a str,
+    pub mappings: Vec<(&'a str, &'a str)>,
+    pub vocabularies: Vec<(&'a str, Vec<(&'a str, &'a str)>)>,
+    pub fonts: Vec<(&'a str, &'a str)>,
+    pub theme_count: usize,
+}
+
+/// Validate identities, uniqueness, bounded counts and mapping syntax.
+pub fn validate_icon_pack(pack: &IconPackValidation<'_>) -> Result<()> {
+    validate_canonical_identity(pack.pack_id, "icon pack id")?;
+    if pack.mappings.len() > crate::MAX_ICON_PACK_MAPPINGS
+        || pack.mappings.len().saturating_add(
+            pack.vocabularies
+                .iter()
+                .map(|(_, mappings)| mappings.len())
+                .fold(0_usize, usize::saturating_add),
+        ) > crate::MAX_ICON_PACK_MAPPINGS
+    {
         bail!(
-            "icon pack '{}' contains more than {} mappings",
-            bindings.pack_id,
+            "icon pack '{}' contains more than {} total mappings",
+            pack.pack_id,
             crate::MAX_ICON_PACK_MAPPINGS
         );
     }
-    if bindings.vocabularies.len() > crate::MAX_ICON_PACK_VOCABULARY_OWNERS {
+    if pack.vocabularies.len() > crate::MAX_ICON_PACK_VOCABULARY_OWNERS {
         bail!(
             "icon pack '{}' contains more than {} vocabulary owners",
-            bindings.pack_id,
+            pack.pack_id,
             crate::MAX_ICON_PACK_VOCABULARY_OWNERS
         );
     }
-    let vocabulary_mappings = bindings
-        .vocabularies
-        .values()
-        .map(HashMap::len)
-        .sum::<usize>();
-    if bindings.mappings.len().saturating_add(vocabulary_mappings) > crate::MAX_ICON_PACK_MAPPINGS {
-        bail!(
-            "icon pack '{}' contains more than {} total mappings",
-            bindings.pack_id,
-            crate::MAX_ICON_PACK_MAPPINGS
-        );
-    }
-    if bindings.font_aliases.len() > crate::MAX_ICON_PACK_FONT_REQUIREMENTS {
+    if pack.fonts.len() > crate::MAX_ICON_PACK_FONT_REQUIREMENTS {
         bail!(
             "icon pack '{}' contains more than {} font requirements",
-            bindings.pack_id,
+            pack.pack_id,
             crate::MAX_ICON_PACK_FONT_REQUIREMENTS
         );
     }
-    for alias in bindings.font_aliases.keys() {
+    if pack.theme_count > crate::MAX_ICON_PACK_THEME_REQUIREMENTS {
+        bail!(
+            "icon pack '{}' contains more than {} theme requirements",
+            pack.pack_id,
+            crate::MAX_ICON_PACK_THEME_REQUIREMENTS
+        );
+    }
+    let mut aliases = HashSet::new();
+    for &(alias, family) in &pack.fonts {
         validate_canonical_identity(alias, "icon font alias")?;
+        if family.trim().is_empty() {
+            bail!("icon font alias '{alias}' has an empty family");
+        }
+        if !aliases.insert(alias) {
+            bail!("duplicate icon font alias '{alias}'");
+        }
     }
-    for (name, mapping) in &bindings.mappings {
-        validate_mapping_size(name, &mapping.target)?;
-        validate_reference(name, "icon mapping name")?;
-        validate_mapping_target(name, &mapping.target)?;
+    for &(name, target) in &pack.mappings {
+        validate_icon_mapping(name, target)?;
     }
-    for (owner, mappings) in &bindings.vocabularies {
+    for (owner, mappings) in &pack.vocabularies {
         validate_reference(owner, "icon vocabulary owner")?;
-        for (name, mapping) in mappings {
-            validate_mapping_size(name, &mapping.target)?;
-            validate_reference(name, "icon vocabulary mapping name")?;
-            validate_mapping_target(name, &mapping.target)?;
+        if owner.len() > crate::MAX_ICON_MAPPING_NAME_BYTES {
+            bail!(
+                "icon vocabulary owner exceeds {} bytes",
+                crate::MAX_ICON_MAPPING_NAME_BYTES
+            );
+        }
+        for &(name, target) in mappings {
+            validate_icon_mapping(name, target)?;
         }
     }
     Ok(())
+}
+
+pub fn validate_icon_mapping(name: &str, target: &str) -> Result<()> {
+    validate_mapping_size(name, target)?;
+    validate_reference(name, "icon mapping name")?;
+    validate_mapping_target(name, target)
+}
+
+fn validate_bindings(bindings: &IconPackBindings) -> Result<()> {
+    validate_reference(&bindings.module_id, "icon pack module id")?;
+    validate_icon_pack(&IconPackValidation {
+        pack_id: &bindings.pack_id,
+        mappings: bindings
+            .mappings
+            .iter()
+            .map(|(name, mapping)| (name.as_str(), mapping.target.as_str()))
+            .collect(),
+        vocabularies: bindings
+            .vocabularies
+            .iter()
+            .map(|(owner, mappings)| {
+                (
+                    owner.as_str(),
+                    mappings
+                        .iter()
+                        .map(|(name, mapping)| (name.as_str(), mapping.target.as_str()))
+                        .collect(),
+                )
+            })
+            .collect(),
+        fonts: bindings
+            .font_aliases
+            .iter()
+            .map(|(alias, font)| (alias.as_str(), font.family.as_str()))
+            .collect(),
+        theme_count: 0,
+    })
 }
 
 fn validate_mapping_size(name: &str, target: &str) -> Result<()> {

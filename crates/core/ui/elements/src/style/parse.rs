@@ -673,9 +673,50 @@ pub(super) fn parse_filter(value: &str) -> VisualFilter {
     else {
         return VisualFilter::NONE;
     };
-    VisualFilter {
-        blur_radius: parse_px(inner).max(0.0),
+    VisualFilter::blur(parse_px(inner).max(0.0))
+}
+
+/// `backdrop-filter`: a space-separated list of `blur(<px>)`,
+/// `refract(<depth> [<edge>])` and `dispersion(<px>)`. An unknown function
+/// rejects the whole value, like an invalid `filter`.
+pub(super) fn parse_backdrop_filter(value: &str) -> VisualFilter {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == "none" {
+        return VisualFilter::NONE;
     }
+    let mut filter = VisualFilter::NONE;
+    let mut rest = trimmed;
+    while !rest.is_empty() {
+        let Some(open) = rest.find('(') else {
+            return VisualFilter::NONE;
+        };
+        let Some(close) = rest[open..].find(')').map(|close| open + close) else {
+            return VisualFilter::NONE;
+        };
+        let name = rest[..open].trim();
+        let args: Vec<f32> = rest[open + 1..close]
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|arg| !arg.is_empty())
+            .map(parse_px)
+            .collect();
+        match (name, args.as_slice()) {
+            ("blur", [radius]) => filter.blur_radius = radius.max(0.0),
+            ("refract", [depth]) => {
+                filter.refract = true;
+                filter.refract_depth = *depth;
+                filter.refract_edge = depth.abs().max(1.0);
+            }
+            ("refract", [depth, edge]) => {
+                filter.refract = true;
+                filter.refract_depth = *depth;
+                filter.refract_edge = edge.max(0.0);
+            }
+            ("dispersion", [amount]) => filter.dispersion = amount.max(0.0),
+            _ => return VisualFilter::NONE,
+        }
+        rest = rest[close + 1..].trim_start();
+    }
+    filter
 }
 
 pub(super) fn parse_background_image(value: &str) -> BackgroundPaint {

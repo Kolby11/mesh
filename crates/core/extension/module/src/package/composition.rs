@@ -36,6 +36,10 @@ pub struct CompositionSpec {
     pub background_services: BTreeSet<String>,
     #[serde(default)]
     pub providers: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub remove_background_services: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub remove_providers: BTreeSet<String>,
     #[serde(default)]
     pub resources: ProfileResources,
     /// Per-extension-point overrides: how this composition rearranges the UI
@@ -158,6 +162,9 @@ impl EffectiveComposition {
             roots,
             background_services: self.spec.background_services.clone(),
             providers: self.spec.providers.clone(),
+            remove_background_services: self.spec.remove_background_services.clone(),
+            remove_providers: self.spec.remove_providers.clone(),
+            slots: self.spec.slots.clone(),
             resources: self.spec.resources.clone(),
             node_slots,
             settings: self.spec.settings.clone(),
@@ -281,6 +288,18 @@ fn merge_spec(base: &mut CompositionSpec, overlay: &CompositionSpec) {
             }
         }
     }
+    base.remove_background_services
+        .extend(overlay.remove_background_services.iter().cloned());
+    base.remove_providers
+        .extend(overlay.remove_providers.iter().cloned());
+    base.remove_background_services
+        .retain(|id| !overlay.background_services.contains(id));
+    base.remove_providers
+        .retain(|id| !overlay.providers.contains_key(id));
+    base.background_services
+        .retain(|service| !overlay.remove_background_services.contains(service));
+    base.providers
+        .retain(|interface, _| !overlay.remove_providers.contains(interface));
     base.background_services
         .extend(overlay.background_services.iter().cloned());
     for (interface, provider) in &overlay.providers {
@@ -331,9 +350,6 @@ fn merge_spec(base: &mut CompositionSpec, overlay: &CompositionSpec) {
 fn merge_root(base: &mut ProfileRootInstance, overlay: &ProfileRootInstance) {
     if !overlay.module.is_empty() {
         base.module = overlay.module.clone();
-    }
-    if overlay.entrypoint != "main" {
-        base.entrypoint = overlay.entrypoint.clone();
     }
     if overlay.active.is_some() {
         base.active = overlay.active;
@@ -778,5 +794,77 @@ mod tests {
                 "composition accepted {field}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod removal_tests {
+    use super::*;
+
+    #[test]
+    fn disabling_an_inherited_service_writes_subtraction_deltas() {
+        let desk = ModuleManifest::from_json_str(r#"{"name":"@me/desk","version":"1","mesh":{"apiVersion":"0.1","kind":"composition","compose":{"backgroundServices":["@me/audio"],"providers":{"me.audio":"@me/audio"}}}}"#).unwrap();
+        let mut profile =
+            ShellProfile::from_json_str(r#"{"schemaVersion":3,"from":{"module":"@me/desk"}}"#)
+                .unwrap();
+        profile
+            .set_background_service_enabled("@me/audio", false, [&desk])
+            .unwrap();
+        let resolved = resolve_composition(&profile, [&desk]).unwrap();
+        assert!(resolved.spec.background_services.is_empty());
+        assert!(resolved.spec.providers.is_empty());
+        profile
+            .set_background_service_enabled("@me/audio", true, [&desk])
+            .unwrap();
+        assert!(
+            resolve_composition(&profile, [&desk])
+                .unwrap()
+                .spec
+                .background_services
+                .contains("@me/audio")
+        );
+    }
+
+    #[test]
+    fn service_and_provider_removals_survive_projection_and_more_specific_additions() {
+        let manifest = |name: &str, extends: Option<&str>, compose: serde_json::Value| {
+            let mut mesh =
+                serde_json::json!({"apiVersion":"0.1","kind":"composition","compose":compose});
+            if let Some(parent) = extends {
+                mesh["extends"] = parent.into();
+            }
+            ModuleManifest::from_json_str(
+                &serde_json::json!({"name":name,"version":"1.0.0","mesh":mesh}).to_string(),
+            )
+            .unwrap()
+        };
+        let base = manifest(
+            "@me/base",
+            None,
+            serde_json::json!({"backgroundServices":["@me/audio"],"providers":{"me.audio":"@me/audio"}}),
+        );
+        let derived = manifest(
+            "@me/desk",
+            Some("@me/base"),
+            serde_json::json!({"removeBackgroundServices":["@me/audio"],"removeProviders":["me.audio"]}),
+        );
+        let mut profile =
+            ShellProfile::from_json_str(r#"{"schemaVersion":3,"from":{"module":"@me/desk"}}"#)
+                .unwrap();
+        let resolved = resolve_composition(&profile, [&base, &derived]).unwrap();
+        assert!(resolved.spec.background_services.is_empty());
+        assert!(resolved.spec.providers.is_empty());
+        let projected = resolve_composition(&resolved.to_profile(), [&base, &derived]).unwrap();
+        assert!(projected.spec.background_services.is_empty());
+        assert!(projected.spec.providers.is_empty());
+        profile.background_services.insert("@me/audio".into());
+        profile
+            .providers
+            .insert("me.audio".into(), "@me/audio".into());
+        let restored = resolve_composition(&profile, [&base, &derived]).unwrap();
+        assert!(restored.spec.background_services.contains("@me/audio"));
+        assert_eq!(restored.spec.providers["me.audio"], "@me/audio");
+        assert!(restored.spec.remove_background_services.is_empty());
+        assert!(restored.spec.remove_providers.is_empty());
     }
 }

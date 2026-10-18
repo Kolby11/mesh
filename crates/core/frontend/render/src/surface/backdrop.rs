@@ -1,0 +1,320 @@
+//! The shell backdrop source behind `backdrop-filter: refract()`.
+//!
+//! A Wayland client never sees what the compositor shows behind its surfaces,
+//! so displacement ("liquid glass") cannot read the real backdrop. It samples
+//! one image MESH holds instead — the wallpaper the active profile paints —
+//! cover-fit to the output and placed at the surface's position on it
+//! (spec 04 §11).
+
+use mesh_core_elements::VisualFilter;
+use mesh_core_elements::style::Corners;
+use skia_safe::{
+    AlphaType, Canvas, ColorType, Data, FilterMode, ISize, ImageInfo, Matrix, MipmapMode, Paint,
+    RRect, Rect, RuntimeEffect, SamplingOptions, Shader, TileMode, image_filters, images,
+    runtime_effect::ChildPtr, surfaces,
+};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock, Mutex};
+
+/// Where the surface being painted sits on its output, in logical pixels.
+/// The shell sets it before each surface paints; refraction samples the
+/// backdrop at `origin + local position`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct BackdropFrame {
+    pub origin: (f32, f32),
+    pub output: (f32, f32),
+}
+
+/// Cover-fit, pre-blurred copies are full-output rasters; a few cover the
+/// blur radii a stylesheet uses without holding one per element.
+const PREPARED_CACHE_ENTRIES: usize = 4;
+
+struct BackdropSource {
+    path: PathBuf,
+    image: skia_safe::Image,
+    prepared: Mutex<Vec<(PreparedKey, skia_safe::Image)>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PreparedKey {
+    width: i32,
+    height: i32,
+    blur_tenths: u32,
+}
+
+static SOURCE: LazyLock<Mutex<Option<Arc<BackdropSource>>>> = LazyLock::new(|| Mutex::new(None));
+
+/// Load (or clear) the backdrop image. Reloading the same path is a no-op, so
+/// the shell can call this on every settings change.
+pub fn set_backdrop_image(path: Option<&Path>) -> Result<(), String> {
+    let mut source = SOURCE.lock().map_err(|_| "backdrop source lock poisoned")?;
+    let Some(path) = path else {
+        *source = None;
+        return Ok(());
+    };
+    if source.as_ref().is_some_and(|current| current.path == path) {
+        return Ok(());
+    }
+    let image = decode(path)?;
+    *source = Some(Arc::new(BackdropSource {
+        path: path.to_path_buf(),
+        image,
+        prepared: Mutex::new(Vec::new()),
+    }));
+    Ok(())
+}
+
+pub fn has_backdrop_image() -> bool {
+    SOURCE
+        .lock()
+        .map(|source| source.is_some())
+        .unwrap_or(false)
+}
+
+fn decode(path: &Path) -> Result<skia_safe::Image, String> {
+    let rgba = image::open(path)
+        .map_err(|error| format!("{}: {error}", path.display()))?
+        .to_rgba8();
+    let (width, height) = rgba.dimensions();
+    let info = ImageInfo::new(
+        (width as i32, height as i32),
+        ColorType::RGBA8888,
+        AlphaType::Unpremul,
+        None,
+    );
+    let row_bytes = width as usize * 4;
+    images::raster_from_data(&info, Data::new_copy(rgba.as_raw()), row_bytes)
+        .ok_or_else(|| format!("{}: could not upload decoded image", path.display()))
+}
+
+impl BackdropSource {
+    /// The source cover-fit to a `width` x `height` device output and blurred
+    /// by `blur` device pixels, built once per key.
+    fn prepared(&self, width: i32, height: i32, blur: f32) -> Option<skia_safe::Image> {
+        let key = PreparedKey {
+            width,
+            height,
+            blur_tenths: (blur.max(0.0) * 10.0).round() as u32,
+        };
+        let mut cache = self.prepared.lock().ok()?;
+        if let Some(index) = cache.iter().position(|(cached, _)| *cached == key) {
+            let entry = cache.remove(index);
+            let image = entry.1.clone();
+            cache.push(entry);
+            return Some(image);
+        }
+        let mut surface = surfaces::raster_n32_premul(ISize::new(width, height))?;
+        let canvas = surface.canvas();
+        let (iw, ih) = (self.image.width() as f32, self.image.height() as f32);
+        let scale = (width as f32 / iw).max(height as f32 / ih);
+        let (dw, dh) = (iw * scale, ih * scale);
+        let dst = Rect::from_xywh(
+            (width as f32 - dw) / 2.0,
+            (height as f32 - dh) / 2.0,
+            dw,
+            dh,
+        );
+        let mut paint = Paint::default();
+        if blur > 0.0 {
+            let sigma = blur / 2.0;
+            paint.set_image_filter(image_filters::blur(
+                (sigma, sigma),
+                TileMode::Clamp,
+                None,
+                None,
+            ));
+        }
+        canvas.draw_image_rect_with_sampling_options(
+            &self.image,
+            None,
+            dst,
+            SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear),
+            &paint,
+        );
+        let image = surface.image_snapshot();
+        if cache.len() >= PREPARED_CACHE_ENTRIES {
+            cache.remove(0);
+        }
+        cache.push((key, image.clone()));
+        Some(image)
+    }
+}
+
+/// A rounded-rect lens. Inside an `edge`-wide rim the sample point moves along
+/// the outward surface normal by up to `depth`, with a profile that is flat in
+/// the middle and steepens toward the rim, so content just outside the glass
+/// appears bent into its edge. `dispersion` pulls red and blue apart along the
+/// same normal; a thin highlight lights the rim from the top-left.
+const LIQUID_GLASS_SKSL: &str = r#"
+uniform shader backdrop;
+uniform float4 bounds;
+uniform float4 radii;
+uniform float depth;
+uniform float edge;
+uniform float dispersion;
+uniform float rim;
+
+float sd(float2 p, float2 center, float2 half_size, float r) {
+    float2 q = abs(p - center) - half_size + r;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+half4 main(float2 p) {
+    float2 half_size = bounds.zw * 0.5;
+    float2 center = bounds.xy + half_size;
+    float2 d = p - center;
+    float r = d.x < 0.0 ? (d.y < 0.0 ? radii.x : radii.w) : (d.y < 0.0 ? radii.y : radii.z);
+    r = min(r, min(half_size.x, half_size.y));
+    float dist = sd(p, center, half_size, r);
+    float2 grad = float2(
+        sd(p + float2(1.0, 0.0), center, half_size, r) - sd(p - float2(1.0, 0.0), center, half_size, r),
+        sd(p + float2(0.0, 1.0), center, half_size, r) - sd(p - float2(0.0, 1.0), center, half_size, r));
+    float glen = length(grad);
+    float2 n = glen > 0.0001 ? grad / glen : float2(0.0);
+
+    float t = edge > 0.0 ? clamp(1.0 + dist / edge, 0.0, 1.0) : 0.0;
+    float k = t * t * t;
+    float2 offset = n * depth * k;
+
+    half4 color;
+    if (dispersion > 0.0) {
+        float2 split = n * dispersion * k;
+        color = half4(
+            backdrop.eval(p + offset + split).r,
+            backdrop.eval(p + offset).g,
+            backdrop.eval(p + offset - split).b,
+            1.0);
+    } else {
+        color = backdrop.eval(p + offset);
+    }
+
+    if (rim > 0.0) {
+        float band = clamp(1.0 + dist / rim, 0.0, 1.0);
+        float light = clamp(dot(n, normalize(float2(-1.0, -1.4))), 0.0, 1.0);
+        color.rgb += half3(band * band * (0.18 + 0.32 * light));
+    }
+    return color;
+}
+"#;
+
+thread_local! {
+    // `RuntimeEffect` is not `Send`; painting happens on the renderer thread,
+    // which compiles the shader once on first use.
+    static EFFECT: Option<RuntimeEffect> = RuntimeEffect::make_for_shader(LIQUID_GLASS_SKSL, None)
+        .map_err(|error| tracing::error!("liquid glass shader failed to compile: {error}"))
+        .ok();
+}
+
+/// Paint the refracted backdrop into the device-space rounded rect. `rect`,
+/// `radii` and `filter` are device-scaled; `frame` is device-scaled too.
+/// Returns false when there is no source to sample.
+pub(crate) fn draw_refraction(
+    canvas: &Canvas,
+    rect: Rect,
+    radii: Corners,
+    filter: VisualFilter,
+    frame: BackdropFrame,
+) -> bool {
+    let Some(source) = SOURCE.lock().ok().and_then(|source| source.clone()) else {
+        return false;
+    };
+    let (output_w, output_h) = (frame.output.0.round() as i32, frame.output.1.round() as i32);
+    if output_w <= 0 || output_h <= 0 || rect.is_empty() {
+        return false;
+    }
+    let Some(prepared) = source.prepared(output_w, output_h, filter.blur_radius) else {
+        return false;
+    };
+    // Surface-local device coordinates -> output coordinates of the prepared image.
+    let local = Matrix::translate((-frame.origin.0, -frame.origin.1));
+    let Some(backdrop) = prepared.to_shader(
+        (TileMode::Clamp, TileMode::Clamp),
+        SamplingOptions::new(FilterMode::Linear, MipmapMode::None),
+        &local,
+    ) else {
+        return false;
+    };
+    draw_backdrop(canvas, rect, radii, filter, backdrop)
+}
+
+fn draw_backdrop(
+    canvas: &Canvas,
+    rect: Rect,
+    radii: Corners,
+    filter: VisualFilter,
+    backdrop: Shader,
+) -> bool {
+    // With no rim or dispersion the lens evaluates to the input shader,
+    // including its alpha. Wallpaper must not pay for an SDF per output pixel.
+    let shader = if filter.refract_edge <= 0.0 && filter.dispersion <= 0.0 {
+        backdrop
+    } else {
+        let Some(shader) = lens_shader(rect, radii, filter, backdrop) else {
+            return false;
+        };
+        shader
+    };
+    draw_shader(canvas, rect, radii, shader);
+    true
+}
+
+fn lens_shader(
+    rect: Rect,
+    radii: Corners,
+    filter: VisualFilter,
+    backdrop: Shader,
+) -> Option<Shader> {
+    EFFECT.with(|effect| make_lens_shader(effect.as_ref()?, rect, radii, filter, backdrop))
+}
+
+fn make_lens_shader(
+    effect: &RuntimeEffect,
+    rect: Rect,
+    radii: Corners,
+    filter: VisualFilter,
+    backdrop: Shader,
+) -> Option<Shader> {
+    let rim = if filter.refract_edge > 0.0 {
+        (filter.refract_edge * 0.12).clamp(1.0, 3.0)
+    } else {
+        0.0
+    };
+    let uniforms: [f32; 12] = [
+        rect.left,
+        rect.top,
+        rect.width(),
+        rect.height(),
+        radii.top_left,
+        radii.top_right,
+        radii.bottom_right,
+        radii.bottom_left,
+        filter.refract_depth,
+        filter.refract_edge,
+        filter.dispersion,
+        rim,
+    ];
+    let bytes: Vec<u8> = uniforms
+        .iter()
+        .flat_map(|value| value.to_ne_bytes())
+        .collect();
+    effect.make_shader(Data::new_copy(&bytes), &[ChildPtr::Shader(backdrop)], None)
+}
+
+fn draw_shader(canvas: &Canvas, rect: Rect, radii: Corners, shader: Shader) {
+    let mut paint = Paint::default();
+    paint.set_anti_alias(true);
+    paint.set_shader(shader);
+    let rrect = RRect::new_rect_radii(
+        rect,
+        &[
+            (radii.top_left, radii.top_left).into(),
+            (radii.top_right, radii.top_right).into(),
+            (radii.bottom_right, radii.bottom_right).into(),
+            (radii.bottom_left, radii.bottom_left).into(),
+        ],
+    );
+    canvas.draw_rrect(rrect, &paint);
+}
+
+#[cfg(test)]
+mod tests;

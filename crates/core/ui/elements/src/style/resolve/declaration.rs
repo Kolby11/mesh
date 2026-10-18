@@ -946,8 +946,8 @@ fn apply_declaration_with_context(
                 resolver.with_resolved_str(value, variables, |resolved| parse_filter(resolved))
         }
         "backdrop-filter" => {
-            style.backdrop_filter =
-                resolver.with_resolved_str(value, variables, |resolved| parse_filter(resolved))
+            style.backdrop_filter = resolver
+                .with_resolved_str(value, variables, |resolved| parse_backdrop_filter(resolved))
         }
         "transition-duration" => {
             resolver.with_resolved_str(value, variables, |resolved| {

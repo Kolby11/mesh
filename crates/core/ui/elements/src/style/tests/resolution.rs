@@ -1042,56 +1042,6 @@ fn focus_visible_requires_focus_visible_state() {
 }
 
 #[test]
-fn input_state_sets_hover_flags_on_nodes() {
-    use crate::events::{InputState, RawInputEvent, UiEvent};
-    use crate::layout::LayoutEngine;
-    use crate::style::Dimension;
-    use crate::tree::WidgetNode;
-
-    let mut root = WidgetNode::new("box");
-    root.computed_style.width = Dimension::Px(200.0);
-    root.computed_style.height = Dimension::Px(100.0);
-
-    let mut btn = WidgetNode::new("button");
-    btn.computed_style.width = Dimension::Px(100.0);
-    btn.computed_style.height = Dimension::Px(50.0);
-    let btn_id = btn.id;
-    root.children = vec![btn].into();
-    LayoutEngine::compute(&mut root, 200.0, 100.0);
-
-    let mut input = InputState::new();
-
-    // Move pointer over the button.
-    let events = input.process(
-        &mut root,
-        &RawInputEvent::PointerMotion { x: 50.0, y: 25.0 },
-    );
-    assert!(root.children[0].state.hovered, "button should be hovered");
-    assert!(!root.state.hovered, "root should not be hovered");
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, UiEvent::PointerEnter { node_id } if *node_id == btn_id))
-    );
-
-    // Move pointer off the button onto the root.
-    let events = input.process(
-        &mut root,
-        &RawInputEvent::PointerMotion { x: 150.0, y: 75.0 },
-    );
-    assert!(
-        !root.children[0].state.hovered,
-        "button hover should be cleared"
-    );
-    assert!(root.state.hovered, "root should now be hovered");
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, UiEvent::PointerLeave { node_id } if *node_id == btn_id))
-    );
-}
-
-#[test]
 fn a_later_rules_custom_property_applies_to_the_same_nodes_var() {
     let theme = mesh_core_theme::default_theme();
     let resolver = StyleResolver::new(&theme);

@@ -693,6 +693,9 @@ pub enum SurfaceExclusiveZone {
     Auto,
     /// Do not reserve compositor space; the surface is an overlay/HUD.
     None,
+    /// Ignore every other surface's exclusive zone and extend to the anchored
+    /// edge (layer-shell `-1`): wallpapers and full-output backdrops.
+    Ignore,
 }
 
 impl SurfaceExclusiveZone {
@@ -700,6 +703,7 @@ impl SurfaceExclusiveZone {
         match value.trim() {
             "auto" => Some(Self::Auto),
             "none" => Some(Self::None),
+            "ignore" => Some(Self::Ignore),
             _ => None,
         }
     }
@@ -1477,13 +1481,42 @@ impl Default for StyleLinearGradient {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VisualFilter {
     pub blur_radius: f32,
+    /// Set by `refract()`: the element samples the shell backdrop source
+    /// instead of asking the compositor for blur (spec 04 §11). Declaring
+    /// `refract(0px 0px)` paints the source unrefracted.
+    pub refract: bool,
+    /// `refract(<depth> <edge>)`: maximum displacement in logical pixels at the
+    /// rim, and the width of the rim band it fades over.
+    pub refract_depth: f32,
+    pub refract_edge: f32,
+    /// `dispersion(<px>)`: extra displacement of the red and blue channels at
+    /// the rim, for chromatic fringing.
+    pub dispersion: f32,
 }
 
 impl VisualFilter {
-    pub const NONE: Self = Self { blur_radius: 0.0 };
+    pub const NONE: Self = Self {
+        blur_radius: 0.0,
+        refract: false,
+        refract_depth: 0.0,
+        refract_edge: 0.0,
+        dispersion: 0.0,
+    };
+
+    pub const fn blur(blur_radius: f32) -> Self {
+        Self {
+            blur_radius,
+            ..Self::NONE
+        }
+    }
 
     pub fn is_none(self) -> bool {
-        self.blur_radius <= 0.0
+        self.blur_radius <= 0.0 && !self.has_refraction()
+    }
+
+    /// Whether this backdrop samples the shell backdrop source.
+    pub fn has_refraction(self) -> bool {
+        self.refract
     }
 }
 

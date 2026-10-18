@@ -303,6 +303,7 @@ mod tests {
             src: None,
             name: Some("audio-volume-high".into()),
             size: Some(24),
+            multicolor: false,
         };
         let c = cmd(
             DisplayPaintContent::Icon(icon),

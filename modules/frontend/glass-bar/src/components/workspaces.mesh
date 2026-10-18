@@ -1,0 +1,134 @@
+<template>
+    <row class="pill" onpointerleave={onLeave}>
+        {#for workspace in items key={workspace.id}}
+            <button
+                class="ws"
+                class:ws-active={workspace.active}
+                class:ws-occupied={workspace.occupied}
+                onclick={onSwitch(workspace.id)}
+                title={workspace.label}
+                aria-label={workspace.label}
+            />
+        {/for}
+    </row>
+</template>
+
+<script lang="luau">
+local wm = require("mesh.wm")
+
+-- A fixed strip of slots, like the reference rice: empty workspaces still
+-- show as dim dots so the active pill visibly travels between positions.
+local SLOTS = 6
+
+items = {}
+
+effect(function()
+    local occupied = {}
+    local highest = SLOTS
+    if wm.available then
+        for _, workspace in wm.workspaces do
+            if workspace.id > 0 then
+                occupied[workspace.id] = (workspace.windows or 0) > 0
+                highest = math.max(highest, workspace.id)
+            end
+        end
+    end
+    local list = {}
+    for id = 1, math.min(highest, 10) do
+        list[#list + 1] = {
+            id = id,
+            label = "Workspace " .. tostring(id),
+            active = wm.active_workspace == id,
+            occupied = occupied[id] == true,
+        }
+    end
+    items = list
+end)
+
+function onSwitch(id)
+    wm.focus_workspace(id)
+end
+
+function onLeave() end
+</script>
+
+<style>
+    .pill {
+        height: 36px;
+        align-items: center;
+        gap: 7px;
+        padding-inline: 13px;
+        border-radius: 999px;
+        border: 1px solid var(--color-glass-rim);
+        background-image: linear-gradient(to bottom, #b468ff4d, #7a2ee033);
+        box-shadow: 0 4px 14px #14003259;
+        backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
+    }
+
+    /* Width is the animated property: the active dot stretches into a pill
+    while its neighbour shrinks back, which reads as the pill sliding. */
+    .ws {
+        width: 13px;
+        height: 13px;
+        padding: 0;
+        border-radius: 999px;
+        background: #ffffff38;
+    }
+
+    .ws-occupied {
+        background: #ffffff70;
+    }
+
+    /* Motion: one vocabulary for the whole shell, all from theme tokens.
+    Containers lift by --animation-lift-hover and brighten their rim; controls
+    scale by --animation-scale-hover/-press and ring with the focus token. */
+
+    .pill {
+        transform: translateY(0px);
+        transition-property: transform, border-color, opacity;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .pill:hover {
+        transform: translateY(var(--animation-lift-hover));
+        border-color: var(--color-glass-rim-hover);
+    }
+
+    .ws {
+        border-width: 1px;
+        border-style: solid;
+        border-color: transparent;
+        transform: scale(1);
+        transition-property: transform, background-color, border-color, opacity;
+        transition-duration: var(--animation-duration-short);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .ws:hover {
+        background-color: #ffffffb0;
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .ws:focus-visible {
+        border-color: var(--color-focus-ring);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .ws:active {
+        transform: scale(var(--animation-scale-press));
+        transition-duration: var(--animation-duration-fast);
+    }
+
+    /* The active dot stretches into a pill while the old one shrinks back,
+    which reads as the pill sliding; width rides the same token timing. */
+    .ws {
+        transition-property: width, transform, background-color, border-color, opacity;
+    }
+
+    .ws-active,
+    .ws-active:hover {
+        width: 42px;
+        background-image: linear-gradient(to bottom, #fbd3ff, #e7a6ff);
+    }
+</style>

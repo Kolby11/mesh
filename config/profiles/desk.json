@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 3,
+  "from": {
+    "module": "@mesh/desk"
+  },
+  "roots": {
+    "@mesh/navigation-bar#default": {
+      "module": "@mesh/navigation-bar",
+      "entrypoint": "main",
+      "active": true
+    },
+    "@mesh/settings#default": {
+      "module": "@mesh/settings",
+      "entrypoint": "main",
+      "active": true
+    },
+    "@mesh/composition-editor#default": {
+      "module": "@mesh/composition-editor",
+      "entrypoint": "main",
+      "active": true
+    }
+  },
+  "settings": {
+    "shell": {
+      "theme": {
+        "active": "@mesh/tokyo-night:tokyo-night"
+      }
+    }
+  },
+  "nodeSlots": {
+    "@mesh/navigation-bar#default": {
+      "start": {
+        "nodes": [
+          {
+            "id": "switcher",
+            "use": "@mesh/profile-switcher:switcher"
+          },
+          {
+            "id": "workspaces",
+            "use": "@mesh/navigation-bar:workspaces"
+          },
+          {
+            "id": "window-title",
+            "use": "@mesh/navigation-bar:window-title"
+          }
+        ]
+      }
+    }
+  }
+}

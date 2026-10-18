@@ -24,7 +24,7 @@ fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose(
         &[PainterCommand::ApplyFilter {
             rect: full_clip(8, 8),
             radii: mesh_core_elements::style::Corners::zero(),
-            filter: PainterFilter::Blur(VisualFilter { blur_radius: 2.0 }),
+            filter: PainterFilter::Blur(VisualFilter::blur(2.0)),
             clip: full_clip(16, 16),
         }],
         &mut diagnostics,
@@ -44,9 +44,7 @@ fn painter_effect_diagnostic_reports_excessive_blur() {
         &[
             PainterCommand::PushLayer(PainterLayer::blurred(
                 full_clip(16, 16),
-                VisualFilter {
-                    blur_radius: MAX_EFFECT_BLUR_RADIUS + 1.0,
-                },
+                VisualFilter::blur(MAX_EFFECT_BLUR_RADIUS + 1.0),
                 BlurQuality::default(),
             )),
             PainterCommand::DrawRect {

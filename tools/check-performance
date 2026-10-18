@@ -37,6 +37,10 @@ cargo test -p mesh-core-shell --release --lib keyed_loop_bindings_capture_locals
 cargo test -p mesh-core-shell --release --lib template_function_call_patches
 cargo test -p mesh-core-shell --release --lib shared_binding_and_structural_expression
 run_benchmark mesh-core-shell narrow_handler_damage_beats_forced_full_repaint
+run_benchmark mesh-core-shell coalesced_reload_wakeup_profile
+run_benchmark mesh-core-shell watcher_idle_wait_profile
+run_benchmark mesh-core-scripting validated_state_publication_profile
+run_benchmark mesh-core-render glass_raster_profile
 run_benchmark mesh-core-shell unbound_handler_write_eliminates_render_pipeline_benchmark
 run_benchmark mesh-core-shell contract_validation_lookup_borrows_interface_name
 run_benchmark mesh-core-shell direct_retained_update_beats_snapshot_map

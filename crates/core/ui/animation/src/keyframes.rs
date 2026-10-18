@@ -324,6 +324,9 @@ mod tests {
 
     fn style(opacity: f32, translate_x: f32) -> AnimatableStyle {
         AnimatableStyle {
+            used_width: 0.0,
+            used_height: 0.0,
+            containing_block: None,
             border_radius: Corners::zero(),
             border_width: Edges::zero(),
             opacity,

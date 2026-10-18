@@ -6,8 +6,4 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-mesh-core-capability = { workspace = true }
 serde_json = { workspace = true }
-
-thiserror = { workspace = true }
-tracing = { workspace = true }

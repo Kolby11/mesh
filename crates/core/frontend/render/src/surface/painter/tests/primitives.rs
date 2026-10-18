@@ -65,7 +65,7 @@ fn painter_primitive_command_classes_record_helper_backed_rects() {
         PainterCommand::ApplyFilter {
             rect,
             radii: mesh_core_elements::style::Corners::all(4.0),
-            filter: PainterFilter::Backdrop(VisualFilter { blur_radius: 2.0 }),
+            filter: PainterFilter::Backdrop(VisualFilter::blur(2.0)),
             clip,
         },
     ];
@@ -192,8 +192,8 @@ fn painter_primitive_box_rounded_shadow_and_filters_emit_effect_classes() {
         color: Color::from_hex("#00000080").unwrap(),
         inset: false,
     };
-    root.computed_style.backdrop_filter = VisualFilter { blur_radius: 3.0 };
-    root.computed_style.filter = VisualFilter { blur_radius: 2.0 };
+    root.computed_style.backdrop_filter = VisualFilter::blur(3.0);
+    root.computed_style.filter = VisualFilter::blur(2.0);
 
     let backend = RecordingPaintBackend::default();
     let recorded = backend.clone();

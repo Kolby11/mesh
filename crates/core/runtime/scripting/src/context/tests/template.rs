@@ -1,7 +1,7 @@
 use super::super::*;
 use mesh_core_capability::CapabilitySet;
 use mesh_core_elements::VariableStore;
-use mesh_core_expression::{compile_expression, evaluate_preview};
+use mesh_core_expression::compile_expression;
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -73,16 +73,8 @@ fn template_expressions_use_component_lexical_scope_and_full_luau() {
 }
 
 #[test]
-fn compiled_template_semantics_match_preview_and_live_runtime() {
+fn compiled_template_semantics_use_the_live_runtime() {
     let expression = compile_expression("enabled and count or fallback").unwrap();
-    let variables = serde_json::Map::from_iter([
-        ("enabled".into(), Value::Bool(true)),
-        ("count".into(), serde_json::json!(7)),
-        ("fallback".into(), serde_json::json!(9)),
-    ]);
-    let preview =
-        evaluate_preview(&expression, &variables, &serde_json::Map::new(), |_| None).unwrap();
-
     let mut ctx = ScriptContext::new(
         "@test/compiled-template-semantics",
         CapabilitySet::default(),
@@ -99,21 +91,12 @@ fn compiled_template_semantics_match_preview_and_live_runtime() {
         .unwrap()
         .0;
 
-    assert_eq!(preview, Value::from(7));
-    assert_eq!(live, preview);
+    assert_eq!(live, Value::from(7));
 }
 
 #[test]
-fn compiled_translation_semantics_match_preview_and_live_runtime() {
+fn compiled_translation_semantics_use_the_live_runtime() {
     let expression = compile_expression("t('nav.open')").unwrap();
-    let preview = evaluate_preview(
-        &expression,
-        &serde_json::Map::new(),
-        &serde_json::Map::new(),
-        |key| (key == "nav.open").then(|| "Open".to_string()),
-    )
-    .unwrap();
-
     let capabilities = CapabilitySet::from_ids(["locale.read"]);
     let mut ctx = ScriptContext::new("@test/compiled-translation-semantics", capabilities).unwrap();
     ctx.set_i18n_translations(HashMap::from([(
@@ -131,8 +114,7 @@ fn compiled_translation_semantics_match_preview_and_live_runtime() {
         .unwrap()
         .0;
 
-    assert_eq!(preview, Value::String("Open".into()));
-    assert_eq!(live, preview);
+    assert_eq!(live, Value::String("Open".into()));
 }
 
 #[test]

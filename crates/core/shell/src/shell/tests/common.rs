@@ -1850,6 +1850,7 @@ pub(super) fn park_reload_deadlines(shell: &mut Shell) {
     shell.next_theme_reload_check = later;
     shell.next_shell_settings_reload_check = later;
     shell.next_frontend_reload_check = later;
+    shell.next_watch_reconcile = later;
 }
 
 pub(super) fn manifest_dependencies(path: &Path) -> String {

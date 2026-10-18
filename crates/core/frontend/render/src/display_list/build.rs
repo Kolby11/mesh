@@ -512,7 +512,14 @@ fn build_paint_subtree_with_transform(
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
-    if paint_node.style.backdrop_filter.blur_radius > 0.0 {
+    if paint_node.style.backdrop_filter.has_refraction() {
+        subtree.push_command(DisplayPaintCommand {
+            node: Arc::clone(&paint_node),
+            clip: node_clip,
+            kind: DisplayPaintCommandKind::ApplyBackdropRefraction,
+        });
+        metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+    } else if paint_node.style.backdrop_filter.blur_radius > 0.0 {
         let kind = match backdrop_blur_policy {
             BackdropBlurPolicy::CompositorRegion => {
                 DisplayPaintCommandKind::ApplyBackdropFilterCompositor
@@ -930,7 +937,7 @@ fn node_visual_bounds_at_with_transform(
             // The same box `visual_clip_for` computes for this node's paint
             // node, without building one (it clones fonts and text content).
             let style = &node.computed_style;
-            let visual = visual_clip_from_parts(
+            let visual = visual_layout_from_parts(
                 world_transform,
                 LayoutRect {
                     x: 0.0,
@@ -943,10 +950,10 @@ fn node_visual_bounds_at_with_transform(
                 style.backdrop_filter.blur_radius,
             );
             FloatBounds {
-                left: visual.x as f32,
-                top: visual.y as f32,
-                right: (visual.x + visual.width) as f32,
-                bottom: (visual.y + visual.height) as f32,
+                left: visual.x,
+                top: visual.y,
+                right: visual.x + visual.width,
+                bottom: visual.y + visual.height,
             }
         })
 }
@@ -1019,6 +1026,22 @@ fn visual_clip_from_parts(
     filter_blur_radius: f32,
     backdrop_blur_radius: f32,
 ) -> DisplayListClip {
+    layout_to_display_clip(visual_layout_from_parts(
+        transform,
+        local_layout,
+        shadow,
+        filter_blur_radius,
+        backdrop_blur_radius,
+    ))
+}
+
+pub(super) fn visual_layout_from_parts(
+    transform: AffineTransform,
+    local_layout: LayoutRect,
+    shadow: BoxShadow,
+    filter_blur_radius: f32,
+    backdrop_blur_radius: f32,
+) -> LayoutRect {
     let mut layout = transform.transform_rect(local_layout);
     if !shadow.is_none() && !shadow.inset {
         let pad = shadow.spread_radius + shadow.blur_radius * 3.0;
@@ -1037,7 +1060,7 @@ fn visual_clip_from_parts(
         layout.width += filter_pad * 2.0;
         layout.height += filter_pad * 2.0;
     }
-    layout_to_display_clip(layout)
+    layout
 }
 
 fn layout_to_display_clip(layout: LayoutRect) -> DisplayListClip {

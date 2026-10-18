@@ -362,7 +362,7 @@ pub struct Attribute {
     /// Whether a brace expression was authored inside a quoted attribute
     /// value, such as `title="{label}"`.
     pub quoted_expression: bool,
-    /// The complete authored attribute, including its name and value.
+    /// The authored attribute, or its brace expression for a dynamic binding.
     pub span: Option<crate::SourceSpan>,
 }
 

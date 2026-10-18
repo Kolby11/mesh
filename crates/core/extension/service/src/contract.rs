@@ -761,26 +761,35 @@ impl TypeExpr {
     /// Check a value against this expression and the contract's complete named
     /// type graph. Arrays validate every member and named objects validate
     /// every declared field recursively, including optional presence/null
-    /// semantics. Cyclic graphs fail closed at the edge that would recurse.
+    /// semantics. Recursive types are bounded by value depth and traversal work.
     pub fn matches_with_types(
         &self,
         value: &JsonValue,
         types: &HashMap<String, InterfaceTypeDef>,
     ) -> bool {
-        let mut visiting = HashSet::new();
-        self.matches_inner(value, types, &mut visiting)
+        self.matches_inner(value, types, 0, &mut 65_536)
     }
 
     fn matches_inner(
         &self,
         value: &JsonValue,
         types: &HashMap<String, InterfaceTypeDef>,
-        visiting: &mut HashSet<String>,
+        depth: usize,
+        remaining: &mut usize,
     ) -> bool {
+        if depth > 64 || *remaining == 0 {
+            return false;
+        }
+        *remaining -= 1;
         if value.is_null() {
             return self.optional;
         }
         if self.array {
+            // Luau has one table type, so a provider cannot spell `[]`: its
+            // empty table serializes as `{}`. Treat that as the empty array.
+            if value.as_object().is_some_and(|object| object.is_empty()) {
+                return true;
+            }
             return value.as_array().is_some_and(|items| {
                 items.iter().all(|item| {
                     let item_expr = Self {
@@ -788,7 +797,7 @@ impl TypeExpr {
                         array: false,
                         optional: false,
                     };
-                    item_expr.matches_inner(item, types, visiting)
+                    item_expr.matches_inner(item, types, depth + 1, remaining)
                 })
             });
         }
@@ -808,27 +817,20 @@ impl TypeExpr {
                         .get("error")
                         .is_none_or(|error| error.is_string() || error.is_null())
             }
-            BaseType::Named(name) => {
-                if !visiting.insert(name.clone()) {
+            BaseType::Named(name) => types.get(name).is_some_and(|definition| {
+                let Some(object) = value.as_object() else {
                     return false;
-                }
-                let matched = types.get(name).is_some_and(|definition| {
-                    let Some(object) = value.as_object() else {
+                };
+                definition.fields.iter().all(|field| {
+                    let Ok(field_type) = TypeExpr::parse(&field.arg_type) else {
                         return false;
                     };
-                    definition.fields.iter().all(|field| {
-                        let Ok(field_type) = TypeExpr::parse(&field.arg_type) else {
-                            return false;
-                        };
-                        match object.get(&field.name) {
-                            Some(value) => field_type.matches_inner(value, types, visiting),
-                            None => field_type.optional,
-                        }
-                    })
-                });
-                visiting.remove(name);
-                matched
-            }
+                    match object.get(&field.name) {
+                        Some(value) => field_type.matches_inner(value, types, depth + 1, remaining),
+                        None => field_type.optional,
+                    }
+                })
+            }),
         }
     }
 }
@@ -1576,6 +1578,9 @@ fn named_type_cycle(
             let Ok(expr) = TypeExpr::parse(&field.arg_type) else {
                 return false;
             };
+            if expr.optional || expr.array {
+                return false;
+            }
             let BaseType::Named(next) = expr.base else {
                 return false;
             };
@@ -1911,6 +1916,15 @@ impl ContractFieldJson {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn empty_luau_table_matches_an_array_type() {
+        let types = HashMap::new();
+        let expr = TypeExpr::parse("int[]").unwrap();
+        assert!(expr.matches_with_types(&serde_json::json!({}), &types));
+        assert!(expr.matches_with_types(&serde_json::json!([]), &types));
+        assert!(!expr.matches_with_types(&serde_json::json!({ "a": 1 }), &types));
+    }
+
     use super::*;
 
     #[test]
@@ -2437,15 +2451,49 @@ mod tests {
     }
 
     #[test]
-    fn rejects_recursive_named_type_cycles() {
+    fn rejects_required_recursive_named_type_cycles() {
         let contract = serde_json::json!({
             "types": {
-                "Node": { "fields": [{ "name": "next", "type": "Node?" }] }
+                "Node": { "fields": [{ "name": "next", "type": "Node" }] }
             }
         });
         let err = parse_interface_contract("mesh.test", "1.0", &contract).unwrap_err();
         assert!(matches!(err, ContractError::InvalidType { .. }));
         assert!(err.to_string().contains("recursive cycle"));
+    }
+
+    #[test]
+    fn finite_recursive_types_validate_values_and_keep_bounds() {
+        let contract = serde_json::json!({
+            "types": {
+                "MenuItem": { "fields": [
+                    { "name": "label", "type": "string" },
+                    { "name": "children", "type": "MenuItem[]" },
+                    { "name": "next", "type": "MenuItem?" }
+                ] }
+            }
+        });
+        let parsed = parse_interface_contract("mesh.test", "1.0", &contract).unwrap();
+        let item = TypeExpr::parse("MenuItem").unwrap();
+        let leaf = serde_json::json!({ "label": "Leaf", "children": [] });
+        assert!(item.matches_with_types(&leaf, &parsed.types));
+        assert!(item.matches_with_types(
+            &serde_json::json!({
+                "label": "Root", "children": [leaf.clone()], "next": leaf.clone()
+            }),
+            &parsed.types
+        ));
+        assert!(!item.matches_with_types(
+            &serde_json::json!({
+                "label": "Root", "children": [{ "label": 7, "children": [] }]
+            }),
+            &parsed.types
+        ));
+        let mut deep = leaf;
+        for _ in 0..70 {
+            deep = serde_json::json!({ "label": "Parent", "children": [deep] });
+        }
+        assert!(!item.matches_with_types(&deep, &parsed.types));
     }
 
     fn ranged_contract() -> CompiledContract {

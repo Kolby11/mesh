@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Compatibility event routing remains covered by shell tests.
-
 use super::super::*;
 use mesh_core_service::RUNTIME_METADATA_STATE_FIELDS;
 
@@ -26,7 +24,7 @@ impl Shell {
         let profiling_started = self
             .profiling_enabled()
             .then_some(std::time::Instant::now());
-        if !self.record_latest_service_state(&event) {
+        if !self.record_shell_service_state(&event) {
             return Ok(VecDeque::new());
         }
         let requests = self.deliver_service_event(&event)?;
@@ -116,13 +114,29 @@ impl Shell {
         }
     }
 
-    pub(in crate::shell) fn record_latest_service_state(&mut self, event: &ServiceEvent) -> bool {
+    pub(in crate::shell) fn record_shell_service_state(&mut self, event: &ServiceEvent) -> bool {
         let interface = match event {
             ServiceEvent::Updated { service, .. } => canonical_interface_name_cow(service),
             _ => return true,
         };
         let identity = self.backend_identity_for_interface(interface.as_ref());
-        self.record_latest_service_state_at_identity(event, identity)
+        if let ServiceEvent::Updated { source_module, .. } = event {
+            if self.backend_runtimes.contains_key(interface.as_ref()) {
+                if !self.backend_provider_is_active_at_identity(
+                    interface.as_ref(),
+                    source_module,
+                    identity,
+                ) {
+                    return false;
+                }
+            } else if self
+                .backend_runtime_status(interface.as_ref(), source_module)
+                .is_some_and(|entry| entry.status.rejects_provider_messages())
+            {
+                return false;
+            }
+        }
+        self.store_latest_service_state(event, identity)
     }
 
     pub(in crate::shell) fn record_latest_service_state_at_identity(
@@ -133,43 +147,38 @@ impl Shell {
         let ServiceEvent::Updated {
             service,
             source_module,
+            payload: _,
+        } = event
+        else {
+            return true;
+        };
+        let interface = canonical_interface_name_cow(service);
+        if !self.backend_provider_is_active_at_identity(interface.as_ref(), source_module, identity)
+        {
+            tracing::debug!(
+                interface = interface.as_ref(),
+                source_module,
+                "ignoring service update from inactive or terminal backend identity"
+            );
+            return false;
+        }
+        self.store_latest_service_state(event, identity)
+    }
+
+    fn store_latest_service_state(
+        &mut self,
+        event: &ServiceEvent,
+        identity: BackendIdentity,
+    ) -> bool {
+        let ServiceEvent::Updated {
+            service,
+            source_module,
             payload,
         } = event
         else {
             return true;
         };
         let interface = canonical_interface_name_cow(service);
-        if let Some(slot) = self.backend_runtimes.get(interface.as_ref()) {
-            if slot.provider_id != *source_module
-                || (identity != BackendIdentity::default()
-                    && !self.backend_provider_is_active_at_identity(
-                        interface.as_ref(),
-                        source_module,
-                        identity,
-                    ))
-                || (identity == BackendIdentity::default()
-                    && !self.backend_provider_is_active(interface.as_ref(), source_module))
-            {
-                tracing::debug!(
-                    interface = interface.as_ref(),
-                    source_module,
-                    active_provider = %slot.provider_id,
-                    "ignoring stale service update from inactive provider"
-                );
-                return false;
-            }
-        } else if identity != BackendIdentity::default()
-            || self
-                .backend_runtime_status(interface.as_ref(), source_module)
-                .is_some_and(|entry| entry.status.rejects_provider_messages())
-        {
-            tracing::debug!(
-                interface = interface.as_ref(),
-                source_module,
-                "ignoring service update from terminal backend provider"
-            );
-            return false;
-        }
         if let Some(latest) = self.latest_service_state.get(interface.as_ref())
             && latest.provider_id == *source_module
             && latest.state.eq(payload)
@@ -748,6 +757,7 @@ impl Shell {
         })
     }
 
+    #[cfg(test)]
     pub(in crate::shell) fn broadcast_backend_interface_event(
         &mut self,
         interface: String,
@@ -764,6 +774,7 @@ impl Shell {
         )
     }
 
+    #[cfg(test)]
     pub(in crate::shell) fn broadcast_backend_interface_event_at_generation(
         &mut self,
         interface: String,
@@ -807,11 +818,8 @@ impl Shell {
             );
             return Ok(VecDeque::new());
         }
-        let provider_is_active = if identity == BackendIdentity::default() {
-            self.backend_provider_is_active(&interface, &provider_id)
-        } else {
-            self.backend_provider_is_active_at_identity(&interface, &provider_id, identity)
-        };
+        let provider_is_active =
+            self.backend_provider_is_active_at_identity(&interface, &provider_id, identity);
         if !provider_is_active {
             tracing::debug!(
                 interface,

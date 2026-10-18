@@ -201,3 +201,67 @@ fn component_tick_effects_are_charged_to_the_component() {
                 .contains("effect_scheduler_quarantined")
     }));
 }
+
+#[test]
+fn healthy_watcher_coalesces_reload_checks_with_watch_maintenance() {
+    let mut shell = Shell::new();
+    shell.file_watcher_active = true;
+    let now = Instant::now();
+    let maintenance = now + Duration::from_secs(2);
+    shell.next_watch_reconcile = maintenance;
+    for offset_ms in [0, 3, 11, 30] {
+        for fallback_ms in [250, 500, 1000] {
+            assert_eq!(
+                shell.next_reload_check(
+                    now + Duration::from_millis(offset_ms),
+                    Duration::from_millis(fallback_ms)
+                ),
+                maintenance,
+            );
+        }
+    }
+    shell.file_watcher_active = false;
+    assert_eq!(
+        shell.next_reload_check(now, Duration::from_millis(250)),
+        now + Duration::from_millis(250)
+    );
+}
+
+#[test]
+fn scheduler_includes_watch_reconciliation_deadline() {
+    let mut shell = Shell::new();
+    park_reload_deadlines(&mut shell);
+    shell.next_watch_reconcile = Instant::now() - Duration::from_millis(1);
+    assert_eq!(shell.next_runtime_sleep(false), Duration::ZERO);
+}
+
+#[test]
+#[ignore = "deterministic release-only idle reload deadline count gate"]
+fn coalesced_reload_wakeup_profile() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    let mut shell = Shell::new();
+    shell.file_watcher_active = true;
+    let start = Instant::now();
+    let interval = Duration::from_secs(2);
+    // Model three checks completing at different times during each maintenance
+    // pass. The old policy added an interval to each completion independently.
+    for run in 0..3 {
+        let mut independent = std::collections::BTreeSet::new();
+        let mut coalesced = std::collections::BTreeSet::new();
+        for pass in 1..=60 {
+            let anchor = start + interval * pass;
+            shell.next_watch_reconcile = anchor + interval;
+            for offset in [1, 5 + run, 12 + run] {
+                let completed = anchor + Duration::from_millis(offset);
+                independent.insert(completed + interval);
+                coalesced.insert(shell.next_reload_check(completed, Duration::from_millis(250)));
+            }
+        }
+        eprintln!(
+            "idle reload deadlines: 60 passes / 120 s run={run}, independent={} coalesced={}",
+            independent.len(),
+            coalesced.len()
+        );
+        assert_eq!(independent.len(), coalesced.len() * 3);
+    }
+}

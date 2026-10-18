@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Test-facing candidate wrappers share the production validator.
-
 use super::super::*;
 use super::{BackendLaunchCandidate, BackendLifecycleStatusRecord};
 use crate::shell::core_provider::CoreServiceRegistry;
@@ -254,6 +252,7 @@ pub(in crate::shell) fn launch_candidate_for_provider_with_capabilities<
         module_id: provider.module_id.clone(),
         service_name: service_name_from_interface(&interface),
         interface,
+        #[cfg(test)]
         entrypoint_path,
         script_source,
         capabilities,

@@ -3,9 +3,10 @@
 //! Package operations touch several independently persisted objects: installed
 //! module trees, the root graph, profiles, and the lock/history.  This module is
 //! deliberately below both consumers so they cannot accidentally grow
-//! different locking or recovery rules.  A transaction takes an advisory OS
-//! lock, records byte-for-byte filesystem snapshots in a durable journal before
-//! mutation, and restores those snapshots if the operation fails or the next
+//! different locking or recovery rules. A transaction takes advisory OS
+//! package and control-plane locks, records byte-for-byte filesystem snapshots
+//! in a durable journal before mutation, and restores those snapshots if the
+//! operation fails or the next
 //! package operation finds an unfinished journal.
 
 use super::{
@@ -145,6 +146,7 @@ pub struct PackageTransaction {
     owner: PackageOwner,
     operation: PackageOperation,
     lock_file: File,
+    control_plane_lock: super::profile::ControlPlaneLock,
     finished: bool,
 }
 
@@ -163,8 +165,9 @@ impl std::fmt::Debug for PackageTransaction {
 impl PackageTransaction {
     /// Acquire the package lock and recover a prior interrupted operation.
     ///
-    /// The lock is held by the returned value for its entire lifetime.  On
-    /// Unix this is a blocking `flock`, so a second CLI invocation waits rather
+    /// Package and control-plane locks are acquired in that order and held
+    /// for the returned value's entire lifetime, including rollback. On
+    /// Unix these are blocking `flock`s, so a second CLI invocation waits rather
     /// than racing a shell IPC request.  The journal is intentionally a fixed
     /// path: there can be at most one package transaction per configuration
     /// directory.
@@ -179,7 +182,10 @@ impl PackageTransaction {
             source,
         })?;
 
+        // Always acquire package before control-plane; profile writers never
+        // acquire the package lock while holding the control-plane lock.
         let lock_file = open_package_lock(&config_dir)?;
+        let control_plane_lock = super::profile::acquire_control_plane_lock(&config_dir)?;
 
         let journal_path = config_dir.join(JOURNAL_FILE);
         recover_journal(&config_dir, &journal_path)?;
@@ -213,6 +219,7 @@ impl PackageTransaction {
             owner,
             operation,
             lock_file,
+            control_plane_lock,
             finished: false,
         };
         transaction.persist_journal()?;
@@ -250,6 +257,7 @@ impl PackageTransaction {
 
         // Held until recovery returns; dropping it releases the lock.
         let _lock_file = open_package_lock(&config_dir)?;
+        let _control_plane_lock = super::profile::acquire_control_plane_lock(&config_dir)?;
         recover_journal(&config_dir, &journal_path)
     }
 
@@ -407,7 +415,7 @@ impl PackageTransaction {
         root: &RootModuleGraphManifest,
     ) -> Result<(), ModuleManifestError> {
         self.protect(path)?;
-        root.save(path)
+        root.save_locked(path, &self.control_plane_lock)
     }
 
     /// Persist a profile through this transaction's journal.
@@ -419,7 +427,7 @@ impl PackageTransaction {
     ) -> Result<(), ModuleManifestError> {
         let path = paths.profile_path(profile_id)?;
         self.protect(&path)?;
-        paths.save(profile_id, profile)
+        paths.save_locked(profile_id, profile, &self.control_plane_lock)
     }
 
     /// Persist a profile only if no other package/profile writer changed its
@@ -433,7 +441,12 @@ impl PackageTransaction {
     ) -> Result<ShellProfile, ModuleManifestError> {
         let path = paths.profile_path(profile_id)?;
         self.protect(&path)?;
-        paths.save_if_revision(profile_id, profile, expected_revision)
+        paths.save_if_revision_locked(
+            profile_id,
+            profile,
+            expected_revision,
+            &self.control_plane_lock,
+        )
     }
 
     /// Persist the active profile pointer through this transaction's journal.
@@ -443,7 +456,7 @@ impl PackageTransaction {
         profile_id: &str,
     ) -> Result<(), ModuleManifestError> {
         self.protect(&paths.active_profile_path())?;
-        paths.set_active(profile_id)
+        paths.set_active_locked(profile_id, &self.control_plane_lock)
     }
 
     /// Archive and persist the next lock generation as part of this package
@@ -459,10 +472,11 @@ impl PackageTransaction {
         self.protect(&self.config_dir.join("lock-history"))?;
         self.protect(&self.config_dir.join(".mesh-store/active-generation"))?;
         MeshLock::archive(&lock_path, &self.config_dir.join("lock-history"))?;
-        lock.save_with_store(
+        lock.save_with_store_locked(
             &lock_path,
             modules_dir,
             &self.config_dir.join(".mesh-store"),
+            &self.control_plane_lock,
         )
     }
 
@@ -478,10 +492,11 @@ impl PackageTransaction {
         self.protect(&self.config_dir.join("lock-history"))?;
         self.protect(&self.config_dir.join(".mesh-store/active-generation"))?;
         MeshLock::archive(&lock_path, &self.config_dir.join("lock-history"))?;
-        lock.save_exact_with_store(
+        lock.save_exact_with_store_locked(
             &lock_path,
             modules_dir,
             &self.config_dir.join(".mesh-store"),
+            &self.control_plane_lock,
         )
     }
 
@@ -787,8 +802,8 @@ impl Drop for PackageTransaction {
                 let _ = cleanup_workspace(&self.journal_path, &self.workspace);
             }
         }
-        // Keeping the advisory lock alive until this destructor returns makes
-        // the restore indivisible from the next package operation.
+        // Both advisory locks outlive the restore, excluding package and
+        // profile writers until rollback is complete.
         let _ = self.lock_file.sync_all();
     }
 }
@@ -1391,6 +1406,117 @@ mod tests {
     }
 
     #[test]
+    fn profile_commits_wait_for_package_commit_abort_and_drop() {
+        use std::os::fd::AsRawFd;
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        for completion in ["commit", "abort", "drop"] {
+            let root = temp_dir(completion);
+            let paths = ProfilePaths::from_root_graph(&root.join("module.json")).unwrap();
+            let initial = paths
+                .save_if_revision("work", &ShellProfile::new(), 0)
+                .unwrap();
+            paths.save("other", &ShellProfile::new()).unwrap();
+            paths.set_active("work").unwrap();
+            let mut transaction =
+                PackageTransaction::begin(&root, PackageOwner::Cli, PackageOperation::Update)
+                    .unwrap();
+            transaction.protect(&paths.profiles_dir()).unwrap();
+            transaction.protect(&paths.active_profile_path()).unwrap();
+            let package_profile = transaction
+                .save_profile_if_revision(&paths, "work", &initial, 1)
+                .unwrap();
+            transaction.set_active_profile(&paths, "other").unwrap();
+
+            let probe = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(root.join(".mesh-control-plane.lock"))
+                .unwrap();
+            assert_eq!(
+                unsafe { libc::flock(probe.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) },
+                -1
+            );
+            assert_eq!(
+                std::io::Error::last_os_error().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+
+            let expected = if completion == "commit" {
+                package_profile
+            } else {
+                initial
+            };
+            let writer_paths = paths.clone();
+            let (started_tx, started_rx) = mpsc::channel();
+            let (done_tx, done_rx) = mpsc::channel();
+            let writer = std::thread::spawn(move || {
+                started_tx.send(()).unwrap();
+                let committed = writer_paths
+                    .save_if_revision("work", &expected, expected.revision)
+                    .unwrap();
+                writer_paths.set_active("work").unwrap();
+                done_tx.send(committed.revision).unwrap();
+            });
+            started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert!(matches!(done_rx.try_recv(), Err(mpsc::TryRecvError::Empty)));
+            match completion {
+                "commit" => transaction.commit().unwrap(),
+                "abort" => transaction.abort().unwrap(),
+                _ => drop(transaction),
+            }
+            let revision = done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            writer.join().unwrap();
+            assert_eq!(paths.load("work").unwrap().revision, revision);
+            assert_eq!(revision, if completion == "commit" { 3 } else { 2 });
+            assert_eq!(paths.active_profile_id().unwrap().as_deref(), Some("work"));
+            fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn interrupted_package_recovery_waits_for_the_control_plane_lock() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let root = temp_dir("recovery-control-plane-lock");
+        let paths = ProfilePaths::from_root_graph(&root.join("module.json")).unwrap();
+        let initial = paths
+            .save_if_revision("work", &ShellProfile::new(), 0)
+            .unwrap();
+        let mut transaction =
+            PackageTransaction::begin(&root, PackageOwner::Cli, PackageOperation::Update).unwrap();
+        transaction
+            .save_profile_if_revision(&paths, "work", &initial, 1)
+            .unwrap();
+        transaction.finished = true;
+        drop(transaction);
+
+        let lock = paths.acquire_control_plane_lock().unwrap();
+        let recovery_root = root.clone();
+        let (done_tx, done_rx) = mpsc::channel();
+        let recovery = std::thread::spawn(move || {
+            done_tx
+                .send(PackageTransaction::recover(&recovery_root))
+                .unwrap();
+        });
+        assert!(matches!(
+            done_rx.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ));
+        assert_eq!(paths.load("work").unwrap().revision, 2);
+        drop(lock);
+        done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
+        recovery.join().unwrap();
+        assert_eq!(paths.load("work").unwrap().revision, 1);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn journal_records_the_shared_owner_and_operation_contract() {
         let root = temp_dir("contract");
         let transaction =
@@ -1615,13 +1741,16 @@ mod tests {
                     transaction.replace_with(&module, &staged)
                 }
                 "remove.after" => transaction.remove(&module),
-                "package.write.after" => super::super::profile::atomic_write(&graph, b"after"),
+                "package.write.after" => {
+                    super::super::profile::atomic_write_unlocked(&graph, b"after")
+                }
                 "store.write.after" | "store.activate.after" => {
                     let mut lock = super::super::MeshLock::new();
-                    lock.save_with_store(
+                    lock.save_with_store_locked(
                         &root.join("mesh.lock"),
                         &modules,
                         &root.join(".mesh-store"),
+                        &transaction.control_plane_lock,
                     )
                 }
                 _ => unreachable!(),

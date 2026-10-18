@@ -1,4 +1,3 @@
-use mesh_core_component::parse_luau_script;
 use mesh_core_icon::{FontAsset, FrontendIconBindings, IconMapping};
 #[cfg(test)]
 use mesh_core_module::manifest::load_canonical_manifest;
@@ -15,15 +14,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// State fields and commands exposed by a backend service module.
-#[derive(Debug, Default, Clone)]
-pub struct InterfaceShape {
-    /// Fields emitted via `mesh.service.emit({...})` in the backend script.
-    pub state_fields: Vec<String>,
-    /// Commands inferred from `function on_command_<name>()` in the backend script.
-    pub commands: Vec<String>,
-}
-
 /// A discovered and indexed view of all modules available in the workspace.
 pub struct ModuleRegistry {
     /// The canonical graph snapshot from which every module-owned index below
@@ -38,10 +28,7 @@ pub struct ModuleRegistry {
     pub module_entrypoints: HashMap<String, PathBuf>,
     /// Maps interface name (e.g. "mesh.audio") → list of field names it emits.
     pub interface_fields: HashMap<String, Vec<String>>,
-    /// Maps interface name → inferred shape (state fields + commands) from backend script.
-    pub interface_shapes: HashMap<String, InterfaceShape>,
-    /// Validated declared contracts. These are authoritative over shapes
-    /// inferred from a provider implementation.
+    /// Validated contracts are the sole authority for service members.
     pub interface_contracts: HashMap<String, InterfaceContract>,
     /// Maps component tag name → module-id for modules that export a component tag.
     pub exported_tags: HashMap<String, String>,
@@ -66,7 +53,6 @@ impl ModuleRegistry {
             module_dirs: HashMap::new(),
             module_entrypoints: HashMap::new(),
             interface_fields: HashMap::new(),
-            interface_shapes: HashMap::new(),
             interface_contracts: HashMap::new(),
             exported_tags: HashMap::new(),
             themes: Vec::new(),
@@ -157,40 +143,6 @@ impl ModuleRegistry {
         }
         registry.interface_contracts = snapshot.interface_contracts().clone();
 
-        // Providers and their canonical declarations are indexed from the
-        // graph, while implementation shapes still come from the source file
-        // named by that same canonical manifest.
-        let mut analyzed = HashMap::<String, InterfaceShape>::new();
-        for provider in snapshot.backend_provider_contributions() {
-            registry
-                .interface_fields
-                .entry(provider.interface.clone())
-                .or_default();
-            let Some(module) = snapshot.module(&provider.module_id) else {
-                continue;
-            };
-            let Some(entry) = &module.manifest.mesh.entrypoints.main else {
-                continue;
-            };
-            let script_path = module
-                .manifest_path
-                .parent()
-                .unwrap_or(workspace_root)
-                .join(entry);
-            let Ok(source) = std::fs::read_to_string(script_path) else {
-                continue;
-            };
-            let shape = analyzed
-                .entry(provider.module_id.clone())
-                .or_insert_with(|| analyze_backend_script(&source))
-                .clone();
-            registry
-                .interface_shapes
-                .entry(provider.interface.clone())
-                .and_modify(|existing| merge_shape(existing, &shape))
-                .or_insert(shape);
-        }
-
         registry.themes = discover_themes(snapshot);
         registry.locales = discover_locales(snapshot);
         registry.resource_snapshot = discover_resources(workspace_root, snapshot);
@@ -218,7 +170,7 @@ impl ModuleRegistry {
         }
         self.module_dirs.insert(module_id.clone(), manifest_dir);
 
-        // Index declared contracts before provider inference. A standalone
+        // Index declared contracts. A standalone
         // interface module is authoritative if it collides with an inline
         // backend declaration, matching installed-graph precedence.
         let standalone_interface = manifest.package.module_type == ModuleType::Interface;
@@ -252,54 +204,6 @@ impl ModuleRegistry {
                 self.interface_fields
                     .entry(canonical_interface_name(&iface.name))
                     .or_default();
-            }
-        }
-
-        // For backend modules, record what interfaces they provide and analyze
-        // the main script to infer state fields + commands.
-        let is_backend = manifest.package.module_type == ModuleType::Backend;
-        let interface_names: Vec<String> = {
-            let mut names: Vec<String> = manifest
-                .provides
-                .iter()
-                .map(|p| canonical_interface_name(&p.interface))
-                .collect();
-            if let Some(svc) = manifest.primary_service() {
-                let provides = canonical_interface_name(&svc.provides);
-                if !names.contains(&provides) {
-                    names.push(provides);
-                }
-            }
-            names
-        };
-
-        for iface in &interface_names {
-            self.interface_fields.entry(iface.clone()).or_default();
-        }
-
-        if is_backend && !interface_names.is_empty() {
-            if let Some(entry) = &manifest.entrypoints.main {
-                let script_path = dir.join(entry);
-                if let Ok(source) = std::fs::read_to_string(&script_path) {
-                    let shape = analyze_backend_script(&source);
-                    for iface in &interface_names {
-                        self.interface_shapes
-                            .entry(iface.clone())
-                            .and_modify(|existing| {
-                                for f in &shape.state_fields {
-                                    if !existing.state_fields.contains(f) {
-                                        existing.state_fields.push(f.clone());
-                                    }
-                                }
-                                for c in &shape.commands {
-                                    if !existing.commands.contains(c) {
-                                        existing.commands.push(c.clone());
-                                    }
-                                }
-                            })
-                            .or_insert_with(|| shape.clone());
-                    }
-                }
             }
         }
 
@@ -364,11 +268,6 @@ impl ModuleRegistry {
     /// The validated contract for an interface, when one was declared.
     pub fn interface_contract(&self, interface: &str) -> Option<&InterfaceContract> {
         self.interface_contracts
-            .get(&canonical_interface_name(interface))
-    }
-
-    pub fn interface_shape(&self, interface: &str) -> Option<&InterfaceShape> {
-        self.interface_shapes
             .get(&canonical_interface_name(interface))
     }
 
@@ -675,71 +574,13 @@ fn lsp_icon_bindings(
     catalog: &mesh_core_resources::SystemResourceCatalog,
     diagnostics: &mut Vec<mesh_core_resources::ResourceExplanationDiagnostic>,
 ) -> mesh_core_icon::IconPackBindings {
-    if section.mappings.len() > mesh_core_icon::MAX_ICON_PACK_MAPPINGS {
+    if let Err(error) = section.validate() {
         diagnostics.push(resource_diagnostic(
             "error",
-            "icon_mapping_limit",
+            "invalid_icon_pack",
             Some(module_id.into()),
             Some(section.id.clone()),
-            format!(
-                "icon pack exceeds the {}-mapping snapshot limit",
-                mesh_core_icon::MAX_ICON_PACK_MAPPINGS
-            ),
-        ));
-    }
-    if section.vocabularies.len() > mesh_core_icon::MAX_ICON_PACK_VOCABULARY_OWNERS {
-        diagnostics.push(resource_diagnostic(
-            "error",
-            "icon_vocabulary_limit",
-            Some(module_id.into()),
-            Some(section.id.clone()),
-            format!(
-                "icon pack exceeds the {}-vocabulary-owner snapshot limit",
-                mesh_core_icon::MAX_ICON_PACK_VOCABULARY_OWNERS
-            ),
-        ));
-    }
-    let total_mappings = section.mappings.len().saturating_add(
-        section
-            .vocabularies
-            .values()
-            .map(HashMap::len)
-            .fold(0_usize, usize::saturating_add),
-    );
-    if total_mappings > mesh_core_icon::MAX_ICON_PACK_MAPPINGS {
-        diagnostics.push(resource_diagnostic(
-            "error",
-            "icon_mapping_limit",
-            Some(module_id.into()),
-            Some(section.id.clone()),
-            format!(
-                "icon pack exceeds the {}-mapping snapshot limit including vocabularies",
-                mesh_core_icon::MAX_ICON_PACK_MAPPINGS
-            ),
-        ));
-    }
-    if section.requires.fonts.len() > mesh_core_icon::MAX_ICON_PACK_FONT_REQUIREMENTS {
-        diagnostics.push(resource_diagnostic(
-            "error",
-            "icon_font_requirement_limit",
-            Some(module_id.into()),
-            Some(section.id.clone()),
-            format!(
-                "icon pack exceeds the {}-font-requirement snapshot limit",
-                mesh_core_icon::MAX_ICON_PACK_FONT_REQUIREMENTS
-            ),
-        ));
-    }
-    if section.requires.themes.len() > mesh_core_icon::MAX_ICON_PACK_THEME_REQUIREMENTS {
-        diagnostics.push(resource_diagnostic(
-            "error",
-            "icon_theme_requirement_limit",
-            Some(module_id.into()),
-            Some(section.id.clone()),
-            format!(
-                "icon pack exceeds the {}-theme-requirement snapshot limit",
-                mesh_core_icon::MAX_ICON_PACK_THEME_REQUIREMENTS
-            ),
+            error,
         ));
     }
     let mut font_aliases = HashMap::new();
@@ -846,20 +687,13 @@ fn lsp_icon_mapping(
     mapping: &mesh_core_module::manifest::IconMappingTarget,
     diagnostics: &mut Vec<mesh_core_resources::ResourceExplanationDiagnostic>,
 ) -> Option<(String, IconMapping)> {
-    if name.trim().is_empty()
-        || name.len() > mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES
-        || mapping.target.trim().is_empty()
-        || mapping.target.len() > mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES
-        || Path::new(&mapping.target).is_absolute()
-        || mapping.target.trim_start().starts_with("~/")
-        || mesh_core_icon::parse_target(&mapping.target).is_none()
-    {
+    if let Err(error) = mesh_core_icon::validate_icon_mapping(name, &mapping.target) {
         diagnostics.push(resource_diagnostic(
             "error",
             "invalid_icon_mapping",
             Some(module_id.into()),
             Some(pack_id.into()),
-            format!("icon mapping '{name}' has an invalid bounded pack/name target"),
+            format!("icon mapping '{name}': {error}"),
         ));
         return None;
     }
@@ -986,33 +820,6 @@ fn root_graph_path(workspace_root: &Path) -> PathBuf {
         .unwrap_or_else(|| workspace_root.join("config/module.json"))
 }
 
-fn merge_shape(existing: &mut InterfaceShape, incoming: &InterfaceShape) {
-    for field in &incoming.state_fields {
-        if !existing.state_fields.contains(field) {
-            existing.state_fields.push(field.clone());
-        }
-    }
-    for command in &incoming.commands {
-        if !existing.commands.contains(command) {
-            existing.commands.push(command.clone());
-        }
-    }
-}
-
-/// Analyze a backend Luau script to infer the service shape:
-/// - State fields from table literals (`return { key = ... }` or
-///   `mesh.service.emit({ key = ... })`).
-/// - Commands from `function on_command_<name>()` definitions.
-fn analyze_backend_script(source: &str) -> InterfaceShape {
-    let Ok(script) = parse_luau_script(source) else {
-        return InterfaceShape::default();
-    };
-    InterfaceShape {
-        state_fields: script.metadata.backend_state_fields,
-        commands: script.metadata.backend_commands,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1063,33 +870,5 @@ mod tests {
         assert_eq!(contract.methods[0].args[0].arg_type, "float");
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn infers_backend_shape_from_luau_ast() {
-        let shape = analyze_backend_script(
-            r#"
--- function on_command_fake() end
-local documentation = "percent = false"
-function
-  on_command_set_volume()
-end
-function on_command_toggle(
-)
-end
-mesh.service.emit(
-  {
-    percent = 65,
-    muted = false,
-  }
-)
-return {
-  available = true,
-}
-"#,
-        );
-
-        assert_eq!(shape.state_fields, ["percent", "muted", "available"]);
-        assert_eq!(shape.commands, ["set_volume", "toggle"]);
     }
 }

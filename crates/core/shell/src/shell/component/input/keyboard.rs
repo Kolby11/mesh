@@ -653,6 +653,7 @@ impl FrontendSurfaceComponent {
         Ok(Some(requests))
     }
 
+    #[cfg(test)]
     pub(in crate::shell::component) fn annotate_surface_shortcuts(&self, tree: &mut WidgetNode) {
         if !self.has_surface_shortcut_declarations() {
             return;
@@ -1028,6 +1029,7 @@ fn collect_keybind_subscribers(node: &WidgetNode, subscribers: &mut Vec<KeybindS
     }
 }
 
+#[cfg(test)]
 fn annotate_nodes_by_keybind(
     node: &mut WidgetNode,
     shortcuts_by_keybind: &HashMap<String, Vec<String>>,

@@ -146,8 +146,10 @@ impl FrontendSurfaceComponent {
         let theme = self.active_theme.borrow().clone();
         let resolver = StyleResolver::new(&theme).with_borrowed_props(surface_css_props);
 
+        let containing_block = (tree.layout.width, tree.layout.height);
         self.apply_style_animations_to_node(
             tree,
+            containing_block,
             previous_styles,
             &resolver,
             &theme,
@@ -221,6 +223,7 @@ impl FrontendSurfaceComponent {
     fn apply_style_animations_to_node(
         &mut self,
         node: &mut WidgetNode,
+        containing_block: (f32, f32),
         previous_styles: &HashMap<NodeId, AnimatableStyle>,
         resolver: &StyleResolver,
         theme: &Theme,
@@ -241,7 +244,8 @@ impl FrontendSurfaceComponent {
                 .is_some_and(|value| value == "true");
         if node.mesh_key().is_some() {
             let node_id = node.id;
-            let before_sampling = AnimatableStyle::from_node(node);
+            let before_sampling =
+                AnimatableStyle::from_node_in_containing_block(node, containing_block);
             live_keys.insert(node_id);
             let keyframes = self.node_keyframe_animations(node, theme);
             let keyframe_properties = keyframes
@@ -264,6 +268,7 @@ impl FrontendSurfaceComponent {
                 self.apply_node_style_animation(
                     node_id,
                     node,
+                    containing_block,
                     previous_styles,
                     now,
                     has_active_animation,
@@ -292,14 +297,15 @@ impl FrontendSurfaceComponent {
             if !keyframe_properties.is_empty()
                 && let Some(base) = self.keyframe_base_styles.get_mut(&node_id)
             {
-                base.applied = AnimatableStyle::from_node(node);
+                base.applied =
+                    AnimatableStyle::from_node_in_containing_block(node, containing_block);
             }
             // Live animations stay dirty even when a delay or a repeated pass
             // holds their sample constant. Completion can write an endpoint
             // after `unfinished` becomes false, so also compare with the input
             // sample and the last painted style. A value sampled at this same
             // `now` alone cannot detect that final change.
-            let sampled = AnimatableStyle::from_node(node);
+            let sampled = AnimatableStyle::from_node_in_containing_block(node, containing_block);
             if animation_is_live
                 || before_sampling != sampled
                 || previous_styles
@@ -312,9 +318,20 @@ impl FrontendSurfaceComponent {
             }
         }
 
+        let child_container = (
+            (node.layout.width
+                - node.computed_style.padding.horizontal()
+                - node.computed_style.border_width.horizontal())
+            .max(0.0),
+            (node.layout.height
+                - node.computed_style.padding.vertical()
+                - node.computed_style.border_width.vertical())
+            .max(0.0),
+        );
         for child in &mut node.children {
             self.apply_style_animations_to_node(
                 child,
+                child_container,
                 previous_styles,
                 resolver,
                 theme,
@@ -335,6 +352,7 @@ impl FrontendSurfaceComponent {
         &mut self,
         key: NodeId,
         node: &mut WidgetNode,
+        containing_block: (f32, f32),
         previous_styles: &HashMap<NodeId, AnimatableStyle>,
         now: Instant,
         has_active_animation: &mut bool,
@@ -343,7 +361,7 @@ impl FrontendSurfaceComponent {
         // The value shown for this node last frame: the in-flight transition's
         // current value if one exists, otherwise the previous tree snapshot,
         // otherwise the node's own desired style (nothing to animate from).
-        let desired = AnimatableStyle::from_node(node);
+        let desired = AnimatableStyle::from_node_in_containing_block(node, containing_block);
         let previous_displayed = self
             .transitions
             .displayed_style(key, now, desired)
@@ -354,13 +372,18 @@ impl FrontendSurfaceComponent {
         let previous_displayed =
             AnimatableStyle::overlay(previous_displayed, desired, keyframe_properties);
 
-        if self.transitions.step_node_with_policy(
-            key,
-            node,
-            previous_displayed,
-            now,
-            self.motion_policy,
-        ) {
+        if self
+            .transitions
+            .step_node_with_layout(
+                key,
+                node,
+                previous_displayed,
+                now,
+                self.motion_policy,
+                Some(containing_block),
+            )
+            .active
+        {
             *has_active_animation = true;
         }
         Some(previous_displayed)
@@ -661,12 +684,32 @@ pub(super) fn collect_visual_styles(root: &WidgetNode) -> HashMap<NodeId, Animat
 }
 
 fn collect_visual_styles_into(node: &WidgetNode, styles: &mut HashMap<NodeId, AnimatableStyle>) {
-    if node.mesh_key().is_some() {
-        styles.insert(node.id, AnimatableStyle::from_node(node));
-    }
+    collect_visual_styles_with_container(node, (node.layout.width, node.layout.height), styles);
+}
 
+fn collect_visual_styles_with_container(
+    node: &WidgetNode,
+    containing_block: (f32, f32),
+    styles: &mut HashMap<NodeId, AnimatableStyle>,
+) {
+    if node.mesh_key().is_some() {
+        styles.insert(
+            node.id,
+            AnimatableStyle::from_node_in_containing_block(node, containing_block),
+        );
+    }
+    let child_container = (
+        (node.layout.width
+            - node.computed_style.padding.horizontal()
+            - node.computed_style.border_width.horizontal())
+        .max(0.0),
+        (node.layout.height
+            - node.computed_style.padding.vertical()
+            - node.computed_style.border_width.vertical())
+        .max(0.0),
+    );
     for child in &node.children {
-        collect_visual_styles_into(child, styles);
+        collect_visual_styles_with_container(child, child_container, styles);
     }
 }
 

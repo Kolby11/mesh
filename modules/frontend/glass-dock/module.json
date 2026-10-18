@@ -1,0 +1,39 @@
+{
+  "name": "@mesh/glass-dock",
+  "version": "0.1.0",
+  "description": "Bottom liquid-glass dock of pinned and running applications with a lift-on-hover animation.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "interfaces": {
+        "mesh.apps": ">=1.0"
+      },
+      "capabilities": [
+        "shell.surface",
+        "theme.read",
+        "service.apps.read",
+        "service.apps.launch"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "bottom",
+      "layer": "top",
+      "keyboard_mode": "none",
+      "visible_on_start": true
+    },
+    "provides": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Glass dock"
+        }
+      ]
+    },
+    "accessibility": {
+      "role": "toolbar"
+    }
+  }
+}

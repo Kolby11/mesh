@@ -389,6 +389,18 @@ impl MeshLock {
         modules_dir: &Path,
         store_root: &Path,
     ) -> Result<(), ModuleManifestError> {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let lock = super::profile::acquire_control_plane_lock(parent)?;
+        self.save_with_store_locked(path, modules_dir, store_root, &lock)
+    }
+
+    pub(super) fn save_with_store_locked(
+        &mut self,
+        path: &Path,
+        modules_dir: &Path,
+        store_root: &Path,
+        _lock: &super::profile::ControlPlaneLock,
+    ) -> Result<(), ModuleManifestError> {
         self.validate()?;
         let generation = self.generation.checked_add(1).ok_or_else(|| {
             ModuleManifestError::Validation("mesh.lock generation overflow".into())
@@ -397,7 +409,7 @@ impl MeshLock {
         let snapshot = store.snapshot_from_lock(generation, self, modules_dir)?;
         store.publish_snapshot(&snapshot)?;
         self.generation = generation;
-        self.save_exact(path)?;
+        self.save_exact_unlocked(path)?;
         store.activate_generation(generation)
     }
 
@@ -407,6 +419,12 @@ impl MeshLock {
     /// [`Self::save`] here would turn the restored snapshot into a new, subtly
     /// different generation and would make a second rollback ambiguous.
     pub fn save_exact(&self, path: &Path) -> Result<(), ModuleManifestError> {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let _lock = super::profile::acquire_control_plane_lock(parent)?;
+        self.save_exact_unlocked(path)
+    }
+
+    fn save_exact_unlocked(&self, path: &Path) -> Result<(), ModuleManifestError> {
         self.validate()?;
         if path.exists() {
             validate_regular_file(path, "mesh.lock")?;
@@ -417,7 +435,7 @@ impl MeshLock {
                 source,
             })?;
         content.push('\n');
-        atomic_write(path, content.as_bytes())
+        super::profile::atomic_write_unlocked(path, content.as_bytes())
     }
 
     /// Persist an already-selected generation and publish its matching
@@ -429,11 +447,23 @@ impl MeshLock {
         modules_dir: &Path,
         store_root: &Path,
     ) -> Result<(), ModuleManifestError> {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let lock = super::profile::acquire_control_plane_lock(parent)?;
+        self.save_exact_with_store_locked(path, modules_dir, store_root, &lock)
+    }
+
+    pub(super) fn save_exact_with_store_locked(
+        &self,
+        path: &Path,
+        modules_dir: &Path,
+        store_root: &Path,
+        _lock: &super::profile::ControlPlaneLock,
+    ) -> Result<(), ModuleManifestError> {
         self.validate()?;
         let store = super::ModuleStore::new(store_root.to_path_buf())?;
         let snapshot = store.snapshot_from_lock(self.generation, self, modules_dir)?;
         store.publish_snapshot(&snapshot)?;
-        self.save_exact(path)?;
+        self.save_exact_unlocked(path)?;
         store.activate_generation(self.generation)
     }
 
@@ -552,11 +582,26 @@ fn migrate_lock_document(
 /// a module directory, so an ordinary shell run cannot make a module look
 /// edited.
 pub fn module_tree_digest(root: &Path) -> Result<String, ModuleManifestError> {
+    module_tree_digest_excluding(root, None)
+}
+
+pub(crate) fn module_source_digest(root: &Path) -> Result<String, ModuleManifestError> {
+    module_tree_digest_excluding(root, Some("module.json"))
+}
+
+fn module_tree_digest_excluding(
+    root: &Path,
+    excluded: Option<&str>,
+) -> Result<String, ModuleManifestError> {
     validate_module_tree(root)?;
     let mut files = Vec::new();
     let mut visited = std::collections::HashSet::new();
     collect_files(root, root, &mut files, &mut visited)?;
+    if excluded.is_some() && root.join(MODULE_SIGNATURE_FILE).is_file() {
+        files.push(MODULE_SIGNATURE_FILE.to_string());
+    }
     files.sort();
+    files.retain(|path| Some(path.as_str()) != excluded);
 
     let mut hasher = Sha256::new();
     for relative in &files {

@@ -300,7 +300,7 @@ fn painter_blurs_background_fill_beyond_node_bounds() {
         },
         Color::from_hex("#000000ff").unwrap(),
     );
-    root.computed_style.filter = VisualFilter { blur_radius: 4.0 };
+    root.computed_style.filter = VisualFilter::blur(4.0);
 
     let mut buffer = PixelBuffer::new(40, 40);
     FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);

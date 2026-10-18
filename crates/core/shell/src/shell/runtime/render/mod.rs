@@ -1,3 +1,4 @@
+mod backdrop;
 mod child;
 mod popup;
 
@@ -42,6 +43,7 @@ pub(super) fn revisioned_surface_config(
 }
 
 impl Shell {
+    #[cfg(test)]
     pub(in crate::shell) fn render_components(&mut self) -> Result<(), ShellRunError> {
         self.render_components_inner()?;
         self.process_effects();
@@ -348,6 +350,7 @@ impl Shell {
                 let (requested_width, requested_height, _) = surface_geometry_with_overlay_reserve(
                     &surface_id,
                     surface.role,
+                    surface.edge,
                     surface.width,
                     surface.height,
                 );
@@ -373,6 +376,7 @@ impl Shell {
                 let (_, _, configured_padding) = surface_geometry_with_overlay_reserve(
                     &surface_id,
                     surface.role,
+                    surface.edge,
                     content.width(),
                     content.height(),
                 );
@@ -444,7 +448,10 @@ impl Shell {
                 // A window is exempt: its size is a hint the compositor answers
                 // rather than a placement it applies, and `apply_window_config`
                 // reads a zero as "no hint" instead of as a span.
+                let fills_output = self.components[index].component.fills_output()
+                    && matches!(surface.edge, Some(mesh_core_wayland::Edge::Top | mesh_core_wayland::Edge::Bottom));
                 let configure_size_resolved = surface.role == SurfaceRole::Window
+                    || fills_output
                     || layer_configure_size_is_resolved(
                         surface.edge,
                         surface.exclusive_zone,
@@ -690,12 +697,15 @@ impl Shell {
                         SurfaceExtent::padded(extent_content, (width, height))
                     }
                 } else {
+                    let (role, edge) = self
+                        .surfaces
+                        .get(&surface_id)
+                        .map(|surface| (surface.role, surface.edge))
+                        .unwrap_or_default();
                     let (padded_width, padded_height, _) = surface_geometry_with_overlay_reserve(
                         &surface_id,
-                        self.surfaces
-                            .get(&surface_id)
-                            .map(|surface| surface.role)
-                            .unwrap_or_default(),
+                        role,
+                        edge,
                         width,
                         height,
                     );
@@ -735,6 +745,7 @@ impl Shell {
                 mesh_core_render::set_font_aliases(
                     self.font_registry.reference_aliases_for_module(&module_id),
                 );
+                mesh_core_render::set_backdrop_frame(self.backdrop_frame(&surface_id));
                 let runtime = &mut self.components[index];
                 if runtime
                     .parent

@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Legacy hit-test helpers remain for interaction regression fixtures.
-
 use super::*;
 use mesh_core_elements::HandlerTarget;
 use mesh_core_elements::style::TooltipAnchor;
@@ -47,33 +45,6 @@ pub fn inspect_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<InspectHit<
         root_transform(0.0, 0.0),
         &AffineClipStack::default(),
     )
-}
-
-fn inspect_hit_test_inner(
-    node: &WidgetNode,
-    x: f32,
-    y: f32,
-    offset_x: f32,
-    offset_y: f32,
-) -> Option<InspectHit<'_>> {
-    if !node_allows(node, InteractionTarget::Paint) {
-        return None;
-    }
-    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
-    if !inside && node_clips_children(node) {
-        return None;
-    }
-    let (child_x, child_y) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in mesh_core_elements::children_in_paint_order(node).rev() {
-        if let Some(hit) = inspect_hit_test_inner(child, x, y, child_x, child_y) {
-            return Some(hit);
-        }
-    }
-    inside.then(|| InspectHit {
-        node,
-        bounds: node_rect_with_offset(node, offset_x, offset_y),
-    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -154,23 +125,6 @@ impl TooltipTarget<'_> {
     }
 }
 
-#[derive(Clone, Copy)]
-struct TooltipRef<'a> {
-    owner: &'a WidgetNode,
-    text: &'a str,
-}
-
-impl TooltipRef<'_> {
-    fn into_owned(self) -> (String, String) {
-        let owner = self
-            .owner
-            .mesh_key()
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("anonymous-tooltip-owner:{:p}", self.owner));
-        (owner, self.text.to_owned())
-    }
-}
-
 /// Resolve all pointer-motion metadata in the same tree traversal.
 pub fn pointer_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<PointerHit> {
     let mut hit = pointer_hit_test_reversed_affine(
@@ -218,134 +172,6 @@ pub fn pointer_event_handler_hit<'a>(
     )
 }
 
-fn pointer_event_handler_hit_inner<'a>(
-    node: &'a WidgetNode,
-    x: f32,
-    y: f32,
-    event_name: &str,
-    offset_x: f32,
-    offset_y: f32,
-) -> Option<PointerEventHandlerHit<'a>> {
-    if !node_allows(node, InteractionTarget::Pointer) {
-        return None;
-    }
-
-    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
-    if !inside && node_clips_children(node) {
-        return None;
-    }
-
-    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in mesh_core_elements::children_in_paint_order(node).rev() {
-        if let Some(hit) =
-            pointer_event_handler_hit_inner(child, x, y, event_name, child_offset_x, child_offset_y)
-        {
-            return Some(hit);
-        }
-    }
-
-    if inside && node.event_handlers.contains_key(event_name) {
-        return node.mesh_key().map(|key| PointerEventHandlerHit {
-            key,
-            node,
-            bounds: node_rect_with_offset(node, offset_x, offset_y),
-        });
-    }
-
-    None
-}
-
-fn pointer_press_hit_inner<'a>(
-    node: &'a WidgetNode,
-    x: f32,
-    y: f32,
-    offset_x: f32,
-    offset_y: f32,
-) -> Option<PointerPressHit<'a>> {
-    if !node_allows(node, InteractionTarget::Pointer) {
-        return None;
-    }
-
-    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
-    if !inside && node_clips_children(node) {
-        return None;
-    }
-
-    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
-    let mut hit = PointerPressHit::default();
-    for child in mesh_core_elements::children_in_paint_order(node).rev() {
-        if let Some(child_hit) =
-            pointer_press_hit_inner(child, x, y, child_offset_x, child_offset_y)
-        {
-            hit.focusable = child_hit.focusable;
-            hit.target = child_hit.target;
-            break;
-        }
-    }
-
-    if inside && let Some(key) = node.mesh_key() {
-        let node_hit = PointerPressNode {
-            key,
-            node,
-            bounds: node_rect_with_offset(node, offset_x, offset_y),
-        };
-        if hit.focusable.is_none() && crate::focus::node_is_pointer_focusable(node) {
-            hit.focusable = Some(node_hit);
-        }
-        if hit.target.is_none() && node.event_handlers.contains_key("click") {
-            hit.target = Some(node_hit);
-        }
-    }
-
-    (hit.focusable.is_some() || hit.target.is_some()).then_some(hit)
-}
-
-fn pointer_hit_test_reversed<'a>(
-    node: &'a WidgetNode,
-    x: f32,
-    y: f32,
-    offset_x: f32,
-    offset_y: f32,
-    inherited_tooltip: Option<TooltipTarget<'a>>,
-) -> Option<PointerHit> {
-    if !node_allows(node, InteractionTarget::Pointer) {
-        return None;
-    }
-    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
-    if !inside && node_clips_children(node) {
-        return None;
-    }
-    let owner_tooltip = node_allows(node, InteractionTarget::Tooltip)
-        .then(|| node_tooltip_text_ref(node))
-        .flatten()
-        .map(|text| TooltipTarget {
-            owner: node,
-            text,
-            bounds: node_rect_with_offset(node, offset_x, offset_y),
-        });
-    let tooltip = owner_tooltip.or(inherited_tooltip);
-    let (child_ox, child_oy) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in mesh_core_elements::children_in_paint_order(node).rev() {
-        if let Some(mut hit) = pointer_hit_test_reversed(child, x, y, child_ox, child_oy, tooltip) {
-            if let Some(key) = node.mesh_key() {
-                hit.path.push(key.to_owned());
-            }
-            return Some(hit);
-        }
-    }
-    let key = node.mesh_key()?;
-    inside.then(|| PointerHit {
-        path: vec![key.to_owned()],
-        tooltip: tooltip.map(TooltipTarget::into_owned),
-        bounds: tooltip
-            .map(|tooltip| tooltip.bounds)
-            .unwrap_or_else(|| node_rect_with_offset(node, offset_x, offset_y)),
-    })
-}
-
 pub fn find_node_by_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a WidgetNode> {
     if node.mesh_key().is_some_and(|value| value == key) {
         return Some(node);
@@ -387,31 +213,6 @@ pub fn find_nodes_by_keys<'a>(
         &mut found,
     );
     found
-}
-
-fn collect_nodes_by_keys<'a>(
-    node: &'a WidgetNode,
-    keys: &std::collections::HashSet<&str>,
-    offset_x: f32,
-    offset_y: f32,
-    found: &mut std::collections::HashMap<&'a str, (&'a WidgetNode, ContentBounds)>,
-) {
-    if found.len() == keys.len() || !node_allows(node, InteractionTarget::Pointer) {
-        return;
-    }
-    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    if let Some(key) = node.mesh_key()
-        && keys.contains(key)
-    {
-        found.insert(key, (node, node_rect_with_offset(node, offset_x, offset_y)));
-    }
-    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in &node.children {
-        collect_nodes_by_keys(child, keys, child_offset_x, child_offset_y, found);
-        if found.len() == keys.len() {
-            break;
-        }
-    }
 }
 
 pub fn find_node_bounds_by_key(
@@ -486,31 +287,6 @@ fn find_focus_node_with_bounds_by_key_affine<'a>(
     })
 }
 
-fn find_node_with_bounds_by_key_at<'a>(
-    node: &'a WidgetNode,
-    key: &str,
-    offset_x: f32,
-    offset_y: f32,
-) -> Option<(&'a WidgetNode, ContentBounds)> {
-    if !node_allows(node, InteractionTarget::Pointer) {
-        return None;
-    }
-    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    if node.mesh_key().is_some_and(|value| value == key) {
-        return Some((node, node_rect_with_offset(node, offset_x, offset_y)));
-    }
-
-    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in &node.children {
-        if let Some(found) =
-            find_node_with_bounds_by_key_at(child, key, child_offset_x, child_offset_y)
-        {
-            return Some(found);
-        }
-    }
-    None
-}
-
 /// Return the root-to-deepest key path under the cursor, regardless of type.
 pub fn find_node_path_at(node: &WidgetNode, x: f32, y: f32) -> Option<Vec<String>> {
     let mut path = find_node_path_reversed_affine(
@@ -522,54 +298,6 @@ pub fn find_node_path_at(node: &WidgetNode, x: f32, y: f32) -> Option<Vec<String
     )?;
     path.reverse();
     Some(path)
-}
-
-fn find_node_path_at_offset(
-    node: &WidgetNode,
-    x: f32,
-    y: f32,
-    offset_x: f32,
-    offset_y: f32,
-) -> Option<Vec<String>> {
-    let mut reversed = find_node_path_reversed(node, x, y, offset_x, offset_y)?;
-    reversed.reverse();
-    Some(reversed)
-}
-
-/// Deepest-first; the caller reverses once, avoiding an insert-at-front per
-/// ancestor.
-fn find_node_path_reversed(
-    node: &WidgetNode,
-    x: f32,
-    y: f32,
-    offset_x: f32,
-    offset_y: f32,
-) -> Option<Vec<String>> {
-    if !node_allows(node, InteractionTarget::Pointer) {
-        return None;
-    }
-
-    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    let inside = layout_contains_with_offset(node, x, y, offset_x, offset_y);
-    if !inside && node_clips_children(node) {
-        return None;
-    }
-
-    let (child_ox, child_oy) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in mesh_core_elements::children_in_paint_order(node).rev() {
-        if let Some(mut path) = find_node_path_reversed(child, x, y, child_ox, child_oy) {
-            if let Some(key) = node.mesh_key() {
-                path.push(key.to_owned());
-            }
-            return Some(path);
-        }
-    }
-
-    if inside {
-        return node.mesh_key().map(|key| vec![key.to_owned()]);
-    }
-
-    None
 }
 
 /// Extract tooltip text from a node's attributes and accessibility metadata.
@@ -646,39 +374,6 @@ pub fn find_tooltip_container_bounds(node: &WidgetNode, key: &str) -> Option<Con
     .flatten()
 }
 
-/// Outer `Option` = keyed node found; inner = nearest clipping ancestor bounds.
-fn find_container_bounds_inner(
-    node: &WidgetNode,
-    key: &str,
-    offset_x: f32,
-    offset_y: f32,
-    nearest_clip: Option<ContentBounds>,
-) -> Option<Option<ContentBounds>> {
-    if !node_allows(node, InteractionTarget::Tooltip) {
-        return None;
-    }
-    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    if node.mesh_key().is_some_and(|k| k == key) {
-        return Some(nearest_clip);
-    }
-    let clips = node.computed_style.overflow_x.clips_contents()
-        || node.computed_style.overflow_y.clips_contents();
-    let nearest_clip = if clips {
-        Some(node_rect_with_offset(node, offset_x, offset_y))
-    } else {
-        nearest_clip
-    };
-    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in &node.children {
-        if let Some(found) =
-            find_container_bounds_inner(child, key, child_offset_x, child_offset_y, nearest_clip)
-        {
-            return Some(found);
-        }
-    }
-    None
-}
-
 /// Find tooltip text for a specific node key in the tree.
 pub fn find_tooltip_text_by_key(node: &WidgetNode, key: &str) -> Option<String> {
     find_tooltip_target_by_key(node, key).map(|tooltip| tooltip.text.to_owned())
@@ -687,27 +382,6 @@ pub fn find_tooltip_text_by_key(node: &WidgetNode, key: &str) -> Option<String> 
 /// Find the tooltip owner key and text for a specific node key in the tree.
 pub fn find_tooltip_by_key(node: &WidgetNode, key: &str) -> Option<(String, String)> {
     find_tooltip_target_by_key(node, key).map(TooltipTarget::into_owned)
-}
-
-fn find_tooltip_by_key_with_inherited<'a>(
-    node: &'a WidgetNode,
-    key: &str,
-    inherited: Option<TooltipRef<'a>>,
-) -> Option<Option<TooltipRef<'a>>> {
-    if !node_allows(node, InteractionTarget::Tooltip) {
-        return None;
-    }
-    let owner_tooltip = node_tooltip_text_ref(node).map(|text| TooltipRef { owner: node, text });
-    let inherited = owner_tooltip.or(inherited);
-    if node.mesh_key().is_some_and(|candidate| candidate == key) {
-        return Some(inherited);
-    }
-    for child in &node.children {
-        if let Some(found) = find_tooltip_by_key_with_inherited(child, key, inherited) {
-            return Some(found);
-        }
-    }
-    None
 }
 
 /// Resolve inherited tooltip text, its owning node, and the owner's
@@ -724,38 +398,6 @@ pub fn find_tooltip_target_by_key<'a>(
         None,
     )
     .flatten()
-}
-
-/// Outer `Option` = keyed node found; inner = its nearest tooltip owner.
-fn find_tooltip_target_by_key_inner<'a>(
-    node: &'a WidgetNode,
-    key: &str,
-    offset_x: f32,
-    offset_y: f32,
-    inherited: Option<TooltipTarget<'a>>,
-) -> Option<Option<TooltipTarget<'a>>> {
-    if !node_allows(node, InteractionTarget::Tooltip) {
-        return None;
-    }
-    let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-    let owner_tooltip = node_tooltip_text_ref(node).map(|text| TooltipTarget {
-        owner: node,
-        text,
-        bounds: node_rect_with_offset(node, offset_x, offset_y),
-    });
-    let inherited = owner_tooltip.or(inherited);
-    if node.mesh_key().is_some_and(|k| k == key) {
-        return Some(inherited);
-    }
-    let (child_offset_x, child_offset_y) = child_offsets_with_scroll(node, offset_x, offset_y);
-    for child in &node.children {
-        if let Some(text) =
-            find_tooltip_target_by_key_inner(child, key, child_offset_x, child_offset_y, inherited)
-        {
-            return Some(text);
-        }
-    }
-    None
 }
 
 pub fn is_input_key(tree: &WidgetNode, key: &str) -> bool {
@@ -1798,79 +1440,6 @@ mod tests {
         assert_eq!(find_node_bounds_by_key(&root, "disabled", 0.0, 0.0), None);
         assert_eq!(find_scrollable_at(&root, 110.0, 20.0), None);
         assert!(pointer_press_hit(&root, 110.0, 20.0).target.is_none());
-    }
-
-    // cargo test -p mesh-core-interaction --release -- borrowed_find_nodes_keys_beat_owned_results --ignored --nocapture
-    #[test]
-    #[ignore = "release-only borrowed node-key result microbenchmark"]
-    fn borrowed_find_nodes_keys_beat_owned_results() {
-        use std::hint::black_box;
-        use std::time::Instant;
-
-        fn collect_owned<'a>(
-            node: &'a WidgetNode,
-            keys: &std::collections::HashSet<&str>,
-            offset_x: f32,
-            offset_y: f32,
-            found: &mut std::collections::HashMap<String, (&'a WidgetNode, ContentBounds)>,
-        ) {
-            if found.len() == keys.len() {
-                return;
-            }
-            let (offset_x, offset_y) = apply_transform_offset(node, offset_x, offset_y);
-            if let Some(key) = node.mesh_key()
-                && keys.contains(key)
-            {
-                found.insert(
-                    key.to_owned(),
-                    (node, node_rect_with_offset(node, offset_x, offset_y)),
-                );
-            }
-            let (child_offset_x, child_offset_y) =
-                child_offsets_with_scroll(node, offset_x, offset_y);
-            for child in &node.children {
-                collect_owned(child, keys, child_offset_x, child_offset_y, found);
-                if found.len() == keys.len() {
-                    break;
-                }
-            }
-        }
-
-        let root = indexed_tree(32, 8);
-        let owned_keys: Vec<String> = root
-            .children
-            .iter()
-            .flat_map(|row| row.children.iter())
-            .filter_map(|node| node.mesh_key().map(str::to_owned))
-            .collect();
-        let keys: std::collections::HashSet<&str> = owned_keys.iter().map(String::as_str).collect();
-        let iterations = 20_000usize;
-
-        let owned_started = Instant::now();
-        let mut owned_total = 0usize;
-        for _ in 0..iterations {
-            let mut found = std::collections::HashMap::with_capacity(keys.len());
-            collect_owned(black_box(&root), black_box(&keys), 0.0, 0.0, &mut found);
-            owned_total = owned_total.wrapping_add(found.len());
-            black_box(found);
-        }
-        let owned = owned_started.elapsed();
-
-        let borrowed_started = Instant::now();
-        let mut borrowed_total = 0usize;
-        for _ in 0..iterations {
-            let found = find_nodes_by_keys(black_box(&root), black_box(&keys));
-            borrowed_total = borrowed_total.wrapping_add(found.len());
-            black_box(found);
-        }
-        let borrowed = borrowed_started.elapsed();
-
-        let speedup = owned.as_secs_f64() / borrowed.as_secs_f64();
-        eprintln!(
-            "MESH_PERF metric=borrowed_find_nodes_keys_speedup value={speedup:.3} owned={owned:?} borrowed={borrowed:?}"
-        );
-        assert_eq!(owned_total, borrowed_total);
-        assert!(borrowed < owned);
     }
 
     // cargo test -p mesh-core-interaction --release -- find_nodes_by_keys_beats_per_key_lookups --ignored --nocapture

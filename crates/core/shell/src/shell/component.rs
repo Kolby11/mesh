@@ -126,6 +126,7 @@ struct CachedServicePayload {
     source_module: String,
 }
 
+#[cfg(test)]
 fn update_cached_service_payload(
     cache: &mut HashMap<String, CachedServicePayload>,
     service_name: &str,
@@ -303,6 +304,7 @@ impl InstanceKeyInterner {
         key
     }
 
+    #[cfg(test)]
     fn intern_embedded(&mut self, host: &str, kind: &str, identifier: &str) -> Arc<str> {
         self.intern_embedded_occurrence(host, kind, identifier, None, None, None)
     }
@@ -434,7 +436,6 @@ pub(super) struct ScrollAnimation {
 pub(super) struct ScrollbarDragState {
     pub(super) node_id: NodeId,
     pub(super) axis: ScrollbarAxis,
-    pub(super) axis_origin: (f32, f32),
     pub(super) axis_direction: (f32, f32),
     pub(super) grab_offset: f32,
     pub(super) track_start: f32,
@@ -724,6 +725,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// This component's resolved overrides: `settings.namespace(&namespace)`.
     /// Cached because it is handed to Luau on every runtime creation.
     settings_json: serde_json::Value,
+    child_settings_cache: RefCell<HashMap<String, HashMap<PathBuf, serde_json::Value>>>,
     /// Reduced-motion preference captured as an immutable decision for the
     /// current animation/scroll scheduling pass.
     motion_policy: MotionPolicy,
@@ -732,6 +734,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// save, and a user fixing one of five mistakes should hear about four.
     settings_diagnostics: Vec<mesh_core_config::SettingsDiagnostic>,
     pub(super) surface_layout: SurfaceLayoutSettings,
+    /// The root asked for the whole output (`height: 100%` on a top/bottom
+    /// surface), so the layer request spans both axes.
+    pub(super) surface_fills_output: bool,
     /// The normalized settings policy and its accepted monotonic generation.
     surface_policy: SurfacePolicySnapshot,
     surface_policy_generation: SurfacePolicyGenerator,
@@ -1279,9 +1284,11 @@ impl FrontendSurfaceComponent {
             settings,
             settings_namespace,
             settings_json: settings_state.effective,
+            child_settings_cache: RefCell::new(HashMap::new()),
             motion_policy,
             settings_diagnostics: settings_state.diagnostics,
             surface_layout: settings_state.layout.clone(),
+            surface_fills_output: false,
             surface_policy,
             surface_policy_generation,
             pending_surface_role_change: None,
@@ -1538,6 +1545,7 @@ impl FrontendSurfaceComponent {
     pub(super) fn adopt_frontend_catalog(&mut self, handle: FrontendCatalogHandle) {
         let snapshot = handle.snapshot();
         self.frontend_catalog_handle = handle;
+        self.child_settings_cache.get_mut().clear();
         self.frontend_catalog = snapshot.catalog;
         self.frontend_catalog_version = snapshot.version;
         self.last_frontend_frame = None;

@@ -277,6 +277,15 @@ fn doc_for(path: &str) -> &'static str {
              instead of rasterized, bounding the worst frame a stylesheet can ask for."
         }
 
+        "shell.render.backdrop" => {
+            "The image `backdrop-filter: refract()` samples. A Wayland client cannot \
+             read what is behind its surfaces, so liquid glass refracts this image instead."
+        }
+        "shell.render.backdrop.image" => {
+            "Absolute path of the backdrop image, cover-fit to each output; normally the \
+             wallpaper the active profile paints. Unset disables refraction."
+        }
+
         // shell.tooltip
         "shell.tooltip" => "Tooltip timing and placement defaults.",
         "shell.tooltip.position" => {

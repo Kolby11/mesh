@@ -193,7 +193,9 @@ impl PropCssDomain {
 }
 
 /// Extract component-prop references from a serialized CSS value.
-pub(super) fn prop_references(value: &str) -> Result<Vec<String>, String> {
+pub(super) fn prop_references(
+    value: &str,
+) -> Result<Vec<(String, SourceSpan)>, (SourceSpan, String)> {
     let mut references = Vec::new();
     let mut cursor = 0;
     while cursor < value.len() {
@@ -201,8 +203,16 @@ pub(super) fn prop_references(value: &str) -> Result<Vec<String>, String> {
             .chars()
             .next()
             .expect("cursor stays on a UTF-8 boundary");
+        if value[cursor..].starts_with("/*") {
+            cursor += value[cursor + 2..]
+                .find("*/")
+                .map(|end| end + 4)
+                .unwrap_or(value.len() - cursor);
+            continue;
+        }
         if matches!(ch, '\'' | '"') {
-            cursor = skip_css_string(value, cursor)?;
+            cursor = skip_css_string(value, cursor)
+                .map_err(|message| (SourceSpan::new(cursor, cursor + 1), message))?;
             continue;
         }
         if !value[cursor..].starts_with("prop(") {
@@ -215,16 +225,26 @@ pub(super) fn prop_references(value: &str) -> Result<Vec<String>, String> {
             continue;
         }
 
-        let end = find_function_end(value, start + "prop".len())
-            .ok_or_else(|| "unterminated `prop(...)` reference".to_string())?;
+        let end = find_function_end(value, start + "prop".len()).ok_or_else(|| {
+            (
+                SourceSpan::new(start, value.len()),
+                "unterminated `prop(...)` reference".to_string(),
+            )
+        })?;
         let name = value[start + "prop(".len()..end].trim();
         if name.is_empty() {
-            return Err("`prop()` needs a non-empty prop name".into());
+            return Err((
+                SourceSpan::new(start, end + 1),
+                "`prop()` needs a non-empty prop name".into(),
+            ));
         }
         if name.contains('(') || name.contains(')') {
-            return Err(format!("`prop({name})` cannot contain nested calls"));
+            return Err((
+                SourceSpan::new(start, end + 1),
+                format!("`prop({name})` cannot contain nested calls"),
+            ));
         }
-        references.push(name.to_string());
+        references.push((name.to_string(), SourceSpan::new(start, end + 1)));
         cursor = end + 1;
     }
     Ok(references)

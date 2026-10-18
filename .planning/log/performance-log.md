@@ -1480,6 +1480,9 @@ section noted.
 | 2026-07-30 | Downsample → blur → upsample image-filter chain for `filter: blur()` layers | P | Slower at every radius (512x512 layer, 200 frames: r8 254ms full-res vs 562ms quarter-res; r32 287ms vs 479ms; r64 310ms vs 488ms). Skia's raster blur already resamples internally for wide kernels, so an explicit chain only adds two transforms and an intermediate. The `downscale` setting was removed rather than shipped as a slower default |
 | 2026-09-30 | Borrowed keys + multiply-rotate hasher in `validate_widget_tree` | — | Audio poll 3.03–3.07ms vs 3.03–3.10ms (300 events × 3); the per-build validation walk is not hash-bound enough to show. Reverted |
 | 2026-09-30 | Full-restyle `StyleShareCache` reusing cloned `ComputedStyle`s by node inputs | E | 99.3% hit rate but no frame win: 15.51–15.91ms before vs 15.13–16.07ms after on `appearance_frame_cost_profile`; key hash/compare plus a full style clone costs as much as resolution. Archived on local branch `archive/style-share-cache` |
+| 2026-10-18 | Separate `Value::hash`/`RandomState` pass for validated backend state | runtime boundary | Unchanged 128-row, 12,626-byte snapshots, release, 2,000 iterations: 177.458–314.765 ms baseline vs 226.492–274.504 ms candidate over two attempted runs. Missed the 1.05x gate (1.15x then 0.78x); replaced by a fingerprint fused into validation's serialization pass |
+| 2026-10-18 | Early return for the flat interior of the liquid-glass SkSL lens | rendering | Release, three interleaved runs of ten rounded 180×40 pills: 9.269–9.338 ms baseline vs 10.524–10.660 ms candidate (0.87–0.89x). One 360×240 card probe reached only 1.08x, missing the 1.2x gate. Reverted; unrefracted wallpaper image-shader fast path retained |
+| 2026-10-18 | FNV-1a fingerprint fused into bounded JSON serialization | runtime boundary | Three controlled first-sample attempts on unchanged 128-row / 12,626-byte state, release, 2,000 iterations: 178.085–191.996 ms baseline vs 202.623–204.492 ms fused (0.87–0.95x); each failed the 1.05x gate. Reverted; fast keyed `ahash` over the typed value is the measured alternative |
 
 ## 2026-07-30 — element `filter: blur()` subtree layers
 
@@ -5164,3 +5167,189 @@ were reverted. The smaller property-specific operation table remains, with
 expanded parity inputs and separate ownership in `resolve/literal.rs`. Broader
 lowering needs a representation that preserves scalar dispatch costs; do not
 retry one larger flat operation enum without checking this measurement.
+
+## 2026-10-17 — CMP-13 child-settings cache key experiment
+
+Debug test profile, `CARGO_INCREMENTAL=0`, local x86_64 development host under
+`nix develop`; `child_settings_resolution_workload`, four runs of 2,000 child
+settings projections with 32 declared props and no stored overrides. Direct
+resolution took 2.460–3.990 ms; the first cache, keyed by module plus deep prop
+schema equality on every lookup, took 3.195–5.422 ms. This key design is rejected:
+comparing the complete schema costs more than resolving an empty namespace.
+The replacement uses the canonical source path within the immutable catalog /
+settings snapshot, with cache invalidation on source, catalog or settings
+replacement. Populated-namespace and replacement-key measurements follow after
+validation. No performance gate is claimed for this experiment.
+
+
+## 2026-10-18 — rejected glass-interior and separate state-hash experiments
+
+Area: liquid-glass raster and backend state publication. AMD Ryzen 7 7840HS,
+release (thin LTO, one codegen unit), CPU Skia raster for glass. Reviewed the
+rejected-experiments table before starting.
+
+A separate keyed `Value::hash` pass removed retained JSON cloning but added a
+second content traversal after validation. On 128-row, 12,626-byte snapshots,
+2,000 unchanged publications per sample, two attempted interleaved samples took
+177.458–314.765 ms before versus 226.492–274.504 ms after. The second sample
+failed `validated_state_publication_profile`'s 1.05x gate; no changed-state win
+is claimed for this design. The replacement fuses the fingerprint into the
+existing bounded serialization writer.
+
+An SkSL early return when the signed distance was outside the refracting rim
+preserved reference pixels but regressed rounded pills. Three interleaved,
+warmed samples of ten 180×40 draws (radius 20, blur 5, depth 12, edge 11,
+dispersion 1.5; cached 1920×1080 backdrop) took 9.269–9.338 ms before versus
+10.524–10.660 ms after (0.87–0.89x). A single ten-frame 360×240 card probe
+(radius 25, blur 6, depth 40, edge 30, dispersion 4) took 107.834 ms before
+versus 100.134 ms after (1.08x), failing `glass_interior_speedup`'s 1.2x gate;
+the run stopped there. Reverted this shortcut. The separate direct image-shader
+path for zero-edge, zero-dispersion wallpaper passed its 1.2x gate and remains.
+
+
+## 2026-10-18 — fused state hash rejected; fast keyed value hash passes
+
+Follow-up to the preceding state-hash experiment. AMD Ryzen 7 7840HS,
+release (thin LTO, one codegen unit), 128 nested device records / 12,626 encoded
+bytes, 2,000 publications per sample.
+
+Fusing FNV-1a into the bounded serialization writer still spent too much time
+hashing bytes, including JSON punctuation. Three controlled first-sample
+attempts took 178.085–191.996 ms baseline versus 202.623–204.492 ms candidate
+(0.87–0.95x); each aborted at the 1.05x unchanged-state gate. Reverted the writer
+and shared-runtime API changes completely.
+
+An isolated hash-only probe on the same value, 10,000 hashes × three runs,
+measured std `RandomState` at 179.511–180.178 ms versus `ahash::RandomState` at
+90.767–93.048 ms. This supplied new evidence for revisiting the separate hash
+pass with a different implementation. The final publication harness guards the
+input at each legacy validation boundary with `black_box`; its common snapshot
+clone, callback budget reservation, and payload drop remain in both paths.
+
+With keyed `ahash`, three warmed, alternating-order samples passed
+`validated_state_publication_profile`'s 1.05x gate in both workloads:
+
+| Workload (2,000 publications) | Legacy validation + retained clone | Validated snapshot + fingerprint | Paired speedup |
+| --- | --- | --- | --- |
+| Unchanged | 176.038–178.055 ms | 143.109–146.284 ms | 1.22–1.23x |
+| Alternating generation field | 301.504–308.900 ms | 143.448–146.937 ms | 2.05–2.13x |
+
+These are Rust publication-boundary measurements, including synthetic snapshot
+construction by cloning the common input. They exclude Lua conversion, channel
+transport, shell contract validation, and rendering; no whole-frame speedup is
+claimed. Final implementation/validation is recorded below when the batch lands.
+
+
+## 2026-10-18 — coalesced reload maintenance and blocking file-watch control
+
+Area: idle scheduling. AMD Ryzen 7 7840HS, workspace release profile (thin LTO,
+one codegen unit). Removed the completed idle-wakeups item from the backlog.
+
+Healthy-watcher theme, settings, frontend, and watch-set checks now share the
+same two-second deadline, instead of completing and rearming independently.
+The scheduler includes the watch-set deadline explicitly. An unavailable
+watcher uses the existing shorter scan intervals; filesystem events force
+immediate checks. A dedicated control eventfd wakes the watcher for replacement
+and shutdown, allowing it to block on inotify/control readiness instead of
+sleeping for 20 ms between command checks.
+
+**Measured.** `coalesced_reload_wakeup_profile`, three deterministic completion-
+phase variations across 60 maintenance passes / 120 modeled seconds, produced
+180 independent reload deadlines versus 60 shared deadlines in every run.
+This measures deadline coalescing, not observed whole-session shell wakeups.
+`watcher_idle_wait_profile`, three paired 160 ms idle waits, measured 7 polling
+wakeups versus 0 blocking-wait wakeups in every run, excluding shutdown. Both
+structural count gates are included in `tools/check-performance`.
+
+**Verified.** Release: four watch-set/worker tests, eight scheduler tests, three
+watcher lifecycle tests, retired-generation rejection, and render-stall backoff
+passed. Worker tests cover idle rebinding, no initially bound directories,
+file-change delivery, and explicit shutdown wakeup. The architecture overview
+records the maintenance and fallback contract. Full live-desktop CPU/fork-rate
+measurement remains outside these isolated wait/deadline gates.
+
+
+## 2026-10-18 — validated backend publication and measured glass wallpaper fast path
+
+Area: backend state publication and software backdrop raster. AMD Ryzen 7
+7840HS, workspace release profile (thin LTO, one codegen unit). Removed the
+completed backend-emit and glass profiling/wallpaper items from the backlog.
+The other 23 performance items remain open. Earlier rejected experiments above
+are retained, including the reverted glass-interior shortcut.
+
+**Backend implementation.** Backend callbacks return immutable `BackendState`
+values. Their private constructor validates session and transport byte/depth
+limits once, reserves callback output, and computes a keyed `ahash` fingerprint.
+`emit`, `emit_json`, `emit_unavailable`, and exported global state all use that
+constructor. Snapshot extraction moves the already validated value; publication
+moves its JSON into the channel and retains only the fingerprint. The last
+fingerprint advances after a successful send. No JSON encoding, exact-equality
+clone, or second validation is retained in the orchestrator's publication path.
+`ahash` was already in the dependency graph and is now a direct scripting
+dependency.
+
+**Final backend measurements.** `validated_state_publication_profile`, 128
+nested device rows / 12,626 encoded bytes, 2,000 publications per sample, three
+warmed alternating-order samples per workload immediately after the final build:
+
+| Workload | Legacy validation + retained clone | Validated snapshot + fingerprint | Paired speedup |
+| --- | --- | --- | --- |
+| Unchanged | 179.684–337.302 ms | 146.020–194.202 ms | 1.09–1.74x |
+| Alternating generation field | 308.638–316.087 ms | 147.779–149.549 ms | 2.07–2.12x |
+
+All samples passed the 1.05x gate. The immediate post-build unchanged samples
+have wider clock/load variance than the earlier controlled 1.22–1.23x result;
+both ranges are recorded rather than dropping the outlier. These remain Rust
+boundary microbenchmarks, not end-to-end script or frame timings. For
+reproducibility, the exploratory hash-only probe in the preceding entry used
+standalone `rustc -O -C lto=thin` with default codegen units; the publication
+gates use the workspace release settings above.
+
+**Glass implementation.** Zero-edge, zero-dispersion backdrop draws reuse the
+prepared image shader directly, retaining source alpha, output-coordinate
+mapping, blur preparation, and the same rounded-rect clip. Refraction and
+highlighted rims use the original lens shader. `glass_raster_profile` retains
+an independent original SkSL reference for the wallpaper A/B comparison.
+
+**Final glass measurements.** Cached cover-fit source and precompiled shaders,
+three alternating-order samples of ten CPU raster draws per case. Allocation,
+image decode, Lua, display-list construction, SHM copy, and compositor time are
+outside this draw-only benchmark:
+
+| Unrefracted output | Original lens, ten draws | Direct image shader, ten draws | Paired speedup |
+| --- | --- | --- | --- |
+| 1920×1080 | 1,918.276–2,049.525 ms | 51.430–52.950 ms | 37.19–39.01x |
+| 3840×2160 | 7,736.758–7,956.938 ms | 208.691–209.469 ms | 37.03–38.13x |
+
+`glass_raster_profile` passes `unrefracted_wallpaper_speedup`'s 1.2x gate at
+both sizes and is included in `tools/check-performance`. Regular lens costs
+are measured, not optimized by this batch: three ten-draw samples each give
+0.968–0.981 ms/draw for a 180×40 pill (radius 20, blur 5, depth 12, edge 11,
+dispersion 1.5), 10.767–10.921 ms/draw for a 360×240 card (radius 25, blur 6,
+depth 40, edge 30, dispersion 4), and 261.300–262.314 ms/draw for a 1920×1080
+stress lens with the card's filter. All glass samples use a cached 1920×1080
+backdrop. This does not claim that a retained idle wallpaper redraws every frame.
+
+**Verified.** Final release tests: render 285 passed / 37 ignored; scripting
+backend 127 passed / 1 ignored; backend orchestration 46 passed; the state and
+glass performance gates passed. State regressions cover session/transport and
+callback limits, nested changes, duplicate suppression, and failed delivery.
+Glass refraction matches reference pixels exactly; unrefracted draws differ
+by at most one 8-bit channel level for translucent fractional samples because
+the direct image and runtime-effect raster paths round differently. Cases cover
+blur, fractional origins, and asymmetric corners. Final `cargo check --tests -p
+mesh-core-shell` and script syntax/changed-file whitespace checks pass.
+
+The wider shell backend-lifecycle run has 37 passed / 5 failed. All five failing
+names also fail in cached pre-change binary `mesh_core_shell-7a1a32dc7d159cd0`
+(built 2026-10-17; 36 passed / 5 failed):
+`backend_lifecycle_uses_explicit_active_provider_from_package_graph`,
+`changing_ui_font_repaints_the_mounted_settings_surface`,
+`committed_activation_replaces_the_previous_capability_grants`,
+`frontend_module_activation_mounts_shipped_surface_live`, and
+`legacy_graph_delta_uses_the_activation_coordinator_commit_boundary`. These
+fixture/configuration failures are not claimed fixed by this performance batch.
+
+**Backdrop dimensions clarification.** The cached 1920×1080 source above
+refers to the regular-lens probes. Each wallpaper probe uses a prepared image
+matching its own output dimensions (1920×1080 or 3840×2160).

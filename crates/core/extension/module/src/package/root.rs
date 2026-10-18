@@ -150,6 +150,16 @@ impl RootModuleGraphManifest {
     /// `module.json` envelope, so writing the derived struct directly would
     /// accidentally drop the `mesh` wrapper and any author-owned fields.
     pub fn save(&self, path: &Path) -> Result<(), ModuleManifestError> {
+        let parent = path.parent().unwrap_or_else(|| Path::new("."));
+        let lock = super::profile::acquire_control_plane_lock(parent)?;
+        self.save_locked(path, &lock)
+    }
+
+    pub(super) fn save_locked(
+        &self,
+        path: &Path,
+        _lock: &super::profile::ControlPlaneLock,
+    ) -> Result<(), ModuleManifestError> {
         self.validate()?;
         if path.exists() {
             super::validate_regular_file(path, "root module graph")?;
@@ -186,7 +196,7 @@ impl RootModuleGraphManifest {
             }
         })?;
         content.push('\n');
-        super::profile::atomic_write(path, content.as_bytes())
+        super::profile::atomic_write_unlocked(path, content.as_bytes())
     }
 }
 
@@ -221,7 +231,7 @@ impl RootModuleGraphJson {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct RootMeshSection {
+pub(super) struct RootMeshSection {
     #[serde(default = "default_schema_version")]
     schema_version: u32,
     #[serde(default = "default_modules_dir")]
@@ -232,11 +242,7 @@ struct RootMeshSection {
     disabled: Vec<String>,
     #[serde(default)]
     providers: HashMap<String, String>,
-    #[serde(
-        default,
-        rename = "capabilityApprovals",
-        alias = "capability_approvals"
-    )]
+    #[serde(default, rename = "capabilityApprovals")]
     capability_approvals: BTreeMap<String, Vec<String>>,
     #[serde(default, rename = "trustPolicy")]
     trust_policy: TrustPolicy,

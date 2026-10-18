@@ -345,3 +345,7 @@ generated settings.
    in-script backend/interface props remain (§5).
 
 No phase leaves an old config path readable (no-backward-compat rule).
+
+CSS `prop()` references in stylesheets and static inline `style` attributes are
+validated against the component declarations at compile time. Diagnostics span
+the offending call, including when the same prop appears in several declarations.

@@ -1,0 +1,47 @@
+{
+  "name": "@mesh/glass-widgets",
+  "version": "0.1.0",
+  "description": "Desktop-layer liquid-glass cards: a now-playing player and a weather forecast.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "optionalInterfaces": {
+        "mesh.media": ">=1.0",
+        "mesh.weather": ">=1.0"
+      },
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      },
+      "capabilities": [
+        "shell.surface",
+        "theme.read",
+        "locale.read",
+        "service.media.read",
+        "service.media.control",
+        "service.weather.read"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "top",
+      "layer": "bottom",
+      "keyboard_mode": "none",
+      "visible_on_start": true
+    },
+    "provides": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Glass desktop widgets"
+        }
+      ]
+    },
+    "icons": {
+      "ignore_shell_default": true
+    }
+  }
+}

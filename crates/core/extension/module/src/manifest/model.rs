@@ -1028,6 +1028,41 @@ pub struct IconPackSection {
     pub vocabularies: HashMap<String, HashMap<String, IconMappingTarget>>,
 }
 
+impl IconPackSection {
+    /// Validate the resource-pack contract shared with prepared icon bindings.
+    pub fn validate(&self) -> Result<(), String> {
+        mesh_core_icon::validate_icon_pack(&mesh_core_icon::IconPackValidation {
+            pack_id: &self.id,
+            mappings: self
+                .mappings
+                .iter()
+                .map(|(name, mapping)| (name.as_str(), mapping.target.as_str()))
+                .collect(),
+            vocabularies: self
+                .vocabularies
+                .iter()
+                .map(|(owner, mappings)| {
+                    (
+                        owner.as_str(),
+                        mappings
+                            .iter()
+                            .map(|(name, mapping)| (name.as_str(), mapping.target.as_str()))
+                            .collect(),
+                    )
+                })
+                .collect(),
+            fonts: self
+                .requires
+                .fonts
+                .iter()
+                .map(|font| (font.alias.as_str(), font.family.as_str()))
+                .collect(),
+            theme_count: self.requires.themes.len(),
+        })
+        .map_err(|error| error.to_string())
+    }
+}
+
 /// Font-pack module section. Mappings are semantic role names (for example
 /// `body` or `mono`) to exact installed family names; chain composition and
 /// pack-qualified resolution belong to the resource runtime.

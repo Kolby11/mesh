@@ -1030,18 +1030,6 @@ impl Shell {
         self.pending_resource_preparation.is_some() || self.pending_profile_switch.is_some()
     }
 
-    pub(in crate::shell) fn profile_candidate_is_pending(
-        &self,
-        interface: &str,
-        provider_id: &str,
-    ) -> bool {
-        self.profile_candidate_is_pending_at_identity(
-            interface,
-            provider_id,
-            mesh_core_backend::BackendIdentity::default(),
-        )
-    }
-
     pub(in crate::shell) fn profile_candidate_is_pending_at_identity(
         &self,
         interface: &str,
@@ -1057,12 +1045,11 @@ impl Shell {
                     .read()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     == provider_id
-                    && (identity == mesh_core_backend::BackendIdentity::default()
-                        || *slot
-                            .identity
-                            .read()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner())
-                            == identity)
+                    && *slot
+                        .identity
+                        .read()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        == identity
             })
     }
 
@@ -1856,20 +1843,6 @@ impl Shell {
         VecDeque::new()
     }
 
-    pub(in crate::shell) fn handle_profile_backend_lifecycle(
-        &mut self,
-        interface: &str,
-        provider_id: &str,
-        status: BackendRuntimeStatus,
-    ) -> bool {
-        self.handle_profile_backend_lifecycle_at_identity(
-            interface,
-            provider_id,
-            mesh_core_backend::BackendIdentity::default(),
-            status,
-        )
-    }
-
     pub(in crate::shell) fn handle_profile_backend_lifecycle_at_identity(
         &mut self,
         interface: &str,
@@ -1890,12 +1863,11 @@ impl Shell {
                     .read()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     == provider_id
-                    && (identity == mesh_core_backend::BackendIdentity::default()
-                        || *slot
-                            .identity
-                            .read()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner())
-                            == identity)
+                    && *slot
+                        .identity
+                        .read()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        == identity
             });
         if !is_candidate {
             return false;
@@ -1941,20 +1913,6 @@ impl Shell {
         true
     }
 
-    pub(in crate::shell) fn capture_profile_backend_update(
-        &mut self,
-        interface: &str,
-        provider_id: &str,
-        event: ServiceEvent,
-    ) -> bool {
-        self.capture_profile_backend_update_at_identity(
-            interface,
-            provider_id,
-            mesh_core_backend::BackendIdentity::default(),
-            event,
-        )
-    }
-
     pub(in crate::shell) fn capture_profile_backend_update_at_identity(
         &mut self,
         interface: &str,
@@ -1974,12 +1932,11 @@ impl Shell {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .as_str()
             == provider_id;
-        let identity_matches = identity == mesh_core_backend::BackendIdentity::default()
-            || *candidate
-                .identity
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                == identity;
+        let identity_matches = *candidate
+            .identity
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            == identity;
         if !is_candidate || !identity_matches {
             return false;
         }
@@ -2046,11 +2003,15 @@ impl Shell {
         } else {
             None
         };
-        if pending.persist_active_profile
-            && let Err(error) = paths.set_active(&plan.profile_id)
-        {
-            self.abort_profile_candidate(pending, error.to_string());
-            return VecDeque::new();
+        if pending.persist_active_profile {
+            let result = match pending.package_transaction.as_mut() {
+                Some(transaction) => transaction.set_active_profile(&paths, &plan.profile_id),
+                None => paths.set_active(&plan.profile_id),
+            };
+            if let Err(error) = result {
+                self.abort_profile_candidate(pending, error.to_string());
+                return VecDeque::new();
+            }
         }
         if let Err(error) = self.commit_resource_snapshot_for_settings(
             &plan.resources,
@@ -2058,6 +2019,7 @@ impl Shell {
             false,
         ) {
             if pending.persist_active_profile
+                && pending.package_transaction.is_none()
                 && let Err(restore_error) = Self::restore_active_profile_if_current(
                     &paths,
                     &plan.profile_id,
@@ -2293,7 +2255,7 @@ impl Shell {
                 source_module: provider_id,
                 payload,
             };
-            if self.record_latest_service_state(&event) {
+            if self.record_shell_service_state(&event) {
                 match self.deliver_service_event(&event) {
                     Ok(next) => requests.extend(next),
                     Err(error) => {

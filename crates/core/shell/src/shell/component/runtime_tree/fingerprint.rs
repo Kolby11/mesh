@@ -221,6 +221,10 @@ pub(super) fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher)
     style.box_shadow.inset.hash(hasher);
     style.filter.blur_radius.to_bits().hash(hasher);
     style.backdrop_filter.blur_radius.to_bits().hash(hasher);
+    style.backdrop_filter.refract.hash(hasher);
+    style.backdrop_filter.refract_depth.to_bits().hash(hasher);
+    style.backdrop_filter.refract_edge.to_bits().hash(hasher);
+    style.backdrop_filter.dispersion.to_bits().hash(hasher);
     hash_option_f32(style.inset_top, hasher);
     hash_option_f32(style.inset_right, hasher);
     hash_option_f32(style.inset_bottom, hasher);

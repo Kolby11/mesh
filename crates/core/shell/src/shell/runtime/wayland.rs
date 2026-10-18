@@ -68,6 +68,7 @@ impl Shell {
         )
     }
 
+    #[cfg(test)]
     pub(in crate::shell) fn dispatch_wayland(&mut self) -> Result<(), ShellRunError> {
         self.dispatch_wayland_inner()?;
         self.process_effects();

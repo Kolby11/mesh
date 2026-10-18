@@ -295,7 +295,8 @@ impl Shell {
         let mut next_deadline = self
             .next_frontend_reload_check
             .min(self.next_theme_reload_check)
-            .min(self.next_shell_settings_reload_check);
+            .min(self.next_shell_settings_reload_check)
+            .min(self.next_watch_reconcile);
 
         for state in self.command_throttle.values() {
             if state.pending.is_none() {
@@ -482,7 +483,8 @@ impl Shell {
             while !self.core.shutting_down {
                 let loop_started = std::time::Instant::now();
                 if loop_started >= self.next_watch_reconcile {
-                    self.next_watch_reconcile = loop_started + WATCH_RECONCILE_INTERVAL;
+                    self.next_watch_reconcile =
+                        loop_started + self.reload_poll_interval(WATCH_RECONCILE_INTERVAL);
                     self.reconcile_file_watcher();
                 }
                 pending.extend(self.reload_theme_if_changed()?);
@@ -769,11 +771,8 @@ impl Shell {
                 ) {
                     return Ok(());
                 }
-                let provider_is_active = if identity == BackendIdentity::default() {
-                    self.backend_provider_is_active(&interface, &provider_id)
-                } else {
-                    self.backend_provider_is_active_at_identity(&interface, &provider_id, identity)
-                };
+                let provider_is_active =
+                    self.backend_provider_is_active_at_identity(&interface, &provider_id, identity);
                 if !provider_is_active {
                     tracing::debug!(
                         interface,
@@ -822,11 +821,11 @@ impl Shell {
                 result,
                 outcome,
             } => {
-                let provider_is_active = (if identity == BackendIdentity::default() {
-                    self.backend_provider_is_active(&interface, &provider_id)
-                } else {
-                    self.backend_provider_is_active_at_identity(&interface, &provider_id, identity)
-                }) && self
+                let provider_is_active = (self.backend_provider_is_active_at_identity(
+                    &interface,
+                    &provider_id,
+                    identity,
+                )) && self
                     .backend_runtimes
                     .get(&interface)
                     .is_some_and(|slot| slot.generation == generation);
@@ -1276,6 +1275,18 @@ impl Shell {
         }
     }
 
+    pub(in crate::shell) fn next_reload_check(
+        &self,
+        now: std::time::Instant,
+        unwatched: Duration,
+    ) -> std::time::Instant {
+        if self.file_watcher_active && self.next_watch_reconcile > now {
+            self.next_watch_reconcile
+        } else {
+            now + self.reload_poll_interval(unwatched)
+        }
+    }
+
     fn schedule_reload_checks_now(&mut self) {
         let now = std::time::Instant::now();
         self.next_theme_reload_check = now;
@@ -1285,7 +1296,7 @@ impl Shell {
     }
 }
 
-/// Longest delay before the shell loop re-derives the hot-reload watch set.
+/// Watch-set maintenance interval without a healthy watcher.
 const WATCH_RECONCILE_INTERVAL: Duration = Duration::from_secs(1);
 /// Metadata-poll fallback interval while the managed file watcher is healthy.
 const WATCHED_RELOAD_POLL_INTERVAL: Duration = Duration::from_secs(2);

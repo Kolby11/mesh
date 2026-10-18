@@ -1,0 +1,87 @@
+<template>
+    <row class="pill weather" hidden={not available} title={summary} aria-label={summary}>
+        <icon class="glyph" name={glyph} size="14" />
+        <text class="temp">{temperature}</text>
+    </row>
+</template>
+
+<script lang="luau">
+local weather = require("mesh.weather")
+
+local GLYPHS = {
+    clear = "weather-clear",
+    ["partly-cloudy"] = "weather-few-clouds",
+    cloudy = "weather-overcast",
+    fog = "weather-fog",
+    drizzle = "weather-showers-scattered",
+    rain = "weather-showers",
+    snow = "weather-snow",
+    storm = "weather-storm",
+}
+
+available = false
+glyph = GLYPHS.cloudy
+temperature = ""
+summary = ""
+
+effect(function()
+    available = weather.available == true
+    if not available then
+        return
+    end
+    local condition = weather.condition or "cloudy"
+    if condition == "clear" and weather.is_day == false then
+        glyph = "weather-clear-night"
+    else
+        glyph = GLYPHS[condition] or GLYPHS.cloudy
+    end
+    temperature = string.format("%.1f°%s", weather.temperature or 0, weather.unit or "C")
+    summary = (weather.location or "") .. " " .. condition
+end)
+</script>
+
+<style>
+    .pill {
+        height: 36px;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--color-glass-rim);
+        background-image: linear-gradient(to bottom, #b468ff4d, #7a2ee033);
+        box-shadow: 0 4px 14px #14003259;
+        backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
+    }
+
+    .weather {
+        gap: 7px;
+        padding: 0 14px 0 11px;
+    }
+
+    .glyph {
+        width: 20px;
+        height: 20px;
+        color: #f5ecff;
+    }
+
+    .temp {
+        height: 20px;
+        font-size: 14px;
+        font-weight: 600;
+        color: #f5ecff;
+    }
+
+    /* Motion: one vocabulary for the whole shell, all from theme tokens.
+    Containers lift by --animation-lift-hover and brighten their rim; controls
+    scale by --animation-scale-hover/-press and ring with the focus token. */
+
+    .pill {
+        transform: translateY(0px);
+        transition-property: transform, border-color, opacity;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .pill:hover {
+        transform: translateY(var(--animation-lift-hover));
+        border-color: var(--color-glass-rim-hover);
+    }
+</style>

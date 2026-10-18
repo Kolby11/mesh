@@ -117,6 +117,7 @@ pub(super) fn apply_runtime_attribute_state_for_ids(
 /// popover content keeps its intrinsic size at the wrapper's in-flow position.
 /// Child-surface paint and input translate the subtree by its own layout origin.
 /// See the node's typed composition metadata.
+#[cfg(test)]
 pub(super) fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
     collapse_promoted_popover_node(node);
     for child in &mut node.children {
@@ -145,18 +146,6 @@ fn collapse_promoted_popover_node(node: &mut WidgetNode) {
     }
 }
 
-/// Promoted embedded widgets remain in the retained tree so their shared VM,
-/// state, and event handlers stay live, but their pixels are owned by the
-/// independent window target. Keep the subtree's geometry available for the
-/// child painter while removing the promoted node from the parent's layout and
-/// hit-test path.
-pub(super) fn collapse_promoted_window_widgets(node: &mut WidgetNode) {
-    collapse_promoted_window_node(node);
-    for child in &mut node.children {
-        collapse_promoted_window_widgets(child);
-    }
-}
-
 fn collapse_promoted_window_node(node: &mut WidgetNode) {
     if node.is_promoted_window() {
         // Keep the widget's intrinsic dimensions available to the child-window
@@ -168,25 +157,10 @@ fn collapse_promoted_window_node(node: &mut WidgetNode) {
     }
 }
 
-pub(super) fn mark_promoted_window_widgets(
-    node: &mut WidgetNode,
-    promoted_keys: &std::collections::HashSet<String>,
-) {
-    if node
-        .mesh_key()
-        .is_some_and(|key| promoted_keys.contains(key))
-    {
-        node.attributes.insert("hidden".into(), "true".into());
-        node.mark_promoted_window();
-    }
-    for child in &mut node.children {
-        mark_promoted_window_widgets(child, promoted_keys);
-    }
-}
-
 /// Keeps generated component-error content from taking over its host layout.
 /// These constraints are shell-owned and must be restored after CSS restyling,
 /// just like promoted-popover geometry above.
+#[cfg(test)]
 pub(in crate::shell::component) fn constrain_error_placeholders(node: &mut WidgetNode) {
     constrain_error_placeholder_node(node);
     for child in &mut node.children {

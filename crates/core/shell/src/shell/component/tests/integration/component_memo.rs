@@ -359,7 +359,7 @@ items = { { id = "first" }, { id = "second" } }
         rebuilt_first
             .mesh_key()
             .unwrap()
-            .contains("@loop:\"first\"/0")
+            .contains("@loop:\"first\"%2F0")
     );
 }
 

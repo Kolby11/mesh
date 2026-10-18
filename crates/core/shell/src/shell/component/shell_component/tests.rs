@@ -537,7 +537,7 @@ fn animation_damage_includes_shadow_filter_visual_bounds() {
         },
         inset: false,
     };
-    node.computed_style.filter = mesh_core_elements::VisualFilter { blur_radius: 3.0 };
+    node.computed_style.filter = mesh_core_elements::VisualFilter::blur(3.0);
 
     let damage = visual_damage_rect_for_widget_node(&node, surface(200, 100));
 

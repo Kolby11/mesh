@@ -96,11 +96,12 @@ fn hash_material(style: &ComputedStyle) -> u64 {
     style.z_index.hash(&mut hasher);
     hash_box_shadow(style.box_shadow, &mut hasher);
     style.filter.blur_radius.to_bits().hash(&mut hasher);
-    style
-        .backdrop_filter
-        .blur_radius
-        .to_bits()
-        .hash(&mut hasher);
+    let backdrop = style.backdrop_filter;
+    backdrop.blur_radius.to_bits().hash(&mut hasher);
+    backdrop.refract.hash(&mut hasher);
+    backdrop.refract_depth.to_bits().hash(&mut hasher);
+    backdrop.refract_edge.to_bits().hash(&mut hasher);
+    backdrop.dispersion.to_bits().hash(&mut hasher);
     hasher.finish()
 }
 
@@ -190,7 +191,7 @@ fn text_input(node: &WidgetNode, previous: Option<&TextPaintInput>) -> TextPaint
 
 fn hash_icon(node: &WidgetNode) -> u64 {
     let mut hasher = PaintInputHasher::default();
-    if node.tag == "icon" {
+    if matches!(node.tag.as_str(), "icon" | "image") {
         hash_attributes(node, &["src", "name", "size"], &mut hasher);
     }
     hash_color(node.computed_style.color, &mut hasher);

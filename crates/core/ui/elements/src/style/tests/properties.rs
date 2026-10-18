@@ -367,3 +367,45 @@ fn keyframe_property_helper_rejects_unsupported_properties() {
         );
     }
 }
+
+#[test]
+fn backdrop_filter_parses_blur_refraction_and_dispersion() {
+    let filter = parse::parse_backdrop_filter("blur(12px) refract(24px 18px) dispersion(2px)");
+    assert_eq!(filter.blur_radius, 12.0);
+    assert!(filter.has_refraction());
+    assert_eq!((filter.refract_depth, filter.refract_edge, filter.dispersion), (24.0, 18.0, 2.0));
+
+    let plain = parse::parse_backdrop_filter("refract(0px 0px)");
+    assert!(plain.has_refraction(), "refract(0 0) still samples the backdrop source");
+    assert!(!plain.is_none());
+
+    assert!(!parse::parse_backdrop_filter("blur(8px)").has_refraction());
+    assert!(parse::parse_backdrop_filter("blur(8px) wobble(2px)").is_none());
+    assert!(
+        !parse::parse_filter("refract(20px)").has_refraction(),
+        "`filter` has no backdrop to refract"
+    );
+}
+
+#[test]
+fn transform_functions_resolve_nested_motion_tokens() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let rules = parse_fixture_style(
+        r#"
+<style>
+.press { transform: scale(var(--animation-scale-press)); }
+.lift { --lift: -3px; transform: translateY(var(--lift)); }
+</style>
+"#,
+    );
+    let (press, diagnostics) = resolve_class(&resolver, &rules, "press");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(
+        press.transform.scale_x > 0.5 && press.transform.scale_x < 1.0,
+        "--animation-scale-press resolved inside scale(): {}",
+        press.transform.scale_x
+    );
+    let (lift, _) = resolve_class(&resolver, &rules, "lift");
+    assert_eq!(lift.transform.translate_y, -3.0);
+}

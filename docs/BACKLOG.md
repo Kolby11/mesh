@@ -26,21 +26,6 @@ unless an item says otherwise. IDs point into the
 (evidence and tests); `A2`–`A8` point into the
 [module architecture direction](../.planning/todos/pending/2026-09-30-module-architecture-direction.md).
 
-### Priority 5 — Control-plane consolidation
-
-- [ ] **MOD-05:** Package transactions take the control-plane lock while
-      protecting or restoring profile files, so rollback cannot erase a
-      concurrent profile commit.
-- [ ] **MOD-06:** One provider-eligibility function shared by the activation
-      closure and graph provider selection.
-- [ ] **MOD-09 / MOD-10 / SH-10 / RES-08:** Move install/uninstall planning,
-      `effective_profile_settings`, config paths and the control-plane lock into
-      core; make every CLI config/locale command profile-aware.
-- [ ] **MOD-07 / MOD-08:** Removal deltas for composition services and
-      providers; inline the resolved composition before force-uninstalling it.
-- [ ] **MOD-12:** Retain a last-valid manifest only while the rest of the module
-      tree is unchanged, and compare the manifest name in discovery mode.
-
 ### Priority 6 — Dead code, duplication and small fixes
 
 - [ ] **SH-07:** Remove the crate-level `allow(dead_code)` in the shell, delete
@@ -57,7 +42,7 @@ unless an item says otherwise. IDs point into the
 - [ ] **RES-11:** Move manifest-less backend fixtures out of `modules/` and delete
       the path-rewrite shim.
 - [ ] **RT-07:** Drop the per-command JSON `state` rollback; publish snapshots
-      only from successful callbacks.
+      only from successful callbacks ([design](../.planning/todos/pending/2026-10-17-backend-publication.md)).
 - [ ] **UI-12:** Resolve percent/`auto` lengths against layout before
       interpolating, and shorten reversed transitions by their progress.
 - [ ] **RND-05:** Take shell visual-damage rects from the display list's world
@@ -106,6 +91,28 @@ Each needs its named workload from the report before any change lands.
 - [ ] **CMP-04 / CMP-09 / CMP-10 / RES-15:** Unbounded expression cache and
       per-parse thread spawns, per-call Lua allocations in template expressions,
       per-call ICU formatter construction.
+
+## Glass shell core gaps (found 2026-10-17)
+
+- [ ] **Composition resolution at startup:** `load_frontend_components` and
+      `effective_profile_settings` read the raw profile, so a `from` composition's
+      roots, settings and `resources.theme` never apply; `config/profiles/glass.json` repeats them.
+- [ ] **Full-colour icons:** XDG/hicolor resolutions and `<icon src>` are always
+      `multicolor: false`; `<image>` has no paint arm and `url()` rejects absolute paths, so docks cannot show app icons in colour.
+- [ ] **CSS profile gaps:** `background:` drops gradients (only `background-image` takes them);
+      gradients and `box-shadow` accept hex colours only, two stops, one shadow.
+- [ ] **Host APIs:** `net.http` and `exec.launch-app` are catalogued but unimplemented
+      (providers shell out to `curl` / `hyprctl dispatch`); no D-Bus API, so no StatusNotifier tray.
+- [ ] **Tooltips on bottom/right-anchored surfaces:** those surfaces get no tooltip reserve on
+      their anchored axis, so tooltips cannot overflow toward the screen; promote tooltips to `xdg_popup`.
+- [ ] **`mesh-shell profile use` live switch:** rejected against a running shell (candidate
+      `@mesh/hyprland-wm` fails to initialize), while `mesh.packages.switch_profile` / IPC `shell:switch_profile` commit.
+- [ ] **Local popover components paint inline:** a closed `<popover>` root is hidden only for module
+      components (`render_embedded_instance`); `require("./x.mesh")` popovers paint their content in the trigger row.
+- [ ] **Icon chains during live switch:** newly mounted modules briefly resolve with an empty pack
+      chain (`effective_chain=[]`), logging missing-icon warnings until the chain is rebuilt.
+- [ ] **Backdrop placement beyond MESH:** refraction predicts surface origins from MESH's own
+      surfaces; another client's exclusive zone (e.g. a quickshell bar) misaligns it. Multi-output backdrops are untested.
 
 ## Authoring model
 
@@ -381,16 +388,6 @@ of payoff.
 - [ ] Rotation transforms allocate a temp `PixelBuffer` and repaint the subtree
       per frame. Low priority until rotation ships; scratch-buffer reuse was
       measured and rejected (see log).
-
-### Idle and scheduling
-
-- [ ] Idle wakeups: theme, settings and frontend metadata polls keep separate
-      deadlines and keep running while inotify is healthy, plus a 1 s watch
-      reconcile (see SH-13). Coalesce them into one deadline, or stop polling
-      when the watcher is healthy and rescan on queue overflow.
-- [ ] Backend `emit` validates the payload JSON, then `publish_changed_update`
-      validates it again and deep-clones it into `last_payload`; validate once
-      and keep a fingerprint instead of the clone.
 
 ### Startup and catalog
 

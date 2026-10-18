@@ -8,9 +8,7 @@ use super::super::{
 use super::scan::{scan_mesh_files_recursive, scan_mesh_source, scan_mesh_sources};
 use super::*;
 use crate::manifest;
-use mesh_core_service::{
-    InterfaceContract, parse_contract_version, parse_interface_contract, parse_version_req,
-};
+use mesh_core_service::{InterfaceContract, parse_interface_contract};
 use mesh_core_theme::{ThemeCatalog, ThemeMetadata, ThemePackDescriptor};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -190,11 +188,12 @@ fn resolve_active_providers(
                 interface_providers
                     .iter()
                     .filter(|provider| {
-                        required_consumers.iter().all(|consumer| {
-                            consumer.backend.get(&interface).is_some_and(|requirement| {
-                                provider_satisfies_requirement(provider, requirement, contract)
+                        provider_satisfies_requirement(provider, "*", contract)
+                            && required_consumers.iter().all(|consumer| {
+                                consumer.backend.get(&interface).is_some_and(|requirement| {
+                                    provider_satisfies_requirement(provider, requirement, contract)
+                                })
                             })
-                        })
                     })
                     .collect::<Vec<_>>()
             })
@@ -298,19 +297,11 @@ fn provider_satisfies_requirement(
     requirement: &str,
     contract: &InterfaceContract,
 ) -> bool {
-    let Some(request) = parse_version_req(requirement) else {
-        return false;
-    };
-    if !request.matches(&contract.version) {
-        return false;
-    }
-    // A provider that names no version implements the declared contract
-    // version; one that names a version must implement exactly that version.
-    match provider.version.as_deref() {
-        None => true,
-        Some(version) => parse_contract_version(version)
-            .is_some_and(|version| version == contract.version && request.matches(&version)),
-    }
+    super::super::resolution::provider_eligible(
+        provider.version.as_deref(),
+        requirement,
+        &contract.version.to_string(),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -565,6 +556,10 @@ impl InstalledModuleGraph {
                 manifest_path: loaded.path.clone(),
                 manifest_source: loaded.source,
                 manifest: loaded.manifest.clone(),
+                source_digest: loaded
+                    .path
+                    .parent()
+                    .and_then(|root| super::super::lock::module_source_digest(root).ok()),
             };
 
             graph_modules.insert(module_id.clone(), node);
@@ -1839,6 +1834,7 @@ pub struct InstalledModuleNode {
     pub manifest_path: PathBuf,
     pub manifest_source: ModuleManifestSource,
     pub manifest: ModuleManifest,
+    pub(crate) source_digest: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

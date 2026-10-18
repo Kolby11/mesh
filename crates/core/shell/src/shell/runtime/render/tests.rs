@@ -76,7 +76,7 @@ fn make_cmd(x: f32, y: f32, width: f32, height: f32, blur_radius: f32) -> Displa
                 opacity: 1.0,
                 box_shadow: BoxShadow::default(),
                 filter: VisualFilter::NONE,
-                backdrop_filter: VisualFilter { blur_radius },
+                backdrop_filter: VisualFilter::blur(blur_radius),
                 mix_blend_mode: mesh_core_elements::BlendMode::Normal,
                 icon_fill: None,
                 icon_weight: None,

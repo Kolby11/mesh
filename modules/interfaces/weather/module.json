@@ -1,0 +1,46 @@
+{
+  "name": "@mesh/weather-interface",
+  "version": "1.0.0",
+  "description": "Standard current-conditions and short forecast contract, independent of its providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.weather",
+      "version": "1.0",
+      "domain": "weather",
+      "relationship": "base",
+      "contract": {
+        "state": [
+          { "name": "available", "type": "boolean", "description": "Whether current conditions have been fetched" },
+          { "name": "location", "type": "string", "description": "Display name of the forecast location" },
+          { "name": "temperature", "type": "float", "description": "Current temperature in the provider's unit" },
+          { "name": "feels_like", "type": "float", "description": "Apparent temperature in the provider's unit" },
+          { "name": "unit", "type": "string", "description": "\"C\" or \"F\"" },
+          { "name": "condition", "type": "string", "description": "Semantic condition: clear, partly-cloudy, cloudy, fog, drizzle, rain, snow or storm" },
+          { "name": "is_day", "type": "boolean", "description": "Whether the location is in daylight" },
+          { "name": "hourly", "type": "Forecast[]", "description": "Upcoming forecast points, nearest first" },
+          { "name": "updated_at", "type": "float", "description": "Unix time in seconds of the last successful fetch" }
+        ],
+        "methods": [
+          { "name": "refresh", "returns": "Result" }
+        ],
+        "events": [],
+        "types": {
+          "Forecast": {
+            "fields": [
+              { "name": "time", "type": "float" },
+              { "name": "temperature", "type": "float" },
+              { "name": "condition", "type": "string" }
+            ]
+          }
+        },
+        "capabilities": {
+          "required": ["service.weather.read"],
+          "methods": { "refresh": ["service.weather.read"] },
+          "permissions": { "service.weather.read": "standard" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,135 @@
+<template>
+    <button
+        class="pill rec"
+        class:rec-live={recording}
+        onclick={onToggle}
+        title={recording and "Stop recording" or "Start screen recording"}
+        aria-label={recording and "Stop recording" or "Start screen recording"}
+        aria-pressed={recording}
+    >
+        <box class="dot" class:dot-live={recording} />
+        <text class="elapsed">{elapsed}</text>
+    </button>
+</template>
+
+<script lang="luau">
+local recorder = require("mesh.recorder")
+
+recording = false
+elapsed = "00:00"
+
+local function render()
+    recording = recorder.available == true and recorder.recording == true
+    if not recording then
+        elapsed = "00:00"
+        return
+    end
+    local seconds = math.max(0, os.time() - (recorder.started_at or os.time()))
+    elapsed = string.format("%02d:%02d", seconds // 60, seconds % 60)
+end
+
+effect(render)
+
+task.spawn(function()
+    while true do
+        task.sleep(1000)
+        if recording then
+            render()
+        end
+    end
+end)
+
+function onToggle()
+    recorder.toggle()
+end
+</script>
+
+<style>
+    .pill {
+        height: 36px;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--color-glass-rim);
+        background-image: linear-gradient(to bottom, #b468ff4d, #7a2ee033);
+        box-shadow: 0 4px 14px #14003259;
+        backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
+    }
+
+    .rec {
+        gap: 7px;
+        padding: 0 13px;
+    }
+
+
+
+    .rec-live {
+        background-image: linear-gradient(to bottom, #ff7ab880, #c2408a52);
+    }
+
+    .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: #ffb3d6;
+    }
+
+    /* Breathing dot while a recording runs. */
+    .dot-live {
+        background: #ff4d8d;
+        animation: rec-pulse 1200 ease-in-out infinite alternate;
+    }
+
+    .elapsed {
+        height: 20px;
+        font-size: 14px;
+        font-weight: 600;
+        color: #f5ecff;
+    }
+
+    @keyframes rec-pulse {
+        0% {
+            opacity: 1;
+        }
+        100% {
+            opacity: 0.35;
+        }
+    }
+
+    /* Motion: one vocabulary for the whole shell, all from theme tokens.
+    Containers lift by --animation-lift-hover and brighten their rim; controls
+    scale by --animation-scale-hover/-press and ring with the focus token. */
+
+    .pill {
+        transform: translateY(0px);
+        transition-property: transform, border-color, opacity;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .pill:hover {
+        transform: translateY(var(--animation-lift-hover));
+        border-color: var(--color-glass-rim-hover);
+    }
+
+    .rec {
+        transform: scale(1);
+        transition-property: transform, background-color, border-color, opacity;
+        transition-duration: var(--animation-duration-short);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .rec:hover {
+        border-color: var(--color-glass-rim-hover);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .rec:focus-visible {
+        border-color: var(--color-focus-ring);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .rec:active {
+        transform: scale(var(--animation-scale-press));
+        transition-duration: var(--animation-duration-fast);
+    }
+</style>

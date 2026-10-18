@@ -559,3 +559,49 @@ fn an_invalid_explicit_module_drops_only_itself_and_decisions_naming_it() {
 
     fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn retained_manifests_require_unchanged_source_and_identity_in_both_discovery_modes() {
+    for explicit in [false, true] {
+        let root = temp_dir("retained-source-identity");
+        let modules = root.join("modules");
+        write_frontend(&modules, "alpha", "@me/alpha");
+        let inventory = if explicit {
+            serde_json::json!({"@me/alpha":{"kind":"ui","path":"alpha"}})
+        } else {
+            serde_json::json!({})
+        };
+        let graph_path = root.join("module.json");
+        fs::write(&graph_path, serde_json::json!({"name":"@me/config","version":"1","mesh":{"modulesDir":"modules","modules":inventory}}).to_string()).unwrap();
+        let original = load_installed_module_graph(&graph_path).unwrap();
+        for filename in ["new.luau", "assets/new.json"] {
+            let added = modules.join("alpha").join(filename);
+            fs::create_dir_all(added.parent().unwrap()).unwrap();
+            fs::write(&added, "new content").unwrap();
+            fs::write(modules.join("alpha/module.json"), "{").unwrap();
+            let changed =
+                load_installed_module_graph_retaining(&graph_path, None, &original).unwrap();
+            assert!(changed.module("@me/alpha").is_none());
+            fs::remove_file(added).unwrap();
+        }
+        fs::write(modules.join("alpha/module.json"), "{").unwrap();
+        fs::write(
+            modules.join("alpha/main.mesh"),
+            "<template><text>changed</text></template>",
+        )
+        .unwrap();
+        let changed = load_installed_module_graph_retaining(&graph_path, None, &original).unwrap();
+        assert!(changed.module("@me/alpha").is_none());
+        write_frontend(&modules, "alpha", "@me/alpha");
+        let original = load_installed_module_graph(&graph_path).unwrap();
+        fs::write(
+            modules.join("alpha/module.json"),
+            r#"{"name":"@me/replacement","version":"1","mesh":{"kind":"invalid"}}"#,
+        )
+        .unwrap();
+        let renamed = load_installed_module_graph_retaining(&graph_path, None, &original).unwrap();
+        assert!(renamed.module("@me/alpha").is_none());
+        assert!(renamed.module("@me/replacement").is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
+}

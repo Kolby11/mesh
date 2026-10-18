@@ -6,7 +6,7 @@ use mesh_core_elements::{ComponentCompositionProps, EventHandlerCall, HandlerTar
 use std::collections::BTreeMap;
 
 #[test]
-fn translated_expression_uses_locale_store_before_composition_runtime() {
+fn translated_expression_uses_the_live_composition_resolver() {
     let value = evaluate_template_expression(
         "t('nav.open_settings')",
         Some(&TranslatingStore),

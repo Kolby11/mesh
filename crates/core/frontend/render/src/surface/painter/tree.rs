@@ -771,6 +771,25 @@ impl FrontendRenderEngine {
                 );
                 return;
             }
+            DisplayPaintCommandKind::ApplyBackdropRefraction => {
+                let frame = self.backdrop_frame();
+                let bounds = scaled_display_node_bounds(&command.node, scale);
+                let clip = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
+                self.execute_painter_commands_in_session(
+                    session,
+                    &[PainterCommand::DrawBackdropRefraction {
+                        rect: bounds,
+                        radii: scale_corners(command.node.style.border_radius, scale),
+                        filter: scaled_visual_filter(command.node.style.backdrop_filter, scale),
+                        frame: super::super::backdrop::BackdropFrame {
+                            origin: (frame.origin.0 * scale, frame.origin.1 * scale),
+                            output: (frame.output.0 * scale, frame.output.1 * scale),
+                        },
+                        clip,
+                    }],
+                );
+                return;
+            }
             DisplayPaintCommandKind::ApplyBackdropFilterRejected => {
                 self.record_painter_diagnostic(PainterDiagnostic {
                     backend_id: self.paint_backend_id(),
@@ -879,7 +898,8 @@ impl FrontendRenderEngine {
             | DisplayPaintCommandKind::PopCompositingLayer
             | DisplayPaintCommandKind::ApplyBackdropFilterCompositor
             | DisplayPaintCommandKind::ApplyBackdropFilterInSurface
-            | DisplayPaintCommandKind::ApplyBackdropFilterRejected => {}
+            | DisplayPaintCommandKind::ApplyBackdropFilterRejected
+            | DisplayPaintCommandKind::ApplyBackdropRefraction => {}
             DisplayPaintCommandKind::PushScrollContent
             | DisplayPaintCommandKind::PopScrollContent => {}
         }
@@ -1317,6 +1337,10 @@ fn corners_have_radius(corners: Corners) -> bool {
 fn scaled_visual_filter(filter: VisualFilter, scale: f32) -> VisualFilter {
     VisualFilter {
         blur_radius: filter.blur_radius * scale,
+        refract: filter.refract,
+        refract_depth: filter.refract_depth * scale,
+        refract_edge: filter.refract_edge * scale,
+        dispersion: filter.dispersion * scale,
     }
 }
 

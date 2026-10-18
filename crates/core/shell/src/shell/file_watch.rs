@@ -34,6 +34,7 @@ enum WatchCommand {
 pub(super) struct FileWatcherHandle {
     commands: std::sync::mpsc::Sender<WatchCommand>,
     stop: Arc<AtomicBool>,
+    control: WakeHandle,
     join: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -50,11 +51,20 @@ impl FileWatcherHandle {
         {
             return false;
         }
-        self.commands.send(WatchCommand::Replace(watch_set)).is_ok()
+        if self
+            .commands
+            .send(WatchCommand::Replace(watch_set))
+            .is_err()
+        {
+            return false;
+        }
+        self.control.wake();
+        true
     }
 
     pub(super) fn stop_and_join(mut self) {
         self.stop.store(true, Ordering::Release);
+        self.control.wake();
         if let Some(join) = self.join.take() {
             if join.join().is_err() {
                 tracing::warn!("file watcher thread panicked during shutdown");
@@ -66,6 +76,7 @@ impl FileWatcherHandle {
 impl Drop for FileWatcherHandle {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
+        self.control.wake();
         if let Some(join) = self.join.take() {
             let _ = join.join();
         }
@@ -78,16 +89,23 @@ pub(super) fn spawn_file_watcher(
     tx: mpsc::UnboundedSender<ShellMessage>,
     wake: WakeHandle,
 ) -> Option<FileWatcherHandle> {
+    let control_fd = rustix::event::eventfd(
+        0,
+        rustix::event::EventfdFlags::CLOEXEC | rustix::event::EventfdFlags::NONBLOCK,
+    )
+    .ok()?;
+    let control = WakeHandle::from_fd(&control_fd).ok()?;
     let (commands, command_rx) = std::sync::mpsc::channel();
     let stop = Arc::new(AtomicBool::new(false));
     let thread_stop = stop.clone();
     std::thread::Builder::new()
         .name("mesh-file-watch".into())
-        .spawn(move || watch_thread(watch_set, command_rx, tx, wake, thread_stop))
+        .spawn(move || watch_thread(watch_set, command_rx, tx, wake, thread_stop, control_fd))
         .map(|join| {
             Some(FileWatcherHandle {
                 commands,
                 stop,
+                control,
                 join: Some(join),
             })
         })
@@ -146,6 +164,7 @@ fn watch_thread(
     tx: mpsc::UnboundedSender<ShellMessage>,
     wake: WakeHandle,
     stop: Arc<AtomicBool>,
+    control: rustix::fd::OwnedFd,
 ) {
     use rustix::fs::inotify::WatchFlags;
     use std::mem::MaybeUninit;
@@ -179,6 +198,8 @@ fn watch_thread(
             return;
         }
 
+        let mut notification = [0u8; 8];
+        let _ = rustix::io::read(&control, &mut notification);
         loop {
             match command_rx.try_recv() {
                 Ok(WatchCommand::Replace(watch_set)) => {
@@ -203,10 +224,15 @@ fn watch_thread(
             }
         }
 
-        let Some(reader) = reader.as_mut() else {
-            // Keep the manager alive when no current input has an existing
-            // directory. A later WatchSet can bind newly-created paths.
-            std::thread::sleep(std::time::Duration::from_millis(20));
+        if stop.load(Ordering::Acquire) {
+            return;
+        }
+        let Some((reader, readiness)) = reader.as_mut() else {
+            if let Err(error) = wait_for_watch_event(&control, None) {
+                tracing::warn!("file watcher control wait failed: {error}");
+                notify_watcher_stopped(&tx, &wake, current_generation);
+                return;
+            }
             continue;
         };
 
@@ -223,9 +249,11 @@ fn watch_thread(
                 wake.wake();
             }
             Err(error) if error == rustix::io::Errno::WOULDBLOCK => {
-                // inotify is non-blocking so configuration commands are
-                // observed promptly without a second control pipe.
-                std::thread::sleep(std::time::Duration::from_millis(20));
+                if let Err(error) = wait_for_watch_event(&control, Some(readiness)) {
+                    tracing::warn!("file watcher readiness wait failed: {error}");
+                    notify_watcher_stopped(&tx, &wake, current_generation);
+                    return;
+                }
             }
             Err(error) => {
                 tracing::warn!("file watcher stopped: {error}");
@@ -237,13 +265,41 @@ fn watch_thread(
 }
 
 #[cfg(target_os = "linux")]
+fn wait_for_watch_event(
+    control: &rustix::fd::OwnedFd,
+    inotify: Option<&rustix::fd::OwnedFd>,
+) -> Result<(), rustix::io::Errno> {
+    use rustix::event::{PollFd, PollFlags, poll};
+    let flags = PollFlags::IN | PollFlags::ERR | PollFlags::HUP;
+    let mut fds = vec![PollFd::new(control, flags)];
+    if let Some(inotify) = inotify {
+        fds.push(PollFd::new(inotify, flags));
+    }
+    match poll(&mut fds, -1) {
+        Ok(_)
+            if fds.iter().any(|fd| {
+                fd.revents()
+                    .intersects(PollFlags::ERR | PollFlags::HUP | PollFlags::NVAL)
+            }) =>
+        {
+            Err(rustix::io::Errno::IO)
+        }
+        Ok(_) | Err(rustix::io::Errno::INTR) => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(target_os = "linux")]
 fn open_reader<'a>(
     watch_set: &WatchSet,
     flags: rustix::fs::inotify::WatchFlags,
     buf: &'a mut [std::mem::MaybeUninit<u8>],
 ) -> Result<
     (
-        Option<rustix::fs::inotify::Reader<'a, rustix::fd::OwnedFd>>,
+        Option<(
+            rustix::fs::inotify::Reader<'a, rustix::fd::OwnedFd>,
+            rustix::fd::OwnedFd,
+        )>,
         usize,
     ),
     String,
@@ -267,7 +323,15 @@ fn open_reader<'a>(
         return Ok((None, 0));
     }
 
-    Ok((Some(inotify::Reader::new(inotify, buf)), watched))
+    // Reader owns its fd without exposing AsFd; poll the same queue through
+    // a duplicate while retaining buffered events between reads.
+    let readiness = inotify
+        .try_clone()
+        .map_err(|error| format!("inotify readiness fd: {error}"))?;
+    Ok((
+        Some((inotify::Reader::new(inotify, buf), readiness)),
+        watched,
+    ))
 }
 
 fn notify_watcher_status(
@@ -334,5 +398,129 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("profiles").join("active.json");
         assert_eq!(watch_dirs(&[path]), vec![root.path().to_path_buf()]);
+    }
+    #[cfg(target_os = "linux")]
+    fn receive(rx: &mut mpsc::UnboundedReceiver<ShellMessage>) -> ShellMessage {
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            match rx.try_recv() {
+                Ok(message) => return message,
+                Err(mpsc::error::TryRecvError::Disconnected) => panic!("watcher disconnected"),
+                Err(mpsc::error::TryRecvError::Empty) => {
+                    assert!(std::time::Instant::now() < until, "watcher timed out");
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn watcher_control_rebinds_an_idle_worker_and_shutdown_wakes_it() {
+        use rustix::event::{EventfdFlags, eventfd};
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let fd = eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK).unwrap();
+        let wake = WakeHandle::from_fd(&fd).unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let watcher =
+            spawn_file_watcher(WatchSet::new(1, vec![first.path().into()]), tx, wake).unwrap();
+        assert!(matches!(
+            receive(&mut rx),
+            ShellMessage::FileWatcherStatus {
+                generation: 1,
+                active: true,
+                ..
+            }
+        ));
+        assert!(watcher.replace(WatchSet::new(2, vec![second.path().into()])));
+        assert!(matches!(
+            receive(&mut rx),
+            ShellMessage::FileWatcherStatus {
+                generation: 2,
+                active: true,
+                ..
+            }
+        ));
+        std::fs::write(second.path().join("settings.json"), "{}").unwrap();
+        assert!(matches!(
+            receive(&mut rx),
+            ShellMessage::FilesystemChanged { generation: 2 }
+        ));
+        watcher.stop_and_join();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn watcher_with_no_bound_directories_accepts_control_and_stops() {
+        use rustix::event::{EventfdFlags, eventfd};
+        let root = tempfile::tempdir().unwrap();
+        let fd = eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK).unwrap();
+        let wake = WakeHandle::from_fd(&fd).unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let watcher = spawn_file_watcher(WatchSet::new(1, vec![]), tx, wake).unwrap();
+        assert!(matches!(
+            receive(&mut rx),
+            ShellMessage::FileWatcherStatus {
+                generation: 1,
+                active: false,
+                ..
+            }
+        ));
+        assert!(watcher.replace(WatchSet::new(2, vec![root.path().into()])));
+        assert!(matches!(
+            receive(&mut rx),
+            ShellMessage::FileWatcherStatus {
+                generation: 2,
+                active: true,
+                ..
+            }
+        ));
+        watcher.stop_and_join();
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "release-only idle watcher wait gate"]
+    fn watcher_idle_wait_profile() {
+        use rustix::event::{EventfdFlags, eventfd};
+        use std::time::Duration;
+        assert!(!cfg!(debug_assertions), "run with --release");
+        for run in 0..3 {
+            let mut counts = Vec::new();
+            for blocking in [false, true] {
+                let control = eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK).unwrap();
+                let notification = WakeHandle::from_fd(&control).unwrap();
+                let stop = Arc::new(AtomicBool::new(false));
+                let worker_stop = stop.clone();
+                let (started_tx, started_rx) = std::sync::mpsc::channel();
+                let worker = std::thread::spawn(move || {
+                    let mut idle_wakeups = 0;
+                    started_tx.send(()).unwrap();
+                    loop {
+                        if blocking {
+                            wait_for_watch_event(&control, None).unwrap();
+                        } else {
+                            std::thread::sleep(Duration::from_millis(20));
+                        }
+                        if worker_stop.load(Ordering::Acquire) {
+                            return idle_wakeups;
+                        }
+                        idle_wakeups += 1;
+                    }
+                });
+                started_rx.recv().unwrap();
+                std::thread::sleep(Duration::from_millis(160));
+                stop.store(true, Ordering::Release);
+                notification.wake();
+                counts.push(worker.join().unwrap());
+            }
+            eprintln!(
+                "idle watcher run={run} duration=160ms polling_wakes={} blocking_wakes={} (shutdown wake excluded)",
+                counts[0], counts[1]
+            );
+            assert!(counts[0] >= 3);
+            assert_eq!(counts[1], 0, "watcher_idle_wait must have no timed wakeups");
+        }
     }
 }

@@ -10,7 +10,6 @@ mesh-core-locale = { workspace = true }
 mesh-core-theme = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-toml = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 libc = { workspace = true }

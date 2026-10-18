@@ -124,6 +124,7 @@ impl FrontendSurfaceComponent {
         Option<ComponentError>,
     ) {
         self.failed_runtime_creations.get_mut().clear();
+        self.child_settings_cache.get_mut().clear();
         self.component_callbacks.get_mut().clear();
         let runtimes = std::mem::take(&mut *self.runtimes.lock().unwrap());
         let mut runtimes = runtimes.into_iter().collect::<Vec<_>>();
@@ -566,13 +567,22 @@ impl FrontendSurfaceComponent {
             .unwrap_or_else(|| Arc::new(Mutex::new(Vec::new())))
     }
 
-    fn settings_json_for_component(
+    pub(super) fn settings_json_for_component(
         &self,
         manifest: &mesh_core_module::Manifest,
         component: &mesh_core_component::ComponentFile,
+        source_path: &Path,
     ) -> serde_json::Value {
         if manifest.package.id == self.compiled.manifest.package.id {
             return self.settings_json.clone();
+        }
+        if let Some(cached) = self
+            .child_settings_cache
+            .borrow()
+            .get(&manifest.package.id)
+            .and_then(|entries| entries.get(source_path))
+        {
+            return cached.clone();
         }
         let state = resolve_frontend_module_settings_with_props(
             &manifest.package.id,
@@ -584,6 +594,11 @@ impl FrontendSurfaceComponent {
             "embedded component settings",
             &state.diagnostics,
         );
+        self.child_settings_cache
+            .borrow_mut()
+            .entry(manifest.package.id.clone())
+            .or_default()
+            .insert(source_path.to_path_buf(), state.effective.clone());
         state.effective
     }
 
@@ -697,7 +712,7 @@ impl FrontendSurfaceComponent {
         for (key, value) in props {
             script_ctx.state_mut().set(key.clone(), value.clone());
         }
-        let settings_json = self.settings_json_for_component(manifest, component);
+        let settings_json = self.settings_json_for_component(manifest, component, source_path);
         let host_props = publish_resolved_props(
             &mut script_ctx,
             component,
@@ -842,8 +857,11 @@ impl FrontendSurfaceComponent {
         compiled: &mesh_core_frontend::CompiledFrontendModule,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
-        let settings_json =
-            self.settings_json_for_component(&compiled.manifest, &compiled.component);
+        let settings_json = self.settings_json_for_component(
+            &compiled.manifest,
+            &compiled.component,
+            &compiled.source_path,
+        );
         let existing_generation = {
             let mut runtimes = self.runtimes.lock().unwrap();
             if let Some(runtime) = runtimes.get_mut(instance_key) {
@@ -941,7 +959,7 @@ impl FrontendSurfaceComponent {
         source_path: &Path,
         props: &HashMap<String, serde_json::Value>,
     ) -> Result<(), ComponentError> {
-        let settings_json = self.settings_json_for_component(host_manifest, component);
+        let settings_json = self.settings_json_for_component(host_manifest, component, source_path);
         let existing_generation = {
             let mut runtimes = self.runtimes.lock().unwrap();
             if let Some(runtime) = runtimes.get_mut(instance_key) {
@@ -2013,6 +2031,14 @@ pub(super) fn publish_resolved_props(
     Ok(resolved.effective)
 }
 
+/// Host-resolved props: the effective value of each declared prop, and the
+/// per-layer snapshot behind `props.source(name)` / `props.at(name, scope)`.
+pub(super) struct ResolvedProps {
+    pub(super) effective: serde_json::Value,
+    pub(super) layers: serde_json::Value,
+}
+
+#[cfg(test)]
 pub(super) fn resolved_props_json(
     component: &mesh_core_component::ComponentFile,
     instance_props: &HashMap<String, serde_json::Value>,
@@ -2020,13 +2046,6 @@ pub(super) fn resolved_props_json(
     instance_key: &str,
 ) -> serde_json::Value {
     resolve_props(component, instance_props, settings_json, instance_key).effective
-}
-
-/// Host-resolved props: the effective value of each declared prop, and the
-/// per-layer snapshot behind `props.source(name)` / `props.at(name, scope)`.
-pub(super) struct ResolvedProps {
-    pub(super) effective: serde_json::Value,
-    pub(super) layers: serde_json::Value,
 }
 
 pub(super) fn resolve_props(

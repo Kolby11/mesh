@@ -5,7 +5,7 @@ use std::path::Path;
 
 use mesh_core_elements::BoxShadow;
 use mesh_core_elements::style::{BackgroundPaint, Color};
-use mesh_core_elements::{AffineTransform, LayoutRect, WidgetNode, node_layout_bounds};
+use mesh_core_elements::{AffineTransform, LayoutRect, WidgetNode};
 
 use crate::FractionalScale;
 use crate::paint_input::{PaintInput, PaintPrimitiveSlot};
@@ -92,7 +92,7 @@ pub(super) fn for_each_primitive_slot(
             emitted = true;
             visit(DisplayPrimitiveSlot::Text);
         }
-        "icon" => {
+        "icon" | "image" => {
             emitted = true;
             visit(DisplayPrimitiveSlot::Icon);
         }
@@ -140,50 +140,18 @@ pub(super) fn visual_bounds_for_node_with_transform(
     node: &WidgetNode,
     world_transform: AffineTransform,
 ) -> LayoutRect {
-    let local = LayoutRect {
-        x: 0.0,
-        y: 0.0,
-        width: node.layout.width.max(0.0),
-        height: node.layout.height.max(0.0),
-    };
-    let mut bounds = node_layout_bounds(node, world_transform);
-    let shadow = node.computed_style.box_shadow;
-    if !shadow.is_none() && !shadow.inset {
-        let pad = shadow.spread_radius + shadow.blur_radius * 3.0;
-        let shadow_bounds = world_transform.transform_rect(LayoutRect {
-            x: shadow.offset_x - pad,
-            y: shadow.offset_y - pad,
-            width: local.width + pad * 2.0,
-            height: local.height + pad * 2.0,
-        });
-        bounds = union_layout_rect(bounds, shadow_bounds);
-    }
-    let filter_pad = node
-        .computed_style
-        .filter
-        .blur_radius
-        .max(node.computed_style.backdrop_filter.blur_radius)
-        * 3.0;
-    if filter_pad > 0.0 {
-        bounds.x -= filter_pad;
-        bounds.y -= filter_pad;
-        bounds.width += filter_pad * 2.0;
-        bounds.height += filter_pad * 2.0;
-    }
-    bounds
-}
-
-fn union_layout_rect(left: LayoutRect, right: LayoutRect) -> LayoutRect {
-    let x = left.x.min(right.x);
-    let y = left.y.min(right.y);
-    let right_edge = (left.x + left.width).max(right.x + right.width);
-    let bottom_edge = (left.y + left.height).max(right.y + right.height);
-    LayoutRect {
-        x,
-        y,
-        width: (right_edge - x).max(0.0),
-        height: (bottom_edge - y).max(0.0),
-    }
+    visual_layout_from_parts(
+        world_transform,
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: node.layout.width.max(0.0),
+            height: node.layout.height.max(0.0),
+        },
+        node.computed_style.box_shadow,
+        node.computed_style.filter.blur_radius,
+        node.computed_style.backdrop_filter.blur_radius,
+    )
 }
 
 pub(super) fn primitive_signature(node: &WidgetNode, slot: DisplayPrimitiveSlot) -> u64 {
@@ -233,7 +201,7 @@ pub(super) fn hash_paint_content_attributes(
             hash_attribute(node, "value", hasher);
             hash_attribute(node, "orient", hasher);
         }
-        "icon" => {
+        "icon" | "image" => {
             hash_attribute(node, "src", hasher);
             hash_attribute(node, "name", hasher);
             hash_attribute(node, "size", hasher);

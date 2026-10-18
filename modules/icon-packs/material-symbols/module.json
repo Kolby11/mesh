@@ -58,7 +58,28 @@
             "media-playback-start": "ms/play_arrow",
             "palette": "ms/palette",
             "applications-graphics": "ms/palette",
-            "emblem-photos": "ms/photo_library"
+            "emblem-photos": "ms/photo_library",
+            "system-search": "ms/search",
+            "media-skip-backward": "ms/skip_previous",
+            "media-skip-forward": "ms/skip_next",
+            "media-playback-pause": "ms/pause",
+            "media-record": "ms/fiber_manual_record",
+            "audio-x-generic": "ms/music_note",
+            "input-keyboard": "ms/keyboard",
+            "network-wired": "ms/lan",
+            "network-wireless-offline": "ms/wifi_off",
+            "network-wireless-signal-excellent": "ms/wifi",
+            "network-wireless-signal-ok": "ms/wifi_2_bar",
+            "network-wireless-signal-weak": "ms/wifi_1_bar",
+            "battery-full-charging": "ms/battery_charging_full",
+            "weather-overcast": "ms/cloud",
+            "weather-fog": "ms/foggy",
+            "weather-showers-scattered": "ms/rainy_light",
+            "weather-showers": "ms/rainy",
+            "weather-snow": "ms/weather_snowy",
+            "weather-storm": "ms/thunderstorm",
+            "view-dual": "ms/dashboard",
+            "object-select": "ms/check"
           }
         }
       ]

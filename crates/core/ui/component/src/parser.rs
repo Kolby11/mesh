@@ -1514,6 +1514,47 @@ button {
     }
 
     #[test]
+    fn prop_diagnostic_spans_the_offending_occurrence_and_checks_inline_styles() {
+        for suffix in [
+            "<template><box /></template><style>.a { color: prop(accent); } .b { width: prop( accent ); }</style>",
+            "<template><box style=\"color: prop(accent); width: prop( accent );\" /></template>",
+        ] {
+            let source = format!(
+                r##"<props>{{ accent = {{ type = "color", default = "#fff" }} }}</props>{suffix}"##
+            );
+            let ParseError::InvalidSemantics { span, message } =
+                parse_component(&source).unwrap_err()
+            else {
+                panic!("expected a CSS type diagnostic");
+            };
+            assert!(message.contains("requires a length"));
+            assert_eq!(&source[span.start..span.end], "prop( accent )");
+        }
+        let source = r#"<template><box style="width: prop(missing);" /></template>"#;
+        let ParseError::InvalidSemantics { span, .. } = parse_component(source).unwrap_err() else {
+            panic!("expected unknown inline prop");
+        };
+        assert_eq!(&source[span.start..span.end], "prop(missing)");
+    }
+
+    #[test]
+    fn inline_prop_spans_skip_other_attributes_and_preserve_xml_entities() {
+        for source in [
+            r#"<template><box title="width: prop(missing);" style="width: prop(missing);" /></template>"#,
+            r#"<template><box title={"quoted"} style="width: prop(&#109;issing);" /></template>"#,
+            r#"<template><box style="width: prop(missing);" style:opacity={fade} /></template>"#,
+        ] {
+            let ParseError::InvalidSemantics { span, .. } = parse_component(source).unwrap_err()
+            else {
+                panic!("expected inline prop diagnostic");
+            };
+            let start = source.rfind("prop(").unwrap();
+            let end = source[start..].find(')').unwrap() + start + 1;
+            assert_eq!(span, SourceSpan::new(start, end));
+        }
+    }
+
+    #[test]
     fn rejects_undefined_and_empty_style_props() {
         for style in [
             ".root { width: prop(missing); }",

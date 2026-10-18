@@ -1,0 +1,217 @@
+<props>
+{
+    icon_size = { type = "number", default = 56, min = 32, max = 96, step = 2, label = "Icon size" },
+}
+</props>
+
+<template>
+    <row class="dock-shell">
+        <box class="flare flare-left" aria-hidden="true">
+            <box class="flare-cut flare-cut-left" />
+        </box>
+        <row class="dock">
+            {#for app in apps key={app.id}}
+                <column class="slot">
+                    <button
+                        class="tile"
+                        class:tile-focused={app.focused}
+                        onclick={onActivate(app.id)}
+                        title={app.name}
+                        aria-label={app.name}
+                    >
+                        <image class="app-icon" src={app.icon} alt="" hidden={not app.has_file} />
+                        <icon class="app-icon app-glyph" name="application-x-executable" size="64" hidden={app.has_file} />
+                    </button>
+                    <box class="dot" class:dot-running={app.running} />
+                </column>
+            {/for}
+        </row>
+        <box class="flare flare-right" aria-hidden="true">
+            <box class="flare-cut flare-cut-right" />
+        </box>
+    </row>
+</template>
+
+<script lang="luau">
+local apps_service = require("mesh.apps")
+
+apps = {}
+
+effect(function()
+    local list = {}
+    if apps_service.available then
+        for _, app in apps_service.apps do
+            list[#list + 1] = {
+                id = app.id,
+                name = app.name,
+                icon = app.icon,
+                has_file = string.sub(app.icon or "", 1, 1) == "/",
+                running = app.running,
+                focused = app.focused,
+            }
+        end
+    end
+    apps = list
+end)
+
+function onActivate(id)
+    apps_service.activate(id)
+end
+</script>
+
+<style>
+    /* The layer surface spans the output's width (bottom anchor); this row
+    centers the shelf and seats it on the screen edge. */
+    .dock-shell {
+        width: 100%;
+        justify-content: center;
+        align-items: flex-end;
+        gap: 0;
+        background: transparent;
+        animation: dock-in 560 cubic-bezier(0.05, 0.7, 0.1, 1) both;
+    }
+
+    /* A glass shelf standing on the screen edge: rounded shoulders on top,
+    square to the floor, where the flares below curve it into the edge. */
+    .dock {
+        height: 104px;
+        padding: 10px 14px 6px;
+        gap: 10px;
+        align-items: flex-start;
+        border-radius: 30px 30px 0 0;
+        border-width: 1px 1px 0 1px;
+        border-color: var(--color-glass-rim);
+        background-image: linear-gradient(to bottom, #ffffff5c, #ffffff38);
+        box-shadow: 0 -6px 24px #0a021a59;
+        backdrop-filter: blur(8px) refract(26px 22px) dispersion(2.5px);
+    }
+
+    /* Concave feet. Each flare is a square of the same glass with a
+    quarter-round cut-out that paints the plain backdrop source
+    (`refract(0px 0px)`), so the shelf sweeps outward into the floor. */
+    .flare {
+        position: relative;
+        width: 30px;
+        height: 30px;
+        flex-shrink: 0;
+        background-image: linear-gradient(to bottom, #ffffff3a, #ffffff38);
+        backdrop-filter: blur(8px) refract(0px 0px);
+    }
+
+    .flare-cut {
+        position: absolute;
+        top: 0;
+        width: 30px;
+        height: 30px;
+        backdrop-filter: refract(0px 0px);
+    }
+
+    .flare-cut-left {
+        left: 0;
+        border-radius: 0 0 30px 0;
+    }
+
+    .flare-cut-right {
+        left: 0;
+        border-radius: 0 0 0 30px;
+    }
+
+    .slot {
+        gap: 4px;
+        align-items: center;
+    }
+
+    /* Each app sits on its own small glass lens, lighter than the shelf; the
+    focused app's lens takes the accent pink. */
+    .tile {
+        width: 78px;
+        height: 78px;
+        padding: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 20px;
+        border: 1px solid #ffffff38;
+        /* A colour with any alpha counts as authored; alpha 0 would let the
+        theme's opaque `button` fill paint over the glass. */
+        background-color: #ffffff03;
+        background-image: linear-gradient(to bottom, #ffffff5e, #ffffff2b);
+        box-shadow: 0 4px 12px #0a021a40;
+        backdrop-filter: blur(12px) refract(12px 14px) dispersion(1.5px);
+    }
+
+    .tile-focused,
+    .tile-focused:hover {
+        border-color: #ffc2e399;
+        background-image: linear-gradient(to bottom, #ff9ccf73, #e0559a4d);
+    }
+
+    .app-icon {
+        width: prop(icon_size);
+        height: prop(icon_size);
+    }
+
+    .app-glyph {
+        color: #f5ecff;
+    }
+
+    .dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 999px;
+        background: transparent;
+        transition-property: background-color, width;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .dot-running {
+        background: #f5ecff;
+    }
+
+    @keyframes dock-in {
+        0% {
+            opacity: 0;
+            transform: translateY(56px);
+        }
+        100% {
+            opacity: 1;
+            transform: translateY(0px);
+        }
+    }
+
+    /* Motion: one vocabulary for the whole shell, all from theme tokens.
+    Containers brighten their rim; controls scale by
+    --animation-scale-hover/-press and ring with the focus token. */
+
+    .dock {
+        transition-property: border-color, opacity;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .dock:hover {
+        border-color: var(--color-glass-rim-hover);
+    }
+
+    .tile {
+        transform: scale(1);
+        transition-property: transform, background-color, border-color, opacity;
+        transition-duration: var(--animation-duration-short);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .tile:hover {
+        border-color: var(--color-glass-rim-hover);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .tile:focus-visible {
+        border-color: var(--color-focus-ring);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .tile:active {
+        transform: scale(var(--animation-scale-press));
+        transition-duration: var(--animation-duration-fast);
+    }
+</style>

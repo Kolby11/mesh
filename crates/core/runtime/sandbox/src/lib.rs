@@ -1,9 +1,8 @@
-/// Shared sandbox policy types for MESH modules.
-///
-/// `mesh-core-scripting` owns the actual Luau interpreter bridge used by both
-/// frontend components and backend services. This crate carries runtime policy
-/// metadata that can be shared by those hosts without tying it to either side.
-use mesh_core_capability::CapabilitySet;
+//! Shared sandbox policy types for MESH modules.
+//!
+//! `mesh-core-scripting` owns the actual Luau interpreter bridge used by both
+//! frontend components and backend services. This crate carries runtime policy
+//! metadata that can be shared by those hosts without tying it to either side.
 
 pub const DEFAULT_JSON_MAX_BYTES: usize = 64 * 1024;
 pub const DEFAULT_JSON_MAX_DEPTH: usize = 32;
@@ -178,45 +177,5 @@ impl Default for SandboxConfig {
             child_process_budget: 8,
             child_process_timeout_ms: 5_000,
         }
-    }
-}
-
-/// The execution tier determines isolation level and trust.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExecutionTier {
-    /// In-process Rust. Core modules only.
-    InProcess,
-    /// Sandboxed Luau interpreter. Default for community modules.
-    Luau,
-    /// Sandboxed WebAssembly. For performance-sensitive community modules.
-    Wasm,
-}
-
-/// A sandboxed runtime instance for a single module.
-#[derive(Debug)]
-pub struct ModuleRuntime {
-    pub module_id: String,
-    pub tier: ExecutionTier,
-    pub config: SandboxConfig,
-    pub capabilities: CapabilitySet,
-}
-
-impl ModuleRuntime {
-    pub fn new(
-        module_id: impl Into<String>,
-        tier: ExecutionTier,
-        capabilities: CapabilitySet,
-    ) -> Self {
-        Self {
-            module_id: module_id.into(),
-            tier,
-            config: SandboxConfig::default(),
-            capabilities,
-        }
-    }
-
-    pub fn with_config(mut self, config: SandboxConfig) -> Self {
-        self.config = config;
-        self
     }
 }

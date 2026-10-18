@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Debug snapshots are used by optional profiling integrations.
-
 use super::super::*;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
@@ -30,6 +28,16 @@ pub(in crate::shell) struct DebugSnapshotCache {
 }
 
 impl Shell {
+    #[cfg(test)]
+    fn record_debug_snapshot_state(&mut self, payload: serde_json::Value) {
+        // Synchronous snapshot reads need the latest state before the next
+        // render tick, but they must still use the normal service-state path
+        // for provider filtering, contract validation, and deduplication.
+        let event = self.debug_snapshot_event_from_payload(payload);
+        self.record_shell_service_state(&event);
+    }
+
+    #[cfg(test)]
     pub(in crate::shell) fn build_debug_snapshot(&mut self) -> DebugSnapshot {
         let snapshot = self.debug_snapshot();
         let payload = debug_service_payload(&self.debug, &snapshot);
@@ -293,14 +301,6 @@ impl Shell {
             benchmarks,
             profiling,
         }
-    }
-
-    fn record_debug_snapshot_state(&mut self, payload: serde_json::Value) {
-        // Synchronous snapshot reads need the latest state before the next
-        // render tick, but they must still use the normal service-state path
-        // for provider filtering, contract validation, and deduplication.
-        let event = self.debug_snapshot_event_from_payload(payload);
-        self.record_latest_service_state(&event);
     }
 
     fn debug_snapshot_event_from_payload(&self, payload: serde_json::Value) -> ServiceEvent {

@@ -5,6 +5,7 @@ members = [
     "crates/core/extension/module",
     "crates/core/foundation/capability",
     "crates/core/foundation/config",
+    "crates/core/foundation/files",
     "crates/core/foundation/theme",
     "crates/core/foundation/locale",
     "crates/core/foundation/diagnostics",
@@ -18,7 +19,6 @@ members = [
     "crates/core/ui/animation",
     "crates/core/ui/interaction",
     "crates/core/runtime/scripting",
-    "crates/core/frontend/host",
     "crates/core/frontend/shell-adapter",
     "crates/core/frontend/abi",
     "crates/core/frontend/compiler",
@@ -56,6 +56,7 @@ rust-version = "1.85"
 mesh-core-shell = { path = "crates/core/shell" }
 mesh-core-module = { path = "crates/core/extension/module" }
 mesh-core-capability = { path = "crates/core/foundation/capability" }
+mesh-core-files = { path = "crates/core/foundation/files" }
 mesh-core-config = { path = "crates/core/foundation/config" }
 mesh-core-theme = { path = "crates/core/foundation/theme" }
 mesh-core-locale = { path = "crates/core/foundation/locale" }
@@ -70,7 +71,6 @@ mesh-core-icon = { path = "crates/core/ui/icon" }
 mesh-core-animation = { path = "crates/core/ui/animation" }
 mesh-core-interaction = { path = "crates/core/ui/interaction" }
 mesh-core-scripting = { path = "crates/core/runtime/scripting" }
-mesh-core-frontend-host = { path = "crates/core/frontend/host" }
 mesh-core-frontend-shell-adapter = { path = "crates/core/frontend/shell-adapter" }
 mesh-core-frontend-abi = { path = "crates/core/frontend/abi" }
 mesh-core-frontend = { path = "crates/core/frontend/compiler" }

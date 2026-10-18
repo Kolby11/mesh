@@ -53,6 +53,7 @@ fn collect_backdrop_blur_regions_with_transform(
     let world_transform = node_transform(parent_transform, node);
 
     if node.computed_style.backdrop_filter.blur_radius > 0.0
+        && !node.computed_style.backdrop_filter.has_refraction()
         && node.layout.width > 0.0
         && node.layout.height > 0.0
     {
@@ -80,7 +81,8 @@ fn collect_backdrop_blur_regions_with_transform(
 pub fn backdrop_blur_regions(commands: &[DisplayPaintCommand]) -> Vec<DamageRect> {
     let mut regions = Vec::new();
     for cmd in commands {
-        if cmd.node.style.backdrop_filter.blur_radius <= 0.0 {
+        let backdrop = cmd.node.style.backdrop_filter;
+        if backdrop.blur_radius <= 0.0 || backdrop.has_refraction() {
             continue;
         }
         for rect in rounded_blur_regions(cmd) {
@@ -261,7 +263,11 @@ pub(super) fn backdrop_read_region(
 /// Whether replaying this command writes pixels. Conservative: over-reporting
 /// only costs an identity blur pass.
 pub(super) fn display_command_paints_pixels(command: &DisplayPaintCommand) -> bool {
-    if command.kind == DisplayPaintCommandKind::ApplyBackdropFilterInSurface {
+    if matches!(
+        command.kind,
+        DisplayPaintCommandKind::ApplyBackdropFilterInSurface
+            | DisplayPaintCommandKind::ApplyBackdropRefraction
+    ) {
         return true;
     }
     if !command.kind.draws_content() {
@@ -285,6 +291,7 @@ pub(super) fn display_command_paints_pixels(command: &DisplayPaintCommand) -> bo
             .any(|width| width > 0.0))
         || (!style.box_shadow.is_none() && !style.box_shadow.inset)
         || style.backdrop_filter.blur_radius > 0.0
+        || style.backdrop_filter.has_refraction()
 }
 
 /// Read regions of backdrop-filter nodes with content beneath them in paint

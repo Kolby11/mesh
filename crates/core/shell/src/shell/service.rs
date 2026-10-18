@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Legacy service adapters remain for integration fixtures.
-
 use super::types::CoreRequest;
 use mesh_core_capability::Capability;
 #[cfg(test)]
@@ -21,16 +19,13 @@ use std::sync::{Arc, OnceLock, RwLock};
 /// Bundle of interned capability values derived from an interface name.
 ///
 /// The shell does a per-service-event capability check on every component
-/// runtime. Constructing the three `Capability` values from formatted
-/// strings showed up in profiling as a hot allocation. This struct lets the
+/// runtime. Constructing capability values from formatted strings showed
+/// up in profiling as a hot allocation. This struct lets the
 /// caller compute them once per interface and pass borrowed refs through
 /// the inner loop.
 pub(super) struct ServiceCapabilities {
     pub service_name: String,
-    pub read: Capability,
     pub control: Capability,
-    pub theme: Option<Capability>,
-    pub locale: Option<Capability>,
 }
 
 /// Get (or build) the interned capability bundle for a given interface.
@@ -50,10 +45,7 @@ pub(super) fn service_capabilities(interface: &str) -> Arc<ServiceCapabilities> 
 
     let service_name = service_name_from_interface(interface);
     let entry = Arc::new(ServiceCapabilities {
-        read: Capability::new(format!("service.{service_name}.read")),
         control: Capability::new(format!("service.{service_name}.control")),
-        theme: (interface == "mesh.theme").then(|| Capability::new("theme.read")),
-        locale: (interface == "mesh.locale").then(|| Capability::new("locale.read")),
         service_name,
     });
 
@@ -80,6 +72,7 @@ pub(super) fn service_update_metadata(
 /// Prefer [`seed_service_context`] for a live runtime: template expressions are
 /// Luau closures over the context's `_ENV`, so a value that reaches only
 /// `ScriptState` is invisible to `{last_service_update.name}`.
+#[cfg(test)]
 pub(super) fn seed_service_state(state: &mut ScriptState) {
     state.set("last_service_update", service_update_metadata("", ""));
 }
@@ -96,6 +89,7 @@ pub(super) fn seed_service_context(
 /// The payload is set directly as `state[service_name]` — no parsing in core.
 /// `has_read` must be pre-computed by the caller from the component's capability set
 /// (`service.<name>.read`) to avoid simultaneous mutable/immutable borrows.
+#[cfg(test)]
 pub(super) fn apply_service_update(
     state: &mut ScriptState,
     has_read: bool,
@@ -174,6 +168,7 @@ pub(super) fn service_command_control_capability(interface: &str) -> Capability 
     service_capabilities(interface).control.clone()
 }
 
+#[cfg(test)]
 pub(super) fn script_events_to_requests(events: Vec<PublishedEvent>) -> Vec<CoreRequest> {
     events
         .into_iter()
@@ -259,6 +254,7 @@ fn lower_frontend_effect(
     })
 }
 
+#[cfg(test)]
 fn script_event_to_request(event: PublishedEvent) -> Option<CoreRequest> {
     script_event_to_request_at(event, None)
 }
@@ -432,13 +428,6 @@ fn script_event_to_request_at(
             },
         }),
     }
-}
-
-fn payload_i32(payload: &serde_json::Value, key: &str) -> Option<i32> {
-    payload
-        .get(key)
-        .and_then(|value| value.as_i64())
-        .and_then(|value| i32::try_from(value).ok())
 }
 
 #[cfg(test)]
@@ -1006,7 +995,6 @@ mod tests {
         let caps = service_capabilities("mesh.audio");
 
         assert_eq!(caps.service_name, "audio");
-        assert_eq!(caps.read.id(), "service.audio.read");
         assert_eq!(caps.control.id(), "service.audio.control");
     }
 

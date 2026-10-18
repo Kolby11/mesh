@@ -1,0 +1,38 @@
+{
+  "name": "@mesh/recorder-interface",
+  "version": "1.0.0",
+  "description": "Standard screen-recording status and control contract.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.recorder",
+      "version": "1.0",
+      "domain": "recorder",
+      "relationship": "base",
+      "contract": {
+        "state": [
+          { "name": "available", "type": "boolean", "description": "Whether a recorder can be started" },
+          { "name": "recording", "type": "boolean", "description": "Whether a recording is in progress" },
+          { "name": "started_at", "type": "float", "description": "Unix time in seconds the current recording began; 0 when idle" },
+          { "name": "output", "type": "string", "description": "Path of the current or last recording" }
+        ],
+        "methods": [
+          { "name": "toggle", "returns": "Result" }
+        ],
+        "events": [
+          { "name": "RecordingSaved", "payload": [{ "name": "path", "type": "string" }] }
+        ],
+        "capabilities": {
+          "required": ["service.recorder.read"],
+          "optional": ["service.recorder.control"],
+          "methods": { "toggle": ["service.recorder.control"] },
+          "permissions": {
+            "service.recorder.read": "standard",
+            "service.recorder.control": "elevated"
+          }
+        }
+      }
+    }
+  }
+}

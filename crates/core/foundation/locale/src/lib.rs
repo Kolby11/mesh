@@ -8,15 +8,8 @@ use icu_plurals::{PluralCategory, PluralRules};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{self, Write};
-use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-#[cfg(unix)]
-use std::{
-    ffi::CString,
-    os::unix::ffi::OsStrExt,
-    os::unix::io::{AsRawFd, FromRawFd},
-};
 
 const MAX_CATALOG_ENTRIES: usize = 4096;
 const MAX_VARIANTS_PER_ENTRY: usize = 32;
@@ -276,8 +269,7 @@ pub enum CatalogSourceKind {
 /// descriptor walk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogSourceHandle {
-    module_root: PathBuf,
-    relative_path: PathBuf,
+    source: mesh_core_files::ContainedFile,
 }
 
 impl CatalogSourceHandle {
@@ -285,198 +277,26 @@ impl CatalogSourceHandle {
         module_root: impl Into<PathBuf>,
         relative_path: impl AsRef<Path>,
     ) -> Result<Self, String> {
-        let module_root = module_root.into();
-        if module_root.as_os_str().is_empty() {
-            return Err("catalog source module root cannot be empty".into());
-        }
-        let relative_path = relative_path.as_ref();
-        if relative_path.as_os_str().is_empty() || relative_path.is_absolute() {
-            return Err(format!(
-                "catalog source path must be a non-empty relative path: {}",
-                relative_path.display()
-            ));
-        }
-        if relative_path.components().any(|component| {
-            matches!(
-                component,
-                Component::CurDir
-                    | Component::ParentDir
-                    | Component::RootDir
-                    | Component::Prefix(_)
-            )
-        }) {
-            return Err(format!(
-                "catalog source path contains an unsafe component: {}",
-                relative_path.display()
-            ));
-        }
-        Ok(Self {
-            module_root,
-            relative_path: relative_path.to_path_buf(),
-        })
+        mesh_core_files::ContainedFile::new(module_root, relative_path)
+            .map(|source| Self { source })
+            .map_err(|error| error.to_string())
     }
 
     pub fn module_root(&self) -> &Path {
-        &self.module_root
+        self.source.module_root()
     }
 
     pub fn relative_path(&self) -> &Path {
-        &self.relative_path
+        self.source.relative_path()
     }
 
     pub fn candidate_path(&self) -> PathBuf {
-        self.module_root.join(&self.relative_path)
+        self.source.candidate_path()
     }
 
     pub fn read_utf8_bounded(&self, max_bytes: usize) -> Result<String, LocaleCatalogLoadError> {
-        #[cfg(unix)]
-        {
-            let mut directory = open_catalog_directory(&self.module_root)?;
-            let mut components = self.relative_path.components().peekable();
-            while let Some(component) = components.next() {
-                let Component::Normal(component) = component else {
-                    return Err(LocaleCatalogLoadError::UnsafePath {
-                        path: self.candidate_path(),
-                        reason: "non-normal path component".into(),
-                    });
-                };
-                if components.peek().is_some() {
-                    directory =
-                        open_catalog_directory_at(&directory, component, &self.candidate_path())?;
-                } else {
-                    let file = open_catalog_file_at(&directory, component, &self.candidate_path())?;
-                    return read_catalog_utf8_bounded(file, &self.candidate_path(), max_bytes);
-                }
-            }
-            Err(LocaleCatalogLoadError::UnsafePath {
-                path: self.candidate_path(),
-                reason: "empty relative path".into(),
-            })
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = max_bytes;
-            Err(LocaleCatalogLoadError::UnsupportedPlatform {
-                path: self.candidate_path(),
-            })
-        }
+        self.source.read_utf8_bounded(max_bytes).map_err(Into::into)
     }
-}
-
-#[cfg(unix)]
-fn open_catalog_directory(path: &Path) -> Result<std::fs::File, LocaleCatalogLoadError> {
-    let name = CString::new(path.as_os_str().as_bytes()).map_err(|_| {
-        LocaleCatalogLoadError::UnsafePath {
-            path: path.to_path_buf(),
-            reason: "path contains NUL".into(),
-        }
-    })?;
-    let fd = unsafe {
-        libc::open(
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
-        )
-    };
-    if fd < 0 {
-        return Err(LocaleCatalogLoadError::Read {
-            path: path.to_path_buf(),
-            source: std::io::Error::last_os_error(),
-        });
-    }
-    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
-}
-
-#[cfg(unix)]
-fn open_catalog_directory_at(
-    parent: &std::fs::File,
-    component: &std::ffi::OsStr,
-    path: &Path,
-) -> Result<std::fs::File, LocaleCatalogLoadError> {
-    let name =
-        CString::new(component.as_bytes()).map_err(|_| LocaleCatalogLoadError::UnsafePath {
-            path: path.to_path_buf(),
-            reason: "path contains NUL".into(),
-        })?;
-    let fd = unsafe {
-        libc::openat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
-            0,
-        )
-    };
-    if fd < 0 {
-        return Err(LocaleCatalogLoadError::Read {
-            path: path.to_path_buf(),
-            source: std::io::Error::last_os_error(),
-        });
-    }
-    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
-}
-
-#[cfg(unix)]
-fn open_catalog_file_at(
-    parent: &std::fs::File,
-    component: &std::ffi::OsStr,
-    path: &Path,
-) -> Result<std::fs::File, LocaleCatalogLoadError> {
-    let name =
-        CString::new(component.as_bytes()).map_err(|_| LocaleCatalogLoadError::UnsafePath {
-            path: path.to_path_buf(),
-            reason: "path contains NUL".into(),
-        })?;
-    let fd = unsafe {
-        libc::openat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-            0,
-        )
-    };
-    if fd < 0 {
-        return Err(LocaleCatalogLoadError::Read {
-            path: path.to_path_buf(),
-            source: std::io::Error::last_os_error(),
-        });
-    }
-    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
-}
-
-#[cfg(unix)]
-fn read_catalog_utf8_bounded(
-    file: std::fs::File,
-    path: &Path,
-    max_bytes: usize,
-) -> Result<String, LocaleCatalogLoadError> {
-    if !file
-        .metadata()
-        .map_err(|source| LocaleCatalogLoadError::Read {
-            path: path.to_path_buf(),
-            source,
-        })?
-        .file_type()
-        .is_file()
-    {
-        return Err(LocaleCatalogLoadError::NotRegularFile {
-            path: path.to_path_buf(),
-        });
-    }
-    let mut bytes = Vec::new();
-    file.take(max_bytes.saturating_add(1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|source| LocaleCatalogLoadError::Read {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    if bytes.len() > max_bytes {
-        return Err(LocaleCatalogLoadError::TooLarge {
-            path: path.to_path_buf(),
-            max_bytes,
-        });
-    }
-    String::from_utf8(bytes).map_err(|_| LocaleCatalogLoadError::InvalidUtf8 {
-        path: path.to_path_buf(),
-    })
 }
 
 /// A graph-authorized catalog input. Language-pack sources target another
@@ -3157,5 +2977,23 @@ mod tests {
             Some("Hello")
         );
         let _ = std::fs::remove_file(path);
+    }
+}
+
+impl From<mesh_core_files::ContainedFileError> for LocaleCatalogLoadError {
+    fn from(error: mesh_core_files::ContainedFileError) -> Self {
+        use mesh_core_files::ContainedFileError as E;
+        match error {
+            E::Read { path, source } => Self::Read { path, source },
+            E::NotRegularFile { path } => Self::NotRegularFile { path },
+            E::TooLarge { path, max_bytes } => Self::TooLarge { path, max_bytes },
+            E::UnsupportedPlatform { path } => Self::UnsupportedPlatform { path },
+            E::UnsafePath { path, reason } => Self::UnsafePath { path, reason },
+            E::InvalidUtf8 { path } => Self::InvalidUtf8 { path },
+            E::Cancelled { path } => Self::Read {
+                path,
+                source: std::io::Error::new(std::io::ErrorKind::Interrupted, "read cancelled"),
+            },
+        }
     }
 }

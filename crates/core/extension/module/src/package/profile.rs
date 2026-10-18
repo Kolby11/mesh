@@ -6,7 +6,7 @@ use crate::manifest::SurfaceLayoutSection;
 use mesh_core_service::{canonical_interface_name, parse_contract_version, parse_version_req};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -15,7 +15,6 @@ pub const PROFILE_SCHEMA_VERSION: u32 = 3;
 pub const DEFAULT_PROFILE_ID: &str = "default";
 
 static PROFILE_TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-const CONTROL_PLANE_LOCK_FILE: &str = ".mesh-control-plane.lock";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -37,8 +36,14 @@ pub struct ShellProfile {
     pub background_services: BTreeSet<String>,
     #[serde(default)]
     pub providers: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub remove_background_services: BTreeSet<String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub remove_providers: BTreeSet<String>,
     #[serde(default)]
     pub resources: ProfileResources,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub slots: BTreeMap<String, super::SlotOverride>,
     /// Sparse ordered placements for author-declared customizable slots.
     #[serde(default)]
     pub node_slots: BTreeMap<String, BTreeMap<String, super::NodeSlotOverride>>,
@@ -148,31 +153,6 @@ fn version_satisfies_requirement(requirement: &str, version: &str) -> bool {
         .is_some_and(|(requirement, version)| requirement.matches(&version))
 }
 
-fn provider_version_satisfies(
-    offered_version: Option<&str>,
-    interface: &str,
-    requirement: &str,
-    declared_versions: &HashMap<String, Vec<String>>,
-) -> bool {
-    let declaration_matches = declared_versions.get(interface).is_none_or(|versions| {
-        versions
-            .iter()
-            .any(|version| version_satisfies_requirement(requirement, version))
-    });
-    if !declaration_matches {
-        return false;
-    }
-
-    offered_version.is_some_and(|version| version_satisfies_requirement(requirement, version))
-        || offered_version.is_none()
-            && declared_versions.get(interface).is_some_and(|versions| {
-                versions
-                    .iter()
-                    .any(|version| version_satisfies_requirement(requirement, version))
-            })
-        || offered_version.is_none() && !declared_versions.contains_key(interface)
-}
-
 impl Default for ProfileRootInstance {
     fn default() -> Self {
         Self {
@@ -236,8 +216,10 @@ impl ShellProfile {
             roots: self.roots.clone(),
             background_services: self.background_services.clone(),
             providers: self.providers.clone(),
+            remove_background_services: self.remove_background_services.clone(),
+            remove_providers: self.remove_providers.clone(),
             resources: self.resources.clone(),
-            slots: BTreeMap::new(),
+            slots: self.slots.clone(),
             node_slots: self.node_slots.clone(),
             settings: self.settings.clone(),
         }
@@ -280,6 +262,17 @@ impl ShellProfile {
             }
         }
         validate_module_ids(self.background_services.iter(), "backgroundServices")?;
+        validate_module_ids(
+            self.remove_background_services.iter(),
+            "removeBackgroundServices",
+        )?;
+        for interface in self.providers.keys().chain(self.remove_providers.iter()) {
+            if interface.trim().is_empty() || canonical_interface_name(interface) != *interface {
+                return Err(ModuleManifestError::Validation(format!(
+                    "invalid provider interface '{interface}'"
+                )));
+            }
+        }
         validate_module_ids(self.providers.values(), "providers")?;
         validate_module_ids(
             self.resources
@@ -395,6 +388,13 @@ impl ShellProfile {
                 .providers
                 .values()
                 .any(|provider| provider == module_id)
+            || self.slots.values().any(|slot| {
+                slot.replace
+                    .iter()
+                    .any(|(source, target)| source == module_id || target == module_id)
+                    || slot.suppress.contains(module_id)
+                    || slot.order.iter().any(|id| id == module_id)
+            })
             || self.resources.theme.as_deref() == Some(module_id)
             || self.resources.icons().iter().any(|id| id == module_id)
             || self.resources.fonts().iter().any(|id| id == module_id)
@@ -425,12 +425,49 @@ impl ShellProfile {
         for chain in self.resources.chains_mut().into_iter().flatten() {
             chain.retain(|id| id != module_id);
         }
+        for slot in self.slots.values_mut() {
+            slot.replace
+                .retain(|source, target| source != module_id && target != module_id);
+            slot.suppress.remove(module_id);
+            slot.order.retain(|id| id != module_id);
+        }
         for slots in self.node_slots.values_mut() {
             for slot in slots.values_mut() {
                 slot.nodes
                     .retain(|node| placement_module(&node.contribution) != Some(module_id));
             }
         }
+    }
+
+    /// Toggle an explicit background service without rewriting composition
+    /// defaults. Disabling also subtracts inherited bindings to that provider;
+    /// required service inference remains independent of this root decision.
+    pub fn set_background_service_enabled<'a>(
+        &mut self,
+        module_id: &str,
+        enabled: bool,
+        manifests: impl IntoIterator<Item = &'a ModuleManifest>,
+    ) -> Result<(), ModuleManifestError> {
+        ModuleId::parse(module_id)?;
+        if enabled {
+            self.remove_background_services.remove(module_id);
+            self.background_services.insert(module_id.to_string());
+        } else {
+            let resolved = super::resolve_composition(self, manifests)?;
+            self.background_services.remove(module_id);
+            self.remove_background_services
+                .insert(module_id.to_string());
+            self.remove_providers.extend(
+                resolved
+                    .spec
+                    .providers
+                    .iter()
+                    .filter(|(_, provider)| provider.as_str() == module_id)
+                    .map(|(interface, _)| interface.clone()),
+            );
+            self.providers.retain(|_, provider| provider != module_id);
+        }
+        Ok(())
     }
 
     /// Resolve the modules needed by this profile. Roots are explicit; declared
@@ -625,11 +662,16 @@ impl ShellProfile {
                     candidate.mesh.kind == ModuleKind::Backend
                         && candidate.mesh.implementations().any(|implementation| {
                             canonical_interface_name(&implementation.interface) == interface
-                                && provider_version_satisfies(
-                                    implementation.version.as_deref(),
-                                    &interface,
-                                    &requirement,
-                                    &declared_interface_versions,
+                                && declared_interface_versions.get(&interface).is_some_and(
+                                    |versions| {
+                                        versions.iter().any(|version| {
+                                            super::resolution::provider_eligible(
+                                                implementation.version.as_deref(),
+                                                &requirement,
+                                                version,
+                                            )
+                                        })
+                                    },
                                 )
                         })
                 };
@@ -756,6 +798,9 @@ impl Default for ShellProfile {
             roots: BTreeMap::new(),
             background_services: BTreeSet::new(),
             providers: BTreeMap::new(),
+            remove_background_services: BTreeSet::new(),
+            remove_providers: BTreeSet::new(),
+            slots: BTreeMap::new(),
             resources: ProfileResources::default(),
             node_slots: BTreeMap::new(),
             settings: BTreeMap::new(),
@@ -846,10 +891,18 @@ impl ProfilePaths {
         profile_id: &str,
         profile: &ShellProfile,
     ) -> Result<(), ModuleManifestError> {
+        let lock = self.acquire_control_plane_lock()?;
+        self.save_locked(profile_id, profile, &lock)
+    }
+
+    pub(super) fn save_locked(
+        &self,
+        profile_id: &str,
+        profile: &ShellProfile,
+        _lock: &ControlPlaneLock,
+    ) -> Result<(), ModuleManifestError> {
         profile.validate()?;
-        let path = self.profile_path(profile_id)?;
-        let _lock = self.acquire_control_plane_lock()?;
-        self.save_unlocked(&path, profile)
+        self.save_unlocked(&self.profile_path(profile_id)?, profile)
     }
 
     fn save_unlocked(
@@ -875,6 +928,17 @@ impl ProfilePaths {
         profile: &ShellProfile,
         expected_revision: u64,
     ) -> Result<ShellProfile, ModuleManifestError> {
+        let lock = self.acquire_control_plane_lock()?;
+        self.save_if_revision_locked(profile_id, profile, expected_revision, &lock)
+    }
+
+    pub(super) fn save_if_revision_locked(
+        &self,
+        profile_id: &str,
+        profile: &ShellProfile,
+        expected_revision: u64,
+        _lock: &ControlPlaneLock,
+    ) -> Result<ShellProfile, ModuleManifestError> {
         if profile.revision != expected_revision {
             return Err(ModuleManifestError::Validation(format!(
                 "profile revision conflict: expected {expected_revision}, found {}",
@@ -882,7 +946,6 @@ impl ProfilePaths {
             )));
         }
 
-        let _lock = self.acquire_control_plane_lock()?;
         let current_revision = match self.load(profile_id) {
             Ok(current) => current.revision,
             Err(ModuleManifestError::Io { source, .. })
@@ -910,34 +973,10 @@ impl ProfilePaths {
         Ok(committed)
     }
 
-    fn acquire_control_plane_lock(&self) -> Result<ControlPlaneLock, ModuleManifestError> {
-        let path = self.config_dir.join(CONTROL_PLANE_LOCK_FILE);
-        let mut options = OpenOptions::new();
-        options.create(true).read(true).write(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-
-            options.mode(0o600);
-        }
-        let file = options
-            .open(&path)
-            .map_err(|source| ModuleManifestError::Io {
-                path: path.clone(),
-                source,
-            })?;
-        #[cfg(unix)]
-        {
-            let result =
-                unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&file), libc::LOCK_EX) };
-            if result != 0 {
-                return Err(ModuleManifestError::Io {
-                    path,
-                    source: std::io::Error::last_os_error(),
-                });
-            }
-        }
-        Ok(ControlPlaneLock(file))
+    pub(super) fn acquire_control_plane_lock(
+        &self,
+    ) -> Result<ControlPlaneLock, ModuleManifestError> {
+        acquire_control_plane_lock(&self.config_dir)
     }
 
     /// Restore the active-profile pointer to a previously observed value.
@@ -947,8 +986,9 @@ impl ProfilePaths {
     /// removing the pointer file rather than leaving it pointed at a
     /// candidate the running shell never actually adopted.
     pub fn restore_active(&self, profile_id: Option<&str>) -> Result<(), ModuleManifestError> {
+        let lock = self.acquire_control_plane_lock()?;
         match profile_id {
-            Some(profile_id) => self.set_active(profile_id),
+            Some(profile_id) => self.set_active_locked(profile_id, &lock),
             None => {
                 let path = self.active_profile_path();
                 match fs::remove_file(&path) {
@@ -961,6 +1001,15 @@ impl ProfilePaths {
     }
 
     pub fn set_active(&self, profile_id: &str) -> Result<(), ModuleManifestError> {
+        let lock = self.acquire_control_plane_lock()?;
+        self.set_active_locked(profile_id, &lock)
+    }
+
+    pub(super) fn set_active_locked(
+        &self,
+        profile_id: &str,
+        _lock: &ControlPlaneLock,
+    ) -> Result<(), ModuleManifestError> {
         let profile_path = self.profile_path(profile_id)?;
         if !profile_path.exists() {
             return Err(ModuleManifestError::Validation(format!(
@@ -968,7 +1017,7 @@ impl ProfilePaths {
                 profile_path.display()
             )));
         }
-        atomic_write(
+        atomic_write_unlocked(
             &self.active_profile_path(),
             format!("{profile_id}\n").as_bytes(),
         )
@@ -1052,48 +1101,27 @@ fn validate_profile_id(profile_id: &str) -> Result<(), ModuleManifestError> {
     Ok(())
 }
 
-struct ControlPlaneLock(File);
+pub(super) use mesh_core_config::ControlPlaneLock;
 
-impl Drop for ControlPlaneLock {
-    fn drop(&mut self) {
-        #[cfg(unix)]
-        {
-            let _ = unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&self.0), libc::LOCK_UN) };
-        }
-    }
+pub(super) fn acquire_control_plane_lock(
+    directory: &Path,
+) -> Result<ControlPlaneLock, ModuleManifestError> {
+    ControlPlaneLock::acquire(directory).map_err(|source| ModuleManifestError::Io {
+        path: directory.join(".mesh-control-plane.lock"),
+        source,
+    })
 }
 
 pub(super) fn atomic_write(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> {
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent).map_err(|source| ModuleManifestError::Io {
-        path: parent.to_path_buf(),
-        source,
-    })?;
-    let lock_path = parent.join(CONTROL_PLANE_LOCK_FILE);
-    let lock_file = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .open(&lock_path)
-        .map_err(|source| ModuleManifestError::Io {
-            path: lock_path.clone(),
-            source,
-        })?;
-    #[cfg(unix)]
-    {
-        let result =
-            unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&lock_file), libc::LOCK_EX) };
-        if result != 0 {
-            return Err(ModuleManifestError::Io {
-                path: lock_path,
-                source: std::io::Error::last_os_error(),
-            });
-        }
-    }
+    let _lock = acquire_control_plane_lock(parent)?;
     atomic_write_unlocked(path, content)
 }
 
-fn atomic_write_unlocked(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> {
+pub(super) fn atomic_write_unlocked(
+    path: &Path,
+    content: &[u8],
+) -> Result<(), ModuleManifestError> {
     super::validate_no_symlink_path(path, "package write target")?;
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent).map_err(|source| ModuleManifestError::Io {
@@ -1269,7 +1297,7 @@ mod tests {
             r#"{"name":"@me/component","version":"1","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
         );
         let backend = manifest(
-            r#"{"name":"@me/audio","version":"1","mesh":{"apiVersion":"0.1","kind":"backend","entry":"main.luau","implements":[{"interface":"mesh.audio","version":"1"}]}}"#,
+            r#"{"name":"@me/audio","version":"1","mesh":{"apiVersion":"0.1","kind":"backend","entry":"main.luau","interfaces":[{"name":"mesh.audio","version":"1","contract":{}}],"implements":[{"interface":"mesh.audio","version":"1"}]}}"#,
         );
         let mut profile = ShellProfile::new();
         profile.add_root(&frontend).unwrap();
@@ -1797,5 +1825,27 @@ mod tests {
         profile.remove_module_references("@mesh/audio");
         assert!(!profile.references_module("@mesh/audio"));
         assert!(profile.references_module("@mesh/desktop"));
+    }
+}
+
+#[cfg(test)]
+mod provider_eligibility_tests {
+    use super::*;
+    #[test]
+    fn activation_requires_the_offered_version_to_equal_the_declared_contract() {
+        let frontend = ModuleManifest::from_json_str(r#"{"name":"@me/panel","version":"1","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh","uses":{"interfaces":{"me.audio":"^1"}}}}"#).unwrap();
+        let mut profile = ShellProfile::new();
+        profile.add_root(&frontend).unwrap();
+        for offer in [Some("1.1"), Some("1.0"), None] {
+            let implementation = match offer {
+                Some(version) => serde_json::json!({"interface":"me.audio","version":version}),
+                None => serde_json::json!({"interface":"me.audio"}),
+            };
+            let backend = ModuleManifest::from_json_str(&serde_json::json!({"name":"@me/audio","version":"1","mesh":{"apiVersion":"0.1","kind":"backend","interfaces":[{"name":"me.audio","version":"1.0","contract":{}}],"implements":[implementation]}}).to_string()).unwrap();
+            assert_eq!(
+                profile.active_module_ids([&frontend, &backend]).is_ok(),
+                offer != Some("1.1")
+            );
+        }
     }
 }

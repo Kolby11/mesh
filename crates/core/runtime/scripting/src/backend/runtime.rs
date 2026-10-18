@@ -1,3 +1,4 @@
+use super::BackendState;
 use super::command::{
     BackendCommandOutcome, BackendCommandRegistry, BackendCommandRun, command_error_result,
     command_result_from_lua,
@@ -90,8 +91,8 @@ enum SuspendedCallback {
 /// What one [`BackendScriptContext::run_due_tasks`] pass settled.
 #[derive(Debug, Default)]
 pub struct BackendTaskRun {
-    /// The state snapshot after every due task ran.
-    pub state: Option<JsonValue>,
+    /// The latest successfully completed task's state snapshot.
+    pub state: Option<BackendState>,
     /// Failures of tasks the script spawned itself.
     pub errors: Vec<BackendScriptError>,
     /// A suspended `start(self)` finished.
@@ -124,7 +125,7 @@ impl BackendScriptEvent {
 #[derive(Debug, Default)]
 struct BackendRuntime {
     poll_interval_ms: u64,
-    pending_emit: Option<JsonValue>,
+    pending_emit: Option<BackendState>,
     pending_events: Vec<BackendScriptEvent>,
     current_payload: JsonValue,
     settings: JsonValue,
@@ -329,14 +330,9 @@ impl BackendScriptContext {
         Arc::clone(&self.backend_identity)
     }
 
-    /// The module-owned session that coordinates realm, host identity,
-    /// resource accounting, lifecycle, state, and failure supervision.
+    #[cfg(test)]
     pub fn session(&self) -> &RuntimeSession {
         &self.session
-    }
-
-    pub fn session_mut(&mut self) -> &mut RuntimeSession {
-        &mut self.session
     }
 
     pub(super) fn ensure_lua(&mut self) -> Result<&Lua, BackendScriptError> {
@@ -447,7 +443,7 @@ impl BackendScriptContext {
     }
 
     /// Call the backend script's `start(self)` startup entrypoint once after load.
-    pub fn call_init(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
+    pub fn call_init(&mut self) -> Result<Option<BackendState>, BackendScriptError> {
         let _budget = self.policy.begin_callback();
         self.session
             .begin_start()
@@ -483,10 +479,11 @@ impl BackendScriptContext {
             }
             Ok(Driven::Suspended(task)) => {
                 self.suspended.insert(task, SuspendedCallback::Start);
-                self.take_service_state_snapshot()
+                Ok(None)
             }
             Err(error) => {
-                self.session.record_failure(error.to_string());
+                let _ = self.session.mark_failed();
+                self.reset_for_call(JsonValue::Null);
                 Err(BackendScriptError::Runtime {
                     module_id: self.module_id.clone(),
                     message: error.to_string(),
@@ -661,6 +658,7 @@ impl BackendScriptContext {
                 module_id: self.module_id.clone(),
                 message,
             };
+            let mut publish = finished.is_ok();
             match (self.suspended.remove(&id), finished) {
                 (None, Ok(_)) => {}
                 (None, Err(message)) => run.errors.push(runtime_error(message)),
@@ -672,7 +670,7 @@ impl BackendScriptContext {
                     );
                 }
                 (Some(SuspendedCallback::Start), Err(message)) => {
-                    self.session.record_failure(message.clone());
+                    let _ = self.session.mark_failed();
                     run.start = Some(Err(runtime_error(message)));
                 }
                 (Some(SuspendedCallback::Poll), finished) => {
@@ -686,6 +684,7 @@ impl BackendScriptContext {
                             error: None,
                         }
                     });
+                    publish = outcome.is_ok();
                     run.commands.push((id, outcome));
                 }
                 (Some(SuspendedCallback::Command { .. }), Err(message)) => {
@@ -699,12 +698,20 @@ impl BackendScriptContext {
                     ));
                 }
             }
+            if publish {
+                match self.take_service_state_snapshot() {
+                    Ok(Some(state)) => run.state = Some(state),
+                    Ok(None) => {}
+                    Err(error) => {
+                        self.reset_for_call(JsonValue::Null);
+                        run.errors.push(error);
+                    }
+                }
+            } else {
+                self.reset_for_call(JsonValue::Null);
+            }
         }
         self.runtime.lock().unwrap().current_payload = JsonValue::Null;
-        match self.take_service_state_snapshot() {
-            Ok(state) => run.state = state,
-            Err(error) => run.errors.push(error),
-        }
         run
     }
 
@@ -725,7 +732,7 @@ impl BackendScriptContext {
         &mut self,
         program: &str,
         lines: &[String],
-    ) -> Result<Option<JsonValue>, BackendScriptError> {
+    ) -> Result<Option<BackendState>, BackendScriptError> {
         self.run_stream_batch_with_program(program, lines)
     }
 
@@ -737,7 +744,7 @@ impl BackendScriptContext {
         &mut self,
         stream: &StreamHandle,
         lines: &[String],
-    ) -> Result<Option<JsonValue>, BackendScriptError> {
+    ) -> Result<Option<BackendState>, BackendScriptError> {
         self.run_stream_batch_with_program(stream.program(), lines)
     }
 
@@ -745,7 +752,7 @@ impl BackendScriptContext {
         &mut self,
         program: &str,
         lines: &[String],
-    ) -> Result<Option<JsonValue>, BackendScriptError> {
+    ) -> Result<Option<BackendState>, BackendScriptError> {
         if lines.is_empty() {
             return Ok(None);
         }
@@ -804,7 +811,7 @@ impl BackendScriptContext {
         &mut self,
         stream: &StreamHandle,
         success: bool,
-    ) -> Result<Option<JsonValue>, BackendScriptError> {
+    ) -> Result<Option<BackendState>, BackendScriptError> {
         let globals = self.script_environment()?;
         let handler = match globals.get::<Function>("on_stream_closed") {
             Ok(handler) => handler,
@@ -846,7 +853,7 @@ impl BackendScriptContext {
     pub fn run_stream_event(
         &mut self,
         event: &StreamEvent,
-    ) -> Result<Option<JsonValue>, BackendScriptError> {
+    ) -> Result<Option<BackendState>, BackendScriptError> {
         let _budget = self.policy.begin_callback();
         self.host_side_effects_enabled
             .store(true, Ordering::Release);
@@ -884,7 +891,7 @@ impl BackendScriptContext {
     }
 
     /// Call `on_poll()` if it exists. Returns any exported service state.
-    pub fn run_poll(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
+    pub fn run_poll(&mut self) -> Result<Option<BackendState>, BackendScriptError> {
         let _budget = self.policy.begin_callback();
         self.host_side_effects_enabled
             .store(true, Ordering::Release);
@@ -900,23 +907,26 @@ impl BackendScriptContext {
                     module_id: self.module_id.clone(),
                     message: err.to_string(),
                 })?;
-        if let Driven::Suspended(task) =
-            self.invoke_callback(handler, current_self).map_err(|err| {
-                BackendScriptError::Runtime {
+        match self.invoke_callback(handler, current_self) {
+            Ok(Driven::Finished(_)) => self.take_service_state_snapshot(),
+            Ok(Driven::Suspended(task)) => {
+                self.suspended.insert(task, SuspendedCallback::Poll);
+                Ok(None)
+            }
+            Err(error) => {
+                self.reset_for_call(JsonValue::Null);
+                Err(BackendScriptError::Runtime {
                     module_id: self.module_id.clone(),
-                    message: err.to_string(),
-                }
-            })?
-        {
-            self.suspended.insert(task, SuspendedCallback::Poll);
+                    message: error.to_string(),
+                })
+            }
         }
-        self.take_service_state_snapshot()
     }
 
     /// Run `on_command_<name>(self)` as a coroutine. A handler that suspends
     /// on a host operation is reported as [`BackendCommandRun::Suspended`]
-    /// and settles from [`Self::run_due_tasks`]; only a handler that fails
-    /// before suspending has its `state` rolled back.
+    /// and settles from [`Self::run_due_tasks`]. Only successful completion
+    /// publishes state; private Luau mutations retain their identity on failure.
     pub fn run_command_with_result(
         &mut self,
         command: &str,
@@ -944,7 +954,6 @@ impl BackendScriptContext {
             }
         }
 
-        let previous_state = self.capture_state_for_rollback()?;
         let handler = match globals.get::<Function>(handler_name.as_str()) {
             Ok(handler) => handler,
             Err(_) => {
@@ -972,12 +981,11 @@ impl BackendScriptContext {
                         payload: payload.clone(),
                     },
                 );
-                let state = self.take_service_state_snapshot()?;
-                return Ok(BackendCommandRun::Suspended { task, state });
+                return Ok(BackendCommandRun::Suspended { task, state: None });
             }
             Err(err) => {
                 let message = err.to_string();
-                self.rollback_command_state(previous_state);
+                self.reset_for_call(JsonValue::Null);
                 return Ok(BackendCommandRun::Finished(BackendCommandOutcome {
                     state: None,
                     result: command_error_result(message.clone()),
@@ -985,21 +993,21 @@ impl BackendScriptContext {
                 }));
             }
         };
-        let state = match self.take_service_state_snapshot() {
-            Ok(state) => state,
+        let result = match self.command_result(command, returned) {
+            Ok(result) => result,
             Err(error) => {
-                self.rollback_command_state(previous_state);
+                self.reset_for_call(JsonValue::Null);
                 return Err(error);
             }
         };
-        match self.command_result(command, returned) {
-            Ok(result) => Ok(BackendCommandRun::Finished(BackendCommandOutcome {
+        match self.take_service_state_snapshot() {
+            Ok(state) => Ok(BackendCommandRun::Finished(BackendCommandOutcome {
                 state,
                 result,
                 error: None,
             })),
             Err(error) => {
-                self.rollback_command_state(previous_state);
+                self.reset_for_call(JsonValue::Null);
                 Err(error)
             }
         }
@@ -1035,15 +1043,10 @@ impl BackendScriptContext {
         Ok(result)
     }
 
-    pub fn take_service_state_snapshot(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
+    pub fn take_service_state_snapshot(
+        &mut self,
+    ) -> Result<Option<BackendState>, BackendScriptError> {
         if let Some(payload) = self.take_pending_emit() {
-            self.policy
-                .budget()
-                .validate_json(&payload, "service state snapshot")
-                .map_err(|error| BackendScriptError::SnapshotFailed {
-                    module_id: self.module_id.clone(),
-                    message: error.to_string(),
-                })?;
             return Ok(Some(payload));
         }
 
@@ -1067,21 +1070,12 @@ impl BackendScriptContext {
                 module_id: self.module_id.clone(),
                 message: format!("failed to convert state to JSON: {err}"),
             })?;
-        let output_bytes = self
-            .policy
-            .budget()
-            .validate_json(&payload, "service state snapshot")
-            .map_err(|error| BackendScriptError::SnapshotFailed {
+        let payload = BackendState::new(payload, &self.policy.budget()).map_err(|error| {
+            BackendScriptError::SnapshotFailed {
                 module_id: self.module_id.clone(),
                 message: error.to_string(),
-            })?;
-        self.policy
-            .budget()
-            .reserve_output(output_bytes)
-            .map_err(|error| BackendScriptError::SnapshotFailed {
-                module_id: self.module_id.clone(),
-                message: error.to_string(),
-            })?;
+            }
+        })?;
         Ok(Some(payload))
     }
 
@@ -1218,11 +1212,7 @@ impl BackendScriptContext {
                 .create_function(move |lua, value: LuaValue| {
                     require_started(&host_side_effects_enabled)?;
                     let payload = lua.from_value::<JsonValue>(value)?;
-                    let output_bytes = resources_for_emit
-                        .validate_json(&payload, "service payload")
-                        .map_err(|error| mlua::Error::external(error.to_string()))?;
-                    resources_for_emit
-                        .reserve_output(output_bytes)
+                    let payload = BackendState::new(payload, &resources_for_emit)
                         .map_err(|error| mlua::Error::external(error.to_string()))?;
                     runtime.lock().unwrap().pending_emit = Some(payload);
                     Ok(())
@@ -1247,11 +1237,7 @@ impl BackendScriptContext {
                         }
                         Some(other) => lua.from_value::<JsonValue>(other)?,
                     };
-                    let output_bytes = resources_for_json
-                        .validate_json(&payload, "service payload")
-                        .map_err(|error| mlua::Error::external(error.to_string()))?;
-                    resources_for_json
-                        .reserve_output(output_bytes)
+                    let payload = BackendState::new(payload, &resources_for_json)
                         .map_err(|error| mlua::Error::external(error.to_string()))?;
                     runtime.lock().unwrap().pending_emit = Some(payload);
                     Ok(())
@@ -1265,13 +1251,15 @@ impl BackendScriptContext {
             "emit_unavailable",
             self.lua_ref()?.create_function(move |_lua, ()| {
                 require_started(&host_side_effects_enabled)?;
-                resources_for_unavailable
-                    .reserve_output(64)
-                    .map_err(|error| mlua::Error::external(error.to_string()))?;
-                runtime.lock().unwrap().pending_emit = Some(serde_json::json!({
-                    "available": false,
-                    "source_module": module_id,
-                }));
+                let payload = BackendState::new(
+                    serde_json::json!({
+                        "available": false,
+                        "source_module": module_id,
+                    }),
+                    &resources_for_unavailable,
+                )
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+                runtime.lock().unwrap().pending_emit = Some(payload);
                 Ok(())
             })?,
         )?;
@@ -1681,46 +1669,7 @@ impl BackendScriptContext {
         runtime.current_payload = payload;
     }
 
-    fn capture_state_for_rollback(&mut self) -> Result<Option<JsonValue>, BackendScriptError> {
-        let state = self
-            .script_environment()?
-            .get::<LuaValue>("state")
-            .map_err(|err| BackendScriptError::SnapshotFailed {
-                module_id: self.module_id.clone(),
-                message: format!("failed to read state before command: {err}"),
-            })?;
-        if matches!(state, LuaValue::Nil) {
-            return Ok(None);
-        }
-        self.backend_lua()?
-            .from_value::<JsonValue>(state)
-            .map(Some)
-            .map_err(|err| BackendScriptError::SnapshotFailed {
-                module_id: self.module_id.clone(),
-                message: format!("failed to convert state before command: {err}"),
-            })
-    }
-
-    fn rollback_command_state(&mut self, previous: Option<JsonValue>) {
-        let Ok(environment) = self.script_environment() else {
-            self.reset_for_call(JsonValue::Null);
-            return;
-        };
-        let _ = environment.set(
-            "state",
-            match previous {
-                Some(value) => self
-                    .lua_ref()
-                    .ok()
-                    .and_then(|lua| lua.to_value(&value).ok())
-                    .unwrap_or(LuaValue::Nil),
-                None => LuaValue::Nil,
-            },
-        );
-        self.reset_for_call(JsonValue::Null);
-    }
-
-    fn take_pending_emit(&self) -> Option<JsonValue> {
+    fn take_pending_emit(&self) -> Option<BackendState> {
         self.runtime.lock().unwrap().pending_emit.take()
     }
 

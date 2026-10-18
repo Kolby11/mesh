@@ -1,0 +1,54 @@
+{
+  "name": "@mesh/media-interface",
+  "version": "1.0.0",
+  "description": "Standard now-playing media contract (MPRIS-shaped), independent of its providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.media",
+      "version": "1.0",
+      "domain": "media",
+      "relationship": "base",
+      "contract": {
+        "state": [
+          { "name": "available", "type": "boolean", "description": "Whether a media player is reachable" },
+          { "name": "state", "type": "string", "description": "\"playing\", \"paused\" or \"stopped\"" },
+          { "name": "player", "type": "string", "description": "Identity of the controlled player; empty when none" },
+          { "name": "title", "type": "string", "description": "Track title; empty when unknown" },
+          { "name": "artist", "type": "string", "description": "Track artist; empty when unknown" },
+          { "name": "album", "type": "string", "description": "Track album; empty when unknown" },
+          { "name": "art_path", "type": "string", "description": "Absolute local path of the cover art; empty when none" },
+          { "name": "position", "type": "float", "minimum": 0, "description": "Playback position in seconds when the state was published" },
+          { "name": "length", "type": "float", "minimum": 0, "description": "Track length in seconds; 0 when unknown" },
+          { "name": "updated_at", "type": "float", "description": "Unix time in seconds at which position was sampled, so consumers can extrapolate while playing" }
+        ],
+        "methods": [
+          { "name": "play_pause", "returns": "Result" },
+          { "name": "next", "returns": "Result" },
+          { "name": "previous", "returns": "Result" },
+          {
+            "name": "seek",
+            "args": [{ "name": "position", "type": "float" }],
+            "returns": "Result",
+            "coalesce": { "key": [] },
+            "stateBinding": { "field": "position", "fromArg": "position" }
+          }
+        ],
+        "events": [
+          {
+            "name": "TrackChanged",
+            "payload": [
+              { "name": "title", "type": "string" },
+              { "name": "artist", "type": "string" }
+            ]
+          }
+        ],
+        "capabilities": {
+          "required": ["service.media.read"],
+          "optional": ["service.media.control"]
+        }
+      }
+    }
+  }
+}

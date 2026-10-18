@@ -7,6 +7,9 @@ use std::path::{Path, PathBuf};
 
 pub use mesh_core_theme::ThemeModePolicy;
 
+mod control_plane;
+pub use control_plane::{ControlPlaneLock, default_module_graph_path};
+
 pub mod settings;
 pub mod validate;
 
@@ -60,12 +63,6 @@ impl std::fmt::Display for ConfigDiagnostic {
         }
         write!(f, ": {} — {}", self.message, self.suggested_action)
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ShellConfig {
-    #[serde(default)]
-    pub shell: ShellSection,
 }
 
 /// Global shell settings sourced from JSON files.
@@ -164,19 +161,25 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
     ),
     FieldSpec::new(
         "render",
-        FieldKind::Section(&[FieldSpec::new(
-            "blur",
-            FieldKind::Section(&[
-                FieldSpec::new("passes", FieldKind::UIntRange { min: 1, max: 3 }),
-                FieldSpec::new(
-                    "max_radius",
-                    FieldKind::FloatRange {
-                        min: 0.0,
-                        max: None,
-                    },
-                ),
-            ]),
-        )]),
+        FieldKind::Section(&[
+            FieldSpec::new(
+                "blur",
+                FieldKind::Section(&[
+                    FieldSpec::new("passes", FieldKind::UIntRange { min: 1, max: 3 }),
+                    FieldSpec::new(
+                        "max_radius",
+                        FieldKind::FloatRange {
+                            min: 0.0,
+                            max: None,
+                        },
+                    ),
+                ]),
+            ),
+            FieldSpec::new(
+                "backdrop",
+                FieldKind::Section(&[FieldSpec::new("image", FieldKind::Str)]),
+            ),
+        ]),
     ),
     FieldSpec::new(
         "tooltip",
@@ -424,6 +427,19 @@ fn resolve_shell_locale_settings_with_host_locale(
 pub struct RenderSettings {
     #[serde(default)]
     pub blur: BlurSettings,
+    #[serde(default)]
+    pub backdrop: BackdropSettings,
+}
+
+/// The image `backdrop-filter: refract()` samples. A Wayland client cannot
+/// read what the compositor shows behind its surfaces, so refraction needs a
+/// source MESH holds itself: normally the wallpaper the active profile paints.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct BackdropSettings {
+    /// Absolute path of the image, cover-fit to each output. Unset disables
+    /// refraction; refracting elements then paint only their own background.
+    #[serde(default)]
+    pub image: Option<String>,
 }
 
 /// Shell-wide accessibility preference consumed by the motion policy
@@ -523,12 +539,6 @@ fn default_tooltip_cursor_offset_y() -> f32 {
     18.0
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ShellSection {
-    #[serde(default)]
-    pub discovery_paths: Vec<String>,
-}
-
 fn default_theme_id() -> String {
     "tokyo-night".to_string()
 }
@@ -557,32 +567,7 @@ fn default_slider_increment_keys() -> Vec<String> {
     vec!["ArrowRight".into(), "ArrowUp".into()]
 }
 
-pub fn resolve_discovery_paths(workspace_root: &Path, configured_paths: &[String]) -> Vec<PathBuf> {
-    let mut resolved = if configured_paths.is_empty() {
-        default_discovery_paths(workspace_root)
-    } else {
-        configured_paths
-            .iter()
-            .filter_map(|path| {
-                let trimmed = path.trim();
-                if trimmed.is_empty() {
-                    return None;
-                }
-                let candidate = PathBuf::from(trimmed);
-                Some(if candidate.is_absolute() {
-                    candidate
-                } else {
-                    workspace_root.join(candidate)
-                })
-            })
-            .collect::<Vec<_>>()
-    };
-
-    resolved.dedup();
-    resolved
-}
-
-fn default_discovery_paths(workspace_root: &Path) -> Vec<PathBuf> {
+pub fn default_discovery_paths(workspace_root: &Path) -> Vec<PathBuf> {
     let mut paths = vec![workspace_root.join("modules")];
 
     let mesh_home_modules = mesh_home_path().join("modules");
@@ -603,9 +588,6 @@ pub enum ConfigError {
     #[error("failed to read config file: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("failed to parse config: {0}")]
-    Parse(#[from] toml::de::Error),
-
     #[error("failed to parse json config: {0}")]
     Json(#[from] serde_json::Error),
 
@@ -616,59 +598,6 @@ pub enum ConfigError {
     RevisionConflict { expected: u64, actual: u64 },
     #[error("settings revision exhausted at {current}")]
     RevisionExhausted { current: u64 },
-}
-
-pub fn default_config_path() -> PathBuf {
-    dirs_path("config").join("mesh/config.toml")
-}
-
-pub fn load_config(path: &Path) -> Result<ShellConfig, ConfigError> {
-    if !path.exists() {
-        return Ok(ShellConfig {
-            shell: ShellSection::default(),
-        });
-    }
-    let content = std::fs::read_to_string(path)?;
-    let document: toml::Value = toml::from_str(&content)?;
-    reject_removed_config_fields(&document, path)?;
-    let config: ShellConfig = document.try_into()?;
-    Ok(config)
-}
-
-fn reject_removed_config_fields(document: &toml::Value, path: &Path) -> Result<(), ConfigError> {
-    let Some(shell) = document.get("shell").and_then(toml::Value::as_table) else {
-        return Ok(());
-    };
-    if !shell.contains_key("default_surface") {
-        return Ok(());
-    }
-
-    Err(ConfigError::Diagnostic {
-        diagnostic: ConfigDiagnostic::error(
-            path,
-            Some("shell.default_surface".into()),
-            "default_surface is a removed root surface selection",
-            "remove shell.default_surface; select root surfaces through the active profile or root graph",
-        ),
-    })
-}
-
-fn dirs_path(kind: &str) -> PathBuf {
-    match kind {
-        "config" => non_empty_env_path(std::env::var_os("XDG_CONFIG_HOME")).unwrap_or_else(|| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            PathBuf::from(home).join(".config")
-        }),
-        "data" => non_empty_env_path(std::env::var_os("XDG_DATA_HOME")).unwrap_or_else(|| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            PathBuf::from(home).join(".local/share")
-        }),
-        _ => PathBuf::from("/tmp"),
-    }
-}
-
-fn non_empty_env_path(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
-    value.filter(|value| !value.is_empty()).map(PathBuf::from)
 }
 
 fn mesh_home_path() -> PathBuf {
@@ -686,61 +615,6 @@ fn mesh_home_path() -> PathBuf {
 mod tests {
     use super::*;
     use serde_json::json;
-
-    #[test]
-    fn shell_section_has_no_implicit_root_surface() {
-        let section = ShellSection::default();
-        assert!(section.discovery_paths.is_empty());
-
-        let serialized = toml::to_string(&section).unwrap();
-        assert!(!serialized.contains("default_surface"));
-    }
-
-    #[test]
-    fn removed_default_surface_gets_a_migration_diagnostic() {
-        let path = std::env::temp_dir().join(format!(
-            "mesh-config-removed-default-surface-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::write(
-            &path,
-            "[shell]\ndefault_surface = \"@mesh/launcher\"\ndiscovery_paths = [\"modules\"]\n",
-        )
-        .unwrap();
-
-        let error = load_config(&path).expect_err("removed surface selection must not be accepted");
-        let ConfigError::Diagnostic { diagnostic } = error else {
-            panic!("expected a migration diagnostic for shell.default_surface");
-        };
-        assert_eq!(diagnostic.severity, ConfigDiagnosticSeverity::Error);
-        assert_eq!(
-            diagnostic.field_path.as_deref(),
-            Some("shell.default_surface")
-        );
-        assert!(
-            diagnostic
-                .message
-                .contains("removed root surface selection")
-        );
-        assert!(
-            diagnostic
-                .suggested_action
-                .contains("active profile or root graph")
-        );
-        assert_eq!(diagnostic.path, path);
-
-        std::fs::remove_file(path).unwrap();
-    }
-
-    #[test]
-    fn empty_xdg_directory_values_are_absent() {
-        assert_eq!(non_empty_env_path(Some(std::ffi::OsString::new())), None);
-        assert_eq!(
-            non_empty_env_path(Some(std::ffi::OsString::from("/tmp/mesh-config"))),
-            Some(PathBuf::from("/tmp/mesh-config"))
-        );
-    }
 
     #[test]
     fn keyboard_settings_default_shortcuts_remain_available_without_user_overrides() {

@@ -49,6 +49,49 @@
         "exec.argv:uname:[\"-r\"]",
         "exec.argv:uname:[\"-s\"]"
       ],
+      "@mesh/glass-bar": [
+        "locale.read",
+        "service.audio.control",
+        "service.audio.read",
+        "service.media.control",
+        "service.media.read",
+        "service.network.read",
+        "service.power.read",
+        "service.recorder.control",
+        "service.recorder.read",
+        "service.weather.read",
+        "service.wm.control",
+        "service.wm.read",
+        "shell.surface",
+        "theme.read"
+      ],
+      "@mesh/glass-dock": [
+        "service.apps.launch",
+        "service.apps.read",
+        "shell.surface",
+        "theme.read"
+      ],
+      "@mesh/glass-wallpaper": ["shell.surface", "theme.read"],
+      "@mesh/glass-widgets": [
+        "locale.read",
+        "service.media.control",
+        "service.media.read",
+        "service.weather.read",
+        "shell.surface",
+        "theme.read"
+      ],
+      "@mesh/hyprland-apps": [
+        "exec.argv:hyprctl:[\"activewindow\",\"-j\"]",
+        "exec.argv:hyprctl:[\"clients\",\"-j\"]",
+        "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.exec_cmd(\\\"*\\\")\"]",
+        "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.focus({ window = \\\"address:*\\\" })\"]",
+        "exec.argv:sh:[\"-c\", \"for b in \\\"${XDG_DATA_HOME:-$HOME/.local/share}\\\" \\\"$HOME/.nix-profile/share\\\" $(printf %s \\\"${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\\\" | tr : \\\" \\\"); do for t in Papirus-Light Papirus Papirus-Dark Adwaita hicolor; do for s in scalable 256x256 128x128 96x96 64x64 48x48; do for c in apps categories; do for e in svg png; do f=\\\"$b/icons/$t/$s/$c/$1.$e\\\"; [ -f \\\"$f\\\" ] && { printf %s \\\"$f\\\"; exit 0; }; done; done; done; done; for e in svg png; do f=\\\"$b/pixmaps/$1.$e\\\"; [ -f \\\"$f\\\" ] && { printf %s \\\"$f\\\"; exit 0; }; done; done; exit 1\", \"sh\", \"*\"]",
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$HYPRLAND_INSTANCE_SIGNATURE\\\"\"]",
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_DATA_HOME:-$HOME/.local/share}:$HOME/.nix-profile/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\\\"\"]",
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\\\"\"]",
+        "fs.read",
+        "net.socket"
+      ],
       "@mesh/hyprland-wm": [
         "exec.argv:hyprctl:[\"activeworkspace\",\"-j\"]",
         "exec.argv:hyprctl:[\"activewindow\",\"-j\"]",
@@ -64,6 +107,16 @@
         "net.socket"
       ],
       "@mesh/language-popover": ["locale.read", "locale.write"],
+      "@mesh/mpris-media": [
+        "exec.argv:curl:[\"-sfL\",\"--max-time\",\"10\",\"-o\",\"*\",\"*\"]",
+        "exec.argv:playerctl:[\"--follow\",\"metadata\",\"--format\",\"*\"]",
+        "exec.argv:playerctl:[\"metadata\",\"--format\",\"*\"]",
+        "exec.argv:playerctl:[\"next\"]",
+        "exec.argv:playerctl:[\"play-pause\"]",
+        "exec.argv:playerctl:[\"position\",\"*\"]",
+        "exec.argv:playerctl:[\"previous\"]",
+        "exec.argv:sh:[\"-c\",\"d=\\\"${XDG_CACHE_HOME:-$HOME/.cache}/mesh/media-art\\\"; mkdir -p \\\"$d\\\" && printf '%s' \\\"$d\\\"\"]"
+      ],
       "@mesh/navigation-bar": [
         "locale.read",
         "locale.write",
@@ -79,7 +132,20 @@
         "shell.surface",
         "theme.read"
       ],
+      "@mesh/networkmanager-network": [
+        "exec.argv:nmcli:[\"-t\",\"-f\",\"ACTIVE,SSID,SIGNAL,SECURITY\",\"device\",\"wifi\",\"list\",\"--rescan\",\"no\"]",
+        "exec.argv:nmcli:[\"-t\",\"-f\",\"TYPE,STATE,CONNECTION,DEVICE\",\"device\"]",
+        "exec.argv:nmcli:[\"device\",\"wifi\",\"connect\",\"*\"]",
+        "exec.argv:nmcli:[\"device\",\"wifi\",\"rescan\"]",
+        "exec.argv:nmcli:[\"monitor\"]",
+        "exec.argv:nmcli:[\"networking\",\"connectivity\"]",
+        "exec.argv:nmcli:[\"radio\",\"wifi\",\"*\"]",
+        "exec.argv:nmcli:[\"radio\",\"wifi\"]"
+      ],
       "@mesh/opacity-test": ["shell.surface", "theme.read"],
+      "@mesh/open-meteo-weather": [
+        "exec.argv:curl:[\"-sf\",\"--max-time\",\"15\",\"*\"]"
+      ],
       "@mesh/pipewire-audio": [
         "exec.argv:wpctl:[\"get-volume\",\"*\"]",
         "exec.argv:wpctl:[\"set-mute\",\"*\",\"*\"]",
@@ -87,6 +153,12 @@
         "exec.argv:wpctl:[\"status\"]",
         "exec.argv:pw-mon:[\"--hide-props\",\"--hide-params\",\"--print-separator\"]"
       ],
+      "@mesh/profile-menu": [
+        "service.packages.control",
+        "service.packages.read",
+        "theme.read"
+      ],
+      "@mesh/profile-switcher": ["service.packages.read", "theme.read"],
       "@mesh/pulseaudio-audio": [
         "exec.argv:pactl:[\"get-sink-mute\",\"@DEFAULT_SINK@\"]",
         "exec.argv:pactl:[\"get-sink-volume\",\"@DEFAULT_SINK@\"]",
@@ -132,6 +204,12 @@
         "exec.argv:upower:[\"-e\"]",
         "exec.argv:upower:[\"-i\",\"*\"]",
         "exec.argv:upower:[\"--monitor\"]"
+      ],
+      "@mesh/wf-recorder": [
+        "exec.argv:pgrep:[\"-x\",\"wf-recorder\"]",
+        "exec.argv:pkill:[\"-INT\",\"-x\",\"wf-recorder\"]",
+        "exec.argv:sh:[\"-c\",\"d=\\\"${XDG_VIDEOS_DIR:-$HOME/Videos}/Recordings\\\"; mkdir -p \\\"$d\\\" && printf '%s' \\\"$d\\\"\"]",
+        "exec.argv:wf-recorder:[\"-f\",\"*\"]"
       ]
     },
     "schemaVersion": 1

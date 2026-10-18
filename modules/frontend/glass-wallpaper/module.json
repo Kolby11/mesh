@@ -1,0 +1,27 @@
+{
+  "name": "@mesh/glass-wallpaper",
+  "version": "0.1.0",
+  "description": "Full-output wallpaper painted from the shell backdrop image, so liquid-glass refraction samples exactly what is shown.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "capabilities": ["shell.surface", "theme.read"]
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "top",
+      "layer": "background",
+      "keyboard_mode": "none",
+      "visible_on_start": true
+    },
+    "provides": {
+      "layout": [
+        { "id": "main", "entrypoint": "src/main.mesh", "label": "Glass wallpaper" }
+      ]
+    },
+    "accessibility": {
+      "role": "presentation"
+    }
+  }
+}

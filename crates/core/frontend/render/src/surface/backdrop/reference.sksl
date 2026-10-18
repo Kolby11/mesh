@@ -1,0 +1,50 @@
+
+uniform shader backdrop;
+uniform float4 bounds;
+uniform float4 radii;
+uniform float depth;
+uniform float edge;
+uniform float dispersion;
+uniform float rim;
+
+float sd(float2 p, float2 center, float2 half_size, float r) {
+    float2 q = abs(p - center) - half_size + r;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+half4 main(float2 p) {
+    float2 half_size = bounds.zw * 0.5;
+    float2 center = bounds.xy + half_size;
+    float2 d = p - center;
+    float r = d.x < 0.0 ? (d.y < 0.0 ? radii.x : radii.w) : (d.y < 0.0 ? radii.y : radii.z);
+    r = min(r, min(half_size.x, half_size.y));
+    float dist = sd(p, center, half_size, r);
+    float2 grad = float2(
+        sd(p + float2(1.0, 0.0), center, half_size, r) - sd(p - float2(1.0, 0.0), center, half_size, r),
+        sd(p + float2(0.0, 1.0), center, half_size, r) - sd(p - float2(0.0, 1.0), center, half_size, r));
+    float glen = length(grad);
+    float2 n = glen > 0.0001 ? grad / glen : float2(0.0);
+
+    float t = edge > 0.0 ? clamp(1.0 + dist / edge, 0.0, 1.0) : 0.0;
+    float k = t * t * t;
+    float2 offset = n * depth * k;
+
+    half4 color;
+    if (dispersion > 0.0) {
+        float2 split = n * dispersion * k;
+        color = half4(
+            backdrop.eval(p + offset + split).r,
+            backdrop.eval(p + offset).g,
+            backdrop.eval(p + offset - split).b,
+            1.0);
+    } else {
+        color = backdrop.eval(p + offset);
+    }
+
+    if (rim > 0.0) {
+        float band = clamp(1.0 + dist / rim, 0.0, 1.0);
+        float light = clamp(dot(n, normalize(float2(-1.0, -1.4))), 0.0, 1.0);
+        color.rgb += half3(band * band * (0.18 + 0.32 * light));
+    }
+    return color;
+}

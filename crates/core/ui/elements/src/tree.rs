@@ -9,7 +9,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Live interaction state, written by `InputState::process` and read by
+/// Live interaction state, written by the interaction runtime and read by
 /// `selector_matches` for pseudo-class selectors like `:hover`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ElementState {

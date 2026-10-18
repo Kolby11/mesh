@@ -17,8 +17,24 @@ resolved revision, content digest, requesters, and active composition),
 compatibility gate, and capability re-approval are available through
 `mesh-shell` and the typed `mesh.packages` service. The authoritative transaction
 machinery is core-owned; CLI adapters and ordinary package/settings components
-consume that boundary. UI module identity confers no management privilege. See
+consume that boundary. UI module identity confers no management privilege. Package transactions acquire
+`.mesh-package.lock` before `.mesh-control-plane.lock` and retain both through
+commit or rollback. Interrupted-journal recovery takes the same locks in that
+order. Profile revisions and the active-profile pointer cannot be committed by
+another writer while a package snapshot can still be restored. See
 [Platform Philosophy §2](00-philosophy.md#2-core-owns-platform-invariants-modules-own-experiences).
+
+CLI and shell share core install/uninstall plans. Removal checks installed
+dependents, inferred as well as explicit active providers, the active layout,
+and inherited references in every profile before changing files. Forced
+composition removal preserves resolved profile contents as described in
+[01 §5.3](01-module-system.md#53-shell-profiles-and-live-switching).
+
+During authoring reload, a last-valid manifest is retained only while the
+non-manifest source digest remains unchanged and any readable manifest name
+still matches the committed module identity. Changed source, added/deleted
+files, symlinks, or a different identity prevent retention. Cold starts never
+retain a manifest.
 
 v1 deliberately ships without a registry or package archives. Detached module
 signing is supported through `module.sig` and root-graph trust anchors; the
@@ -193,6 +209,13 @@ advanced only after the matching lock bytes land. Graph and shell discovery use
 the active object paths when a snapshot exists, while the installed module tree
 remains the directly editable authoring source and is retained for update and
 local-edit checks.
+
+Managed snapshot entries use their immutable objects. Unlocked source modules
+remain available alongside those entries; publishing a package generation does
+not replace the untracked distribution or local authoring inventory. Package
+engines return a graph loaded after the matching lock/store generation is
+published, and failed offline operations explicitly abort before reporting an
+error.
 
 ## 2. Directories
 

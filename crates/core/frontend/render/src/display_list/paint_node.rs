@@ -209,6 +209,20 @@ pub(super) fn build_paint_content_with_previous(
                 .attributes
                 .get("size")
                 .and_then(|value| value.parse::<u32>().ok()),
+            multicolor: false,
+        }),
+        // An image is content, not a glyph: its file paints in its own colours.
+        "image" => DisplayPaintContent::Icon(DisplayIconPaint {
+            src: retained_optional_display_str(
+                node.attributes.get("src").map(String::as_str),
+                match previous {
+                    Some(DisplayPaintContent::Icon(icon)) => icon.src.as_ref(),
+                    _ => None,
+                },
+            ),
+            name: None,
+            size: None,
+            multicolor: true,
         }),
         "checkbox" if node_is_checked(node) => {
             DisplayPaintContent::Checkmark(DisplayCheckmarkPaint {

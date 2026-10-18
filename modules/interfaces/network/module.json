@@ -1,0 +1,53 @@
+{
+  "name": "@mesh/network-interface",
+  "version": "1.0.0",
+  "description": "Standard network connectivity and Wi-Fi contract, independent of its providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.network",
+      "version": "1.0",
+      "domain": "network",
+      "relationship": "base",
+      "contract": {
+        "state": [
+          { "name": "available", "type": "boolean", "description": "Whether the network service is reachable" },
+          { "name": "connectivity", "type": "string", "description": "\"full\", \"limited\", \"portal\" or \"none\"" },
+          { "name": "kind", "type": "string", "description": "Primary connection kind: \"wifi\", \"ethernet\" or \"none\"" },
+          { "name": "wifi_enabled", "type": "boolean", "description": "Whether the Wi-Fi radio is on" },
+          { "name": "ssid", "type": "string", "description": "Connected Wi-Fi network name; empty when none" },
+          { "name": "signal", "type": "int", "minimum": 0, "maximum": 100, "description": "Connected Wi-Fi signal strength percentage" },
+          { "name": "interface_name", "type": "string", "description": "Device of the primary connection" },
+          { "name": "networks", "type": "WifiNetwork[]", "description": "Visible Wi-Fi networks from the last scan" }
+        ],
+        "methods": [
+          {
+            "name": "set_wifi_enabled",
+            "args": [{ "name": "enabled", "type": "boolean" }],
+            "returns": "Result",
+            "stateBinding": { "field": "wifi_enabled", "fromArg": "enabled" }
+          },
+          { "name": "scan", "returns": "Result" },
+          { "name": "connect", "args": [{ "name": "id", "type": "string" }], "returns": "Result" }
+        ],
+        "events": [],
+        "types": {
+          "WifiNetwork": {
+            "fields": [
+              { "name": "id", "type": "string" },
+              { "name": "ssid", "type": "string" },
+              { "name": "signal", "type": "int" },
+              { "name": "secured", "type": "boolean" },
+              { "name": "connected", "type": "boolean" }
+            ]
+          }
+        },
+        "capabilities": {
+          "required": ["service.network.read"],
+          "optional": ["service.network.control"]
+        }
+      }
+    }
+  }
+}

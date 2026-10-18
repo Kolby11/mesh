@@ -154,7 +154,7 @@ fn ok_command_result() -> JsonValue {
 
 #[derive(Debug, Clone)]
 pub struct BackendCommandOutcome {
-    pub state: Option<JsonValue>,
+    pub state: Option<super::BackendState>,
     pub result: JsonValue,
     pub error: Option<String>,
 }
@@ -165,7 +165,10 @@ pub struct BackendCommandOutcome {
 #[derive(Debug, Clone)]
 pub enum BackendCommandRun {
     Finished(BackendCommandOutcome),
-    Suspended { task: u64, state: Option<JsonValue> },
+    Suspended {
+        task: u64,
+        state: Option<super::BackendState>,
+    },
 }
 
 pub(super) fn command_result_from_lua(

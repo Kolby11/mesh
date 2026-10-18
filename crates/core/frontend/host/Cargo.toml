@@ -1,9 +1,0 @@
-[package]
-name = "mesh-core-frontend-host"
-description = "Renderer-neutral frontend host ABI for MESH"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-
-[dependencies]
-mesh-core-frontend-abi = { workspace = true }

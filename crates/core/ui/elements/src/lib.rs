@@ -2,7 +2,6 @@ pub mod accessibility;
 pub mod attributes;
 pub mod composition;
 pub mod element;
-pub mod events;
 pub mod frame;
 pub mod interaction_contract;
 pub mod layout;
@@ -40,9 +39,6 @@ pub use element::{
     element_input_type_for_tag, element_runtime_tag_for_tag, element_snapshot,
     element_snapshot_json, element_type_for_tag, validate_element_attribute,
     validate_element_event,
-};
-pub use events::{
-    EventDispatcher, InputDispatchResult, InputState, Modifiers, RawInputEvent, UiEvent,
 };
 pub use frame::{
     FrameNode, FramePhase, FramePhaseStamps, FrameSemanticNode, FrameSemanticRelationships,

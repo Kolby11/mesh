@@ -371,7 +371,7 @@ fn lower_keyframes_rule(
         let stop_span = span;
         let raw_declarations = raw_blocks
             .get(keyframe_index)
-            .map(|block| split_raw_declarations(block.as_str()))
+            .map(|(block, base)| split_raw_declarations(block.as_str(), *base))
             .unwrap_or_default();
         let declarations =
             lower_declarations(&keyframe.declarations, &raw_declarations, stop_span)?;
@@ -418,7 +418,7 @@ fn lower_keyframes_rule(
 
 fn lower_declarations(
     source_block: &lightningcss::declaration::DeclarationBlock<'_>,
-    raw_declarations: &[(String, String)],
+    raw_declarations: &[(String, String, SourceSpan)],
     span: SourceSpan,
 ) -> Result<Vec<Declaration>, LoweringError> {
     let mut raw_used = vec![false; raw_declarations.len()];
@@ -431,20 +431,20 @@ fn lower_declarations(
             let value = property
                 .value_to_css_string(PrinterOptions::default())
                 .map_err(|err| error(err.to_string(), span))?;
-            let raw_value = raw_declarations
+            let (raw_value, value_span) = raw_declarations
                 .iter()
                 .enumerate()
-                .find(|(index, (name, _))| !raw_used[*index] && name == &property_name)
-                .map(|(index, (_, value))| {
+                .find(|(index, (name, _, _))| !raw_used[*index] && name == &property_name)
+                .map(|(index, (_, value, value_span))| {
                     raw_used[index] = true;
-                    value.clone()
+                    (value.clone(), *value_span)
                 })
-                .unwrap_or_else(|| value.clone());
+                .unwrap_or_else(|| (value.clone(), span));
             Ok(Declaration {
                 property: property_name,
                 value,
                 raw_value,
-                span,
+                span: value_span,
             })
         })
         .collect()
@@ -881,7 +881,7 @@ fn raw_declarations_for_span(
     source: &str,
     source_base: usize,
     span: SourceSpan,
-) -> Vec<(String, String)> {
+) -> Vec<(String, String, SourceSpan)> {
     let local_start = span.start.saturating_sub(source_base).min(source.len());
     let Some(open_offset) = source[local_start..].find('{') else {
         return Vec::new();
@@ -890,10 +890,10 @@ fn raw_declarations_for_span(
     let Some(close) = find_matching_brace(source, open) else {
         return Vec::new();
     };
-    split_raw_declarations(&source[open + 1..close])
+    split_raw_declarations(&source[open + 1..close], source_base + open + 1)
 }
 
-fn raw_keyframe_blocks(source: &str, source_base: usize, span: SourceSpan) -> Vec<String> {
+fn raw_keyframe_blocks(source: &str, source_base: usize, span: SourceSpan) -> Vec<(String, usize)> {
     let local_start = span.start.saturating_sub(source_base).min(source.len());
     let Some(open_offset) = source[local_start..].find('{') else {
         return Vec::new();
@@ -915,13 +915,16 @@ fn raw_keyframe_blocks(source: &str, source_base: usize, span: SourceSpan) -> Ve
         if nested_close > close {
             break;
         }
-        blocks.push(source[nested_open + 1..nested_close].to_string());
+        blocks.push((
+            source[nested_open + 1..nested_close].to_string(),
+            source_base + nested_open + 1,
+        ));
         cursor = nested_close + 1;
     }
     blocks
 }
 
-fn split_raw_declarations(body: &str) -> Vec<(String, String)> {
+fn split_raw_declarations(body: &str, source_base: usize) -> Vec<(String, String, SourceSpan)> {
     let mut result = Vec::new();
     let mut start = 0;
     let mut depth = 0usize;
@@ -960,17 +963,21 @@ fn split_raw_declarations(body: &str) -> Vec<(String, String)> {
             b'(' => depth += 1,
             b')' => depth = depth.saturating_sub(1),
             b';' if depth == 0 => {
-                push_raw_declaration(&mut result, &body[start..index]);
+                push_raw_declaration(&mut result, &body[start..index], source_base + start);
                 start = index + 1;
             }
             _ => {}
         }
     }
-    push_raw_declaration(&mut result, &body[start..]);
+    push_raw_declaration(&mut result, &body[start..], source_base + start);
     result
 }
 
-fn push_raw_declaration(result: &mut Vec<(String, String)>, raw: &str) {
+fn push_raw_declaration(
+    result: &mut Vec<(String, String, SourceSpan)>,
+    raw: &str,
+    source_base: usize,
+) {
     let raw = strip_css_comments(raw);
     let Some(colon) = raw.find(':') else {
         return;
@@ -978,7 +985,13 @@ fn push_raw_declaration(result: &mut Vec<(String, String)>, raw: &str) {
     let property = raw[..colon].trim();
     let value = raw[colon + 1..].trim();
     if !property.is_empty() && !value.is_empty() {
-        result.push((property.to_string(), value.to_string()));
+        let leading = raw[colon + 1..].len() - raw[colon + 1..].trim_start().len();
+        let value_start = source_base + colon + 1 + leading;
+        result.push((
+            property.to_string(),
+            value.to_string(),
+            SourceSpan::new(value_start, value_start + value.len()),
+        ));
     }
 }
 
@@ -1007,6 +1020,7 @@ fn strip_css_comments(value: &str) -> String {
             result.push(byte);
             index += 1;
         } else if byte == b'/' && bytes.get(index + 1) == Some(&b'*') {
+            let comment_start = index;
             index += 2;
             while index + 1 < bytes.len() && !(bytes[index] == b'*' && bytes[index + 1] == b'/') {
                 index += 1;
@@ -1014,6 +1028,7 @@ fn strip_css_comments(value: &str) -> String {
             if index + 1 < bytes.len() {
                 index += 2;
             }
+            result.resize(result.len() + index - comment_start, b' ');
         } else {
             result.push(byte);
             index += 1;

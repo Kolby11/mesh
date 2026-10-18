@@ -22,20 +22,13 @@ pub use font::{
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
-use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-#[cfg(unix)]
-use std::{
-    ffi::CString,
-    os::unix::ffi::OsStrExt,
-    os::unix::fs::MetadataExt,
-    os::unix::io::{AsRawFd, FromRawFd},
-};
 
 pub const DEFAULT_MAX_RESOURCE_BYTES: usize = 64 * 1024 * 1024;
-const RESOURCE_READ_CHUNK_BYTES: usize = 64 * 1024;
 
 /// A shared byte budget for bounded derived-resource work.
 ///
@@ -317,6 +310,8 @@ pub fn resource_fingerprint(path: &Path) -> Option<ResourceFingerprint> {
     })
 }
 
+const RESOURCE_READ_CHUNK_BYTES: usize = 64 * 1024;
+
 static RESOURCE_REVISION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, thiserror::Error)]
@@ -346,8 +341,7 @@ pub enum ResourceAssetError {
 /// descriptor-relative no-follow walk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceAssetHandle {
-    module_root: PathBuf,
-    relative_path: PathBuf,
+    source: mesh_core_files::ContainedFile,
 }
 
 impl ResourceAssetHandle {
@@ -355,50 +349,21 @@ impl ResourceAssetHandle {
         module_root: impl Into<PathBuf>,
         relative_path: impl AsRef<Path>,
     ) -> Result<Self, ResourceAssetError> {
-        let module_root = module_root.into();
-        let relative_path = relative_path.as_ref();
-        if module_root.as_os_str().is_empty() {
-            return Err(ResourceAssetError::UnsafePath {
-                path: module_root,
-                reason: "module root is empty".into(),
-            });
-        }
-        if relative_path.as_os_str().is_empty() || relative_path.is_absolute() {
-            return Err(ResourceAssetError::UnsafePath {
-                path: relative_path.to_path_buf(),
-                reason: "resource path must be non-empty and relative".into(),
-            });
-        }
-        if relative_path.components().any(|component| {
-            matches!(
-                component,
-                Component::CurDir
-                    | Component::ParentDir
-                    | Component::RootDir
-                    | Component::Prefix(_)
-            )
-        }) {
-            return Err(ResourceAssetError::UnsafePath {
-                path: relative_path.to_path_buf(),
-                reason: "resource path contains an unsafe component".into(),
-            });
-        }
-        Ok(Self {
-            module_root,
-            relative_path: relative_path.to_path_buf(),
-        })
+        mesh_core_files::ContainedFile::new(module_root, relative_path)
+            .map(|source| Self { source })
+            .map_err(Into::into)
     }
 
     pub fn module_root(&self) -> &Path {
-        &self.module_root
+        self.source.module_root()
     }
 
     pub fn relative_path(&self) -> &Path {
-        &self.relative_path
+        self.source.relative_path()
     }
 
     pub fn candidate_path(&self) -> PathBuf {
-        self.module_root.join(&self.relative_path)
+        self.source.candidate_path()
     }
 
     pub fn read_bounded(&self, max_bytes: usize) -> Result<Vec<u8>, ResourceAssetError> {
@@ -410,54 +375,9 @@ impl ResourceAssetHandle {
         max_bytes: usize,
         cancellation: &ResourcePreparationToken,
     ) -> Result<Vec<u8>, ResourceAssetError> {
-        #[cfg(unix)]
-        {
-            if cancellation.is_cancelled() {
-                return Err(ResourceAssetError::Cancelled {
-                    path: self.candidate_path(),
-                });
-            }
-            let mut directory = open_resource_directory(&self.module_root)?;
-            let mut components = self.relative_path.components().peekable();
-            while let Some(component) = components.next() {
-                if cancellation.is_cancelled() {
-                    return Err(ResourceAssetError::Cancelled {
-                        path: self.candidate_path(),
-                    });
-                }
-                let Component::Normal(component) = component else {
-                    return Err(ResourceAssetError::UnsafePath {
-                        path: self.candidate_path(),
-                        reason: "non-normal path component".into(),
-                    });
-                };
-                if components.peek().is_some() {
-                    directory =
-                        open_resource_directory_at(&directory, component, &self.candidate_path())?;
-                } else {
-                    let file =
-                        open_resource_file_at(&directory, component, &self.candidate_path())?;
-                    return read_resource_bounded(
-                        file,
-                        &self.candidate_path(),
-                        max_bytes,
-                        cancellation,
-                    );
-                }
-            }
-            Err(ResourceAssetError::UnsafePath {
-                path: self.candidate_path(),
-                reason: "empty relative path".into(),
-            })
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = max_bytes;
-            let _ = cancellation;
-            Err(ResourceAssetError::UnsupportedPlatform {
-                path: self.candidate_path(),
-            })
-        }
+        self.source
+            .read_bounded(max_bytes, || cancellation.is_cancelled())
+            .map_err(Into::into)
     }
 }
 
@@ -501,137 +421,6 @@ pub fn validate_font_face_with_cancellation(
             family: expected_family.to_owned(),
         })
     }
-}
-
-#[cfg(unix)]
-fn open_resource_directory(path: &Path) -> Result<std::fs::File, ResourceAssetError> {
-    let name =
-        CString::new(path.as_os_str().as_bytes()).map_err(|_| ResourceAssetError::UnsafePath {
-            path: path.to_path_buf(),
-            reason: "path contains NUL".into(),
-        })?;
-    let fd = unsafe {
-        libc::open(
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
-        )
-    };
-    if fd < 0 {
-        return Err(ResourceAssetError::Read {
-            path: path.to_path_buf(),
-            source: std::io::Error::last_os_error(),
-        });
-    }
-    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
-}
-
-#[cfg(unix)]
-fn open_resource_directory_at(
-    parent: &std::fs::File,
-    component: &std::ffi::OsStr,
-    path: &Path,
-) -> Result<std::fs::File, ResourceAssetError> {
-    let name = CString::new(component.as_bytes()).map_err(|_| ResourceAssetError::UnsafePath {
-        path: path.to_path_buf(),
-        reason: "path contains NUL".into(),
-    })?;
-    let fd = unsafe {
-        libc::openat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
-            0,
-        )
-    };
-    if fd < 0 {
-        return Err(ResourceAssetError::Read {
-            path: path.to_path_buf(),
-            source: std::io::Error::last_os_error(),
-        });
-    }
-    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
-}
-
-#[cfg(unix)]
-fn open_resource_file_at(
-    parent: &std::fs::File,
-    component: &std::ffi::OsStr,
-    path: &Path,
-) -> Result<std::fs::File, ResourceAssetError> {
-    let name = CString::new(component.as_bytes()).map_err(|_| ResourceAssetError::UnsafePath {
-        path: path.to_path_buf(),
-        reason: "path contains NUL".into(),
-    })?;
-    let fd = unsafe {
-        libc::openat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-            0,
-        )
-    };
-    if fd < 0 {
-        return Err(ResourceAssetError::Read {
-            path: path.to_path_buf(),
-            source: std::io::Error::last_os_error(),
-        });
-    }
-    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
-}
-
-#[cfg(unix)]
-fn read_resource_bounded(
-    mut file: std::fs::File,
-    path: &Path,
-    max_bytes: usize,
-    cancellation: &ResourcePreparationToken,
-) -> Result<Vec<u8>, ResourceAssetError> {
-    if !file
-        .metadata()
-        .map_err(|source| ResourceAssetError::Read {
-            path: path.to_path_buf(),
-            source,
-        })?
-        .file_type()
-        .is_file()
-    {
-        return Err(ResourceAssetError::NotRegularFile {
-            path: path.to_path_buf(),
-        });
-    }
-    let limit = max_bytes.saturating_add(1);
-    let mut bytes = Vec::with_capacity(limit.min(RESOURCE_READ_CHUNK_BYTES));
-    let mut chunk = [0_u8; RESOURCE_READ_CHUNK_BYTES];
-    while bytes.len() < limit {
-        if cancellation.is_cancelled() {
-            return Err(ResourceAssetError::Cancelled {
-                path: path.to_path_buf(),
-            });
-        }
-        let amount = (limit - bytes.len()).min(chunk.len());
-        let read = file
-            .read(&mut chunk[..amount])
-            .map_err(|source| ResourceAssetError::Read {
-                path: path.to_path_buf(),
-                source,
-            })?;
-        if read == 0 {
-            break;
-        }
-        bytes.extend_from_slice(&chunk[..read]);
-    }
-    if cancellation.is_cancelled() {
-        return Err(ResourceAssetError::Cancelled {
-            path: path.to_path_buf(),
-        });
-    }
-    if bytes.len() > max_bytes {
-        return Err(ResourceAssetError::TooLarge {
-            path: path.to_path_buf(),
-            max_bytes,
-        });
-    }
-    Ok(bytes)
 }
 
 #[derive(Debug, Clone)]
@@ -1369,5 +1158,23 @@ mod tests {
             validate_font_face(&handle, "Inter"),
             Err(ResourceAssetError::InvalidFont { .. })
         ));
+    }
+}
+
+impl From<mesh_core_files::ContainedFileError> for ResourceAssetError {
+    fn from(error: mesh_core_files::ContainedFileError) -> Self {
+        use mesh_core_files::ContainedFileError as E;
+        match error {
+            E::Read { path, source } => Self::Read { path, source },
+            E::NotRegularFile { path } => Self::NotRegularFile { path },
+            E::TooLarge { path, max_bytes } => Self::TooLarge { path, max_bytes },
+            E::UnsupportedPlatform { path } => Self::UnsupportedPlatform { path },
+            E::UnsafePath { path, reason } => Self::UnsafePath { path, reason },
+            E::InvalidUtf8 { path } => Self::Read {
+                path,
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid UTF-8"),
+            },
+            E::Cancelled { path } => Self::Cancelled { path },
+        }
     }
 }

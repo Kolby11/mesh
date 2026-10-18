@@ -1,0 +1,197 @@
+<template>
+    <row class="pill media" hidden={not has_track}>
+        <icon class="art" src={art} size="64" hidden={art == ""} />
+        <box class="art art-empty" hidden={art ~= ""}>
+            <icon class="art-glyph" name="audio-x-generic" size="12" />
+        </box>
+        <column class="meta">
+            <text class="title">{title}</text>
+            <text class="time">{progress}</text>
+        </column>
+        <button class="ctl" onclick={onPrevious} aria-label="Previous track">
+            <icon class="ctl-glyph" name="media-skip-backward" size="13" />
+        </button>
+        <button class="ctl" onclick={onToggle} aria-label={playing and "Pause" or "Play"}>
+            <icon class="ctl-glyph" name={playing and "media-playback-pause" or "media-playback-start"} size="13" />
+        </button>
+        <button class="ctl" onclick={onNext} aria-label="Next track">
+            <icon class="ctl-glyph" name="media-skip-forward" size="13" />
+        </button>
+    </row>
+</template>
+
+<script lang="luau">
+local media = require("mesh.media")
+
+has_track = false
+playing = false
+title = ""
+art = ""
+progress = ""
+
+local function clock(seconds)
+    seconds = math.max(0, math.floor(seconds or 0))
+    return string.format("%02d:%02d", seconds // 60, seconds % 60)
+end
+
+local function position_now()
+    local position = media.position or 0
+    if media.state == "playing" then
+        position += os.time() - (media.updated_at or os.time())
+    end
+    local length = media.length or 0
+    return length > 0 and math.min(position, length) or position
+end
+
+local function render()
+    has_track = media.available == true and (media.title or "") ~= ""
+    playing = media.state == "playing"
+    local text = media.title or ""
+    title = #text > 26 and (string.sub(text, 1, 25) .. "…") or text
+    art = media.art_path or ""
+    progress = clock(position_now()) .. " / " .. clock(media.length)
+end
+
+effect(render)
+
+task.spawn(function()
+    while true do
+        task.sleep(1000)
+        if playing then
+            progress = clock(position_now()) .. " / " .. clock(media.length)
+        end
+    end
+end)
+
+function onPrevious()
+    media.previous()
+end
+
+function onToggle()
+    media.play_pause()
+end
+
+function onNext()
+    media.next()
+end
+</script>
+
+<style>
+    .pill {
+        height: 36px;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--color-glass-rim);
+        background-image: linear-gradient(to bottom, #b468ff4d, #7a2ee033);
+        box-shadow: 0 4px 14px #14003259;
+        backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
+    }
+
+    .media {
+        gap: 8px;
+        padding-inline: 4px 8px;
+        max-width: 476px;
+    }
+
+    .art {
+        width: 28px;
+        height: 28px;
+        flex-shrink: 0;
+        border-radius: 999px;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .art-empty {
+        background: #ffffff26;
+    }
+
+    .art-glyph {
+        width: 17px;
+        height: 17px;
+        color: #f5ecff;
+    }
+
+    .meta {
+        gap: 0;
+        min-width: 0;
+        flex-shrink: 1;
+        justify-content: center;
+    }
+
+    .title {
+        height: 14px;
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.2;
+        color: #f5ecff;
+        text-overflow: ellipsis;
+    }
+
+    .time {
+        height: 13px;
+        font-size: 10px;
+        line-height: 1.2;
+        color: #e3cdfa;
+    }
+
+    .ctl {
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        flex-shrink: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 999px;
+        background: transparent;
+    }
+
+
+
+    .ctl-glyph {
+        width: 18px;
+        height: 18px;
+        color: #f5ecff;
+    }
+
+    /* Motion: one vocabulary for the whole shell, all from theme tokens.
+    Containers lift by --animation-lift-hover and brighten their rim; controls
+    scale by --animation-scale-hover/-press and ring with the focus token. */
+
+    .pill {
+        transform: translateY(0px);
+        transition-property: transform, border-color, opacity;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .pill:hover {
+        transform: translateY(var(--animation-lift-hover));
+        border-color: var(--color-glass-rim-hover);
+    }
+
+    .ctl {
+        border-width: 1px;
+        border-style: solid;
+        border-color: transparent;
+        transform: scale(1);
+        transition-property: transform, background-color, border-color, opacity;
+        transition-duration: var(--animation-duration-short);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .ctl:hover {
+        background-color: var(--color-glass-hover);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .ctl:focus-visible {
+        border-color: var(--color-focus-ring);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .ctl:active {
+        transform: scale(var(--animation-scale-press));
+        transition-duration: var(--animation-duration-fast);
+    }
+</style>

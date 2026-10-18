@@ -47,6 +47,7 @@ impl Shell {
                 "shell runtime stopped".to_string(),
                 false,
                 true,
+                false,
             );
             self.retire_backend_provider_generation(&interface, &provider_id, identity);
         }
@@ -92,23 +93,6 @@ impl Shell {
             .unwrap_or_default()
     }
 
-    pub(in crate::shell) fn backend_provider_is_active(
-        &self,
-        interface: &str,
-        provider_id: &str,
-    ) -> bool {
-        self.backend_runtimes.get(interface).is_some_and(|slot| {
-            *slot
-                .event_provider_id
-                .read()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                == provider_id
-                && !self
-                    .backend_runtime_status(interface, provider_id)
-                    .is_some_and(|entry| entry.status.rejects_provider_messages())
-        })
-    }
-
     pub(in crate::shell) fn backend_provider_is_active_at_identity(
         &self,
         interface: &str,
@@ -126,12 +110,11 @@ impl Shell {
                     .read()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     == identity
-                && (identity == mesh_core_backend::BackendIdentity::default()
-                    || !self
-                        .backend_runtime_status(interface, provider_id)
-                        .is_some_and(|entry| {
-                            entry.identity == identity && entry.status.rejects_provider_messages()
-                        }))
+                && !self
+                    .backend_runtime_status(interface, provider_id)
+                    .is_some_and(|entry| {
+                        entry.identity == identity && entry.status.rejects_provider_messages()
+                    })
         })
     }
 
@@ -188,13 +171,15 @@ impl Shell {
         publish_health: bool,
     ) {
         let identity = self.backend_identity_for_interface(&interface);
-        self.record_backend_runtime_status_with_identity(
+        self.record_backend_runtime_status_with_identity_and_lifecycle(
             interface,
             provider_id,
             identity,
             status,
             message,
             publish_health,
+            true,
+            true,
         );
     }
 
@@ -215,6 +200,7 @@ impl Shell {
             message,
             publish_health,
             true,
+            false,
         );
     }
 
@@ -227,6 +213,7 @@ impl Shell {
         message: String,
         publish_health: bool,
         update_module_lifecycle: bool,
+        shell_owned: bool,
     ) {
         self.invalidate_debug_snapshot_cache();
         let is_failure = matches!(
@@ -272,22 +259,24 @@ impl Shell {
                 },
             );
         if update_module_lifecycle
-            && self.backend_runtime_status_is_authoritative(
-                &interface,
-                &provider_id,
-                identity,
-                status,
-            )
+            && (shell_owned
+                || self.backend_runtime_status_is_authoritative(
+                    &interface,
+                    &provider_id,
+                    identity,
+                    status,
+                ))
         {
             self.update_module_runtime_lifecycle(&provider_id, status, &message);
         }
-        self.publish_backend_health_at_identity(
+        self.publish_backend_health_with_authority(
             &interface,
             &provider_id,
             identity,
             status,
             &message,
             publish_health,
+            shell_owned,
         );
     }
 
@@ -347,41 +336,34 @@ impl Shell {
                 .get(interface)
                 .is_some_and(|pending| {
                     pending.slot.provider_id == provider_id
-                        && (identity == mesh_core_backend::BackendIdentity::default()
-                            || *pending
-                                .slot
-                                .identity
-                                .read()
-                                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                                == identity)
+                        && *pending
+                            .slot
+                            .identity
+                            .read()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            == identity
                 })
                 || self.profile_candidate_is_pending_at_identity(interface, provider_id, identity);
         if pending_candidate {
             return false;
         }
 
-        // The legacy, identity-less lifecycle channel is also used for
-        // startup validation failures before a runtime slot exists. Preserve
-        // that authoritative path; once an identity is present, require the
-        // live or committed generation to own the transition.
-        identity == mesh_core_backend::BackendIdentity::default()
-            || self.backend_runtimes.get(interface).is_some_and(|slot| {
-                slot.provider_id == provider_id
-                    && *slot
-                        .identity
-                        .read()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        == identity
-            })
-            || self.committed_provider_generation_matches(
-                interface,
-                provider_id,
-                identity,
-                matches!(
-                    status,
-                    BackendRuntimeStatus::Stopped | BackendRuntimeStatus::Quarantined
-                ),
-            )
+        self.backend_runtimes.get(interface).is_some_and(|slot| {
+            slot.provider_id == provider_id
+                && *slot
+                    .identity
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    == identity
+        }) || self.committed_provider_generation_matches(
+            interface,
+            provider_id,
+            identity,
+            matches!(
+                status,
+                BackendRuntimeStatus::Stopped | BackendRuntimeStatus::Quarantined
+            ),
+        )
     }
 
     fn committed_provider_generation_matches(
@@ -429,29 +411,7 @@ impl Shell {
         }
     }
 
-    /// Publish one authoritative availability transition to both ordinary
-    /// service observers and subscribers of the reserved `health` event. The
-    /// provider cache is updated before delivery, so a newly mounted runtime
-    /// and an already-mounted runtime see the same terminal state.
-    pub(in crate::shell) fn publish_backend_health(
-        &mut self,
-        interface: &str,
-        provider_id: &str,
-        status: BackendRuntimeStatus,
-        message: &str,
-        deliver: bool,
-    ) {
-        let identity = self.backend_identity_for_interface(interface);
-        self.publish_backend_health_at_identity(
-            interface,
-            provider_id,
-            identity,
-            status,
-            message,
-            deliver,
-        );
-    }
-
+    #[cfg(test)]
     pub(in crate::shell) fn publish_backend_health_at_identity(
         &mut self,
         interface: &str,
@@ -460,6 +420,27 @@ impl Shell {
         status: BackendRuntimeStatus,
         message: &str,
         deliver: bool,
+    ) {
+        self.publish_backend_health_with_authority(
+            interface,
+            provider_id,
+            identity,
+            status,
+            message,
+            deliver,
+            false,
+        );
+    }
+
+    fn publish_backend_health_with_authority(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        identity: mesh_core_backend::BackendIdentity,
+        status: BackendRuntimeStatus,
+        message: &str,
+        deliver: bool,
+        shell_owned: bool,
     ) {
         let active_identity_matches = self.backend_runtimes.get(interface).is_some_and(|slot| {
             slot.provider_id == provider_id
@@ -495,7 +476,7 @@ impl Shell {
             && self.committed_provider_generation_matches(interface, provider_id, identity, true);
         let committed_identity_matches =
             self.committed_provider_generation_matches(interface, provider_id, identity, false);
-        if identity != mesh_core_backend::BackendIdentity::default()
+        if !shell_owned
             && !active_identity_matches
             && !committed_identity_matches
             && !retired_stop_matches
@@ -517,7 +498,10 @@ impl Shell {
                     .map(|pending| pending.slot.provider_id.as_str())
             });
         if current_provider.is_some_and(|current| current != provider_id)
-            || current_provider.is_none() && provider_id != "<none>" && !retired_stop_matches
+            || !shell_owned
+                && current_provider.is_none()
+                && provider_id != "<none>"
+                && !retired_stop_matches
         {
             tracing::debug!(
                 interface,
@@ -848,6 +832,7 @@ impl Shell {
                 "superseded by a newer provider switch".to_string(),
                 true,
                 false,
+                false,
             );
         }
         self.pending_backend_runtimes.insert(interface, pending);
@@ -1025,6 +1010,7 @@ impl Shell {
             message.clone(),
             true,
             false,
+            false,
         );
         self.diagnostics.record_lifecycle_error(
             "@mesh/settings",
@@ -1051,6 +1037,7 @@ impl Shell {
         self.fail_pending_backend_runtime_switch(interface, provider_id, pending, message);
     }
 
+    #[cfg(test)]
     pub(in crate::shell) fn handle_backend_lifecycle(
         &mut self,
         interface: String,
@@ -1085,13 +1072,12 @@ impl Shell {
                 .get(&interface)
                 .is_some_and(|pending| {
                     pending.slot.provider_id == provider_id
-                        && (identity == mesh_core_backend::BackendIdentity::default()
-                            || *pending
-                                .slot
-                                .identity
-                                .read()
-                                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                                == identity)
+                        && *pending
+                            .slot
+                            .identity
+                            .read()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            == identity
                 })
                 || self.profile_candidate_is_pending_at_identity(
                     &interface,
@@ -1100,10 +1086,7 @@ impl Shell {
                 );
         let is_active_provider =
             self.backend_provider_is_active_at_identity(&interface, &provider_id, identity);
-        if identity != mesh_core_backend::BackendIdentity::default()
-            && !is_prepared_provider
-            && !is_active_provider
-        {
+        if !is_prepared_provider && !is_active_provider {
             tracing::debug!(
                 interface,
                 provider_id,
@@ -1120,6 +1103,7 @@ impl Shell {
             message.clone(),
             true,
             !is_prepared_provider,
+            false,
         );
         if self.handle_profile_backend_lifecycle_at_identity(
             &interface,
@@ -1134,13 +1118,12 @@ impl Shell {
                 .get(&interface)
                 .is_some_and(|pending| {
                     pending.slot.provider_id == provider_id
-                        && (identity == mesh_core_backend::BackendIdentity::default()
-                            || *pending
-                                .slot
-                                .identity
-                                .read()
-                                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                                == identity)
+                        && *pending
+                            .slot
+                            .identity
+                            .read()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            == identity
                 });
         if event_provider_is_pending {
             if runtime_status == BackendRuntimeStatus::Running {
@@ -1185,12 +1168,11 @@ impl Shell {
         }
         let event_provider_is_current = self.backend_runtimes.get(&interface).is_some_and(|slot| {
             slot.provider_id == provider_id
-                && (identity == mesh_core_backend::BackendIdentity::default()
-                    || *slot
-                        .identity
-                        .read()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        == identity)
+                && *slot
+                    .identity
+                    .read()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    == identity
         });
         if runtime_status == BackendRuntimeStatus::Running && event_provider_is_current {
             self.note_backend_running(&interface);
@@ -1212,20 +1194,6 @@ impl Shell {
         }
     }
 
-    pub(in crate::shell) fn capture_pending_backend_update(
-        &mut self,
-        interface: &str,
-        provider_id: &str,
-        event: ServiceEvent,
-    ) -> bool {
-        self.capture_pending_backend_update_at_identity(
-            interface,
-            provider_id,
-            mesh_core_backend::BackendIdentity::default(),
-            event,
-        )
-    }
-
     pub(in crate::shell) fn capture_pending_backend_update_at_identity(
         &mut self,
         interface: &str,
@@ -1238,13 +1206,12 @@ impl Shell {
             .get(interface)
             .is_some_and(|pending| {
                 pending.slot.provider_id == provider_id
-                    && (identity == mesh_core_backend::BackendIdentity::default()
-                        || *pending
-                            .slot
-                            .identity
-                            .read()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner())
-                            == identity)
+                    && *pending
+                        .slot
+                        .identity
+                        .read()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        == identity
             });
         if !matches_pending {
             return false;
@@ -1304,6 +1271,7 @@ impl Shell {
             message.to_string(),
             true,
             false,
+            false,
         );
         if !has_current_runtime {
             self.update_module_runtime_lifecycle(&module_id, BackendRuntimeStatus::Failed, message);
@@ -1322,7 +1290,7 @@ impl Shell {
             source_module: provider_id.to_string(),
             payload,
         };
-        if self.record_latest_service_state(&event) {
+        if self.record_shell_service_state(&event) {
             match self.deliver_service_event(&event) {
                 Ok(requests) => self.enqueue_effects(requests),
                 Err(error) => tracing::warn!(

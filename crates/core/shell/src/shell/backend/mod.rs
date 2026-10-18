@@ -1,3 +1,4 @@
+#[cfg(test)]
 use super::*;
 
 mod candidates;
@@ -104,6 +105,7 @@ pub(in crate::shell) struct BackendLaunchCandidate {
     pub(in crate::shell) module_id: String,
     pub(in crate::shell) interface: String,
     pub(in crate::shell) service_name: String,
+    #[cfg(test)]
     pub(in crate::shell) entrypoint_path: PathBuf,
     pub(in crate::shell) script_source: String,
     pub(in crate::shell) capabilities: mesh_core_capability::CapabilitySet,

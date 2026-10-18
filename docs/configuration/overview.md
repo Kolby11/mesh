@@ -20,6 +20,18 @@ remain the legacy fallback. Core resolves shared preferences, profile overrides,
 and instance values without copying defaults into storage. See
 [Settings](../spec/08-settings.md) and [Profiles](../spec/01-module-system.md#53-shell-profiles-and-live-switching).
 
+CLI and shell use the same core configuration paths and lock. An explicit
+`MESH_MODULE_GRAPH_PATH` selects the root graph; shared settings default to
+that graph's directory unless `MESH_SETTINGS_PATH` selects another file. A
+checkout uses `config/module.json` by default; installed builds fall back to
+`$MESH_HOME/module.json` (`~/.mesh/module.json`).
+
+`mesh-shell config show` and locale inspection show the effective active
+profile settings, including composition defaults. `config path` prints the
+active profile file, or the shared settings file in legacy mode. `config eject`
+and `config reset` modify only that active layer; they do not copy or erase
+shared preferences when a profile is selected.
+
 The settings engine and scoped storage are built-in core services. Settings and
 devtools UI are ordinary components using their APIs. Module-owned saved data
 (`self.storage`), persisted user preferences, and script-controlled runtime props
@@ -181,3 +193,7 @@ Configuration will use layered scope:
 Durable service data will remain service-owned and shared unless the service
 declares another scope. The exact profile file schema and migration from the
 current repository graph remain backlog work.
+
+Source discovery uses the checkout, `$MESH_HOME/modules` and the system module
+roots. TOML `config.toml` is no longer loaded; package availability and desktop
+choices belong to the canonical root graph and profiles.

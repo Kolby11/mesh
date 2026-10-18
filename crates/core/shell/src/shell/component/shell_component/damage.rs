@@ -1,10 +1,6 @@
-#![allow(dead_code)] // Alternate damage-bound helpers remain for paint fixtures.
-
 use super::*;
-use mesh_core_elements::{
-    AffineTransform, InteractionTarget, NodeEligibility, child_transform, node_eligibility,
-    node_transform, root_transform,
-};
+#[cfg(test)]
+use mesh_core_elements::{InteractionTarget, node_eligibility};
 
 pub(super) fn scale_damage_rect_to_buffer(
     rect: DamageRect,
@@ -213,12 +209,13 @@ pub(super) fn damage_rects_for_node_ids(
     surface: DamageRect,
 ) -> Vec<DamageRect> {
     let mut damage = Vec::with_capacity(node_ids.len().min(MAX_DAMAGE_RECTS));
-    damage_rects_for_node_ids_into(node, node_ids, last_visual_damage, surface, &mut damage);
+    let current = collect_visual_damage_rects(node, surface);
+    damage_rects_for_node_ids_into(&current, node_ids, last_visual_damage, surface, &mut damage);
     damage
 }
 
 pub(super) fn damage_rects_for_node_ids_into(
-    node: &WidgetNode,
+    current: &HashMap<mesh_core_elements::NodeId, DamageRect>,
     node_ids: &HashSet<mesh_core_elements::NodeId>,
     last_visual_damage: &HashMap<mesh_core_elements::NodeId, DamageRect>,
     surface: DamageRect,
@@ -235,93 +232,11 @@ pub(super) fn damage_rects_for_node_ids_into(
             push_damage_rect(damage, previous, surface);
         }
     }
-    collect_damage_rects_for_node_ids(node, node_ids, surface, damage);
-}
-
-pub(super) fn collect_damage_rects_for_node_ids(
-    node: &WidgetNode,
-    node_ids: &HashSet<mesh_core_elements::NodeId>,
-    surface: DamageRect,
-    damage: &mut Vec<DamageRect>,
-) {
-    collect_damage_rects_for_node_ids_with_policy(
-        node,
-        node_ids,
-        surface,
-        damage,
-        NodeEligibility::ROOT,
-    );
-}
-
-fn collect_damage_rects_for_node_ids_with_policy(
-    node: &WidgetNode,
-    node_ids: &HashSet<mesh_core_elements::NodeId>,
-    surface: DamageRect,
-    damage: &mut Vec<DamageRect>,
-    parent_policy: NodeEligibility,
-) {
-    if node_ids.is_empty() {
-        return;
+    for node_id in node_ids {
+        if let Some(rect) = current.get(node_id) {
+            push_damage_rect(damage, *rect, surface);
+        }
     }
-    let policy = parent_policy.child(node);
-    if node_ids.contains(&node.id)
-        && policy.allows(InteractionTarget::Paint)
-        && let Some(bounds) = damage_rect_for_widget_node(node, surface)
-    {
-        push_damage_rect(damage, bounds, surface);
-    }
-
-    for child in &node.children {
-        collect_damage_rects_for_node_ids_with_policy(child, node_ids, surface, damage, policy);
-    }
-}
-
-pub(super) fn damage_rect_for_widget_node(
-    node: &WidgetNode,
-    surface: DamageRect,
-) -> Option<DamageRect> {
-    visual_damage_rect_for_widget_node(node, surface)
-}
-
-/// Extend a node's plain `(left, top, right, bottom)` box to also cover its
-/// box-shadow and blur-filter overflow, in the same coordinate space as the
-/// input box. Shared by present-damage computation (clipped to the surface)
-/// and popup buffer padding.
-pub(super) fn shadow_filter_extended_bounds(
-    left: f32,
-    top: f32,
-    width: f32,
-    height: f32,
-    style: &mesh_core_elements::style::ComputedStyle,
-) -> (f32, f32, f32, f32) {
-    let mut ext_left = left;
-    let mut ext_top = top;
-    let mut ext_right = left + width;
-    let mut ext_bottom = top + height;
-
-    let shadow = style.box_shadow;
-    if !shadow.is_none() && !shadow.inset {
-        let spread = shadow.spread_radius;
-        let blur_pad = shadow.blur_radius * 3.0;
-        ext_left = ext_left.min(left + shadow.offset_x - spread - blur_pad);
-        ext_top = ext_top.min(top + shadow.offset_y - spread - blur_pad);
-        ext_right = ext_right.max(left + width + shadow.offset_x + spread + blur_pad);
-        ext_bottom = ext_bottom.max(top + height + shadow.offset_y + spread + blur_pad);
-    }
-
-    let filter_pad = style
-        .filter
-        .blur_radius
-        .max(style.backdrop_filter.blur_radius)
-        * 3.0;
-    if filter_pad > 0.0 {
-        ext_left -= filter_pad;
-        ext_top -= filter_pad;
-        ext_right += filter_pad;
-        ext_bottom += filter_pad;
-    }
-
-    (ext_left, ext_top, ext_right, ext_bottom)
 }
 
 /// A node's own box plus its visual overshoot from `box-shadow` (outer) and
@@ -329,75 +244,14 @@ pub(super) fn shadow_filter_extended_bounds(
 /// Shared by damage-rect computation (clipped to the surface) and popover
 /// buffer padding (which needs the raw, unclipped extent).
 pub(super) fn node_visual_bounds(node: &WidgetNode) -> Option<(f32, f32, f32, f32)> {
-    node_visual_bounds_with_transform(node, root_transform(0.0, 0.0)).map(layout_bounds_tuple)
-}
-
-fn node_visual_bounds_with_transform(
-    node: &WidgetNode,
-    parent_transform: AffineTransform,
-) -> Option<mesh_core_elements::LayoutRect> {
-    if node.layout.width <= 0.0 || node.layout.height <= 0.0 {
-        return None;
-    }
-    let world = node_transform(parent_transform, node);
-    if world.inverse().is_none() {
-        return None;
-    }
-    let local = mesh_core_elements::LayoutRect {
-        x: 0.0,
-        y: 0.0,
-        width: node.layout.width.max(0.0),
-        height: node.layout.height.max(0.0),
-    };
-    let mut bounds = world.transform_rect(local);
-    let shadow = node.computed_style.box_shadow;
-    if !shadow.is_none() && !shadow.inset {
-        let pad = shadow.spread_radius + shadow.blur_radius * 3.0;
-        bounds = union_layout_rect(
-            bounds,
-            world.transform_rect(mesh_core_elements::LayoutRect {
-                x: shadow.offset_x - pad,
-                y: shadow.offset_y - pad,
-                width: local.width + pad * 2.0,
-                height: local.height + pad * 2.0,
-            }),
-        );
-    }
-    let filter_pad = node
-        .computed_style
-        .filter
-        .blur_radius
-        .max(node.computed_style.backdrop_filter.blur_radius)
-        * 3.0;
-    if filter_pad > 0.0 {
-        bounds.x -= filter_pad;
-        bounds.y -= filter_pad;
-        bounds.width += filter_pad * 2.0;
-        bounds.height += filter_pad * 2.0;
-    }
-    Some(bounds)
+    mesh_core_render::display_list::widget_visual_bounds(node).map(layout_bounds_tuple)
 }
 
 fn layout_bounds_tuple(rect: mesh_core_elements::LayoutRect) -> (f32, f32, f32, f32) {
     (rect.x, rect.y, rect.x + rect.width, rect.y + rect.height)
 }
 
-fn union_layout_rect(
-    left: mesh_core_elements::LayoutRect,
-    right: mesh_core_elements::LayoutRect,
-) -> mesh_core_elements::LayoutRect {
-    let x = left.x.min(right.x);
-    let y = left.y.min(right.y);
-    let right_edge = (left.x + left.width).max(right.x + right.width);
-    let bottom_edge = (left.y + left.height).max(right.y + right.height);
-    mesh_core_elements::LayoutRect {
-        x,
-        y,
-        width: (right_edge - x).max(0.0),
-        height: (bottom_edge - y).max(0.0),
-    }
-}
-
+#[cfg(test)]
 pub(super) fn visual_damage_rect_for_widget_node(
     node: &WidgetNode,
     surface: DamageRect,
@@ -422,46 +276,9 @@ pub(super) fn visual_damage_rect_for_widget_node(
 /// descendant `box-shadow`/`filter` overshoot (e.g. a floating bubble
 /// button's shadow) isn't clipped at the buffer edge.
 pub(super) fn subtree_visual_bounds(node: &WidgetNode) -> (f32, f32, f32, f32) {
-    let mut bounds = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
-    accumulate_subtree_visual_bounds(node, &mut bounds);
-    bounds
-}
-
-pub(super) fn accumulate_subtree_visual_bounds(
-    node: &WidgetNode,
-    bounds: &mut (f32, f32, f32, f32),
-) {
-    accumulate_subtree_visual_bounds_with_transform(
-        node,
-        root_transform(0.0, 0.0),
-        NodeEligibility::ROOT,
-        bounds,
-    );
-}
-
-fn accumulate_subtree_visual_bounds_with_transform(
-    node: &WidgetNode,
-    parent_transform: AffineTransform,
-    parent_policy: NodeEligibility,
-    bounds: &mut (f32, f32, f32, f32),
-) {
-    let policy = parent_policy.child(node);
-    if !policy.allows(InteractionTarget::Paint) {
-        return;
-    }
-    if let Some(rect) = node_visual_bounds_with_transform(node, parent_transform) {
-        let (left, top, right, bottom) = layout_bounds_tuple(rect);
-        bounds.0 = bounds.0.min(left);
-        bounds.1 = bounds.1.min(top);
-        bounds.2 = bounds.2.max(right);
-        bounds.3 = bounds.3.max(bottom);
-    }
-    let world = node_transform(parent_transform, node);
-    let scroll = node.resolved_scroll_metrics();
-    let child_transform = child_transform(world, node, scroll.x, scroll.y);
-    for child in &node.children {
-        accumulate_subtree_visual_bounds_with_transform(child, child_transform, policy, bounds);
-    }
+    mesh_core_render::display_list::widget_subtree_visual_bounds(node)
+        .map(layout_bounds_tuple)
+        .unwrap_or((f32::MAX, f32::MAX, f32::MIN, f32::MIN))
 }
 
 /// Extra buffer padding (left, top, right, bottom) a popover subtree needs
@@ -483,39 +300,14 @@ pub(super) fn popover_content_padding(node: &WidgetNode) -> (u32, u32, u32, u32)
     )
 }
 
+#[cfg(test)]
 pub(super) fn collect_visual_damage_rects(
     node: &WidgetNode,
     surface: DamageRect,
 ) -> HashMap<mesh_core_elements::NodeId, DamageRect> {
-    let mut damage = HashMap::new();
-    collect_visual_damage_rects_with_policy(node, surface, &mut damage, NodeEligibility::ROOT);
-    damage
-}
-
-pub(super) fn collect_visual_damage_rects_into(
-    node: &WidgetNode,
-    surface: DamageRect,
-    damage: &mut HashMap<mesh_core_elements::NodeId, DamageRect>,
-) {
-    collect_visual_damage_rects_with_policy(node, surface, damage, NodeEligibility::ROOT);
-}
-
-fn collect_visual_damage_rects_with_policy(
-    node: &WidgetNode,
-    surface: DamageRect,
-    damage: &mut HashMap<mesh_core_elements::NodeId, DamageRect>,
-    parent_policy: NodeEligibility,
-) {
-    let policy = parent_policy.child(node);
-    if !policy.allows(InteractionTarget::Paint) {
-        return;
-    }
-    if let Some(bounds) = visual_damage_rect_for_widget_node(node, surface) {
-        damage.insert(node.id, bounds);
-    }
-    for child in &node.children {
-        collect_visual_damage_rects_with_policy(child, surface, damage, policy);
-    }
+    let mut list = mesh_core_render::RetainedDisplayList::default();
+    list.update(node, surface.width, surface.height, true, true);
+    list.visual_damage_rects(surface)
 }
 
 pub(super) fn damage_rects_from_options_into(

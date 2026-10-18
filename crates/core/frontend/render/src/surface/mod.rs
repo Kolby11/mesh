@@ -1,3 +1,4 @@
+pub(crate) mod backdrop;
 mod buffer;
 mod debug_overlay;
 mod glyph;
@@ -14,6 +15,7 @@ use crate::display_list::BackdropBlurPolicy;
 use crate::display_list::{DisplayPaintCommand, SelectedDisplayListPaint};
 use mesh_core_elements::NodeId;
 
+pub use backdrop::{BackdropFrame, has_backdrop_image, set_backdrop_image};
 pub use buffer::{PixelBuffer, PixelCanvasSession};
 pub use debug_overlay::{DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot};
 pub use glyph::GlyphAxes;
@@ -213,6 +215,14 @@ pub fn set_backdrop_blur_policy(policy: BackdropBlurPolicy) {
 
 pub fn backdrop_blur_policy() -> BackdropBlurPolicy {
     BACKDROP_BLUR_POLICY.with(Cell::get)
+}
+
+/// Place the next surface paint on its output for `backdrop-filter:
+/// refract()`. The shell sets this per surface before painting it.
+pub fn set_backdrop_frame(frame: BackdropFrame) {
+    FRONTEND_RENDERER.with(|engine| {
+        engine.borrow().set_backdrop_frame(frame);
+    });
 }
 
 /// Whether the active paint backend can realize the in-surface backdrop

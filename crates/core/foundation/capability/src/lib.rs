@@ -110,6 +110,53 @@ pub fn service_permission_namespace(interface: &str) -> String {
     format!("service.{name}.")
 }
 
+/// Fixed host and builtin service permissions; executable argv grants are parameterized.
+pub const BUILTIN_CAPABILITIES: &[(&str, PrivilegeLevel)] = &[
+    ("shell.surface", PrivilegeLevel::Standard),
+    ("shell.widget", PrivilegeLevel::Standard),
+    ("theme.read", PrivilegeLevel::Standard),
+    ("locale.read", PrivilegeLevel::Standard),
+    ("service.audio.read", PrivilegeLevel::Standard),
+    ("service.brightness.read", PrivilegeLevel::Standard),
+    ("service.bluetooth.read", PrivilegeLevel::Standard),
+    ("service.composition.read", PrivilegeLevel::Standard),
+    ("service.debug.read", PrivilegeLevel::Standard),
+    ("service.device.read", PrivilegeLevel::Standard),
+    ("service.media.read", PrivilegeLevel::Standard),
+    ("service.network.read", PrivilegeLevel::Standard),
+    ("service.packages.read", PrivilegeLevel::Standard),
+    ("service.power.read", PrivilegeLevel::Standard),
+    ("service.settings.read", PrivilegeLevel::Standard),
+    ("service.wm.read", PrivilegeLevel::Standard),
+    ("exec.launch-app", PrivilegeLevel::Elevated),
+    ("exec.locale", PrivilegeLevel::Elevated),
+    ("shell.clipboard.write", PrivilegeLevel::Elevated),
+    ("shell.notification", PrivilegeLevel::Elevated),
+    ("fs.read", PrivilegeLevel::Elevated),
+    ("fs.write", PrivilegeLevel::Elevated),
+    ("fs.watch", PrivilegeLevel::Elevated),
+    ("dbus.session", PrivilegeLevel::Elevated),
+    ("net.http", PrivilegeLevel::Elevated),
+    ("service.audio.control", PrivilegeLevel::Elevated),
+    ("service.brightness.control", PrivilegeLevel::Elevated),
+    ("service.bluetooth.control", PrivilegeLevel::Elevated),
+    ("service.composition.control", PrivilegeLevel::Elevated),
+    ("service.debug.control", PrivilegeLevel::Elevated),
+    ("service.media.control", PrivilegeLevel::Elevated),
+    ("service.network.control", PrivilegeLevel::Elevated),
+    ("service.packages.control", PrivilegeLevel::Elevated),
+    ("service.settings.control", PrivilegeLevel::Elevated),
+    ("service.theme.control", PrivilegeLevel::Elevated),
+    ("service.wm.control", PrivilegeLevel::Elevated),
+    ("service.notifications.post", PrivilegeLevel::Elevated),
+    ("service.notifications.manage", PrivilegeLevel::Elevated),
+    ("exec.command", PrivilegeLevel::High),
+    ("shell.screenshot", PrivilegeLevel::High),
+    ("dbus.system", PrivilegeLevel::High),
+    ("net.socket", PrivilegeLevel::High),
+    ("locale.write", PrivilegeLevel::High),
+];
+
 impl CapabilityCatalog {
     /// The closed build catalog, with no interface-declared permissions.
     pub fn builtin() -> Self {
@@ -185,56 +232,12 @@ impl CapabilityCatalog {
     }
 
     fn builtin_level(id: &str) -> Option<PrivilegeLevel> {
-        Some(match id {
-            "shell.surface"
-            | "shell.widget"
-            | "theme.read"
-            | "locale.read"
-            | "service.audio.read"
-            | "service.brightness.read"
-            | "service.bluetooth.read"
-            | "service.composition.read"
-            | "service.debug.read"
-            | "service.device.read"
-            | "service.media.read"
-            | "service.network.read"
-            | "service.packages.read"
-            | "service.power.read"
-            | "service.settings.read"
-            | "service.wm.read" => PrivilegeLevel::Standard,
-            "exec.launch-app"
-            | "exec.locale"
-            | "shell.clipboard.write"
-            | "shell.notification"
-            | "fs.read"
-            | "fs.write"
-            | "fs.watch"
-            | "dbus.session"
-            | "net.http"
-            | "service.audio.control"
-            | "service.brightness.control"
-            | "service.bluetooth.control"
-            | "service.composition.control"
-            | "service.debug.control"
-            | "service.media.control"
-            | "service.network.control"
-            | "service.packages.control"
-            | "service.settings.control"
-            | "service.theme.control"
-            | "service.wm.control"
-            | "service.notifications.post"
-            | "service.notifications.manage" => PrivilegeLevel::Elevated,
-            "exec.command" | "shell.screenshot" | "dbus.system" | "net.socket" | "locale.write" => {
-                PrivilegeLevel::High
-            }
-            value
-                if value.starts_with("exec.argv:")
-                    && parse_exec_argv_capability(value).is_some() =>
-            {
-                PrivilegeLevel::High
-            }
-            _ => return None,
-        })
+        if id.starts_with("exec.argv:") && parse_exec_argv_capability(id).is_some() {
+            return Some(PrivilegeLevel::High);
+        }
+        BUILTIN_CAPABILITIES
+            .iter()
+            .find_map(|(known, level)| (*known == id).then_some(*level))
     }
 
     pub fn validate(&self, id: &str) -> Result<PrivilegeLevel, CapabilityPolicyError> {

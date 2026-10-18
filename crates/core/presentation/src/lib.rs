@@ -1420,6 +1420,15 @@ impl PresentationEngine {
     /// (see [`SurfacePadding`]) so that inflating a surface and confining its
     /// input cannot come apart — they are the same decision, expressed once.
     /// This accessor exists so tests can assert the result.
+    /// Logical size of the output a surface is on. `None` before the
+    /// compositor has placed the surface, and for non-Wayland backends.
+    pub fn output_logical_size(&self, surface_id: &str) -> Option<(u32, u32)> {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.output_logical_size(surface_id),
+            Backend::DevWindow(_) | Backend::Testing(_) => None,
+        }
+    }
+
     pub fn input_region(&self, surface_id: &str) -> Option<DamageRect> {
         match &self.backend {
             Backend::WaylandSurface(bridge) => bridge.input_region(surface_id),

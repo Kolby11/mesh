@@ -17,6 +17,12 @@ use super::policy::MotionPolicy;
 /// Bundle of every property that can be transitioned or keyframed.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AnimatableStyle {
+    /// Width measured for this authored style by the layout pass.
+    pub used_width: f32,
+    /// Height measured for this authored style by the layout pass.
+    pub used_height: f32,
+    /// Content-box dimensions used to resolve percentage constraints.
+    pub containing_block: Option<(f32, f32)>,
     pub border_radius: Corners,
     pub border_width: Edges,
     pub opacity: f32,
@@ -50,6 +56,9 @@ impl AnimatableStyle {
     pub fn from_node(node: &WidgetNode) -> Self {
         let s = &node.computed_style;
         Self {
+            used_width: node.layout.width,
+            used_height: node.layout.height,
+            containing_block: None,
             // Clamp to the radius the painter can actually draw for this box so
             // transitions and keyframes interpolate toward the visible value
             // rather than an over-large authored radius.
@@ -85,6 +94,40 @@ impl AnimatableStyle {
             inset_left: s.inset_left,
             visibility: s.visibility,
         }
+    }
+
+    pub fn from_node_in_containing_block(node: &WidgetNode, containing_block: (f32, f32)) -> Self {
+        Self {
+            containing_block: Some(containing_block),
+            ..Self::from_node(node)
+        }
+    }
+
+    fn resolved_lengths(mut self) -> Self {
+        let resolve = |value: Dimension, used: f32, reference: Option<f32>| match value {
+            Dimension::Px(value) => Dimension::Px(value),
+            Dimension::Percent(percent) => {
+                Dimension::Px(reference.map_or(used, |basis| basis * percent / 100.0))
+            }
+            _ => Dimension::Px(used),
+        };
+        self.width = resolve(self.width, self.used_width, None);
+        self.height = resolve(self.height, self.used_height, None);
+        for dimension in [&mut self.min_width, &mut self.max_width] {
+            *dimension = resolve(
+                *dimension,
+                self.used_width,
+                self.containing_block.map(|size| size.0),
+            );
+        }
+        for dimension in [&mut self.min_height, &mut self.max_height] {
+            *dimension = resolve(
+                *dimension,
+                self.used_height,
+                self.containing_block.map(|size| size.1),
+            );
+        }
+        self
     }
 
     pub fn apply_to_node(self, node: &mut WidgetNode) {
@@ -124,6 +167,17 @@ impl AnimatableStyle {
     /// and `to`, so the animator only ever interpolates those.
     pub fn selective_from(previous: Self, desired: Self, props: TransitionProperties) -> Self {
         Self {
+            containing_block: previous.containing_block,
+            used_width: pick(
+                props.animates_width(),
+                previous.used_width,
+                desired.used_width,
+            ),
+            used_height: pick(
+                props.animates_height(),
+                previous.used_height,
+                desired.used_height,
+            ),
             border_radius: pick(
                 props.animates_border_radius(),
                 previous.border_radius,
@@ -338,6 +392,9 @@ fn pick<T>(use_previous: bool, previous: T, desired: T) -> T {
 impl Interpolate for AnimatableStyle {
     fn lerp(self, other: Self, progress: f32) -> Self {
         Self {
+            containing_block: other.containing_block,
+            used_width: self.used_width.lerp(other.used_width, progress),
+            used_height: self.used_height.lerp(other.used_height, progress),
             border_radius: self.border_radius.lerp(other.border_radius, progress),
             border_width: self.border_width.lerp(other.border_width, progress),
             opacity: self.opacity.lerp(other.opacity, progress),
@@ -409,6 +466,8 @@ pub struct ActiveTransition {
     pub source: TransitionStyle,
     /// Position of this entry in the node's authored transition list.
     pub entry: usize,
+    reversing_start: AnimatableStyle,
+    reversing_factor: f32,
 }
 
 impl ActiveTransition {
@@ -422,7 +481,9 @@ impl ActiveTransition {
         }
         let active = elapsed - self.delay;
         let raw = (active.as_secs_f32() / self.duration.as_secs_f32()).clamp(0.0, 1.0);
-        self.from.lerp(self.to, apply_easing(self.easing, raw))
+        self.from
+            .resolved_lengths()
+            .lerp(self.to.resolved_lengths(), apply_easing(self.easing, raw))
     }
 
     pub fn finished(&self, now: Instant) -> bool {
@@ -627,13 +688,27 @@ impl TransitionAnimator {
         now: Instant,
         policy: MotionPolicy,
     ) -> AnimationStep {
+        self.step_node_with_layout(key, node, previous_displayed, now, policy, None)
+    }
+
+    /// Step using the current containing block for percentage size constraints.
+    pub fn step_node_with_layout(
+        &mut self,
+        key: NodeId,
+        node: &mut WidgetNode,
+        previous_displayed: AnimatableStyle,
+        now: Instant,
+        policy: MotionPolicy,
+        containing_block: Option<(f32, f32)>,
+    ) -> AnimationStep {
         // A node nothing restyled since the last step still holds that step's
         // sample in the properties it animates. Reading it as the target would
         // retarget the transition at its own output — every such frame
         // restarts the ease from a lower value, so the motion jitters and
         // crawls toward its end. Only the animated properties are restored;
         // the rest keep any in-place update (a surface root's size) made since.
-        let resolved = AnimatableStyle::from_node(node);
+        let mut resolved = AnimatableStyle::from_node(node);
+        resolved.containing_block = containing_block;
         let desired = match (self.authored.get(&key), self.active.get(&key)) {
             (Some(authored), Some(running)) if node.computed_style.animated_sample => {
                 let animated = running
@@ -694,7 +769,10 @@ impl TransitionAnimator {
                 {
                     AnimationLifecycle::Continued
                 }
-                Some(active) if target_matches(active.from, desired, entry.properties) => {
+                Some(active)
+                    if !active.finished(now)
+                        && target_matches(active.reversing_start, desired, entry.properties) =>
+                {
                     AnimationLifecycle::Reversed
                 }
                 Some(_) => AnimationLifecycle::Replaced,
@@ -706,6 +784,25 @@ impl TransitionAnimator {
                 continue;
             }
 
+            // CSS Transitions §3.1: repeated reversals retain the logical start
+            // and shorten by eased distance rather than restarting a full duration.
+            let (reversing_start, reversing_factor) =
+                if entry_lifecycle == AnimationLifecycle::Reversed {
+                    let active = &running[slot.unwrap()];
+                    let elapsed = now
+                        .saturating_duration_since(active.started_at)
+                        .saturating_sub(active.delay);
+                    let progress =
+                        (elapsed.as_secs_f32() / active.duration.as_secs_f32()).clamp(0.0, 1.0);
+                    let factor = (apply_easing(active.easing, progress) * active.reversing_factor
+                        + 1.0
+                        - active.reversing_factor)
+                        .abs()
+                        .clamp(0.0, 1.0);
+                    (active.to, factor)
+                } else {
+                    (previous_displayed, 1.0)
+                };
             let instance = ActiveTransition {
                 from: AnimatableStyle::selective_from(
                     previous_displayed,
@@ -714,7 +811,9 @@ impl TransitionAnimator {
                 ),
                 to: desired,
                 started_at: now,
-                duration,
+                duration: duration.mul_f64(f64::from(reversing_factor)),
+                reversing_start,
+                reversing_factor,
                 delay: Duration::from_millis(u64::from(entry.delay_ms)),
                 easing: entry.easing.into(),
                 source: entry,
@@ -845,9 +944,7 @@ fn lerp_dimension(from: Dimension, to: Dimension, progress: f32) -> Dimension {
     match (from, to) {
         (Dimension::Px(a), Dimension::Px(b)) => Dimension::Px(a.lerp(b, progress)),
         (Dimension::Percent(a), Dimension::Percent(b)) => Dimension::Percent(a.lerp(b, progress)),
-        // Treat Auto as Px(0) when the other side is Px, so it interpolates through zero
-        (Dimension::Auto, Dimension::Px(b)) => Dimension::Px((0.0f32).lerp(b, progress)),
-        (Dimension::Px(a), Dimension::Auto) => Dimension::Px(a.lerp(0.0, progress)),
+        _ if progress < 0.5 => from,
         _ => to,
     }
 }
@@ -876,6 +973,11 @@ fn lerp_box_shadow(from: BoxShadow, to: BoxShadow, progress: f32) -> BoxShadow {
 fn lerp_visual_filter(from: VisualFilter, to: VisualFilter, progress: f32) -> VisualFilter {
     VisualFilter {
         blur_radius: from.blur_radius.lerp(to.blur_radius, progress),
+        // Whether the source is sampled cannot be interpolated; the target wins.
+        refract: to.refract,
+        refract_depth: from.refract_depth.lerp(to.refract_depth, progress),
+        refract_edge: from.refract_edge.lerp(to.refract_edge, progress),
+        dispersion: from.dispersion.lerp(to.dispersion, progress),
     }
 }
 
@@ -1013,6 +1115,77 @@ mod tests {
             MotionPolicy::default(),
         );
         assert_eq!(step.lifecycle, AnimationLifecycle::Reversed);
+    }
+
+    #[test]
+    fn mixed_transition_lengths_use_measured_layout_endpoints() {
+        for (from, to, old_width, new_width) in [
+            (Dimension::Percent(50.0), Dimension::Px(120.0), 80.0, 120.0),
+            (Dimension::Auto, Dimension::Px(100.0), 40.0, 100.0),
+            (Dimension::Px(20.0), Dimension::Fit, 20.0, 60.0),
+            (Dimension::Content, Dimension::Percent(75.0), 40.0, 120.0),
+        ] {
+            let mut node = WidgetNode::new("box");
+            node.layout.width = old_width;
+            node.computed_style.width = from;
+            let previous = AnimatableStyle::from_node(&node);
+            node.layout.width = new_width;
+            node.computed_style.width = to;
+            node.computed_style.transitions = vec![TransitionStyle {
+                duration_ms: 100,
+                easing: mesh_core_elements::TransitionEasing::Linear,
+                properties: TransitionProperties::of_property("width"),
+                ..Default::default()
+            }];
+            let mut animator = TransitionAnimator::new();
+            let start = Instant::now();
+            let key = node.id;
+            assert!(animator.step_node(key, &mut node, previous, start));
+            let displayed = animator
+                .displayed_style(key, start + Duration::from_millis(50), previous)
+                .unwrap();
+            assert_eq!(
+                displayed.width,
+                Dimension::Px((old_width + new_width) / 2.0)
+            );
+        }
+    }
+
+    #[test]
+    fn repeated_reversals_shorten_by_eased_distance() {
+        let mut node = WidgetNode::new("box");
+        node.computed_style.opacity = 1.0;
+        node.computed_style.transitions = vec![TransitionStyle {
+            duration_ms: 100,
+            easing: mesh_core_elements::TransitionEasing::Linear,
+            properties: TransitionProperties::of_property("opacity"),
+            ..Default::default()
+        }];
+        let previous = AnimatableStyle {
+            opacity: 0.0,
+            ..AnimatableStyle::from_node(&node)
+        };
+        let mut animator = TransitionAnimator::new();
+        let start = Instant::now();
+        let key = node.id;
+        animator.step_node(key, &mut node, previous, start);
+        for (elapsed, target, duration) in [(50, 0.0, 50), (75, 1.0, 75)] {
+            let now = start + Duration::from_millis(elapsed);
+            let displayed = animator.displayed_style(key, now, previous).unwrap();
+            restyle(&mut node, |style| style.opacity = target);
+            let step = animator.step_node_with_policy_state(
+                key,
+                &mut node,
+                displayed,
+                now,
+                MotionPolicy::default(),
+            );
+            assert_eq!(step.lifecycle, AnimationLifecycle::Reversed);
+            assert_eq!(
+                animator.unfinished(key, now).next().unwrap().duration,
+                Duration::from_millis(duration)
+            );
+        }
     }
 
     #[test]
@@ -1399,6 +1572,9 @@ mod tests {
     #[test]
     fn animatable_style_interpolates_transition_safe_fields() {
         let from = AnimatableStyle {
+            used_width: 10.0,
+            used_height: 10.0,
+            containing_block: None,
             border_radius: Corners::zero(),
             border_width: Edges::zero(),
             opacity: 0.0,

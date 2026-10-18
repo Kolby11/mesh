@@ -104,6 +104,7 @@ struct MeasuredSurfaceGeometry {
     content_size: (u32, u32),
     margins: [i32; 4],
     exclusive_zone: i32,
+    fills_output: bool,
 }
 
 fn measured_surface_geometry(
@@ -126,6 +127,10 @@ fn measured_surface_geometry(
         measured.0.max(definite_px(root.computed_style.width)),
         measured.1.max(definite_px(root.computed_style.height)),
     );
+    // A top/bottom root of `height: 100%` asks for the whole output: a
+    // wallpaper or full-output backdrop.
+    let fills_output = matches!(edge, Edge::Top | Edge::Bottom)
+        && matches!(root.computed_style.height, mesh_core_elements::Dimension::Percent(p) if p >= 100.0);
     let margins = [
         css_edge_to_i32(root.computed_style.margin.top),
         css_edge_to_i32(root.computed_style.margin.right),
@@ -141,12 +146,14 @@ fn measured_surface_geometry(
     let exclusive_zone = match root.computed_style.surface_exclusive_zone {
         SurfaceExclusiveZone::Auto => anchored_outer_extent,
         SurfaceExclusiveZone::None => 0,
+        SurfaceExclusiveZone::Ignore => -1,
     };
 
     MeasuredSurfaceGeometry {
         content_size,
         margins,
         exclusive_zone,
+        fills_output,
     }
 }
 
@@ -1156,10 +1163,13 @@ impl ShellComponent for FrontendSurfaceComponent {
             surface_damage,
             &mut tooltip_damage_rects,
         );
+        let current_visual_damage = self
+            .retained_display_list
+            .visual_damage_rects(content_damage);
         let mut dirty_node_visual_damage_rects =
             std::mem::take(&mut self.dirty_node_visual_damage_scratch);
         damage_rects_for_node_ids_into(
-            &tree,
+            &current_visual_damage,
             self.retained_tree.render_dirty_node_ids(),
             &self.last_visual_damage,
             content_damage,
@@ -1224,6 +1234,10 @@ impl ShellComponent for FrontendSurfaceComponent {
                 if measured_size != (content_width, content_height) {
                     self.invalidate_surface_config();
                 }
+            }
+            if self.surface_fills_output != measured_geometry.fills_output {
+                self.surface_fills_output = measured_geometry.fills_output;
+                self.invalidate_surface_config();
             }
             if self.surface_layout.exclusive_zone != measured_geometry.exclusive_zone
                 || [
@@ -1340,7 +1354,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
         // When effective_damage.rects is empty, leave last_present_damage_rects unchanged
         // (accumulates across immediate-rerender passes, matching old merge_optional_damage behaviour)
-        self.last_visual_damage = collect_visual_damage_rects(&tree, content_damage);
+        self.last_visual_damage = current_visual_damage;
         let traversal_micros = paint_metrics
             .traversal_micros
             .saturating_sub(paint_metrics.text.shaping_micros)
@@ -1523,6 +1537,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         settings: &Arc<mesh_core_config::SettingsStore>,
     ) -> Result<bool, ComponentError> {
         let store_changed = !Arc::ptr_eq(&self.settings, settings);
+        if store_changed {
+            self.child_settings_cache.get_mut().clear();
+        }
         self.settings = settings.clone();
         if store_changed {
             // Profile overlays produce a new effective store while retaining
@@ -2058,6 +2075,10 @@ impl ShellComponent for FrontendSurfaceComponent {
             .map(|transition| u64::from(transition.duration_ms))
             .max()
             .unwrap_or(0)
+    }
+
+    fn fills_output(&self) -> bool {
+        self.surface_fills_output
     }
 
     fn content_input_size(&self) -> Option<(u32, u32)> {

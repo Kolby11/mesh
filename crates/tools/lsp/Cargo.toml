@@ -11,6 +11,7 @@ name = "mesh-tools-lsp"
 path = "src/main.rs"
 
 [dependencies]
+mesh-core-capability = { workspace = true }
 mesh-core-component = { workspace = true }
 mesh-core-config    = { workspace = true }
 mesh-core-elements  = { workspace = true }

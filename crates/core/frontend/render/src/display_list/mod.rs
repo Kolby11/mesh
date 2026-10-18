@@ -813,6 +813,66 @@ impl RetainedDisplayList {
         self.last_metrics
     }
 
+    /// Current painted bounds in surface coordinates, including ancestor
+    /// transforms, retained scroll offsets, effect overflow and paint clips.
+    pub fn visual_damage_rects(&self, surface: DamageRect) -> HashMap<NodeId, DamageRect> {
+        let mut bounds = HashMap::new();
+        let mut scroll = None;
+        for command in self.paint_commands.iter() {
+            match command.kind {
+                DisplayPaintCommandKind::PushScrollContent => {
+                    scroll = Some((
+                        -command.node.scrollbars.scroll_x,
+                        -command.node.scrollbars.scroll_y,
+                        command.clip,
+                    ));
+                }
+                DisplayPaintCommandKind::PopScrollContent => {
+                    scroll = None;
+                }
+                _ => {}
+            }
+            if !command.kind.draws_content() {
+                continue;
+            }
+            let mut rect =
+                paint_node::intersect_display_clip(visual_clip_for(&command.node), command.clip);
+            if command.node.in_scroll_content {
+                if let Some((x, y, viewport)) = scroll {
+                    let left = (rect.x as f32 + x).floor();
+                    let top = (rect.y as f32 + y).floor();
+                    let right = (rect.x as f32 + rect.width as f32 + x).ceil();
+                    let bottom = (rect.y as f32 + rect.height as f32 + y).ceil();
+                    rect = paint_node::intersect_display_clip(
+                        DisplayListClip {
+                            x: left as i32,
+                            y: top as i32,
+                            width: (right - left).max(0.0) as i32,
+                            height: (bottom - top).max(0.0) as i32,
+                        },
+                        viewport,
+                    );
+                }
+            }
+            let rect = crate::FractionalScale::identity()
+                .device_layout_rect(mesh_core_elements::LayoutRect {
+                    x: rect.x as f32,
+                    y: rect.y as f32,
+                    width: rect.width as f32,
+                    height: rect.height as f32,
+                })
+                .to_nonnegative_damage_rect()
+                .and_then(|rect| clip_rect(rect, surface));
+            if let Some(rect) = rect {
+                bounds
+                    .entry(command.node.id)
+                    .and_modify(|old| *old = union_damage(Some(*old), rect).unwrap())
+                    .or_insert(rect);
+            }
+        }
+        bounds
+    }
+
     pub fn last_metrics(&self) -> DisplayListMetrics {
         self.last_metrics
     }
@@ -1370,3 +1430,23 @@ fn paint_topology_changed(
 
 #[cfg(test)]
 mod tests;
+
+/// Conservative standalone widget bounds computed by the display-list geometry.
+pub fn widget_visual_bounds(node: &WidgetNode) -> Option<mesh_core_elements::LayoutRect> {
+    node_visual_bounds_at(node, 0.0, 0.0).map(|bounds| mesh_core_elements::LayoutRect {
+        x: bounds.left,
+        y: bounds.top,
+        width: bounds.right - bounds.left,
+        height: bounds.bottom - bounds.top,
+    })
+}
+
+/// Conservative subtree bounds for allocating a promoted surface buffer.
+pub fn widget_subtree_visual_bounds(node: &WidgetNode) -> Option<mesh_core_elements::LayoutRect> {
+    subtree_bounds_at(node, 0.0, 0.0).map(|bounds| mesh_core_elements::LayoutRect {
+        x: bounds.left,
+        y: bounds.top,
+        width: bounds.right - bounds.left,
+        height: bounds.bottom - bounds.top,
+    })
+}

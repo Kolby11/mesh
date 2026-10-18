@@ -16,7 +16,7 @@ use mesh_core_scripting::ScriptError;
 use mesh_core_theme::Theme;
 use mesh_core_wayland::{KeyboardMode, ShellSurface, WindowStates};
 
-pub use mesh_core_frontend_host::{
+pub use mesh_core_frontend_abi::{
     DebugEffect, EffectRejection, EffectScope, EffectSource, FrontendEffect, FrontendEffectBatch,
     FrontendEffectRevision, ScopedFrontendEffect, ServiceEffect, SurfaceEffect, SurfaceRole,
 };
@@ -1161,7 +1161,7 @@ impl ShellEffectAdapter {
     }
 }
 
-impl mesh_core_frontend_host::FrontendEffectSink for ShellEffectAdapter {
+impl mesh_core_frontend_abi::FrontendEffectSink for ShellEffectAdapter {
     type Request = CoreRequest;
     type Error = ShellEffectError;
 
@@ -1813,6 +1813,12 @@ pub trait ShellComponent: Send {
     /// the input region at the whole-surface default.
     fn content_input_size(&self) -> Option<(u32, u32)> {
         None
+    }
+    /// Whether the surface root asked for the whole output (`height: 100%` on
+    /// a top/bottom surface). Its zero height is then a deliberate span, not
+    /// a missing measurement.
+    fn fills_output(&self) -> bool {
+        false
     }
     /// Return the last widget tree built by `paint`, for the debug layout inspector.
     fn last_widget_tree(&self) -> Option<&WidgetNode> {

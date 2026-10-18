@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Debug paint accessors remain for integration diagnostics.
-
 use super::*;
 
 impl FrontendSurfaceComponent {
@@ -41,6 +39,7 @@ impl FrontendSurfaceComponent {
         }
     }
 
+    #[cfg(test)]
     pub fn display_list_paint_commands(&self) -> &[DisplayPaintCommand] {
         self.retained_display_list.paint_commands()
     }

@@ -275,13 +275,21 @@ hot. *(Proxy `props` access: target; component props tracking: with
 **Shipped** (`mesh-shell config`):
 
 ```
-mesh-shell config path                   # the settings file path
-mesh-shell config show [namespace]       # whole document, or one namespace's overrides
+mesh-shell config path                   # the active profile or shared settings path
+mesh-shell config show [namespace]       # effective document, or one effective namespace
 mesh-shell config doctor                 # report values MESH cannot use, and orphaned
                                          # namespaces; exits non-zero on any error
 mesh-shell config eject <module-id>      # materialize effective surface + exposed props (§1)
 mesh-shell config reset <namespace>      # drop a namespace's overrides
 ```
+
+With an active profile, every `config` read and diagnostic includes resolved
+composition defaults and profile overrides over shared preferences. `eject`
+and `reset` write only the active profile's sparse `settings` map; reset
+removes the selected layer's override and reveals inherited values. Without
+an active profile, writes use the shared settings document. Writes check the
+active pointer, shared revision, and profile revision under core-owned locks.
+CLI locale reads and writes use the same resolution and persistence boundary.
 
 **Target** (`mesh settings`, through the settings service):
 
@@ -295,3 +303,8 @@ mesh settings doctor                     # as `config doctor`, through the servi
 
 Orphaned namespaces (module uninstalled) are reported, not auto-deleted —
 reinstalling restores the user's configuration.
+
+Embedded component settings are resolved once per effective settings/source
+snapshot and canonical source file. Rebuilds reuse the validated projection and
+its diagnostics; settings replacement, source reload and catalog adoption clear
+the cache. Profile changes invalidate it even when the durable revision is unchanged.

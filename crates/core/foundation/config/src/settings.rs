@@ -17,19 +17,19 @@
 //! }
 //! ```
 
+#[cfg(test)]
+use crate::control_plane::CONTROL_PLANE_LOCK_FILE;
 use crate::validate::{
     SettingsDiagnostic, describe, unknown_key_diagnostic_from, validate_json_schema,
     validate_object,
 };
-use crate::{ConfigError, SHELL_SETTINGS_FIELDS, ShellSettings, mesh_home_path};
+use crate::{ConfigError, SHELL_SETTINGS_FIELDS, ShellSettings};
 use serde_json::{Map as JsonMap, Value as JsonValue};
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-
-const CONTROL_PLANE_LOCK_FILE: &str = ".mesh-control-plane.lock";
 
 pub const SETTINGS_SCHEMA_VERSION: u64 = 1;
 
@@ -401,7 +401,7 @@ impl SettingsStore {
     pub fn save(&self) -> Result<(), ConfigError> {
         let parent = settings_parent(&self.path);
         ensure_settings_directory(parent)?;
-        let _lock = acquire_control_plane_lock(parent)?;
+        let _lock = crate::ControlPlaneLock::acquire(parent)?;
         self.save_unlocked(parent)
     }
 
@@ -411,6 +411,19 @@ impl SettingsStore {
     /// method as the durable commit boundary. The in-memory store advances to
     /// the committed revision only after the atomic replace succeeds.
     pub fn save_if_revision(&mut self, expected_revision: u64) -> Result<(), ConfigError> {
+        let parent = settings_parent(&self.path);
+        ensure_settings_directory(parent)?;
+        let lock = crate::ControlPlaneLock::acquire(parent)?;
+        self.save_if_revision_locked(expected_revision, &lock)
+    }
+
+    /// Persist a candidate while the caller holds its control-plane lock.
+    pub fn save_if_revision_locked(
+        &mut self,
+        expected_revision: u64,
+        lock: &crate::ControlPlaneLock,
+    ) -> Result<(), ConfigError> {
+        lock.ensure_directory(settings_parent(&self.path))?;
         if self.revision != expected_revision {
             return Err(ConfigError::RevisionConflict {
                 expected: expected_revision,
@@ -420,7 +433,6 @@ impl SettingsStore {
 
         let parent = settings_parent(&self.path);
         ensure_settings_directory(parent)?;
-        let _lock = acquire_control_plane_lock(parent)?;
         let actual_revision = Self::load_from(&self.path)?.revision;
         if actual_revision != expected_revision {
             return Err(ConfigError::RevisionConflict {
@@ -445,6 +457,19 @@ impl SettingsStore {
     /// This lets a profile-scoped transaction ensure that shared fallback
     /// settings did not change while its profile candidate was prepared.
     pub fn check_revision(&self, expected_revision: u64) -> Result<(), ConfigError> {
+        let parent = settings_parent(&self.path);
+        ensure_settings_directory(parent)?;
+        let lock = crate::ControlPlaneLock::acquire(parent)?;
+        self.check_revision_locked(expected_revision, &lock)
+    }
+
+    /// Check a candidate while the caller holds the shared control-plane lock.
+    pub fn check_revision_locked(
+        &self,
+        expected_revision: u64,
+        lock: &crate::ControlPlaneLock,
+    ) -> Result<(), ConfigError> {
+        lock.ensure_directory(settings_parent(&self.path))?;
         if self.revision != expected_revision {
             return Err(ConfigError::RevisionConflict {
                 expected: expected_revision,
@@ -452,9 +477,6 @@ impl SettingsStore {
             });
         }
 
-        let parent = settings_parent(&self.path);
-        ensure_settings_directory(parent)?;
-        let _lock = acquire_control_plane_lock(parent)?;
         let actual_revision = Self::load_from(&self.path)?.revision;
         if actual_revision != expected_revision {
             return Err(ConfigError::RevisionConflict {
@@ -553,38 +575,6 @@ fn ensure_settings_directory(parent: &Path) -> io::Result<()> {
         fs::create_dir_all(parent)?;
     }
     Ok(())
-}
-
-struct ControlPlaneLock(File);
-
-fn acquire_control_plane_lock(parent: &Path) -> Result<ControlPlaneLock, ConfigError> {
-    let path = parent.join(CONTROL_PLANE_LOCK_FILE);
-    let mut options = OpenOptions::new();
-    options.create(true).read(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-
-        options.mode(0o600);
-    }
-    let file = options.open(&path)?;
-    #[cfg(unix)]
-    {
-        let result = unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&file), libc::LOCK_EX) };
-        if result != 0 {
-            return Err(io::Error::last_os_error().into());
-        }
-    }
-    Ok(ControlPlaneLock(file))
-}
-
-impl Drop for ControlPlaneLock {
-    fn drop(&mut self) {
-        #[cfg(unix)]
-        {
-            let _ = unsafe { libc::flock(std::os::fd::AsRawFd::as_raw_fd(&self.0), libc::LOCK_UN) };
-        }
-    }
 }
 
 fn create_settings_temporary(path: &Path, parent: &Path) -> io::Result<(PathBuf, File)> {
@@ -764,14 +754,10 @@ pub fn default_settings_path() -> PathBuf {
         return path.clone();
     }
 
-    let repo_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../..")
-        .join("config/settings.json");
-    if repo_path.exists() {
-        return repo_path;
-    }
-
-    mesh_home_path().join("settings.json")
+    crate::default_module_graph_path()
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("settings.json")
 }
 
 /// Load just the core shell preferences.

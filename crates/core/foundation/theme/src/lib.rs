@@ -12,17 +12,9 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
-use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
-
-#[cfg(unix)]
-use std::ffi::CString;
-#[cfg(unix)]
-use std::os::unix::ffi::OsStrExt;
-#[cfg(unix)]
-use std::os::unix::io::{AsRawFd, FromRawFd};
 
 const LEGACY_DEFAULT_SHELL_ANIMATION_PREFIX: &str = "animation.default.";
 pub const DEFAULT_MAX_THEME_SOURCE_BYTES: usize = 2 * 1024 * 1024;
@@ -546,8 +538,7 @@ pub struct ThemeModuleLayer {
 /// safely against symlink and race attacks is a separate I/O boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemeSourceHandle {
-    module_root: PathBuf,
-    relative_path: PathBuf,
+    source: mesh_core_files::ContainedFile,
 }
 
 impl ThemeSourceHandle {
@@ -555,81 +546,22 @@ impl ThemeSourceHandle {
         module_root: impl Into<PathBuf>,
         relative_path: impl AsRef<Path>,
     ) -> Result<Self, String> {
-        let module_root = module_root.into();
-        if module_root.as_os_str().is_empty() {
-            return Err("theme source module root cannot be empty".into());
-        }
-        let relative_path = relative_path.as_ref();
-        if relative_path.as_os_str().is_empty() || relative_path.is_absolute() {
-            return Err(format!(
-                "theme source path must be a non-empty relative path: {}",
-                relative_path.display()
-            ));
-        }
-        if relative_path.components().any(|component| {
-            matches!(
-                component,
-                Component::CurDir
-                    | Component::ParentDir
-                    | Component::RootDir
-                    | Component::Prefix(_)
-            )
-        }) {
-            return Err(format!(
-                "theme source path contains an unsafe component: {}",
-                relative_path.display()
-            ));
-        }
-        Ok(Self {
-            module_root,
-            relative_path: relative_path.to_path_buf(),
-        })
+        mesh_core_files::ContainedFile::new(module_root, relative_path)
+            .map(|source| Self { source })
+            .map_err(|error| error.to_string())
     }
 
     pub fn module_root(&self) -> &Path {
-        &self.module_root
+        self.source.module_root()
     }
 
     pub fn relative_path(&self) -> &Path {
-        &self.relative_path
+        self.source.relative_path()
     }
 
     /// Return the lexical candidate path for the later contained-open step.
     pub fn candidate_path(&self) -> PathBuf {
-        self.module_root.join(&self.relative_path)
-    }
-
-    /// Open the selected source beneath its owning module root without
-    /// following symlinks in the root, intermediate directories, or file.
-    pub fn read_utf8_bounded(&self, max_bytes: usize) -> Result<String, ThemeSourceError> {
-        #[cfg(unix)]
-        {
-            let mut directory = open_directory(&self.module_root)?;
-            let mut components = self.relative_path.components().peekable();
-            while let Some(component) = components.next() {
-                let Component::Normal(component) = component else {
-                    return Err(ThemeSourceError::UnsafePath {
-                        path: self.candidate_path(),
-                    });
-                };
-                if components.peek().is_some() {
-                    directory = open_directory_at(&directory, component, &self.candidate_path())?;
-                } else {
-                    let file = open_file_at(&directory, component, &self.candidate_path())?;
-                    return read_bounded_utf8(file, &self.candidate_path(), max_bytes);
-                }
-            }
-            Err(ThemeSourceError::UnsafePath {
-                path: self.candidate_path(),
-            })
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = max_bytes;
-            Err(ThemeSourceError::UnsupportedPlatform {
-                path: self.candidate_path(),
-            })
-        }
+        self.source.candidate_path()
     }
 
     /// Return a stable content fingerprint for change detection without
@@ -639,6 +571,9 @@ impl ThemeSourceHandle {
             self.read_utf8_bounded(DEFAULT_MAX_THEME_SOURCE_BYTES)?
                 .as_bytes(),
         ))
+    }
+    pub fn read_utf8_bounded(&self, max_bytes: usize) -> Result<String, ThemeSourceError> {
+        self.source.read_utf8_bounded(max_bytes).map_err(Into::into)
     }
 }
 
@@ -670,116 +605,6 @@ pub enum ThemeSourceError {
     UnsafePath { path: PathBuf },
     #[error("safe theme source opening is unavailable on this platform: {path}")]
     UnsupportedPlatform { path: PathBuf },
-}
-
-#[cfg(unix)]
-fn open_directory(path: &Path) -> Result<std::fs::File, ThemeSourceError> {
-    let name =
-        CString::new(path.as_os_str().as_bytes()).map_err(|_| ThemeSourceError::UnsafePath {
-            path: path.to_path_buf(),
-        })?;
-    let fd = unsafe {
-        libc::open(
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
-        )
-    };
-    if fd < 0 {
-        return Err(ThemeSourceError::Io {
-            path: path.to_path_buf(),
-            source: std::io::Error::last_os_error(),
-        });
-    }
-    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
-}
-
-#[cfg(unix)]
-fn open_directory_at(
-    parent: &std::fs::File,
-    component: &std::ffi::OsStr,
-    path: &Path,
-) -> Result<std::fs::File, ThemeSourceError> {
-    let name = CString::new(component.as_bytes()).map_err(|_| ThemeSourceError::UnsafePath {
-        path: path.to_path_buf(),
-    })?;
-    let fd = unsafe {
-        libc::openat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
-            0,
-        )
-    };
-    if fd < 0 {
-        return Err(ThemeSourceError::Io {
-            path: path.to_path_buf(),
-            source: std::io::Error::last_os_error(),
-        });
-    }
-    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
-}
-
-#[cfg(unix)]
-fn open_file_at(
-    parent: &std::fs::File,
-    component: &std::ffi::OsStr,
-    path: &Path,
-) -> Result<std::fs::File, ThemeSourceError> {
-    let name = CString::new(component.as_bytes()).map_err(|_| ThemeSourceError::UnsafePath {
-        path: path.to_path_buf(),
-    })?;
-    let fd = unsafe {
-        libc::openat(
-            parent.as_raw_fd(),
-            name.as_ptr(),
-            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW,
-            0,
-        )
-    };
-    if fd < 0 {
-        return Err(ThemeSourceError::Io {
-            path: path.to_path_buf(),
-            source: std::io::Error::last_os_error(),
-        });
-    }
-    Ok(unsafe { std::fs::File::from_raw_fd(fd) })
-}
-
-#[cfg(unix)]
-fn read_bounded_utf8(
-    file: std::fs::File,
-    path: &Path,
-    max_bytes: usize,
-) -> Result<String, ThemeSourceError> {
-    if !file
-        .metadata()
-        .map_err(|source| ThemeSourceError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?
-        .file_type()
-        .is_file()
-    {
-        return Err(ThemeSourceError::NotRegularFile {
-            path: path.to_path_buf(),
-        });
-    }
-    let mut bytes = Vec::new();
-    file.take(max_bytes.saturating_add(1) as u64)
-        .read_to_end(&mut bytes)
-        .map_err(|source| ThemeSourceError::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    if bytes.len() > max_bytes {
-        return Err(ThemeSourceError::TooLarge {
-            path: path.to_path_buf(),
-            max_bytes,
-        });
-    }
-    String::from_utf8(bytes).map_err(|_| ThemeSourceError::InvalidUtf8 {
-        path: path.to_path_buf(),
-    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3226,5 +3051,23 @@ mod tests {
         let escaped = ThemeSourceHandle::new(&root, "link/main.css").unwrap();
         assert!(escaped.read_utf8_bounded(1024).is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+impl From<mesh_core_files::ContainedFileError> for ThemeSourceError {
+    fn from(error: mesh_core_files::ContainedFileError) -> Self {
+        use mesh_core_files::ContainedFileError as E;
+        match error {
+            E::Read { path, source } => Self::Io { path, source },
+            E::NotRegularFile { path } => Self::NotRegularFile { path },
+            E::TooLarge { path, max_bytes } => Self::TooLarge { path, max_bytes },
+            E::UnsupportedPlatform { path } => Self::UnsupportedPlatform { path },
+            E::UnsafePath { path, .. } => Self::UnsafePath { path },
+            E::InvalidUtf8 { path } => Self::InvalidUtf8 { path },
+            E::Cancelled { path } => Self::Io {
+                path,
+                source: std::io::Error::new(std::io::ErrorKind::Interrupted, "read cancelled"),
+            },
+        }
     }
 }

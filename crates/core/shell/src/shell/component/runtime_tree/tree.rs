@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Tree inspection methods support benchmarks and regression tests.
-
 use super::*;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -98,6 +96,38 @@ pub(in crate::shell::component) struct RetainedWidgetTree {
 }
 
 impl RetainedWidgetTree {
+    #[cfg(test)]
+    pub(super) fn visit_fresh_snapshots(
+        &self,
+        node: &WidgetNode,
+        visit: &mut impl FnMut(NodeId, &RetainedNodeSnapshot, &RetainedNodeSnapshot) -> bool,
+    ) -> Option<usize> {
+        fn walk(
+            retained: &RetainedWidgetTree,
+            node: &WidgetNode,
+            visit: &mut impl FnMut(NodeId, &RetainedNodeSnapshot, &RetainedNodeSnapshot) -> bool,
+            total: &mut usize,
+        ) -> bool {
+            let Some(key) = retained.node_keys.get(&node.id).copied() else {
+                return false;
+            };
+            let Some(previous) = retained.nodes.get(key) else {
+                return false;
+            };
+            let fresh = retained_snapshot_with_render(node, previous.render.clone(), None);
+            *total += 1;
+            if !visit(node.id, previous, &fresh) {
+                return false;
+            }
+            node.children
+                .iter()
+                .all(|child| walk(retained, child, visit, total))
+        }
+
+        let mut total = 0;
+        walk(self, node, visit, &mut total).then_some(total)
+    }
+
     pub(in crate::shell::component) fn update(
         &mut self,
         root: &WidgetNode,
@@ -198,6 +228,7 @@ impl RetainedWidgetTree {
     /// because layout changes can propagate from a dirty leaf to ancestors and
     /// siblings. A structural mismatch falls back to the full update before any
     /// retained snapshot is mutated.
+    #[cfg(test)]
     pub(in crate::shell::component) fn update_for_dirty_roots(
         &mut self,
         root: &WidgetNode,
@@ -213,6 +244,7 @@ impl RetainedWidgetTree {
     /// The second tuple field is `None` when the scope was promoted to the full
     /// update path, since structural and broad updates require downstream full
     /// synchronization as well.
+    #[cfg(test)]
     pub(in crate::shell::component) fn update_for_dirty_roots_collect<'a>(
         &mut self,
         root: &'a WidgetNode,
@@ -458,44 +490,6 @@ impl RetainedWidgetTree {
         })?;
 
         (total == self.node_keys.len()).then_some((affected, total))
-    }
-
-    /// Compare a fresh widget tree directly with the retained slotmap.
-    ///
-    /// The analysis callers only need each node's previous snapshot; they do
-    /// not need a second `NodeId -> snapshot` table. Walking the tree directly
-    /// avoids allocating and populating that temporary map on every narrow or
-    /// layout analysis pass. Returning the visited count preserves detection
-    /// of removed nodes, while a missing retained key detects inserted nodes.
-    pub(super) fn visit_fresh_snapshots(
-        &self,
-        node: &WidgetNode,
-        visit: &mut impl FnMut(NodeId, &RetainedNodeSnapshot, &RetainedNodeSnapshot) -> bool,
-    ) -> Option<usize> {
-        fn walk(
-            retained: &RetainedWidgetTree,
-            node: &WidgetNode,
-            visit: &mut impl FnMut(NodeId, &RetainedNodeSnapshot, &RetainedNodeSnapshot) -> bool,
-            total: &mut usize,
-        ) -> bool {
-            let Some(key) = retained.node_keys.get(&node.id).copied() else {
-                return false;
-            };
-            let Some(previous) = retained.nodes.get(key) else {
-                return false;
-            };
-            let fresh = retained_snapshot_with_render(node, previous.render.clone(), None);
-            *total += 1;
-            if !visit(node.id, previous, &fresh) {
-                return false;
-            }
-            node.children
-                .iter()
-                .all(|child| walk(retained, child, visit, total))
-        }
-
-        let mut total = 0;
-        walk(self, node, visit, &mut total).then_some(total)
     }
 }
 

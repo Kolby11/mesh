@@ -9,14 +9,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 pub(super) const BUILTIN_DEBUG_INSPECTOR_ID: &str = "@mesh/debug-inspector";
 
 pub(in crate::shell) fn installed_module_graph_path() -> PathBuf {
-    if let Ok(path) = std::env::var("MESH_MODULE_GRAPH_PATH")
-        && !path.trim().is_empty()
-    {
-        return PathBuf::from(path);
-    }
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../..")
-        .join("config/module.json")
+    mesh_core_config::default_module_graph_path()
 }
 
 /// Load a candidate graph. Once a graph is committed, a module whose
@@ -65,8 +58,6 @@ pub(in crate::shell) struct ResourceSnapshot {
     /// Mutable only for resolver caches; the bindings and captured host
     /// catalog are replaced by swapping this whole handle at commit.
     pub icon_registry: mesh_core_icon::IconRegistryHandle,
-    pub icon_pack_chain: Vec<String>,
-    pub font_pack_chain: Vec<String>,
     pub icon_assets: Vec<ResourceAsset>,
     pub font_assets: Vec<ResourceAsset>,
 }
@@ -82,8 +73,7 @@ impl Default for ResourceSnapshot {
             revision: 0,
             host_catalog,
             icon_registry,
-            icon_pack_chain: Vec::new(),
-            font_pack_chain: Vec::new(),
+
             icon_assets: Vec::new(),
             font_assets: Vec::new(),
         }
@@ -95,9 +85,7 @@ pub(in crate::shell) struct PreparedResourceSnapshot {
     pub(in crate::shell) resource_lease: Option<mesh_core_resources::ResourcePreparationLease>,
     pub snapshot: ResourceSnapshot,
     pub explanation: mesh_core_resources::ResourceExplanationSnapshot,
-    pub icon_packs: Vec<mesh_core_icon::IconPackBindings>,
     pub font_registry: mesh_core_resources::FontRegistry,
-    pub frontends: Vec<(String, mesh_core_icon::FrontendIconBindings)>,
 }
 
 fn resource_asset_explanation(
@@ -1023,15 +1011,14 @@ impl Shell {
                         icon_registry: std::sync::Arc::new(std::sync::Mutex::new(
                             icon_registry,
                         )),
-                        icon_pack_chain: icon_chain,
-                        font_pack_chain: font_chain,
+
                         icon_assets,
                         font_assets,
                     },
                     explanation,
-                    icon_packs,
+
                     font_registry,
-                    frontends,
+
                 })
             })
             .map_err(|error| ShellRunError::FrontendComposition {
@@ -1320,43 +1307,7 @@ fn log_locale_catalog_diagnostics(diagnostics: &[mesh_core_locale::CatalogSource
     }
 }
 
-/// Layer a profile's sparse preferences and per-instance surface overrides on
-/// top of shared user defaults. The shared document remains untouched.
-pub(in crate::shell) fn effective_profile_settings(
-    shared: SettingsStore,
-    profile: Option<&mesh_core_module::package::ShellProfile>,
-) -> Result<SettingsStore, mesh_core_config::ConfigError> {
-    let Some(profile) = profile else {
-        return Ok(shared);
-    };
-    let path = shared.path().to_path_buf();
-    let mut document = shared.to_value();
-    let root = document
-        .as_object_mut()
-        .expect("SettingsStore always serializes an object");
-    if let Some(theme) = &profile.resources.theme {
-        let target = root
-            .entry("shell".to_string())
-            .or_insert_with(|| serde_json::json!({}));
-        mesh_core_config::merge_json(target, &serde_json::json!({ "theme": { "active": theme } }));
-    }
-    for (namespace, overrides) in &profile.settings {
-        let target = root
-            .entry(namespace.clone())
-            .or_insert_with(|| serde_json::json!({}));
-        mesh_core_config::merge_json(target, overrides);
-    }
-    for (instance_id, instance) in profile.roots.iter().filter(|(_, root)| root.is_active()) {
-        let Some(surface) = &instance.surface else {
-            continue;
-        };
-        let target = root
-            .entry(instance_id.clone())
-            .or_insert_with(|| serde_json::json!({}));
-        mesh_core_config::merge_json(target, &serde_json::json!({ "surface": surface }));
-    }
-    SettingsStore::from_value(path, document)
-}
+pub(in crate::shell) use mesh_core_module::package::effective_profile_settings;
 
 fn builtin_state_contract(
     interface: &str,
@@ -1441,7 +1392,6 @@ fn builtin_contract(
 #[cfg(test)]
 #[derive(Debug)]
 pub(super) struct DiscoveredModuleManifest {
-    pub(super) dir: PathBuf,
     pub(super) loaded:
         Result<mesh_core_module::LoadedManifest, mesh_core_module::manifest::ManifestError>,
 }
@@ -1517,9 +1467,7 @@ fn discover_shell_module_manifest_dirs_under(
 
 #[cfg(test)]
 fn shell_module_manifest_exists(dir: &Path) -> bool {
-    dir.join("package.json").exists()
-        || dir.join("module.json").exists()
-        || dir.join("mesh.toml").exists()
+    dir.join("module.json").exists()
 }
 
 #[cfg(test)]
@@ -1529,7 +1477,6 @@ pub(super) fn load_shell_module_manifests(
     module_dirs
         .par_iter()
         .map(|dir| DiscoveredModuleManifest {
-            dir: dir.clone(),
             loaded: mesh_core_module::manifest::load_canonical_manifest(dir),
         })
         .collect()
@@ -1749,7 +1696,6 @@ pub(super) fn load_shell_module_manifests_serial(
     module_dirs
         .iter()
         .map(|dir| DiscoveredModuleManifest {
-            dir: dir.clone(),
             loaded: mesh_core_module::manifest::load_canonical_manifest(dir),
         })
         .collect()
@@ -1812,13 +1758,6 @@ impl Shell {
     pub fn new() -> Self {
         #[cfg(test)]
         isolate_test_settings();
-        let config_path = mesh_core_config::default_config_path();
-        let config = load_config(&config_path).unwrap_or_else(|e| {
-            tracing::warn!("failed to load config, using defaults: {e}");
-            ShellConfig {
-                shell: Default::default(),
-            }
-        });
         let shared_settings = SettingsStore::load().unwrap_or_else(|e| {
             tracing::warn!("failed to load settings, using defaults: {e}");
             SettingsStore::default()
@@ -1868,12 +1807,13 @@ impl Shell {
         let settings = mesh_core_config::resolve_shell_locale_settings(settings_store.shell());
 
         mesh_core_render::set_blur_quality(blur_quality_from_settings(&settings.render.blur));
+        apply_backdrop_settings(&settings.render.backdrop);
         let (theme, theme_watch) = default_theme_state(&settings);
         let locale = LocaleEngine::with_fallback_locale(
             settings.i18n.locale.clone(),
             settings.i18n.fallback_locale.clone(),
         );
-        let module_dirs = resolve_default_module_dirs(&config);
+        let module_dirs = resolve_default_module_dirs();
         let settings_watch = {
             let path = settings_store.path().to_path_buf();
             let modified_at = std::fs::metadata(&path)
@@ -2110,7 +2050,6 @@ impl Shell {
         }
 
         Self {
-            config,
             settings,
             settings_store,
             control_plane_revision,
@@ -2721,15 +2660,7 @@ impl Shell {
         Ok(())
     }
 
-    pub(in crate::shell) fn activate_frontend_module(
-        &mut self,
-        module_id: &str,
-        graph: &InstalledModuleGraph,
-    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
-        let locale = self.prepare_locale_for_graph(graph)?;
-        self.activate_frontend_module_with_locale(module_id, graph, locale)
-    }
-
+    #[cfg(test)]
     pub(in crate::shell) fn activate_frontend_module_with_locale(
         &mut self,
         module_id: &str,
@@ -2881,6 +2812,17 @@ impl Shell {
         Ok(requests)
     }
 
+    #[cfg(test)]
+    pub(in crate::shell) fn activate_frontend_module(
+        &mut self,
+        module_id: &str,
+        graph: &InstalledModuleGraph,
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
+        let locale = self.prepare_locale_for_graph(graph)?;
+        self.activate_frontend_module_with_locale(module_id, graph, locale)
+    }
+
+    #[cfg(test)]
     pub(in crate::shell) fn deactivate_frontend_module(
         &mut self,
         module_id: &str,

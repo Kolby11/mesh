@@ -28,8 +28,29 @@ impl FrontendCompositionResolver for IdentityTranslationComposition {
         expression: &mesh_core_expression::CompiledExpression,
         _locals: &serde_json::Map<String, serde_json::Value>,
     ) -> Option<TemplateExpressionResult> {
-        let _ = expression;
-        None
+        let mut context = mesh_core_scripting::ScriptContext::new(
+            "@test/translation-resolver",
+            mesh_core_capability::CapabilitySet::from_ids(["locale.read"]),
+        )
+        .unwrap();
+        context.set_i18n_translations(std::collections::HashMap::from([(
+            "nav.open_settings".into(),
+            "Open settings".into(),
+        )]));
+        context
+            .compile_and_execute_component_with_compiled(
+                "local t = import(\"mesh.i18n\", \"t\")",
+                &[],
+                &[mesh_core_expression::compile_expression(expression.source()).unwrap()],
+            )
+            .unwrap();
+        let (value, service_reads) = context
+            .evaluate_compiled_template_expression(expression, _locals)
+            .unwrap();
+        Some(TemplateExpressionResult {
+            value,
+            service_reads,
+        })
     }
 
     fn render_import(

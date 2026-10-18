@@ -1,0 +1,164 @@
+<template>
+    <popover
+        open={open}
+        class="menu-shell"
+        aria-label="Switch shell"
+        anchor-ref="profileButton"
+        anchor="bottom"
+        gravity="bottom"
+        offset-y="8"
+        open-on="click"
+    >
+        <column class="menu">
+            <text class="menu-title">Shell</text>
+            {#for profile in profiles key={profile.id}}
+                <button
+                    class="row"
+                    class:row-active={profile.active}
+                    class:row-pending={profile.pending}
+                    onclick={onSwitch(profile.id)}
+                    aria-pressed={profile.active}
+                >
+                    <text class="row-label">{profile.label}</text>
+                    <icon class="row-check" name="object-select" size="16" hidden={not profile.active} />
+                </button>
+            {/for}
+        </column>
+    </popover>
+</template>
+
+<script lang="luau">
+local packages = require("mesh.packages")
+
+-- Written by the core disclosure controller (`open-on="click"`).
+open = false
+profiles = {}
+
+-- The profile this menu asked for, shown as pending until the transactional
+-- switch commits and `active_profile` reports it.
+local requested = nil
+
+local function label(id)
+    local spaced = string.gsub(id, "[-_]", " ")
+    return string.upper(string.sub(spaced, 1, 1)) .. string.sub(spaced, 2)
+end
+
+effect(function()
+    local active = packages.active_profile or ""
+    if requested == active then
+        requested = nil
+    end
+    local list = {}
+    for _, id in packages.profiles or {} do
+        list[#list + 1] = {
+            id = id,
+            label = label(id),
+            active = id == active,
+            pending = id == requested,
+        }
+    end
+    profiles = list
+    end)
+
+function onSwitch(id)
+    open = false
+    if id == packages.active_profile then
+        return
+    end
+    requested = id
+    packages.switch_profile(id)
+end
+</script>
+
+<style>
+    .menu-shell {
+        padding: 0;
+    }
+
+    .menu {
+        min-width: 200px;
+        gap: 4px;
+        padding: 10px;
+        border-radius: var(--radius-lg);
+        border: 1px solid var(--color-outline-variant);
+        background: var(--effect-backdrop-blur-popup-background);
+        backdrop-filter: blur(var(--effect-backdrop-blur-popup-radius));
+        box-shadow: var(--shadow-umbra-lg);
+        animation: menu-in 220 cubic-bezier(0.05, 0.7, 0.1, 1) both;
+    }
+
+    .menu-title {
+        height: 20px;
+        padding-inline: 8px;
+        font-size: var(--typography-size-xs);
+        font-weight: 600;
+        color: var(--color-on-surface-variant);
+    }
+
+    .row {
+        width: 100%;
+        height: 36px;
+        padding: 0 10px;
+        justify-content: space-between;
+        align-items: center;
+        border-radius: var(--radius-md);
+        border-width: 1px;
+        border-style: solid;
+        border-color: transparent;
+        background: transparent;
+        color: var(--color-on-surface);
+        transform: scale(1);
+        transition-property: transform, background-color, border-color, color;
+        transition-duration: var(--animation-duration-short);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    /* Rows span the popover, so hover fills rather than scales (a scaled row
+    would clip at the menu edge); focus and press match every other control. */
+    .row:hover {
+        background: var(--color-surface-container-high);
+    }
+
+    .row:focus-visible {
+        border-color: var(--color-primary);
+    }
+
+    .row:active {
+        transform: scale(var(--animation-scale-press));
+        transition-duration: var(--animation-duration-fast);
+    }
+
+    .row-active,
+    .row-active:hover {
+        background: var(--color-primary);
+        color: var(--color-on-primary);
+    }
+
+    .row-pending {
+        opacity: 0.6;
+    }
+
+    .row-label {
+        height: 20px;
+        font-size: var(--typography-size-md);
+        font-weight: 500;
+        color: inherit;
+    }
+
+    .row-check {
+        width: 16px;
+        height: 16px;
+        color: inherit;
+    }
+
+    @keyframes menu-in {
+        0% {
+            opacity: 0;
+            transform: translateY(-6px);
+        }
+        100% {
+            opacity: 1;
+            transform: translateY(0px);
+        }
+    }
+</style>

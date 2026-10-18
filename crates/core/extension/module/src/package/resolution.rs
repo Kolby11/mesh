@@ -560,3 +560,17 @@ mod tests {
         assert!(outcome.blocked.contains_key("@me/derived"));
     }
 }
+
+/// An omitted provider version implements the declared version. An explicit
+/// offer must equal it, and the consumer must accept that declared version.
+pub(crate) fn provider_eligible(offered: Option<&str>, requirement: &str, declared: &str) -> bool {
+    let Some(version) = mesh_core_service::parse_contract_version(declared) else {
+        return false;
+    };
+    mesh_core_service::parse_version_req(requirement)
+        .is_some_and(|request| request.matches(&version))
+        && offered.is_none_or(|offered| {
+            mesh_core_service::parse_contract_version(offered)
+                .is_some_and(|offered| offered == version)
+        })
+}

@@ -14,7 +14,8 @@ pub use fallback::{
     BuiltInIconFallback, MISSING_ICON_SVG, fallback_stage, semantic_fallback_names,
 };
 pub use registry::{
-    IconRegistry, IconResolution, IconResolutionProvenance, ResolvedTarget, SupportedAxes,
+    IconPackValidation, IconRegistry, IconResolution, IconResolutionProvenance, ResolvedTarget,
+    SupportedAxes, validate_icon_mapping, validate_icon_pack,
 };
 pub use xdg::{
     MAX_FONT_BYTES, MAX_GLYPH_MAP_BYTES, MAX_GLYPH_MAP_ENTRIES, parse_glyph_map_bytes,

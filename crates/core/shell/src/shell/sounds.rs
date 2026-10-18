@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Sound variants await their corresponding module providers.
-
 /// Shell sound event dispatch.
 ///
 /// Core maps semantic shell events to a typed service request. Normal interface
@@ -9,11 +7,6 @@ use mesh_core_config::ShellSounds;
 
 pub(super) enum SoundKind {
     Startup,
-    Shutdown,
-    DeviceConnected,
-    DeviceDisconnected,
-    Error,
-    Notification,
 }
 
 /// A core-triggered call of a declared service method, dispatched like any
@@ -30,11 +23,6 @@ pub(super) struct ShellSoundCall {
 pub(super) fn shell_sound_request(kind: SoundKind, sounds: &ShellSounds) -> Option<ShellSoundCall> {
     let path = match kind {
         SoundKind::Startup => sounds.startup.as_deref(),
-        SoundKind::Shutdown => sounds.shutdown.as_deref(),
-        SoundKind::DeviceConnected => sounds.device_connected.as_deref(),
-        SoundKind::DeviceDisconnected => sounds.device_disconnected.as_deref(),
-        SoundKind::Error => sounds.error.as_deref(),
-        SoundKind::Notification => sounds.notification.as_deref(),
     };
 
     let path = path?;

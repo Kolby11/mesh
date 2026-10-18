@@ -1,0 +1,69 @@
+{
+  "name": "@mesh/glass",
+  "version": "0.1.0",
+  "description": "Liquid-glass desktop: floating top bar of glass pills, desktop player and weather cards, and a bottom dock, in the violet glass theme.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "composition",
+    "uses": {
+      "modules": {
+        "@mesh/glass-bar": ">=0.1.0",
+        "@mesh/glass-widgets": ">=0.1.0",
+        "@mesh/glass-dock": ">=0.1.0",
+        "@mesh/settings": ">=0.1.0",
+        "@mesh/violet-glass": ">=0.1.0",
+        "@mesh/glass-wallpaper": ">=0.1.0"
+      }
+    },
+    "compose": {
+      "roots": {
+        "@mesh/glass-wallpaper#default": {
+          "module": "@mesh/glass-wallpaper",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/glass-bar#default": {
+          "module": "@mesh/glass-bar",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/glass-widgets#default": {
+          "module": "@mesh/glass-widgets",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/glass-dock#default": {
+          "module": "@mesh/glass-dock",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/settings#default": {
+          "module": "@mesh/settings",
+          "entrypoint": "main",
+          "active": true
+        }
+      },
+      "providers": {
+        "mesh.audio": "@mesh/pipewire-audio",
+        "mesh.brightness": "@mesh/backlight-brightness",
+        "mesh.media": "@mesh/mpris-media",
+        "mesh.weather": "@mesh/open-meteo-weather",
+        "mesh.network": "@mesh/networkmanager-network",
+        "mesh.apps": "@mesh/hyprland-apps",
+        "mesh.recorder": "@mesh/wf-recorder"
+      },
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      },
+      "settings": {
+        "shell": {
+          "theme": {
+            "active": "@mesh/violet-glass:violet-glass"
+          }
+        }
+      }
+    }
+  }
+}

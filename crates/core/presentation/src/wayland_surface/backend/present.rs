@@ -291,6 +291,12 @@ impl WaylandSurfaceBackend {
     /// The input region currently derived for a surface, for tests and
     /// diagnostics. `None` for an unknown surface or one whose whole area is
     /// content.
+    /// Logical size of the output `surface_id` is on, once the compositor has
+    /// placed it there.
+    pub(crate) fn output_logical_size(&self, surface_id: &str) -> Option<(u32, u32)> {
+        self.output_logical_size_for_surface(surface_id)
+    }
+
     pub(crate) fn input_region(&self, surface_id: &str) -> Option<DamageRect> {
         let output_size = self.output_logical_size_for_surface(surface_id);
         let entry = self.state.surfaces.get(surface_id)?;

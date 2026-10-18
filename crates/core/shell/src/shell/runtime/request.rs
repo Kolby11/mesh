@@ -877,7 +877,6 @@ impl Shell {
                 VecDeque::new()
             }
             ProfileWriteOperation::ProviderSelection {
-                graph_path: _,
                 interface,
                 provider_id,
             } => {
@@ -923,9 +922,8 @@ impl Shell {
                 VecDeque::new()
             }
             ProfileWriteOperation::ModuleEnabled {
-                graph_path: _,
                 module_id,
-                enabled: _,
+
                 active_profile_id,
             } => {
                 let DurableProfileWriteResult::Rollback(rollback) = result else {
@@ -1068,9 +1066,8 @@ impl Shell {
             .expect("module existence was validated above");
         if self.file_watcher_tx.is_some() {
             let operation = ProfileWriteOperation::ModuleEnabled {
-                graph_path: graph_path.clone(),
                 module_id: module_id.to_string(),
-                enabled,
+
                 active_profile_id: active_profile_id.clone(),
             };
             let write_path = graph_path.clone();
@@ -1144,6 +1141,7 @@ impl Shell {
     /// Interfaces where `module_id` is the graph's active provider but has no
     /// live runtime yet — i.e. what enabling `module_id` must spawn so it
     /// doesn't wait for a restart. Pure graph/state query, no spawning.
+    #[cfg(test)]
     pub(in crate::shell) fn newly_active_backend_interfaces(
         &self,
         graph: &InstalledModuleGraph,
@@ -1251,7 +1249,6 @@ impl Shell {
             }
             if self.file_watcher_tx.is_some() {
                 let operation = ProfileWriteOperation::ProviderSelection {
-                    graph_path: graph_path.clone(),
                     interface: interface.to_string(),
                     provider_id: provider_id.to_string(),
                 };
@@ -1608,6 +1605,7 @@ impl Shell {
         Ok(requests)
     }
 
+    #[cfg(test)]
     pub(in crate::shell) fn drain_requests(
         &mut self,
         requests: &mut VecDeque<impl Into<SourcedRequest>>,
@@ -1630,15 +1628,6 @@ impl Shell {
                 message,
             );
         }
-        Ok(())
-    }
-
-    pub(in crate::shell) fn drain_request(
-        &mut self,
-        request: CoreRequest,
-    ) -> Result<(), ShellRunError> {
-        self.enqueue_effects(std::iter::once(request));
-        self.process_effects();
         Ok(())
     }
 
@@ -1744,13 +1733,11 @@ impl Shell {
                     .get(interface_canonical.as_ref())
                     .map(|slot| slot.generation)
                     .unwrap_or(0);
-                let identity = self.backend_identity_for_interface(interface_canonical.as_ref());
                 let route = ServiceCallRoute {
                     interface: interface_canonical.into_owned(),
                     instance_id: source_instance_id,
                     module_id: source_module_id.clone(),
                     generation,
-                    identity,
                 };
                 self.pending_service_call_routes.insert(call_id, route);
                 let result = self.dispatch_service_command_with_call_id(

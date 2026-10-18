@@ -28,8 +28,8 @@ mod util;
 pub use backend::{
     BackendCommandArgument, BackendCommandRegistry, BackendCommandRun, BackendCommandSpec,
     BackendEventRegistry, BackendEventSpec, BackendScriptContext, BackendScriptError,
-    BackendScriptEvent, BackendTaskRun, StreamEvent, StreamEventKind, StreamExitStatus,
-    StreamHandle, StreamId, StreamLine, StreamState, StreamStatus,
+    BackendScriptEvent, BackendState, BackendTaskRun, StreamEvent, StreamEventKind,
+    StreamExitStatus, StreamHandle, StreamId, StreamLine, StreamState, StreamStatus,
 };
 pub use context::{
     ElementAction, LocaleBoundState, PublishedEvent, ScriptContext, ScriptDiagnostic,
@@ -37,9 +37,6 @@ pub use context::{
 };
 pub use operation::{OperationRegistry, OperationRejection, ShellOperation};
 pub use session::{
-    ResourceBroker, ResourceKind, ResourceLease, ResourceLimit, RuntimeBackoff, RuntimeEvent,
-    RuntimeFailureDecision, RuntimeHealth, RuntimeHealthState, RuntimeHost, RuntimeLifecycle,
-    RuntimeLifecycleState, RuntimeQuarantine, RuntimeRealm, RuntimeSession, RuntimeSessionConfig,
-    RuntimeSessionError, RuntimeState, RuntimeStateCommit, RuntimeStateTransaction,
-    RuntimeSupervisor,
+    ResourceBroker, ResourceKind, ResourceLease, ResourceLimit, RuntimeHost, RuntimeLifecycle,
+    RuntimeLifecycleState, RuntimeRealm, RuntimeSession, RuntimeSessionConfig, RuntimeSessionError,
 };

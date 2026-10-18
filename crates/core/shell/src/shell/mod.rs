@@ -1,9 +1,7 @@
-#![allow(dead_code)] // Shell compatibility and diagnostic paths are exercised by tests.
-
 use mesh_core_capability::{CapabilityPolicy, EffectiveCapabilities};
 use mesh_core_config::{
-    ModuleSettingsOverrides, SettingsNamespaceSchema, SettingsStore, ShellConfig, ShellSettings,
-    load_config, resolve_discovery_paths,
+    ModuleSettingsOverrides, SettingsNamespaceSchema, SettingsStore, ShellSettings,
+    default_discovery_paths,
 };
 use mesh_core_debug::{
     BackendRuntimeEntry, DebugDiagnosticEntry, DebugOverlayState, DebugSnapshot, HealthEntry,
@@ -304,6 +302,22 @@ fn blur_quality_from_settings(
     }
 }
 
+/// Load the image `backdrop-filter: refract()` samples. A missing or
+/// unreadable file is reported and leaves refraction off rather than failing
+/// the settings change.
+fn apply_backdrop_settings(settings: &mesh_core_config::BackdropSettings) {
+    let path = settings
+        .image
+        .as_deref()
+        .filter(|path| !path.is_empty())
+        .map(Path::new);
+    if let Err(error) = mesh_core_render::set_backdrop_image(path) {
+        tracing::warn!("backdrop image could not be loaded, refraction disabled: {error}");
+        let _ = mesh_core_render::set_backdrop_image(None);
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn prepare_icon_pack_bindings(
     module_id: &str,
     module_dir: &Path,
@@ -319,6 +333,7 @@ pub(crate) fn prepare_icon_pack_bindings(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn prepare_icon_pack_bindings_with_cancellation(
     module_id: &str,
     module_dir: &Path,
@@ -345,130 +360,12 @@ pub(crate) fn prepare_icon_pack_bindings_with_catalog(
     if cancellation.is_cancelled() {
         return Err("resource preparation cancelled".into());
     }
-    if section.id.trim().is_empty() {
-        tracing::warn!(
-            "module {} declares mesh.contributes.icons but the icon-pack id is empty; skipping",
-            module_id
-        );
-        return Err(format!(
-            "module {} declares mesh.contributes.icons with an empty icon-pack id",
-            module_id
-        ));
-    }
-    mesh_core_icon::validate_canonical_identity(&section.id, "icon pack id")
-        .map_err(|error| error.to_string())?;
-    if section.mappings.len() > mesh_core_icon::MAX_ICON_PACK_MAPPINGS {
-        return Err(format!(
-            "icon-pack '{}' contains more than {} mappings",
-            module_id,
-            mesh_core_icon::MAX_ICON_PACK_MAPPINGS
-        ));
-    }
-    if section.vocabularies.len() > mesh_core_icon::MAX_ICON_PACK_VOCABULARY_OWNERS {
-        return Err(format!(
-            "icon-pack '{}' contains more than {} vocabulary owners",
-            module_id,
-            mesh_core_icon::MAX_ICON_PACK_VOCABULARY_OWNERS
-        ));
-    }
-    if section.requires.fonts.len() > mesh_core_icon::MAX_ICON_PACK_FONT_REQUIREMENTS {
-        return Err(format!(
-            "icon-pack '{}' contains more than {} font requirements",
-            module_id,
-            mesh_core_icon::MAX_ICON_PACK_FONT_REQUIREMENTS
-        ));
-    }
-    if section.requires.themes.len() > mesh_core_icon::MAX_ICON_PACK_THEME_REQUIREMENTS {
-        return Err(format!(
-            "icon-pack '{}' contains more than {} theme requirements",
-            module_id,
-            mesh_core_icon::MAX_ICON_PACK_THEME_REQUIREMENTS
-        ));
-    }
-    let total_mappings = section.mappings.len().saturating_add(
-        section
-            .vocabularies
-            .values()
-            .map(|mappings| mappings.len())
-            .sum(),
-    );
-    if total_mappings > mesh_core_icon::MAX_ICON_PACK_MAPPINGS {
-        return Err(format!(
-            "icon-pack '{}' contains more than {} total mappings",
-            module_id,
-            mesh_core_icon::MAX_ICON_PACK_MAPPINGS
-        ));
-    }
-    for (name, mapping) in &section.mappings {
-        if name.len() > mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES {
-            return Err(format!(
-                "icon-pack '{}' mapping name exceeds {} bytes",
-                module_id,
-                mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES
-            ));
-        }
-        if mapping.target.len() > mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES {
-            return Err(format!(
-                "icon-pack '{}' mapping '{}' target exceeds {} bytes",
-                module_id,
-                name,
-                mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES
-            ));
-        }
-    }
-    for (owner, mappings) in &section.vocabularies {
-        if owner.len() > mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES {
-            return Err(format!(
-                "icon-pack '{}' vocabulary owner exceeds {} bytes",
-                module_id,
-                mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES
-            ));
-        }
-        for (name, mapping) in mappings {
-            if name.len() > mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES {
-                return Err(format!(
-                    "icon-pack '{}' vocabulary mapping name exceeds {} bytes",
-                    module_id,
-                    mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES
-                ));
-            }
-            if mapping.target.len() > mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES {
-                return Err(format!(
-                    "icon-pack '{}' mapping '{}' target exceeds {} bytes",
-                    module_id,
-                    name,
-                    mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES
-                ));
-            }
-        }
-    }
+    section.validate()?;
     let mut font_aliases = std::collections::HashMap::new();
-    let mut seen_aliases = std::collections::HashSet::new();
     for req in &section.requires.fonts {
         if cancellation.is_cancelled() {
             return Err("resource preparation cancelled".into());
         }
-        if req.alias.trim().is_empty() {
-            return Err(format!(
-                "icon-pack '{}' declares a font with an empty alias",
-                module_id
-            ));
-        }
-        mesh_core_icon::validate_canonical_identity(&req.alias, "icon font alias")
-            .map_err(|error| error.to_string())?;
-        if req.family.trim().is_empty() {
-            return Err(format!(
-                "icon-pack '{}' declares font alias '{}' with an empty family",
-                module_id, req.alias
-            ));
-        }
-        if !seen_aliases.insert(req.alias.clone()) {
-            return Err(format!(
-                "icon-pack '{}' declares duplicate font alias '{}'",
-                module_id, req.alias
-            ));
-        }
-
         let (glyph_map_path, prepared_glyphs) = match req.glyph_map.as_deref() {
             Some(path) => {
                 let (glyph_map_path, bytes) = read_module_resource_with_cancellation(
@@ -565,37 +462,8 @@ pub(crate) fn prepare_icon_pack_bindings_with_catalog(
     let validate_mapping = |name: &str,
                             mapping: &mesh_core_module::manifest::IconMappingTarget|
      -> Result<(), String> {
-        if name.trim().is_empty() || mapping.target.trim().is_empty() {
-            return Err(format!(
-                "icon-pack '{}' declares an icon mapping with an empty name or target",
-                module_id
-            ));
-        }
-        if name.len() > mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES {
-            return Err(format!(
-                "icon-pack '{}' mapping name exceeds {} bytes",
-                module_id,
-                mesh_core_icon::MAX_ICON_MAPPING_NAME_BYTES
-            ));
-        }
-        if mapping.target.len() > mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES {
-            return Err(format!(
-                "icon-pack '{}' mapping '{}' target exceeds {} bytes",
-                module_id,
-                name,
-                mesh_core_icon::MAX_ICON_MAPPING_TARGET_BYTES
-            ));
-        }
         if cancellation.is_cancelled() {
             return Err("resource preparation cancelled".into());
-        }
-        if std::path::Path::new(&mapping.target).is_absolute()
-            || mapping.target.trim_start().starts_with("~/")
-        {
-            return Err(format!(
-                "icon-pack '{}' mapping '{}' uses an absolute or home-relative target",
-                module_id, name
-            ));
         }
         let (alias, glyph_name) =
             mesh_core_icon::parse_target(&mapping.target).ok_or_else(|| {
@@ -623,13 +491,7 @@ pub(crate) fn prepare_icon_pack_bindings_with_catalog(
     for (name, mapping) in &section.mappings {
         validate_mapping(name, mapping)?;
     }
-    for (owner, mappings) in &section.vocabularies {
-        if owner.trim().is_empty() {
-            return Err(format!(
-                "icon-pack '{}' declares an empty vocabulary owner",
-                module_id
-            ));
-        }
+    for mappings in section.vocabularies.values() {
         for (name, mapping) in mappings {
             validate_mapping(name, mapping)?;
         }
@@ -781,7 +643,6 @@ fn update_modifiers_for_key_release(modifiers: &mut KeyModifiers, key: &str) {
 }
 
 pub struct Shell {
-    pub config: ShellConfig,
     /// Core shell preferences, resolved from [`Self::settings_store`]. Kept
     /// alongside the store because most readers want only this.
     pub settings: ShellSettings,
@@ -1209,9 +1070,9 @@ pub enum ShellRunError {
     },
 }
 
-fn resolve_default_module_dirs(config: &ShellConfig) -> Vec<PathBuf> {
+fn resolve_default_module_dirs() -> Vec<PathBuf> {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-    resolve_discovery_paths(&workspace_root, &config.shell.discovery_paths)
+    default_discovery_paths(&workspace_root)
 }
 
 #[cfg(test)]

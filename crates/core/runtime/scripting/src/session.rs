@@ -3,32 +3,23 @@
 //! A [`RuntimeSession`] is deliberately narrower than either adapter.  It owns
 //! the identity and policy that must remain stable across callbacks, while the
 //! adapters retain their frontend/backend-specific host operations.  Keeping
-//! these pieces together prevents lifecycle, resource, and failure decisions
-//! from becoming ambient state in individual host functions.
+//! these pieces together keeps realm initialization and resource accounting
+//! consistent. Provider supervision belongs to the shell.
 
 use crate::policy::{ExecutionGuard, FramePause, ResourceBudget, RuntimePolicy};
 use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_runtime::SandboxConfig;
 use mlua::Lua;
 use serde_json::Value;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 pub use crate::policy::{ResourceKind, ResourceLimit};
-
-const DEFAULT_FAILURE_LIMIT: u32 = 3;
-const DEFAULT_BACKOFF_INITIAL_MS: u64 = 100;
-const DEFAULT_BACKOFF_MAX_MS: u64 = 30_000;
 
 /// Configuration shared by every runtime session owned by a module.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeSessionConfig {
     pub sandbox: SandboxConfig,
     pub generation: u64,
-    pub failure_limit: u32,
-    pub backoff_initial: Duration,
-    pub backoff_max: Duration,
 }
 
 impl Default for RuntimeSessionConfig {
@@ -36,9 +27,6 @@ impl Default for RuntimeSessionConfig {
         Self {
             sandbox: SandboxConfig::default(),
             generation: 0,
-            failure_limit: DEFAULT_FAILURE_LIMIT,
-            backoff_initial: Duration::from_millis(DEFAULT_BACKOFF_INITIAL_MS),
-            backoff_max: Duration::from_millis(DEFAULT_BACKOFF_MAX_MS),
         }
     }
 }
@@ -158,204 +146,6 @@ impl RuntimeLifecycle {
             return Ok(());
         }
         self.transition(RuntimeLifecycleState::Failed)
-    }
-
-    fn prepare_restart(&mut self) -> Result<(), RuntimeSessionError> {
-        if self.state == RuntimeLifecycleState::Stopped {
-            return Err(RuntimeSessionError::InvalidTransition {
-                from: self.state,
-                to: RuntimeLifecycleState::Loaded,
-            });
-        }
-        if self.state != RuntimeLifecycleState::Loaded {
-            self.transition(RuntimeLifecycleState::Loaded)?;
-        }
-        Ok(())
-    }
-}
-
-/// Coarse runtime health, distinct from static installed-graph health.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeHealthState {
-    Healthy,
-    Degraded,
-    Unavailable,
-}
-
-/// The health record published by a runtime session.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeHealth {
-    state: RuntimeHealthState,
-    reason: Option<String>,
-    recoverable: bool,
-    since: SystemTime,
-}
-
-impl Default for RuntimeHealth {
-    fn default() -> Self {
-        Self::healthy()
-    }
-}
-
-impl RuntimeHealth {
-    pub fn healthy() -> Self {
-        Self::new(RuntimeHealthState::Healthy, None, false)
-    }
-
-    pub fn degraded(reason: impl Into<String>) -> Self {
-        Self::new(RuntimeHealthState::Degraded, Some(reason.into()), true)
-    }
-
-    pub fn unavailable(reason: impl Into<String>, recoverable: bool) -> Self {
-        Self::new(
-            RuntimeHealthState::Unavailable,
-            Some(reason.into()),
-            recoverable,
-        )
-    }
-
-    fn new(state: RuntimeHealthState, reason: Option<String>, recoverable: bool) -> Self {
-        Self {
-            state,
-            reason,
-            recoverable,
-            since: SystemTime::now(),
-        }
-    }
-
-    pub fn state(&self) -> RuntimeHealthState {
-        self.state
-    }
-
-    pub fn reason(&self) -> Option<&str> {
-        self.reason.as_deref()
-    }
-
-    pub fn recoverable(&self) -> bool {
-        self.recoverable
-    }
-
-    pub fn since(&self) -> SystemTime {
-        self.since
-    }
-}
-
-/// Exponential retry state for one runtime generation.
-#[derive(Debug, Clone)]
-pub struct RuntimeBackoff {
-    failures: u32,
-    initial: Duration,
-    maximum: Duration,
-}
-
-impl RuntimeBackoff {
-    pub fn new(initial: Duration, maximum: Duration) -> Self {
-        Self {
-            failures: 0,
-            initial,
-            maximum: maximum.max(initial),
-        }
-    }
-
-    pub fn failures(&self) -> u32 {
-        self.failures
-    }
-
-    pub fn next_delay(&mut self) -> Duration {
-        self.failures = self.failures.saturating_add(1);
-        let exponent = self.failures.saturating_sub(1).min(31);
-        let multiplier = 1u32 << exponent;
-        self.initial
-            .checked_mul(multiplier)
-            .unwrap_or(self.maximum)
-            .min(self.maximum)
-    }
-
-    pub fn reset(&mut self) {
-        self.failures = 0;
-    }
-}
-
-/// Cancellation and failure counters for a runtime session.
-#[derive(Debug, Clone)]
-pub struct RuntimeSupervisor {
-    cancelled: Arc<AtomicBool>,
-    failures: u32,
-    failure_limit: u32,
-}
-
-impl RuntimeSupervisor {
-    fn new(failure_limit: u32) -> Self {
-        Self {
-            cancelled: Arc::new(AtomicBool::new(false)),
-            failures: 0,
-            failure_limit: failure_limit.max(1),
-        }
-    }
-
-    pub fn failures(&self) -> u32 {
-        self.failures
-    }
-
-    pub fn failure_limit(&self) -> u32 {
-        self.failure_limit
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::Acquire)
-    }
-
-    pub fn cancellation(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.cancelled)
-    }
-
-    pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
-    }
-
-    fn record_failure(&mut self) -> bool {
-        self.failures = self.failures.saturating_add(1);
-        self.failures >= self.failure_limit
-    }
-
-    fn reset(&mut self) {
-        self.failures = 0;
-        self.cancelled.store(false, Ordering::Release);
-    }
-}
-
-/// Quarantine state is explicit so a failed module cannot be silently
-/// restarted by a generic retry loop.
-#[derive(Debug, Clone, Default)]
-pub struct RuntimeQuarantine {
-    active: bool,
-    reason: Option<String>,
-    since: Option<SystemTime>,
-}
-
-impl RuntimeQuarantine {
-    pub fn is_active(&self) -> bool {
-        self.active
-    }
-
-    pub fn reason(&self) -> Option<&str> {
-        self.reason.as_deref()
-    }
-
-    pub fn since(&self) -> Option<SystemTime> {
-        self.since
-    }
-
-    fn enter(&mut self, reason: impl Into<String>) {
-        self.active = true;
-        self.reason = Some(reason.into());
-        self.since = Some(SystemTime::now());
-    }
-
-    fn clear(&mut self) {
-        self.active = false;
-        self.reason = None;
-        self.since = None;
     }
 }
 
@@ -545,111 +335,6 @@ pub struct ResourceLease {
     _guard: ExecutionGuard,
 }
 
-/// Rust-owned service state for a module runtime.
-#[derive(Debug, Clone, Default)]
-pub struct RuntimeState {
-    revision: u64,
-    snapshot: Option<Value>,
-}
-
-impl RuntimeState {
-    pub fn revision(&self) -> u64 {
-        self.revision
-    }
-
-    pub fn snapshot(&self) -> Option<&Value> {
-        self.snapshot.as_ref()
-    }
-
-    pub fn snapshot_cloned(&self) -> Option<Value> {
-        self.snapshot.clone()
-    }
-
-    pub fn begin_transaction(&self) -> RuntimeStateTransaction {
-        RuntimeStateTransaction {
-            base_revision: self.revision,
-            snapshot: self.snapshot.clone(),
-            events: Vec::new(),
-        }
-    }
-
-    fn commit(
-        &mut self,
-        transaction: RuntimeStateTransaction,
-    ) -> Result<RuntimeStateCommit, RuntimeSessionError> {
-        if transaction.base_revision != self.revision {
-            return Err(RuntimeSessionError::StateConflict {
-                expected: transaction.base_revision,
-                actual: self.revision,
-            });
-        }
-        self.snapshot = transaction.snapshot.clone();
-        self.revision = self.revision.saturating_add(1);
-        Ok(RuntimeStateCommit {
-            revision: self.revision,
-            snapshot: transaction.snapshot,
-            events: transaction.events,
-        })
-    }
-}
-
-/// A staged state/event update. It becomes visible only when the owning
-/// session commits it, so a failed callback cannot publish a partial result.
-#[derive(Debug, Clone)]
-pub struct RuntimeStateTransaction {
-    base_revision: u64,
-    snapshot: Option<Value>,
-    events: Vec<RuntimeEvent>,
-}
-
-impl RuntimeStateTransaction {
-    pub fn base_revision(&self) -> u64 {
-        self.base_revision
-    }
-
-    pub fn set_snapshot(&mut self, snapshot: Value) {
-        self.snapshot = Some(snapshot);
-    }
-
-    pub fn clear_snapshot(&mut self) {
-        self.snapshot = None;
-    }
-
-    pub fn publish_event(&mut self, name: impl Into<String>, payload: Value) {
-        self.events.push(RuntimeEvent {
-            name: name.into(),
-            payload,
-        });
-    }
-
-    pub fn events(&self) -> &[RuntimeEvent] {
-        &self.events
-    }
-}
-
-/// A typed event staged with a runtime state transaction.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RuntimeEvent {
-    pub name: String,
-    pub payload: Value,
-}
-
-/// The committed result of one callback transaction.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RuntimeStateCommit {
-    pub revision: u64,
-    pub snapshot: Option<Value>,
-    pub events: Vec<RuntimeEvent>,
-}
-
-/// The failure result used by the session supervisor.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuntimeFailureDecision {
-    pub failures: u32,
-    pub retry_after: Duration,
-    pub quarantined: bool,
-}
-
 /// Errors that cross the shared runtime-session boundary.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RuntimeSessionError {
@@ -658,10 +343,6 @@ pub enum RuntimeSessionError {
         from: RuntimeLifecycleState,
         to: RuntimeLifecycleState,
     },
-    #[error("runtime session for '{module_id}' is quarantined")]
-    Quarantined { module_id: String },
-    #[error("runtime session for '{module_id}' is not active")]
-    Inactive { module_id: String },
     #[error("capability '{capability}' denied for module '{module_id}'")]
     CapabilityDenied {
         module_id: String,
@@ -669,8 +350,6 @@ pub enum RuntimeSessionError {
     },
     #[error("runtime realm setup failed: {0}")]
     RealmSetup(String),
-    #[error("runtime state revision conflict: expected {expected}, found {actual}")]
-    StateConflict { expected: u64, actual: u64 },
 }
 
 /// One authoritative execution session for a module runtime generation.
@@ -682,11 +361,6 @@ pub struct RuntimeSession {
     host: RuntimeHost,
     resources: ResourceBroker,
     lifecycle: RuntimeLifecycle,
-    state: RuntimeState,
-    supervisor: RuntimeSupervisor,
-    health: RuntimeHealth,
-    backoff: RuntimeBackoff,
-    quarantine: RuntimeQuarantine,
 }
 
 impl RuntimeSession {
@@ -742,11 +416,6 @@ impl RuntimeSession {
             realm: RuntimeRealm::new(policy),
             resources,
             lifecycle: RuntimeLifecycle::default(),
-            state: RuntimeState::default(),
-            supervisor: RuntimeSupervisor::new(config.failure_limit),
-            health: RuntimeHealth::healthy(),
-            backoff: RuntimeBackoff::new(config.backoff_initial, config.backoff_max),
-            quarantine: RuntimeQuarantine::default(),
         }
     }
 
@@ -756,12 +425,6 @@ impl RuntimeSession {
 
     pub fn generation(&self) -> u64 {
         self.generation
-    }
-
-    pub fn is_current(&self, generation: u64) -> bool {
-        self.generation == generation
-            && !self.supervisor.is_cancelled()
-            && !self.quarantine.is_active()
     }
 
     pub fn realm(&self) -> &RuntimeRealm {
@@ -793,136 +456,33 @@ impl RuntimeSession {
         &self.lifecycle
     }
 
-    pub fn state(&self) -> &RuntimeState {
-        &self.state
-    }
-
-    pub fn supervisor(&self) -> &RuntimeSupervisor {
-        &self.supervisor
-    }
-
-    pub fn health(&self) -> &RuntimeHealth {
-        &self.health
-    }
-
-    pub fn backoff(&self) -> &RuntimeBackoff {
-        &self.backoff
-    }
-
-    pub fn quarantine(&self) -> &RuntimeQuarantine {
-        &self.quarantine
-    }
-
     pub fn set_generation(&mut self, generation: u64) {
         self.generation = generation;
         self.host.set_generation(generation);
     }
 
-    pub fn begin_callback(&self) -> Result<ResourceLease, RuntimeSessionError> {
-        if self.quarantine.is_active() {
-            return Err(RuntimeSessionError::Quarantined {
-                module_id: self.module_id.clone(),
-            });
-        }
-        if matches!(
-            self.lifecycle.state(),
-            RuntimeLifecycleState::Stopping
-                | RuntimeLifecycleState::Stopped
-                | RuntimeLifecycleState::Failed
-        ) || self.supervisor.is_cancelled()
-        {
-            return Err(RuntimeSessionError::Inactive {
-                module_id: self.module_id.clone(),
-            });
-        }
-        Ok(self.resources.begin_callback())
-    }
-
     pub fn mark_loaded(&mut self) -> Result<(), RuntimeSessionError> {
-        if self.quarantine.is_active() {
-            return Err(RuntimeSessionError::Quarantined {
-                module_id: self.module_id.clone(),
-            });
-        }
         self.lifecycle.mark_loaded()
     }
 
     pub fn begin_start(&mut self) -> Result<(), RuntimeSessionError> {
-        if self.quarantine.is_active() {
-            return Err(RuntimeSessionError::Quarantined {
-                module_id: self.module_id.clone(),
-            });
-        }
         self.lifecycle.begin_start()
     }
 
     pub fn mark_running(&mut self) -> Result<(), RuntimeSessionError> {
-        self.lifecycle.mark_running()?;
-        self.supervisor.cancelled.store(false, Ordering::Release);
-        self.health = RuntimeHealth::healthy();
-        Ok(())
+        self.lifecycle.mark_running()
+    }
+
+    pub fn mark_failed(&mut self) -> Result<(), RuntimeSessionError> {
+        self.lifecycle.mark_failed()
     }
 
     pub fn begin_stop(&mut self) -> Result<(), RuntimeSessionError> {
-        self.supervisor.cancel();
         self.lifecycle.begin_stop()
     }
 
     pub fn finish_stop(&mut self) -> Result<(), RuntimeSessionError> {
         self.lifecycle.mark_stopped()
-    }
-
-    pub fn record_success(&mut self) {
-        self.supervisor.reset();
-        self.backoff.reset();
-        self.health = RuntimeHealth::healthy();
-    }
-
-    pub fn record_failure(&mut self, reason: impl Into<String>) -> RuntimeFailureDecision {
-        let reason = reason.into();
-        let retry_after = self.backoff.next_delay();
-        let quarantined = self.supervisor.record_failure();
-        let _ = self.lifecycle.mark_failed();
-        self.health = RuntimeHealth::unavailable(reason.clone(), !quarantined);
-        if quarantined {
-            self.quarantine.enter(reason);
-            self.supervisor.cancel();
-        }
-        RuntimeFailureDecision {
-            failures: self.supervisor.failures(),
-            retry_after,
-            quarantined,
-        }
-    }
-
-    pub fn prepare_restart(&mut self) -> Result<(), RuntimeSessionError> {
-        if self.quarantine.is_active() {
-            return Err(RuntimeSessionError::Quarantined {
-                module_id: self.module_id.clone(),
-            });
-        }
-        self.supervisor.cancelled.store(false, Ordering::Release);
-        self.lifecycle.prepare_restart()?;
-        self.health = RuntimeHealth::degraded("runtime restart pending");
-        Ok(())
-    }
-
-    pub fn clear_quarantine(&mut self) {
-        self.quarantine.clear();
-        self.supervisor.reset();
-        self.backoff.reset();
-        self.health = RuntimeHealth::degraded("runtime quarantine cleared");
-    }
-
-    pub fn begin_state_transaction(&self) -> RuntimeStateTransaction {
-        self.state.begin_transaction()
-    }
-
-    pub fn commit_state(
-        &mut self,
-        transaction: RuntimeStateTransaction,
-    ) -> Result<RuntimeStateCommit, RuntimeSessionError> {
-        self.state.commit(transaction)
     }
 }
 
@@ -962,62 +522,6 @@ mod tests {
         let _lease = session.resources().begin_callback();
         assert!(lua.load("while true do end").exec().is_err());
         assert!(session.realm().is_initialized());
-    }
-
-    #[test]
-    fn lifecycle_failure_uses_backoff_then_quarantines() {
-        let mut session = RuntimeSession::with_config(
-            "@test/failing",
-            CapabilitySet::default(),
-            RuntimeSessionConfig {
-                failure_limit: 2,
-                backoff_initial: Duration::from_millis(10),
-                backoff_max: Duration::from_millis(15),
-                ..RuntimeSessionConfig::default()
-            },
-        );
-        session.mark_loaded().unwrap();
-        session.begin_start().unwrap();
-        session.mark_running().unwrap();
-
-        let first = session.record_failure("first failure");
-        assert_eq!(first.retry_after, Duration::from_millis(10));
-        assert!(!first.quarantined);
-        assert_eq!(session.health().state(), RuntimeHealthState::Unavailable);
-
-        session.prepare_restart().unwrap();
-        session.begin_start().unwrap();
-        session.mark_running().unwrap();
-        let second = session.record_failure("second failure");
-        assert_eq!(second.retry_after, Duration::from_millis(15));
-        assert!(second.quarantined);
-        assert!(session.quarantine().is_active());
-        assert!(!session.is_current(session.generation()));
-    }
-
-    #[test]
-    fn state_transactions_commit_atomically_and_reject_stale_writers() {
-        let mut session = RuntimeSession::new("@test/state", CapabilitySet::default());
-        let mut first = session.begin_state_transaction();
-        first.set_snapshot(serde_json::json!({"ready": true}));
-        first.publish_event("ready", serde_json::json!({}));
-        let committed = session.commit_state(first).unwrap();
-        assert_eq!(committed.revision, 1);
-        assert_eq!(
-            session.state().snapshot(),
-            Some(&serde_json::json!({"ready": true}))
-        );
-        assert_eq!(committed.events.len(), 1);
-
-        let mut stale = session.begin_state_transaction();
-        let mut current = session.begin_state_transaction();
-        current.set_snapshot(serde_json::json!({"value": 2}));
-        session.commit_state(current).unwrap();
-        stale.set_snapshot(serde_json::json!({"value": 1}));
-        assert!(matches!(
-            session.commit_state(stale),
-            Err(RuntimeSessionError::StateConflict { .. })
-        ));
     }
 
     #[test]

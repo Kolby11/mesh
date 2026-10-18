@@ -404,3 +404,47 @@ blur, and the in-surface engine's caching, are open work in the
 
 Popovers promoted to `xdg_popup` inherit their parent layer surface's blur on
 compositors that blur layer popups.
+
+Transitions between pixel, percentage and intrinsic lengths use the layout
+measurements of their source and target styles. Reversing an interrupted
+transition shortens its duration by its eased progress, including repeated
+reversals; the authored target is restored when the transition completes.
+
+## 11. Liquid glass (`backdrop-filter: refract()`)
+
+**Status: shipped (in-surface Skia runtime shader); multi-output and foreign
+exclusive zones are targets.**
+
+Compositor blur (§10) can only blur what is behind a surface; it cannot bend
+it. Refraction needs pixels MESH holds itself, so it samples one **backdrop
+source**: the image at `shell.render.backdrop.image`, cover-fit to the output.
+A profile that uses liquid glass normally also paints that image as its
+wallpaper (`@mesh/glass-wallpaper`), so what the glass bends is what is shown.
+
+```css
+.card {
+    backdrop-filter: blur(6px) refract(40px 30px) dispersion(4px);
+}
+```
+
+| Function | Meaning |
+| --- | --- |
+| `blur(<px>)` | Blur of the sampled source. |
+| `refract(<depth> [<edge>])` | Inside an `edge`-wide rim the sample moves up to `depth` along the outward normal of the element's rounded rect, steepening toward the rim. `edge` defaults to `depth`. `refract(0px 0px)` paints the source unrefracted. |
+| `dispersion(<px>)` | Extra red/blue separation along the same normal for chromatic fringing. |
+
+An element with `refract()` is painted client-side under its own background
+and border (`ApplyBackdropRefraction`), and is never exported as a compositor
+blur region. The rim also gets a soft top-left highlight. Without a backdrop
+source, the element paints only its own background.
+
+**Placement.** Layer-shell never tells a client where its surface is, so the
+shell predicts each surface's origin from its anchor, margins and the
+exclusive zones of MESH's own higher-layer surfaces on the same edge. The
+prediction is exact when MESH owns every exclusive zone on that edge; another
+client's panel shifts the real surface and misaligns the sampled image.
+
+**Full-output surfaces.** A top/bottom surface whose root is `height: 100%`
+spans the output (anchored to all four edges), and `exclusive-zone: ignore`
+(layer-shell `-1`) keeps it under every other surface's zone — the wallpaper
+shape.

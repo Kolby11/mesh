@@ -653,6 +653,9 @@ pub struct DisplayIconPaint {
     pub src: Option<Arc<str>>,
     pub name: Option<Arc<str>>,
     pub size: Option<u32>,
+    /// Paint the file's own colours instead of tinting it with `color`
+    /// (`<image>`; spec 05 §6 `multicolor`).
+    pub multicolor: bool,
 }
 
 impl PartialEq for DisplayIconPaint {
@@ -660,6 +663,7 @@ impl PartialEq for DisplayIconPaint {
         optional_shared_str_eq(&self.src, &other.src)
             && optional_shared_str_eq(&self.name, &other.name)
             && self.size == other.size
+            && self.multicolor == other.multicolor
     }
 }
 
@@ -714,6 +718,10 @@ pub enum DisplayPaintCommandKind {
     /// Records an explicit rejected backdrop request. The node is painted
     /// without blur and the renderer emits a diagnostic at the lowering seam.
     ApplyBackdropFilterRejected,
+    /// Paints the shell backdrop source beneath the node, blurred and
+    /// refracted (`backdrop-filter: refract()`). Always client-side: the
+    /// compositor can only blur, never displace, what is behind a surface.
+    ApplyBackdropRefraction,
 }
 
 impl DisplayPaintCommandKind {
@@ -742,6 +750,7 @@ impl DisplayPaintCommandKind {
             Self::ApplyBackdropFilterCompositor
                 | Self::ApplyBackdropFilterInSurface
                 | Self::ApplyBackdropFilterRejected
+                | Self::ApplyBackdropRefraction
         )
     }
 }

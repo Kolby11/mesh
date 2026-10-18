@@ -113,7 +113,7 @@ fn skia_effect_layer_blur_expands_painted_pixels() {
         &[
             PainterCommand::PushLayer(PainterLayer::blurred(
                 full_clip(24, 24),
-                VisualFilter { blur_radius: 3.0 },
+                VisualFilter::blur(3.0),
                 BlurQuality::default(),
             )),
             PainterCommand::DrawRect {

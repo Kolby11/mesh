@@ -204,11 +204,7 @@ mod tests {
     use tower_lsp::lsp_types::{HoverContents, Url};
 
     use super::{hover, hover_template};
-    use crate::{
-        document::Document,
-        module_registry::{InterfaceShape, ModuleRegistry},
-        util::offset_to_position,
-    };
+    use crate::{document::Document, module_registry::ModuleRegistry, util::offset_to_position};
 
     #[test]
     fn gesture_and_touch_hover_uses_event_documentation() {
@@ -266,37 +262,6 @@ audio.set_volume()
                 .contains("set_volume(percent: number): Ticket<{ ok: boolean, error: string? }>")
         );
         assert!(command.contains("Typed command declared by `mesh.audio`."));
-    }
-
-    #[test]
-    fn service_member_hover_uses_inferred_backend_shape_when_contract_is_missing() {
-        let source = r#"<template></template>
-
-<script lang="luau">
-local power = require("mesh.power")
-power.available
-power.refresh()
-</script>
-"#;
-        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source.into());
-        let mut registry = ModuleRegistry::empty();
-        registry.interface_shapes.insert(
-            "mesh.power".into(),
-            InterfaceShape {
-                state_fields: vec!["available".into()],
-                commands: vec!["refresh".into()],
-            },
-        );
-
-        let field = hover_at(&doc, source.find("available").unwrap(), &registry);
-        assert!(field.contains("State field emitted by the `mesh.power` backend service."));
-        assert!(field.contains("Read as `power.available`."));
-
-        let command = hover_at(&doc, source.find("refresh").unwrap(), &registry);
-        assert!(
-            command.contains("Sends the `refresh` command to the `mesh.power` backend service.")
-        );
-        assert!(command.contains("Call as `power.refresh()`."));
     }
 
     fn hover_at(doc: &Document, offset: usize, registry: &ModuleRegistry) -> String {
