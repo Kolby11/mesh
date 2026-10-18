@@ -25,6 +25,19 @@ pub(super) struct TemplateExpressionCache {
     /// environment cannot observe, so any public change may affect them.
     pub(super) opaque_expressions: HashSet<String>,
     pub(super) hits: u64,
+    /// Bound closures and member-read tables by source, so an evaluation
+    /// needs no Lua string to find them. Valid until the expressions are
+    /// reinstalled or the script reloads.
+    pub(super) handles: HashMap<String, TemplateExpressionHandle>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct TemplateExpressionHandle {
+    pub(super) closure: Function,
+    pub(super) member_reads: Option<Table>,
+    /// The member-read table's version when `member_reads` above was last
+    /// copied into [`TemplateExpressionCache::member_reads`].
+    pub(super) synced_member_reads_version: Option<i64>,
 }
 
 /// Append each template expression to the component source as a closure, so
@@ -62,7 +75,10 @@ return function(member_reads)
   local env = setmetatable({}, { __index = function(_, name)
     local value = current[name]
     if value ~= nil then return value end
-    if recording and member_reads[name] == nil then member_reads[name] = true end
+    if recording and member_reads[name] == nil then
+      member_reads[name] = true
+      member_reads[0] = (member_reads[0] or 0) + 1
+    end
     return component_env[name]
   end, __newindex = function(_, name, value)
     if current[name] ~= nil then current[name] = value else component_env[name] = value end
@@ -93,7 +109,9 @@ end
 
 /// Rebind the closures the component source installed in
 /// `__mesh_template_expressions` to their per-expression environments, and
-/// install `__mesh_template_expression_member_reads`, keyed by source.
+/// install `__mesh_template_expression_member_reads`, keyed by source. Each
+/// member-read table counts its recorded names under key `0`, so the host can
+/// tell whether it changed without walking it.
 pub(super) fn install_template_expressions(
     lua: &Lua,
     env: &Table,

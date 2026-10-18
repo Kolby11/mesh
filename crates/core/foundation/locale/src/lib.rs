@@ -1024,23 +1024,58 @@ fn message_placeholders(message: &str) -> Result<BTreeSet<String>, String> {
 /// deliberately fall back to `other`, which is the required safe catalog
 /// variant.
 pub fn plural_category(locale: &str, value: &str) -> &'static str {
-    let Ok(locale) = IcuLocale::try_from_str(locale) else {
-        return "other";
-    };
     let Ok(value) = value.parse::<Decimal>() else {
         return "other";
     };
-    let Ok(rules) = PluralRules::try_new_cardinal(locale.into()) else {
-        return "other";
-    };
-    match rules.category_for(&value) {
-        PluralCategory::Zero => "zero",
-        PluralCategory::One => "one",
-        PluralCategory::Two => "two",
-        PluralCategory::Few => "few",
-        PluralCategory::Many => "many",
-        PluralCategory::Other => "other",
+    let category = with_cached_formatter(&PLURAL_RULES, locale, |locale| {
+        let locale = IcuLocale::try_from_str(locale).ok()?;
+        PluralRules::try_new_cardinal(locale.into()).ok()
+    }, |rules| rules.category_for(&value));
+    match category {
+        Some(PluralCategory::Zero) => "zero",
+        Some(PluralCategory::One) => "one",
+        Some(PluralCategory::Two) => "two",
+        Some(PluralCategory::Few) => "few",
+        Some(PluralCategory::Many) => "many",
+        Some(PluralCategory::Other) | None => "other",
     }
+}
+
+/// Locales whose formatters each thread keeps; a shell usually needs one or
+/// two, and an unbounded key set would come from untrusted script input.
+const FORMATTER_CACHE_LOCALES: usize = 8;
+
+type FormatterCache<T> = std::cell::RefCell<Vec<(String, Option<T>)>>;
+
+thread_local! {
+    static PLURAL_RULES: FormatterCache<PluralRules> = const { std::cell::RefCell::new(Vec::new()) };
+    static DECIMAL_FORMATTERS: FormatterCache<Result<DecimalFormatter, LocaleFormatError>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Run `use_formatter` with this thread's formatter for `locale`, building it
+/// with `build` on first use. ICU construction loads and validates locale
+/// data, which costs far more than the formatting call itself.
+fn with_cached_formatter<T, R>(
+    cache: &'static std::thread::LocalKey<FormatterCache<T>>,
+    locale: &str,
+    build: impl FnOnce(&str) -> Option<T>,
+    use_formatter: impl FnOnce(&T) -> R,
+) -> Option<R> {
+    cache.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let index = match cache.iter().position(|(cached, _)| cached == locale) {
+            Some(index) => index,
+            None => {
+                if cache.len() >= FORMATTER_CACHE_LOCALES {
+                    cache.remove(0);
+                }
+                cache.push((locale.to_owned(), build(locale)));
+                cache.len() - 1
+            }
+        };
+        cache[index].1.as_ref().map(use_formatter)
+    })
 }
 
 /// Format a decimal using the locale's CLDR decimal symbols and grouping.
@@ -1049,19 +1084,25 @@ pub fn plural_category(locale: &str, value: &str) -> &'static str {
 /// number of visible fraction digits. `format_number` below is the convenient
 /// floating-point wrapper for Rust callers.
 pub fn format_number_value(locale: &str, value: &str) -> Result<String, LocaleFormatError> {
-    let locale = normalized_icu_locale(locale)?;
-    let value = value
-        .parse::<Decimal>()
-        .map_err(|_| LocaleFormatError::InvalidNumber {
-            value: value.to_string(),
-        })?;
-    let formatter =
-        DecimalFormatter::try_new(locale.into(), Default::default()).map_err(|error| {
-            LocaleFormatError::FormatterData {
-                message: error.to_string(),
-            }
-        })?;
-    Ok(formatter.format_to_string(&value))
+    let build = |locale: &str| {
+        Some(normalized_icu_locale(locale).and_then(|locale| {
+            DecimalFormatter::try_new(locale.into(), Default::default()).map_err(|error| {
+                LocaleFormatError::FormatterData {
+                    message: error.to_string(),
+                }
+            })
+        }))
+    };
+    let formatted = with_cached_formatter(&DECIMAL_FORMATTERS, locale, build, |formatter| {
+        let formatter = formatter.as_ref().map_err(Clone::clone)?;
+        let value = value
+            .parse::<Decimal>()
+            .map_err(|_| LocaleFormatError::InvalidNumber {
+                value: value.to_string(),
+            })?;
+        Ok(formatter.format_to_string(&value))
+    });
+    formatted.expect("decimal formatter cache stores every build result")
 }
 
 /// Format a finite floating-point number using locale-sensitive decimal
@@ -2171,6 +2212,49 @@ fn interpolate(template: &str, args: &HashMap<String, String>) -> Option<String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+
+    // cargo test -p mesh-core-locale --release --lib -- cached_icu_formatter_profile --ignored --nocapture
+    #[test]
+    #[ignore = "release-only ICU formatter cache profile"]
+    fn cached_icu_formatter_profile() {
+        // 200 plural `t()` lookups and 200 formatted numbers per frame.
+        let frames = 50;
+        let counts = (0..200).map(|count| count.to_string()).collect::<Vec<_>>();
+        let started = std::time::Instant::now();
+        let mut uncached = 0usize;
+        for _ in 0..frames {
+            for count in &counts {
+                let locale = IcuLocale::try_from_str("sk").unwrap();
+                let rules = PluralRules::try_new_cardinal(locale.into()).unwrap();
+                uncached += rules.category_for(&count.parse::<Decimal>().unwrap()) as usize;
+                let locale = normalized_icu_locale("sk").unwrap();
+                let formatter = DecimalFormatter::try_new(locale.into(), Default::default()).unwrap();
+                uncached += formatter
+                    .format_to_string(&count.parse::<Decimal>().unwrap())
+                    .len();
+            }
+        }
+        let uncached_time = started.elapsed();
+        let started = std::time::Instant::now();
+        let mut cached = 0usize;
+        for _ in 0..frames {
+            for count in &counts {
+                cached += plural_category("sk", count).len();
+                cached += format_number_value("sk", count).unwrap().len();
+            }
+        }
+        let cached_time = started.elapsed();
+        std::hint::black_box((uncached, cached));
+        let speedup = uncached_time.as_secs_f64() / cached_time.as_secs_f64();
+        eprintln!(
+            "{} plural + number calls: per-call ICU construction {uncached_time:?}; cached formatters {cached_time:?}; ratio {speedup:.2}x",
+            frames * counts.len()
+        );
+        println!("MESH_PERF metric=cached_icu_formatter_speedup value={speedup:.6}");
+        assert!(speedup >= 2.0, "cached ICU formatters should be at least 2x");
+    }
+
 
     #[test]
     fn basic_translation() {

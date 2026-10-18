@@ -7,9 +7,13 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock, mpsc};
 
 const PARSER_STACK_BYTES: usize = 16 * 1024 * 1024;
+/// Distinct expressions retained across both cache generations. Shipped
+/// modules use a few hundred; an editor session can otherwise grow without
+/// bound as every keystroke compiles a new source.
+const MAX_CACHED_EXPRESSIONS: usize = 4096;
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum ExpressionCompileError {
@@ -172,8 +176,92 @@ fn is_reference_expression(mut expression: &full_moon::ast::Expression) -> bool 
     matches!(expression, full_moon::ast::Expression::Var(_))
 }
 
-static EXPRESSION_CACHE: OnceLock<Mutex<HashMap<String, SharedCompiledExpression>>> =
-    OnceLock::new();
+/// Two-generation bounded cache: hits in the old generation are promoted, and
+/// a full young generation retires the old one, so recently used expressions
+/// survive while the total stays under [`MAX_CACHED_EXPRESSIONS`].
+#[derive(Default)]
+struct ExpressionCache {
+    young: HashMap<String, SharedCompiledExpression>,
+    old: HashMap<String, SharedCompiledExpression>,
+}
+
+impl ExpressionCache {
+    fn get(&mut self, source: &str) -> Option<SharedCompiledExpression> {
+        if let Some(compiled) = self.young.get(source) {
+            return Some(Arc::clone(compiled));
+        }
+        let (source, compiled) = self.old.remove_entry(source)?;
+        self.insert(source, Arc::clone(&compiled));
+        Some(compiled)
+    }
+
+    fn insert(&mut self, source: String, compiled: SharedCompiledExpression) {
+        if self.young.len() >= MAX_CACHED_EXPRESSIONS / 2 {
+            self.old = std::mem::take(&mut self.young);
+        }
+        self.young.insert(source, compiled);
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.young.len() + self.old.len()
+    }
+}
+
+static EXPRESSION_CACHE: OnceLock<Mutex<ExpressionCache>> = OnceLock::new();
+
+fn expression_cache() -> std::sync::MutexGuard<'static, ExpressionCache> {
+    EXPRESSION_CACHE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// `(calls_function, sorted references, is_reference)`, or `None` when the
+/// source is not a valid expression.
+type ParsedExpression = Option<(bool, Vec<String>, bool)>;
+
+struct ParseJob {
+    candidate: String,
+    reply: mpsc::SyncSender<std::thread::Result<ParsedExpression>>,
+}
+
+/// One long-lived parser thread with the deep stack `full_moon` needs, so a
+/// new expression costs a channel round trip rather than a thread spawn.
+fn parser_worker() -> Result<&'static mpsc::Sender<ParseJob>, ExpressionCompileError> {
+    static WORKER: OnceLock<Result<mpsc::Sender<ParseJob>, String>> = OnceLock::new();
+    WORKER
+        .get_or_init(|| {
+            let (sender, jobs) = mpsc::channel::<ParseJob>();
+            std::thread::Builder::new()
+                .name("mesh-expression-parser".into())
+                .stack_size(PARSER_STACK_BYTES)
+                .spawn(move || {
+                    for job in jobs {
+                        let parsed = std::panic::catch_unwind(|| parse_expression(&job.candidate));
+                        let _ = job.reply.send(parsed);
+                    }
+                })
+                .map(|_| sender)
+                .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(|error| ExpressionCompileError::ParserThread(error.clone()))
+}
+
+fn parse_expression(candidate: &str) -> ParsedExpression {
+    use full_moon::visitors::Visitor;
+    full_moon::parse(candidate)
+        .map(|ast| {
+            let mut metadata = ExpressionMetadata::default();
+            metadata.visit_ast(&ast);
+            let reference = matches!(ast.nodes().last_stmt(), Some(full_moon::ast::LastStmt::Return(statement)) if statement.returns().iter().next().is_some_and(is_reference_expression)) && !metadata.calls_function;
+            let mut references = metadata.references.into_iter().collect::<Vec<_>>();
+            references.sort();
+            (metadata.calls_function, references, reference)
+        })
+        .ok()
+}
 
 /// Parse and cache one expression. Repeated references from markup, preview,
 /// and runtime setup return the same shared semantic value across threads.
@@ -184,32 +272,21 @@ pub fn compile_expression(
     if source.is_empty() {
         return Err(ExpressionCompileError::Empty);
     }
-    let non_ascii = first_non_ascii(source);
-
-    let cache = EXPRESSION_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut cache = cache.lock().expect("expression cache poisoned");
-    if let Some(compiled) = cache.get(source).cloned() {
+    if let Some(compiled) = expression_cache().get(source) {
         return Ok(compiled);
     }
+    let non_ascii = first_non_ascii(source);
 
-    let candidate = format!("return ({source})");
-    let parsed = std::thread::Builder::new()
-        .stack_size(PARSER_STACK_BYTES)
-        .spawn(move || {
-            use full_moon::visitors::Visitor;
-            full_moon::parse(&candidate)
-                .map(|ast| {
-                    let mut metadata = ExpressionMetadata::default();
-                    metadata.visit_ast(&ast);
-                    let reference = matches!(ast.nodes().last_stmt(), Some(full_moon::ast::LastStmt::Return(statement)) if statement.returns().iter().next().is_some_and(is_reference_expression)) && !metadata.calls_function;
-                    let mut references = metadata.references.into_iter().collect::<Vec<_>>();
-                    references.sort();
-                    (metadata.calls_function, references, reference)
-                })
-                .ok()
+    let (reply, parsed) = mpsc::sync_channel(1);
+    parser_worker()?
+        .send(ParseJob {
+            candidate: format!("return ({source})"),
+            reply,
         })
+        .map_err(|error| ExpressionCompileError::ParserThread(error.to_string()))?;
+    let parsed = parsed
+        .recv()
         .map_err(|error| ExpressionCompileError::ParserThread(error.to_string()))?
-        .join()
         .map_err(|_| {
             non_ascii.map_or(
                 ExpressionCompileError::ParserPanicked,
@@ -235,6 +312,12 @@ pub fn compile_expression(
         references,
         is_reference,
     });
+    // Another thread may have compiled the same source meanwhile; keep the
+    // first so every consumer shares one value.
+    let mut cache = expression_cache();
+    if let Some(existing) = cache.get(source) {
+        return Ok(existing);
+    }
     cache.insert(source.to_owned(), Arc::clone(&compiled));
     Ok(compiled)
 }
@@ -279,6 +362,60 @@ mod tests {
         assert_eq!(expression.referenced_identifiers(), ["actions", "external"]);
         assert!(compile_expression("(actions.pick)").unwrap().is_reference());
         assert!(!expression.is_reference());
+    }
+
+    #[test]
+    fn cache_stays_bounded_and_keeps_recent_expressions() {
+        let hot = compile_expression("hot_value + 1").unwrap();
+        for index in 0..MAX_CACHED_EXPRESSIONS * 2 {
+            compile_expression(&format!("bounded_{index} + 1")).unwrap();
+            if index % 64 == 0 {
+                assert!(Arc::ptr_eq(&hot, &compile_expression("hot_value + 1").unwrap()));
+            }
+        }
+        assert!(expression_cache().len() <= MAX_CACHED_EXPRESSIONS);
+    }
+
+    // cargo test -p mesh-core-expression --release -- cold_expression_compile_profile --ignored --nocapture
+    #[test]
+    #[ignore = "release-only cold expression compile profile"]
+    fn cold_expression_compile_profile() {
+        let count = 2_000;
+        let sources = |prefix: &str| {
+            (0..count)
+                .map(|index| format!("{prefix}_{index}.value and label(item, {index}) or fallback"))
+                .collect::<Vec<_>>()
+        };
+        // The replaced path: a fresh deep-stack thread per new expression,
+        // spawned and joined while the global cache lock is held.
+        let lock = Mutex::new(HashMap::<String, ParsedExpression>::new());
+        let spawned_sources = sources("spawned");
+        let started = std::time::Instant::now();
+        for source in &spawned_sources {
+            let mut cache = lock.lock().unwrap();
+            let candidate = format!("return ({source})");
+            let parsed = std::thread::Builder::new()
+                .stack_size(PARSER_STACK_BYTES)
+                .spawn(move || parse_expression(&candidate))
+                .unwrap()
+                .join()
+                .unwrap();
+            cache.insert(source.clone(), parsed);
+        }
+        let spawned = started.elapsed();
+
+        let worker_sources = sources("worker");
+        let started = std::time::Instant::now();
+        for source in &worker_sources {
+            compile_expression(source).unwrap();
+        }
+        let worker = started.elapsed();
+        let speedup = spawned.as_secs_f64() / worker.as_secs_f64();
+        eprintln!(
+            "{count} cold expressions: thread per parse {spawned:?}; parser worker {worker:?}; ratio {speedup:.2}x"
+        );
+        println!("MESH_PERF metric=expression_parser_worker_speedup value={speedup:.6}");
+        assert!(speedup >= 1.2, "the parser worker should be at least 1.2x");
     }
 
     #[test]

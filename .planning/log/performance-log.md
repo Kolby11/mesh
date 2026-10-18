@@ -5533,3 +5533,68 @@ this machine than on a TSC system.
 **Verified.** Release: animation crate 44 passed; shell lib failure set
 unchanged (45, diffed by name), including the keyframe easing/lowering tests.
 
+
+## 2026-10-18 — CMP-04 / CMP-09 / CMP-10 / RES-15, and a coarse frame-budget clock
+
+AMD Ryzen 7 7840HS (`hpet` clock source, `CONFIG_HZ=1000`), workspace release
+profile. Removed the CMP-04 / CMP-09 / CMP-10 / RES-15 backlog item.
+
+**CMP-04 / CMP-10 — expression cache and parser threads.**
+`compile_expression` held the global cache lock while spawning and joining a
+fresh 16 MB-stack thread for every new expression, and the cache never
+evicted. Parsing now runs on one long-lived `mesh-expression-parser` thread
+(same stack size; `catch_unwind` keeps the non-ASCII panic diagnostics), with
+the lock released while parsing. The cache has two generations: hits in the
+old generation are promoted, and the total is capped at 4,096 expressions.
+`cold_expression_compile_profile`, 2,000 distinct expressions, three runs:
+thread per parse 266.5–285.5 ms vs parser worker 72.1–74.7 ms (3.70–3.82x).
+Gate `expression_parser_worker_speedup` (≥ 1.2x).
+`cache_stays_bounded_and_keeps_recent_expressions` covers the bound.
+
+**Frame-budget clock (found while measuring CMP-09).** The Luau interrupt
+fires at every call/return boundary and loop back-edge. Each firing took a
+mutex and read `Instant::now()` to enforce the 50 ms `frame_budget_us`. On
+this HPET machine that read is ~0.85 µs, and one template expression with
+`__index` metamethod lookups hits many checkpoints. The window start is now an
+`AtomicU64` from `CLOCK_MONOTONIC_COARSE` (vDSO read of the cached tick, 1 ms
+resolution here), which is ample for a 50 ms bound.
+`frame_budget_aborts_a_long_running_callback_before_the_instruction_budget`
+still passes. This applies to every Luau callback in the realm, not only
+templates.
+
+**CMP-09 — per-call template-expression work.** Each call created Lua strings
+to look up the closure table and the full expression source, built a `locals`
+table even when empty, walked the expression's member-read table, and
+allocated several `String` cache keys. Bound closures and member-read tables
+are now cached by source in Rust (cleared on reinstall and script reload);
+empty locals pass `nil`; the Lua side bumps `member_reads[0]` when it records
+a new name, so the host re-reads that table only when its version changes.
+
+`template_expression_call_profile`: one row expression with `{item, index}`
+locals × 200 rows, and 20 empty-locals member expressions, 10,000 calls each,
+three runs:
+
+| Step | Row call with locals | Empty-locals call |
+| --- | --- | --- |
+| Before | 21.94–31.93 µs | 11.68–14.08 µs |
+| Coarse frame clock | 7.04–7.18 µs | 3.35–3.39 µs |
+| + cached handles / `nil` locals | 4.68–4.88 µs | 1.15–1.29 µs |
+
+A 200-row `{#for}` that evaluated one row expression in 4.4–6.4 ms per frame
+now does so in about 0.95 ms on this machine. No relative gate: both arms
+would need the old runtime in the same binary. The profile is kept for
+re-measurement. TSC-clocked machines will see a smaller clock win.
+
+**RES-15 — ICU formatters.** `plural_category` and `format_number_value`
+parsed the locale and constructed `PluralRules` / `DecimalFormatter` per call.
+Both are now cached per thread by locale string (8 locales, oldest evicted;
+build errors are cached too). `cached_icu_formatter_profile`, 200 plural +
+200 number calls × 50 frames, three runs: 3.97–4.80 ms per-call construction
+vs 0.81–1.28 ms cached (3.11–5.32x). Gate `cached_icu_formatter_speedup`
+(≥ 2x).
+
+**Verified.** Release: expression 7 passed; scripting 339 passed / 29 ignored;
+locale 28 passed; frontend the two known failures; shell lib failure set
+unchanged (45). `mesh-tools-lsp` `shipped_manifests_validate_cleanly` fails on
+an unrelated manifest-schema drift (`permissions`), now a backlog item.
+

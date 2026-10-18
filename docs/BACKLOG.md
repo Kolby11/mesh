@@ -28,6 +28,9 @@ unless an item says otherwise. IDs point into the
 
 ### Priority 6 — Dead code, duplication and small fixes
 
+- [ ] LSP manifest schema lacks the nested `permissions` map that the weather,
+      apps and recorder interface manifests declare; `shipped_manifests_validate_cleanly`
+      fails. Sync `mesh-tools-lsp` `manifest/schema.rs` with `mesh-core-module`.
 - [ ] **SH-07:** Remove the crate-level `allow(dead_code)` in the shell, delete
       the 43 dead items, gate test wrappers, drop the default-identity wildcard.
 - [ ] **UI-10 / RT-08 / CMP-05 / CMP-12:** Delete legacy translation-only
@@ -79,9 +82,6 @@ unless an item says otherwise. IDs point into the
 
 Each needs its named workload from the report before any change lands.
 
-- [ ] **CMP-04 / CMP-09 / CMP-10 / RES-15:** Unbounded expression cache and
-      per-parse thread spawns, per-call Lua allocations in template expressions,
-      per-call ICU formatter construction.
 
 ## Glass shell core gaps (found 2026-10-17)
 

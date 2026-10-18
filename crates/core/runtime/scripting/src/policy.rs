@@ -7,9 +7,8 @@
 use mesh_core_runtime::SandboxConfig;
 use mlua::{Compiler, Lua, VmState};
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResourceKind {
@@ -63,9 +62,10 @@ struct ResourceCounters {
     active_children: AtomicU64,
     callback_depth: AtomicU32,
     remaining_instructions: AtomicU64,
-    /// `Some(t)` while the frame-time clock is running; `None` while it is
-    /// paused for a blocking host call (see [`ResourceBudget::pause_frame_clock`]).
-    frame_window_start: Mutex<Option<Instant>>,
+    /// [`coarse_now_us`] when the frame-time window opened, or
+    /// [`FRAME_CLOCK_PAUSED`] while it is paused for a blocking host call
+    /// (see [`ResourceBudget::pause_frame_clock`]).
+    frame_window_start: AtomicU64,
     /// Frame time banked from windows that already ended, in microseconds.
     frame_accumulated_us: AtomicU64,
     frame_pause_depth: AtomicU32,
@@ -82,7 +82,7 @@ impl Default for ResourceCounters {
             active_children: AtomicU64::new(0),
             callback_depth: AtomicU32::new(0),
             remaining_instructions: AtomicU64::new(0),
-            frame_window_start: Mutex::new(None),
+            frame_window_start: AtomicU64::new(FRAME_CLOCK_PAUSED),
             frame_accumulated_us: AtomicU64::new(0),
             frame_pause_depth: AtomicU32::new(0),
         }
@@ -143,7 +143,9 @@ impl ResourceBudget {
                 .frame_accumulated_us
                 .store(0, Ordering::Release);
             self.counters.frame_pause_depth.store(0, Ordering::Release);
-            *self.counters.frame_window_start.lock().unwrap() = Some(Instant::now());
+            self.counters
+                .frame_window_start
+                .store(coarse_now_us(), Ordering::Release);
         }
         ExecutionGuard {
             budget: self.clone(),
@@ -161,11 +163,16 @@ impl ResourceBudget {
             .frame_pause_depth
             .fetch_add(1, Ordering::AcqRel)
             == 0
-            && let Some(start) = self.counters.frame_window_start.lock().unwrap().take()
         {
-            self.counters
-                .frame_accumulated_us
-                .fetch_add(start.elapsed().as_micros() as u64, Ordering::AcqRel);
+            let start = self
+                .counters
+                .frame_window_start
+                .swap(FRAME_CLOCK_PAUSED, Ordering::AcqRel);
+            if start != FRAME_CLOCK_PAUSED {
+                self.counters
+                    .frame_accumulated_us
+                    .fetch_add(coarse_now_us().saturating_sub(start), Ordering::AcqRel);
+            }
         }
         FramePause {
             budget: self.clone(),
@@ -201,9 +208,10 @@ impl ResourceBudget {
                 limit: self.config.instruction_budget,
             });
         }
-        if let Some(start) = *self.counters.frame_window_start.lock().unwrap() {
+        let start = self.counters.frame_window_start.load(Ordering::Acquire);
+        if start != FRAME_CLOCK_PAUSED {
             let elapsed_us = self.counters.frame_accumulated_us.load(Ordering::Acquire)
-                + start.elapsed().as_micros() as u64;
+                + coarse_now_us().saturating_sub(start);
             if elapsed_us > self.config.frame_budget_us {
                 return Err(ResourceLimit {
                     kind: ResourceKind::FrameTime,
@@ -357,9 +365,31 @@ impl Drop for FramePause {
             .fetch_sub(1, Ordering::AcqRel)
             == 1
         {
-            *self.budget.counters.frame_window_start.lock().unwrap() = Some(Instant::now());
+            self.budget
+                .counters
+                .frame_window_start
+                .store(coarse_now_us(), Ordering::Release);
         }
     }
+}
+
+const FRAME_CLOCK_PAUSED: u64 = u64::MAX;
+
+/// Monotonic microseconds from the kernel's tick-granular clock. The frame
+/// budget is tens of milliseconds and is checked at every interpreter
+/// checkpoint, so a vDSO read of the cached tick time (no hardware clock
+/// access; resolution one tick) replaces a precise read that costs about a
+/// microsecond on HPET-clocked machines.
+fn coarse_now_us() -> u64 {
+    let mut now = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: `now` is a valid, writable timespec for the duration of the call.
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC_COARSE, &mut now) };
+    (now.tv_sec as u64)
+        .saturating_mul(1_000_000)
+        .saturating_add(now.tv_nsec as u64 / 1_000)
 }
 
 fn reserve_counter(

@@ -376,3 +376,51 @@ fn workspace_component_uses_provider_ids_and_display_order() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].payload["id"], serde_json::json!(-1337));
 }
+
+// cargo test -p mesh-core-scripting --release --lib -- template_expression_call_profile --ignored --nocapture
+#[test]
+#[ignore = "release-only template expression call profile"]
+fn template_expression_call_profile() {
+    let row_expression = "item.name .. ' ' .. tostring(index) .. suffix";
+    let member_expressions = (0..20)
+        .map(|index| format!("count + {index}"))
+        .collect::<Vec<_>>();
+    let mut expressions = vec![row_expression.to_string()];
+    expressions.extend(member_expressions.iter().cloned());
+    let mut ctx = ScriptContext::new("@mesh/profile", CapabilitySet::default()).unwrap();
+    ctx.compile_and_execute_component("count = 1\nsuffix = '!'", &[], &expressions)
+        .unwrap();
+    let rows = (0..200)
+        .map(|index| {
+            let mut locals = serde_json::Map::new();
+            locals.insert("item".into(), serde_json::json!({ "name": format!("row {index}") }));
+            locals.insert("index".into(), serde_json::json!(index));
+            locals
+        })
+        .collect::<Vec<_>>();
+    let empty = serde_json::Map::new();
+    let frames = 50u32;
+    let started = std::time::Instant::now();
+    for _ in 0..frames {
+        for locals in &rows {
+            std::hint::black_box(ctx.evaluate_template_expression(row_expression, locals).unwrap());
+        }
+    }
+    let row_time = started.elapsed();
+    let started = std::time::Instant::now();
+    for _ in 0..frames {
+        for _ in 0..10 {
+            for expression in &member_expressions {
+                std::hint::black_box(ctx.evaluate_template_expression(expression, &empty).unwrap());
+            }
+        }
+    }
+    let member_time = started.elapsed();
+    let row_calls = f64::from(frames) * 200.0;
+    let member_calls = f64::from(frames) * 200.0;
+    eprintln!(
+        "{row_calls} row calls with locals: {row_time:?} ({:.2} us/call); {member_calls} empty-locals calls: {member_time:?} ({:.2} us/call)",
+        row_time.as_secs_f64() * 1e6 / row_calls,
+        member_time.as_secs_f64() * 1e6 / member_calls,
+    );
+}

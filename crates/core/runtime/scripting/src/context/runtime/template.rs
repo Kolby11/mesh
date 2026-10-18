@@ -42,18 +42,19 @@ impl ScriptContext {
                 return Ok((value, Vec::new()));
             }
         }
-        let closures: Table = self
-            .env()
-            .get("__mesh_template_expressions")
-            .map_err(map_lua_error)?;
-        let closure: mlua::Function = closures.get(expression_source).map_err(map_lua_error)?;
-        let locals = self.lua().to_value(locals).map_err(lua_err)?;
+        let handle = self.template_expression_handle(expression_source)?;
+        // The bound closure falls back to its shared empty table for `nil`.
+        let locals = if empty_locals {
+            LuaValue::Nil
+        } else {
+            self.lua().to_value(locals).map_err(lua_err)?
+        };
         let previous_reads = {
             let mut tracked = self.tracked_service_fields.lock().unwrap();
             std::mem::take(&mut *tracked)
         };
         let _budget = self.realm_policy.begin_callback();
-        let evaluated = closure.call::<LuaValue>(locals).map_err(map_lua_error);
+        let evaluated = handle.closure.call::<LuaValue>(locals).map_err(map_lua_error);
         let expression_reads = {
             let mut tracked = self.tracked_service_fields.lock().unwrap();
             let expression_reads = std::mem::take(&mut *tracked);
@@ -78,59 +79,66 @@ impl ScriptContext {
                     .map(move |field| (service.clone(), field))
             })
             .collect();
-        {
-            let mut cache = self.template_expression_cache.lock().unwrap();
-            let dependencies = cache
-                .service_reads
-                .entry(expression_source.to_owned())
-                .or_default();
-            dependencies.extend(reads.iter().cloned());
+        let mut cache = self.template_expression_cache.lock().unwrap();
+        match cache.service_reads.get_mut(expression_source) {
+            Some(dependencies) => dependencies.extend(reads.iter().cloned()),
+            None => {
+                cache
+                    .service_reads
+                    .insert(expression_source.to_owned(), reads.iter().cloned().collect());
+            }
         }
-        {
-            let member_reads = self
-                .env()
-                .get::<Table>("__mesh_template_expression_member_reads")
+        if let Some(member_read_table) = &handle.member_reads {
+            let version = member_read_table
+                .raw_get::<Option<i64>>(0)
                 .ok()
-                .and_then(|all_reads| all_reads.get::<Table>(expression_source).ok())
-                .map(|expression_reads| {
-                    let mut names: Vec<_> = expression_reads
-                        .pairs::<String, bool>()
-                        .filter_map(|entry| {
-                            entry.ok().and_then(|(name, read)| read.then_some(name))
-                        })
-                        .collect();
-                    names.sort_unstable();
-                    names
-                });
-            if let Some(member_reads) = member_reads {
-                let calls_component_function = expression.calls_function();
-                let cacheable = empty_locals
-                    && reads.is_empty()
-                    && !calls_component_function
-                    && member_reads
-                        .iter()
-                        .all(|name| self.user_global_key_set.contains(name));
-                let mut cache = self.template_expression_cache.lock().unwrap();
+                .flatten()
+                .unwrap_or(0);
+            let calls_component_function = expression.calls_function();
+            if handle.synced_member_reads_version != Some(version)
+                || !cache.member_reads.contains_key(expression_source)
+            {
+                let mut names: Vec<_> = member_read_table
+                    .pairs::<LuaValue, bool>()
+                    .filter_map(|entry| match entry {
+                        Ok((LuaValue::String(name), true)) => name.to_str().ok().map(|name| name.to_owned()),
+                        _ => None,
+                    })
+                    .collect();
+                names.sort_unstable();
                 if calls_component_function {
                     cache
                         .opaque_expressions
                         .insert(expression_source.to_string());
                 }
-                cache
-                    .template_member_reads
-                    .extend(member_reads.iter().cloned());
+                cache.template_member_reads.extend(names.iter().cloned());
                 cache
                     .member_reads
-                    .insert(expression_source.to_string(), member_reads);
-                if cacheable && let Ok(value) = &value {
-                    cache
-                        .values
-                        .insert(expression_source.to_string(), value.clone());
-                } else {
-                    cache.values.remove(expression_source);
+                    .insert(expression_source.to_string(), names);
+                if let Some(cached) = cache.handles.get_mut(expression_source) {
+                    cached.synced_member_reads_version = Some(version);
                 }
             }
+            let cacheable = empty_locals
+                && reads.is_empty()
+                && !calls_component_function
+                && cache.member_reads[expression_source]
+                    .iter()
+                    .all(|name| self.user_global_key_set.contains(name));
+            if cacheable && let Ok(value) = &value {
+                match cache.values.get_mut(expression_source) {
+                    Some(cached) => *cached = value.clone(),
+                    None => {
+                        cache
+                            .values
+                            .insert(expression_source.to_string(), value.clone());
+                    }
+                }
+            } else {
+                cache.values.remove(expression_source);
+            }
         }
+        drop(cache);
         Ok((value?, reads))
     }
 
@@ -263,5 +271,43 @@ impl ScriptContext {
     #[cfg(test)]
     pub(in crate::context) fn template_expression_cache_hits(&self) -> u64 {
         self.template_expression_cache.lock().unwrap().hits
+    }
+}
+
+impl ScriptContext {
+    fn template_expression_handle(
+        &self,
+        expression_source: &str,
+    ) -> Result<super::vm::TemplateExpressionHandle, ScriptError> {
+        if let Some(handle) = self
+            .template_expression_cache
+            .lock()
+            .unwrap()
+            .handles
+            .get(expression_source)
+        {
+            return Ok(handle.clone());
+        }
+        let closures: Table = self
+            .env()
+            .get("__mesh_template_expressions")
+            .map_err(map_lua_error)?;
+        let closure: mlua::Function = closures.get(expression_source).map_err(map_lua_error)?;
+        let member_reads = self
+            .env()
+            .get::<Table>("__mesh_template_expression_member_reads")
+            .ok()
+            .and_then(|all_reads| all_reads.get::<Table>(expression_source).ok());
+        let handle = super::vm::TemplateExpressionHandle {
+            closure,
+            member_reads,
+            synced_member_reads_version: None,
+        };
+        self.template_expression_cache
+            .lock()
+            .unwrap()
+            .handles
+            .insert(expression_source.to_owned(), handle.clone());
+        Ok(handle)
     }
 }
