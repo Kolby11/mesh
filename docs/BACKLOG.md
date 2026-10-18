@@ -28,6 +28,10 @@ unless an item says otherwise. IDs point into the
 
 ### Priority 6 — Dead code, duplication and small fixes
 
+- [ ] Skia's anti-aliasing of a rounded rect depends on whether the clip cuts
+      its arc, so partial repaints differ from a full paint on edge pixels (up to
+      ~55/255 on a few pixels at a window corner). Make rounded geometry
+      clip-invariant or keep damage edges off arcs; see the 2026-10-18 scroll log.
 - [ ] `scene_thread::tests::discarded_output_leases_retire_outside_the_queue_lock`
       fails about one full render-suite run in three under parallel load and
       passes alone; make its retirement ordering deterministic.
@@ -291,9 +295,9 @@ From the 2026-09-30 Settings scroll session profile; evidence and A/B numbers
 in the [performance log](../.planning/log/performance-log.md). Roughly in order
 of payoff.
 
-- [ ] Scrolling repaints all visible content (one Skia draw per glyph) every
-      frame. Retain a bounded content raster and shift integral device pixels,
-      repainting exposed strips; [design](../.planning/todos/pending/2026-09-30-scroll-raster-cache.md).
+- [ ] Fractional momentum scroll frames, and scopes over a non-uniform backdrop
+      (gradient, image, partial cover), still replay the whole viewport; a
+      transparent content raster could cover them ([design](../.planning/todos/pending/2026-09-30-scroll-raster-cache.md)).
 - [ ] Unscoped restyle frames still fingerprint the whole tree
       (`retained_tree.update`). Scroll momentum no longer takes this path; what
       remains (resize, theme, window state) also relayouts, so diffing only

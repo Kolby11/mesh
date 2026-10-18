@@ -1220,6 +1220,7 @@ impl Shell {
                     .as_mut()
                     .expect("paint buffer initialised");
                 self.debug_overlay.paint_layout_bounds(&tree, buffer, scale);
+                self.components[index].component.buffer_overlaid();
                 present_damage = vec![DamageRect {
                     x: 0,
                     y: 0,
@@ -1250,6 +1251,7 @@ impl Shell {
                 scale,
                 (number("x"), number("y"), number("width"), number("height")),
             );
+            self.components[index].component.buffer_overlaid();
             present_damage = vec![DamageRect {
                 x: 0,
                 y: 0,

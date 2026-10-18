@@ -977,3 +977,77 @@ fn label_resize_scroll_viewport_damage_profile() {
     println!("MESH_PERF metric=label_resize_viewport_damage_percent value={percent:.6}");
     assert!(percent < 2.0, "a label resize must not damage unrelated scroll viewports");
 }
+
+#[test]
+fn scroll_shift_plans_only_scopes_over_a_uniform_backdrop() {
+    fn scene(beneath: Option<mesh_core_elements::style::BackgroundPaint>) -> WidgetNode {
+        let mut root = node(1, "box", 0.0, 0.0, 200.0, 160.0);
+        if let Some(paint) = beneath {
+            root.computed_style.background_paint = paint;
+        }
+        let mut area = node(2, "scroll-area", 20.0, 20.0, 120.0, 100.0);
+        area.computed_style.background_color = Color::TRANSPARENT;
+        area.computed_style.overflow_y = Overflow::Hidden;
+        area.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+            max_y: 300.0,
+            content_width: 120.0,
+            content_height: 400.0,
+            ..Default::default()
+        });
+        for index in 0..20 {
+            area.children.push(node(
+                10 + index,
+                "box",
+                24.0,
+                24.0 + index as f32 * 20.0,
+                100.0,
+                16.0,
+            ));
+        }
+        root.children.push(area);
+        root
+    }
+    let scroll = |root: &mut WidgetNode, list: &mut RetainedDisplayList, objects: &mut crate::RenderObjectTree, y: f32| {
+        root.children[0].scroll_metrics.as_mut().unwrap().y = y;
+        let dirty = objects.update(root);
+        list.update_with_dirty_nodes(root, dirty, objects.dirty_node_ids(), 200, 160, false, true);
+    };
+
+    let mut root = scene(None);
+    let mut objects = crate::RenderObjectTree::default();
+    objects.update(&root);
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 200, 160, true, true);
+    // Without a painted base no shift is planned.
+    scroll(&mut root, &mut list, &mut objects, 4.0);
+    assert!(list.scroll_shifts().is_empty());
+    list.mark_painted();
+    scroll(&mut root, &mut list, &mut objects, 12.0);
+    let shifts = list.scroll_shifts();
+    assert_eq!(shifts.len(), 1);
+    assert_eq!(shifts[0].owner, 2);
+    assert_eq!(shifts[0].scroll_delta, (0.0, 8.0));
+    assert_eq!(
+        shifts[0].viewport,
+        DamageRect {
+            x: 20,
+            y: 20,
+            width: 120,
+            height: 100
+        }
+    );
+    // A vertical move replays horizontal edge bands only.
+    assert!(shifts[0].anchored.iter().all(|band| band.width == 120));
+
+    // A gradient beneath varies across the viewport.
+    let mut root = scene(Some(mesh_core_elements::style::BackgroundPaint::LinearGradient(
+        Default::default(),
+    )));
+    let mut objects = crate::RenderObjectTree::default();
+    objects.update(&root);
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 200, 160, true, true);
+    list.mark_painted();
+    scroll(&mut root, &mut list, &mut objects, 8.0);
+    assert!(list.scroll_shifts().is_empty());
+}

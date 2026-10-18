@@ -101,32 +101,64 @@ impl PixelBuffer {
     /// Shift a standalone content raster by integral device pixels, preserving
     /// overlapping pixels exactly. Newly exposed pixels become transparent;
     /// returned strips are disjoint and must be repainted before cache reuse.
-    /// This must not shift a composed surface (backgrounds/overlays stay put).
-    #[allow(dead_code)] // Verified primitive; production raster-cache integration follows.
+    #[cfg(test)]
     pub(crate) fn shift_raster_pixels(&mut self, dx: i32, dy: i32) -> Vec<crate::DamageRect> {
-        let mut exposed = Vec::new();
-        if self.width == 0 || self.height == 0 || (dx == 0 && dy == 0) {
-            return exposed;
-        }
-        let ax = dx.unsigned_abs();
-        let ay = dy.unsigned_abs();
-        if ax >= self.width || ay >= self.height {
-            self.data.fill(0);
-            exposed.push(crate::DamageRect {
+        let exposed = self.shift_region_pixels(
+            crate::DamageRect {
                 x: 0,
                 y: 0,
                 width: self.width,
                 height: self.height,
-            });
+            },
+            dx,
+            dy,
+        );
+        for strip in &exposed {
+            self.clear_rect(
+                strip.x,
+                strip.y,
+                strip.width,
+                strip.height,
+                Color::TRANSPARENT,
+            );
+        }
+        exposed.into_vec()
+    }
+
+    /// Move the pixels inside `region` by integral device pixels, preserving
+    /// overlapping pixels exactly; pixels outside `region` are untouched.
+    /// Returns the disjoint strips of `region` that received no moved pixel;
+    /// they keep stale contents and must be repainted. A displacement at least
+    /// as large as `region` returns the whole region.
+    pub fn shift_region_pixels(
+        &mut self,
+        region: crate::DamageRect,
+        dx: i32,
+        dy: i32,
+    ) -> smallvec::SmallVec<[crate::DamageRect; 2]> {
+        let mut exposed = smallvec::SmallVec::new();
+        let region = crate::DamageRect {
+            x: region.x.min(self.width),
+            y: region.y.min(self.height),
+            width: region.width.min(self.width.saturating_sub(region.x)),
+            height: region.height.min(self.height.saturating_sub(region.y)),
+        };
+        if region.width == 0 || region.height == 0 || (dx == 0 && dy == 0) {
+            return exposed;
+        }
+        let ax = dx.unsigned_abs();
+        let ay = dy.unsigned_abs();
+        if ax >= region.width || ay >= region.height {
+            exposed.push(region);
             return exposed;
         }
 
-        let source_x = if dx < 0 { ax } else { 0 };
-        let source_y = if dy < 0 { ay } else { 0 };
-        let target_x = if dx > 0 { ax } else { 0 };
-        let target_y = if dy > 0 { ay } else { 0 };
-        let rows = self.height - ay;
-        let row_bytes = (self.width - ax) as usize * 4;
+        let source_x = region.x + if dx < 0 { ax } else { 0 };
+        let source_y = region.y + if dy < 0 { ay } else { 0 };
+        let target_x = region.x + if dx > 0 { ax } else { 0 };
+        let target_y = region.y + if dy > 0 { ay } else { 0 };
+        let rows = region.height - ay;
+        let row_bytes = (region.width - ax) as usize * 4;
         for step in 0..rows {
             // Moving down must copy bottom-up; copy_within handles horizontal
             // overlap in either direction within each row.
@@ -137,28 +169,23 @@ impl PixelBuffer {
         }
         if ay > 0 {
             exposed.push(crate::DamageRect {
-                x: 0,
-                y: if dy > 0 { 0 } else { rows },
-                width: self.width,
+                x: region.x,
+                y: if dy > 0 { region.y } else { region.y + rows },
+                width: region.width,
                 height: ay,
             });
         }
         if ax > 0 {
             exposed.push(crate::DamageRect {
-                x: if dx > 0 { 0 } else { self.width - ax },
+                x: if dx > 0 {
+                    region.x
+                } else {
+                    region.x + region.width - ax
+                },
                 y: target_y,
                 width: ax,
                 height: rows,
             });
-        }
-        for strip in &exposed {
-            self.clear_rect(
-                strip.x,
-                strip.y,
-                strip.width,
-                strip.height,
-                Color::TRANSPARENT,
-            );
         }
         exposed
     }
@@ -629,5 +656,55 @@ mod tests {
         }
 
         assert_eq!(buffer.data().as_ptr(), allocation);
+    }
+}
+
+#[cfg(test)]
+mod shift_region_tests {
+    use super::*;
+
+    #[test]
+    fn region_shift_moves_only_pixels_inside_the_region() {
+        let mut buffer = PixelBuffer::new(8, 8);
+        for (index, pixel) in buffer.data_mut().chunks_mut(4).enumerate() {
+            pixel.copy_from_slice(&[index as u8, 0, 0, 255]);
+        }
+        let before = buffer.data().to_vec();
+        let region = crate::DamageRect {
+            x: 2,
+            y: 2,
+            width: 4,
+            height: 4,
+        };
+        let exposed = buffer.shift_region_pixels(region, 0, -1);
+        assert_eq!(
+            exposed.as_slice(),
+            &[crate::DamageRect {
+                x: 2,
+                y: 5,
+                width: 4,
+                height: 1
+            }]
+        );
+        let at = |data: &[u8], x: usize, y: usize| data[(y * 8 + x) * 4];
+        for y in 0..8 {
+            for x in 0..8 {
+                let inside = (2..6).contains(&x) && (2..5).contains(&y);
+                let expected = if inside {
+                    at(&before, x, y + 1)
+                } else {
+                    at(&before, x, y)
+                };
+                if !(inside || !(2..6).contains(&x) || !(2..6).contains(&y)) {
+                    continue;
+                }
+                assert_eq!(at(buffer.data(), x, y), expected, "pixel ({x}, {y})");
+            }
+        }
+        assert_eq!(
+            buffer.shift_region_pixels(region, 0, 9).as_slice(),
+            &[region],
+            "a move past the region exposes all of it"
+        );
     }
 }

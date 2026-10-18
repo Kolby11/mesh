@@ -18,6 +18,8 @@ pub(super) struct RetainedPaintSubtree {
     pub(super) command_span: Option<RetainedSubtreeSpan>,
     pub(super) spans: Arc<[RetainedCommandSpan]>,
     pub(super) scroll_viewport: Option<DamageRect>,
+    /// The owner's scroll offset when `scroll_viewport` is set.
+    pub(super) scroll_offset: (f32, f32),
 }
 
 impl Default for RetainedPaintSubtree {
@@ -31,6 +33,7 @@ impl Default for RetainedPaintSubtree {
             command_span: None,
             spans: Vec::new().into(),
             scroll_viewport: None,
+            scroll_offset: (0.0, 0.0),
         }
     }
 }
@@ -290,6 +293,7 @@ impl PaintSubtreeBuilder {
             command_span,
             spans: spans.into(),
             scroll_viewport: None,
+            scroll_offset: (0.0, 0.0),
         }
     }
 }

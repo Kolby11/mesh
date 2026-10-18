@@ -370,6 +370,13 @@ fn settings_scroll_frame_gate() {
         std::thread::sleep(FRAME_INTERVAL);
     }
 
+    // `MESH_SCROLL_STAGES=1` prints per-stage attribution; stage profiling
+    // perturbs frame timing, so the gate numbers are only valid without it.
+    let dump_stages = std::env::var_os("MESH_SCROLL_STAGES").is_some();
+    if dump_stages {
+        settings.set_profiling_enabled(true);
+        let _ = settings.take_profiling_records();
+    }
     let mut frame_times = Vec::new();
     let mut passes = 0u32;
     let mut frames = 0u32;
@@ -418,12 +425,28 @@ fn settings_scroll_frame_gate() {
         std::thread::sleep(FRAME_INTERVAL.saturating_sub(frame_started.elapsed()));
     }
     let after_fingers = settings.scroll_offsets[&page_id].y;
+    let shifted_finger_frames = settings.scroll_shifted_frames;
     for _ in 0..MOMENTUM_FRAMES {
         let frame_started = Instant::now();
         run_frame(&mut settings, &mut frame_times);
         std::thread::sleep(FRAME_INTERVAL.saturating_sub(frame_started.elapsed()));
     }
     let after_momentum = settings.scroll_offsets[&page_id].y;
+    // Whole-pixel finger frames over the page's uniform backdrop move their
+    // retained viewport pixels in place; fractional momentum frames replay.
+    let shifted_fraction = f64::from(shifted_finger_frames as u32) / f64::from(FINGER_FRAMES);
+    eprintln!(
+        "scroll shifts: {shifted_finger_frames}/{FINGER_FRAMES} finger frames, {} momentum",
+        settings.scroll_shifted_frames - shifted_finger_frames
+    );
+    println!("MESH_PERF metric=settings_scroll_shifted_fraction value={shifted_fraction:.6}");
+    if dump_stages {
+        super::navigation_profile::dump_stages(
+            "settings scroll",
+            settings.take_profiling_records(),
+            FINGER_FRAMES + MOMENTUM_FRAMES,
+        );
+    }
 
     frame_times.sort();
     let p50 = percentile(&frame_times, 0.5);
@@ -464,5 +487,108 @@ fn settings_scroll_frame_gate() {
     assert_eq!(
         style_frames, 0,
         "no scroll frame after the gesture's first may restyle"
+    );
+}
+
+/// Scrolling the shipped Settings page moves retained viewport pixels in
+/// place on whole-pixel frames. After every frame — shifted, fractional
+/// momentum, and the settle — the retained buffer must match a fresh full
+/// paint of the same display list.
+///
+/// Skia's anti-aliasing of a rounded edge depends on whether the clip cuts
+/// it, so a partial repaint whose clip crosses an arc — the window corner at
+/// the viewport edge, a scrollbar end split by disjoint damage — differs
+/// from a full paint on a few edge pixels (backlog). Measured: at most 71
+/// pixels, worst channel delta 55. The tolerance admits that; a misplaced
+/// shift moves whole rows of content and fails it by thousands of pixels.
+#[test]
+fn settings_scroll_shift_matches_full_paint() {
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(920, 900);
+    let mut settings = appearance_surface(&theme, &mut buffer);
+    for _ in 0..4 {
+        render_loop_frame(&mut settings, &theme, &mut buffer);
+    }
+    let (x, y) = {
+        let tree = settings.last_tree.as_ref().unwrap();
+        let page = first_node_with_class_token(tree, "settings-scroll").expect("page scroller");
+        (
+            page.layout.x + page.layout.width / 2.0,
+            page.layout.y + page.layout.height / 2.0,
+        )
+    };
+    settings
+        .handle_input(&theme, 920, 900, ComponentInput::PointerMove { x, y })
+        .unwrap();
+    while render_loop_frame(&mut settings, &theme, &mut buffer) > 0 {}
+
+    let assert_matches_full_paint = |settings: &FrontendSurfaceComponent,
+                                     buffer: &PixelBuffer,
+                                     label: &str| {
+        let selected = settings.retained_display_list.select_paint_commands(
+            Some(DamageRect {
+                x: 0,
+                y: 0,
+                width: 920,
+                height: 900,
+            }),
+            mesh_core_render::DisplayListRepaintPolicy::FullSurface,
+        );
+        let mut fresh = PixelBuffer::new(920, 900);
+        mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
+            &selected,
+            &mut fresh,
+            1.0,
+            None,
+            None,
+            None,
+            Some("@mesh/settings"),
+        );
+        let mut differing = 0usize;
+        let mut worst = 0u8;
+        for (painted, full) in buffer.data().chunks(4).zip(fresh.data().chunks(4)) {
+            let delta = painted
+                .iter()
+                .zip(full)
+                .map(|(a, b)| a.abs_diff(*b))
+                .max()
+                .unwrap_or(0);
+            if delta > 0 {
+                differing += 1;
+                worst = worst.max(delta);
+            }
+        }
+        assert!(
+            differing <= 96 && worst <= 64,
+            "{label}: {differing} pixels differ, worst channel delta {worst}"
+        );
+    };
+    let dy_steps = [-4.0, -4.0, -8.0, -4.0, 4.0, -3.5, -4.0, -12.0, 8.0, -4.0];
+    for (frame, dy) in dy_steps.into_iter().enumerate() {
+        settings
+            .handle_input(
+                &theme,
+                920,
+                900,
+                ComponentInput::TwoFingerScroll { x, y, dx: 0.0, dy },
+            )
+            .unwrap();
+        render_loop_frame(&mut settings, &theme, &mut buffer);
+        assert_matches_full_paint(&settings, &buffer, &format!("frame {frame} (dy {dy})"));
+    }
+    // Momentum ticks are fractional; they replay instead of shifting.
+    for frame in 0..20 {
+        std::thread::sleep(Duration::from_millis(8));
+        if render_loop_frame(&mut settings, &theme, &mut buffer) == 0 {
+            break;
+        }
+        assert_matches_full_paint(&settings, &buffer, &format!("momentum frame {frame}"));
+    }
+    // Once content moves, a nested resource list comes under the pointer and
+    // takes the gesture; scrolling inside content is not shiftable.
+    assert!(
+        settings.scroll_shifted_frames >= 3,
+        "whole-pixel page scroll frames move retained pixels, got {}",
+        settings.scroll_shifted_frames
     );
 }

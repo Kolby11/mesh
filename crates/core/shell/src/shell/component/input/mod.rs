@@ -829,7 +829,10 @@ impl FrontendSurfaceComponent {
                                 },
                             );
                         }
-                        self.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
+                        self.invalidate_scroll(
+                            ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS,
+                        );
+                        self.dirty = true;
                     }
                 }
             }

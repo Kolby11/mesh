@@ -1,3 +1,4 @@
+use smallvec::SmallVec;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -12,6 +13,7 @@ mod blur;
 mod build;
 mod paint_node;
 mod scroll;
+mod scroll_shift;
 mod sequence;
 mod signature;
 pub use sequence::PaintSequence;
@@ -20,6 +22,7 @@ mod subtree;
 mod types;
 
 pub use blur::{backdrop_blur_regions, backdrop_blur_regions_from_tree};
+pub use scroll_shift::ScrollShift;
 pub use types::*;
 
 use blur::*;
@@ -267,6 +270,8 @@ impl RetainedDisplayList {
             width: surface_width.max(1),
             height: surface_height.max(1),
         };
+        let painted_base = self.painted_generation == Some(self.generation);
+        self.scroll_shifts.clear();
         let resource_revision = mesh_core_resources::resource_revision();
         let resource_revision_changed = self.resource_revision != resource_revision;
         let paint_origin = (offset_x.to_bits(), offset_y.to_bits());
@@ -586,6 +591,27 @@ impl RetainedDisplayList {
             previous_entries.clear();
             self.next_entries_scratch = previous_entries;
         }
+        let shift_candidates: SmallVec<[(NodeId, DamageRect, (f32, f32)); 2]> =
+            if scroll_only && painted_base {
+                dirty_node_ids
+                    .iter()
+                    .filter_map(|id| {
+                        let previous = self.subtrees.get(id)?;
+                        let next = subtrees.get(id)?;
+                        let viewport = next.scroll_viewport?;
+                        (previous.scroll_viewport == Some(viewport)).then_some((
+                            *id,
+                            viewport,
+                            (
+                                next.scroll_offset.0 - previous.scroll_offset.0,
+                                next.scroll_offset.1 - previous.scroll_offset.1,
+                            ),
+                        ))
+                    })
+                    .collect()
+            } else {
+                SmallVec::new()
+            };
         let mut previous_subtrees = std::mem::replace(&mut self.subtrees, subtrees);
         previous_subtrees.clear();
         self.next_subtrees_scratch = previous_subtrees;
@@ -595,6 +621,16 @@ impl RetainedDisplayList {
         self.resource_revision = resource_revision;
         self.built_backdrop_blur_policy = self.backdrop_blur_policy;
         self.layer_scopes = collect_layer_scopes(self.paint_commands.as_ref());
+        // Every candidate must qualify, or the frame keeps ordinary repaint:
+        // a partially shifted surface would mix two damage models.
+        let shifts = shift_candidates
+            .iter()
+            .map(|&(owner, viewport, delta)| {
+                scroll_shift::plan_scroll_shift(&self.paint_commands, owner, viewport, delta)
+            })
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default();
+        self.scroll_shifts = shifts;
         self.filter_layer_regions =
             filter_layer_regions(self.paint_commands.as_ref(), &self.layer_scopes, surface);
         if let Some((backdrop_regions, blur_regions)) = updated_blur_metadata {
@@ -823,6 +859,20 @@ impl RetainedDisplayList {
     /// to query a previous frame's [`visual_damage_rects_into`] later.
     pub fn paint_commands_snapshot(&self) -> Arc<PaintSequence<DisplayPaintCommand>> {
         Arc::clone(&self.paint_commands)
+    }
+
+    /// Scroll scopes whose composed viewport pixels may be moved in place
+    /// this frame. Non-empty only for a scroll-only update whose previous
+    /// state the caller confirmed with [`Self::mark_painted`]; every changed
+    /// scope qualifies, or the list is empty.
+    pub fn scroll_shifts(&self) -> &[ScrollShift] {
+        &self.scroll_shifts
+    }
+
+    /// Record that the caller's buffer now holds this list's current state,
+    /// which later [`Self::scroll_shifts`] use as their base.
+    pub fn mark_painted(&mut self) {
+        self.painted_generation = Some(self.generation);
     }
 
     pub fn last_metrics(&self) -> DisplayListMetrics {

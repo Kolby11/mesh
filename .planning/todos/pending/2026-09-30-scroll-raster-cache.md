@@ -4,6 +4,15 @@
 the implementation and measurements are in the performance log. This note
 describes remaining raster work, not another backlog.
 
+## Progress — 2026-10-18
+
+Whole-pixel scrolls over a uniform backdrop now move the retained surface
+pixels in place: no second raster, no extra memory, and no compositing of
+transparent pixels (performance log, 2026-10-18). This covers the Settings
+finger-scroll workload (59/60 frames). What remains for this note: fractional
+momentum frames, and scopes whose backdrop varies across the viewport. Those
+are the cases a transparent content raster, as designed below, would add.
+
 ## D6 scope revision — 2026-10-13
 
 Production wiring is deferred until the immutable scene commit and render-thread

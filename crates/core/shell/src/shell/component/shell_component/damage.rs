@@ -417,3 +417,178 @@ pub(super) fn clip_damage(rect: DamageRect, surface: DamageRect) -> Option<Damag
         None
     }
 }
+
+impl FrontendSurfaceComponent {
+    /// Move the retained pixels of viewports that only scrolled since the
+    /// last painted frame, and narrow `effective` to the strips and anchored
+    /// rects that still need replay. Returns the presentation damage — the
+    /// whole moved viewports — when a shift was applied; `None` leaves
+    /// `effective` untouched for an ordinary repaint.
+    pub(super) fn shift_scrolled_viewports(
+        &mut self,
+        effective: &mut EffectiveDamage,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        current_tooltip_damage: Option<DamageRect>,
+    ) -> Option<Vec<DamageRect>> {
+        let shifts = self.retained_display_list.scroll_shifts();
+        if shifts.is_empty()
+            || effective.full_surface
+            || self.surface_pixels_invalid
+            || self.buffer_overlaid
+        {
+            return None;
+        }
+        let mut displacements = smallvec::SmallVec::<[(i32, i32); 2]>::new();
+        for shift in shifts {
+            // The tooltip is painted into the buffer over the content and
+            // would move with it.
+            if [current_tooltip_damage, self.last_tooltip_damage]
+                .into_iter()
+                .flatten()
+                .any(|tooltip| tooltip.intersects(shift.viewport))
+            {
+                return None;
+            }
+            // Other damage reaching into a moved viewport would be replayed
+            // over pixels that are about to move.
+            if effective.rects.iter().any(|rect| {
+                rect.intersects(shift.viewport) && !damage_rect_contains(shift.viewport, *rect)
+            }) {
+                return None;
+            }
+            let dx = -shift.scroll_delta.0 * scale;
+            let dy = -shift.scroll_delta.1 * scale;
+            if (dx - dx.round()).abs() > 1e-3 || (dy - dy.round()).abs() > 1e-3 {
+                return None;
+            }
+            displacements.push((dx.round() as i32, dy.round() as i32));
+        }
+
+        let present = effective.rects.clone();
+        let mut paint = effective
+            .rects
+            .iter()
+            .copied()
+            .filter(|rect| !shifts.iter().any(|shift| rect.intersects(shift.viewport)))
+            .collect::<Vec<_>>();
+        for (shift, (dx, dy)) in shifts.iter().zip(displacements) {
+            // The device pixels wholly inside the viewport; partially covered
+            // edge pixels lie in the anchored edge bands, which are replayed.
+            let left = (shift.viewport.x as f32 * scale).ceil() as u32;
+            let top = (shift.viewport.y as f32 * scale).ceil() as u32;
+            let right = ((shift.viewport.x + shift.viewport.width) as f32 * scale).floor() as u32;
+            let bottom =
+                ((shift.viewport.y + shift.viewport.height) as f32 * scale).floor() as u32;
+            let device = DamageRect {
+                x: left,
+                y: top,
+                width: right.saturating_sub(left),
+                height: bottom.saturating_sub(top),
+            };
+            // A viewport edge between device pixels leaves a partially
+            // covered column or row outside `device`; replay it like the
+            // other anchored parts.
+            let edge = |logical: u32| (logical as f32 * scale).fract() != 0.0;
+            let v = shift.viewport;
+            if edge(v.x) {
+                paint.push(DamageRect { width: 1, ..v });
+            }
+            if edge(v.x + v.width) {
+                paint.push(DamageRect { x: v.x + v.width - 1, width: 1, ..v });
+            }
+            if edge(v.y) {
+                paint.push(DamageRect { height: 1, ..v });
+            }
+            if edge(v.y + v.height) {
+                paint.push(DamageRect { y: v.y + v.height - 1, height: 1, ..v });
+            }
+            for strip in buffer.shift_region_pixels(device, dx, dy) {
+                let x = (strip.x as f32 / scale).floor() as u32;
+                let y = (strip.y as f32 / scale).floor() as u32;
+                let right = ((strip.x + strip.width) as f32 / scale).ceil() as u32;
+                let bottom = ((strip.y + strip.height) as f32 / scale).ceil() as u32;
+                paint.extend(clip_damage(
+                    DamageRect {
+                        x,
+                        y,
+                        width: right.saturating_sub(x),
+                        height: bottom.saturating_sub(y),
+                    },
+                    shift.viewport,
+                ));
+            }
+            paint.extend(shift.anchored.iter().copied());
+        }
+        for shift in shifts {
+            for rect in paint.iter_mut() {
+                if damage_rect_contains(shift.viewport, *rect) {
+                    *rect = avoid_arc_edges(*rect, shift);
+                }
+            }
+        }
+        effective.rect = paint.iter().copied().reduce(union_damage);
+        effective.policy = DisplayListRepaintPolicy::MinimalDamage;
+        effective.rects = paint;
+        self.scroll_shifted_frames += 1;
+        Some(present)
+    }
+}
+
+fn damage_rect_contains(outer: DamageRect, inner: DamageRect) -> bool {
+    inner.x >= outer.x
+        && inner.y >= outer.y
+        && inner.x + inner.width <= outer.x + outer.width
+        && inner.y + inner.height <= outer.y + outer.height
+}
+
+/// Grow `rect` inside its viewport until no edge that lies inside the
+/// viewport ends on a row or column holding a rounded-corner arc, so every
+/// arc is either replayed whole or moved whole. Edges on the viewport
+/// boundary stay; the viewport's own edges are handled as anchored bands.
+fn avoid_arc_edges(
+    rect: DamageRect,
+    shift: &mesh_core_render::display_list::ScrollShift,
+) -> DamageRect {
+    let viewport = shift.viewport;
+    let grow = |mut start: u32, mut end: u32, low: u32, high: u32, arcs: &[(f32, f32)]| {
+        loop {
+            let mut moved = false;
+            for &(a, b) in arcs {
+                let (a, b) = (a.floor() - 1.0, b.ceil() + 1.0);
+                if start > low && (start as f32) > a && (start as f32) < b {
+                    start = (a.max(low as f32)) as u32;
+                    moved = true;
+                }
+                if end < high && (end as f32) > a && (end as f32) < b {
+                    end = (b.min(high as f32)) as u32;
+                    moved = true;
+                }
+            }
+            if !moved {
+                return (start, end);
+            }
+        }
+    };
+    let (top, bottom) = grow(
+        rect.y,
+        rect.y + rect.height,
+        viewport.y,
+        viewport.y + viewport.height,
+        &shift.arc_rows,
+    );
+    let (left, right) = grow(
+        rect.x,
+        rect.x + rect.width,
+        viewport.x,
+        viewport.x + viewport.width,
+        &shift.arc_columns,
+    );
+    DamageRect {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    }
+}
+

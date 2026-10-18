@@ -61,6 +61,14 @@ impl DamageRect {
         u64::from(self.width) * u64::from(self.height)
     }
 
+    pub(crate) fn right(self) -> u32 {
+        self.x.saturating_add(self.width)
+    }
+
+    pub(crate) fn bottom(self) -> u32 {
+        self.y.saturating_add(self.height)
+    }
+
     pub fn intersects(self, other: Self) -> bool {
         if self.width == 0 || self.height == 0 || other.width == 0 || other.height == 0 {
             return false;
@@ -472,6 +480,9 @@ pub struct RetainedDisplayList {
     pub(super) last_metrics: DisplayListMetrics,
     pub(super) last_damage_rects: Vec<DamageRect>,
     pub(super) frame_plan: Arc<FramePaintPlan>,
+    pub(super) scroll_shifts: Vec<super::ScrollShift>,
+    /// The `generation` the caller last painted, if confirmed.
+    pub(super) painted_generation: Option<u64>,
 }
 
 impl Default for RetainedDisplayList {
@@ -504,6 +515,8 @@ impl Default for RetainedDisplayList {
             last_metrics: DisplayListMetrics::default(),
             last_damage_rects: Vec::new(),
             frame_plan: Arc::new(FramePaintPlan::empty()),
+            scroll_shifts: Vec::new(),
+            painted_generation: None,
         }
     }
 }

@@ -5647,3 +5647,77 @@ runs `scene_thread::tests::discarded_output_leases_retire_outside_the_queue_lock
 failed under load; it passed in six isolated runs and is unrelated (backlog).
 Shell lib failure set unchanged (45).
 
+
+## 2026-10-18 — scroll frames keep retained pixels; whole-pixel scrolls shift in place
+
+AMD Ryzen 7 7840HS, workspace release profile. Narrowed the scroll-raster
+backlog item to the remaining cases.
+
+**Finding: every scroll frame repainted the whole surface.** Two-finger input
+and momentum ticks invalidated `PAINT` through `invalidate`/
+`invalidate_style_path`, and `PAINT` sets `surface_pixels_invalid`. Each scroll
+frame therefore cleared and replayed all 920×900 pixels, although the retained
+display list already damaged only the scrolled viewport.
+`invalidate_scroll`/`invalidate_scroll_tick` now mark the frame dirty without
+invalidating pixels. Damage comes from the display list: retained viewports,
+moved entries for non-retained scrollers, and scrollbars.
+
+**In-place shift.** A frame that is scroll-only for retained scopes, whose
+previous state the shell painted (`RetainedDisplayList::mark_painted`), plans a
+`ScrollShift` per scope when everything painted beneath the viewport is a
+full-cover solid fill. The composed viewport pixels are then content over a
+constant colour, and an integral device-pixel move is exact. The shell moves the
+retained buffer pixels (`PixelBuffer::shift_region_pixels`) and replays only:
+
+- exposed strips;
+- owner edge bands across the direction of motion (vertical scrolls keep side
+  borders and side edges, which are constant down a column);
+- beneath nodes' border bands and corner squares;
+- scrollbar strips;
+- overlays painted above the scope.
+
+Presentation damage stays the whole viewport. Shifts are skipped for
+fractional displacements, layers or backdrops inside or above the scope, a
+visible tooltip, shell debug overlays in the buffer (new
+`ShellComponent::buffer_overlaid`), and full-surface frames.
+
+This deviates from the design note's separate transparent raster. Shifting
+composed pixels needs no second buffer and no compositing, but only applies
+over a uniform backdrop. The note now tracks the remaining cases.
+
+**Measured.** `settings_scroll_frame_gate`, 920×900 Settings Appearance, 60
+two-finger 4px frames + 30 momentum frames, three runs per step:
+
+| Step | Frame p50 | Frame p90 |
+| --- | --- | --- |
+| Before | 5.580–5.691 ms | 6.512–6.643 ms |
+| Scroll keeps retained pixels | 3.938–3.998 ms | 4.736–5.019 ms |
+| + in-place shift | 2.720–2.785 ms | 4.097–4.836 ms |
+
+Stage attribution (`MESH_SCROLL_STAGES=1`, which perturbs timing) for paint
+traversal per frame: 4.631 ms before, 3.021 ms partial, 3.476 ms with the
+shift under profiling. Text draws went 2.901 → 1.650 → 0.983 ms/frame. With
+the shift, 59/60 finger frames move; fractional momentum frames replay, so p90
+moves less. Gate `settings_scroll_shifted_fraction` (≥ 0.9) is in
+`tools/check-performance`. A first version that replayed both side bands and
+the scrollbar command's whole box was slower than plain partial repaint
+(p50 4.607–4.777 ms): every content row intersected those full-height rects.
+
+**Correctness and a limit found.** `settings_scroll_shift_matches_full_paint`
+compares the retained buffer with a fresh full paint after every frame. Exact
+equality is impossible for any partial repaint whose clip crosses a rounded
+arc: Skia's anti-aliasing of a rounded rect (fill or border) depends on
+whether the clip cuts it. A minimal 920×700 rounded window repainted under the
+viewport clip differs from a full paint at its corner (worst alpha 57 vs 42).
+A clip holding the whole corner still differs by ±1. Hover repaints already
+have this. Shifting would carry such pixels inward from the exposed strip, so
+replayed strips and bands grow until their inner edges miss content arc rows
+(`ScrollShift::arc_rows`/`arc_columns`). The test allows ≤ 96 differing pixels
+with channel delta ≤ 64 (measured worst: 71 pixels, delta 55, at the window
+corner and a scrollbar end). A misplaced shift fails it by thousands of
+pixels. The clip-dependent anti-aliasing is a backlog item.
+
+**Verified.** Release render 290 passed / 41 ignored (new: planner
+uniform/gradient cases, region shift). Shell lib failure set unchanged (45);
+the parity test passes with 3+ shifted frames.
+

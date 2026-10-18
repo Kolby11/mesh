@@ -102,7 +102,7 @@ fn navigation_surface(theme: &Theme, buffer: &mut PixelBuffer) -> FrontendSurfac
     component
 }
 
-fn dump_stages(label: &str, records: Vec<ComponentProfilingRecord>, frames: u32) {
+pub(super) fn dump_stages(label: &str, records: Vec<ComponentProfilingRecord>, frames: u32) {
     let mut totals: BTreeMap<String, (Duration, u32)> = BTreeMap::new();
     let mut attribution: BTreeMap<String, (Duration, u32)> = BTreeMap::new();
     for record in records {

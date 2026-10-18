@@ -1616,6 +1616,10 @@ pub trait ShellComponent: Send {
     fn wants_render(&self) -> bool;
     /// A paint-only frame, implying no script, layout, or style change.
     fn request_paint(&mut self) {}
+    /// The shell drew pixels the component did not paint (debug overlays)
+    /// into its paint buffer, so retained pixels must not be moved in place
+    /// until the next full repaint replaces them.
+    fn buffer_overlaid(&mut self) {}
     fn surface_size_changed(&mut self, _width: u32, _height: u32) -> bool {
         false
     }

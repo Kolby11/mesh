@@ -1143,6 +1143,11 @@ pub(super) struct FrontendSurfaceComponent {
         DamageRect,
     )>,
     visual_damage_lookup_scratch: (HashMap<NodeId, DamageRect>, HashMap<NodeId, DamageRect>),
+    /// The paint buffer holds shell-drawn overlay pixels until the next full
+    /// repaint, so its retained pixels must not be moved in place.
+    buffer_overlaid: bool,
+    /// Frames whose scrolled viewports were moved in place.
+    scroll_shifted_frames: u64,
     tooltip_damage_scratch: Vec<DamageRect>,
     dirty_node_visual_damage_scratch: Vec<DamageRect>,
     /// Current tooltip configuration from the effective shell settings.
@@ -1482,6 +1487,8 @@ impl FrontendSurfaceComponent {
             last_present_damage_rects: Vec::new(),
             last_visual_commands: None,
             visual_damage_lookup_scratch: (HashMap::new(), HashMap::new()),
+            buffer_overlaid: false,
+            scroll_shifted_frames: 0,
             tooltip_damage_scratch: Vec::new(),
             dirty_node_visual_damage_scratch: Vec::new(),
             tooltip_settings,
@@ -1706,11 +1713,22 @@ impl FrontendSurfaceComponent {
 
     /// Schedule the next frame for a live smooth scroll or momentum tick. Like
     /// `invalidate_style_path`, but the dirt it adds does not ask the render
-    /// loop for an immediate corrective pass.
+    /// loop for an immediate corrective pass, and it keeps the retained
+    /// pixels: the display list damages exactly the scrolled viewports.
     pub(super) fn invalidate_scroll_tick(&mut self, flags: ComponentDirtyFlags) {
         let next_frame_only = self.pending_dirt_is_next_frame_only();
-        self.invalidate_style_path(flags);
+        self.invalidate_scroll(flags);
+        self.style_only_dirty = true;
         self.next_frame_only_dirty = next_frame_only;
+    }
+
+    /// Mark a scroll offset change. Scroll damage is derived by the retained
+    /// display list (scrolled viewports, moved entries, scrollbars), so unlike
+    /// [`Self::invalidate`] this never forces a whole-surface pixel repaint.
+    pub(super) fn invalidate_scroll(&mut self, flags: ComponentDirtyFlags) {
+        self.animation_only_dirty = false;
+        self.next_frame_only_dirty = false;
+        self.dirty_types |= flags;
     }
 
     fn pending_dirt_is_next_frame_only(&self) -> bool {

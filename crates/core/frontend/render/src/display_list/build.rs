@@ -694,6 +694,7 @@ fn build_paint_subtree_with_transform(
             width: scroll_viewport_clip.width.max(0) as u32,
             height: scroll_viewport_clip.height.max(0) as u32,
         });
+        retained.scroll_offset = (scroll_x, scroll_y);
     }
     let subtree = Arc::new(retained);
     next_subtrees.insert(node.id, Arc::clone(&subtree));

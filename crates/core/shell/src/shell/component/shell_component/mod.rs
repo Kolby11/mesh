@@ -777,6 +777,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.invalidate_paint();
     }
 
+    fn buffer_overlaid(&mut self) {
+        self.buffer_overlaid = true;
+    }
+
     fn surface_size_changed(&mut self, width: u32, height: u32) -> bool {
         self.observe_surface_size(width, height)
     }
@@ -1233,6 +1237,12 @@ impl ShellComponent for FrontendSurfaceComponent {
         {
             effective_damage.rect = bounding_damage_rect(&effective_damage.rects, surface_damage);
         }
+        let present_override = self.shift_scrolled_viewports(
+            &mut effective_damage,
+            buffer,
+            scale,
+            current_tooltip_damage,
+        );
         let _paint_damage = if effective_damage.full_surface {
             Some(surface_damage)
         } else {
@@ -1368,9 +1378,15 @@ impl ShellComponent for FrontendSurfaceComponent {
             current_tooltip_damage,
         );
         self.advance_interaction_frame(mesh_core_interaction::InteractionFramePhase::PaintReady);
+        self.retained_display_list.mark_painted();
         if effective_damage.full_surface {
+            self.buffer_overlaid = false;
             self.last_present_damage_rects.clear();
             self.last_present_damage_rects.push(surface_damage);
+        } else if let Some(present) = present_override {
+            for rect in present {
+                push_damage_rect(&mut self.last_present_damage_rects, rect, surface_damage);
+            }
         } else if !effective_damage.rects.is_empty() {
             for &rect in &effective_damage.rects {
                 push_damage_rect(&mut self.last_present_damage_rects, rect, surface_damage);
