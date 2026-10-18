@@ -254,7 +254,6 @@ fn compose_input_value(
     )
 }
 
-#[cfg(test)]
 pub(in crate::shell::component) fn annotate_runtime_tree(
     node: &mut WidgetNode,
     key: String,

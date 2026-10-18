@@ -1,9 +1,10 @@
 -- PipeWire audio backend.
 --
 -- Reads volume via wpctl. Reacts to volume changes from any client through
--- `pw-mon`, streamed via mesh.exec_stream: a volume or mute change is a
--- `changed:` record on the sink's Node. A slow safety-net poll covers a
--- missed record; without pw-mon the provider polls quickly.
+-- native PipeWire Node/Metadata invalidations (`pipewire.observe`), or the
+-- `pw-mon` monitor when that grant is missing or the source fails. A slow
+-- safety-net poll covers a missed record; without either stream the provider
+-- polls quickly.
 
 local SOUNDS_ROOT = "/usr/share/mesh/sounds/"
 

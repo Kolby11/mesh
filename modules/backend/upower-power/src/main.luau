@@ -1,7 +1,8 @@
 -- UPower-backed power/battery backend.
--- Discovers the first battery device via `upower -e`, then polls
--- `upower -i <path>` and parses the textual report into the
--- mesh.power state contract.
+-- Discovers the first battery device via `upower -e` and parses the
+-- `upower -i <path>` report into the mesh.power state contract. UPower D-Bus
+-- signals (or the `upower --monitor` fallback) refresh promptly on power-source
+-- and device changes; a slow poll keeps battery level and estimates current.
 
 state = {
     available = false,

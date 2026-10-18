@@ -331,6 +331,9 @@ of payoff.
 
 ### Runtime boundary
 
+- [ ] Signal-terminated shells orphan `exec_stream` monitors: `kill_on_drop` never
+      runs on SIGINT/SIGTERM and no handler exists. Add graceful signal shutdown
+      (`PR_SET_PDEATHSIG` is unsafe: spawning threads can be idle Tokio workers).
 - [ ] Handler sync still reads compound table globals, because nested in-place
       mutations never assign through `_ENV`. Eliminating those reads needs
       recursively tracked tables or Rust-owned reactive values (R).

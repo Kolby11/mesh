@@ -133,6 +133,7 @@
         "theme.read"
       ],
       "@mesh/networkmanager-network": [
+        "dbus.system",
         "exec.argv:nmcli:[\"-t\",\"-f\",\"ACTIVE,SSID,SIGNAL,SECURITY\",\"device\",\"wifi\",\"list\",\"--rescan\",\"no\"]",
         "exec.argv:nmcli:[\"-t\",\"-f\",\"TYPE,STATE,CONNECTION,DEVICE\",\"device\"]",
         "exec.argv:nmcli:[\"device\",\"wifi\",\"connect\",\"*\"]",
@@ -147,6 +148,7 @@
         "exec.argv:curl:[\"-sf\",\"--max-time\",\"15\",\"*\"]"
       ],
       "@mesh/pipewire-audio": [
+        "pipewire.observe",
         "exec.argv:wpctl:[\"get-volume\",\"*\"]",
         "exec.argv:wpctl:[\"set-mute\",\"*\",\"*\"]",
         "exec.argv:wpctl:[\"set-volume\",\"*\",\"*\"]",
@@ -201,6 +203,7 @@
       "@mesh/theme-selector": ["service.theme.control", "theme.read"],
       "@mesh/touch-gesture-proof": ["shell.surface", "theme.read"],
       "@mesh/upower-power": [
+        "dbus.system",
         "exec.argv:upower:[\"-e\"]",
         "exec.argv:upower:[\"-i\",\"*\"]",
         "exec.argv:upower:[\"--monitor\"]"

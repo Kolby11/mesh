@@ -12,7 +12,8 @@ measurements are in [`log/`](log/README.md). Open work is in
   sources share the bounded stream lifecycle with inotify/socket sources.
   Stream callbacks and bounded shutdown yield through D2. NetworkManager,
   UPower and audio prefer native sources with monitor/poll fallbacks.
-  Validation and live provider measurements are in the performance log.
+  Native grants are approved in `config/module.json`; a live shell spawns no
+  monitor subprocesses. Measurements are in the performance log.
 
 - **Finalized memo entries and D7 matching implemented:** component memo
   entries retain pre-animation styles and semantics; class/state reverse
