@@ -66,6 +66,8 @@ pub(in crate::shell) struct ScheduledEffect {
     request: CoreRequest,
     context: EffectContext,
     fingerprint: u64,
+    /// Frame-budget bytes this effect is charged.
+    weight: usize,
     /// The core service call answered when this effect settles.
     call_id: Option<u64>,
 }
@@ -137,8 +139,10 @@ impl EffectScheduler {
     fn enqueue_batch(&mut self, effects: impl IntoIterator<Item = (CoreRequest, EffectSource)>) {
         let transaction_id = self.next_transaction_id();
         for (request, source) in effects {
+            let (fingerprint, weight) = effect_identity(&request);
             self.enqueue_with_context(ScheduledEffect {
-                fingerprint: effect_fingerprint(&request),
+                fingerprint,
+                weight,
                 request,
                 context: EffectContext {
                     source,
@@ -167,8 +171,10 @@ impl EffectScheduler {
             if let Some(source) = source {
                 context.source = source;
             }
+            let (fingerprint, weight) = effect_identity(&request);
             self.enqueue_with_context(ScheduledEffect {
-                fingerprint: effect_fingerprint(&request),
+                fingerprint,
+                weight,
                 request,
                 context,
                 call_id: None,
@@ -183,8 +189,10 @@ impl EffectScheduler {
             return;
         };
         context.depth = context.depth.saturating_add(1);
+        let (fingerprint, weight) = effect_identity(&request);
         self.enqueue_with_context(ScheduledEffect {
-            fingerprint: effect_fingerprint(&request),
+            fingerprint,
+            weight,
             request,
             context,
             call_id: Some(call_id),
@@ -244,7 +252,7 @@ impl EffectScheduler {
                 self.queues.insert(source.clone(), queue);
             }
 
-            let weight = effect_weight(&effect.request);
+            let weight = effect.weight;
             let frame = self.frame.as_mut().expect("scheduler frame must be active");
             if frame.processed >= MAX_EFFECTS_PER_FRAME {
                 self.deferred.push_back(effect);
@@ -497,14 +505,26 @@ impl EffectScheduler {
     }
 }
 
-fn effect_fingerprint(request: &CoreRequest) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    format!("{request:?}").hash(&mut hasher);
-    hasher.finish()
-}
-
-fn effect_weight(request: &CoreRequest) -> usize {
-    64usize.saturating_add(format!("{request:?}").len())
+/// Repeat-detection fingerprint and budget weight of a request, from one
+/// streaming pass over its `Debug` form without materializing it.
+fn effect_identity(request: &CoreRequest) -> (u64, usize) {
+    struct HashingCounter {
+        hasher: std::collections::hash_map::DefaultHasher,
+        bytes: usize,
+    }
+    impl std::fmt::Write for HashingCounter {
+        fn write_str(&mut self, text: &str) -> std::fmt::Result {
+            self.hasher.write(text.as_bytes());
+            self.bytes = self.bytes.saturating_add(text.len());
+            Ok(())
+        }
+    }
+    let mut sink = HashingCounter {
+        hasher: std::collections::hash_map::DefaultHasher::new(),
+        bytes: 0,
+    };
+    let _ = std::fmt::Write::write_fmt(&mut sink, format_args!("{request:?}"));
+    (sink.hasher.finish(), 64usize.saturating_add(sink.bytes))
 }
 
 /// Canonical failure payload when a service command cannot be delivered (no
@@ -3687,6 +3707,63 @@ mod tests {
             CoreRequest::UninstallModule { module_id, force }
                 if module_id == "@example/module" && force
         ));
+    }
+
+    // cargo test -p mesh-core-shell --release --lib -- effect_identity_single_pass_profile --ignored --nocapture
+    #[test]
+    #[ignore = "release-only effect fingerprint/weight profile"]
+    fn effect_identity_single_pass_profile() {
+        fn slider_command(bytes: usize, value: usize) -> CoreRequest {
+            CoreRequest::ServiceCall {
+                interface: "mesh.audio".into(),
+                command: "set_volume".into(),
+                payload: serde_json::json!({
+                    "value": value,
+                    "device": "x".repeat(bytes),
+                }),
+                call_id: value as u64,
+                source_instance_id: "@mesh/quick-settings#default".into(),
+                source_module_id: "@mesh/quick-settings".into(),
+                source_capabilities: Default::default(),
+            }
+        }
+        for bytes in [2 * 1024, 50 * 1024] {
+            let requests = (0..1_000).map(|value| slider_command(bytes, value)).collect::<Vec<_>>();
+            let mut sink = 0u64;
+            let mut double = std::time::Duration::ZERO;
+            let mut single = std::time::Duration::ZERO;
+            for _ in 0..3 {
+                let started = std::time::Instant::now();
+                for request in &requests {
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    format!("{request:?}").hash(&mut hasher);
+                    let weight = 64usize.saturating_add(format!("{request:?}").len());
+                    sink = sink.wrapping_add(hasher.finish()).wrapping_add(weight as u64);
+                }
+                double += started.elapsed();
+                let started = std::time::Instant::now();
+                for request in &requests {
+                    let (fingerprint, weight) = effect_identity(request);
+                    sink = sink.wrapping_add(fingerprint).wrapping_add(weight as u64);
+                }
+                single += started.elapsed();
+            }
+            std::hint::black_box(sink);
+            let speedup = double.as_secs_f64() / single.as_secs_f64();
+            eprintln!(
+                "3,000 {} KB slider effects: two Debug strings {double:?}; one streaming pass {single:?}; ratio {speedup:.2}x",
+                bytes / 1024
+            );
+            if bytes == 50 * 1024 {
+                println!("MESH_PERF metric=effect_identity_single_pass_speedup value={speedup:.6}");
+                assert!(speedup >= 1.5, "one streaming pass should be at least 1.5x");
+            }
+        }
+        let request = slider_command(64, 1);
+        assert_eq!(
+            effect_identity(&request).1,
+            64 + format!("{request:?}").len()
+        );
     }
 
     fn scheduler_source(module_id: &str, runtime_id: &str) -> EffectSource {

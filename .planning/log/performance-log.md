@@ -5429,3 +5429,59 @@ regression `layout_change_damages_only_scroll_viewports_whose_scope_moved`
 repaint equals fresh paint). Shell lib failure set unchanged apart from the
 five theme tests fixed earlier today.
 
+
+## 2026-10-18 — SH-05 / SH-06 fixed; SH-13 measured and left alone
+
+AMD Ryzen 7 7840HS, workspace release profile. Removed the SH-05 / SH-06 /
+SH-13 backlog item.
+
+**SH-05 — font-alias cache thrash.** The shell sets each module's font aliases
+before painting its surface. Any change cleared the text layout cache, glyph
+atlas, and named-family availability cache, and bumped the measurer revision
+(which also makes retained layout remeasure every text node). Two surfaces
+with different alias maps did that on every switch. Alias maps are now
+interned per font-system generation, and the measurer revision is
+`base × 64 + alias-set id`. A surface switching back gets its old revision
+and its cached layouts. The glyph atlas (keyed by resolved face) and
+availability cache (raw family name) no longer clear on alias changes;
+font-database and resource-revision changes still clear everything.
+
+`alternating_font_alias_surfaces_profile`: two alias sets (none / `Inter` →
+`DejaVu Sans`) alternating for 200 frames, 40 labels each, three runs:
+
+| | Time | Layout hits / misses | Distinct measurer revisions |
+| --- | --- | --- | --- |
+| Before | 91.1–93.5 ms | 0 / 8,000 | 200 |
+| After | 6.4–7.6 ms | 7,920 / 80 | 2 |
+
+Gate `alias_alternation_layout_hit_ratio` (≥ 0.95). The retained-layout
+remeasure this also avoids is not timed here.
+`interned_alias_sets_never_share_layouts` checks that measurements under each
+alias set equal a fresh renderer's.
+
+**SH-06 — double `Debug` formatting per effect.** `effect_fingerprint` and
+`effect_weight` each built `format!("{request:?}")`, at enqueue and again at
+dispatch. One streaming pass into a hashing/counting `fmt::Write` now runs at
+enqueue; the weight is stored on the effect. `effect_identity_single_pass_profile`,
+1,000 `ServiceCall` slider commands × 3 rounds, three runs:
+
+| Payload | Two `Debug` strings | One streaming pass | Speedup |
+| --- | --- | --- | --- |
+| 2 KB | 11.7–14.7 ms | 5.8–8.0 ms | 1.84–2.19x |
+| 50 KB | 203.4–204.7 ms | 111.8–115.2 ms | 1.76–1.83x |
+
+Gate `effect_identity_single_pass_speedup` (≥ 1.5x, 50 KB). The remaining
+~37 µs per 50 KB effect is the `Debug` walk of the JSON payload itself.
+
+**SH-13 — idle watch-set rebuild: measured, not changed.** With a healthy
+watcher, `reconcile_file_watcher` rebuilds, sorts, and compares the watch-path
+vector every two seconds. `idle_watch_set_reconcile_profile` on the repository
+graph (52 modules, 121 paths, no mounted components), 2,000 passes: 223.4 ms,
+**112 µs per pass**, about 0.006% of one core at the 2 s cadence. An input
+fingerprint cache would add invalidation risk for no measurable win. The
+periodic metadata stat of component sources is the deliberate lost-event
+safety net from the reload-maintenance entry above.
+
+**Verified.** Release render 287 passed / 40 ignored; shell lib failure set
+unchanged (45, diffed by name).
+

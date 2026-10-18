@@ -79,8 +79,6 @@ unless an item says otherwise. IDs point into the
 
 Each needs its named workload from the report before any change lands.
 
-- [ ] **SH-05 / SH-06 / SH-13:** Font-alias cache thrash between modules, double
-      `Debug` formatting per effect, idle watch-set rebuilds.
 - [ ] **UI-11:** Compile keyframe rules once per animation instance and theme
       revision instead of re-resolving string declarations every frame
       (evidence for S09-PERF-002).

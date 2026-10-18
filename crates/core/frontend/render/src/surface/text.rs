@@ -77,12 +77,23 @@ struct TextEngine {
     locale: String,
     font_database: Option<fontdb::Database>,
     font_aliases: HashMap<String, String>,
+    /// Alias maps seen since `measurer_base` last changed; an index is that
+    /// map's stable id. Surfaces of modules with different font overrides
+    /// paint in turn, so switching back must find its earlier layouts.
+    alias_sets: Vec<HashMap<String, String>>,
+    alias_set_id: u64,
     swash_cache: SwashCache,
     layout_cache: ByteLruCache<u64, TextLayoutEntry>,
     resource_revision: u64,
+    /// Bumped when the font system changes; [`Self::measurer_revision`] is
+    /// derived from it and the active alias set.
+    measurer_base: u64,
     measurer_revision: u64,
     metrics: TextCacheMetrics,
 }
+
+/// Alias sets interned per measurer base before the table restarts.
+const MAX_ALIAS_SETS: u64 = 64;
 
 thread_local! {
     static RENDERER: RefCell<TextRenderer> = RefCell::new(TextRenderer::new());
@@ -403,12 +414,15 @@ impl TextRenderer {
                 locale,
                 font_database: None,
                 font_aliases: HashMap::new(),
+                alias_sets: vec![HashMap::new()],
+                alias_set_id: 0,
                 swash_cache: SwashCache::new(),
                 layout_cache: ByteLruCache::new(
                     TEXT_LAYOUT_CACHE_CAPACITY,
                     TEXT_LAYOUT_CACHE_MAX_BYTES,
                 ),
                 resource_revision: resource_revision(),
+                measurer_base: 0,
                 measurer_revision: 0,
                 metrics: TextCacheMetrics {
                     layout_cache_max_bytes: TEXT_LAYOUT_CACHE_MAX_BYTES as u64,
@@ -1161,7 +1175,7 @@ fn glyph_atlas_storage_bytes(width: u32, height: u32, bytes_per_pixel: usize) ->
 impl TextEngine {
     fn set_font_database(&mut self, database: fontdb::Database) {
         self.font_database = Some(database.clone());
-        self.measurer_revision = self.measurer_revision.saturating_add(1);
+        self.bump_measurer_base();
         self.font_system = FontSystem::new_with_locale_and_db(self.locale.clone(), database);
         self.swash_cache = SwashCache::new();
         self.layout_cache.clear();
@@ -1170,16 +1184,40 @@ impl TextEngine {
         self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
     }
 
+    /// Aliases only change which face a family name resolves to. Glyph
+    /// images (keyed by resolved face) and named-family availability are
+    /// alias-independent, and layouts are keyed by the measurer revision, so
+    /// no cache is cleared here.
     fn set_font_aliases(&mut self, aliases: HashMap<String, String>) {
         if self.font_aliases == aliases {
             return;
         }
+        let id = match self.alias_sets.iter().position(|set| *set == aliases) {
+            Some(index) => index as u64,
+            None => {
+                if self.alias_sets.len() as u64 >= MAX_ALIAS_SETS {
+                    self.alias_sets.clear();
+                    self.measurer_base = self.measurer_base.saturating_add(1);
+                }
+                self.alias_sets.push(aliases.clone());
+                self.alias_sets.len() as u64 - 1
+            }
+        };
         self.font_aliases = aliases;
-        self.measurer_revision = self.measurer_revision.saturating_add(1);
-        self.layout_cache.clear();
-        GLYPH_ATLAS.with(|atlas| atlas.borrow_mut().clear());
-        NAMED_FONT_AVAILABILITY.with(|cache| cache.borrow_mut().clear());
-        self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
+        self.alias_set_id = id;
+        self.refresh_measurer_revision();
+    }
+
+    fn bump_measurer_base(&mut self) {
+        self.measurer_base = self.measurer_base.saturating_add(1);
+        self.refresh_measurer_revision();
+    }
+
+    fn refresh_measurer_revision(&mut self) {
+        self.measurer_revision = self
+            .measurer_base
+            .saturating_mul(MAX_ALIAS_SETS)
+            .saturating_add(self.alias_set_id);
     }
 
     fn ensure_resource_revision(&mut self) {
@@ -1189,7 +1227,7 @@ impl TextEngine {
         }
 
         self.resource_revision = revision;
-        self.measurer_revision = self.measurer_revision.saturating_add(1);
+        self.bump_measurer_base();
         self.font_system = self
             .font_database
             .as_ref()
@@ -1930,6 +1968,71 @@ fn extract_selected_text(text: &str, start: Cursor, end: Cursor) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interned_alias_sets_never_share_layouts() {
+        let mono = HashMap::from([("Inter".to_string(), "DejaVu Sans Mono".to_string())]);
+        let serif = HashMap::from([("Inter".to_string(), "DejaVu Serif".to_string())]);
+        let measure = |renderer: &TextRenderer| {
+            renderer.measure_styled("Wide WWW text iii", "Inter", 14.0, 400, 1.2, None)
+        };
+        let fresh = |aliases: &HashMap<String, String>| {
+            let renderer = TextRenderer::new();
+            renderer.set_font_aliases(aliases.clone());
+            measure(&renderer)
+        };
+        let (fresh_mono, fresh_serif) = (fresh(&mono), fresh(&serif));
+
+        let renderer = TextRenderer::new();
+        for _ in 0..3 {
+            renderer.set_font_aliases(mono.clone());
+            assert_eq!(measure(&renderer), fresh_mono);
+            renderer.set_font_aliases(serif.clone());
+            assert_eq!(measure(&renderer), fresh_serif);
+            renderer.set_font_aliases(HashMap::new());
+            measure(&renderer);
+        }
+        assert_eq!(renderer.cache_metrics().layout_misses, 3);
+    }
+
+    // cargo test -p mesh-core-render --release -- alternating_font_alias_surfaces_profile --ignored --nocapture
+    #[test]
+    #[ignore = "release-only font-alias surface alternation profile"]
+    fn alternating_font_alias_surfaces_profile() {
+        use mesh_core_elements::TextMeasurer;
+
+        // Two surfaces painting in turn, one with a module font override.
+        let plain = HashMap::new();
+        let overridden = HashMap::from([("Inter".to_string(), "DejaVu Sans".to_string())]);
+        let renderer = TextRenderer::new();
+        let labels = (0..40).map(|index| format!("label {index}")).collect::<Vec<_>>();
+        let frames = 200u32;
+        let mut revisions = std::collections::HashSet::new();
+        let started = std::time::Instant::now();
+        for frame in 0..frames {
+            let aliases = if frame % 2 == 0 { &plain } else { &overridden };
+            renderer.set_font_aliases(aliases.clone());
+            revisions.insert(renderer.revisions().measurer_revision);
+            for label in &labels {
+                std::hint::black_box(renderer.measure_styled(label, "Inter", 14.0, 400, 1.2, None));
+            }
+        }
+        let elapsed = started.elapsed();
+        let metrics = renderer.cache_metrics();
+        eprintln!(
+            "{frames} alternating surface frames x {} labels: {elapsed:?}; layout hits {} misses {} invalidations {}; distinct measurer revisions {}",
+            labels.len(),
+            metrics.layout_hits,
+            metrics.layout_misses,
+            metrics.layout_invalidations,
+            revisions.len(),
+        );
+        let hit_ratio =
+            metrics.layout_hits as f64 / (metrics.layout_hits + metrics.layout_misses) as f64;
+        println!("MESH_PERF metric=alias_alternation_layout_hit_ratio value={hit_ratio:.6}");
+        assert_eq!(revisions.len(), 2, "each alias set keeps one measurer revision");
+        assert!(hit_ratio >= 0.95, "alternating alias sets must reuse their layouts");
+    }
 
     #[test]
     fn selection_geometry_spans_wrapped_lines() {

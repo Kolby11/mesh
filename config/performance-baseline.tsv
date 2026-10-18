@@ -70,3 +70,5 @@ structural_selector_bucket_speedup       lower      4.00      0
 lazy_frame_plan_speedup                  lower      2.00      0
 filtered_visual_damage_speedup           lower      1.50      0
 label_resize_viewport_damage_percent     upper      1.00      0
+alias_alternation_layout_hit_ratio       lower      0.95      0
+effect_identity_single_pass_speedup      lower      1.50      0

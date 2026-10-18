@@ -265,3 +265,27 @@ fn coalesced_reload_wakeup_profile() {
         assert_eq!(independent.len(), coalesced.len() * 3);
     }
 }
+
+#[test]
+#[ignore = "release-only idle watch-set reconcile profile"]
+fn idle_watch_set_reconcile_profile() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    let mut shell = Shell::new();
+    shell.load_installed_module_graph_cached().unwrap();
+    shell.reconcile_file_watcher();
+    let paths = shell.file_watch_set.paths.len();
+    let modules = shell
+        .installed_module_graph
+        .as_ref()
+        .map_or(0, |graph| graph.modules().len());
+    let iterations = 2_000u32;
+    let started = Instant::now();
+    for _ in 0..iterations {
+        shell.reconcile_file_watcher();
+    }
+    let elapsed = started.elapsed();
+    eprintln!(
+        "idle reconcile: {modules} modules, {paths} watch paths, {iterations} passes {elapsed:?} ({:.1} us/pass)",
+        elapsed.as_secs_f64() * 1e6 / f64::from(iterations)
+    );
+}
