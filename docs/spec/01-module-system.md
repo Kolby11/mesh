@@ -1094,6 +1094,11 @@ without the grant.
   running an exact `-c` script with whole-argument `*` positional values after
   it (`["-c","test -S \"$1\"","sh","*"]`). Basename grants such as `exec.wpctl` are not executable policy. The explicit
   high-risk `exec.command` capability remains the unrestricted override.
+- **Shipped — scoped D-Bus calls.** `dbus.call:<bus>:<destination>:<interface>`
+  permits `mesh.dbus_call` to one interface at one bus name, or at any name with
+  `*` (for per-client services such as StatusNotifier items). `<bus>` is
+  `system` (High) or `session` (Elevated). The broad `dbus.system` and
+  `dbus.session` grants cover signal subscription only, not calls.
 - **Shipped — exec locale.** Exec children run in `LC_ALL=C.UTF-8` so a
   provider parses the same tool output on every host. A call can ask for
   another locale with an options table, `mesh.exec(program, args, { locale =

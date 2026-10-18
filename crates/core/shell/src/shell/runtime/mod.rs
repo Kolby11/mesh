@@ -438,6 +438,11 @@ impl Shell {
             resource_wake.wake()
         })));
 
+        if let Err(error) =
+            super::signals::spawn_signal_shutdown(&runtime, tx.clone(), wake.clone())
+        {
+            tracing::warn!("signal shutdown handler unavailable: {error}");
+        }
         self.file_watcher_tx = Some(tx.clone());
         self.reconcile_file_watcher();
         self.backend_respawn = Some(backend::BackendRespawnContext {

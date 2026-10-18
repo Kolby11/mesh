@@ -46,4 +46,5 @@ smallvec = "1"
 rayon = { workspace = true }
 
 [dev-dependencies]
+libc = { workspace = true }
 tempfile = "3"

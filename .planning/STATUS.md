@@ -15,6 +15,10 @@ measurements are in [`log/`](log/README.md). Open work is in
   Native grants are approved in `config/module.json`; a live shell spawns no
   monitor subprocesses. Measurements are in the performance log.
 
+- **Signal shutdown and `mesh.dbus_call` implemented:** signals run the ordinary
+  teardown (no orphaned monitors); scoped `dbus.call:` grants allow method calls.
+  Next D-Bus step is A8: migrate UPower/NetworkManager reads off `exec.argv`.
+
 - **Finalized memo entries and D7 matching implemented:** component memo
   entries retain pre-animation styles and semantics; class/state reverse
   dependencies include component and theme rules. Rebuilds defer compiler

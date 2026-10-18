@@ -3100,6 +3100,42 @@ fn native_event_sources_require_grants_and_startup() {
 }
 
 #[test]
+fn dbus_call_requires_a_matching_grant_and_startup() {
+    let call = "mesh.dbus_call('session', { destination = 'org.mesh.Test', path = '/org/mesh/Test', interface = 'org.mesh.Test', member = 'Echo' })";
+    for grants in [
+        vec![],
+        vec!["dbus.session".to_string()],
+        vec!["dbus.call:system:*:org.mesh.Test".to_string()],
+        vec!["dbus.call:session:org.mesh.Other:org.mesh.Test".to_string()],
+        vec!["dbus.call:session:*:org.mesh.Other".to_string()],
+    ] {
+        let mut ctx =
+            BackendScriptContext::new_with_capabilities("@test/dbus-call", grants.clone());
+        ctx.load_script(&format!(
+            "state = {{}}; function start(self) local reply = {call}; state.success = reply.success; state.error = reply.error end"
+        ))
+        .unwrap();
+        let state = ctx.call_init().unwrap().unwrap();
+        assert_eq!(state["success"], false, "{grants:?}");
+        assert_eq!(
+            state["error"], "missing capability dbus.call:session:org.mesh.Test:org.mesh.Test",
+            "{grants:?}"
+        );
+    }
+    let mut ctx = BackendScriptContext::new("@test/dbus-call-staging");
+    assert!(
+        ctx.load_script(&format!("{call}; function start(self) end"))
+            .unwrap_err()
+            .to_string()
+            .contains("before start(self)")
+    );
+    let mut ctx = BackendScriptContext::new("@test/dbus-call-fields");
+    ctx.load_script("function start(self) mesh.dbus_call('session', { destination = 'a.b', path = '/', interface = 'a.b', member = 'C', extra = 1 }) end")
+        .unwrap();
+    assert!(ctx.call_init().is_err());
+}
+
+#[test]
 fn stream_callbacks_suspend_and_report_completion_and_failure() {
     for hook in ["on_stream_batch", "on_stream_line"] {
         let mut ctx = BackendScriptContext::new("@test/async-stream");

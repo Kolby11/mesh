@@ -68,8 +68,9 @@ unless an item says otherwise. IDs point into the
 - [ ] **A6 / RES-05:** Ship bar widgets as separate `mesh.navigation.item`
       modules with per-instance props; share volume presentation in a library.
 - [ ] **A2:** Optional named features inside contracts with `supports()` checks.
-- [ ] **A8:** Scoped D-Bus, file read/watch and Wayland protocol host primitives
-      (extends the D-Bus item under Runtime boundary); plain-language permissions.
+- [ ] **A8:** Move UPower/NetworkManager state reads from `exec.argv` to scoped
+      `dbus.call` grants; scope `dbus.*` subscriptions per sender and `fs.*` per path;
+      ext-workspace protocol data; plain-language permissions.
 - [ ] **A4:** `module fork` / `diff` / `rebase` with recorded upstream.
 
 ### Priority 8 — Structural mechanics
@@ -95,7 +96,8 @@ unless an item says otherwise. IDs point into the
 - [ ] **CSS profile gaps:** `background:` drops gradients (only `background-image` takes them);
       gradients and `box-shadow` accept hex colours only, two stops, one shadow.
 - [ ] **Host APIs:** `net.http` and `exec.launch-app` are catalogued but unimplemented
-      (providers shell out to `curl` / `hyprctl dispatch`); no D-Bus API, so no StatusNotifier tray.
+      (providers shell out to `curl` / `hyprctl dispatch`). A StatusNotifier tray still needs
+      D-Bus name ownership and exported objects (watcher/host); `mesh.dbus_call` only calls out.
 - [ ] **Tooltips on bottom/right-anchored surfaces:** those surfaces get no tooltip reserve on
       their anchored axis, so tooltips cannot overflow toward the screen; promote tooltips to `xdg_popup`.
 - [ ] **`mesh-shell profile use` live switch:** rejected against a running shell (candidate
@@ -331,9 +333,6 @@ of payoff.
 
 ### Runtime boundary
 
-- [ ] Signal-terminated shells orphan `exec_stream` monitors: `kill_on_drop` never
-      runs on SIGINT/SIGTERM and no handler exists. Add graceful signal shutdown
-      (`PR_SET_PDEATHSIG` is unsafe: spawning threads can be idle Tokio workers).
 - [ ] Handler sync still reads compound table globals, because nested in-place
       mutations never assign through `_ENV`. Eliminating those reads needs
       recursively tracked tables or Rust-owned reactive values (R).

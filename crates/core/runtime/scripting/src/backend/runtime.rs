@@ -1651,6 +1651,85 @@ impl BackendScriptContext {
                     }
                 })?,
         )?;
+        let grants = self
+            .capabilities
+            .iter()
+            .filter_map(|id| mesh_core_capability::parse_dbus_call_capability(id))
+            .collect::<Arc<[_]>>();
+        let permitted = move |bus: &str, call: &super::dbus_call::MethodCall| {
+            let system = match bus {
+                "system" => true,
+                "session" => false,
+                _ => return Err(mlua::Error::runtime("bus must be system or session")),
+            };
+            Ok(grants
+                .iter()
+                .any(|grant| grant.permits(system, &call.destination, &call.interface)))
+        };
+        let denied = |bus: &str, call: &super::dbus_call::MethodCall| {
+            serde_json::json!({
+                "success": false, "signature": "", "body": [], "error_name": "",
+                "error": format!(
+                    "missing capability dbus.call:{bus}:{}:{}",
+                    call.destination, call.interface
+                ),
+            })
+        };
+        let module_id = self.module_id.clone();
+        let resources = self.policy.budget();
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        let check = permitted.clone();
+        let blocking = self.lua_ref()?.create_function(move |lua, (bus, call): (String, Table)| {
+            require_started(&started)?;
+            let call = lua.from_value::<super::dbus_call::MethodCall>(LuaValue::Table(call))?;
+            let reply = if check(&bus, &call)? {
+                let _frame_pause = resources.pause_frame_clock();
+                super::dbus_call::call(
+                    &super::dbus_call::BusTarget::named(&bus).expect("permitted bus is named"),
+                    &call,
+                    resources.child_process_timeout(),
+                    resources.output_limit() as usize,
+                )
+            } else {
+                tracing::warn!(module_id = %module_id, bus = %bus, destination = %call.destination,
+                    interface = %call.interface, "denied backend dbus_call");
+                denied(&bus, &call)
+            };
+            let bytes = resources
+                .validate_json(&reply, "backend D-Bus reply")
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            resources
+                .reserve_output(bytes)
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            lua.to_value(&reply)
+        })?;
+        let resources = self.policy.budget();
+        let owner = Arc::clone(&self.task_io);
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        let start = self
+            .lua_ref()?
+            .create_function(move |lua, (bus, call): (String, Table)| {
+                require_started(&started)?;
+                let call = lua.from_value::<super::dbus_call::MethodCall>(LuaValue::Table(call))?;
+                if !permitted(&bus, &call)? {
+                    return super::task_io::TaskIo::ready(
+                        lua,
+                        denied(&bus, &call),
+                        resources.clone(),
+                    );
+                }
+                let timeout = resources.child_process_timeout();
+                let limit = resources.output_limit() as usize;
+                owner.spawn(lua, resources.clone(), move || {
+                    let target =
+                        super::dbus_call::BusTarget::named(&bus).expect("permitted bus is named");
+                    Ok(super::dbus_call::call(&target, &call, timeout, limit))
+                })
+            })?;
+        mesh.set(
+            "dbus_call",
+            super::task_io::yielding_host_function(self.lua_ref()?, blocking, start)?,
+        )?;
         let granted = self.capabilities.contains("net.netlink");
         let streams = Arc::clone(&self.streams);
         let started = Arc::clone(&self.host_side_effects_enabled);

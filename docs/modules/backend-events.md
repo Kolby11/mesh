@@ -93,6 +93,46 @@ structure, such as `(su)`). Body entries use zvariant's JSON representation,
 including each value's signature and value. Empty bodies are empty arrays.
 D-Bus uses a bounded 64-message subscription queue before the shared stream queue.
 
+## D-Bus method calls
+
+`mesh.dbus_call(bus, call)` sends one method call and returns its reply. It
+needs a `dbus.call:<bus>:<destination>:<interface>` grant matching the call;
+`*` as the destination permits any bus name for that interface. The broad
+`dbus.system`/`dbus.session` grants do not permit calls.
+
+```lua
+local reply = mesh.dbus_call("system", {
+    destination = "org.freedesktop.UPower",
+    path = "/org/freedesktop/UPower/devices/DisplayDevice",
+    interface = "org.freedesktop.DBus.Properties",
+    member = "Get",
+    signature = "ss",
+    args = { "org.freedesktop.UPower.Device", "Percentage" },
+})
+if reply.success then
+    local percentage = reply.body[1].value.value
+end
+```
+
+`signature` describes `args` and is omitted for a call without arguments.
+Arguments map from Luau by type: integers for `y n q i u x t` (range-checked),
+numbers for `d`, booleans, strings for `s o g`, arrays for `a…`, arrays of fields
+for structures, and tables with string keys for dictionaries (integer and boolean
+keys are written as strings). A variant argument is `{ signature = "s", value = … }`.
+File descriptors are not supported. Malformed arguments fail without contacting
+the bus. Values beyond 2^53 lose precision in Luau numbers.
+
+The reply has `success`, `signature`, `body`, `error` and `error_name`. `body`
+uses the same `{signature, value}` entries as signal records, so a reply value can
+be passed back as a variant argument. A D-Bus error reply sets `error_name` (for
+example `org.freedesktop.DBus.Error.UnknownMethod`); denied grants, connection
+failures, the callback timeout and replies over the output limit set only `error`.
+
+In a coroutine the call suspends on the bounded host worker pool like
+`mesh.socket_request`; elsewhere it blocks the backend callback. Each call opens a
+private bus connection, so it suits occasional reads and controls rather than
+per-frame polling.
+
 ## Other protocol records
 
 PipeWire records have `event` and the registry object's `id`: `added`, `removed`,

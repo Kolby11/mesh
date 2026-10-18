@@ -1,4 +1,5 @@
 mod command;
+mod dbus_call;
 mod errors;
 mod event;
 mod exec;

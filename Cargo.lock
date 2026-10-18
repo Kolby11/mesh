@@ -2456,6 +2456,7 @@ name = "mesh-core-shell"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.11.1",
+ "libc",
  "mesh-core-animation",
  "mesh-core-backend",
  "mesh-core-capability",

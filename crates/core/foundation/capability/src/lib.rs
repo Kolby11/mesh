@@ -238,6 +238,13 @@ impl CapabilityCatalog {
         if id.starts_with("exec.argv:") && parse_exec_argv_capability(id).is_some() {
             return Some(PrivilegeLevel::High);
         }
+        if let Some(grant) = parse_dbus_call_capability(id) {
+            return Some(if grant.system {
+                PrivilegeLevel::High
+            } else {
+                PrivilegeLevel::Elevated
+            });
+        }
         BUILTIN_CAPABILITIES
             .iter()
             .find_map(|(known, level)| (*known == id).then_some(*level))
@@ -307,6 +314,64 @@ pub fn parse_exec_argv_capability(value: &str) -> Option<(String, Option<Vec<Str
         Some(serde_json::from_str::<Vec<String>>(arguments).ok()?)
     };
     Some((program.to_string(), arguments))
+}
+
+/// A `dbus.call:<bus>:<destination>:<interface>` grant: method calls on one
+/// interface, at one bus name or (`*`) at any name on that bus.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DbusCallGrant {
+    pub system: bool,
+    /// `None` permits any destination, for per-client services such as
+    /// StatusNotifier items that live at unpredictable unique names.
+    pub destination: Option<String>,
+    pub interface: String,
+}
+
+impl DbusCallGrant {
+    pub fn permits(&self, system: bool, destination: &str, interface: &str) -> bool {
+        self.system == system
+            && self.interface == interface
+            && self
+                .destination
+                .as_deref()
+                .is_none_or(|granted| granted == destination)
+    }
+}
+
+pub fn parse_dbus_call_capability(value: &str) -> Option<DbusCallGrant> {
+    let mut parts = value.strip_prefix("dbus.call:")?.splitn(3, ':');
+    let system = match parts.next()? {
+        "system" => true,
+        "session" => false,
+        _ => return None,
+    };
+    let destination = match parts.next()? {
+        "*" => None,
+        name if dbus_dotted_name(name, true) => Some(name.to_string()),
+        _ => return None,
+    };
+    let interface = parts.next()?;
+    dbus_dotted_name(interface, false).then(|| DbusCallGrant {
+        system,
+        destination,
+        interface: interface.to_string(),
+    })
+}
+
+/// D-Bus well-known bus names and interface names: two or more dot-separated
+/// elements of `[A-Za-z0-9_]` (bus names also allow `-`), none starting with a
+/// digit, at most 255 bytes.
+fn dbus_dotted_name(name: &str, bus_name: bool) -> bool {
+    let elements = name.split('.').collect::<Vec<_>>();
+    name.len() <= 255
+        && elements.len() >= 2
+        && elements.iter().all(|element| {
+            !element.is_empty()
+                && !element.starts_with(|c: char| c.is_ascii_digit())
+                && element
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || (bus_name && c == '-'))
+        })
 }
 
 /// Whether an in-argument `*` of an `exec.argv` grant may match `c`. The set
@@ -606,6 +671,42 @@ impl Default for CapabilitySet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dbus_call_grants_scope_bus_destination_and_interface() {
+        let catalog = CapabilityCatalog::builtin();
+        assert_eq!(
+            catalog.validate("dbus.call:session:*:org.kde.StatusNotifierItem"),
+            Ok(PrivilegeLevel::Elevated)
+        );
+        assert_eq!(
+            catalog.validate("dbus.call:system:org.freedesktop.UPower:org.freedesktop.UPower"),
+            Ok(PrivilegeLevel::High)
+        );
+        for invalid in [
+            "dbus.call:session:*",
+            "dbus.call:user:*:org.a.B",
+            "dbus.call:session:*:*",
+            "dbus.call:session::1.42:org.a.B",
+            "dbus.call:session:org:org.a.B",
+            "dbus.call:session:org.a.B:org.a-b.C",
+            "dbus.call:session:org.a.B:org.1a.C",
+        ] {
+            assert!(
+                catalog.validate(invalid).is_err(),
+                "{invalid} must be rejected"
+            );
+        }
+
+        let any = parse_dbus_call_capability("dbus.call:session:*:org.a.Item").unwrap();
+        assert!(any.permits(false, ":1.42", "org.a.Item"));
+        assert!(!any.permits(true, ":1.42", "org.a.Item"));
+        assert!(!any.permits(false, ":1.42", "org.a.Other"));
+        let one =
+            parse_dbus_call_capability("dbus.call:session:org.a.Watcher:org.a.Watcher").unwrap();
+        assert!(one.permits(false, "org.a.Watcher", "org.a.Watcher"));
+        assert!(!one.permits(false, "org.b.Watcher", "org.a.Watcher"));
+    }
 
     #[derive(Clone, Copy, Debug, Default)]
     struct AllocationCounters {

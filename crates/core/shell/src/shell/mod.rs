@@ -142,6 +142,7 @@ mod package;
 mod profile;
 mod runtime;
 mod service;
+mod signals;
 mod sounds;
 mod surface_layout;
 mod types;
