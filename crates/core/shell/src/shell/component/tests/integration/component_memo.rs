@@ -1028,3 +1028,74 @@ end)
     assert_eq!(hits, iterations * 12);
     assert!(hit_time < miss_time);
 }
+
+#[test]
+fn finalized_component_memo_matches_fresh_styles_semantics_and_pixels() {
+    const SOURCE: &str = r#"
+<template><box class={variant}><Child /></box></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+variant = "plain"
+</script>
+<style>
+box { transition: none; }
+.warm { color: #ff0000; font-size: 22px; }
+.hidden { display: none; }
+</style>
+"#;
+    const CHILD: &str = r#"
+<template><button><text content="Memo child" /></button></template>
+<style>button { transition: none; } text { transition: none; }</style>
+"#;
+    fn assert_projection(a: &WidgetNode, b: &WidgetNode) {
+        assert_eq!(a.computed_style, b.computed_style);
+        assert_eq!(a.accessibility, b.accessibility);
+        assert_eq!(
+            (a.layout.x, a.layout.y, a.layout.width, a.layout.height),
+            (b.layout.x, b.layout.y, b.layout.width, b.layout.height)
+        );
+        assert_eq!(a.children.len(), b.children.len());
+        for (a, b) in a.children.iter().zip(b.children.iter()) {
+            assert_projection(a, b);
+        }
+    }
+    let mut memo = memo_surface(SOURCE, &[("Child", CHILD)]);
+    let mut fresh = memo_surface(SOURCE, &[("Child", CHILD)]);
+    for _ in 0..3 {
+        rebuild(&mut memo, 240, 80);
+        rebuild(&mut fresh, 240, 80);
+    }
+    for (variant, width) in [
+        ("plain", 240),
+        ("warm", 240),
+        ("hidden", 240),
+        ("plain", 240),
+        ("warm", 300),
+        ("plain", 300),
+    ] {
+        for component in [&mut memo, &mut fresh] {
+            component
+                .runtimes
+                .lock()
+                .unwrap()
+                .get_mut(PARENT_ID)
+                .unwrap()
+                .script_ctx
+                .set_member_state("variant", serde_json::json!(variant))
+                .unwrap();
+        }
+        fresh.clear_component_memo();
+        let cached_pixels = rebuild(&mut memo, width, 80);
+        let fresh_pixels = rebuild(&mut fresh, width, 80);
+        assert_eq!(
+            cached_pixels.data(),
+            fresh_pixels.data(),
+            "{variant} at {width}"
+        );
+        assert_projection(
+            memo.last_tree.as_ref().unwrap(),
+            fresh.last_tree.as_ref().unwrap(),
+        );
+    }
+    assert!(memo.component_memo_hit_count() > 0);
+}

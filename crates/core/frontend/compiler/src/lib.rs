@@ -545,6 +545,7 @@ impl CompiledFrontendModule {
             composition,
             measurer,
             None,
+            false,
         )
     }
 
@@ -575,6 +576,36 @@ impl CompiledFrontendModule {
             composition,
             measurer,
             Some((previous, rebuild_node_ids)),
+            false,
+        )
+    }
+
+    /// Build a surface for a host that will annotate, restyle, lay out and
+    /// normalize it before use. Geometry here is provisional; previews should
+    /// use `build_tree_with_state` instead. Selective builds require the same
+    /// statically shaped template guard as `build_tree_with_state_selective`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_tree_for_finalization(
+        &self,
+        theme: &Theme,
+        width: u32,
+        height: u32,
+        state: Option<&dyn VariableStore>,
+        instance_key: &str,
+        composition: &dyn FrontendCompositionResolver,
+        selective: Option<(&WidgetNode, &HashSet<NodeId>)>,
+    ) -> WidgetNode {
+        self.build_tree_with_state_inner(
+            theme,
+            width,
+            height,
+            state,
+            FrontendRenderMode::Surface,
+            instance_key,
+            Some(composition),
+            None,
+            selective,
+            true,
         )
     }
 
@@ -597,6 +628,7 @@ impl CompiledFrontendModule {
         composition: Option<&dyn FrontendCompositionResolver>,
         measurer: Option<&dyn mesh_core_elements::TextMeasurer>,
         selective: Option<(&WidgetNode, &HashSet<NodeId>)>,
+        defer_layout: bool,
     ) -> WidgetNode {
         let _source_path_guard = render::ComponentSourcePathGuard::enter(Some(&self.source_path));
         let mut root = WidgetNode::new("surface");
@@ -714,10 +746,10 @@ impl CompiledFrontendModule {
 
         // Embedded trees are laid out after composition, against the embedded
         // node's constraints — not the host's full bounds available here.
-        if mode == FrontendRenderMode::Surface {
+        if mode == FrontendRenderMode::Surface && !defer_layout {
             LayoutEngine::compute_with_measurer(&mut root, width as f32, height as f32, measurer);
         }
-        mesh_core_elements::normalize_accessibility(&mut root);
+        mesh_core_elements::normalize_accessibility_before_finalization(&mut root);
         root
     }
 

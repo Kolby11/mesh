@@ -20,9 +20,10 @@
 //! surface-portal state writes (`pending_surface_states`) veto caching because
 //! they must re-run every build.
 //!
-//! Cached nodes are position-independent: `_mesh_key` identity and
-//! interaction annotations are applied later by `finalize_tree`, and event
-//! handlers are already namespaced by instance key during attribute
+//! Cached nodes hold finalized styles and semantics before animation sampling.
+//! Authored inputs remain position-independent. Runtime identity and interaction
+//! annotations are refreshed by `finalize_tree`; event handlers are already
+//! namespaced by instance key during attribute
 //! construction. The cache is cleared by `reset_render_caches` (theme change,
 //! locale change, source reload — the same sites that clear or invalidate the
 //! runtimes map).
@@ -402,7 +403,7 @@ impl FrontendSurfaceComponent {
         container_width: f32,
         container_height: f32,
         marks_before: MemoEffectMarks,
-        node: &WidgetNode,
+        node: &mut WidgetNode,
     ) {
         if self.portal_state_writes.get() != marks_before.portal {
             // A nested surface portal published visibility state during this
@@ -414,6 +415,7 @@ impl FrontendSurfaceComponent {
         let Some(subtree_generation) = self.runtime_subtree_generation(instance_key) else {
             return;
         };
+        node.set_memo_instance(self.instance_keys.borrow_mut().intern(instance_key));
         self.component_memo.borrow_mut().insert(
             self.instance_keys.borrow_mut().intern(instance_key),
             ComponentMemoEntry {
@@ -427,6 +429,22 @@ impl FrontendSurfaceComponent {
                 node: node.clone(),
             },
         );
+    }
+
+    /// Publish pre-animation projections only. Layout and runtime identities
+    /// are refreshed on reuse; styles and semantics carry their own validity.
+    pub(super) fn finalize_component_memo(&self, tree: &WidgetNode) {
+        fn visit(node: &WidgetNode, memo: &mut HashMap<Arc<str>, ComponentMemoEntry>) {
+            if let Some(key) = node.memo_instance()
+                && let Some(entry) = memo.get_mut(key)
+            {
+                entry.node.retain_finalization_from(node);
+            }
+            for child in &node.children {
+                visit(child, memo);
+            }
+        }
+        visit(tree, &mut self.component_memo.borrow_mut());
     }
 
     pub(super) fn clear_component_memo(&self) {

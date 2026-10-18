@@ -356,6 +356,9 @@ impl FrontendSurfaceComponent {
             // sample and the last painted style. A value sampled at this same
             // `now` alone cannot detect that final change.
             let sampled = AnimatableStyle::from_node_in_containing_block(node, containing_block);
+            if animation_is_live || before_sampling != sampled {
+                node.mark_style_sampled();
+            }
             if animation_is_live
                 || before_sampling != sampled
                 || previous_styles

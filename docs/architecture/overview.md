@@ -39,6 +39,11 @@ the installed graph, registers interface contracts and providers, compiles
 frontend roots, executes service/component Luau, renders surfaces, and handles
 Wayland events.
 
+Shell tree builds defer layout until runtime annotation and the final cascade
+are applied. Overflow then uses that geometry. Component memo entries preserve
+pre-animation styles and semantic projections while retaining original authored
+inputs; previews continue to produce a complete laid-out tree.
+
 Hot reload uses a managed filesystem watcher that blocks on inotify and a
 control eventfd; watch replacement and shutdown wake that wait directly. With
 a healthy watcher, theme, settings, frontend metadata, and watch-set maintenance

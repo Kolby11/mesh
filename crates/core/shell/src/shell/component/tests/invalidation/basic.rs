@@ -2772,3 +2772,34 @@ end
     let tree = component.last_tree.as_ref().expect("tree");
     assert!(content_of(tree, "visible"), "the {{#if}} body must appear");
 }
+
+#[test]
+fn template_patching_unhides_nodes_without_selector_changes() {
+    let mut component = test_frontend_component(
+        r#"
+<script lang="luau">
+hidden = false
+function toggle() hidden = not hidden end
+</script>
+<template><column><button hidden={hidden}>Visible again</button></column></template>
+<style>button { transition: none; width: 100px; height: 30px; }</style>
+"#,
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(240, 80);
+    let mut buffer = PixelBuffer::new(240, 80);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    for hidden in [true, false, true, false] {
+        component.call_namespaced_handler("toggle", &[]).unwrap();
+        component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+        let node = first_node_by_tag(component.last_tree.as_ref().unwrap(), "button").unwrap();
+        assert_eq!(
+            node.computed_style.display == mesh_core_elements::Display::None,
+            hidden
+        );
+        assert_eq!(node.accessibility.hidden, hidden);
+        if !hidden {
+            assert!(node.layout.width > 0.0);
+        }
+    }
+}

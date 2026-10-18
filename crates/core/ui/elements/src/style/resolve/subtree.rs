@@ -7,6 +7,60 @@ use crate::style::*;
 use mesh_core_component::style::StyleRule;
 
 impl<'a> StyleResolver<'a> {
+    fn finalized_style_reuse(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
+        context: StyleContext,
+        parent: Option<&ParentInheritedStyle>,
+    ) -> (bool, bool) {
+        if !self.reuse_finalized || !node.finalized_style_pristine {
+            return (false, false);
+        }
+        let Some(cached) = node.finalized_style.clone() else {
+            return (false, false);
+        };
+        if !cached.same_environment(parent, self, index, context) {
+            return (false, false);
+        }
+        if node.finalized_style_valid {
+            return (true, true);
+        }
+        (
+            cached.same_matching_rules(node, rules, index, context, self),
+            false,
+        )
+    }
+
+    fn remember_finalized_style(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        index: &StyleRuleIndex,
+        context: StyleContext,
+        parent: Option<&ParentInheritedStyle>,
+    ) {
+        node.finalized_accessibility_valid &= node
+            .children
+            .iter()
+            .all(|child| child.finalized_accessibility_valid);
+        if !self.reuse_finalized && !self.incremental_matching {
+            node.finalized_style = None;
+            node.finalized_style_valid = false;
+            return;
+        }
+        let unchanged = node.finalized_style.as_ref().is_some_and(|cached| {
+            cached.matches_node(node) && cached.same_environment(parent, self, index, context)
+        });
+        if !unchanged {
+            node.finalized_style = Some(std::sync::Arc::new(FinalizedStyle::new(
+                node, parent, self, index, context,
+            )));
+        }
+        node.finalized_style_valid = true;
+        node.finalized_style_pristine = true;
+    }
+
     /// Re-resolves the computed style of `node` and its descendants, reusing a
     /// caller-provided index. The index must have been built from the same
     /// `rules` slice; this is verified with `is_for()` and the index is rebuilt
@@ -80,7 +134,15 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
         parent_style: Option<&ParentInheritedStyle>,
     ) {
-        if !preserve_synthetic_surface_style(node, parent_style) {
+        let (reuse_node, reuse_subtree) =
+            self.finalized_style_reuse(node, rules, index, context, parent_style);
+        if reuse_subtree {
+            return;
+        }
+        if !reuse_node {
+            node.finalized_accessibility_valid = false;
+        }
+        if !reuse_node && !preserve_synthetic_surface_style(node, parent_style) {
             let attrs = StyleNodeAttrs::from_node(node);
             node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
                 rules,
@@ -100,6 +162,7 @@ impl<'a> StyleResolver<'a> {
         for child in &mut node.children {
             self.restyle_subtree_with_index(child, rules, index, context, Some(&parent));
         }
+        self.remember_finalized_style(node, index, context, parent_style);
     }
 
     pub(super) fn restyle_subtree_with_index_profiled(
@@ -111,7 +174,15 @@ impl<'a> StyleResolver<'a> {
         parent_style: Option<&ParentInheritedStyle>,
         attribution: &mut StyleRuleAttribution,
     ) {
-        if !preserve_synthetic_surface_style(node, parent_style) {
+        let (reuse_node, reuse_subtree) =
+            self.finalized_style_reuse(node, rules, index, context, parent_style);
+        if reuse_subtree {
+            return;
+        }
+        if !reuse_node {
+            node.finalized_accessibility_valid = false;
+        }
+        if !reuse_node && !preserve_synthetic_surface_style(node, parent_style) {
             let attrs = StyleNodeAttrs::from_node(node);
             node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
                 rules,
@@ -137,6 +208,7 @@ impl<'a> StyleResolver<'a> {
                 attribution,
             );
         }
+        self.remember_finalized_style(node, index, context, parent_style);
     }
 
     pub fn restyle_subtree_for_ids(
@@ -207,14 +279,24 @@ impl<'a> StyleResolver<'a> {
         parent_style: Option<&ParentInheritedStyle>,
         inherited_dirty: bool,
     ) {
+        node.finalized_style_valid = false;
         let is_target = target_ids.contains(&node.id);
         // A node should have its style recomputed if it is a direct target or
         // an inherited field changed on its parent. Parent context itself is
         // carried independently so a deep direct target retains inherited
         // values without forcing clean ancestors through style resolution.
         let should_restyle = is_target || inherited_dirty;
+        let was_pristine = node.finalized_style_pristine;
 
-        if should_restyle {
+        let reuse_node = should_restyle
+            && !inherited_dirty
+            && self.incremental_matching
+            && node.finalized_style.clone().is_some_and(|cached| {
+                cached.same_environment(parent_style, self, index, context)
+                    && cached.same_matching_rules(node, rules, index, context, self)
+            });
+        if should_restyle && !reuse_node {
+            node.finalized_accessibility_valid = false;
             let previous_inherited = ParentInheritedStyle::from(&node.computed_style);
             if !preserve_synthetic_surface_style(node, parent_style) {
                 // Recompute this node's style.
@@ -270,6 +352,11 @@ impl<'a> StyleResolver<'a> {
                 );
             }
         }
+        if should_restyle {
+            self.remember_finalized_style(node, index, context, parent_style);
+            node.finalized_style_pristine = !reuse_node || was_pristine;
+            node.finalized_style_valid = false;
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -284,8 +371,18 @@ impl<'a> StyleResolver<'a> {
         inherited_dirty: bool,
         attribution: &mut StyleRuleAttribution,
     ) {
+        node.finalized_style_valid = false;
         let should_restyle = target_ids.contains(&node.id) || inherited_dirty;
-        if should_restyle {
+        let was_pristine = node.finalized_style_pristine;
+        let reuse_node = should_restyle
+            && !inherited_dirty
+            && self.incremental_matching
+            && node.finalized_style.clone().is_some_and(|cached| {
+                cached.same_environment(parent_style, self, index, context)
+                    && cached.same_matching_rules(node, rules, index, context, self)
+            });
+        if should_restyle && !reuse_node {
+            node.finalized_accessibility_valid = false;
             let previous_inherited = ParentInheritedStyle::from(&node.computed_style);
             if !preserve_synthetic_surface_style(node, parent_style) {
                 let attrs = StyleNodeAttrs::from_node(node);
@@ -330,6 +427,11 @@ impl<'a> StyleResolver<'a> {
                     attribution,
                 );
             }
+        }
+        if should_restyle {
+            self.remember_finalized_style(node, index, context, parent_style);
+            node.finalized_style_pristine = !reuse_node || was_pristine;
+            node.finalized_style_valid = false;
         }
     }
 }

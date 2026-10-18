@@ -11,7 +11,7 @@ use mesh_core_component::template::{
 use mesh_core_elements::style::StylePropertyMask;
 use mesh_core_elements::{
     ComputedStyle, NodeId, StyleContext, StyleResolver, VariableStore, WidgetNode,
-    authored_element_state, normalize_accessibility,
+    authored_element_state, normalize_accessibility_before_finalization as normalize_accessibility,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;

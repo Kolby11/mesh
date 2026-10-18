@@ -217,7 +217,16 @@ Other property-specific token lowering remains a target.
 
 **Shipped:** compound selectors retain their tag/class/id candidate filter when
 pseudo-states change. Pseudo-state dependencies are indexed separately for
-invalidation, including all states in multi-state compounds.
+invalidation, including all states in multi-state compounds. Class dependencies
+include every class atom, independently of the forward candidate bucket.
+Targeted updates test changed dependencies for selector entry and exit; nodes
+whose matched rules do not change retain their computed style. Inherited text
+and custom-property changes still propagate to descendants.
+
+**Shipped:** component memo entries retain pre-animation styles. Reuse checks
+the theme, rule-index revision, component props, container dimensions, inherited
+values and annotated node inputs before skipping a clean subtree. Lifecycle
+classes and runtime value overrides remain separate from authored memo inputs.
 
 Component `<style>` blocks support a deliberate selector subset: tag, `.class`,
 `#id`, `*`, pseudo-states (`:hover`, `:focus`, `:focus-visible`, `:active`,

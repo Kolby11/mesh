@@ -16,6 +16,8 @@ use std::sync::Arc;
 /// index validates identity through `is_for()`.
 #[derive(Debug, Clone)]
 pub struct StyleRuleIndex {
+    pub(super) revision: u64,
+    class_to_rules: HashMap<String, Vec<usize>>,
     pub(super) rules_ptr: usize,
     pub(super) rules_len: usize,
     pub(super) tag: HashMap<String, Vec<usize>>,
@@ -75,6 +77,11 @@ impl StyleRuleAttribution {
 impl StyleRuleIndex {
     pub fn new(rules: &[StyleRule]) -> Self {
         let mut index = Self {
+            revision: {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
+            class_to_rules: HashMap::new(),
             rules_ptr: rules.as_ptr() as usize,
             rules_len: rules.len(),
             tag: HashMap::new(),
@@ -99,8 +106,62 @@ impl StyleRuleIndex {
         };
         for (idx, rule) in rules.iter().enumerate() {
             index.index_selector(idx, &rule.selector);
+            index.index_class_dependencies(idx, &rule.selector);
         }
         index
+    }
+
+    fn index_class_dependencies(&mut self, idx: usize, selector: &Selector) {
+        match selector {
+            Selector::Class(class) => self
+                .class_to_rules
+                .entry(class.clone())
+                .or_default()
+                .push(idx),
+            Selector::Compound(parts) => {
+                for part in parts {
+                    self.index_class_dependencies(idx, part);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Whether changes to class/state inputs leave the matched rule set intact.
+    /// Reverse dependencies include every compound atom, independently of the
+    /// forward bucket chosen to find candidates. Both selector entry and exit
+    /// are tested, including container conditions.
+    pub fn changed_dependencies_preserve_matches(
+        &self,
+        rules: &[StyleRule],
+        old: &StyleNodeAttrs<'_>,
+        new: &StyleNodeAttrs<'_>,
+        context: StyleContext,
+    ) -> bool {
+        if !self.is_for(rules) || old.tag != new.tag || old.id != new.id {
+            return false;
+        }
+        let unchanged = |idx: usize| {
+            rule_matches_attrs(&rules[idx], old, context)
+                == rule_matches_attrs(&rules[idx], new, context)
+        };
+        for class in old.classes.iter().chain(new.classes.iter()) {
+            if old.has_class(class) != new.has_class(class)
+                && self
+                    .class_to_rules
+                    .get(class)
+                    .is_some_and(|rules| rules.iter().any(|&idx| !unchanged(idx)))
+            {
+                return false;
+            }
+        }
+        let changed_state = old.state_mask ^ new.state_mask;
+        for (&bit, rules) in &self.state_to_rules {
+            if changed_state & bit != 0 && rules.iter().any(|&idx| !unchanged(idx)) {
+                return false;
+            }
+        }
+        true
     }
 
     /// Returns true when this index was built from the given rules slice

@@ -333,6 +333,12 @@ pub struct WidgetNode {
     /// lowered to the compositor surface rather than consumed by Taffy's
     /// synthetic wrapper.
     surface_root: bool,
+    pub(crate) finalized_style: Option<Arc<crate::style::FinalizedStyle>>,
+    pub(crate) finalized_accessibility: Option<Arc<crate::accessibility::FinalizedAccessibility>>,
+    pub(crate) finalized_style_valid: bool,
+    pub(crate) finalized_style_pristine: bool,
+    pub(crate) finalized_accessibility_valid: bool,
+    memo_instance: Option<Arc<str>>,
     authored: Arc<WidgetNodeAuthored>,
 }
 
@@ -424,6 +430,12 @@ impl WidgetNode {
             cached_class_attr: None,
             cached_classes: Vec::new(),
             surface_root: false,
+            finalized_style: None,
+            finalized_accessibility: None,
+            finalized_style_valid: false,
+            finalized_style_pristine: false,
+            finalized_accessibility_valid: false,
+            memo_instance: None,
             authored: Arc::new(WidgetNodeAuthored {
                 tag: tag.into(),
                 attributes: AttributeMap::new(),
@@ -436,6 +448,89 @@ impl WidgetNode {
                 composition: WidgetCompositionMetadata::default(),
             }),
         }
+    }
+
+    /// Identify a component memo boundary independently of its tree position.
+    #[doc(hidden)]
+    pub fn set_memo_instance(&mut self, instance: Arc<str>) {
+        self.memo_instance = Some(instance);
+    }
+
+    #[doc(hidden)]
+    pub fn memo_instance(&self) -> Option<&str> {
+        self.memo_instance.as_deref()
+    }
+
+    /// Copy finalized projections into the original, position-independent memo
+    /// tree. Authored inputs stay separate from runtime annotation overrides.
+    /// Panics if corresponding nodes have different child counts.
+    #[doc(hidden)]
+    pub fn retain_finalization_from(&mut self, live: &Self) {
+        let same_style = self
+            .finalized_style
+            .as_ref()
+            .zip(live.finalized_style.as_ref())
+            .is_some_and(|(a, b)| Arc::ptr_eq(a, b));
+        let same_semantics = self
+            .finalized_accessibility
+            .as_ref()
+            .zip(live.finalized_accessibility.as_ref())
+            .is_some_and(|(a, b)| Arc::ptr_eq(a, b));
+        if same_style
+            && same_semantics
+            && live.finalized_style_valid
+            && live.finalized_accessibility_valid
+        {
+            return;
+        }
+        self.computed_style = live.computed_style.clone();
+        self.accessibility = live.accessibility.clone();
+        if self.accessibility_baseline().is_none() {
+            if let Some(baseline) = live.accessibility_baseline() {
+                self.set_accessibility_baseline(baseline.clone());
+            }
+        }
+        self.finalized_style = live.finalized_style.clone();
+        self.finalized_accessibility = live.finalized_accessibility.clone();
+        self.finalized_style_valid = live.finalized_style_valid;
+        self.finalized_style_pristine = live.finalized_style_pristine;
+        self.finalized_accessibility_valid = live.finalized_accessibility_valid;
+        assert_eq!(self.children.len(), live.children.len());
+        for (cached, live) in self.children.iter_mut().zip(live.children.iter()) {
+            cached.retain_finalization_from(live);
+        }
+    }
+
+    /// Prevent sampled animation values in a retained tree from being treated
+    /// as authored styles during a later selective rebuild.
+    #[doc(hidden)]
+    pub fn mark_style_sampled(&mut self) {
+        self.finalized_style_pristine = false;
+        self.finalized_style_valid = false;
+        self.finalized_accessibility_valid = false;
+    }
+
+    /// Validate cached finalization after runtime annotation, bottom-up.
+    /// Call after annotating children and before using a finalized memo clone.
+    #[doc(hidden)]
+    pub fn validate_finalized_subtree(&mut self) {
+        self.finalized_style_valid = self.finalized_style_pristine
+            && self
+                .finalized_style
+                .as_ref()
+                .is_some_and(|cached| cached.matches_node(self))
+            && self
+                .children
+                .iter()
+                .all(|child| child.finalized_style_valid);
+        self.finalized_accessibility_valid = self
+            .finalized_accessibility
+            .as_ref()
+            .is_some_and(|cached| cached.matches_node(self))
+            && self
+                .children
+                .iter()
+                .all(|child| child.finalized_accessibility_valid);
     }
 
     #[doc(hidden)]
@@ -674,6 +769,12 @@ mod tests {
             cached_class_attr: node.cached_class_attr.clone(),
             cached_classes: node.cached_classes.clone(),
             surface_root: node.surface_root,
+            finalized_style: node.finalized_style.clone(),
+            finalized_accessibility: node.finalized_accessibility.clone(),
+            finalized_style_valid: node.finalized_style_valid,
+            finalized_style_pristine: node.finalized_style_pristine,
+            finalized_accessibility_valid: node.finalized_accessibility_valid,
+            memo_instance: node.memo_instance.clone(),
             authored: Arc::new((*node.authored).clone()),
         }
     }

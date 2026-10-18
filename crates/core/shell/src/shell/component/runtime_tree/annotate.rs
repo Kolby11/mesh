@@ -509,9 +509,13 @@ pub(super) fn annotate_runtime_tree_inner(
         key.truncate(previous_len);
     }
 
-    annotate_overflow.then(|| {
+    let bounds = annotate_overflow.then(|| {
         mesh_core_interaction::annotate_overflow_node(node, context.scroll_offsets, children_bounds)
-    })
+    });
+    if !context.retained {
+        node.validate_finalized_subtree();
+    }
+    bounds
 }
 
 pub(super) fn annotate_slider_node(

@@ -223,7 +223,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 container_width,
                 container_height,
                 marks_before,
-                &node,
+                &mut node,
             );
             self.record_component_instance_build(
                 &instance_key,
@@ -352,7 +352,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             container_width,
             container_height,
             marks_before,
-            &node,
+            &mut node,
         );
         self.record_component_instance_build(&instance_key, &module_id, build_started);
         Some(node)
@@ -491,7 +491,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                     .iter()
                     .map(|(key, value)| (key.clone(), value.clone()))
                     .collect();
-                let node = self.render_embedded_compiled_instance(
+                let mut node = self.render_embedded_compiled_instance(
                     &instance_key,
                     &contribution.source_module_id,
                     compiled,
@@ -505,7 +505,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                     container_width,
                     container_height,
                     marks_before,
-                    &node,
+                    &mut node,
                 );
                 self.record_component_instance_build(
                     &instance_key,

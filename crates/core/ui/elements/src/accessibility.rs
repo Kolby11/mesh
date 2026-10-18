@@ -73,7 +73,7 @@ impl AccessibilityRole {
 }
 
 /// Accessibility metadata for a single widget node.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AccessibilityInfo {
     pub role: AccessibilityRole,
     pub label: Option<String>,
@@ -119,7 +119,7 @@ pub fn live_accessibility_focus(node: &WidgetNode) -> bool {
 }
 
 /// Dynamic state for accessibility.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct AccessibilityState {
     pub disabled: bool,
     pub checked: Option<bool>,
@@ -224,13 +224,23 @@ pub fn normalize_accessibility(root: &mut WidgetNode) {
         );
         return;
     }
-    normalize_node(root, NodeEligibility::ROOT);
+    normalize_node(root, NodeEligibility::ROOT, false);
+}
+
+/// Normalize compiler intermediates while leaving finalized component memo
+/// subtrees intact. Their inherited eligibility and runtime state must be
+/// refreshed by the host's final normalization after annotation and layout.
+#[doc(hidden)]
+pub fn normalize_accessibility_before_finalization(root: &mut WidgetNode) {
+    if validate_widget_tree(root).is_ok() {
+        normalize_node(root, NodeEligibility::ROOT, true);
+    }
 }
 
 /// Normalize live semantic metadata after validating the complete tree.
 pub fn try_normalize_accessibility(root: &mut WidgetNode) -> Result<(), WidgetTreeValidationError> {
     validate_widget_tree(root)?;
-    normalize_node(root, NodeEligibility::ROOT);
+    normalize_node(root, NodeEligibility::ROOT, false);
     Ok(())
 }
 
@@ -279,7 +289,84 @@ struct SnapshotReferenceText {
     visible_text: String,
 }
 
-fn normalize_node(node: &mut WidgetNode, parent_policy: NodeEligibility) -> String {
+#[derive(Debug, Clone)]
+pub(crate) struct FinalizedAccessibility {
+    attributes: crate::attributes::AttributeMap,
+    tag: String,
+    state: crate::tree::ElementState,
+    baseline: Option<AccessibilityInfo>,
+    info: AccessibilityInfo,
+    policy: NodeEligibility,
+    text: String,
+}
+
+impl FinalizedAccessibility {
+    pub(crate) fn matches_node(&self, node: &WidgetNode) -> bool {
+        self.attributes == node.attributes
+            && self.tag == node.tag
+            && self.state == node.state
+            && self.baseline.as_ref() == node.accessibility_baseline()
+            && self.info == node.accessibility
+    }
+}
+
+/// Normalize validated memo clones, preserving clean semantic subtrees and
+/// their cached text. Callers must validate finalization inputs bottom-up
+/// after runtime annotation. The complete identity guard still runs.
+#[doc(hidden)]
+pub fn normalize_accessibility_finalized_memo(root: &mut WidgetNode) {
+    if let Err(error) = validate_widget_tree(root) {
+        tracing::error!(target: "mesh::accessibility", error = %error, "rejecting invalid widget tree before accessibility normalization");
+        return;
+    }
+    normalize_memo_node(root, NodeEligibility::ROOT);
+}
+
+fn normalize_memo_node(node: &mut WidgetNode, parent: NodeEligibility) -> String {
+    let policy = parent.child(node);
+    if node.finalized_accessibility_valid
+        && let Some(cached) = &node.finalized_accessibility
+        && cached.policy == policy
+        && cached.matches_node(node)
+    {
+        return cached.text.clone();
+    }
+    if node.accessibility_baseline().is_none() {
+        node.set_accessibility_baseline(node.accessibility.clone());
+    }
+    let child_text = node
+        .children
+        .iter_mut()
+        .map(|child| normalize_memo_node(child, policy))
+        .filter(|text| !text.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let (info, text) = frame_local_info(node, &child_text, policy);
+    node.accessibility = info.clone();
+    node.finalized_accessibility = Some(std::sync::Arc::new(FinalizedAccessibility {
+        attributes: node.attributes.clone(),
+        tag: node.tag.clone(),
+        state: node.state,
+        baseline: node.accessibility_baseline().cloned(),
+        info,
+        policy,
+        text: text.clone(),
+    }));
+    node.finalized_accessibility_valid = true;
+    text
+}
+
+fn normalize_node(
+    node: &mut WidgetNode,
+    parent_policy: NodeEligibility,
+    preserve_memo: bool,
+) -> String {
+    if preserve_memo
+        && node.memo_instance().is_some()
+        && let Some(cached) = &node.finalized_accessibility
+    {
+        return cached.text.clone();
+    }
     let authored = if let Some(info) = node.accessibility_baseline() {
         info.clone()
     } else {
@@ -294,7 +381,7 @@ fn normalize_node(node: &mut WidgetNode, parent_policy: NodeEligibility) -> Stri
     let hidden = !policy.allows(InteractionTarget::Semantics);
     let mut child_text = Vec::new();
     for child in &mut node.children {
-        let text = normalize_node(child, policy);
+        let text = normalize_node(child, policy, preserve_memo);
         if !text.is_empty() {
             child_text.push(text);
         }
@@ -1174,5 +1261,97 @@ mod tests {
             .find(|node| node.attributes.get("id").map(String::as_str) == Some("hidden-panel"))
             .expect("hidden panel")
             .id
+    }
+}
+
+#[cfg(test)]
+mod finalized_memo_tests {
+    use super::*;
+
+    fn validate(node: &mut WidgetNode) {
+        for child in &mut node.children {
+            validate(child);
+        }
+        node.validate_finalized_subtree();
+    }
+
+    fn assert_semantics(a: &WidgetNode, b: &WidgetNode) {
+        assert_eq!(a.accessibility, b.accessibility);
+        for (a, b) in a.children.iter().zip(b.children.iter()) {
+            assert_semantics(a, b);
+        }
+    }
+
+    #[test]
+    fn finalized_semantics_keep_child_text_and_inherited_eligibility_current() {
+        let mut root = WidgetNode::new("button");
+        let mut child = WidgetNode::new("text");
+        child.attributes.insert("content".into(), "before".into());
+        root.children.push(child);
+        normalize_accessibility_finalized_memo(&mut root);
+        let cached = root.finalized_accessibility.clone().unwrap();
+        validate(&mut root);
+        normalize_accessibility_finalized_memo(&mut root);
+        assert!(std::sync::Arc::ptr_eq(
+            &cached,
+            root.finalized_accessibility.as_ref().unwrap()
+        ));
+        for change in 0..6 {
+            match change {
+                0 => {
+                    root.children[0]
+                        .attributes
+                        .insert("content".into(), "after".into());
+                }
+                1 => {
+                    root.attributes.insert("disabled".into(), "true".into());
+                }
+                2 => {
+                    root.attributes.insert("hidden".into(), "true".into());
+                }
+                3 => {
+                    root.attributes.remove("hidden");
+                }
+                4 => {
+                    root.children[0]
+                        .attributes
+                        .insert("aria-hidden".into(), "true".into());
+                }
+                _ => {
+                    root.children[0].attributes.remove("aria-hidden");
+                    root.state.focused = true;
+                }
+            }
+            let mut full = root.clone();
+            validate(&mut root);
+            normalize_accessibility_finalized_memo(&mut root);
+            normalize_accessibility(&mut full);
+            assert_semantics(&root, &full);
+        }
+    }
+
+    #[test]
+    fn memo_projection_copy_preserves_authored_runtime_override_inputs() {
+        let mut authored = WidgetNode::new("input");
+        authored
+            .attributes
+            .insert("value".into(), "authored".into());
+        let mut live = authored.clone();
+        live.attributes.insert("value".into(), "runtime".into());
+        live.state.focused = true;
+        normalize_accessibility_finalized_memo(&mut live);
+        authored.retain_finalization_from(&live);
+        assert_eq!(authored.attributes.get("value").unwrap(), "authored");
+        assert!(!authored.state.focused);
+        assert_eq!(
+            authored.accessibility.state.value.as_deref(),
+            Some("runtime")
+        );
+        validate(&mut authored);
+        normalize_accessibility_finalized_memo(&mut authored);
+        assert_eq!(
+            authored.accessibility.state.value.as_deref(),
+            Some("authored")
+        );
     }
 }

@@ -8,11 +8,18 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
+- **Finalized memo entries and D7 matching implemented:** component memo
+  entries retain pre-animation styles and semantics; class/state reverse
+  dependencies include component and theme rules. Rebuilds defer compiler
+  layout to the authoritative final cascade. Release failure sets match the
+  baseline and structural gates pass; measurements are in the performance log.
+  Remaining string declaration lowering stays in the backlog.
+
 - **Performance follow-through (2026-10-18):** Priority 9 closed; in-surface
   blur phases 0–2 (correctness fix, per-element routing, 04 §10 contract);
   scroll frames keep retained pixels and whole-pixel scrolls shift in place;
   D7 keyword lowering. Blur caches (phases 3–5) stay gated on D6; the
-  remaining scroll-raster cases and memo restyle are in the backlog.
+  remaining scroll-raster cases are in the backlog.
 
 - **Performance batch implemented:** shared reload maintenance,
   blocking file-watch control, validated backend state/fingerprints, and direct
@@ -30,11 +37,6 @@ measurements are in [`log/`](log/README.md). Open work is in
   package activation has not been exercised.
 - **Priority 4 committed:** CMP-07, CMP-02/08, A1, A7, A5 and RES-06/RES-12
   landed in `934c4648`. Inspector Ctrl+Tab and niri/Sway providers are unchecked live.
-
-- **D7 in progress:** theme alias/token projections, indexed literal
-  operations, compound selector buckets, and (2026-10-18) keyword/layout
-  property lowering are validated; 97.5% of rebuild declarations apply typed.
-  Incremental selector matching for class changes stays open.
 
 - **D6 preparation:** immutable scene submissions and a bounded render-thread
   handoff and owned, budgeted font preparation are validated. Icon snapshots,

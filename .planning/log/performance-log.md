@@ -1484,6 +1484,7 @@ section noted.
 | 2026-10-18 | Early return for the flat interior of the liquid-glass SkSL lens | rendering | Release, three interleaved runs of ten rounded 180×40 pills: 9.269–9.338 ms baseline vs 10.524–10.660 ms candidate (0.87–0.89x). One 360×240 card probe reached only 1.08x, missing the 1.2x gate. Reverted; unrefracted wallpaper image-shader fast path retained |
 | 2026-10-18 | FNV-1a fingerprint fused into bounded JSON serialization | runtime boundary | Three controlled first-sample attempts on unchanged 128-row / 12,626-byte state, release, 2,000 iterations: 178.085–191.996 ms baseline vs 202.623–204.492 ms fused (0.87–0.95x); each failed the 1.05x gate. Reverted; fast keyed `ahash` over the typed value is the measured alternative |
 | 2026-10-18 | `Arc<[TransitionStyle]>` with a shared default instead of `Vec` in `ComputedStyle` | style | Appearance service frame restyle 2.673–2.723 ms vs 2.672–2.705 ms without it (three runs each, release): no measurable change. The one-entry default `Vec` clone is not a restyle cost driver. Reverted |
+| 2026-10-18 | Finalized memo styles while retaining compiler preliminary layout | component memo | Release, 550-node Appearance, three interleaved unpinned 60-update samples: 10.665–11.395 ms/frame baseline vs 25.345–26.575 ms/frame prototype; intrinsic shaping/font fallback returned in compiler layout. Final implementation defers that pass |
 
 ## 2026-07-30 — element `filter: blur()` subtree layers
 
@@ -5762,3 +5763,86 @@ triggers (tree_build 5.8–6.0 ms), the existing memo-restyle backlog item.
 **Verified.** Release elements 277 passed / 10 failed: the same 10 names as the
 baseline, diffed.
 
+
+## 2026-10-18 — finalized component memo entries and D7 incremental matching
+
+Base tree `beccc092` · area: component memo, style matching and accessibility.
+AMD Ryzen 7 7840HS, workspace release profile (thin LTO, one codegen unit).
+Reviewed the rejected-experiments table before implementation.
+
+Component memo entries retain pre-animation computed styles, semantic metadata
+and child text. Only projections are copied back: authored attributes, runtime
+identity and loop placement stay independent, so input overrides, promotion,
+lifecycle classes and keyed reorders do not become authored memo inputs.
+Annotation validates reusable subtrees bottom-up. Style reuse checks the theme,
+unique rule-index revision, props, container dimensions and inherited values;
+semantic reuse also checks inherited eligibility and changed child text.
+Sampled animation styles cannot masquerade as authored styles in a selective
+rebuild. Complete identity validation remains mandatory.
+
+D7 now indexes every class atom and pseudo-state dependency separately from
+forward candidate buckets, including nested compounds and active theme rules.
+Targeted updates check selector entry and exit before reapplying declarations;
+unchanged matches keep their computed style and input snapshot. Inheritance
+still propagates. Retained frames do not repeat rebuild-only memo validation.
+The remaining string declarations stay in the backlog.
+
+Shell builds defer the compiler's preliminary layout and preserve finalized
+memo semantics until host finalization. Overflow clamping follows the final
+layout; previews retain their complete compiler layout path. This is necessary
+for finalized memo styles: a preliminary layout against them can reintroduce
+expensive intrinsic text measurement before the final cascade.
+
+**Measured.** Three interleaved before/after samples, both binaries pinned to
+CPU 4 with `taskset -c 4`, with compilation finished before measurement:
+
+| Workload | Before | After |
+| --- | --- | --- |
+| `appearance_frame_cost_profile`: 550 nodes, 920×900, 60 unrelated audio updates per sample | 10.832–10.869 ms/frame | 5.621–5.777 ms/frame |
+| Same workload, profiled `style_restyle` (rule attribution enabled) | 3.030–3.089 ms/frame | 0.669–0.680 ms/frame |
+| `navigation_frame_cost_profile`: 112 nodes, settled 1920×40, 60 audio updates | 1.648–1.688 ms/frame | 1.646–1.649 ms/frame |
+| Same navigation tree, 5,000 audio-only updates (`MESH_BENCH_FRAMES=5000 MESH_BENCH_ONLY=audio`) | 1.572–1.637 ms/frame | 1.553–1.592 ms/frame |
+
+Appearance improves about 1.9×. Navigation ranges overlap; do not claim a clear
+full-poll speedup from the smaller style and normalization changes. Exploratory
+unpinned short navigation runs varied substantially (updated binary
+2.241–2.943 ms/frame); the new animation counter reported zero active-animation
+frames, rejecting startup motion as the explanation. Pinning both versions to
+one core removed that apparent regression. Use the affinity-controlled ranges
+above rather than comparing uncontrolled short samples.
+
+**Structural gates.** `finalized_memo_and_selector_dependency_profile`, three
+release runs pinned to CPU 4:
+
+- 513-node tree, 256 class/state rules, 200 clone/finalize cycles: forced full
+  117.128–122.110 ms versus finalized memo 57.474–61.597 ms,
+  1.915–2.125×. `finalized_memo_speedup` >= 1.5.
+- 256 rules, 100,000 unmatched class changes: full selector scan
+  386.543–388.317 ms versus reverse dependencies 6.240–6.438 ms,
+  60.321–62.077×. `selector_dependency_update_speedup` >= 4.0.
+
+Both gates are registered in `tools/check-performance` and
+`config/performance-baseline.tsv`; these are structural workloads, not complete
+surface rendering measurements.
+
+**Rejected prototype.** Retaining finalized styles while keeping compiler
+preliminary layout made the Appearance frame slower: three interleaved,
+unpinned release samples of the same 550-node/60-update workload measured
+10.665–11.395 ms/frame baseline versus 25.345–26.575 ms/frame prototype.
+`perf` identified intrinsic shaping/font fallback in compiler layout. The final
+implementation defers that duplicate pass. Sampling evidence is under ignored
+`profiles/finalized-memo-2026-10-18/`.
+
+**Verified.** Release shell: 864 passed / 45 failed / 138 ignored, with exactly
+the baseline's 45 failure names. Elements: 284 passed / 10 failed / 64 ignored,
+with exactly the baseline's 10 failure names. Frontend: 81 passed / the same two
+known failures / 19 ignored. New regressions cover full-resolution parity,
+selector removal, compound/theme dependencies, container/prop/index invalidation,
+child names, inherited eligibility, authored input preservation, sampled styles,
+hide/show template patches, and cached-versus-fresh pixels and semantics.
+The existing scroll pixel parity test passes in the shell suite;
+`settings_scroll_frame_gate` also passes: 90 frames, 90 paint passes, zero
+restyles after the first and shifted finger-frame fraction 0.983333 (gate >= 0.9).
+`cargo check -p mesh-core-shell --tests`, shell syntax and diff whitespace checks
+pass. Scope ends with these three backlog items; later performance items remain
+open. All nine pending design notes remain linked.

@@ -213,11 +213,14 @@ fn navigation_frame_cost_profile() {
     // must not care.
     let started = Instant::now();
     let mut audio_painted = 0u32;
+    let mut audio_animation_frames = 0u32;
     for volume in 0..loop_frames("audio") {
         publish(&mut component, "mesh.audio", audio_payload(volume % 100));
         audio_painted += u32::from(paint_if_wanted(&mut component, &theme, &mut buffer));
+        audio_animation_frames += u32::from(component.animation_only_dirty);
     }
     let audio_poll = started.elapsed();
+    eprintln!("audio frames with active animations: {audio_animation_frames}");
 
     // A service nothing in the bar reads.
     let started = Instant::now();

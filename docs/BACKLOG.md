@@ -155,8 +155,6 @@ Each needs a design and a measured prototype before it is adopted.
 - [ ] **D6:** Connect the immutable scene/render-thread handoff to frozen font/icon
       resources, GPU raster and presentation. The bounded handoff prototype is
       implemented; scroll-raster and blur plans are re-scoped around renderer ownership.
-- [ ] **D7:** Styles compiled to typed form with dependency-indexed incremental
-      selector matching; class/state changes restyle only matching nodes.
 - [ ] **D8:** Event-driven backend host APIs (D-Bus signals, PipeWire, netlink,
       inotify) on D2 coroutines; polling becomes the fallback.
 - [ ] **D9:** CI performance gates per workload: idle wakeups, hover, service
@@ -316,12 +314,6 @@ of payoff.
       Restyle time is now mostly node resolution and `ComputedStyle` copying,
       not declaration application. _(detail: "P2 — typing & interning")_
       _(detail: "P2 — architecture")_
-- [ ] A tree-rebuild frame restyles memo-reused subtrees too. Component memo
-      entries are stored pre-restyle (position-independent by design), so a
-      reused page pays a full style walk and copy-on-write anyway — 2.8ms of an
-      8.6ms Appearance service frame. Needs styled memo entries, or a
-      "styles still valid" mark the restyle walk can skip — a value-level
-      share cache was measured and rejected (see log).
 
 ### Typing and interning
 
@@ -357,9 +349,6 @@ of payoff.
 
 ### Rendering and paint
 
-- [ ] Narrow script frames run full-tree `normalize_accessibility` (~20% of a
-      navigation audio poll): memo-reused subtrees are stored pre-finalization,
-      so `normalize_accessibility_dirty` has no normalized data to keep for them.
 - [ ] Establish one canonical render-frame snapshot and transform/clip model;
       unify invalidation, display-list reuse, damage, blur regions, and hit
       testing around cumulative affine transforms. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).

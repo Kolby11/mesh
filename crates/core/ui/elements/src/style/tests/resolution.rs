@@ -1088,3 +1088,406 @@ fn a_later_rules_custom_property_applies_to_the_same_nodes_var() {
     assert_eq!(resolve(false), Color::from_hex("#0000ff").unwrap());
     assert_eq!(resolve(true), Color::from_hex("#ff0000").unwrap());
 }
+
+fn validate_finalized(node: &mut crate::tree::WidgetNode) {
+    for child in &mut node.children {
+        validate_finalized(child);
+    }
+    node.validate_finalized_subtree();
+}
+
+#[test]
+fn finalized_memo_styles_preserve_full_resolution_on_input_changes() {
+    let theme = mesh_core_theme::default_theme();
+    let rules = vec![
+        StyleRule {
+            selector: Selector::Class("parent".into()),
+            declarations: vec![Declaration {
+                property: "color".into(),
+                value: StyleValue::Literal("#ff0000".into()),
+            }],
+            container_query: None,
+        },
+        StyleRule {
+            selector: Selector::Compound(vec![
+                Selector::Class("item".into()),
+                Selector::Class("selected".into()),
+                Selector::State("*".into(), "hover".into()),
+            ]),
+            declarations: vec![Declaration {
+                property: "width".into(),
+                value: StyleValue::Literal("80px".into()),
+            }],
+            container_query: None,
+        },
+    ];
+    let resolver = StyleResolver::new(&theme)
+        .with_finalized_memo_styles(true)
+        .with_incremental_matching();
+    let mut root = crate::tree::WidgetNode::new("box");
+    let mut child = crate::tree::WidgetNode::new("text");
+    child.attributes.insert("class".into(), "item".into());
+    root.children.push(child);
+    let mut index = None;
+    let context = StyleContext::default();
+    resolver.restyle_subtree_cached(&mut root, &rules, context, &mut index);
+    for change in 0..7 {
+        match change {
+            0 => {
+                root.children[0]
+                    .attributes
+                    .insert("class".into(), "item unrelated".into());
+            }
+            1 => {
+                root.children[0]
+                    .attributes
+                    .insert("class".into(), "item selected".into());
+                root.children[0].state.hovered = true;
+            }
+            2 => {
+                root.attributes.insert("class".into(), "parent".into());
+            }
+            3 => {
+                root.children[0]
+                    .attributes
+                    .insert("style".into(), "font-size: 31px".into());
+            }
+            4 => {
+                root.children[0].state.hovered = false;
+            }
+            5 => {
+                root.attributes.remove("class");
+            }
+            _ => {
+                root.children[0].attributes.remove("style");
+            }
+        }
+        let mut full = root.clone();
+        validate_finalized(&mut root);
+        let mut attribution = StyleRuleAttribution::new(&rules);
+        resolver.restyle_subtree_cached_profiled(
+            &mut root,
+            &rules,
+            context,
+            &mut index,
+            &mut attribution,
+        );
+        StyleResolver::new(&theme).restyle_subtree_cached(&mut full, &rules, context, &mut None);
+        assert_eq!(root.computed_style, full.computed_style, "change {change}");
+        assert_eq!(
+            root.children[0].computed_style, full.children[0].computed_style,
+            "change {change}"
+        );
+        if change == 0 {
+            assert_eq!(attribution.entries().count(), 0);
+        }
+    }
+    let old_cache = root.finalized_style.clone().unwrap();
+    validate_finalized(&mut root);
+    resolver.restyle_subtree_cached(&mut root, &rules, context, &mut index);
+    assert!(std::sync::Arc::ptr_eq(
+        &old_cache,
+        root.finalized_style.as_ref().unwrap()
+    ));
+    // A new index identity must invalidate snapshots even if its allocator
+    // reuses the old rules vector's address.
+    let mut index = Some(StyleRuleIndex::new(&rules));
+    resolver.restyle_subtree_cached(&mut root, &rules, context, &mut index);
+    assert!(!std::sync::Arc::ptr_eq(
+        &old_cache,
+        root.finalized_style.as_ref().unwrap()
+    ));
+}
+
+#[test]
+fn incremental_class_and_state_matching_checks_all_compound_dependencies() {
+    let theme = mesh_core_theme::default_theme();
+    let rules = vec![StyleRule {
+        selector: Selector::Compound(vec![
+            Selector::Class("first".into()),
+            Selector::Compound(vec![
+                Selector::Class("last".into()),
+                Selector::State("*".into(), "hover".into()),
+            ]),
+        ]),
+        declarations: vec![Declaration {
+            property: "width".into(),
+            value: StyleValue::Literal("80px".into()),
+        }],
+        container_query: None,
+    }];
+    let resolver = StyleResolver::new(&theme).with_incremental_matching();
+    let mut node = crate::tree::WidgetNode::new("button");
+    let mut index = None;
+    resolver.restyle_subtree_cached(&mut node, &rules, StyleContext::default(), &mut index);
+    for (classes, hovered, matches) in [
+        ("first", false, false),
+        ("first last", false, false),
+        ("first last", true, true),
+        ("last", true, false),
+        ("first last", true, true),
+        ("first last unrelated", true, true),
+        ("first last", false, false),
+    ] {
+        node.attributes.insert("class".into(), classes.into());
+        node.state.hovered = hovered;
+        let mut full = node.clone();
+        let mut attribution = StyleRuleAttribution::new(&rules);
+        resolver.restyle_subtree_for_ids_cached_profiled(
+            &mut node,
+            &rules,
+            StyleContext::default(),
+            &mut index,
+            &std::collections::HashSet::from([full.id]),
+            &mut attribution,
+        );
+        StyleResolver::new(&theme).restyle_subtree_cached(
+            &mut full,
+            &rules,
+            StyleContext::default(),
+            &mut None,
+        );
+        assert_eq!(node.computed_style, full.computed_style);
+        assert_eq!(node.computed_style.width == Dimension::Px(80.0), matches);
+        if classes.ends_with("unrelated") {
+            assert_eq!(attribution.entries().count(), 0);
+        }
+    }
+}
+
+#[test]
+#[ignore = "release-only finalized memo and incremental selector benchmark"]
+fn finalized_memo_and_selector_dependency_profile() {
+    use std::hint::black_box;
+    use std::time::Instant;
+    let theme = mesh_core_theme::default_theme();
+    let rules = (0..256)
+        .map(|i| StyleRule {
+            selector: Selector::Compound(vec![
+                Selector::Class(format!("item{i}")),
+                Selector::State("*".into(), "hover".into()),
+            ]),
+            declarations: vec![Declaration {
+                property: "background".into(),
+                value: StyleValue::Literal("#123456".into()),
+            }],
+            container_query: None,
+        })
+        .collect::<Vec<_>>();
+    let mut raw = crate::tree::WidgetNode::new("box");
+    for i in 0..512 {
+        let mut child = crate::tree::WidgetNode::new("text");
+        child
+            .attributes
+            .insert("class".into(), format!("item{}", i % 256));
+        child
+            .attributes
+            .insert("content".into(), format!("row {i}"));
+        raw.children.push(child);
+    }
+    let resolver = StyleResolver::new(&theme)
+        .with_finalized_memo_styles(true)
+        .with_incremental_matching();
+    let mut index = None;
+    let mut finalized = raw.clone();
+    resolver.restyle_subtree_cached(&mut finalized, &rules, StyleContext::default(), &mut index);
+    crate::normalize_accessibility_finalized_memo(&mut finalized);
+    raw.retain_finalization_from(&finalized);
+    let iterations = 200;
+    let full_started = Instant::now();
+    for _ in 0..iterations {
+        let mut tree = raw.clone();
+        StyleResolver::new(&theme).restyle_subtree_cached(
+            &mut tree,
+            &rules,
+            StyleContext::default(),
+            &mut index,
+        );
+        crate::normalize_accessibility(&mut tree);
+        black_box(tree);
+    }
+    let full = full_started.elapsed();
+    let memo_started = Instant::now();
+    for _ in 0..iterations {
+        let mut tree = raw.clone();
+        validate_finalized(&mut tree);
+        resolver.restyle_subtree_cached(&mut tree, &rules, StyleContext::default(), &mut index);
+        crate::normalize_accessibility_finalized_memo(&mut tree);
+        black_box(tree);
+    }
+    let memo = memo_started.elapsed();
+    let speedup = full.as_secs_f64() / memo.as_secs_f64();
+    println!("MESH_PERF metric=finalized_memo_speedup value={speedup:.4}");
+    eprintln!("finalized memo: 513 nodes, {iterations} rebuilds: full {full:?}, memo {memo:?}");
+    assert!(
+        speedup >= 1.5,
+        "finalized memo must avoid full finalization"
+    );
+
+    let old_classes = vec!["unrelated".to_string()];
+    let new_classes = vec!["unrelated".to_string(), "item128".to_string()];
+    let old = StyleNodeAttrs::new("button", &old_classes, None, ElementState::default());
+    let new = StyleNodeAttrs::new("button", &new_classes, None, ElementState::default());
+    let index = index.unwrap();
+    let iterations = 100_000;
+    let scan_started = Instant::now();
+    for _ in 0..iterations {
+        black_box(rules.iter().all(|rule| {
+            selector_matches_attrs(&rule.selector, black_box(&old))
+                == selector_matches_attrs(&rule.selector, black_box(&new))
+        }));
+    }
+    let scan = scan_started.elapsed();
+    let deps_started = Instant::now();
+    for _ in 0..iterations {
+        assert!(black_box(index.changed_dependencies_preserve_matches(
+            &rules,
+            black_box(&old),
+            black_box(&new),
+            StyleContext::default()
+        )));
+    }
+    let deps = deps_started.elapsed();
+    let speedup = scan.as_secs_f64() / deps.as_secs_f64();
+    println!("MESH_PERF metric=selector_dependency_update_speedup value={speedup:.4}");
+    eprintln!(
+        "selector dependencies: 256 rules, {iterations} unmatched class changes: scan {scan:?}, index {deps:?}"
+    );
+    assert!(
+        speedup >= 4.0,
+        "dependency lookup must avoid unrelated rules"
+    );
+}
+
+#[test]
+fn finalized_memo_environment_and_container_changes_invalidate_styles() {
+    use mesh_core_component::style::ContainerQuery;
+    let theme = mesh_core_theme::default_theme();
+    let rules = vec![
+        StyleRule {
+            selector: Selector::Tag("text".into()),
+            declarations: vec![Declaration {
+                property: "font-size".into(),
+                value: StyleValue::Prop("size".into()),
+            }],
+            container_query: None,
+        },
+        StyleRule {
+            selector: Selector::Class("wide".into()),
+            declarations: vec![Declaration {
+                property: "width".into(),
+                value: StyleValue::Literal("120px".into()),
+            }],
+            container_query: Some(ContainerQuery {
+                min_width: Some(200.0),
+                ..Default::default()
+            }),
+        },
+    ];
+    let mut node = crate::tree::WidgetNode::new("text");
+    node.attributes.insert("class".into(), "wide".into());
+    let mut index = None;
+    for (width, size) in [
+        (100.0, "14px"),
+        (300.0, "14px"),
+        (300.0, "24px"),
+        (100.0, "24px"),
+    ] {
+        let props = std::collections::HashMap::from([(
+            "--mesh-prop-size".into(),
+            StyleValue::Literal(size.into()),
+        )]);
+        let context = StyleContext {
+            container_width: width,
+            container_height: 80.0,
+        };
+        let mut full = node.clone();
+        validate_finalized(&mut node);
+        StyleResolver::new(&theme)
+            .with_props(props.clone())
+            .with_finalized_memo_styles(true)
+            .restyle_subtree_cached(&mut node, &rules, context, &mut index);
+        StyleResolver::new(&theme)
+            .with_props(props)
+            .restyle_subtree_cached(&mut full, &rules, context, &mut None);
+        assert_eq!(node.computed_style, full.computed_style);
+        assert_eq!(
+            node.computed_style.width == Dimension::Px(120.0),
+            width >= 200.0
+        );
+    }
+    let old = node.finalized_style.clone().unwrap();
+    validate_finalized(&mut node);
+    let changed_theme = mesh_core_theme::default_theme();
+    StyleResolver::new(&changed_theme)
+        .with_finalized_memo_styles(true)
+        .restyle_subtree_cached(&mut node, &rules, StyleContext::default(), &mut index);
+    assert!(!std::sync::Arc::ptr_eq(
+        &old,
+        node.finalized_style.as_ref().unwrap()
+    ));
+}
+
+#[test]
+fn finalized_memo_does_not_reuse_sampled_retained_styles() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme).with_finalized_memo_styles(true);
+    let mut node = crate::tree::WidgetNode::new("text");
+    let mut index = None;
+    resolver.restyle_subtree_cached(&mut node, &[], StyleContext::default(), &mut index);
+    let authored = node.computed_style.clone();
+    node.computed_style.opacity = 0.25;
+    node.mark_style_sampled();
+    validate_finalized(&mut node);
+    resolver.restyle_subtree_cached(&mut node, &[], StyleContext::default(), &mut index);
+    assert_eq!(node.computed_style, authored);
+}
+
+#[test]
+fn incremental_matching_includes_module_theme_selector_dependencies() {
+    let mut theme = mesh_core_theme::default_theme();
+    theme.modules_mut().insert(
+        "@test/theme-deps".into(),
+        mesh_core_theme::ThemeModule {
+            rules: vec![mesh_core_theme::ThemeStyleRule {
+                selector: Selector::Compound(vec![
+                    Selector::Class("themed".into()),
+                    Selector::State("*".into(), "hover".into()),
+                ]),
+                declarations: [("width".into(), "83px".into())].into_iter().collect(),
+            }],
+            ..Default::default()
+        },
+    );
+    let resolver = StyleResolver::new(&theme).with_incremental_matching();
+    let mut node = crate::tree::WidgetNode::new("button");
+    node.set_module_id("@test/theme-deps");
+    let mut index = None;
+    resolver.restyle_subtree_cached(&mut node, &[], StyleContext::default(), &mut index);
+    for (class, hovered, matched) in [
+        ("themed", false, false),
+        ("themed", true, true),
+        ("other", true, false),
+        ("themed", true, true),
+        ("themed", false, false),
+    ] {
+        node.attributes.insert("class".into(), class.into());
+        node.state.hovered = hovered;
+        let mut full = node.clone();
+        resolver.restyle_subtree_for_ids_cached(
+            &mut node,
+            &[],
+            StyleContext::default(),
+            &mut index,
+            &std::collections::HashSet::from([full.id]),
+        );
+        StyleResolver::new(&theme).restyle_subtree_cached(
+            &mut full,
+            &[],
+            StyleContext::default(),
+            &mut None,
+        );
+        assert_eq!(node.computed_style, full.computed_style);
+        assert_eq!(node.computed_style.width == Dimension::Px(83.0), matched);
+    }
+}

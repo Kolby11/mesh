@@ -102,6 +102,12 @@ else ([01 §9](01-module-system.md)):
 
 Diagnostics identify the tag, attribute, reason, and the concrete fix.
 
+Finalized component memo entries retain semantic projections and child text.
+After runtime annotation, unchanged subtrees keep their normalized metadata;
+changed child text updates ancestor names, and inherited visibility or disabled
+state invalidates affected descendants. Rebuilds still validate the complete
+tree's identity invariants before publishing semantics.
+
 ## 7. One tree, machine consumers
 
 The same semantic tree — not a parallel structure — is what the automation

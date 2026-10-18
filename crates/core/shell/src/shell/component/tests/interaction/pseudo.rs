@@ -1176,3 +1176,60 @@ fn window_states_project_onto_the_tree_as_css_state() {
         "repeating the same states must not dirty the surface"
     );
 }
+
+#[test]
+fn theme_only_hover_rules_invalidate_and_restyle_their_nodes() {
+    let mut component = test_frontend_component(
+        r#"
+<template><button>Theme hover</button></template>
+<style>button { transition: none; }</style>
+"#,
+    );
+    let mut theme = default_theme();
+    theme.modules_mut().insert(
+        component.id().into(),
+        mesh_core_theme::ThemeModule {
+            rules: vec![mesh_core_theme::ThemeStyleRule {
+                selector: mesh_core_component::style::Selector::State(
+                    "button".into(),
+                    "hover".into(),
+                ),
+                declarations: [("background".into(), "#ff0000".into())]
+                    .into_iter()
+                    .collect(),
+            }],
+            ..Default::default()
+        },
+    );
+    component.theme_changed().unwrap();
+    let extent = SurfaceExtent::unpadded(240, 80);
+    let mut buffer = PixelBuffer::new(240, 80);
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert!(component.module_styles_have_hover_rules());
+    let button = first_node_by_tag(component.last_tree.as_ref().unwrap(), "button").unwrap();
+    let key = button.mesh_key().unwrap().to_string();
+    let id = button.id;
+    let resting = button.computed_style.background_color;
+    component.hovered_key = Some(key);
+    component.hovered_path = vec![id];
+    component.invalidate_interaction_restyle();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert_eq!(
+        first_node_by_tag(component.last_tree.as_ref().unwrap(), "button")
+            .unwrap()
+            .computed_style
+            .background_color,
+        mesh_core_elements::Color::from_hex("#ff0000").unwrap()
+    );
+    component.hovered_key = None;
+    component.hovered_path.clear();
+    component.invalidate_interaction_restyle();
+    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert_eq!(
+        first_node_by_tag(component.last_tree.as_ref().unwrap(), "button")
+            .unwrap()
+            .computed_style
+            .background_color,
+        resting
+    );
+}

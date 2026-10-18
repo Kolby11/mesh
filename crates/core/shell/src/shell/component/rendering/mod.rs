@@ -148,6 +148,14 @@ impl FrontendSurfaceComponent {
             for rule in &rules {
                 collect_selector_state_dependencies(&rule.selector, &mut state_dependencies);
             }
+            let theme = self.active_theme.borrow();
+            for rule in theme
+                .style_rules()
+                .iter()
+                .chain(theme.modules().values().flat_map(|module| &module.rules))
+            {
+                collect_selector_state_dependencies(&rule.selector, &mut state_dependencies);
+            }
             self.cached_restyle_state_dependencies = state_dependencies;
             rules.sort_by_key(|rule| selector_contains_state(&rule.selector));
 
@@ -169,7 +177,7 @@ impl FrontendSurfaceComponent {
     }
 
     /// Whether a pointer hover transition can change any rule in this surface,
-    /// including rules contributed by imported component modules.
+    /// including active theme rules and imported component modules.
     pub(super) fn module_styles_have_hover_rules(&mut self) -> bool {
         self.module_restyle_rules();
         self.cached_restyle_state_dependencies
@@ -339,34 +347,19 @@ impl FrontendSurfaceComponent {
         self.has_promoted_popover_wrappers.set(false);
         self.has_error_placeholders.set(false);
         self.template_expression_failure.borrow_mut().take();
-        let measurer = SharedTextMeasurer;
         let tree_build_started = std::time::Instant::now();
         let fallback_tree = selective.map(|(previous, _)| previous);
         let mut tree = if let Some(runtime_failure) = self.runtime_failure.borrow().clone() {
             self.build_error_widget(runtime_failure)
-        } else if let Some((previous, rebuild_node_ids)) = selective {
-            self.compiled.build_tree_with_state_selective(
-                theme,
-                width,
-                height,
-                Some(&bound),
-                FrontendRenderMode::Surface,
-                self.root_instance_key(),
-                Some(self),
-                Some(&measurer),
-                previous,
-                rebuild_node_ids,
-            )
         } else {
-            self.compiled.build_tree_with_state(
+            self.compiled.build_tree_for_finalization(
                 theme,
                 width,
                 height,
                 Some(&bound),
-                FrontendRenderMode::Surface,
                 self.root_instance_key(),
-                Some(self),
-                Some(&measurer),
+                self,
+                selective,
             )
         };
         if let Some((_failed_instance_key, failure)) =
@@ -619,7 +612,19 @@ impl FrontendSurfaceComponent {
                     .as_ref()
                     .map(|cache| &cache.shortcuts_by_keybind),
             );
-            annotate_runtime_and_overflow_tree(tree, "root".to_string(), &mut annotation_context);
+            if trigger_kind == "rebuild" {
+                super::runtime_tree::annotate_runtime_tree(
+                    tree,
+                    "root".to_string(),
+                    &mut annotation_context,
+                );
+            } else {
+                annotate_runtime_and_overflow_tree(
+                    tree,
+                    "root".to_string(),
+                    &mut annotation_context,
+                );
+            }
             let changed = std::mem::take(&mut annotation_context.changed);
             drop(annotation_context);
             drop(shortcut_cache);
@@ -667,7 +672,15 @@ impl FrontendSurfaceComponent {
             mesh_core_interaction::InteractionFramePhase::StyleInvalidated,
         );
         self.module_restyle_rules();
-        let resolver = StyleResolver::new(theme).with_borrowed_props(surface_css_props);
+        let cache_finalization = trigger_kind == "rebuild"
+            && !self.surface_entering
+            && !self.surface_exiting
+            && self.entering_child_keys.is_empty()
+            && self.closing_child_keys.is_empty();
+        let resolver = StyleResolver::new(theme)
+            .with_borrowed_props(surface_css_props)
+            .with_finalized_memo_styles(cache_finalization)
+            .with_incremental_matching();
         let context = StyleContext {
             container_width: width as f32,
             container_height: height as f32,
@@ -919,6 +932,11 @@ impl FrontendSurfaceComponent {
                 Some(trigger_kind),
             );
         }
+        if trigger_kind == "rebuild" {
+            // New compiler trees have no provisional layout. Clamp scroll
+            // offsets only against the authoritative post-style geometry.
+            mesh_core_interaction::annotate_overflow_tree(tree, &mut self.scroll_offsets);
+        }
         // Normalize the live projection after style/layout. Paint refreshes
         // any subsequently animated nodes before the retained diff and final
         // immutable capture, so all consumers see the sampled frame.
@@ -936,8 +954,13 @@ impl FrontendSurfaceComponent {
                 mesh_core_elements::normalize_accessibility(tree);
                 scoped_finalize = false;
             }
+        } else if trigger_kind == "rebuild" {
+            mesh_core_elements::normalize_accessibility_finalized_memo(tree);
         } else {
             mesh_core_elements::normalize_accessibility(tree);
+        }
+        if cache_finalization {
+            self.finalize_component_memo(tree);
         }
         annotation_dirty.extend(self.annotate_selection_tree(tree, theme, !scoped_finalize));
 

@@ -26,6 +26,7 @@ pub mod tree;
 pub use accessibility::{
     AccessibilityInfo, AccessibilityRelationships, AccessibilityRole, AccessibilityState,
     AccessibilityTree, AccessibilityTreeNode, live_accessibility_focus, normalize_accessibility,
+    normalize_accessibility_before_finalization, normalize_accessibility_finalized_memo,
     try_normalize_accessibility,
 };
 pub use attributes::{AttrKey, AttributeMap};

@@ -42,7 +42,7 @@ pub(super) const MAX_THEME_DEFAULT_DECLARATION_CACHE_ENTRIES: usize = 512;
 /// The CSS-inherited fields from a parent node. Used instead of cloning
 /// the full `ComputedStyle` (~60 fields) when passing parent context into
 /// recursive restyle calls.
-#[derive(PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(super) struct ParentInheritedStyle {
     pub(super) custom_properties: HashMap<String, StyleValue>,
     pub(super) color: Color,
@@ -261,5 +261,114 @@ impl CachedThemeTokenValue {
 
     pub(super) fn is_missing(&self) -> bool {
         matches!(self, Self::Missing | Self::Error(_))
+    }
+}
+
+/// Inputs to a style already held by a finalized memo node. No style value is
+/// copied on a hit; inheritance and the cascade revision are checked separately.
+#[derive(Debug, Clone)]
+pub(crate) struct FinalizedStyle {
+    tag: String,
+    classes: Vec<String>,
+    id: Option<String>,
+    inline_style: Option<String>,
+    hidden: Option<String>,
+    promoted: (bool, bool),
+    module_id: Option<String>,
+    state: crate::tree::ElementState,
+    parent: Option<ParentInheritedStyle>,
+    theme_revision: u64,
+    index_revision: u64,
+    props: HashMap<String, StyleValue>,
+    container: (f32, f32),
+}
+
+impl FinalizedStyle {
+    pub(crate) fn matches_node(&self, node: &crate::tree::WidgetNode) -> bool {
+        self.hidden.as_deref() == node.attributes.get("hidden").map(String::as_str)
+            && self.promoted == (node.is_promoted_popover(), node.is_promoted_window())
+            && self.tag == node.tag
+            && self.module_id.as_deref() == node.module_id()
+            && self.id.as_deref() == node.attributes.get("id").map(String::as_str)
+            && self.inline_style.as_deref() == node.attributes.get("style").map(String::as_str)
+            && self.state == node.state
+            && self.classes.iter().map(String::as_str).eq(node
+                .attributes
+                .get("class")
+                .into_iter()
+                .flat_map(|s| s.split_whitespace()))
+    }
+
+    pub(super) fn new(
+        node: &crate::tree::WidgetNode,
+        parent: Option<&ParentInheritedStyle>,
+        resolver: &super::StyleResolver<'_>,
+        index: &StyleRuleIndex,
+        context: StyleContext,
+    ) -> Self {
+        Self {
+            tag: node.tag.clone(),
+            classes: node
+                .attributes
+                .get("class")
+                .map(|s| s.split_whitespace().map(str::to_owned).collect())
+                .unwrap_or_default(),
+            id: node.attributes.get("id").cloned(),
+            inline_style: node.attributes.get("style").cloned(),
+            hidden: node.attributes.get("hidden").cloned(),
+            promoted: (node.is_promoted_popover(), node.is_promoted_window()),
+            module_id: node.module_id().map(str::to_owned),
+            state: node.state,
+            parent: parent.cloned(),
+            theme_revision: resolver.theme.revision(),
+            index_revision: index.revision,
+            props: resolver.props.as_ref().clone(),
+            container: (context.container_width, context.container_height),
+        }
+    }
+
+    pub(super) fn same_environment(
+        &self,
+        parent: Option<&ParentInheritedStyle>,
+        resolver: &super::StyleResolver<'_>,
+        index: &StyleRuleIndex,
+        context: StyleContext,
+    ) -> bool {
+        self.theme_revision == resolver.theme.revision()
+            && self.index_revision == index.revision
+            && self.container == (context.container_width, context.container_height)
+            && self.props == *resolver.props
+            && self.parent.as_ref() == parent
+    }
+
+    pub(super) fn same_matching_rules(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        rules: &[mesh_core_component::style::StyleRule],
+        index: &StyleRuleIndex,
+        context: StyleContext,
+        resolver: &super::StyleResolver<'_>,
+    ) -> bool {
+        if self.hidden.as_deref() != node.attributes.get("hidden").map(String::as_str)
+            || self.promoted != (node.is_promoted_popover(), node.is_promoted_window())
+        {
+            return false;
+        }
+        let attrs = StyleNodeAttrs::from_node(node);
+        if self.tag != attrs.tag
+            || self.id.as_deref() != attrs.id
+            || self.inline_style.as_deref() != attrs.inline_style
+            || self.module_id.as_deref() != attrs.module_id
+        {
+            return false;
+        }
+        let old = StyleNodeAttrs::new(&self.tag, &self.classes, self.id.as_deref(), self.state);
+        index.changed_dependencies_preserve_matches(rules, &old, &attrs, context)
+            && resolver.theme_dependencies_preserve_matches(
+                self.module_id.as_deref(),
+                &old,
+                &attrs,
+                context,
+            )
     }
 }
