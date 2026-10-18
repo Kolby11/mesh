@@ -500,15 +500,14 @@ impl RetainedDisplayList {
         } else {
             self.reconcile_entries(&mut next, patch_sparse_entries, dirty_node_ids, surface)
         };
-        // Offsets are absent from immutable content signatures. Damage the
-        // anchored viewport explicitly when its scope transform changes.
+        // Offsets are absent from immutable content signatures. Damage an
+        // anchored viewport explicitly when its owner's subtree was rebuilt;
+        // viewports a layout change did not reach keep their pixels.
         let scoped_geometry_change = changed_layout_count(dirty_summary) > 0;
         if scoped_geometry_change {
-            for subtree in self.subtrees.values().chain(subtrees.values()) {
-                if let Some(viewport) = subtree.scroll_viewport {
-                    damage = union_damage(damage, viewport);
-                    push_sparse_damage_rect(&mut damage_rects, viewport, surface);
-                }
+            for viewport in changed_scroll_viewports(&self.subtrees, &subtrees) {
+                damage = union_damage(damage, viewport);
+                push_sparse_damage_rect(&mut damage_rects, viewport, surface);
             }
         }
 
@@ -1428,4 +1427,26 @@ pub fn visual_damage_rects_into(
                 .or_insert(rect);
         }
     }
+}
+
+/// The previous and next viewports of every retained scroll owner whose
+/// subtree was rebuilt, appeared, or disappeared. A rebuilt owner may have
+/// moved, scrolled, or changed geometry inside its content; a reused owner
+/// replays its content unchanged at the same anchor.
+fn changed_scroll_viewports<'a>(
+    previous: &'a HashMap<NodeId, Arc<RetainedPaintSubtree>>,
+    next: &'a HashMap<NodeId, Arc<RetainedPaintSubtree>>,
+) -> impl Iterator<Item = DamageRect> + 'a {
+    let rebuilt = |a: &Arc<RetainedPaintSubtree>, b: Option<&Arc<RetainedPaintSubtree>>| {
+        b.is_none_or(|b| !Arc::ptr_eq(a, b))
+    };
+    let changed_next = next.iter().filter_map(move |(id, subtree)| {
+        let viewport = subtree.scroll_viewport?;
+        rebuilt(subtree, previous.get(id)).then_some(viewport)
+    });
+    let changed_previous = previous.iter().filter_map(move |(id, subtree)| {
+        let viewport = subtree.scroll_viewport?;
+        rebuilt(subtree, next.get(id)).then_some(viewport)
+    });
+    changed_next.chain(changed_previous)
 }

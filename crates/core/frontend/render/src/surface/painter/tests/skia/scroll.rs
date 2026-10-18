@@ -446,3 +446,122 @@ fn retained_scroll_reveals_content_and_matches_fresh_full_paint() {
         }
     }
 }
+
+#[test]
+fn layout_change_damages_only_scroll_viewports_whose_scope_moved() {
+    fn scroll_area(id: u64, x: f32) -> WidgetNode {
+        let mut area = node(
+            "scroll-area",
+            LayoutRect {
+                x,
+                y: 4.0,
+                width: 60.0,
+                height: 48.0,
+            },
+            Color::from_hex("#203040").unwrap(),
+        );
+        area.id = id;
+        area.computed_style.overflow_y = Overflow::Hidden;
+        area.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+            max_y: 112.0,
+            content_width: 60.0,
+            content_height: 160.0,
+            ..Default::default()
+        });
+        for index in 0..8 {
+            let mut text = text_node(
+                &format!("row {index}"),
+                4.0,
+                4.0 + index as f32 * 20.0,
+                52.0,
+                18.0,
+                Color::from_hex("#d0e0f0").unwrap(),
+            );
+            text.id = id * 100 + index;
+            area.children.push(text);
+        }
+        area
+    }
+    let mut root = node(
+        "column",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 160.0,
+            height: 80.0,
+        },
+        Color::from_hex("#101010").unwrap(),
+    );
+    root.id = 1;
+    root.children.push(scroll_area(2, 4.0));
+    root.children.push(scroll_area(3, 80.0));
+    let mut label = text_node(
+        "label",
+        4.0,
+        58.0,
+        40.0,
+        16.0,
+        Color::from_hex("#f0f0f0").unwrap(),
+    );
+    label.id = 4;
+    root.children.push(label);
+
+    let engine = FrontendRenderEngine::new();
+    let mut objects = RenderObjectTree::default();
+    objects.update(&root);
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 160, 80, true, true);
+    let mut buffer = PixelBuffer::new(160, 80);
+    engine.render_tree(&root, &mut buffer, 1.0);
+    let left = DamageRect {
+        x: 4,
+        y: 4,
+        width: 60,
+        height: 48,
+    };
+    for step in 0..4 {
+        match step {
+            0 => root.children[2].layout.width = 72.0,
+            1 => root.children[1].layout.x = 88.0,
+            2 => root.children[0].scroll_metrics.as_mut().unwrap().y = 30.0,
+            _ => root.children[2].layout.width = 48.0,
+        }
+        let dirty = objects.update(&root);
+        list.update_with_dirty_nodes(&root, dirty, objects.dirty_node_ids(), 160, 80, false, true);
+        let damage = list.damage_rects().to_vec();
+        let right = DamageRect {
+            x: root.children[1].layout.x as u32,
+            y: 4,
+            width: 60,
+            height: 48,
+        };
+        let touches = |viewport: DamageRect| damage.iter().any(|rect| rect.intersects(viewport));
+        match step {
+            0 | 3 => assert!(
+                !touches(left) && !touches(right),
+                "step {step}: a label resize must not damage either viewport: {damage:?}"
+            ),
+            1 => assert!(
+                touches(right) && !touches(left),
+                "step {step}: only the moved viewport is damaged: {damage:?}"
+            ),
+            _ => assert!(touches(left), "step {step}: scrolled viewport is damaged"),
+        }
+        let selected =
+            list.select_paint_commands_for_rects(&damage, DisplayListRepaintPolicy::MinimalDamage);
+        for rect in damage {
+            buffer.clear_rect(rect.x, rect.y, rect.width, rect.height, Color::TRANSPARENT);
+            engine.render_selected_display_list_for_module(
+                &selected,
+                &mut buffer,
+                1.0,
+                Some((rect.x, rect.y, rect.width, rect.height)),
+                None,
+                None,
+            );
+        }
+        let mut fresh = PixelBuffer::new(160, 80);
+        engine.render_tree(&root, &mut fresh, 1.0);
+        assert!(buffer.data() == fresh.data(), "step={step}");
+    }
+}

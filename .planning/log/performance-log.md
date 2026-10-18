@@ -5392,3 +5392,40 @@ and `filtered_visual_damage_speedup` (1.5x) are in `tools/check-performance`.
 **Verified.** Release: render 285 passed / 38 ignored. Shell lib: same failure
 set (50) before and after, diffed by name against a stashed baseline.
 
+
+## 2026-10-18 — RND-02: layout changes damage only rebuilt scroll viewports
+
+Area: retained display-list damage. AMD Ryzen 7 7840HS, workspace release
+profile. Removed the RND-02 backlog item.
+
+Content inside a retained scroll scope has no offsets in its signatures, so
+any layout-class dirty bit used to damage **every** anchored viewport on the
+surface. A viewport is now damaged only if its owner's retained subtree was
+rebuilt (owner or a descendant dirty, an ancestor forcing a rebuild), appeared,
+or disappeared. Reused owners replay their content unchanged at the same anchor.
+A first version compared only the owner's scope geometry; it missed a nested
+scroll inside retained content (`nested_scroll_inside_retained_content_matches_fresh_paint`
+caught it) and was replaced by the rebuilt-subtree rule.
+
+**Measured.** `label_resize_scroll_viewport_damage_profile`: 960×480 surface
+with three 80-row scroll areas (240/480/240 wide) and a status label outside
+them whose width changes every frame, 200 frames, three runs each. Damage is
+deterministic:
+
+| | Damaged px/frame | Share of surface | Update time, 200 frames |
+| --- | --- | --- | --- |
+| Before | 425,791 | 92.4% | 68.6–99.0 ms |
+| After | 3,391 | 0.7% | 65.6–68.1 ms |
+
+The win is in repainted pixels downstream of the display list, which this
+profile does not time; update cost is unchanged. Gate
+`label_resize_viewport_damage_percent` (upper 1.0%) is in
+`tools/check-performance`. `settings_scroll_frame_gate` still passes (p50
+5.647 ms, p90 6.669 ms, 90 frames).
+
+**Verified.** Release render 286 passed / 38 ignored, including the new pixel
+regression `layout_change_damages_only_scroll_viewports_whose_scope_moved`
+(label resize damages neither viewport; moving one damages only it; partial
+repaint equals fresh paint). Shell lib failure set unchanged apart from the
+five theme tests fixed earlier today.
+

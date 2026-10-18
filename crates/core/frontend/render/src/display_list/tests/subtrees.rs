@@ -917,3 +917,63 @@ fn early_exit_preclip_matches_the_full_subtree_union() {
         );
     }
 }
+
+// cargo test -p mesh-core-render --release -- label_resize_scroll_viewport_damage_profile --ignored --nocapture
+#[test]
+#[ignore = "release-only scroll-viewport damage profile"]
+fn label_resize_scroll_viewport_damage_profile() {
+    // A settings-shaped surface: sidebar, page, and preview scroll areas,
+    // plus a status label outside all three whose width changes every frame.
+    fn scroll_area(id: NodeId, x: f32, width: f32) -> WidgetNode {
+        let mut area = node(id, "scroll-area", x, 0.0, width, 440.0);
+        area.computed_style.overflow_y = Overflow::Hidden;
+        area.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+            max_y: 1160.0,
+            content_width: width,
+            content_height: 1600.0,
+            ..Default::default()
+        });
+        for index in 0..80 {
+            area.children.push(node(
+                id * 1000 + index,
+                "text",
+                8.0,
+                8.0 + index as f32 * 20.0,
+                width - 16.0,
+                18.0,
+            ));
+        }
+        area
+    }
+    let mut root = node(1, "row", 0.0, 0.0, 960.0, 480.0);
+    root.children.push(scroll_area(2, 0.0, 240.0));
+    root.children.push(scroll_area(3, 240.0, 480.0));
+    root.children.push(scroll_area(4, 720.0, 240.0));
+    let mut label = node(5, "text", 8.0, 448.0, 120.0, 24.0);
+    label.attributes.insert("content".into(), "status".into());
+    root.children.push(label);
+
+    let mut objects = crate::RenderObjectTree::default();
+    objects.update(&root);
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 960, 480, true, true);
+    let frames = 200u64;
+    let mut damaged = 0u64;
+    let started = std::time::Instant::now();
+    for frame in 0..frames {
+        root.children[3].layout.width = 121.0 + (frame % 40) as f32;
+        let dirty = objects.update(&root);
+        assert!(dirty.geometry > 0);
+        list.update_with_dirty_nodes(&root, dirty, objects.dirty_node_ids(), 960, 480, false, true);
+        damaged += list.damage_rects().iter().map(|rect| rect.area()).sum::<u64>();
+    }
+    let elapsed = started.elapsed();
+    let per_frame = damaged as f64 / frames as f64;
+    eprintln!(
+        "{frames} label-resize frames: {per_frame:.0} damaged px/frame ({:.1}% of 960x480); update {elapsed:?}",
+        per_frame / (960.0 * 480.0) * 100.0
+    );
+    let percent = per_frame / (960.0 * 480.0) * 100.0;
+    println!("MESH_PERF metric=label_resize_viewport_damage_percent value={percent:.6}");
+    assert!(percent < 2.0, "a label resize must not damage unrelated scroll viewports");
+}
