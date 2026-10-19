@@ -245,6 +245,70 @@ been measured and reverted.
 Every optimization lands with a representative benchmark, and a checked relative
 gate where the win is structural.
 
+### Render sweep findings
+
+From a read-only code sweep on 2026-10-19; nothing below is measured yet.
+Verify each against `navigation_hover_profile`, `appearance_frame_cost_profile`
+or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
+
+- [ ] Hover and transition ticks set `surface_pixels_invalid`, forcing full
+      surface damage (`component.rs:1703,1714,1940`). Keep pixels valid like
+      `invalidate_scroll` and let the retained diff pick damage; pixel-parity test.
+- [ ] Any finished icon/glyph/image job calls `request_paint()` on every
+      component, forcing full damage everywhere (`runtime/render/mod.rs:70`).
+      Route completions to the nodes/components that requested the resource key.
+- [ ] Every hover runs layout even for paint-only `:hover` rules. Omit LAYOUT
+      when no state rule touches a layout property; split the retained STYLE
+      flag into layout and paint hashes.
+- [ ] Live animations request every vsync during `steps()` holds, delays and
+      infinite loops; sleep until the next visible change. The style-animation
+      pass walks the whole tree on any restyle (theme `node {}` transition);
+      visit only restyled and animating nodes.
+- [ ] A rounded `overflow` ancestor sends every descendant down the affine path
+      with a shader clip per node (`display_list/types.rs:566`). Use a rect clip
+      for nodes missing the corner squares; longer term, push/pop clip scopes.
+- [ ] Multi-rect damage replays the selection once per rect when it contains a
+      layer scope (`painter/tree.rs:363,596`); paint once under `clip_region`.
+- [ ] A scroll viewport is one opaque replay span, so damage inside it replays
+      all content including offscreen rows (`display_list/build.rs:684`).
+- [ ] Popover show rebuilds the retained GPU target and dmabuf ring. Keep the
+      target while hidden and pool dmabuf slots per size in `GpuPresenter`.
+- [ ] GPU target and dmabuf ring reallocate on every size change; round both up
+      to 64 px classes like the SHM path and crop with the viewport.
+- [ ] Opacity: `opacity: 0` subtrees still rasterize into a layer, and single-
+      primitive leaves open a `save_layer`; prune the first, fold alpha into the
+      paint for the second. Animated opacity/transform layers have no raster cache.
+- [ ] The GPU painter keeps CPU-tuned choices (A8 atlas rounded fills, shader
+      clips, CPU-rastered shadows/gradients); try analytic `draw_rrect`/
+      `clip_rrect` and mask-filter shadows on Ganesh behind a parity test.
+- [ ] Skia context: no persistent shader cache, no `perform_deferred_cleanup`,
+      one flush plus fence per surface per frame instead of one per frame.
+- [ ] Text: each layout-cache hit removes and reinserts its entry (~15–25 allocs
+      per text node per paint), and the shared 512-entry cache may never hit on
+      Settings; check `TextCacheMetrics.layout_misses` first.
+- [ ] Text draws one `draw_image_rect` per glyph; batch with `draw_atlas` per run,
+      later Skia text blobs. Glyph pages re-upload the whole page on growth.
+- [ ] Icon tint is in every icon raster key, so colour changes re-rasterize;
+      cache A8 masks and tint at draw. File-icon misses rasterize twice, once on
+      the UI thread. Missing icons re-queue resolution jobs.
+- [ ] Images over 16 MB never enter `SKIA_IMAGE_CACHE` and are copied and
+      re-uploaded every paint; wrap the decoded `Arc` without copying.
+- [ ] An icon-pack publish advances the shared resource revision and rebuilds
+      `FontSystem`; split font and icon revisions. `TextRenderer::new` does a
+      system font scan that is discarded on the first frame.
+- [ ] Frame pacing is per component, not per target, so popover frames wait on
+      the parent's callback. Service updates run Lua per message, not per frame.
+- [ ] Sparse frames still pay ~10 full passes (batch index rebuild, topology
+      check, backdrop regions, layer-scope collection); the subtree reuse map
+      drops descendants of reused subtrees (`build.rs:433`) — add a regression.
+- [ ] Hit testing visits the whole tree without bounds culling and clones a clip
+      `Vec` per node on pointer move; hover keys are re-parsed to `NodeId`s.
+- [ ] Regressions: `TextMeasureKey::new` copies four strings per probe (since
+      `8fe08b37`); `render/mod.rs:100` clones the surface id before `wants_render`.
+- [ ] Bugs: held-key repeat and the focus-grab and 50 ms callback-escape
+      deadlines are absent from `next_runtime_sleep` (repeat stalls up to 2 s,
+      then bursts); effects queued during render wait for the next wakeup.
+
 ### Scroll and animation frames
 
 From the 2026-09-30 Settings scroll session profile; evidence and A/B numbers
