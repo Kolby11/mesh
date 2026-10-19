@@ -1,5 +1,6 @@
 //! Text measurement and rendering for the frontend render engine.
 
+use super::glyph_pages::{GlyphPages, MAX_PAGED_GLYPH, PageSlot};
 use super::{PixelBuffer, PixelCanvasSession, checked_pixel_bytes};
 use cosmic_text::{
     Align, Attrs, AttrsOwned, Buffer, BufferLine, CacheKey, Cursor, Family, FamilyOwned,
@@ -12,7 +13,8 @@ use mesh_core_elements::style::{FontStyle, TextAlign, TextDirection, WhiteSpace}
 use mesh_core_elements::{TextMeasureContext, TextMeasureRevisions};
 use mesh_core_resources::resource_revision;
 use skia_safe::{
-    AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
+    AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions,
+    canvas::SrcRectConstraint, images,
 };
 use std::cell::RefCell;
 use std::cmp::Ordering;
@@ -41,6 +43,9 @@ struct NamedFontAvailabilityKey {
 
 struct GlyphAtlasEntry {
     image: skia_safe::Image,
+    /// Where the glyph also lives in a shared page, drawn from there once a
+    /// page snapshot covers it.
+    slot: Option<PageSlot>,
     placement_left: i32,
     placement_top: i32,
     is_color: bool,
@@ -61,6 +66,9 @@ thread_local! {
     /// spaces) so we skip the swash lookup next time.
     static GLYPH_ATLAS: RefCell<ByteLruCache<GlyphAtlasKey, Option<GlyphAtlasEntry>>> =
         RefCell::new(ByteLruCache::new(GLYPH_ATLAS_CAPACITY, GLYPH_ATLAS_MAX_BYTES));
+    /// Page images the atlas entries' slots point into. Cleared together
+    /// with `GLYPH_ATLAS`, so no live entry refers to a reused cell.
+    static GLYPH_PAGES: RefCell<GlyphPages> = RefCell::new(GlyphPages::default());
     static NAMED_FONT_AVAILABILITY: RefCell<ByteLruCache<NamedFontAvailabilityKey, bool>> =
         RefCell::new(ByteLruCache::new(
             NAMED_FONT_AVAILABILITY_CACHE_CAPACITY,
@@ -666,17 +674,22 @@ impl TextRenderer {
                 ..
             } = &mut *engine;
             GLYPH_ATLAS.with(|atlas_cell| {
-                let mut atlas = atlas_cell.borrow_mut();
-                let mut renderer = SkiaGlyphRenderer {
-                    font_system,
-                    swash_cache,
-                    atlas: &mut atlas,
-                    canvas,
-                    base_x,
-                    base_y,
-                    resource_revision,
-                };
-                cosmic.render(&mut renderer, cosmic_color(color));
+                GLYPH_PAGES.with(|pages_cell| {
+                    let mut atlas = atlas_cell.borrow_mut();
+                    let mut pages = pages_cell.borrow_mut();
+                    pages.refresh();
+                    let mut renderer = SkiaGlyphRenderer {
+                        font_system,
+                        swash_cache,
+                        atlas: &mut atlas,
+                        pages: &mut pages,
+                        canvas,
+                        base_x,
+                        base_y,
+                        resource_revision,
+                    };
+                    cosmic.render(&mut renderer, cosmic_color(color));
+                })
             });
         }
         canvas.restore_to_count(save_count);
@@ -1033,6 +1046,7 @@ struct SkiaGlyphRenderer<'a> {
     font_system: &'a mut FontSystem,
     swash_cache: &'a mut SwashCache,
     atlas: &'a mut ByteLruCache<GlyphAtlasKey, Option<GlyphAtlasEntry>>,
+    pages: &'a mut GlyphPages,
     canvas: &'a Canvas,
     base_x: i32,
     base_y: i32,
@@ -1068,8 +1082,17 @@ impl Renderer for SkiaGlyphRenderer<'_> {
         };
         let needs_build = self.atlas.get(&cache_key).is_none();
         if needs_build {
-            let entry =
-                build_glyph_atlas_entry(self.font_system, self.swash_cache, cache_key.cache_key);
+            let (entry, pages_full) = build_glyph_atlas_entry(
+                self.font_system,
+                self.swash_cache,
+                self.pages,
+                cache_key.cache_key,
+            );
+            if pages_full {
+                // Cells are never reclaimed one by one; start over instead.
+                self.pages.clear();
+                self.atlas.clear();
+            }
             let weight = entry.as_ref().map_or(1, |entry| entry.bytes);
             self.atlas.insert(cache_key, entry, weight);
         }
@@ -1083,6 +1106,9 @@ impl Renderer for SkiaGlyphRenderer<'_> {
         let dest_y = (self.base_y + physical_glyph.y - entry.placement_top) as f32;
         let (img_w, img_h) = (entry.image.width() as f32, entry.image.height() as f32);
         let dest = Rect::from_xywh(dest_x, dest_y, img_w, img_h);
+        let paged = entry
+            .slot
+            .and_then(|slot| Some((self.pages.image(slot)?, Rect::from(slot.src))));
 
         let mut paint = Paint::default();
         paint.set_anti_alias(false);
@@ -1094,21 +1120,55 @@ impl Renderer for SkiaGlyphRenderer<'_> {
             // image's A8 alpha modulates it.
             paint.set_argb(a, r, g, b);
         }
-        self.canvas.draw_image_rect_with_sampling_options(
-            &entry.image,
-            None,
-            dest,
-            SamplingOptions::default(),
-            &paint,
-        );
+        match paged {
+            Some((page, src)) => self.canvas.draw_image_rect_with_sampling_options(
+                page,
+                Some((&src, SrcRectConstraint::Strict)),
+                dest,
+                SamplingOptions::default(),
+                &paint,
+            ),
+            None => self.canvas.draw_image_rect_with_sampling_options(
+                &entry.image,
+                None,
+                dest,
+                SamplingOptions::default(),
+                &paint,
+            ),
+        };
     }
 }
 
+/// Rasterize a glyph into its own image and, when it fits, a shared page.
+/// The flag reports that the pages had no room left.
 fn build_glyph_atlas_entry(
     font_system: &mut FontSystem,
     swash_cache: &mut SwashCache,
+    pages: &mut GlyphPages,
     cache_key: CacheKey,
-) -> Option<GlyphAtlasEntry> {
+) -> (Option<GlyphAtlasEntry>, bool) {
+    let Some((entry, pixels)) = rasterize_glyph(font_system, swash_cache, cache_key) else {
+        return (None, false);
+    };
+    let slot = pages.place(
+        entry.is_color,
+        entry.image.width() as u32,
+        entry.image.height() as u32,
+        &pixels,
+    );
+    let pages_full = slot.is_none() && glyph_pages_accept(&entry);
+    (Some(GlyphAtlasEntry { slot, ..entry }), pages_full)
+}
+
+fn glyph_pages_accept(entry: &GlyphAtlasEntry) -> bool {
+    entry.image.width() as u32 <= MAX_PAGED_GLYPH && entry.image.height() as u32 <= MAX_PAGED_GLYPH
+}
+
+fn rasterize_glyph(
+    font_system: &mut FontSystem,
+    swash_cache: &mut SwashCache,
+    cache_key: CacheKey,
+) -> Option<(GlyphAtlasEntry, Vec<u8>)> {
     // cosmic-text's SwashCache is an unbounded HashMap. Keep the bounded
     // Skia atlas below as the sole resident glyph cache and rasterize
     // misses without populating the dependency's cache.
@@ -1151,13 +1211,17 @@ fn build_glyph_atlas_entry(
     }
     let data = Data::new_copy(image.data.as_slice());
     let sk_image = images::raster_from_data(&info, data, row_bytes)?;
-    Some(GlyphAtlasEntry {
-        image: sk_image,
-        placement_left: image.placement.left,
-        placement_top: image.placement.top,
-        is_color: matches!(image.content, SwashContent::Color),
-        bytes,
-    })
+    Some((
+        GlyphAtlasEntry {
+            image: sk_image,
+            slot: None,
+            placement_left: image.placement.left,
+            placement_top: image.placement.top,
+            is_color: matches!(image.content, SwashContent::Color),
+            bytes,
+        },
+        image.data,
+    ))
 }
 
 fn glyph_atlas_storage_bytes(width: u32, height: u32, bytes_per_pixel: usize) -> Option<usize> {
@@ -1180,6 +1244,7 @@ impl TextEngine {
         self.swash_cache = SwashCache::new();
         self.layout_cache.clear();
         GLYPH_ATLAS.with(|atlas| atlas.borrow_mut().clear());
+        GLYPH_PAGES.with(|pages| pages.borrow_mut().clear());
         NAMED_FONT_AVAILABILITY.with(|cache| cache.borrow_mut().clear());
         self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
     }
@@ -1238,6 +1303,7 @@ impl TextEngine {
         self.swash_cache = SwashCache::new();
         self.layout_cache.clear();
         GLYPH_ATLAS.with(|atlas| atlas.borrow_mut().clear());
+        GLYPH_PAGES.with(|pages| pages.borrow_mut().clear());
         NAMED_FONT_AVAILABILITY.with(|cache| cache.borrow_mut().clear());
         self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
     }

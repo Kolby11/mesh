@@ -63,11 +63,11 @@ entry in the [performance log](../../log/performance-log.md).
 
 ### Resource residency (phase 5)
 
-Icons, images, SVG rasterizations and painter-owned glyph bitmaps are CPU
-`Image`s; Ganesh uploads each one when it is first drawn and caches the
-texture by image identity. Measure text-update and icon-grid frames on the
-GPU path, then keep GPU images keyed by the existing cache keys where uploads
-dominate.
+Glyphs share page images (performance log, "Shared glyph pages"). Icons,
+images and icon-font glyphs still draw one texture each; Ganesh caches each
+upload by image identity, so steady frames do not re-upload, but op combining
+is quadratic in distinct textures. Move icons into pages if an icon-dense
+surface shows `TextureOpImpl::onCombineIfPossible` in a profile.
 
 ### Gates (rest of phase 6)
 

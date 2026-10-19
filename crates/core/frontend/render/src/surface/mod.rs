@@ -3,6 +3,7 @@ mod buffer;
 mod canvas;
 mod debug_overlay;
 mod glyph;
+mod glyph_pages;
 pub(crate) mod icon;
 mod painter;
 mod profiling;

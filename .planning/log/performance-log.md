@@ -6208,3 +6208,41 @@ correctly across ring buffers.
 `ef6f3c8b`. `mesh-core-shell` serial release: 866 passed / 45 failed with and
 without `gpu`, failure names identical to an `ef6f3c8b` worktree. No named
 gate exists yet.
+
+## 2026-10-19 — Shared glyph pages: text on the GPU path
+
+Area: text painter (`surface/text.rs`, `surface/glyph_pages.rs`). Same machine
+and profile as the previous entry. Follows it: the GPU path shipped there made
+text-dense repaints far slower than the CPU.
+
+**Cause.** Each glyph drew from its own Skia image. On Ganesh every glyph
+became a texture op with a distinct texture, and op combining is quadratic in
+them: a perf profile of the text workload put 77% of samples in
+`TextureOpImpl::onCombineIfPossible`. The cost was CPU-side and identical on
+both GPUs.
+
+**Change.** Rasterized glyphs up to 128 px are also copied into shared 1024²
+pages (A8 masks, RGBA color glyphs; at most 4 + 2 pages, cleared together with
+the glyph cache when full). Text draws use a page snapshot with a strict
+source rect; a glyph placed after the latest snapshot draws from its own image
+until the next text node refreshes the page, so a first frame snapshots each
+dirty page at most once per text node. CPU output is unchanged: all
+exact-pixel renderer and shell text tests pass.
+
+**Workload.** `gpu_frame_cost_workload` gained a text-dense surface: 40 lines
+of 81-character text at 14 px, 920×900 logical at scale 2. Per frame ranges,
+4 samples × 40 frames:
+
+| Damage | CPU raster + SHM | AMD 780M before | AMD 780M after | RTX 4060 before | RTX 4060 after |
+| --- | --- | --- | --- | --- | --- |
+| 40 text lines | 6.999–7.579 ms | 120.024–122.587 ms | 2.589–2.640 ms | 119.949–121.973 ms | 2.350–2.462 ms |
+| One text line | 0.137–0.142 ms | 0.452–0.502 ms | 0.169–0.278 ms | 0.358–0.399 ms | 0.198–0.205 ms |
+| Settings full surface | 33.960–34.676 ms | 2.639–2.918 ms | 2.282–2.573 ms | 2.251–2.300 ms | 1.951–2.026 ms |
+
+**Verified.** Renderer release 299 passed (default) and 308 passed
+(`renderer-gpu`, `MESH_REQUIRE_GPU=1`). Shell serial release with `gpu`:
+866 passed / 45 failed, failure names identical to the `ef6f3c8b` baseline.
+Live top-bar capture against `MESH_RENDER_GPU=0`: 147 differing pixels, all in
+the clock and CPU counter. Icon images and icon-font glyphs still draw one
+texture each; with tens of icons per surface the combining cost is not
+measurable yet.

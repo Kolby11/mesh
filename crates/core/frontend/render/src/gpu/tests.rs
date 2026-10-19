@@ -704,6 +704,32 @@ mod frame_cost {
         root
     }
 
+    /// A text-dense surface: 40 lines of mixed text on a plain background.
+    fn text_scene() -> WidgetNode {
+        let mut root = node(1, "box", (0.0, 0.0, 920.0, 900.0));
+        root.computed_style.background_color = color(24, 28, 36, 255);
+        for line in 0..40u64 {
+            let mut label = node(
+                10 + line,
+                "text",
+                (16.0, 12.0 + line as f32 * 22.0, 880.0, 20.0),
+            );
+            label.attributes.insert(
+                "content".into(),
+                format!(
+                    "{line:02} The quick brown fox jumps over the lazy dog — 0123456789 ABCDEFGHIJKLM"
+                )
+                .into(),
+            );
+            label.computed_style.color = color(230, 234, 240, 255);
+            label.computed_style.font_size = 14.0;
+            label.computed_style.line_height = 1.3;
+            label.computed_style.padding = Edges::zero();
+            root.children.push(label);
+        }
+        root
+    }
+
     fn logical(x: u32, y: u32, width: u32, height: u32) -> DamageRect {
         DamageRect {
             x,
@@ -784,18 +810,28 @@ mod frame_cost {
     fn gpu_frame_cost_workload() {
         let _guard = crate::resource_state_test_lock();
         let engine = FrontendRenderEngine::new();
-        let root = settings_scene();
-        let mut list = RetainedDisplayList::default();
-        list.set_backdrop_blur_policy(crate::display_list::BackdropBlurPolicy::InSurfaceFilter);
-        list.update(&root, LOGICAL.0, LOGICAL.1, true, true);
+        let list_for = |root: &WidgetNode| {
+            let mut list = RetainedDisplayList::default();
+            list.set_backdrop_blur_policy(crate::display_list::BackdropBlurPolicy::InSurfaceFilter);
+            list.update(root, LOGICAL.0, LOGICAL.1, true, true);
+            list
+        };
+        let settings = list_for(&settings_scene());
+        let text = list_for(&text_scene());
         let (width, height) = (
             (LOGICAL.0 as f32 * SCALE) as u32,
             (LOGICAL.1 as f32 * SCALE) as u32,
         );
         let workloads = [
-            ("full surface", logical(0, 0, LOGICAL.0, LOGICAL.1)),
-            ("frosted panel", logical(40, 40, 840, 260)),
-            ("small widget", logical(476, 544, 138, 76)),
+            (
+                "full surface",
+                &settings,
+                logical(0, 0, LOGICAL.0, LOGICAL.1),
+            ),
+            ("frosted panel", &settings, logical(40, 40, 840, 260)),
+            ("small widget", &settings, logical(476, 544, 138, 76)),
+            ("40 text lines", &text, logical(0, 0, LOGICAL.0, LOGICAL.1)),
+            ("one text line", &text, logical(16, 452, 880, 20)),
         ];
         eprintln!(
             "surface {}x{} logical at scale {SCALE} ({width}x{height} px), {FRAMES} frames x {SAMPLES} samples",
@@ -803,7 +839,7 @@ mod frame_cost {
         );
         let mut cpu = PixelBuffer::new(width, height);
         let mut shm = vec![0u8; cpu.data().len()];
-        for (name, damage) in workloads {
+        for (name, list, damage) in workloads {
             let mut samples = Vec::new();
             for _ in 0..=SAMPLES {
                 let started = Instant::now();
@@ -834,12 +870,12 @@ mod frame_cost {
                 context.dmabuf_target(width, height).unwrap(),
                 context.dmabuf_target(width, height).unwrap(),
             ];
-            for (name, damage) in workloads {
+            for (name, list, damage) in workloads {
                 let mut samples = Vec::new();
                 for _ in 0..=SAMPLES {
                     let started = Instant::now();
                     for frame in 0..FRAMES {
-                        paint(&engine, &list, &mut retained.session(), damage);
+                        paint(&engine, list, &mut retained.session(), damage);
                         ring[frame % 2].copy_from(&mut retained, &[device(damage)]);
                         context.submit_for(&ring[frame % 2]);
                     }
