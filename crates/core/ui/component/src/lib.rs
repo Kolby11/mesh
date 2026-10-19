@@ -1,3 +1,5 @@
+mod color_literals;
+pub use color_literals::{ComponentColorLiteral, component_color_literals};
 pub mod parser;
 pub mod style;
 mod token_usage;

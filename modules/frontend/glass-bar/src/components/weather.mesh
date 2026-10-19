@@ -46,8 +46,8 @@ end)
         align-items: center;
         border-radius: 999px;
         border: 1px solid var(--glass-rim);
-        background-image: linear-gradient(to bottom, #b468ff4d, #7a2ee033);
-        box-shadow: 0 4px 14px #14003259;
+        background-image: var(--glass-surface-pill);
+        box-shadow: var(--glass-shadow-pill);
         backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
     }
 
@@ -59,14 +59,14 @@ end)
     .glyph {
         width: 20px;
         height: 20px;
-        color: #f5ecff;
+        color: var(--glass-text);
     }
 
     .temp {
         height: 20px;
         font-size: 14px;
         font-weight: 600;
-        color: #f5ecff;
+        color: var(--glass-text);
     }
 
     /* Motion: one vocabulary for the whole shell, all from theme tokens.

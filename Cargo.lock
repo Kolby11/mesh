@@ -2174,6 +2174,7 @@ dependencies = [
 name = "mesh-core-component"
 version = "0.1.0"
 dependencies = [
+ "cssparser 0.35.0",
  "full_moon",
  "lightningcss",
  "mesh-core-expression",

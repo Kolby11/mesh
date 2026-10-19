@@ -342,14 +342,19 @@ impl Backend {
         }
 
         let doc = Document::new(uri.clone(), source);
-        let local_tokens = {
+        let (local_tokens, independent) = {
             let registry = self.registry.read().await;
             uri.to_file_path()
                 .ok()
-                .map(|path| registry.local_theme_tokens(&path))
+                .map(|path| {
+                    (
+                        registry.local_theme_tokens(&path),
+                        registry.theme_independent(&path),
+                    )
+                })
                 .unwrap_or_default()
         };
-        let diags = diagnostics::from_document_with_local_tokens(&doc, &local_tokens);
+        let diags = diagnostics::from_document_with_theme_context(&doc, &local_tokens, independent);
         let _update_guard = self.document_update_lock.lock().await;
         if !self.commit_document_version(&uri, version).await {
             return None;

@@ -208,6 +208,7 @@ fn extract_keybind_subscriptions_from_component(component: &ComponentFile) -> Ve
 
 #[derive(Debug, Default)]
 pub(crate) struct MeshSourceScan {
+    pub(crate) color_literals: Vec<mesh_core_component::ComponentColorLiteral>,
     pub(crate) token_reads: Vec<mesh_core_component::ThemeTokenRead>,
     pub(crate) icon_names: Vec<String>,
     pub(crate) static_calls: MeshStaticCalls,
@@ -219,6 +220,7 @@ pub(crate) fn scan_mesh_source(content: &str) -> MeshSourceScan {
         return MeshSourceScan::default();
     };
     MeshSourceScan {
+        color_literals: mesh_core_component::component_color_literals(&component, content),
         token_reads: mesh_core_component::unknown_theme_token_reads(&component, content, &[]),
         icon_names: extract_icon_names_from_component(&component),
         static_calls: extract_mesh_static_calls_from_component(&component),

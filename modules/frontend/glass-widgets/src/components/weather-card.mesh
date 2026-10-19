@@ -93,8 +93,8 @@ end)
         justify-content: space-between;
         border-radius: 25px;
         border: 1px solid var(--glass-rim);
-        background-image: linear-gradient(to bottom, #8a48ec3d, #36178a2e);
-        box-shadow: 0 20px 48px #0a021a73;
+        background-image: var(--glass-surface-weather);
+        box-shadow: var(--glass-shadow-card);
         backdrop-filter: blur(6px) refract(40px 30px) dispersion(4px);
         opacity: 1;
         animation: card-in 620 cubic-bezier(0.05, 0.7, 0.1, 1) both;
@@ -114,7 +114,7 @@ end)
     .hero {
         width: 101px;
         height: 101px;
-        color: #ddd0f7;
+        color: var(--glass-text-caption);
     }
 
     .place {
@@ -126,14 +126,14 @@ end)
         height: 34px;
         font-size: 24px;
         font-weight: 600;
-        color: #f8f0ff;
+        color: var(--glass-text-heading);
         text-align: right;
     }
 
     .condition {
         height: 28px;
         font-size: 18px;
-        color: #e3cdfa;
+        color: var(--glass-text-muted);
         text-align: right;
     }
 
@@ -157,21 +157,21 @@ end)
         font-size: 76px;
         font-weight: 700;
         line-height: 1.1;
-        color: #fbf5ff;
+        color: var(--glass-text-strong);
     }
 
     .degree {
         height: 50px;
         font-size: 42px;
         font-weight: 700;
-        color: #fbf5ff;
+        color: var(--glass-text-strong);
     }
 
     .feels {
         height: 25px;
         font-size: 17px;
         font-weight: 500;
-        color: #e3cdfa;
+        color: var(--glass-text-muted);
     }
 
     .forecast {
@@ -189,20 +189,20 @@ end)
         height: 28px;
         font-size: 20px;
         font-weight: 600;
-        color: #f8f0ff;
+        color: var(--glass-text-heading);
     }
 
     .point-glyph {
         width: 36px;
         height: 36px;
-        color: #c8dcff;
+        color: var(--glass-text-cool);
     }
 
     .point-time {
         height: 22px;
         font-size: 15px;
         font-weight: 500;
-        color: #f5ecff;
+        color: var(--glass-text);
     }
 
     @keyframes card-in {

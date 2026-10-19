@@ -63,7 +63,7 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/apps-interface` | interface | `mesh.apps` pinned/running application contract |
 | `@mesh/recorder-interface` | interface | `mesh.recorder` screen-recording contract |
 | `@mesh/violet-glass` | theme | Violet glass palette with monospace type; tunes `@mesh/glass-material` |
-| `@mesh/glass-material` | library | Token family (`--glass-rim`, `--glass-rim-hover`, `--glass-hover`) shared by the glass bar, dock and widgets |
+| `@mesh/glass-material` | library | Shared surface gradients, translucent fills, text, accents, rims, hovers and shadows; defaults derive from any theme, with Violet Glass tuning the original palette |
 | `@mesh/shell-ui-interface` | interface | Named UI extension-point contracts a host surface renders foreign module UI into |
 | `@mesh/icons-default` | icon-pack | Default semantic icon mappings |
 | `@mesh/icons-material-symbols` | icon-pack | Material Symbols font and codepoint mappings |

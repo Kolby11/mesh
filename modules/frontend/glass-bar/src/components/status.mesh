@@ -116,8 +116,8 @@ end
         align-items: center;
         border-radius: 999px;
         border: 1px solid var(--glass-rim);
-        background-image: linear-gradient(to bottom, #b468ff4d, #7a2ee033);
-        box-shadow: 0 4px 14px #14003259;
+        background-image: var(--glass-surface-pill);
+        box-shadow: var(--glass-shadow-pill);
         backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
     }
 
@@ -137,37 +137,39 @@ end
 
 
     /* The battery is the one solid accent pill on the right, as in the
-    reference: pale pink glass with dark text. */
+    reference; its colours follow the material accent roles. */
     .pill.battery {
-        border: 1px solid #ffffff66;
-        background-image: linear-gradient(to bottom, #ffe3f4e6, #f5b6dccc);
+        border: 1px solid var(--glass-rim-accent);
+        background-image: var(--glass-surface-battery);
+        --battery-foreground: var(--glass-text-on-accent);
     }
 
     .pill.battery-low {
-        background-image: linear-gradient(to bottom, #ff8fa3e6, #e2466acc);
+        background-image: var(--glass-surface-battery-low);
+        --battery-foreground: var(--glass-text-on-error);
     }
 
     .glyph {
         width: 20px;
         height: 20px;
-        color: #f5ecff;
+        color: var(--glass-text);
     }
 
     .glyph-dark {
         width: 18px;
         height: 18px;
-        color: #3a1238;
+        color: var(--battery-foreground);
     }
 
     .label {
         height: 20px;
         font-size: 13px;
         font-weight: 600;
-        color: #f5ecff;
+        color: var(--glass-text);
     }
 
     .label-dark {
-        color: #3a1238;
+        color: var(--battery-foreground);
     }
 
     /* Motion: one vocabulary for the whole shell, all from theme tokens.

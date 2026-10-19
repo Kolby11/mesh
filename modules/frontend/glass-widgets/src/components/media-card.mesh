@@ -118,8 +118,8 @@ end
         align-items: center;
         border-radius: 25px;
         border: 1px solid var(--glass-rim);
-        background-image: linear-gradient(to bottom, #a466f03d, #4a1fa02e);
-        box-shadow: 0 20px 48px #0a021a73;
+        background-image: var(--glass-surface-media);
+        box-shadow: var(--glass-shadow-card);
         backdrop-filter: blur(6px) refract(40px 30px) dispersion(4px);
         opacity: 1;
         animation: card-in 520 cubic-bezier(0.05, 0.7, 0.1, 1) both;
@@ -137,9 +137,9 @@ end
         justify-content: center;
         align-items: center;
         border-radius: 20px;
-        border: 1px solid #ffffff33;
-        background: #ffffff1f;
-        box-shadow: 0 8px 22px #0a021a66;
+        border: 1px solid var(--glass-rim-inset);
+        background: var(--glass-fill-artwork);
+        box-shadow: var(--glass-shadow-artwork);
         overflow: hidden;
     }
 
@@ -152,7 +152,7 @@ end
     .art-glyph {
         width: 62px;
         height: 62px;
-        color: #e9d8ff;
+        color: var(--glass-text-artwork);
     }
 
     .body {
@@ -166,14 +166,14 @@ end
         height: 36px;
         font-size: 27px;
         font-weight: 600;
-        color: #f8f0ff;
+        color: var(--glass-text-heading);
         text-overflow: ellipsis;
     }
 
     .artist {
         height: 25px;
         font-size: 17px;
-        color: #e3cdfa;
+        color: var(--glass-text-muted);
         text-overflow: ellipsis;
     }
 
@@ -188,14 +188,14 @@ end
         height: 22px;
         font-size: 15px;
         font-weight: 500;
-        color: #f5ecff;
+        color: var(--glass-text);
     }
 
     .seek {
         flex-grow: 1;
         height: 31px;
         padding: 0;
-        color: #efe4ff;
+        color: var(--glass-text-control);
     }
 
     .controls {
@@ -212,8 +212,8 @@ end
         justify-content: center;
         align-items: center;
         border-radius: 11px;
-        border: 1px solid #ffffff2e;
-        background-image: linear-gradient(to bottom, #d79bff4d, #9c58f033);
+        border: 1px solid var(--glass-rim-control);
+        background-image: var(--glass-surface-control);
     }
 
 
@@ -221,7 +221,7 @@ end
     .ctl-glyph {
         width: 22px;
         height: 22px;
-        color: #fbf5ff;
+        color: var(--glass-text-strong);
     }
 
     @keyframes card-in {

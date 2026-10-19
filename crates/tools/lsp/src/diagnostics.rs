@@ -9,6 +9,14 @@ pub fn from_document(doc: &Document) -> Vec<Diagnostic> {
 }
 
 pub fn from_document_with_local_tokens(doc: &Document, local_tokens: &[String]) -> Vec<Diagnostic> {
+    from_document_with_theme_context(doc, local_tokens, false)
+}
+
+pub fn from_document_with_theme_context(
+    doc: &Document,
+    local_tokens: &[String],
+    independent: bool,
+) -> Vec<Diagnostic> {
     let mut diagnostics = doc
         .parse_error
         .as_ref()
@@ -17,6 +25,17 @@ pub fn from_document_with_local_tokens(doc: &Document, local_tokens: &[String]) 
     diagnostics.extend(diagnostics_from_script_refs(doc));
     diagnostics.extend(diagnostics_from_quoted_expression_attrs(doc));
     if let Some(component) = &doc.parsed {
+        if !independent {
+            diagnostics.extend(mesh_core_component::component_color_literals(component, &doc.source).into_iter().map(|literal| Diagnostic {
+                range: byte_range_to_lsp_range(&doc.source, literal.span.start, literal.span.end),
+                severity: Some(DiagnosticSeverity::WARNING),
+                message: format!("Literal colour '{}' does not follow the active theme. Use a theme token, add a trailing /* mesh-allow-literal */ comment for a fixed colour, or declare mesh.theme.independent.", literal.value),
+                source: Some("mesh-tools-lsp".into()),
+                code: Some(NumberOrString::String("mesh.theme.hardcoded_color_in_component_style".into())),
+                ..Default::default()
+            }));
+        }
+
         diagnostics.extend(mesh_core_component::unknown_theme_token_reads(component, &doc.source, local_tokens).into_iter().map(|read| Diagnostic {
             range: byte_range_to_lsp_range(&doc.source, read.span.start, read.span.end),
             severity: Some(DiagnosticSeverity::WARNING),
@@ -262,6 +281,31 @@ mod tests {
     use super::*;
     use tower_lsp::lsp_types::Position;
     use tower_lsp::lsp_types::Url;
+
+    #[test]
+    fn fixed_colour_warnings_have_ranges_and_honour_independence() {
+        let source = "<template><text>Žltá</text></template>\n<style>.box { color: red; background: #fff; /* mesh-allow-literal */ }</style>";
+        let doc = Document::new(
+            Url::parse("file:///tmp/colours.mesh").unwrap(),
+            source.into(),
+        );
+        let warnings = from_document(&doc);
+        assert_eq!(warnings.len(), 1, "{warnings:#?}");
+        let warning = &warnings[0];
+        let offset = source.find("red;").unwrap();
+        assert_eq!(
+            warning.range,
+            byte_range_to_lsp_range(source, offset, offset + 3)
+        );
+        assert_eq!(warning.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            warning.code,
+            Some(NumberOrString::String(
+                "mesh.theme.hardcoded_color_in_component_style".into()
+            ))
+        );
+        assert!(from_document_with_theme_context(&doc, &[], true).is_empty());
+    }
 
     #[test]
     fn semantic_token_warnings_share_css_and_script_contracts() {

@@ -82,8 +82,8 @@ end
         align-items: center;
         border-radius: 999px;
         border: 1px solid var(--glass-rim);
-        background-image: linear-gradient(to bottom, #b468ff4d, #7a2ee033);
-        box-shadow: 0 4px 14px #14003259;
+        background-image: var(--glass-surface-pill);
+        box-shadow: var(--glass-shadow-pill);
         backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
     }
 
@@ -103,13 +103,13 @@ end
     }
 
     .art-empty {
-        background: #ffffff26;
+        background: var(--glass-fill-inset);
     }
 
     .art-glyph {
         width: 17px;
         height: 17px;
-        color: #f5ecff;
+        color: var(--glass-text);
     }
 
     .meta {
@@ -124,7 +124,7 @@ end
         font-size: 11px;
         font-weight: 600;
         line-height: 1.2;
-        color: #f5ecff;
+        color: var(--glass-text);
         text-overflow: ellipsis;
     }
 
@@ -132,7 +132,7 @@ end
         height: 13px;
         font-size: 10px;
         line-height: 1.2;
-        color: #e3cdfa;
+        color: var(--glass-text-muted);
     }
 
     .ctl {
@@ -151,7 +151,7 @@ end
     .ctl-glyph {
         width: 18px;
         height: 18px;
-        color: #f5ecff;
+        color: var(--glass-text);
     }
 
     /* Motion: one vocabulary for the whole shell, all from theme tokens.

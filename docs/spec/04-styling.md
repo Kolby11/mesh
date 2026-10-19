@@ -368,13 +368,18 @@ it.
 
 ## 7. Theme coherence enforcement
 
-**Status: target.** Token-based theming only works ecosystem-wide if modules
+**Status: shipped.** Token-based theming only works ecosystem-wide if modules
 actually use tokens. The installed-graph source scan flags color literals
 outside `var(--…)`/`prop(…)` in component `<style>` blocks as
 `hardcoded_color_in_component_style` (warn severity, LSP + `mesh doctor`).
 Escape hatch: a `/* mesh-allow-literal */` trailing comment for genuinely
-fixed colors (brand marks). The inverse guard — unresolved token references —
-already exists.
+fixed colors (brand marks). `mesh.theme.independent: true` exempts the owning
+module from this warning. Hex, named and functional colours in fills, gradients,
+shadows, borders, text and local custom properties are checked, including
+container rules and keyframe stops. Comments, strings, URLs, `transparent` and
+`currentColor` are not fixed colours. The trailing exemption applies only to
+the preceding declaration on that line; token/prop expressions are exempt.
+The inverse guard — unresolved token references — already exists.
 
 ## 8. Tooling
 

@@ -210,6 +210,16 @@ impl ModuleRegistry {
         self.manifests.insert(module_id, manifest);
     }
 
+    pub fn theme_independent(&self, path: &Path) -> bool {
+        self.module_dirs
+            .iter()
+            .filter(|(_, root)| path.starts_with(root))
+            .max_by_key(|(_, root)| root.components().count())
+            .and_then(|(id, _)| self.manifests.get(id))
+            .and_then(|manifest| manifest.theme.as_ref())
+            .is_some_and(|theme| theme.independent)
+    }
+
     pub fn local_theme_tokens(&self, path: &Path) -> Vec<String> {
         let owner = self
             .module_dirs
@@ -837,6 +847,28 @@ fn root_graph_path(workspace_root: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn independence_uses_the_nearest_owning_module() {
+        let dir = std::env::temp_dir().join(format!("mesh-lsp-independent-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("child")).unwrap();
+        for (root, name, independent) in [
+            (&dir, "@alice/logo", true),
+            (&dir.join("child"), "@alice/widget", false),
+        ] {
+            std::fs::write(root.join("module.json"), serde_json::to_string(&serde_json::json!({
+                "name":name,"version":"1.0.0",
+                "mesh":{"apiVersion":"0.1","kind":"ui","entry":"src/main.mesh", "theme":{"independent":independent}}
+            })).unwrap()).unwrap();
+        }
+        let mut registry = ModuleRegistry::empty();
+        registry.try_load_module(&dir);
+        registry.try_load_module(&dir.join("child"));
+        assert!(registry.theme_independent(&dir.join("src/main.mesh")));
+        assert!(!registry.theme_independent(&dir.join("child/src/card.mesh")));
+        assert!(!registry.theme_independent(Path::new("/unrelated.mesh")));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn indexes_external_contract_as_authoritative_interface_shape() {

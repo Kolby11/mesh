@@ -683,6 +683,22 @@ fn diagnose_frontend_source_contracts(
         for ((path, _content), scan) in mesh_files.iter().zip(&mesh_source_scans) {
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
             let local_tokens = super::token_diagnostics::visible_module_tokens(modules, module);
+            if !module
+                .manifest
+                .mesh
+                .theme
+                .as_ref()
+                .is_some_and(|theme| theme.independent)
+            {
+                for literal in &scan.color_literals {
+                    diagnostics.push(ModuleGraphDiagnostic {
+                        module_id: module.id.clone(),
+                        contribution_id: Some(format!("{}:color_literal:{}:{}", module.id, path.display(), literal.span.start)),
+                        status: "hardcoded_color_in_component_style".into(),
+                        message: format!("module {} uses literal colour '{}' in {} at bytes {}..{}; use a theme token, add a trailing /* mesh-allow-literal */ comment for a fixed colour, or declare mesh.theme.independent", module.id, literal.value, path.display(), literal.span.start, literal.span.end),
+                    });
+                }
+            }
             for read in &scan.token_reads {
                 if local_tokens.contains(&mesh_core_theme::canonical_token_name(&read.name)) {
                     continue;

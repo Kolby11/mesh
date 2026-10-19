@@ -8,6 +8,12 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
+- **Glass theme coherence implemented:** glass surfaces, text, gradients and
+  shadows derive from the shared material family or contract roles; Violet
+  Glass retains its tuned values. Doctor and LSP warn about fixed component
+  colours, respecting independent modules and trailing literal exemptions.
+  All eight shipped theme modes and the component parser suite pass.
+
 - **Theme/component compatibility implemented:** contract 1.1 with platform
   defaults, theme `@module` values over module defaults, `library` token
   families, internal-selector and undeclared-hook diagnostics,

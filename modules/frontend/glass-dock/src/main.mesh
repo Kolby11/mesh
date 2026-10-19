@@ -81,8 +81,8 @@ end
         border-radius: 30px 30px 0 0;
         border-width: 1px 1px 0 1px;
         border-color: var(--glass-rim);
-        background-image: linear-gradient(to bottom, #ffffff5c, #ffffff38);
-        box-shadow: 0 -6px 24px #0a021a59;
+        background-image: var(--glass-surface-dock);
+        box-shadow: var(--glass-shadow-dock);
         backdrop-filter: blur(8px) refract(26px 22px) dispersion(2.5px);
     }
 
@@ -94,7 +94,7 @@ end
         width: 30px;
         height: 30px;
         flex-shrink: 0;
-        background-image: linear-gradient(to bottom, #ffffff3a, #ffffff38);
+        background-image: var(--glass-surface-flare);
         backdrop-filter: blur(8px) refract(0px 0px);
     }
 
@@ -122,7 +122,7 @@ end
     }
 
     /* Each app sits on its own small glass lens, lighter than the shelf; the
-    focused app's lens takes the accent pink. */
+    focused app's lens takes the theme accent. */
     .tile {
         width: 78px;
         height: 78px;
@@ -130,19 +130,19 @@ end
         justify-content: center;
         align-items: center;
         border-radius: 20px;
-        border: 1px solid #ffffff38;
+        border: 1px solid var(--glass-fill-subtle);
         /* A colour with any alpha counts as authored; alpha 0 would let the
         theme's opaque `button` fill paint over the glass. */
-        background-color: #ffffff03;
-        background-image: linear-gradient(to bottom, #ffffff5e, #ffffff2b);
-        box-shadow: 0 4px 12px #0a021a40;
+        background-color: var(--glass-fill-lens);
+        background-image: var(--glass-surface-lens);
+        box-shadow: var(--glass-shadow-lens);
         backdrop-filter: blur(12px) refract(12px 14px) dispersion(1.5px);
     }
 
     .tile-focused,
     .tile-focused:hover {
-        border-color: #ffc2e399;
-        background-image: linear-gradient(to bottom, #ff9ccf73, #e0559a4d);
+        border-color: var(--glass-rim-focused);
+        background-image: var(--glass-surface-focused);
     }
 
     .app-icon {
@@ -151,7 +151,7 @@ end
     }
 
     .app-glyph {
-        color: #f5ecff;
+        color: var(--glass-text);
     }
 
     .dot {
@@ -165,7 +165,7 @@ end
     }
 
     .dot-running {
-        background: #f5ecff;
+        background: var(--glass-text);
     }
 
     @keyframes dock-in {

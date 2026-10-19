@@ -10,7 +10,7 @@
         width: 100%;
         height: 100%;
         exclusive-zone: ignore;
-        background: #120a24;
+        background: var(--color-background);
         backdrop-filter: refract(0px 0px);
     }
 </style>

@@ -166,7 +166,8 @@ fn shipped_ui_and_theme_reads_use_the_semantic_contract_or_local_tokens() {
                     | "token_default_outside_contract"
                     | "theme_styles_component_internals"
                     | "theme_sets_undeclared_module_token"
-            )
+            ) || (diagnostic.status == "hardcoded_color_in_component_style"
+                && diagnostic.module_id.starts_with("@mesh/glass-"))
         })
         .collect::<Vec<_>>();
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
@@ -354,4 +355,179 @@ fn module_tokens_cannot_claim_a_semantic_contract_group() {
     let error = load_module_manifest(&dir).unwrap_err().to_string();
     assert!(error.contains("semantic contract group 'color'"), "{error}");
     fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn doctor_warns_for_fixed_colours_in_reusable_components_unless_independent() {
+    for independent in [false, true] {
+        let dir = temp_dir("component-colour-coherence");
+        write_module(
+            &dir,
+            serde_json::json!({
+                "name":"@alice/colour-widget","version":"1.0.0",
+                "mesh":{"apiVersion":"0.1","kind":"ui","entry":"src/main.mesh",
+                    "theme":{"independent":independent}}
+            }),
+            &[
+                (
+                    "src/main.mesh",
+                    "<template><box/></template><style>.box { color: var(--color-on-surface); }</style>",
+                ),
+                (
+                    "src/components/card.mesh",
+                    "<template><box/></template><style>.box { background: linear-gradient(red, #123456); border-color: blue; /* mesh-allow-literal */ }</style>",
+                ),
+            ],
+        );
+        let graph = InstalledModuleGraph::from_parts(
+            root_with_modules(&[("@alice/colour-widget", ModuleKind::Ui)], &[], None),
+            vec![load_module_manifest(&dir).unwrap()],
+        )
+        .unwrap();
+        let warnings = graph
+            .authoring_diagnostics()
+            .into_iter()
+            .filter(|diagnostic| diagnostic.status == "hardcoded_color_in_component_style")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            warnings.len(),
+            if independent { 0 } else { 2 },
+            "{warnings:#?}"
+        );
+        assert!(
+            warnings
+                .iter()
+                .all(|warning| warning.message.contains("components/card.mesh")
+                    && warning.message.contains("at bytes"))
+        );
+        assert!(graph.module("@alice/colour-widget").unwrap().enabled);
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[test]
+fn shipped_glass_material_resolves_and_paints_under_every_theme_mode() {
+    use mesh_core_elements::style::{BackgroundPaint, Color, StyleContext, StyleResolver};
+    use mesh_core_theme::{Theme, ThemeModule, ThemeModuleLayer, ThemeSourceHandle};
+
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let material = load_module_manifest(&root.join("modules/libraries/glass-material")).unwrap();
+    let tokens = material
+        .manifest
+        .mesh
+        .theme
+        .as_ref()
+        .unwrap()
+        .tokens
+        .clone();
+    let rules = vec![mesh_core_component::StyleRule {
+        selector: mesh_core_component::Selector::Universal,
+        declarations: mesh_core_component::parse_inline_style(
+            "background-image: var(--glass-surface-pill); color: var(--glass-text); box-shadow: var(--glass-shadow-pill);"
+        ).unwrap(),
+        container_query: None,
+    }];
+    for entry in fs::read_dir(root.join("modules/themes")).unwrap() {
+        let dir = entry.unwrap().path();
+        let module = load_module_manifest(&dir).unwrap();
+        for declaration in &module.manifest.mesh.contributes.themes {
+            for (mode, path) in &declaration.modes {
+                let pack = mesh_core_theme::load_theme_from_source(
+                    &ThemeSourceHandle::new(&dir, path).unwrap(),
+                    &declaration.id,
+                    &declaration.id,
+                )
+                .unwrap();
+                let theme = Theme::compose_layers(
+                    &mesh_core_theme::default_theme(),
+                    &pack,
+                    &declaration.id,
+                    mode,
+                    [
+                        ThemeModuleLayer {
+                            module_id: "@mesh/glass-material".into(),
+                            module: ThemeModule {
+                                tokens: tokens.clone(),
+                                ..Default::default()
+                            },
+                            families: vec![],
+                        },
+                        ThemeModuleLayer {
+                            module_id: "@mesh/glass-bar".into(),
+                            module: ThemeModule::default(),
+                            families: vec!["@mesh/glass-material".into()],
+                        },
+                    ],
+                    &std::collections::HashMap::new(),
+                )
+                .unwrap();
+                for name in tokens.keys() {
+                    let resolved = theme
+                        .resolve_token_value(&format!("@mesh/glass-bar.{name}"))
+                        .unwrap()
+                        .unwrap()
+                        .to_string();
+                    assert!(
+                        !resolved.contains("var("),
+                        "{} {mode} {name}: {resolved}",
+                        declaration.id
+                    );
+                    if name.starts_with("glass.text")
+                        || name.starts_with("glass.fill")
+                        || name.starts_with("glass.rim")
+                        || name.starts_with("glass.indicator")
+                        || name == "glass.hover"
+                    {
+                        assert!(
+                            Color::from_css(&resolved).is_some(),
+                            "{} {mode} {name}: {resolved}",
+                            declaration.id
+                        );
+                    }
+                }
+                let style = StyleResolver::new(&theme).resolve_node_style_for_module(
+                    &rules,
+                    "box",
+                    &[],
+                    None,
+                    StyleContext::default(),
+                    mesh_core_elements::tree::ElementState::default(),
+                    Some("@mesh/glass-bar"),
+                );
+                let BackgroundPaint::LinearGradient(gradient) = style.background_paint else {
+                    panic!("{} {mode}: missing material gradient", declaration.id);
+                };
+                assert!(gradient.from.a > 0 && gradient.from.a < 255);
+                assert!(gradient.to.a > 0 && gradient.to.a < 255);
+                assert_eq!(style.box_shadow.blur_radius, 14.0);
+                assert!(style.box_shadow.color.a > 0 && style.box_shadow.color.a < 255);
+                if declaration.id == "violet-glass" {
+                    assert_eq!(gradient.from, Color::from_hex("#b468ff4d").unwrap());
+                    assert_eq!(gradient.to, Color::from_hex("#7a2ee033").unwrap());
+                    assert_eq!(style.color, Color::from_hex("#f5ecff").unwrap());
+                    assert_eq!(
+                        style.box_shadow.color,
+                        Color::from_hex("#14003259").unwrap()
+                    );
+                } else {
+                    let surface = theme
+                        .resolve_token_value("--color-surface-container-high")
+                        .unwrap()
+                        .unwrap()
+                        .to_string();
+                    let foreground = theme
+                        .resolve_token_value("--color-on-surface")
+                        .unwrap()
+                        .unwrap()
+                        .to_string();
+                    let expected = Color::from_css(&surface).unwrap();
+                    assert_eq!(
+                        (gradient.from.r, gradient.from.g, gradient.from.b),
+                        (expected.r, expected.g, expected.b)
+                    );
+                    assert_eq!(style.color, Color::from_css(&foreground).unwrap());
+                }
+            }
+        }
+    }
 }

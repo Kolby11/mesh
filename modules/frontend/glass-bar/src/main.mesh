@@ -5,7 +5,7 @@
                 <button class="glyph-btn" onclick={onSettings} title="Settings" aria-label="Settings">
                     <icon class="glyph" name="settings" size="15" />
                 </button>
-                <ProfileSwitcher trigger_hover="#ffffff2e" />
+                <ProfileSwitcher trigger_hover="var(--glass-hover)" />
                 <button class="glyph-btn" onclick={onSearch} title="Search" aria-label="Search">
                     <icon class="glyph" name="system-search" size="15" />
                 </button>
@@ -55,7 +55,7 @@ end
         align-items: center;
         gap: 11px;
         background: transparent;
-        color: #f5ecff;
+        color: var(--glass-text);
     }
 
     .cluster {
@@ -86,8 +86,8 @@ end
         padding-inline: 6px;
         border-radius: 999px;
         border: 1px solid var(--glass-rim);
-        background-image: linear-gradient(to bottom, #b468ff4d, #7a2ee033);
-        box-shadow: 0 4px 14px #14003259;
+        background-image: var(--glass-surface-pill);
+        box-shadow: var(--glass-shadow-pill);
         backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
     }
 
@@ -99,7 +99,7 @@ end
         align-items: center;
         border-radius: 999px;
         background: transparent;
-        color: #f5ecff;
+        color: var(--glass-text);
     }
 
 
@@ -107,7 +107,7 @@ end
     .glyph {
         width: 21px;
         height: 21px;
-        color: #f5ecff;
+        color: var(--glass-text);
     }
 
     /* Motion: one vocabulary for the whole shell, all from theme tokens.

@@ -50,8 +50,8 @@ end
         align-items: center;
         border-radius: 999px;
         border: 1px solid var(--glass-rim);
-        background-image: linear-gradient(to bottom, #b468ff4d, #7a2ee033);
-        box-shadow: 0 4px 14px #14003259;
+        background-image: var(--glass-surface-pill);
+        box-shadow: var(--glass-shadow-pill);
         backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
     }
 
@@ -63,19 +63,19 @@ end
 
 
     .rec-live {
-        background-image: linear-gradient(to bottom, #ff7ab880, #c2408a52);
+        background-image: var(--glass-surface-recording);
     }
 
     .dot {
         width: 10px;
         height: 10px;
         border-radius: 999px;
-        background: #ffb3d6;
+        background: var(--glass-indicator);
     }
 
     /* Breathing dot while a recording runs. */
     .dot-live {
-        background: #ff4d8d;
+        background: var(--glass-indicator-recording);
         animation: rec-pulse 1200 ease-in-out infinite alternate;
     }
 
@@ -83,7 +83,7 @@ end
         height: 20px;
         font-size: 14px;
         font-weight: 600;
-        color: #f5ecff;
+        color: var(--glass-text);
     }
 
     @keyframes rec-pulse {

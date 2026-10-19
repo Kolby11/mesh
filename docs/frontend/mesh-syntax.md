@@ -933,7 +933,14 @@ Write the supported MESH practical shell CSS subset. See
 unsupported-feature contract. Use `var(--...)` to reference theme design
 values and local custom properties in supported declarations. Root theme values
 use names such as `var(--color-surface)`. Module-scoped theme values use the
-module's semantic variable names, for example `var(--weather-color-sunny)`:
+module's semantic variable names, for example `var(--weather-color-sunny)`.
+Doctor and the LSP warn about literal colours in `<style>` declarations. For
+a deliberately fixed colour, append `/* mesh-allow-literal */` after its
+semicolon on the same line; modules that deliberately ignore themes declare
+`mesh.theme.independent: true`. `transparent` and `currentColor` are exempt.
+See [theme coherence](../spec/04-styling.md#7-theme-coherence-enforcement).
+
+For example:
 
 ```css
 <style>
