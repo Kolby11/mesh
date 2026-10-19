@@ -161,6 +161,16 @@ pub(super) fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher)
             1_u8.hash(hasher);
             source.path.hash(hasher);
         }
+        BackgroundPaint::MultiStopLinearGradient(colors) => {
+            3_u8.hash(hasher);
+            colors.len().hash(hasher);
+            for color in colors {
+                color.r.hash(hasher);
+                color.g.hash(hasher);
+                color.b.hash(hasher);
+                color.a.hash(hasher);
+            }
+        }
         BackgroundPaint::LinearGradient(gradient) => {
             2_u8.hash(hasher);
             hash_color(gradient.from, hasher);
@@ -219,6 +229,15 @@ pub(super) fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher)
     style.box_shadow.spread_radius.to_bits().hash(hasher);
     hash_color(style.box_shadow.color, hasher);
     style.box_shadow.inset.hash(hasher);
+    style.additional_box_shadows.len().hash(hasher);
+    for shadow in &style.additional_box_shadows {
+        shadow.offset_x.to_bits().hash(hasher);
+        shadow.offset_y.to_bits().hash(hasher);
+        shadow.blur_radius.to_bits().hash(hasher);
+        shadow.spread_radius.to_bits().hash(hasher);
+        hash_color(shadow.color, hasher);
+        shadow.inset.hash(hasher);
+    }
     style.filter.blur_radius.to_bits().hash(hasher);
     style.backdrop_filter.blur_radius.to_bits().hash(hasher);
     style.backdrop_filter.refract.hash(hasher);

@@ -1144,3 +1144,25 @@ fn exported_visual_damage_uses_ancestor_transform_and_scroll() {
         }
     );
 }
+
+#[test]
+fn css_profile_later_shadow_participates_in_damage_selection() {
+    let mut root = node(1, "box", 20.0, 20.0, 20.0, 20.0);
+    root.computed_style.additional_box_shadows = vec![BoxShadow {
+        offset_x: 20.0,
+        color: Color::BLACK,
+        ..BoxShadow::NONE
+    }];
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 80, 80, false, true);
+    let selected = list.select_paint_commands(
+        Some(DamageRect {
+            x: 54,
+            y: 24,
+            width: 2,
+            height: 2,
+        }),
+        DisplayListRepaintPolicy::MinimalDamage,
+    );
+    assert!(selected.iter().any(|command| command.node.id == 1));
+}

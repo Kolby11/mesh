@@ -55,6 +55,7 @@ fn painter_command_contract_constructs_required_command_set() {
         },
         PainterCommand::DrawLinearGradient {
             gradient: PainterLinearGradient {
+                intermediate: Vec::new(),
                 from: Color::BLACK,
                 to: Color::WHITE,
             },

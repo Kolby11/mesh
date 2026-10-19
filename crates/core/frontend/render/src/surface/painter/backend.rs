@@ -59,7 +59,7 @@ const MAX_SKIA_IMAGE_DIMENSION: u32 = 8192;
 const EFFECT_RASTER_CACHE_ENTRIES: usize = 128;
 const EFFECT_RASTER_CACHE_BYTES: usize = 32 * 1024 * 1024;
 type ShadowRasterKey = (i32, i32, [u32; 4], u32, u32);
-type GradientShaderCacheKey = (u32, u32, i32, i32);
+type GradientShaderCacheKey = (u32, u32, Vec<u32>, i32, i32);
 type RoundedGradientKey = (GradientShaderCacheKey, [u32; 4]);
 
 // Keyed by the `Arc<RgbaImage>` allocation's address, so the value holds a
@@ -83,7 +83,7 @@ thread_local! {
             SKIA_IMAGE_CACHE_MAX_BYTES,
         ));
 
-    // Keyed by (from_rgba, to_rgba, w, h) rather than position, so a moving
+    // Keyed by every stop and dimensions rather than position, so a moving
     // same-sized gradient reuses its shader instead of churning the cache.
     static GRADIENT_SHADER_CACHE:
         RefCell<ByteLruCache<GradientShaderCacheKey, skia_safe::Shader>> = RefCell::new(
@@ -503,8 +503,9 @@ pub(crate) enum PainterImageSource {
     Path(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PainterLinearGradient {
+    pub intermediate: Vec<Color>,
     pub from: Color,
     pub to: Color,
 }
@@ -852,7 +853,7 @@ impl SkiaPaintBackend {
                 } => {
                     self.draw_linear_gradient_command(
                         canvas,
-                        *gradient,
+                        gradient.clone(),
                         *rect,
                         *radii,
                         effective_clip(*clip, &clip_stack),
@@ -1649,13 +1650,23 @@ impl SkiaPaintBackend {
         ]);
         let to_rgba =
             u32::from_be_bytes([gradient.to.r, gradient.to.g, gradient.to.b, gradient.to.a]);
-        let grad_cache_key = (from_rgba, to_rgba, rect.width, rect.height);
+        let grad_cache_key = (
+            from_rgba,
+            to_rgba,
+            gradient
+                .intermediate
+                .iter()
+                .map(|c| u32::from_be_bytes([c.r, c.g, c.b, c.a]))
+                .collect(),
+            rect.width,
+            rect.height,
+        );
         if corners_have_radius(radii)
             && rect.width <= MAX_SKIA_IMAGE_DIMENSION as i32
             && rect.height <= MAX_SKIA_IMAGE_DIMENSION as i32
         {
             let key = (
-                grad_cache_key,
+                grad_cache_key.clone(),
                 [
                     radii.top_left.to_bits(),
                     radii.top_right.to_bits(),
@@ -1681,7 +1692,7 @@ impl SkiaPaintBackend {
                 // both happen before the destination damage clip is applied.
                 self.draw_linear_gradient_command(
                     surface.canvas(),
-                    gradient,
+                    gradient.clone(),
                     local,
                     Corners::zero(),
                     local,
@@ -1734,10 +1745,11 @@ impl SkiaPaintBackend {
         let shader = if let Some(s) = cached_shader {
             s
         } else {
-            let colors = [
-                Color4f::from(crate::surface::buffer::skia_color(gradient.from)),
-                Color4f::from(crate::surface::buffer::skia_color(gradient.to)),
-            ];
+            let colors: Vec<_> = std::iter::once(&gradient.from)
+                .chain(&gradient.intermediate)
+                .chain(std::iter::once(&gradient.to))
+                .map(|color| Color4f::from(crate::surface::buffer::skia_color(*color)))
+                .collect();
             let gradient_colors =
                 skia_gradient::Colors::new_evenly_spaced(colors.as_slice(), TileMode::Clamp, None);
             let shader_gradient = skia_gradient::Gradient::new(

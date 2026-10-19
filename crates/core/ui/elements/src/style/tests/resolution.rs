@@ -1491,3 +1491,138 @@ fn incremental_matching_includes_module_theme_selector_dependencies() {
         assert_eq!(node.computed_style.width == Dimension::Px(83.0), matched);
     }
 }
+
+#[test]
+fn css_profile_gradients_shorthand_and_shadow_lists() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let resolve = |declarations: &[(&str, &str)]| {
+        resolver.resolve_node_style(
+            &[StyleRule {
+                selector: Selector::Tag("box".into()),
+                declarations: declarations
+                    .iter()
+                    .map(|(property, value)| Declaration {
+                        property: (*property).into(),
+                        value: StyleValue::Literal((*value).into()),
+                    })
+                    .collect(),
+                container_query: None,
+            }],
+            "box",
+            &[],
+            None,
+            StyleContext::default(),
+            ElementState::default(),
+        )
+    };
+    let gradient =
+        "linear-gradient(to bottom, red, rgb(0, 255, 0), hsl(240, 100%, 50%), transparent)";
+    let expected = BackgroundPaint::MultiStopLinearGradient(vec![
+        Color::from_css("red").unwrap(),
+        Color::from_css("rgb(0, 255, 0)").unwrap(),
+        Color::from_css("hsl(240, 100%, 50%)").unwrap(),
+        Color::TRANSPARENT,
+    ]);
+    assert_eq!(
+        resolve(&[("background", gradient)]).background_paint,
+        expected
+    );
+    assert_eq!(
+        resolve(&[("background-image", gradient)]).background_paint,
+        expected
+    );
+    let reset = resolve(&[("background-image", gradient), ("background", "red")]);
+    assert_eq!(reset.background_paint, BackgroundPaint::None);
+    assert_eq!(reset.background_color, Color::from_css("red").unwrap());
+    assert_eq!(
+        resolve(&[("background", "red"), ("background", gradient)]).background_color,
+        Color::TRANSPARENT
+    );
+    assert_eq!(
+        resolve(&[("background", gradient), ("background-color", "red")]).background_paint,
+        expected
+    );
+    let shadow = resolve(&[(
+        "box-shadow",
+        "rgba(255, 0, 0, 0.5) 1px 2px 3px, 4px 5px blue, inset 0 0 2px hsl(120, 100%, 50%)",
+    )]);
+    assert_eq!(
+        shadow.box_shadow.color,
+        Color::from_css("rgba(255, 0, 0, 0.5)").unwrap()
+    );
+    assert_eq!(shadow.box_shadow.offset_y, 2.0);
+    assert_eq!(shadow.additional_box_shadows.len(), 2);
+    assert_eq!(
+        shadow.additional_box_shadows[0].color,
+        Color::from_css("blue").unwrap()
+    );
+    assert!(shadow.additional_box_shadows[1].inset);
+    let reset = resolve(&[
+        ("box-shadow", "0 2px red, 0 4px blue"),
+        ("box-shadow", "none"),
+    ]);
+    assert!(reset.box_shadow.is_none());
+    assert!(reset.additional_box_shadows.is_empty());
+    for invalid in [
+        "0 2px red, invalid",
+        "0 2px rgb(1, 2)",
+        "0 red",
+        "0 0 red blue",
+    ] {
+        let style = resolve(&[("box-shadow", invalid)]);
+        assert!(style.box_shadow.is_none(), "{invalid}");
+        assert!(style.additional_box_shadows.is_empty(), "{invalid}");
+    }
+}
+
+#[test]
+fn css_profile_paints_accept_theme_color_syntax() {
+    use crate::style::parse::{parse_background_image, parse_box_shadows};
+    for value in [
+        "rebeccapurple",
+        "#1234",
+        "rgb(20% 40% 60% / 50%)",
+        "hsl(120 50% 40% / 0.6)",
+        "hwb(120 20% 30%)",
+        "oklch(60% 0.1 120)",
+        "color(display-p3 0.2 0.4 0.6)",
+    ] {
+        let [r, g, b, a] = mesh_core_theme::css::parse_color_rgba(value).expect(value);
+        let expected = Color { r, g, b, a };
+        assert_eq!(
+            parse_background_image(&format!("linear-gradient({value}, {value})")),
+            BackgroundPaint::LinearGradient(StyleLinearGradient {
+                from: expected,
+                to: expected
+            }),
+            "{value}"
+        );
+        let shadows = parse_box_shadows(&format!("0 2px {value}, 0 4px {value}"));
+        assert_eq!(shadows.len(), 2, "{value}");
+        assert!(
+            shadows.iter().all(|shadow| shadow.color == expected),
+            "{value}"
+        );
+    }
+    for invalid in [
+        "linear-gradient(red, blue,)",
+        "linear-gradient(red)",
+        "linear-gradient(red,,blue)",
+        "linear-gradient(red, rgb(0, 0, 0)",
+    ] {
+        assert_eq!(
+            parse_background_image(invalid),
+            BackgroundPaint::None,
+            "{invalid}"
+        );
+    }
+    for invalid in [
+        "0 2px red,",
+        "0 2px red,,0 4px blue",
+        "0 2px rgb(0, 0, 0",
+        "0 2px #ééé",
+    ] {
+        assert!(parse_box_shadows(invalid).is_empty(), "{invalid}");
+    }
+}

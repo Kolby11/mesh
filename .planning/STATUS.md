@@ -8,6 +8,11 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
+- **CSS profile gaps implemented:** gradient shorthand, theme color syntax,
+  multiple evenly spaced stops and shadow lists are supported. CPU render
+  tests pass (306); elements retain the 10 documented fixture failures.
+  GPU files are unchanged; see October's log.
+
 - **Worker test isolation implemented:** image-decode and SVG worker fixtures
   run in child processes so parallel painters cannot consume their broker
   admission budget. Gradient-shader test counts follow their thread-local cache.

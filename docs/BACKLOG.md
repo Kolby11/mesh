@@ -58,8 +58,6 @@ unless an item says otherwise. IDs point into the
       roots, settings and `resources.theme` never apply; `config/profiles/glass.json` repeats them.
 - [ ] **Full-colour icons:** XDG/hicolor resolutions and `<icon src>` are always
       `multicolor: false`; `<image>` has no paint arm and `url()` rejects absolute paths, so docks cannot show app icons in colour.
-- [ ] **CSS profile gaps:** `background:` drops gradients (only `background-image` takes them);
-      gradients and `box-shadow` accept hex colours only, two stops, one shadow.
 - [ ] **Host APIs:** `net.http` and `exec.launch-app` are catalogued but unimplemented
       (providers shell out to `curl` / `hyprctl dispatch`). A StatusNotifier tray still needs
       D-Bus name ownership and exported objects (watcher/host); `mesh.dbus_call` only calls out.

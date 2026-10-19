@@ -464,3 +464,58 @@ fn painter_orders_children_by_z_index() {
 
     assert_eq!(pixel(&buffer, 5, 5), Color::from_hex("#0000ff").unwrap());
 }
+
+#[test]
+fn css_profile_multiple_shadows_paint_first_on_top_and_all_extents() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 8.0,
+            y: 8.0,
+            width: 16.0,
+            height: 16.0,
+        },
+        Color::WHITE,
+    );
+    root.computed_style.box_shadow = BoxShadow {
+        offset_x: 8.0,
+        color: Color::from_css("red").unwrap(),
+        ..BoxShadow::NONE
+    };
+    root.computed_style.additional_box_shadows = vec![BoxShadow {
+        offset_x: 16.0,
+        color: Color::from_css("blue").unwrap(),
+        ..BoxShadow::NONE
+    }];
+    let mut buffer = PixelBuffer::new(48, 32);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+    assert_eq!(pixel(&buffer, 12, 12), Color::WHITE);
+    assert_eq!(pixel(&buffer, 28, 12), Color::from_css("red").unwrap());
+    assert_eq!(pixel(&buffer, 36, 12), Color::from_css("blue").unwrap());
+}
+
+#[test]
+fn css_profile_multistop_gradient_paints_middle_and_invalidates_cache() {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 12.0,
+            height: 21.0,
+        },
+        Color::TRANSPARENT,
+    );
+    let engine = FrontendRenderEngine::new();
+    for middle in ["lime", "yellow"] {
+        root.computed_style.background_paint =
+            mesh_core_elements::style::BackgroundPaint::MultiStopLinearGradient(vec![
+                Color::from_css("red").unwrap(),
+                Color::from_css(middle).unwrap(),
+                Color::from_css("blue").unwrap(),
+            ]);
+        let mut buffer = PixelBuffer::new(12, 21);
+        engine.render_tree(&root, &mut buffer, 1.0);
+        assert_eq!(pixel(&buffer, 6, 10), Color::from_css(middle).unwrap());
+    }
+}

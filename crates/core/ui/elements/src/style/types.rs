@@ -754,6 +754,8 @@ pub struct ComputedStyle {
     pub transform: Transform2D,
     pub transform_origin: TransformOrigin,
     pub box_shadow: BoxShadow,
+    /// Shadows after the first, in CSS front-to-back order.
+    pub additional_box_shadows: Vec<BoxShadow>,
     pub filter: VisualFilter,
     pub backdrop_filter: VisualFilter,
     pub mix_blend_mode: BlendMode,
@@ -846,6 +848,7 @@ impl Default for ComputedStyle {
             transform: Transform2D::IDENTITY,
             transform_origin: TransformOrigin::default(),
             box_shadow: BoxShadow::NONE,
+            additional_box_shadows: Vec::new(),
             filter: VisualFilter::NONE,
             backdrop_filter: VisualFilter::NONE,
             mix_blend_mode: BlendMode::Normal,
@@ -1456,6 +1459,7 @@ pub enum BackgroundPaint {
     None,
     Image(StyleImageSource),
     LinearGradient(StyleLinearGradient),
+    MultiStopLinearGradient(Vec<Color>),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -1738,6 +1742,9 @@ impl Color {
 
     pub fn from_hex(hex: &str) -> Option<Self> {
         let hex = hex.strip_prefix('#')?;
+        if !hex.is_ascii() {
+            return None;
+        }
         match hex.len() {
             3 => {
                 let r = u8::from_str_radix(&hex[0..1], 16).ok()? * 17;
@@ -1762,10 +1769,16 @@ impl Color {
         }
     }
 
-    /// Parse the CSS color forms accepted by component color props. Theme
-    /// colors historically arrived as normalized hex values, while runtime
-    /// `prop()` overrides retain their authored `rgb()`/`rgba()` spelling.
+    /// Parse a context-independent theme CSS color into sRGB channels.
     pub fn from_css(value: &str) -> Option<Self> {
+        // Preserve channel rounding for existing authored hex/rgb values.
+        Self::from_legacy_css(value).or_else(|| {
+            let [r, g, b, a] = mesh_core_theme::css::parse_color_rgba(value)?;
+            Some(Self { r, g, b, a })
+        })
+    }
+
+    fn from_legacy_css(value: &str) -> Option<Self> {
         let value = value.trim();
         if let Some(color) = Self::from_hex(value) {
             return Some(color);

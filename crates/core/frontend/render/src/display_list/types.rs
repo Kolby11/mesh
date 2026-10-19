@@ -622,6 +622,7 @@ pub struct DisplayPaintStyle {
     pub shaping_features: Arc<str>,
     pub opacity: f32,
     pub box_shadow: BoxShadow,
+    pub additional_box_shadows: Vec<BoxShadow>,
     pub filter: VisualFilter,
     pub backdrop_filter: VisualFilter,
     pub mix_blend_mode: BlendMode,

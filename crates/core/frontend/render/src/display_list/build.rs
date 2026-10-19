@@ -947,6 +947,7 @@ fn node_visual_bounds_at_with_transform(
                     height: node.layout.height,
                 },
                 style.box_shadow,
+                &style.additional_box_shadows,
                 style.filter.blur_radius,
                 style.backdrop_filter.blur_radius,
             );
@@ -1002,6 +1003,7 @@ pub(super) fn visual_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
         node.transform,
         node.local_layout,
         node.style.box_shadow,
+        &node.style.additional_box_shadows,
         node.style.filter.blur_radius,
         node.style.backdrop_filter.blur_radius,
     )
@@ -1011,6 +1013,7 @@ fn visual_clip_from_parts(
     transform: AffineTransform,
     local_layout: LayoutRect,
     shadow: BoxShadow,
+    additional_shadows: &[BoxShadow],
     filter_blur_radius: f32,
     backdrop_blur_radius: f32,
 ) -> DisplayListClip {
@@ -1018,6 +1021,7 @@ fn visual_clip_from_parts(
         transform,
         local_layout,
         shadow,
+        additional_shadows,
         filter_blur_radius,
         backdrop_blur_radius,
     ))
@@ -1027,19 +1031,22 @@ pub(super) fn visual_layout_from_parts(
     transform: AffineTransform,
     local_layout: LayoutRect,
     shadow: BoxShadow,
+    additional_shadows: &[BoxShadow],
     filter_blur_radius: f32,
     backdrop_blur_radius: f32,
 ) -> LayoutRect {
     let mut layout = transform.transform_rect(local_layout);
-    if !shadow.is_none() && !shadow.inset {
-        let pad = shadow.spread_radius + shadow.blur_radius * 3.0;
-        let shadow_layout = transform.transform_rect(LayoutRect {
-            x: shadow.offset_x - pad,
-            y: shadow.offset_y - pad,
-            width: local_layout.width + pad * 2.0,
-            height: local_layout.height + pad * 2.0,
-        });
-        layout = union_layout_rect(layout, shadow_layout);
+    for shadow in std::iter::once(&shadow).chain(additional_shadows) {
+        if !shadow.is_none() && !shadow.inset {
+            let pad = shadow.spread_radius + shadow.blur_radius * 3.0;
+            let shadow_layout = transform.transform_rect(LayoutRect {
+                x: shadow.offset_x - pad,
+                y: shadow.offset_y - pad,
+                width: local_layout.width + pad * 2.0,
+                height: local_layout.height + pad * 2.0,
+            });
+            layout = union_layout_rect(layout, shadow_layout);
+        }
     }
     let filter_pad = filter_blur_radius.max(backdrop_blur_radius) * 3.0;
     if filter_pad > 0.0 {

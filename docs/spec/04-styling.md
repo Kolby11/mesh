@@ -484,3 +484,38 @@ client's panel shifts the real surface and misaligns the sampled image.
 spans the output (anchored to all four edges), and `exclusive-zone: ignore`
 (layer-shell `-1`) keeps it under every other surface's zone — the wallpaper
 shape.
+
+## 12. Background gradients and box shadows
+
+**Status: shipped.** `background` accepts a solid theme-compatible CSS color,
+`none`, a supported relative `url(...)`, or `linear-gradient(...)`.
+The shorthand resets both the background color and image/gradient; use
+`background-color` or `background-image` to change only that part.
+
+Linear gradients run top to bottom (optionally written `to bottom`) and accept
+at least two evenly spaced color stops. Every stop uses the same CSS color parser
+as theme colors, including hex, named colors, transparent, and supported functional
+colors such as `rgb()`, `rgba()`, `hsl()` and `hsla()`. Functional-color commas do
+not separate stops. Explicit stop positions, other directions/angles, radial
+and repeating gradients, and multiple background layers are outside this profile.
+
+`box-shadow` accepts comma-separated shadows, with the first painted on top.
+Each shadow has two offsets, optional blur and spread lengths (pixels or unitless
+pixel values), and an optional theme-compatible CSS color before or after the
+lengths. The existing omitted-color default is half-alpha black; negative blur
+is clamped to zero. `none` clears the entire list. Malformed lists clear the
+shadow value rather than painting a valid prefix. `inset` is parsed but inset
+painting remains unsupported. Additional shadow layers are not interpolated by
+the existing single-shadow animation contract.
+
+```css
+.panel {
+  background: linear-gradient(#152238, rgb(30, 60, 90), transparent);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3), 0 8px 20px navy;
+}
+```
+
+CPU painting preserves the existing two-stop and single-shadow raster behavior.
+All stops and shadows participate in retained paint signatures; all outer shadow
+extents participate in damage bounds. Rounded gradients preserve exact pixels
+between full and partial repainting.

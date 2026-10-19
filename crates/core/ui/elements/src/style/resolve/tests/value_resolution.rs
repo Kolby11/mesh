@@ -798,6 +798,7 @@ fn background_paint_score(paint: &BackgroundPaint) -> u32 {
     match paint {
         BackgroundPaint::None => 1,
         BackgroundPaint::Image(source) => 2_u32.saturating_add(source.path.len() as u32),
+        BackgroundPaint::MultiStopLinearGradient(colors) => colors.len() as u32,
         BackgroundPaint::LinearGradient(gradient) => 3_u32
             .saturating_add(u32::from(gradient.from.r))
             .saturating_add(u32::from(gradient.to.r)),

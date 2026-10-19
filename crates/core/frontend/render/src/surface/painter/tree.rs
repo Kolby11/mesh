@@ -1066,13 +1066,20 @@ impl FrontendRenderEngine {
 
         node_commands.clear();
 
-        push_box_shadow_command(
-            node_commands,
-            bounds,
-            scale_corners(style.border_radius, scale),
-            style.box_shadow,
-            clip,
-        );
+        for shadow in style
+            .additional_box_shadows
+            .iter()
+            .rev()
+            .chain(std::iter::once(&style.box_shadow))
+        {
+            push_box_shadow_command(
+                node_commands,
+                bounds,
+                scale_corners(style.border_radius, scale),
+                *shadow,
+                clip,
+            );
+        }
         if style.background_color.a > 0 {
             push_fill_shape_command(
                 node_commands,
@@ -1219,13 +1226,20 @@ fn append_display_node_self_paint_commands(
     }
 
     let start_len = commands.len();
-    push_box_shadow_command(
-        commands,
-        bounds,
-        scale_corners(style.border_radius, scale),
-        style.box_shadow,
-        clip,
-    );
+    for shadow in style
+        .additional_box_shadows
+        .iter()
+        .rev()
+        .chain(std::iter::once(&style.box_shadow))
+    {
+        push_box_shadow_command(
+            commands,
+            bounds,
+            scale_corners(style.border_radius, scale),
+            *shadow,
+            clip,
+        );
+    }
     if style.background_color.a > 0 {
         push_fill_shape_command(
             commands,
@@ -1371,9 +1385,24 @@ fn push_background_paint_command(
                 commands.push(PainterCommand::PopClip);
             }
         }
+        BackgroundPaint::MultiStopLinearGradient(colors) => {
+            if colors.len() >= 2 {
+                commands.push(PainterCommand::DrawLinearGradient {
+                    gradient: PainterLinearGradient {
+                        from: colors[0],
+                        to: colors[colors.len() - 1],
+                        intermediate: colors[1..colors.len() - 1].to_vec(),
+                    },
+                    rect,
+                    radii,
+                    clip,
+                });
+            }
+        }
         BackgroundPaint::LinearGradient(gradient) => {
             commands.push(PainterCommand::DrawLinearGradient {
                 gradient: PainterLinearGradient {
+                    intermediate: Vec::new(),
                     from: gradient.from,
                     to: gradient.to,
                 },

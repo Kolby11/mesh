@@ -49,6 +49,7 @@ fn painter_primitive_command_classes_record_helper_backed_rects() {
         },
         PainterCommand::DrawLinearGradient {
             gradient: PainterLinearGradient {
+                intermediate: Vec::new(),
                 from: Color::BLACK,
                 to: Color::WHITE,
             },

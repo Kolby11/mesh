@@ -90,6 +90,7 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
                 .unwrap_or_default(),
             opacity,
             box_shadow: node.computed_style.box_shadow,
+            additional_box_shadows: node.computed_style.additional_box_shadows.clone(),
             filter: node.computed_style.filter,
             backdrop_filter: node.computed_style.backdrop_filter,
             mix_blend_mode: node.computed_style.mix_blend_mode,

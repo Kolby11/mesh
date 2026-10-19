@@ -47,7 +47,8 @@ macro_rules! literal_properties {
 }
 
 literal_properties! { raw, style, value;
-    Background(Color): "background" | "background-color" => Color::from_css(raw) => style.background_color = value;
+    BackgroundShorthand(Color): "background" => Color::from_css(raw) => { style.background_color = value; style.background_paint = BackgroundPaint::None };
+    Background(Color): "background-color" => Color::from_css(raw) => style.background_color = value;
     Color(Color): "color" => Color::from_css(raw) => style.color = value;
     FontSize(f32): "font-size" => Some(parse_px(raw)) => style.font_size = value;
     FontWeight(u16): "font-weight" => Some(parse_px(raw) as u16) => style.font_weight = value;

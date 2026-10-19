@@ -1088,3 +1088,15 @@ fn find_matching_brace(source: &str, open: usize) -> Option<usize> {
     }
     None
 }
+
+/// Parse a context-independent CSS color into sRGB bytes using the theme parser.
+/// Context-dependent values such as `currentColor` cannot resolve here.
+pub fn parse_color_rgba(value: &str) -> Option<[u8; 4]> {
+    use lightningcss::{
+        traits::Parse,
+        values::color::{CssColor, RGBA},
+    };
+    let color = CssColor::parse_string(value.trim()).ok()?;
+    let rgba = RGBA::try_from(&color).ok()?;
+    Some([rgba.red, rgba.green, rgba.blue, rgba.alpha])
+}

@@ -258,6 +258,7 @@ fn skia_effect_linear_gradient_draws_top_and_bottom_colors() {
         &mut buffer,
         &[PainterCommand::DrawLinearGradient {
             gradient: PainterLinearGradient {
+                intermediate: Vec::new(),
                 from: Color::from_hex("#ff0000").unwrap(),
                 to: Color::from_hex("#0000ff").unwrap(),
             },
@@ -286,6 +287,7 @@ fn skia_effect_linear_gradient_reuses_shader_for_moving_same_size_rects() {
     let mut buffer = PixelBuffer::new(24, 20);
     let mut diagnostics = Vec::new();
     let gradient = PainterLinearGradient {
+        intermediate: Vec::new(),
         from: Color::from_hex("#ff0000").unwrap(),
         to: Color::from_hex("#0000ff").unwrap(),
     };
@@ -294,7 +296,7 @@ fn skia_effect_linear_gradient_reuses_shader_for_moving_same_size_rects() {
         &mut buffer,
         &[
             PainterCommand::DrawLinearGradient {
-                gradient,
+                gradient: gradient.clone(),
                 rect: ClipRect {
                     x: 0,
                     y: 0,
@@ -305,7 +307,7 @@ fn skia_effect_linear_gradient_reuses_shader_for_moving_same_size_rects() {
                 clip: full_clip(24, 20),
             },
             PainterCommand::DrawLinearGradient {
-                gradient,
+                gradient: gradient.clone(),
                 rect: ClipRect {
                     x: 12,
                     y: 4,
@@ -335,6 +337,7 @@ fn skia_effect_linear_gradient_reuses_shader_for_moving_same_size_rects() {
 fn moving_gradient_shader_size_key_beats_position_churn_benchmark() {
     let iterations = 5_000;
     let gradient = PainterLinearGradient {
+        intermediate: Vec::new(),
         from: Color::from_hex("#ff0000").unwrap(),
         to: Color::from_hex("#0000ff").unwrap(),
     };
@@ -347,7 +350,7 @@ fn moving_gradient_shader_size_key_beats_position_churn_benchmark() {
         SkiaPaintBackend.execute_commands(
             &mut buffer,
             &[PainterCommand::DrawLinearGradient {
-                gradient,
+                gradient: gradient.clone(),
                 rect: ClipRect {
                     x: (i % 72) as i32,
                     y: (i % 24) as i32,
@@ -370,7 +373,7 @@ fn moving_gradient_shader_size_key_beats_position_churn_benchmark() {
         SkiaPaintBackend.execute_commands(
             &mut buffer,
             &[PainterCommand::DrawLinearGradient {
-                gradient,
+                gradient: gradient.clone(),
                 rect: ClipRect {
                     x: (i % 72) as i32,
                     y: (i % 24) as i32,
@@ -518,6 +521,7 @@ fn painter_effect_gradient_respects_rounded_clip() {
         &mut buffer,
         &[PainterCommand::DrawLinearGradient {
             gradient: PainterLinearGradient {
+                intermediate: Vec::new(),
                 from: Color::from_hex("#ff0000").unwrap(),
                 to: Color::from_hex("#0000ff").unwrap(),
             },

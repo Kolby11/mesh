@@ -228,6 +228,7 @@ mod tests {
             text_direction: TextDirection::Ltr,
             opacity: 1.0,
             box_shadow: BoxShadow::NONE,
+            additional_box_shadows: Vec::new(),
             filter: VisualFilter::NONE,
             backdrop_filter: VisualFilter::NONE,
             mix_blend_mode: BlendMode::Normal,

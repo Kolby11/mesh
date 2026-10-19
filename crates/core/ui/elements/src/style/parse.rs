@@ -730,7 +730,7 @@ pub(super) fn parse_background_image(value: &str) -> BackgroundPaint {
     }
 
     if let Some(gradient) = parse_linear_gradient(trimmed) {
-        return BackgroundPaint::LinearGradient(gradient);
+        return gradient;
     }
 
     BackgroundPaint::None
@@ -772,63 +772,117 @@ fn parse_background_url(value: &str) -> Option<String> {
     Some(path.to_string())
 }
 
-fn parse_linear_gradient(value: &str) -> Option<StyleLinearGradient> {
+fn split_paint_list(value: &str) -> Option<Vec<String>> {
+    let mut depth = 0usize;
+    for ch in value.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.checked_sub(1)?,
+            _ => {}
+        }
+    }
+    if depth != 0 || value.trim_end().ends_with(',') {
+        return None;
+    }
+    let parts = split_paren_aware(value, ',');
+    (!parts.is_empty() && parts.iter().all(|part| !part.trim().is_empty())).then_some(parts)
+}
+
+fn parse_linear_gradient(value: &str) -> Option<BackgroundPaint> {
     let inner = value
         .strip_prefix("linear-gradient(")
         .and_then(|rest| rest.strip_suffix(')'))?;
-    let mut parts = inner
-        .split(',')
-        .map(str::trim)
-        .filter(|part| !part.is_empty());
-    let first = parts.next()?;
-    let from = if first == "to bottom" {
-        Color::from_hex(parts.next()?)?
+    let parts = split_paint_list(inner)?;
+    let colors = parts.iter().map(|part| part.trim()).collect::<Vec<_>>();
+    let colors = if colors.first() == Some(&"to bottom") {
+        &colors[1..]
     } else {
-        Color::from_hex(first)?
+        &colors[..]
     };
-    let to = Color::from_hex(parts.next()?)?;
-    if parts.next().is_some() {
+    let colors = colors
+        .iter()
+        .map(|color| Color::from_css(color))
+        .collect::<Option<Vec<_>>>()?;
+    if colors.len() < 2 {
         return None;
     }
-    Some(StyleLinearGradient { from, to })
+    Some(if colors.len() == 2 {
+        BackgroundPaint::LinearGradient(StyleLinearGradient {
+            from: colors[0],
+            to: colors[1],
+        })
+    } else {
+        BackgroundPaint::MultiStopLinearGradient(colors)
+    })
 }
 
-pub(super) fn parse_box_shadow(value: &str) -> BoxShadow {
-    let trimmed = first_comma_item(value).trim();
-    if trimmed.is_empty() || trimmed == "none" {
-        return BoxShadow::NONE;
+pub(super) fn parse_box_shadows(value: &str) -> Vec<BoxShadow> {
+    if value.trim() == "none" {
+        return Vec::new();
     }
+    split_paint_list(value)
+        .unwrap_or_default()
+        .iter()
+        .map(|item| parse_single_box_shadow(item))
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_default()
+}
 
+#[cfg(test)]
+pub(super) fn parse_box_shadow(value: &str) -> BoxShadow {
+    parse_box_shadows(value)
+        .first()
+        .copied()
+        .unwrap_or(BoxShadow::NONE)
+}
+
+fn parse_single_box_shadow(value: &str) -> Option<BoxShadow> {
     let mut inset = false;
-    let mut color = Color {
-        r: 0,
-        g: 0,
-        b: 0,
-        a: 128,
-    };
+    let mut color = None;
     let mut lengths = Vec::new();
-    for token in trimmed.split_whitespace() {
+    let normalized = value.replace(['\t', '\n', '\r'], " ");
+    for token in split_paren_aware(&normalized, ' ') {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
         if token == "inset" {
+            if inset {
+                return None;
+            }
             inset = true;
-        } else if let Some(parsed) = Color::from_hex(token) {
-            color = parsed;
+        } else if let Some(parsed) = Color::from_css(token) {
+            if color.replace(parsed).is_some() {
+                return None;
+            }
         } else {
-            lengths.push(parse_px(token));
+            let length = token
+                .strip_suffix("px")
+                .unwrap_or(token)
+                .parse::<f32>()
+                .ok()?;
+            if !length.is_finite() {
+                return None;
+            }
+            lengths.push(length);
         }
     }
-
-    if lengths.len() < 2 {
-        return BoxShadow::NONE;
+    if !(2..=4).contains(&lengths.len()) {
+        return None;
     }
-
-    BoxShadow {
+    Some(BoxShadow {
         offset_x: lengths[0],
         offset_y: lengths[1],
         blur_radius: lengths.get(2).copied().unwrap_or(0.0).max(0.0),
         spread_radius: lengths.get(3).copied().unwrap_or(0.0),
-        color,
+        color: color.unwrap_or(Color {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 128,
+        }),
         inset,
-    }
+    })
 }
 
 /// `aspect-ratio: auto | <number> | <number> / <number>`.

@@ -135,6 +135,7 @@ pub(super) fn visual_bounds_for_node_with_transform(
             height: node.layout.height.max(0.0),
         },
         node.computed_style.box_shadow,
+        &node.computed_style.additional_box_shadows,
         node.computed_style.filter.blur_radius,
         node.computed_style.backdrop_filter.blur_radius,
     )
@@ -302,6 +303,16 @@ pub(super) fn hash_background_paint(paint: &BackgroundPaint, hasher: &mut Displa
             1_u8.hash(hasher);
             source.path.hash(hasher);
         }
+        BackgroundPaint::MultiStopLinearGradient(colors) => {
+            3_u8.hash(hasher);
+            colors.len().hash(hasher);
+            for color in colors {
+                color.r.hash(hasher);
+                color.g.hash(hasher);
+                color.b.hash(hasher);
+                color.a.hash(hasher);
+            }
+        }
         BackgroundPaint::LinearGradient(gradient) => {
             2_u8.hash(hasher);
             gradient.from.r.hash(hasher);
@@ -336,7 +347,8 @@ pub(super) fn batch_barrier(
     if node.computed_style.opacity < 1.0 {
         return Some(DisplayBatchBarrier::Opacity);
     }
-    if !node.computed_style.box_shadow.is_none()
+    if !node.computed_style.additional_box_shadows.is_empty()
+        || !node.computed_style.box_shadow.is_none()
         || !node.computed_style.filter.is_none()
         || !node.computed_style.backdrop_filter.is_none()
     {

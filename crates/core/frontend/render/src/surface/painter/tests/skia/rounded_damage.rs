@@ -13,6 +13,11 @@ fn bounds() -> ClipRect {
 }
 
 fn effect_commands(case: usize, clip: ClipRect, image: &str) -> Vec<PainterCommand> {
+    if case == 5 {
+        let mut commands = effect_commands(2, clip, image);
+        commands.extend(effect_commands(3, clip, image).into_iter().skip(1));
+        return commands;
+    }
     let rect = bounds();
     let radii = Corners {
         top_left: 17.5,
@@ -26,8 +31,16 @@ fn effect_commands(case: usize, clip: ClipRect, image: &str) -> Vec<PainterComma
         clip,
     }];
     match case {
-        0 => commands.push(PainterCommand::DrawLinearGradient {
+        0 | 4 => commands.push(PainterCommand::DrawLinearGradient {
             gradient: PainterLinearGradient {
+                intermediate: if case == 4 {
+                    vec![
+                        Color::from_css("lime").unwrap(),
+                        Color::from_css("rgba(255, 255, 0, 0.5)").unwrap(),
+                    ]
+                } else {
+                    Vec::new()
+                },
                 from: Color {
                     r: 240,
                     g: 100,
@@ -388,7 +401,11 @@ fn rounded_effect_raster_cost_workload() {
                     PainterCommand::DrawLinearGradient {
                         rect: *rect,
                         radii,
-                        gradient: PainterLinearGradient { from, to },
+                        gradient: PainterLinearGradient {
+                            intermediate: Vec::new(),
+                            from,
+                            to,
+                        },
                         clip: full_clip(920, 900),
                     }
                 }
@@ -439,4 +456,14 @@ fn rounded_effect_raster_cost_workload() {
             assert!(diagnostics.is_empty());
         }
     }
+}
+
+#[test]
+fn css_profile_rounded_multistop_gradient_repaints_exactly_under_damage_clips() {
+    assert_effect_repaint(4);
+}
+
+#[test]
+fn css_profile_multiple_shadows_repaint_exactly_under_damage_clips() {
+    assert_effect_repaint(5);
 }

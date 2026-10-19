@@ -95,6 +95,12 @@ fn hash_material(style: &ComputedStyle) -> u64 {
     style.mix_blend_mode.hash(&mut hasher);
     style.z_index.hash(&mut hasher);
     hash_box_shadow(style.box_shadow, &mut hasher);
+    if !style.additional_box_shadows.is_empty() {
+        style.additional_box_shadows.len().hash(&mut hasher);
+        for shadow in &style.additional_box_shadows {
+            hash_box_shadow(*shadow, &mut hasher);
+        }
+    }
     style.filter.blur_radius.to_bits().hash(&mut hasher);
     let backdrop = style.backdrop_filter;
     backdrop.blur_radius.to_bits().hash(&mut hasher);
@@ -262,6 +268,16 @@ fn hash_background_paint(paint: &BackgroundPaint, hasher: &mut impl Hasher) {
             1_u8.hash(hasher);
             source.path.hash(hasher);
         }
+        BackgroundPaint::MultiStopLinearGradient(colors) => {
+            3_u8.hash(hasher);
+            colors.len().hash(hasher);
+            for color in colors {
+                color.r.hash(hasher);
+                color.g.hash(hasher);
+                color.b.hash(hasher);
+                color.a.hash(hasher);
+            }
+        }
         BackgroundPaint::LinearGradient(gradient) => {
             2_u8.hash(hasher);
             hash_color(gradient.from, hasher);
@@ -348,4 +364,25 @@ impl PaintInputHasher {
         self.0 = self.0.wrapping_mul(FNV_PRIME);
         self.0 ^= self.0 >> 32;
     }
+}
+
+#[test]
+fn css_profile_material_hash_includes_later_stops_and_shadows() {
+    use mesh_core_elements::{BoxShadow, style::Color};
+    let mut style = ComputedStyle::default();
+    style.background_paint =
+        BackgroundPaint::MultiStopLinearGradient(vec![Color::BLACK, Color::WHITE, Color::BLACK]);
+    let before = hash_material(&style);
+    if let BackgroundPaint::MultiStopLinearGradient(colors) = &mut style.background_paint {
+        colors[1] = Color::TRANSPARENT;
+    }
+    assert_ne!(before, hash_material(&style));
+    style.additional_box_shadows.push(BoxShadow {
+        offset_x: 10.0,
+        color: Color::BLACK,
+        ..BoxShadow::NONE
+    });
+    let before = hash_material(&style);
+    style.additional_box_shadows[0].color = Color::WHITE;
+    assert_ne!(before, hash_material(&style));
 }

@@ -783,7 +783,13 @@ fn apply_declaration_with_context(
         variables: &HashMap<String, StyleValue>,
         context: &mut ResolutionContext,
 ) {
-        "background" | "background-color" => {
+        "background" => {
+            resolver.with_resolved_str(value, variables, |resolved| {
+                style.background_paint = parse_background_image(resolved);
+                style.background_color = Color::from_css(resolved).unwrap_or(Color::TRANSPARENT);
+            });
+        }
+        "background-color" => {
             style.background_color = resolver.resolve_color_with_variables(value, variables)
         }
         "color" => style.color = resolver.resolve_color_with_variables(value, variables),
@@ -930,8 +936,9 @@ fn apply_declaration_with_context(
                 resolver.with_resolved_str(value, variables, |resolved| parse_transform(resolved))
         }
         "box-shadow" => {
-            style.box_shadow =
-                resolver.with_resolved_str(value, variables, |resolved| parse_box_shadow(resolved))
+            let mut shadows = resolver.with_resolved_str(value, variables, parse_box_shadows);
+            style.box_shadow = if shadows.is_empty() { BoxShadow::NONE } else { shadows.remove(0) };
+            style.additional_box_shadows = shadows;
         }
         "background-image" => {
             style.background_paint = resolver.with_resolved_str(value, variables, |resolved| {
