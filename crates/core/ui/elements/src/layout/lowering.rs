@@ -44,6 +44,29 @@ impl TextMeasureData {
         }
     }
 
+    pub(super) fn measure_key(
+        &self,
+        max_width: Option<f32>,
+        revisions: TextMeasureRevisions,
+    ) -> super::TextMeasureKey {
+        super::TextMeasureKey {
+            content: self.content.clone(),
+            font_family: self.font_family.clone(),
+            font_size: self.font_size.to_bits(),
+            font_weight: self.font_weight,
+            font_style: self.font_style,
+            letter_spacing: self.letter_spacing.to_bits(),
+            line_height: self.line_height.to_bits(),
+            text_direction: self.text_direction,
+            white_space: self.white_space,
+            language: self.language.clone(),
+            shaping_features: self.shaping_features.clone(),
+            max_width: max_width.map(f32::to_bits),
+            resource_revision: revisions.resource_revision,
+            measurer_revision: revisions.measurer_revision,
+        }
+    }
+
     pub(super) fn context<'a>(
         &'a self,
         max_width: Option<f32>,
@@ -349,13 +372,12 @@ pub(super) fn measure_taffy_node(
     };
     let revisions = measurer.revisions();
     intrinsic_cache.invalidate_text_measurements_if_needed(revisions);
-    let context = text.context(max_width, revisions);
-    let measure_key = TextMeasureKey::new(&context);
+    let measure_key = text.measure_key(max_width, revisions);
     let (measured_width, measured_height) =
         if let Some(measured) = intrinsic_cache.get_text_measurement(&measure_key) {
             measured
         } else {
-            let measured = measurer.measure_text(&context);
+            let measured = measurer.measure_text(&text.context(max_width, revisions));
             intrinsic_cache.insert_text_measurement(measure_key, measured);
             measured
         };

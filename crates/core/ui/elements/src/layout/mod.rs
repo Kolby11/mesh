@@ -209,25 +209,6 @@ struct TextMeasureKey {
 }
 
 impl TextMeasureKey {
-    fn new(context: &TextMeasureContext<'_>) -> Self {
-        Self {
-            content: Arc::from(context.text),
-            font_family: Arc::from(context.font_family),
-            font_size: context.font_size.to_bits(),
-            font_weight: context.font_weight,
-            font_style: context.font_style,
-            letter_spacing: context.letter_spacing.to_bits(),
-            line_height: context.line_height.to_bits(),
-            text_direction: context.text_direction,
-            white_space: context.white_space,
-            language: Arc::from(context.language),
-            shaping_features: Arc::from(context.shaping_features),
-            max_width: context.max_width.map(f32::to_bits),
-            resource_revision: context.revisions.resource_revision,
-            measurer_revision: context.revisions.measurer_revision,
-        }
-    }
-
     fn estimated_bytes(&self) -> usize {
         size_of::<Self>()
             .saturating_add(size_of::<(f32, f32)>())

@@ -141,32 +141,50 @@ impl TextMeasurer for RevisionedMeasurer {
 
 #[test]
 fn text_measure_key_includes_all_shaping_inputs_and_revisions() {
-    let mut context = TextMeasureContext::new("shaped", "Inter", 14.0, 400, 1.4, Some(120.0));
-    let base = TextMeasureKey::new(&context);
-
-    context.font_style = FontStyle::Italic;
-    assert_ne!(base, TextMeasureKey::new(&context));
-    context.font_style = FontStyle::Normal;
-    context.letter_spacing = 0.5;
-    assert_ne!(base, TextMeasureKey::new(&context));
-    context.letter_spacing = 0.0;
-    context.text_direction = TextDirection::Rtl;
-    assert_ne!(base, TextMeasureKey::new(&context));
-    context.text_direction = TextDirection::Ltr;
-    context.white_space = WhiteSpace::Nowrap;
-    assert_ne!(base, TextMeasureKey::new(&context));
-    context.white_space = WhiteSpace::Normal;
-    context.language = "ar";
-    assert_ne!(base, TextMeasureKey::new(&context));
-    context.language = "";
-    context.shaping_features = "liga=0";
-    assert_ne!(base, TextMeasureKey::new(&context));
-    context.shaping_features = "";
-    context.revisions = TextMeasureRevisions {
-        resource_revision: 2,
-        measurer_revision: 1,
+    let mut data = TextMeasureData {
+        content: Arc::from("shaped"),
+        font_family: Arc::from("Inter"),
+        font_size: 14.0,
+        font_weight: 400,
+        font_style: FontStyle::Normal,
+        letter_spacing: 0.0,
+        line_height: 1.4,
+        text_direction: TextDirection::Ltr,
+        white_space: WhiteSpace::Normal,
+        language: Arc::from(""),
+        shaping_features: Arc::from(""),
     };
-    assert_ne!(base, TextMeasureKey::new(&context));
+    let revisions = TextMeasureRevisions::default();
+    let base = data.measure_key(Some(120.0), revisions);
+
+    data.font_style = FontStyle::Italic;
+    assert_ne!(base, data.measure_key(Some(120.0), revisions));
+    data.font_style = FontStyle::Normal;
+    data.letter_spacing = 0.5;
+    assert_ne!(base, data.measure_key(Some(120.0), revisions));
+    data.letter_spacing = 0.0;
+    data.text_direction = TextDirection::Rtl;
+    assert_ne!(base, data.measure_key(Some(120.0), revisions));
+    data.text_direction = TextDirection::Ltr;
+    data.white_space = WhiteSpace::Nowrap;
+    assert_ne!(base, data.measure_key(Some(120.0), revisions));
+    data.white_space = WhiteSpace::Normal;
+    data.language = Arc::from("ar");
+    assert_ne!(base, data.measure_key(Some(120.0), revisions));
+    data.language = Arc::from("");
+    data.shaping_features = Arc::from("liga=0");
+    assert_ne!(base, data.measure_key(Some(120.0), revisions));
+    data.shaping_features = Arc::from("");
+    assert_ne!(
+        base,
+        data.measure_key(
+            Some(120.0),
+            TextMeasureRevisions {
+                resource_revision: 2,
+                measurer_revision: 1,
+            },
+        )
+    );
 }
 
 struct FractionalMeasurer;
