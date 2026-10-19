@@ -6,7 +6,7 @@
 //! path as monochrome SVG icons.
 
 use super::profiling;
-use super::resource_broker::{ResourceBroker, ResourceBrokerContext};
+use super::resource_broker::{PendingResourceConsumers, ResourceBroker, ResourceBrokerContext};
 #[cfg(test)]
 use super::{PixelBuffer, PixelCanvasSession};
 use super::{checked_pixel_bytes, resource_generation_is_current};
@@ -20,7 +20,6 @@ use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
 };
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::io::Read;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -114,7 +113,7 @@ struct GlyphJobResult {
 struct GlyphRasterQueue {
     result_sender: Sender<GlyphJobResult>,
     receiver: Receiver<GlyphJobResult>,
-    pending: HashSet<GlyphCacheKey>,
+    pending: PendingResourceConsumers<GlyphCacheKey>,
 }
 
 static GLYPH_RASTER_QUEUE: OnceLock<Mutex<GlyphRasterQueue>> = OnceLock::new();
@@ -126,7 +125,7 @@ fn glyph_raster_queue() -> &'static Mutex<GlyphRasterQueue> {
         Mutex::new(GlyphRasterQueue {
             result_sender,
             receiver: result_receiver,
-            pending: HashSet::new(),
+            pending: PendingResourceConsumers::default(),
         })
     })
 }
@@ -141,19 +140,20 @@ fn drain_glyph_raster_jobs() -> bool {
         };
         let mut results = Vec::new();
         while let Ok(result) = queue.receiver.try_recv() {
-            queue.pending.remove(&result.key);
-            results.push(result);
+            let waiters = queue.pending.remove(&result.key);
+            results.push((result, waiters));
         }
         results
     };
 
     let mut completed = false;
-    for result in results {
+    for (result, waiters) in results {
         if result.cancelled || !resource_generation_is_current(result.key.resource_revision) {
             continue;
         }
         profiling::record_icon_image_raster(result.elapsed);
         cache_store(result.key, result.glyph);
+        waiters.notify();
         completed = true;
     }
     if completed {

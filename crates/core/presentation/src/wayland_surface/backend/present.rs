@@ -381,6 +381,13 @@ impl WaylandSurfaceBackend {
             .map(|entry| resolved_surface_size(entry, output_size))
     }
 
+    pub fn surface_frame_callback_deadline(&self, surface_id: &str) -> Option<Instant> {
+        self.state
+            .surfaces
+            .get(surface_id)?
+            .frame_callback_deadline()
+    }
+
     pub fn surface_waiting_for_frame_callback(&self, surface_id: &str) -> bool {
         self.state
             .surfaces

@@ -5,7 +5,7 @@ use super::PixelCanvasSession;
 use super::glyph::draw_font_glyph;
 use super::glyph::{GlyphAxes, draw_font_glyph_on_canvas};
 use super::profiling;
-use super::resource_broker::{ResourceBroker, ResourceBrokerContext};
+use super::resource_broker::{PendingResourceConsumers, ResourceBroker, ResourceBrokerContext};
 use super::{checked_pixel_bytes, resource_generation_is_current};
 use image::imageops::FilterType;
 use mesh_core_elements::lru::ByteLruCache;
@@ -26,7 +26,7 @@ use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
 };
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
@@ -161,7 +161,7 @@ struct RasterJobResult {
 struct IconRasterQueue {
     result_sender: Sender<RasterJobResult>,
     receiver: Receiver<RasterJobResult>,
-    pending: HashSet<RasterCacheKey>,
+    pending: PendingResourceConsumers<RasterCacheKey>,
     ready: HashMap<
         RasterCacheKey,
         (
@@ -185,7 +185,7 @@ struct ImageDecodeJobResult {
 struct ImageDecodeQueue {
     result_sender: Sender<ImageDecodeJobResult>,
     receiver: Receiver<ImageDecodeJobResult>,
-    pending: HashSet<ImageDecodeKey>,
+    pending: PendingResourceConsumers<ImageDecodeKey>,
     ready: HashMap<ImageDecodeKey, (Arc<image::RgbaImage>, ResourceByteReservation)>,
 }
 
@@ -214,7 +214,7 @@ struct IconResolutionQueue {
     #[cfg(not(test))]
     result_sender: Sender<IconResolutionJobResult>,
     receiver: Receiver<IconResolutionJobResult>,
-    pending: HashSet<IconResolutionKey>,
+    pending: PendingResourceConsumers<IconResolutionKey>,
     ready: HashMap<IconResolutionKey, (IconResolution, ResourceByteReservation)>,
 }
 
@@ -227,7 +227,7 @@ fn icon_raster_queue() -> &'static Mutex<IconRasterQueue> {
         Mutex::new(IconRasterQueue {
             result_sender,
             receiver: result_receiver,
-            pending: HashSet::new(),
+            pending: PendingResourceConsumers::default(),
             ready: HashMap::new(),
         })
     })
@@ -239,7 +239,7 @@ fn image_decode_queue() -> &'static Mutex<ImageDecodeQueue> {
         Mutex::new(ImageDecodeQueue {
             result_sender,
             receiver: result_receiver,
-            pending: HashSet::new(),
+            pending: PendingResourceConsumers::default(),
             ready: HashMap::new(),
         })
     })
@@ -256,7 +256,7 @@ fn icon_resolution_queue() -> &'static Mutex<IconResolutionQueue> {
             #[cfg(not(test))]
             result_sender,
             receiver: result_receiver,
-            pending: HashSet::new(),
+            pending: PendingResourceConsumers::default(),
             ready: HashMap::new(),
         })
     })
@@ -284,8 +284,8 @@ fn drain_icon_resolution_jobs() -> bool {
             .retain(|key, _| key.resource_revision == current_generation);
         let mut results = Vec::new();
         while let Ok(result) = queue.receiver.try_recv() {
-            queue.pending.remove(&result.key);
-            results.push(result);
+            let waiters = queue.pending.remove(&result.key);
+            results.push((result, waiters));
         }
         results
     };
@@ -294,11 +294,12 @@ fn drain_icon_resolution_jobs() -> bool {
     if let Some(queue) = ICON_RESOLUTION_QUEUE.get()
         && let Ok(mut queue) = queue.lock()
     {
-        for result in results {
+        for (result, waiters) in results {
             if result.cancelled || !resource_generation_is_current(result.key.resource_revision) {
                 continue;
             }
             if let Some(resolution) = result.resolution {
+                waiters.notify();
                 queue.ready.insert(result.key, (resolution, result._budget));
                 completed = true;
             }
@@ -432,8 +433,8 @@ fn drain_image_decode_jobs() -> bool {
             .retain(|key, _| key.resource_revision == current_generation);
         let mut results = Vec::new();
         while let Ok(result) = queue.receiver.try_recv() {
-            queue.pending.remove(&result.key);
-            results.push(result);
+            let waiters = queue.pending.remove(&result.key);
+            results.push((result, waiters));
         }
         results
     };
@@ -442,7 +443,7 @@ fn drain_image_decode_jobs() -> bool {
     if let Some(queue) = IMAGE_DECODE_QUEUE.get()
         && let Ok(mut queue) = queue.lock()
     {
-        for result in results {
+        for (result, waiters) in results {
             if result.cancelled
                 || result.image.is_none()
                 || !resource_generation_is_current(result.key.resource_revision)
@@ -450,6 +451,7 @@ fn drain_image_decode_jobs() -> bool {
             {
                 continue;
             }
+            waiters.notify();
             queue.ready.insert(
                 result.key,
                 (result.image.expect("image checked above"), result._budget),
@@ -577,15 +579,15 @@ fn drain_icon_raster_jobs() -> bool {
         });
         let mut results = Vec::new();
         while let Ok(result) = queue.receiver.try_recv() {
-            queue.pending.remove(&result.key);
-            results.push(result);
+            let waiters = queue.pending.remove(&result.key);
+            results.push((result, waiters));
         }
         results
     };
 
     let mut cached_results = Vec::new();
     let mut ready_results = Vec::new();
-    for result in results {
+    for (result, waiters) in results {
         if result.cancelled || !resource_generation_is_current(result.key.resource_revision) {
             continue;
         }
@@ -596,6 +598,7 @@ fn drain_icon_raster_jobs() -> bool {
             profiling::record_raster_cache_bypass();
         }
         if let Some(variant) = result.variant {
+            waiters.notify();
             if result.cacheable {
                 cached_results.push((result.key, variant, result._budget));
             } else {
@@ -2048,7 +2051,17 @@ mod tests {
             freshness: resource_fingerprint(&path).unwrap(),
         };
 
-        assert_eq!(schedule_image_decode_job(key.clone()), Some(true));
+        let first = super::super::ResourcePaintConsumer::default();
+        let second = super::super::ResourcePaintConsumer::default();
+        let unrelated = super::super::ResourcePaintConsumer::default();
+        {
+            let _scope = first.enter();
+            assert_eq!(schedule_image_decode_job(key.clone()), Some(true));
+        }
+        {
+            let _scope = second.enter();
+            assert_eq!(schedule_image_decode_job(key.clone()), Some(false));
+        }
         let deadline = Instant::now() + WORKER_WAIT;
         let image = loop {
             drain_image_decode_jobs();
@@ -2058,6 +2071,9 @@ mod tests {
             assert!(Instant::now() < deadline, "worker did not decode the image");
             std::thread::sleep(Duration::from_millis(1));
         };
+        assert!(first.take_ready());
+        assert!(second.take_ready());
+        assert!(!unrelated.take_ready());
         assert_eq!(image.dimensions(), (2, 1));
         assert_eq!(image.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
         assert!(poll_image_decode_jobs());

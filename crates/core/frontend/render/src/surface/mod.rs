@@ -27,7 +27,10 @@ pub use painter::{
     PainterCapabilitySnapshot, PainterDiagnosticSnapshot, TooltipPaintColors,
 };
 pub use profiling::RasterMetrics;
-pub use resource_broker::{resource_completion_waker_installed, set_resource_completion_waker};
+pub use resource_broker::{
+    ResourcePaintConsumer, ResourcePaintScope, resource_completion_waker_installed,
+    set_resource_completion_waker,
+};
 pub use text::{SharedTextMeasurer, TextCacheMetrics, TextRenderer};
 
 /// Return whether work prepared against `generation` still belongs to the

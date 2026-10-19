@@ -907,11 +907,17 @@ impl SurfaceEntry {
         }
     }
 
+    pub(in crate::wayland_surface) fn frame_callback_deadline(&self) -> Option<Instant> {
+        if !self.generations.has_pending_frame() {
+            return None;
+        }
+        self.frame_pending_since?
+            .checked_add(MAX_FRAME_CALLBACK_WAIT)
+    }
+
     pub(in crate::wayland_surface) fn waiting_for_frame_callback(&self) -> bool {
-        self.generations.has_pending_frame()
-            && self
-                .frame_pending_since
-                .is_some_and(|since| since.elapsed() < MAX_FRAME_CALLBACK_WAIT)
+        self.frame_callback_deadline()
+            .is_some_and(|deadline| Instant::now() < deadline)
     }
 
     /// Refresh the explicit buffer-release gate after Wayland dispatch. The

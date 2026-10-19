@@ -4,6 +4,99 @@ use mesh_core_resources::{
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::hash::Hash;
+use std::sync::Weak;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+thread_local! {
+    static PAINT_CONSUMER: RefCell<Option<Weak<AtomicBool>>> = const { RefCell::new(None) };
+}
+
+/// Tracks completed resources requested while painting one component's targets.
+/// Dropping the consumer releases its subscriptions without retaining the component.
+#[derive(Default)]
+pub struct ResourcePaintConsumer(Arc<AtomicBool>);
+
+impl ResourcePaintConsumer {
+    /// Attribute resource requests in this scope to this consumer. Nested scopes
+    /// restore the previous consumer when their guard is dropped.
+    pub fn enter(&self) -> ResourcePaintScope {
+        ResourcePaintScope(
+            PAINT_CONSUMER.with(|active| active.replace(Some(Arc::downgrade(&self.0)))),
+            std::marker::PhantomData,
+        )
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.0.load(Ordering::Acquire)
+    }
+
+    /// Consume the repaint request coalesced from this consumer's finished loads.
+    pub fn take_ready(&self) -> bool {
+        self.0.swap(false, Ordering::AcqRel)
+    }
+}
+
+#[must_use = "keep the resource paint scope alive while painting"]
+pub struct ResourcePaintScope(
+    Option<Weak<AtomicBool>>,
+    std::marker::PhantomData<std::rc::Rc<()>>,
+);
+
+impl Drop for ResourcePaintScope {
+    fn drop(&mut self) {
+        PAINT_CONSUMER.with(|active| active.replace(self.0.take()));
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct ResourceWaiters(Vec<Weak<AtomicBool>>);
+
+impl ResourceWaiters {
+    fn subscribe_current(&mut self) {
+        PAINT_CONSUMER.with(|active| {
+            if let Some(consumer) = active.borrow().as_ref() {
+                self.0.retain(|waiter| waiter.strong_count() > 0);
+                if !self.0.iter().any(|waiter| waiter.ptr_eq(consumer)) {
+                    self.0.push(consumer.clone());
+                }
+            }
+        });
+    }
+
+    pub(crate) fn notify(self) {
+        for consumer in self.0.into_iter().filter_map(|waiter| waiter.upgrade()) {
+            consumer.store(true, Ordering::Release);
+        }
+    }
+}
+
+pub(crate) struct PendingResourceConsumers<K>(HashMap<K, ResourceWaiters>);
+
+impl<K> Default for PendingResourceConsumers<K> {
+    fn default() -> Self {
+        Self(HashMap::new())
+    }
+}
+
+impl<K: Eq + Hash> PendingResourceConsumers<K> {
+    pub(crate) fn insert(&mut self, key: K) -> bool {
+        let new = !self.0.contains_key(&key);
+        self.0.entry(key).or_default().subscribe_current();
+        new
+    }
+
+    pub(crate) fn remove(&mut self, key: &K) -> ResourceWaiters {
+        self.0.remove(key).unwrap_or_default()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 const RESOURCE_BROKER_QUEUE_CAPACITY: usize = 128;
 const RESOURCE_BROKER_MAX_BYTES: usize = 64 * 1024 * 1024;
 
@@ -215,6 +308,78 @@ fn resource_worker(state: Arc<ResourceBrokerState>, receiver: mpsc::Receiver<Res
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    #[ignore = "release-only resource completion fanout profile"]
+    fn resource_completion_fanout_profile() {
+        let consumers: Vec<_> = (0..32)
+            .map(|_| super::ResourcePaintConsumer::default())
+            .collect();
+        let mut requests = 0;
+        let started = std::time::Instant::now();
+        for _ in 0..1000 {
+            let mut pending = super::PendingResourceConsumers::default();
+            for resource in 0..8 {
+                for consumer in &consumers[..2] {
+                    let _scope = consumer.enter();
+                    pending.insert(resource);
+                }
+            }
+            for resource in 0..8 {
+                pending.remove(&resource).notify();
+            }
+            requests += consumers
+                .iter()
+                .filter(|consumer| consumer.take_ready())
+                .count();
+        }
+        eprintln!(
+            "32 components, 8 shared loads/batch, 1000 batches: {requests} requesting-component repaints vs 32000 broadcast repaints; {:?}",
+            started.elapsed()
+        );
+        assert_eq!(requests, 2000);
+        println!(
+            "MESH_PERF metric=resource_completion_repaint_fraction value={:.4}",
+            requests as f64 / 32000.0
+        );
+    }
+    #[test]
+    fn resource_completions_notify_only_requesting_consumers() {
+        let first = super::ResourcePaintConsumer::default();
+        let second = super::ResourcePaintConsumer::default();
+        let unrelated = super::ResourcePaintConsumer::default();
+        let dropped = super::ResourcePaintConsumer::default();
+        let mut pending = super::PendingResourceConsumers::default();
+        {
+            let _scope = first.enter();
+            assert!(pending.insert("shared"));
+            assert!(!pending.insert("shared"));
+            {
+                let _nested = second.enter();
+                assert!(!pending.insert("shared"));
+                assert!(pending.insert("second-only"));
+            }
+            assert!(pending.insert("first-only"));
+        }
+        {
+            let _scope = dropped.enter();
+            pending.insert("shared");
+        }
+        drop(dropped);
+        assert_eq!(pending.0["shared"].0.len(), 3);
+        pending.remove(&"shared").notify();
+        assert!(first.take_ready());
+        assert!(second.take_ready());
+        assert!(!unrelated.take_ready());
+        assert!(!first.take_ready());
+        pending.remove(&"first-only").notify();
+        assert!(first.take_ready());
+        assert!(!second.take_ready());
+        pending.remove(&"second-only").notify();
+        assert!(second.take_ready());
+        assert!(!first.take_ready());
+    }
+
     use super::*;
     use std::time::Duration;
 
