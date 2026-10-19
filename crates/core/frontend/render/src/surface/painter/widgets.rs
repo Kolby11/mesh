@@ -321,18 +321,6 @@ impl FrontendRenderEngine {
         }
     }
 
-    pub(super) fn render_display_scrollbars(
-        &self,
-        node: &DisplayPaintNode,
-        buffer: &mut PixelBuffer,
-        scale: f32,
-        bounds: ClipRect,
-        clip: ClipRect,
-    ) {
-        let commands = scrollbar_commands(node, scale, bounds, clip);
-        self.execute_painter_commands(buffer, &commands);
-    }
-
     pub(super) fn render_display_scrollbars_in_session(
         &self,
         node: &DisplayPaintNode,

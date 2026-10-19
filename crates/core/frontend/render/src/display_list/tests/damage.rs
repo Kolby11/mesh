@@ -440,6 +440,7 @@ fn display_list_keeps_opaque_backgrounds_batchable_and_translucent_backgrounds_c
 
 #[test]
 fn display_list_uses_cached_icon_opacity_for_conservative_barriers() {
+    let _resources = crate::resource_state_test_lock();
     let td = tempfile::tempdir().unwrap();
     let opaque_path = td.path().join("opaque.png");
     let translucent_path = td.path().join("translucent.png");
@@ -1364,7 +1365,9 @@ fn frame_plan_derivation_and_visual_damage_profile() {
         sink = sink.wrapping_add(std::hint::black_box(
             plan.nodes().len() + plan.transforms().len() + plan.scroll_scopes().len(),
         ));
-        sink = sink.wrapping_add(std::hint::black_box(eager.visual_damage_rects(surface).len()));
+        sink = sink.wrapping_add(std::hint::black_box(
+            eager.visual_damage_rects(surface).len(),
+        ));
         eager_time += started.elapsed();
 
         let started = Instant::now();
@@ -1388,8 +1391,18 @@ fn frame_plan_derivation_and_visual_damage_profile() {
         scratch.0.clear();
         scratch.1.clear();
         let current = lazy.paint_commands_snapshot();
-        visual_damage_rects_into(&previous, surface, |id| dirty_ids.contains(&id), &mut scratch.0);
-        visual_damage_rects_into(&current, surface, |id| dirty_ids.contains(&id), &mut scratch.1);
+        visual_damage_rects_into(
+            &previous,
+            surface,
+            |id| dirty_ids.contains(&id),
+            &mut scratch.0,
+        );
+        visual_damage_rects_into(
+            &current,
+            surface,
+            |id| dirty_ids.contains(&id),
+            &mut scratch.1,
+        );
         sink = sink.wrapping_add(std::hint::black_box(scratch.0.len() + scratch.1.len()));
         filtered_time += started.elapsed();
     }
@@ -1409,6 +1422,12 @@ fn frame_plan_derivation_and_visual_damage_profile() {
     );
     println!("MESH_PERF metric=lazy_frame_plan_speedup value={frame_speedup:.6}");
     println!("MESH_PERF metric=filtered_visual_damage_speedup value={visual_speedup:.6}");
-    assert!(frame_speedup >= 2.0, "lazy frame-plan derivation should be at least 2x");
-    assert!(visual_speedup >= 1.5, "filtered visual damage should be at least 1.5x");
+    assert!(
+        frame_speedup >= 2.0,
+        "lazy frame-plan derivation should be at least 2x"
+    );
+    assert!(
+        visual_speedup >= 1.5,
+        "filtered visual damage should be at least 1.5x"
+    );
 }

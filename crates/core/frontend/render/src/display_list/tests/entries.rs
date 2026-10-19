@@ -28,6 +28,7 @@ fn display_list_reuses_unchanged_entries() {
 
 #[test]
 fn resource_revision_forces_retained_present_damage_without_tree_changes() {
+    let _resources = crate::resource_state_test_lock();
     let root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
     let mut list = RetainedDisplayList::default();
 
@@ -56,9 +57,7 @@ fn resource_revision_forces_retained_present_damage_without_tree_changes() {
     );
     assert_eq!(stable.damage_area, 0);
 
-    // Model a resource replacement without advancing the process-global
-    // revision, which keeps this unit test independent from tests running in
-    // parallel that exercise the same global revision token.
+    // Invalidate only this list so unrelated parallel tests keep their resource revision.
     list.resource_revision = list.resource_revision.saturating_sub(1);
     let refreshed = list.update_for_retained_generation(
         &root,
@@ -600,10 +599,15 @@ fn display_list_can_force_full_surface_damage() {
 #[test]
 #[cfg(debug_assertions)]
 fn resource_reload_preserves_widget_caller_lineage() {
+    if crate::isolate_resource_revision_test(
+        "display_list::tests::entries::resource_reload_preserves_widget_caller_lineage",
+    ) {
+        return;
+    }
+    let _resources = crate::resource_state_test_lock();
     let root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
     let mut list = RetainedDisplayList::default();
     list.update_at_for_retained_generation(&root, 95, 0.0, 0.0, 100, 40, false, true);
-    let _resources = crate::resource_state_test_lock();
     mesh_core_resources::advance_resource_revision();
     assert!(list.caller_lineage_is_valid(&root, 95));
     let metrics = list.update_at_for_retained_generation(&root, 95, 0.0, 0.0, 100, 40, false, true);
@@ -613,6 +617,7 @@ fn resource_reload_preserves_widget_caller_lineage() {
 
 #[test]
 fn display_list_validates_caller_lineage_for_retained_generation() {
+    let _resources = crate::resource_state_test_lock();
     let mut root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
     root.computed_style.overflow_y = Overflow::Scroll;
     let mut list = RetainedDisplayList::default();

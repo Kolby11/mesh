@@ -3,6 +3,8 @@
 mod device_damage;
 pub mod display_list;
 mod fractional_scale;
+#[cfg(feature = "renderer-gpu")]
+pub mod gpu;
 pub mod library_adapters;
 mod paint_input;
 pub mod scene_thread;
@@ -42,27 +44,28 @@ pub use proof::{
 };
 pub use render_object::{RenderObjectDirtySummary, RenderObjectFingerprint, RenderObjectTree};
 pub use surface::{
-    BlurQuality, DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot, FrontendRenderEngine,
-    GlyphAxes, MAX_BLUR_PASSES, PaintCommandAttribution, PaintCommandClass,
+    BackdropFrame, BlurQuality, DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot,
+    FrontendRenderEngine, GlyphAxes, MAX_BLUR_PASSES, PaintCommandAttribution, PaintCommandClass,
     PaintCommandClassMetrics, PaintProfilingMetrics, PainterBackendSnapshot,
-    PainterCapabilitySnapshot, PainterDiagnosticSnapshot, PixelBuffer, RasterMetrics,
-    SharedTextMeasurer, TextCacheMetrics, TextRenderer, TooltipPaintColors, backdrop_blur_policy,
-    blur_quality, glyph_raster_jobs_pending, icon_raster_jobs_pending,
-    icon_resolution_jobs_pending, image_decode_jobs_pending, paint_backend_supports_backdrop_blur,
-    paint_display_list_for_module_with_profiling_metrics, paint_frontend_tree,
-    paint_frontend_tree_at, paint_frontend_tree_at_for_module,
+    PainterCapabilitySnapshot, PainterDiagnosticSnapshot, PixelBuffer, PixelCanvasSession,
+    RasterMetrics, SharedTextMeasurer, TextCacheMetrics, TextRenderer, TooltipPaintColors,
+    backdrop_blur_policy, blur_quality, glyph_raster_jobs_pending, has_backdrop_image,
+    icon_raster_jobs_pending, icon_resolution_jobs_pending, image_decode_jobs_pending,
+    paint_backend_supports_backdrop_blur, paint_display_list_for_module_with_profiling_metrics,
+    paint_frontend_tree, paint_frontend_tree_at, paint_frontend_tree_at_for_module,
     paint_frontend_tree_at_for_module_with_text_metrics,
     paint_frontend_tree_at_for_module_with_text_metrics_clipped,
     paint_frontend_tree_at_for_module_with_text_metrics_clipped_filtered,
     paint_selected_display_list_for_module_with_profiling_metrics,
     paint_selected_display_list_for_module_with_profiling_metrics_and_attribution,
+    paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session,
     paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution,
+    paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution_in_session,
     poll_glyph_raster_jobs, poll_icon_raster_jobs, poll_icon_resolution_jobs,
     poll_image_decode_jobs, resource_completion_waker_installed, set_backdrop_blur_policy,
-    BackdropFrame, has_backdrop_image, set_backdrop_frame, set_backdrop_image,
-    set_blur_quality, set_font_aliases, set_font_database, set_resource_completion_waker,
-    set_tooltip_center_x, set_tooltip_paint_colors, set_tooltip_paint_font_family,
-    set_tooltip_paint_opacity, set_tooltip_paint_scale,
+    set_backdrop_frame, set_backdrop_image, set_blur_quality, set_font_aliases, set_font_database,
+    set_resource_completion_waker, set_tooltip_center_x, set_tooltip_paint_colors,
+    set_tooltip_paint_font_family, set_tooltip_paint_opacity, set_tooltip_paint_scale,
 };
 
 /// Serializes tests that touch process-wide resource state: the global
@@ -74,4 +77,25 @@ pub(crate) fn resource_state_test_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
     LOCK.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[cfg(test)]
+pub(crate) fn isolate_resource_revision_test(test_name: &str) -> bool {
+    const CHILD_TEST: &str = "MESH_RESOURCE_REVISION_TEST_CHILD";
+    if std::env::var(CHILD_TEST).as_deref() == Ok(test_name) {
+        return false;
+    }
+
+    // Revision bumps invalidate every retained list in the process, including
+    // readers that do not otherwise share mutable test resources.
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test_name, "--nocapture"])
+        .env(CHILD_TEST, test_name)
+        .status()
+        .expect("run resource revision test in a child process");
+    assert!(
+        status.success(),
+        "isolated test {test_name} failed: {status}"
+    );
+    true
 }

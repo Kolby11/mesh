@@ -436,6 +436,11 @@ plan, phases 3–5.
 Popovers promoted to `xdg_popup` inherit their parent layer surface's blur on
 compositors that blur layer popups.
 
+Rounded overflow clips constrain descendant painting and point hit testing,
+including retained scrolling content. Background images and gradients follow
+normalized corner radii. Partial damage repaints reproduce full-paint edge
+coverage; pixels outside the damage rectangle remain untouched.
+
 Transitions between pixel, percentage and intrinsic lengths use the layout
 measurements of their source and target styles. Reversing an interrupted
 transition shortens its duration by its eased progress, including repeated

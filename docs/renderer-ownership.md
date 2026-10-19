@@ -35,6 +35,16 @@ cancellation token. Layout and painting must receive the same prepared database.
 Production integration still needs a policy for large installed font catalogs,
 icon snapshots, GPU ownership and presentation.
 
+## GPU context
+
+`render::gpu`, behind the `renderer-gpu` feature, owns a dynamically loaded
+EGL display, a GLES3 context and Skia's Ganesh `DirectContext`. It is not
+`Send`: the renderer-owning thread creates, uses and drops it. It allocates
+BGRA premultiplied offscreen targets with a synchronous readback for tests and
+parity checks. It does not present; GPU frames are planned to reach the
+compositor as dmabuf buffers committed by the presentation layer. The plan is
+[`.planning/todos/pending/2026-07-15-gpu-rendering-backend.md`](../.planning/todos/pending/2026-07-15-gpu-rendering-backend.md).
+
 ## Adapter boundaries
 
 `library_adapters.rs`, `parley_adapter.rs`, `accesskit_adapter.rs`,

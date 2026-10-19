@@ -178,24 +178,6 @@ fn complete_interface_proxy(
         return items;
     }
 
-    // Always include on_change
-    if "on_change".starts_with(prefix) {
-        items.push(CompletionItem {
-            label: "on_change".to_string(),
-            kind: Some(CompletionItemKind::METHOD),
-            detail: Some("register change handler".to_string()),
-            insert_text: Some("on_change(function()\n\t$0\nend)".to_string()),
-            insert_text_format: Some(Fmt::SNIPPET),
-            documentation: Some(Documentation::MarkupContent(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: format!(
-                    "Register a handler called whenever the `{iface_name}` service emits an update.\n\n```lua\n{var_name}.on_change(function()\n    -- read {var_name}.percent, {var_name}.muted, etc.\nend)\n```"
-                ),
-            })),
-            ..Default::default()
-        });
-    }
-
     items
 }
 
@@ -1068,20 +1050,19 @@ mod contract_completion_tests {
     use super::*;
 
     #[test]
-    fn absent_contract_does_not_offer_backend_result_fields() {
+    fn absent_contract_does_not_offer_service_members() {
         let source =
             "<template><box /></template><script>local audio = require(\"mesh.audio\")</script>";
         let document = Document::new(
             tower_lsp::lsp_types::Url::parse("file:///contract-only.mesh").unwrap(),
             source.into(),
         );
-        let registry = ModuleRegistry::empty();
+        let mut registry = ModuleRegistry::empty();
+        registry
+            .interface_fields
+            .insert("mesh.audio".into(), vec!["ok".into(), "error".into()]);
         let items = complete_interface_proxy("audio", "", &document, &registry);
-        assert!(
-            !items
-                .iter()
-                .any(|item| matches!(item.label.as_str(), "ok" | "error"))
-        );
+        assert!(items.is_empty());
         assert!(service_member_markdown("audio", "mesh.audio", "ok", &registry).is_none());
     }
 }

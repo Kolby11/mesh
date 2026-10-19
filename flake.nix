@@ -17,6 +17,7 @@
           pipewire
           fontconfig
           freetype
+          libglvnd
           libxkbcommon
           wayland
           wayland-protocols
@@ -41,7 +42,9 @@
             tracy
           ] ++ runtimeLibs;
 
-          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs;
+          # libglvnd dispatches EGL to the host's vendor drivers, which NixOS
+          # installs outside the store.
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs + ":/run/opengl-driver/lib";
 
           shellHook = ''
             echo "MESH dev shell ready"

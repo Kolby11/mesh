@@ -56,7 +56,11 @@ const GRADIENT_SHADER_CACHE_MAX_BYTES: usize = 64 * 1024;
 const GRADIENT_SHADER_ENTRY_BYTES: usize = 1024;
 const MAX_GRADIENT_DIMENSION: i32 = 4096;
 const MAX_SKIA_IMAGE_DIMENSION: u32 = 8192;
+const EFFECT_RASTER_CACHE_ENTRIES: usize = 128;
+const EFFECT_RASTER_CACHE_BYTES: usize = 32 * 1024 * 1024;
+type ShadowRasterKey = (i32, i32, [u32; 4], u32, u32);
 type GradientShaderCacheKey = (u32, u32, i32, i32);
+type RoundedGradientKey = (GradientShaderCacheKey, [u32; 4]);
 #[cfg(test)]
 static GRADIENT_SHADER_CREATIONS: AtomicUsize = AtomicUsize::new(0);
 
@@ -69,6 +73,10 @@ struct CachedSkiaImage {
 }
 
 thread_local! {
+    static ROUNDED_GRADIENT_CACHE: RefCell<ByteLruCache<RoundedGradientKey, skia_safe::Image>> =
+        RefCell::new(ByteLruCache::new(EFFECT_RASTER_CACHE_ENTRIES, EFFECT_RASTER_CACHE_BYTES));
+    static SHADOW_RASTER_CACHE: RefCell<ByteLruCache<ShadowRasterKey, skia_safe::Image>> =
+        RefCell::new(ByteLruCache::new(EFFECT_RASTER_CACHE_ENTRIES, EFFECT_RASTER_CACHE_BYTES));
     static SKIA_IMAGE_CACHE: RefCell<ByteLruCache<usize, CachedSkiaImage>> =
         RefCell::new(ByteLruCache::new(
             SKIA_IMAGE_CACHE_CAPACITY,
@@ -103,24 +111,26 @@ pub(crate) trait PaintBackend: Send + Sync {
 
     fn capabilities(&self) -> PainterBackendCapabilities;
 
-    fn execute_commands(
-        &self,
-        buffer: &mut PixelBuffer,
-        commands: &[PainterCommand],
-        diagnostics: &mut Vec<PainterDiagnostic>,
-    );
-
-    /// Lets several invocations in one paint pass share a single
-    /// `surfaces::wrap_pixels`. Defaults to one wrap per call.
+    /// Execute commands on the session's target, raster or GPU. Several
+    /// invocations in one paint pass share the session's canvas.
     fn execute_commands_in_session(
         &self,
         session: &mut PixelCanvasSession<'_>,
         commands: &[PainterCommand],
         diagnostics: &mut Vec<PainterDiagnostic>,
+    );
+
+    fn execute_commands(
+        &self,
+        buffer: &mut PixelBuffer,
+        commands: &[PainterCommand],
+        diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
-        session.with_buffer(|buffer| {
-            self.execute_commands(buffer, commands, diagnostics);
-        });
+        self.execute_commands_in_session(
+            &mut PixelCanvasSession::new(buffer),
+            commands,
+            diagnostics,
+        );
     }
 
     /// Begin painting one node in its cumulative local-to-surface affine
@@ -160,19 +170,6 @@ pub(crate) trait PaintBackend: Send + Sync {
         layers: &mut PainterLayerStack,
     ) {
         layers.clear();
-    }
-
-    /// For the immediate painter, which rasterizes a filtered subtree into its
-    /// own buffer instead of opening a canvas layer.
-    fn composite_blurred_buffer(
-        &self,
-        _buffer: &mut PixelBuffer,
-        _source: &PixelBuffer,
-        _at: (i32, i32),
-        _filter: VisualFilter,
-        _quality: BlurQuality,
-        _clip: ClipRect,
-    ) {
     }
 
     fn fill_rect(&self, buffer: &mut PixelBuffer, rect: ClipRect, color: Color, clip: ClipRect) {
@@ -619,8 +616,30 @@ impl PaintBackend for SkiaPaintBackend {
                 false,
             );
             for clip in ancestor_clips {
-                let path = affine_clip_path(*clip, scale);
-                canvas.clip_path(&path, None, true);
+                if corners_have_radius(clip.radii) {
+                    let matrix = canvas.local_to_device();
+                    canvas.concat(&skia_matrix(clip.transform, scale));
+                    canvas.scale((1.0 / scale, 1.0 / scale));
+                    rounded::clip(
+                        canvas,
+                        ClipRect {
+                            x: (clip.rect.x * scale).round() as i32,
+                            y: (clip.rect.y * scale).round() as i32,
+                            width: (clip.rect.width * scale).round() as i32,
+                            height: (clip.rect.height * scale).round() as i32,
+                        },
+                        Corners {
+                            top_left: clip.radii.top_left * scale,
+                            top_right: clip.radii.top_right * scale,
+                            bottom_right: clip.radii.bottom_right * scale,
+                            bottom_left: clip.radii.bottom_left * scale,
+                        },
+                    );
+                    canvas.set_matrix(&matrix);
+                } else {
+                    let path = affine_clip_path(*clip, scale);
+                    canvas.clip_path(&path, None, true);
+                }
             }
             canvas.concat(&skia_matrix(transform, scale));
             save_count
@@ -633,19 +652,6 @@ impl PaintBackend for SkiaPaintBackend {
                 canvas.restore_to_count(save_count);
             });
         }
-    }
-
-    fn execute_commands(
-        &self,
-        buffer: &mut PixelBuffer,
-        commands: &[PainterCommand],
-        diagnostics: &mut Vec<PainterDiagnostic>,
-    ) {
-        let mut layers = PainterLayerStack::default();
-        let _ = buffer.with_skia_canvas(|canvas| {
-            self.execute_commands_on_canvas(canvas, commands, &mut layers, diagnostics);
-            close_open_layers_on_canvas(canvas, &mut layers);
-        });
     }
 
     fn execute_commands_in_session(
@@ -685,57 +691,6 @@ impl PaintBackend for SkiaPaintBackend {
             close_open_layers_on_canvas(canvas, layers);
         });
     }
-
-    fn composite_blurred_buffer(
-        &self,
-        buffer: &mut PixelBuffer,
-        source: &PixelBuffer,
-        at: (i32, i32),
-        filter: VisualFilter,
-        quality: BlurQuality,
-        clip: ClipRect,
-    ) {
-        if source.width() == 0 || source.height() == 0 || clip.width <= 0 || clip.height <= 0 {
-            return;
-        }
-        let info = ImageInfo::new(
-            (source.width() as i32, source.height() as i32),
-            skia_safe::ColorType::BGRA8888,
-            skia_safe::AlphaType::Premul,
-            None,
-        );
-        let Some(image) = images::raster_from_data(
-            &info,
-            Data::new_copy(source.data()),
-            source.stride() as usize,
-        ) else {
-            return;
-        };
-        let mut paint = skia_safe::Paint::default();
-        if let Some(image_filter) = blur_image_filter(filter.blur_radius, quality) {
-            paint.set_image_filter(image_filter);
-        }
-        let _ = buffer.with_skia_canvas(|canvas| {
-            let save_count = canvas.save();
-            canvas.clip_rect(
-                Rect::from_xywh(
-                    clip.x as f32,
-                    clip.y as f32,
-                    clip.width as f32,
-                    clip.height as f32,
-                ),
-                None,
-                false,
-            );
-            canvas.draw_image_with_sampling_options(
-                &image,
-                (at.0 as f32, at.1 as f32),
-                SamplingOptions::from(skia_safe::FilterMode::Linear),
-                Some(&paint),
-            );
-            canvas.restore_to_count(save_count);
-        });
-    }
 }
 
 fn close_open_layers_on_canvas(canvas: &Canvas, layers: &mut PainterLayerStack) {
@@ -754,6 +709,7 @@ impl SkiaPaintBackend {
         diagnostics: &mut Vec<PainterDiagnostic>,
     ) {
         let mut clip_stack: SmallVec<[ClipRect; 8]> = SmallVec::new();
+        let mut clip_saves: SmallVec<[usize; 8]> = SmallVec::new();
         for command in commands {
             match command {
                 PainterCommand::PushClip(clip) => {
@@ -763,9 +719,26 @@ impl SkiaPaintBackend {
                         .map(|current| intersect_clip(current, clip.rect))
                         .unwrap_or(clip.rect);
                     clip_stack.push(effective);
+                    clip_saves.push(canvas.save());
+                    if corners_have_radius(clip.radii) {
+                        rounded::clip(canvas, clip.rect, clip.radii);
+                    } else {
+                        canvas.clip_irect(
+                            skia_safe::IRect::from_xywh(
+                                effective.x,
+                                effective.y,
+                                effective.width,
+                                effective.height,
+                            ),
+                            None,
+                        );
+                    }
                 }
                 PainterCommand::PopClip => {
                     clip_stack.pop();
+                    if let Some(save) = clip_saves.pop() {
+                        canvas.restore_to_count(save);
+                    }
                 }
                 PainterCommand::PushLayer(layer) => {
                     let blur_radius = match layer.filter {
@@ -1328,6 +1301,83 @@ impl SkiaPaintBackend {
             return;
         }
 
+        let shadow_radii = add_corner_radius(radii, shadow.spread_radius);
+        let key = (
+            shadow_rect.width,
+            shadow_rect.height,
+            [
+                shadow_radii.top_left.to_bits(),
+                shadow_radii.top_right.to_bits(),
+                shadow_radii.bottom_right.to_bits(),
+                shadow_radii.bottom_left.to_bits(),
+            ],
+            shadow.blur_radius.to_bits(),
+            u32::from_be_bytes([
+                shadow.color.r,
+                shadow.color.g,
+                shadow.color.b,
+                shadow.color.a,
+            ]),
+        );
+        let image = SHADOW_RASTER_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if let Some(image) = cache.get(&key) {
+                return Some(image.clone());
+            }
+            let width = shadow_bounds.width;
+            let height = shadow_bounds.height;
+            if width > MAX_SKIA_IMAGE_DIMENSION as i32 || height > MAX_SKIA_IMAGE_DIMENSION as i32 {
+                return None;
+            }
+            let info = ImageInfo::new(
+                (width, height),
+                skia_safe::ColorType::RGBA8888,
+                skia_safe::AlphaType::Premul,
+                None,
+            );
+            let mut surface = skia_safe::surfaces::raster(&info, None, None)?;
+            let mut paint = skia_paint(shadow.color, true);
+            if shadow.blur_radius > 0.0 {
+                paint.set_mask_filter(MaskFilter::blur(
+                    BlurStyle::Normal,
+                    blur_radius_to_sigma(shadow.blur_radius),
+                    Some(false),
+                ));
+            }
+            let rect = Rect::from_xywh(
+                blur_pad as f32,
+                blur_pad as f32,
+                shadow_rect.width as f32,
+                shadow_rect.height as f32,
+            );
+            surface
+                .canvas()
+                .draw_rrect(rrect_from_corners(rect, shadow_radii), &paint);
+            let image = surface.image_snapshot();
+            cache.insert(
+                key,
+                image.clone(),
+                (width as usize)
+                    .saturating_mul(height as usize)
+                    .saturating_mul(4),
+            );
+            Some(image)
+        });
+        if let Some(image) = image {
+            let save_count = canvas.save();
+            canvas.clip_irect(
+                skia_safe::IRect::from_xywh(clipped.x, clipped.y, clipped.width, clipped.height),
+                None,
+            );
+            canvas.draw_image(
+                image,
+                (shadow_bounds.x as f32, shadow_bounds.y as f32),
+                None,
+            );
+            canvas.restore_to_count(save_count);
+            return;
+        }
+
         let skia_clip = (clipped.x, clipped.y, clipped.width, clipped.height);
         let save_count = canvas.save();
         canvas.clip_rect(
@@ -1419,7 +1469,16 @@ impl SkiaPaintBackend {
             rect.height as f32,
         );
         if corners_have_radius(radii) {
-            canvas.clip_rrect(rrect_from_corners(rect, radii), None, true);
+            rounded::clip(
+                canvas,
+                ClipRect {
+                    x: rect.left as i32,
+                    y: rect.top as i32,
+                    width: rect.width() as i32,
+                    height: rect.height() as i32,
+                },
+                radii,
+            );
         } else {
             canvas.clip_rect(rect, None, false);
         }
@@ -1591,6 +1650,68 @@ impl SkiaPaintBackend {
         let to_rgba =
             u32::from_be_bytes([gradient.to.r, gradient.to.g, gradient.to.b, gradient.to.a]);
         let grad_cache_key = (from_rgba, to_rgba, rect.width, rect.height);
+        if corners_have_radius(radii)
+            && rect.width <= MAX_SKIA_IMAGE_DIMENSION as i32
+            && rect.height <= MAX_SKIA_IMAGE_DIMENSION as i32
+        {
+            let key = (
+                grad_cache_key,
+                [
+                    radii.top_left.to_bits(),
+                    radii.top_right.to_bits(),
+                    radii.bottom_right.to_bits(),
+                    radii.bottom_left.to_bits(),
+                ],
+            );
+            let image = ROUNDED_GRADIENT_CACHE.with(|cache| {
+                let mut cache = cache.borrow_mut();
+                if let Some(image) = cache.get(&key) {
+                    return Some(image.clone());
+                }
+                let info = ImageInfo::new(
+                    (rect.width, rect.height),
+                    skia_safe::ColorType::RGBA8888,
+                    skia_safe::AlphaType::Premul,
+                    None,
+                );
+                let mut surface = skia_safe::surfaces::raster(&info, None, None)?;
+                let local = ClipRect { x: 0, y: 0, ..rect };
+                rounded::clip(surface.canvas(), local, radii);
+                // Gradient span evaluation and coverage multiplication must
+                // both happen before the destination damage clip is applied.
+                self.draw_linear_gradient_command(
+                    surface.canvas(),
+                    gradient,
+                    local,
+                    Corners::zero(),
+                    local,
+                );
+                let image = surface.image_snapshot();
+                cache.insert(
+                    key,
+                    image.clone(),
+                    (rect.width as usize)
+                        .saturating_mul(rect.height as usize)
+                        .saturating_mul(4),
+                );
+                Some(image)
+            });
+            if let Some(image) = image {
+                let save = canvas.save();
+                canvas.clip_irect(
+                    skia_safe::IRect::from_xywh(
+                        clipped.x,
+                        clipped.y,
+                        clipped.width,
+                        clipped.height,
+                    ),
+                    None,
+                );
+                canvas.draw_image(image, (rect.x as f32, rect.y as f32), None);
+                canvas.restore_to_count(save);
+                return;
+            }
+        }
         let cacheable =
             rect.width <= MAX_GRADIENT_DIMENSION && rect.height <= MAX_GRADIENT_DIMENSION;
         let save_count = canvas.save();
@@ -1648,10 +1769,18 @@ impl SkiaPaintBackend {
         paint.set_anti_alias(true);
         paint.set_shader(shader);
         if corners_have_radius(radii) {
-            canvas.draw_rrect(rrect_from_corners(rect, radii), &paint);
-        } else {
-            canvas.draw_rect(rect, &paint);
+            rounded::clip(
+                canvas,
+                ClipRect {
+                    x: 0,
+                    y: 0,
+                    width: rect.width() as i32,
+                    height: rect.height() as i32,
+                },
+                radii,
+            );
         }
+        canvas.draw_rect(rect, &paint);
         canvas.restore_to_count(save_count);
     }
 
@@ -1868,7 +1997,7 @@ fn inset_corners(corners: Corners, inset: f32) -> Corners {
     }
 }
 
-fn normalize_corners(width: f32, height: f32, corners: Corners) -> Corners {
+pub(super) fn normalize_corners(width: f32, height: f32, corners: Corners) -> Corners {
     let mut corners = Corners {
         top_left: corners.top_left.max(0.0),
         top_right: corners.top_right.max(0.0),

@@ -1,16 +1,14 @@
 ---
 created: 2026-07-15T00:00:00.000Z
-title: GPU rendering backend (Skia-GL first, wgpu/Vello later) — v1.25
+revised: 2026-10-19
+title: GPU rendering backend (Skia-GL on the D6 render thread, dmabuf present)
 area: rendering
-related_phases:
-  - v1.25-gpu-rendering
 files:
+  - crates/core/frontend/render/src/gpu.rs
+  - crates/core/frontend/render/src/scene_thread.rs
+  - crates/core/frontend/render/src/surface/buffer.rs
   - crates/core/frontend/render/src/surface/painter/backend.rs
-  - crates/core/frontend/render/src/surface/painter.rs
-  - crates/core/frontend/render/src/display_list.rs
-  - crates/core/presentation/src/lib.rs
-  - crates/core/presentation/src/wayland_surface/backend.rs
-  - crates/core/frontend/render/Cargo.toml
+  - crates/core/presentation/src/wayland_surface/backend/present.rs
 ---
 
 ## Goal
@@ -20,103 +18,104 @@ software path as a runtime fallback. Unlocks cheap blur/shadow/gradient
 effects (currently CPU-per-damaged-pixel) and removes the full-surface raster
 cost from animation-heavy frames.
 
-## Why Skia-GL first, not wgpu/Vello first
+## Decisions (revised 2026-10-19)
 
-- The authoritative paint backend is already `SkiaPaintBackend`
-  (`painter/backend.rs`) drawing through a Skia `Canvas`. Skia's GPU backend
-  (Ganesh, `skia-safe` `gl` feature) uses the **same Canvas API**, so every
-  painter command ports with pixel parity — the diff is context/surface
-  creation, not paint semantics.
-- EGL on Wayland gives partial present via `EGL_EXT_buffer_age` +
-  `EGL_KHR_swap_buffers_with_damage`, so the shipped damage pipeline
-  (per-buffer damage, fractional-scale edge mapping) carries over. wgpu today
-  cannot express buffer-age partial present — going wgpu-first would regress
-  the just-completed damage work to full-frame presents.
-- The painter command API is already backend-neutral by contract
-  (`docs/renderer-ownership.md` forbids skia_safe types in retained data),
-  and the `renderer-anyrender` / `renderer-vello-encoding` feature scaffolds
-  stay as the long-term replacement-candidate lane. Nothing in this plan
-  closes the Vello door; it defers it until wgpu can do damage-aware present.
-
-## Prerequisite check (all shipped as of 2026-07-15)
-
-- Retained display list + damage rects: shipped (display_list.rs).
-- Retained Taffy layout: shipped 2026-07-15.
-- Fractional-scale partial damage with physical edge mapping: shipped
-  2026-07-15.
-- Child popups replay retained command streams: shipped 2026-07-15.
+- **Skia Ganesh over GLES3, not wgpu/Vello.** The painter already draws
+  through a Skia `Canvas`; Ganesh uses the same API, so the port is target
+  acquisition, not paint semantics. wgpu cannot express damage-aware partial
+  present. The Vello lane stays open behind the same painter contract.
+- **The renderer runs on the D6 scene thread.** `GpuContext` is not `Send`
+  and is created, used and dropped by the `SceneRenderer` worker.
+- **Present dmabuf buffers from the UI thread, not `eglSwapBuffers`.** The
+  original plan presented through `wl_egl_window` + `eglSwapBuffersWithDamage`.
+  That attaches and commits the `wl_surface` from the GL thread, while the UI
+  thread commits input/opaque/blur regions and window geometry on the same
+  surface — two committers, breaking presentation ownership. Instead the
+  renderer draws into GBM-allocated buffers (imported as EGLImage-backed
+  FBOs) and returns them as `SceneRenderer::Output`; presentation attaches
+  them through `zwp_linux_dmabuf_v1` in the same commit as region state.
+  Buffer age is our own per-buffer damage bookkeeping (as SHM already does),
+  so no `EGL_EXT_buffer_age` dependency.
+- **Display selection.** Tests use `EGL_MESA_platform_surfaceless`. Production
+  must render on the compositor's device: open the EGL display on the
+  render node reported by `zwp_linux_dmabuf_v1` feedback (main device), so
+  hybrid laptops (this dev box: AMD iGPU + NVIDIA dGPU) do not render on one
+  GPU and scan out on the other.
 
 ## Phases
 
-### Phase 1 — presentation: GPU surface plumbing behind a backend enum
+### Phase 1 — headless context, offscreen raster, readback (done 2026-10-19)
 
-- Add a `PresentationBufferKind { Shm, Egl }` decision per surface in
-  `wayland_surface/backend.rs`. EGL path: `wayland-egl` (`wl_egl_window`)
-  + `khronos-egl` context bound to the compositor's `wl_display`.
-- One shared EGL context/display; per-surface `EGLSurface` sized in
-  physical pixels (existing fractional-scale viewport logic reused —
-  `wp_viewport` still maps physical buffer → logical size).
-- Selection: config/env gate (`MESH_RENDER_GPU=1` initially), automatic
-  fallback to SHM on EGL init failure with a one-shot diagnostic. Never
-  fail startup because GL is missing (nix env, llvmpipe boxes).
-- No painting change yet: prove context creation, resize, scale change,
-  and teardown against both dev-window and layer-shell backends.
+`mesh-core-render::gpu` behind the `renderer-gpu` feature: dynamically loaded
+libEGL (no link-time GL dependency), surfaceless display, GLES3 context,
+Skia `DirectContext`, BGRA premultiplied offscreen targets, synchronous
+readback into `PixelBuffer`. Parity test against Skia raster. The nix shell
+now provides libglvnd plus `/run/opengl-driver/lib`.
 
-### Phase 2 — render: SkiaPaintBackend over a GPU surface
+### Phase 2 — painter over a canvas target (done 2026-10-19)
 
-- Enable `skia-safe` `gl` feature (behind a cargo feature `renderer-gpu`
-  so CI without GL headers still builds).
-- Generalize the backend's surface acquisition: today it wraps the
-  `PixelBuffer` as a raster surface; add a `gpu::DirectContext` +
-  `backend_render_targets::make_gl` path targeting the EGL FBO.
-- Paint commands are untouched — same Canvas calls. Flush + submit at end
-  of paint instead of memcpy into SHM.
-- Keep `PixelBuffer` as the retained/compare copy only where consumed
-  (tests, debug snapshots, damage diffing that reads pixels). Add an
-  explicit GPU→CPU readback used only by tests/debug, never per frame.
-- Extend `paint_backend_snapshot()` with backend id (`skia-raster` /
-  `skia-gl`), and route GL errors into the existing unsupported-feature
-  diagnostics + rollback authority.
+`PixelCanvasSession` is the paint target: a `PixelBuffer` (raster) or any
+Skia surface; `GpuTarget::session()` makes one on a GPU target. Its raw-buffer
+escape hatch (`with_buffer`) is gone. Damage clears and in-place scroll
+shifts are session methods: byte fast paths on raster, Src draws and a
+snapshot self-copy elsewhere. The scrollbar fallback and the tooltip draw on
+the session's canvas. The paint-backend trait's required method takes a
+session. The icon blits and glyph blends were already test-only; they now draw
+through the canvas, and `blend_pixel` plus the dead
+`composite_blurred_buffer` are deleted. Backdrop blur is a backdrop
+`save_layer` and needs no buffer reads. The display-list and region paint
+entry points have `_in_session` variants that a scene-thread renderer calls.
 
-### Phase 3 — damage-aware present
+Still raster-only, with no GPU path needed yet: the debug overlay's
+capture/restore copies bytes, and the shell's SHM frame path still calls
+`PixelBuffer::clear_rect`/`shift_region_pixels` before painting. Phase 3
+renders through the session methods instead.
 
-- Query `EGL_EXT_buffer_age`; keep a ring of recent frame-damage sets per
-  surface (the SHM per-buffer damage bookkeeping already models this —
-  reuse its accumulation logic).
-- Repaint the union of damage for the returned age, present with
-  `eglSwapBuffersWithDamage`. Age 0 / unsupported ⇒ full repaint (still
-  correct, just slower).
-- Scissor/clip the GPU paint to the damage union exactly like the raster
-  painter clips today (physical-edge mapping already shipped).
+### Phase 3 — `SceneRenderer` implementation
 
-### Phase 4 — resource residency
+A GPU `SceneRenderer` on the scene thread: per-surface buffer rings, damage
+replay per buffer, `requires_full_replay` honored, surface removal retires
+GPU resources on the owner thread. Readback output first, so it can drive the
+existing SHM present path end to end before dmabuf exists.
 
-- Glyph atlas / image / SVG rasterization currently produce CPU pixmaps
-  per paint; upload once and cache as `skia_safe::Image` textures keyed
-  by the existing icon/image cache keys. Measure with the v1.21 icon-grid
-  and text-update workloads before/after.
+### Phase 4 — dmabuf presentation
 
-### Phase 5 — parity + rollout
+GBM allocation on the compositor's main device, `zwp_linux_dmabuf_v1`
+(v4 feedback for device and format/modifier selection), explicit or implicit
+sync fence before attach, buffer release tracking feeding the ring. SHM stays
+the fallback per surface; the backend id (`skia-raster` / `skia-gl`) joins
+`paint_backend_snapshot()`.
 
-- Pixel-parity harness: render each canonical v1.21 workload on raster
-  and GL, compare with small tolerance; run in CI where GL (llvmpipe) is
-  available in the nix shell.
-- Flip default to GPU-when-available once the eight canonical workloads
-  show no regressions and popups/fractional scale pass; keep
-  `MESH_RENDER_GPU=0` as the escape hatch.
+### Phase 5 — resource residency
+
+Upload glyph atlases, images and SVG rasterizations once as GPU images keyed
+by the existing cache keys; measure icon-grid and text-update workloads.
+
+### Phase 6 — parity, gates and rollout
+
+Pixel-parity per canonical workload, D9 gates on both backends, then
+GPU-when-available by default with `MESH_RENDER_GPU=0` as the escape hatch.
+Never fail startup when GL is missing; fall back with one diagnostic.
+
+## Measured so far
+
+- Skia prebuilt binaries with `gl` download for skia-safe 0.97; no source build.
+- GPU vs raster parity on a rect/rounded-rect/gradient scene (96×64,
+  NVIDIA RTX 4060, GLES3): fills and gradients identical; 64 antialiased
+  rounded-curve pixels differ, worst by 41 levels (analytic vs supersampled
+  coverage). Parity checks must budget curve edges, not demand exactness.
+
+- Production painter, GPU target vs `PixelBuffer`, 160×120 at scale 1
+  (debug build, RTX 4060, `MESH_REQUIRE_GPU=1`), as pixels off by more than 2
+  levels and the worst delta: panel chrome, shadow, gradient and text 2/19,200
+  (worst 3); 20-icon grid 0 (1); backdrop blur, filter blur and opacity layers
+  404 (4); retained scroll replay with shifts and strip clears 0 (2). GPU
+  replay equals a fresh GPU paint byte for byte.
 
 ## Risks / open questions
 
-- nix dev shell needs EGL/GL headers + llvmpipe for tests (same class of
-  problem as the solved xkbcommon one).
-- skia-safe with `gl` significantly increases build time; keep it feature
-  gated.
-- Shared context across surfaces vs per-surface contexts: start shared
-  (one GL thread — the shell already paints serially); revisit when the
-  K-phase parallel paint work lands (GPU submission likely stays on one
-  thread anyway).
-- Dev-window (winit) backend: either keep it raster or add a GL swapchain
-  there too; raster-only dev-window is acceptable initially.
-- wgpu/Vello migration remains a replacement candidate behind the same
-  painter contract; revisit when wgpu exposes damage-aware present or
-  when we accept full-frame presents on GPU.
+- skia-safe `gl` increases build time; keep it feature gated.
+- NVIDIA GBM/dmabuf export behavior on driver 580; Mesa on the iGPU.
+- Dev-window (minifb) backend stays raster.
+- Whether readback-to-SHM (Phase 3) is ever a net win — likely not; it is a
+  correctness bridge, not a shipping mode.

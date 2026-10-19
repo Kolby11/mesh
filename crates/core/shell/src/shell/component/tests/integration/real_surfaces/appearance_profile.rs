@@ -9,10 +9,6 @@ use crate::ShellComponent;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-/// Pages of `@mesh/settings` that do not read `mesh.audio`. An audio poll must
-/// reuse every one of their memoized subtrees.
-const PAGES_NOT_READING_AUDIO: u64 = 5;
-
 fn seed_large_resource_catalog(settings: &mut FrontendSurfaceComponent, count: usize) {
     let icon_themes = (0..count)
         .map(|index| {
@@ -79,6 +75,21 @@ fn appearance_surface(theme: &Theme, buffer: &mut PixelBuffer) -> FrontendSurfac
     settings
 }
 
+fn publish_audio_percent(settings: &mut FrontendSurfaceComponent, percent: u32) {
+    let payload = serde_json::json!({
+        "available": true,
+        "percent": percent,
+        "muted": false,
+    });
+    settings
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload,
+        })
+        .unwrap();
+}
+
 fn publish_audio(settings: &mut FrontendSurfaceComponent, volume: u32) {
     settings
         .handle_service_event(&ServiceEvent::Updated {
@@ -90,31 +101,24 @@ fn publish_audio(settings: &mut FrontendSurfaceComponent, volume: u32) {
 }
 
 #[test]
-fn audio_polls_reuse_every_settings_page_appearance_does_not_read() {
+fn unread_audio_updates_schedule_no_frame() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(920, 900);
     let mut settings = appearance_surface(&theme, &mut buffer);
 
     // Settle: the first audio payload is genuinely new to every runtime.
     publish_audio(&mut settings, 10);
-    settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
-        .unwrap();
+    settle(&mut settings, &theme, &mut buffer);
 
-    let hits_before = settings.component_memo_hit_count();
+    // No template expression reads the changed fields and the Audio page's
+    // effect writes nothing for them, so the update must not schedule a frame
+    // that would rebuild or restyle the page.
     publish_audio(&mut settings, 11);
-    settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
-        .unwrap();
-    let reused = settings.component_memo_hit_count() - hits_before;
-
-    assert_eq!(
-        reused, PAGES_NOT_READING_AUDIO,
-        "an audio poll must reuse the memoized subtree of every page that does \
-         not read mesh.audio; reused {reused}"
+    assert!(
+        !settings.wants_render(),
+        "an audio update no template or effect consumes must not schedule a frame"
     );
 
-    // The reuse must not cost correctness: Appearance is still the rendered page.
     let text = settings
         .display_list_paint_commands()
         .iter()
@@ -127,12 +131,54 @@ fn audio_polls_reuse_every_settings_page_appearance_does_not_read() {
         .collect::<Vec<_>>();
     assert!(
         text.iter().any(|text| text == "Color theme"),
-        "Appearance content must survive a memoized audio poll frame: {text:?}"
+        "Appearance content must survive an unread audio update: {text:?}"
     );
     assert!(
         text.iter().any(|text| text.starts_with("Icon Theme")),
-        "the bounded icon-theme rows must survive a memoized audio poll frame"
+        "the bounded icon-theme rows must survive an unread audio update"
     );
+}
+
+/// The hidden Audio page derives its labels in an effect. A volume change
+/// writes those bound globals, which must patch the bindings in place instead
+/// of rebuilding the visible Appearance page, and match a full rebuild.
+#[test]
+fn hidden_audio_page_volume_patches_without_rebuild() {
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(920, 900);
+    let mut settings = appearance_surface(&theme, &mut buffer);
+    publish_audio_percent(&mut settings, 10);
+    settle(&mut settings, &theme, &mut buffer);
+    let _ = settings.take_invalidation_snapshot();
+
+    publish_audio_percent(&mut settings, 40);
+    assert!(
+        settings.wants_render(),
+        "a bound volume write must schedule a frame"
+    );
+    settings
+        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
+    let snapshot = settings
+        .take_invalidation_snapshot()
+        .expect("the volume frame records invalidation");
+    assert!(snapshot.patched_node_count > 0);
+    assert!(!snapshot.full_rebuild);
+    assert_eq!(snapshot.component.script_narrow, 0);
+
+    let patched = {
+        let mut texts = Vec::new();
+        all_texts(settings.last_tree.as_ref().unwrap(), &mut texts);
+        texts
+    };
+    assert!(patched.iter().any(|text| text == "40%"), "{patched:?}");
+
+    settle(&mut settings, &theme, &mut buffer);
+    settings.invalidate_script_state();
+    settle(&mut settings, &theme, &mut buffer);
+    let mut rebuilt = Vec::new();
+    all_texts(settings.last_tree.as_ref().unwrap(), &mut rebuilt);
+    assert_eq!(patched, rebuilt, "patched text must match a full rebuild");
 }
 
 fn dump_stages(label: &str, records: Vec<ComponentProfilingRecord>, frames: u32) {
@@ -200,19 +246,49 @@ fn appearance_frame_cost_profile() {
             .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
             .unwrap();
     }
+    // Let the page-enter transitions finish so the loops below measure only
+    // what each update schedules.
+    while settings.wants_render() {
+        settings
+            .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .unwrap();
+    }
 
     const FRAMES: u32 = 60;
 
     // Profiling attribution costs real time, so take the wall-clock numbers
     // first and use the instrumented pass only for the breakdown.
+    // Like `Shell::render_components`, paint only when the update scheduled a
+    // frame: an update nothing reads must not schedule one.
+    let mut service_frames = 0u32;
     let started = Instant::now();
     for volume in 0..FRAMES {
         publish_audio(&mut settings, volume % 100);
-        settings
-            .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
-            .unwrap();
+        if settings.wants_render() {
+            service_frames += 1;
+            settings
+                .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+                .unwrap();
+        }
     }
     let service = started.elapsed();
+    eprintln!("unrelated service updates that scheduled a frame: {service_frames}/{FRAMES}");
+
+    // The hidden Audio page's effect turns a volume change into writes of
+    // its bound globals; those must patch the bindings, not rebuild the tree.
+    let mut read_frames = 0u32;
+    let started = Instant::now();
+    for tick in 0..FRAMES {
+        publish_audio_percent(&mut settings, tick % 100);
+        if settings.wants_render() {
+            read_frames += 1;
+            settings
+                .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+                .unwrap();
+        }
+    }
+    let read_service = started.elapsed();
+    eprintln!("hidden-page volume updates that scheduled a frame: {read_frames}/{FRAMES}");
 
     let started = Instant::now();
     for _ in 0..FRAMES {
@@ -251,6 +327,7 @@ fn appearance_frame_cost_profile() {
 
     for (label, elapsed) in [
         ("unrelated service update", service),
+        ("hidden-page volume update", read_service),
         ("paint only", paint_only),
         ("resource-list scroll", scroll),
         ("render hooks alone", hooks),
@@ -271,12 +348,28 @@ fn appearance_frame_cost_profile() {
     let _ = settings.take_profiling_records();
     for volume in 0..FRAMES {
         publish_audio(&mut settings, volume % 100);
-        settings
-            .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
-            .unwrap();
+        if settings.wants_render() {
+            settings
+                .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+                .unwrap();
+        }
     }
     dump_stages(
         "unrelated service update",
+        settings.take_profiling_records(),
+        FRAMES,
+    );
+
+    for tick in 0..FRAMES {
+        publish_audio_percent(&mut settings, tick % 100);
+        if settings.wants_render() {
+            settings
+                .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+                .unwrap();
+        }
+    }
+    dump_stages(
+        "hidden-page volume update",
         settings.take_profiling_records(),
         FRAMES,
     );
@@ -586,4 +679,27 @@ fn settings_scroll_shift_matches_full_paint() {
         "whole-pixel page scroll frames move retained pixels, got {}",
         settings.scroll_shifted_frames
     );
+}
+
+fn settle(settings: &mut FrontendSurfaceComponent, theme: &Theme, buffer: &mut PixelBuffer) {
+    let mut frames = 0;
+    while settings.wants_render() {
+        settings
+            .paint(theme, SurfaceExtent::unpadded(920, 900), buffer, 1.0)
+            .unwrap();
+        frames += 1;
+        assert!(frames < 600, "the Appearance page never settled");
+    }
+}
+
+/// Text content of every `<text>`, including hidden pages.
+fn all_texts(node: &WidgetNode, output: &mut Vec<String>) {
+    if node.tag == "text"
+        && let Some(content) = node.attributes.get("content")
+    {
+        output.push(content.clone());
+    }
+    for child in &node.children {
+        all_texts(child, output);
+    }
 }

@@ -964,8 +964,20 @@ fn label_resize_scroll_viewport_damage_profile() {
         root.children[3].layout.width = 121.0 + (frame % 40) as f32;
         let dirty = objects.update(&root);
         assert!(dirty.geometry > 0);
-        list.update_with_dirty_nodes(&root, dirty, objects.dirty_node_ids(), 960, 480, false, true);
-        damaged += list.damage_rects().iter().map(|rect| rect.area()).sum::<u64>();
+        list.update_with_dirty_nodes(
+            &root,
+            dirty,
+            objects.dirty_node_ids(),
+            960,
+            480,
+            false,
+            true,
+        );
+        damaged += list
+            .damage_rects()
+            .iter()
+            .map(|rect| rect.area())
+            .sum::<u64>();
     }
     let elapsed = started.elapsed();
     let per_frame = damaged as f64 / frames as f64;
@@ -975,7 +987,10 @@ fn label_resize_scroll_viewport_damage_profile() {
     );
     let percent = per_frame / (960.0 * 480.0) * 100.0;
     println!("MESH_PERF metric=label_resize_viewport_damage_percent value={percent:.6}");
-    assert!(percent < 2.0, "a label resize must not damage unrelated scroll viewports");
+    assert!(
+        percent < 2.0,
+        "a label resize must not damage unrelated scroll viewports"
+    );
 }
 
 #[test]
@@ -1007,7 +1022,10 @@ fn scroll_shift_plans_only_scopes_over_a_uniform_backdrop() {
         root.children.push(area);
         root
     }
-    let scroll = |root: &mut WidgetNode, list: &mut RetainedDisplayList, objects: &mut crate::RenderObjectTree, y: f32| {
+    let scroll = |root: &mut WidgetNode,
+                  list: &mut RetainedDisplayList,
+                  objects: &mut crate::RenderObjectTree,
+                  y: f32| {
         root.children[0].scroll_metrics.as_mut().unwrap().y = y;
         let dirty = objects.update(root);
         list.update_with_dirty_nodes(root, dirty, objects.dirty_node_ids(), 200, 160, false, true);
@@ -1040,9 +1058,9 @@ fn scroll_shift_plans_only_scopes_over_a_uniform_backdrop() {
     assert!(shifts[0].anchored.iter().all(|band| band.width == 120));
 
     // A gradient beneath varies across the viewport.
-    let mut root = scene(Some(mesh_core_elements::style::BackgroundPaint::LinearGradient(
-        Default::default(),
-    )));
+    let mut root = scene(Some(
+        mesh_core_elements::style::BackgroundPaint::LinearGradient(Default::default()),
+    ));
     let mut objects = crate::RenderObjectTree::default();
     objects.update(&root);
     let mut list = RetainedDisplayList::default();

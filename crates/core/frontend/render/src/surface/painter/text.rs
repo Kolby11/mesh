@@ -1250,6 +1250,25 @@ impl FrontendRenderEngine {
         scale: f32,
         clip: Option<(u32, u32, u32, u32)>,
     ) {
+        self.render_tooltip_clipped_in_session(
+            text,
+            paint_x,
+            paint_y,
+            &mut PixelCanvasSession::new(buffer),
+            scale,
+            clip,
+        );
+    }
+
+    pub fn render_tooltip_clipped_in_session(
+        &self,
+        text: &str,
+        paint_x: f32,
+        paint_y: f32,
+        session: &mut PixelCanvasSession<'_>,
+        scale: f32,
+        clip: Option<(u32, u32, u32, u32)>,
+    ) {
         let font_size = 12.0 * scale;
         let pad_h = (8.0 * scale) as i32;
         let pad_v = (5.0 * scale) as i32;
@@ -1288,9 +1307,9 @@ impl FrontendRenderEngine {
         } else {
             ((paint_x) * scale) as i32
         };
-        let tx_full = tx_full_raw.min(buffer.width() as i32 - box_w - 6).max(4);
+        let tx_full = tx_full_raw.min(session.width() as i32 - box_w - 6).max(4);
         let ty_full = ((paint_y) * scale) as i32;
-        let ty_full = ty_full.min(buffer.height() as i32 - box_h - 6).max(4);
+        let ty_full = ty_full.min(session.height() as i32 - box_h - 6).max(4);
 
         // Center the animated box inside the final rect so the expand grows
         // outward from the middle — both sides move apart symmetrically.
@@ -1300,8 +1319,8 @@ impl FrontendRenderEngine {
         let full_clip = ClipRect {
             x: 0,
             y: 0,
-            width: buffer.width() as i32,
-            height: buffer.height() as i32,
+            width: session.width() as i32,
+            height: session.height() as i32,
         };
         let tooltip_clip = clip
             .map(|clip| {
@@ -1345,8 +1364,8 @@ impl FrontendRenderEngine {
         if clipped_layer_bounds.width <= 0 || clipped_layer_bounds.height <= 0 {
             return;
         }
-        self.execute_painter_commands(
-            buffer,
+        self.execute_painter_commands_in_session(
+            session,
             &[
                 PainterCommand::PushLayer(PainterLayer::isolated(
                     clipped_layer_bounds,
@@ -1389,22 +1408,24 @@ impl FrontendRenderEngine {
             (text_clip.x + text_clip.width).max(0) as u32,
             (text_clip.y + text_clip.height).max(0) as u32,
         );
-        self.text_renderer.render_clipped(
-            text,
-            &font_family,
-            font_size,
-            400,
-            1.3,
-            TextAlign::Left,
-            text_color,
-            buffer,
-            // Anchor the text to the final box so it stays put while the
-            // centered expand clip reveals it.
-            (tx_full + pad_h) as u32,
-            (ty_full + pad_v) as u32,
-            text_clip,
-            Some(max_text_w),
-        );
+        session.with_canvas(|canvas| {
+            self.text_renderer.render_clipped_on_canvas(
+                text,
+                &font_family,
+                font_size,
+                400,
+                1.3,
+                TextAlign::Left,
+                text_color,
+                canvas,
+                // Anchor the text to the final box so it stays put while the
+                // centered expand clip reveals it.
+                (tx_full + pad_h) as u32,
+                (ty_full + pad_v) as u32,
+                text_clip,
+                Some(max_text_w),
+            );
+        });
     }
 }
 

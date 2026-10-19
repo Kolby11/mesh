@@ -26,29 +26,11 @@ unless an item says otherwise. IDs point into the
 (evidence and tests); `A2`–`A8` point into the
 [module architecture direction](../.planning/todos/pending/2026-09-30-module-architecture-direction.md).
 
-### Priority 6 — Dead code, duplication and small fixes
+### Priority 6 — Test isolation
 
-- [ ] Rounded clips (`overflow` with a radius), rounded gradients and images,
-      and box shadows still rasterize through Skia under the damage clip, so a
-      partial repaint can differ from a full paint at their arcs. Fills and
-      borders are clip-invariant (`painter/rounded.rs`); extend that to these.
-- [ ] `display_list::tests::entries::resource_revision_forces_retained_present_damage_without_tree_changes`
-      and `display_list_validates_caller_lineage_for_retained_generation` fail in
-      most parallel render-suite runs (also on `d2c8e294`) and pass alone.
-- [ ] `mesh-tools-lsp` `real_settings::discovers_the_shipped_themes` reads the
-      checked-in `config/active-profile` (`glass`), whose closure holds only
-      `violet-glass`; give the test its own profile root.
-- [ ] **SH-09 / RES-13:** One icon-pack validator and one contained file reader
-      shared by shell, LSP, theme, locale and resources.
-- [ ] **RES-09 / RES-10:** Derive LSP manifest keys and capability completion
-      from core; complete services from contracts only.
-- [ ] **UI-12:** Resolve percent/`auto` lengths against layout before
-      interpolating, and shorten reversed transitions by their progress.
-- [ ] **RND-05:** Take shell visual-damage rects from the display list's world
-      bounds (ancestor transforms and scroll) and delete the parallel geometry.
-- [ ] **RT-11 / CMP-11 / CMP-13:** Allow finite recursive contract types; span
-      `prop()` diagnostics and check inline styles; resolve child settings once
-      per revision.
+- [ ] Isolate `surface::icon::tests::image_decode_worker_transfers_bounded_image_off_the_paint_path`
+      from parallel painter queue traffic: scheduling can return `Some(false)`
+      instead of `Some(true)` in full debug and release render-suite runs.
 
 ### Priority 7 — Customization and ecosystem
 
@@ -286,6 +268,11 @@ of payoff.
       (`retained_tree.update`). Scroll momentum no longer takes this path; what
       remains (resize, theme, window state) also relayouts, so diffing only
       restyled nodes needs layout-changed nodes reported too.
+- [ ] Binding-patch frames still pay whole-tree passes for a few patched
+      nodes: `layout_dirty_node_snapshots` fingerprints every node, the style
+      animation pass and display-list diff walk the tree, and the tree is
+      revalidated. Scope them to the patched/affected set; patches inside a
+      `display: none` subtree should skip layout entirely.
 - [ ] In-surface blur re-blurs and repaints a frosted element's whole read
       region on any nearby change (a hover inside a frosted panel is ~7x a plain
       repaint). Backdrop root, clamped edges and the blurred-backdrop/filter-layer
@@ -362,8 +349,9 @@ of payoff.
 
 ### Architecture
 
-- [ ] Advance GPU rendering on two measured lanes: the conservative Skia-GL/EGL
-      migration and an experimental persistent-scene/database renderer that extends
+- [ ] Advance GPU rendering on two measured lanes: the conservative Skia-GL
+      migration (scene-thread renderer, dmabuf present — phases 3–6 of its
+      plan) and an experimental persistent-scene/database renderer that extends
       retained identity into raster resources and tiles. Plans:
       [GPU backend](../.planning/todos/pending/2026-07-15-gpu-rendering-backend.md) and
       [persistent scene renderer](../.planning/todos/pending/2026-09-20-persistent-scene-renderer.md).

@@ -284,7 +284,6 @@ impl FrontendSurfaceComponent {
     /// Settle pending effects before choosing the template update path.
     /// Writes with no template consumers preserve the retained tree.
     pub(super) fn run_pending_effects(&mut self) {
-        self.effects_changed_templates = false;
         if !self.reactive_effects_pending {
             return;
         }
@@ -320,6 +319,10 @@ impl FrontendSurfaceComponent {
             || !self.pending_service_binding_readers.is_empty())
             && self.try_patch_template_writes(&written)
         {
+            self.drop_script_narrow_after_patch();
+            return;
+        }
+        if !state_dirty && self.script_narrow_is_unread_service_update() {
             self.drop_script_narrow_after_patch();
             return;
         }

@@ -277,11 +277,8 @@ fn shipped_navigation_service_poll_uses_narrow_damage() {
             })
             .unwrap();
         if level == 52 {
-            assert!(
-                component
-                    .dirty_types
-                    .contains(ComponentDirtyFlags::SCRIPT_NARROW)
-            );
+            assert!(component.wants_render());
+            assert!(!component.dirty_types.contains(ComponentDirtyFlags::SCRIPT));
             assert!(
                 !component.surface_pixels_invalid,
                 "service polls must preserve the buffer for partial repaint"

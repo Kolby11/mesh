@@ -193,15 +193,6 @@ impl PaintBackend for TestPaintBackend {
         capabilities
     }
 
-    fn execute_commands(
-        &self,
-        buffer: &mut PixelBuffer,
-        commands: &[PainterCommand],
-        diagnostics: &mut Vec<PainterDiagnostic>,
-    ) {
-        SkiaPaintBackend.execute_commands(buffer, commands, diagnostics);
-    }
-
     fn execute_commands_in_session(
         &self,
         session: &mut PixelCanvasSession<'_>,
@@ -330,9 +321,9 @@ impl PaintBackend for RecordingPaintBackend {
         }
     }
 
-    fn execute_commands(
+    fn execute_commands_in_session(
         &self,
-        _buffer: &mut PixelBuffer,
+        _session: &mut PixelCanvasSession<'_>,
         commands: &[PainterCommand],
         _diagnostics: &mut Vec<PainterDiagnostic>,
     ) {

@@ -1787,6 +1787,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0560e3f9a9a03ea6b6e90b41138c5db9e21526c99eb192c1a26c68176593285"
 
 [[package]]
+name = "khronos-egl"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6aae1df220ece3c0ada96b8153459b67eebe9ae9212258bb0134ae60416fdf76"
+dependencies = [
+ "libc",
+ "libloading",
+]
+
+[[package]]
 name = "kurbo"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2372,6 +2382,7 @@ dependencies = [
  "cosmic-text",
  "fontdb 0.23.0",
  "image",
+ "khronos-egl",
  "mesh-core-elements",
  "mesh-core-frontend",
  "mesh-core-icon",
@@ -2576,6 +2587,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stylua",
+ "tempfile",
  "tokio",
  "tower-lsp",
  "tracing",

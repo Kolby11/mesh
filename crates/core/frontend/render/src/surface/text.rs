@@ -2005,7 +2005,9 @@ mod tests {
         let plain = HashMap::new();
         let overridden = HashMap::from([("Inter".to_string(), "DejaVu Sans".to_string())]);
         let renderer = TextRenderer::new();
-        let labels = (0..40).map(|index| format!("label {index}")).collect::<Vec<_>>();
+        let labels = (0..40)
+            .map(|index| format!("label {index}"))
+            .collect::<Vec<_>>();
         let frames = 200u32;
         let mut revisions = std::collections::HashSet::new();
         let started = std::time::Instant::now();
@@ -2030,8 +2032,15 @@ mod tests {
         let hit_ratio =
             metrics.layout_hits as f64 / (metrics.layout_hits + metrics.layout_misses) as f64;
         println!("MESH_PERF metric=alias_alternation_layout_hit_ratio value={hit_ratio:.6}");
-        assert_eq!(revisions.len(), 2, "each alias set keeps one measurer revision");
-        assert!(hit_ratio >= 0.95, "alternating alias sets must reuse their layouts");
+        assert_eq!(
+            revisions.len(),
+            2,
+            "each alias set keeps one measurer revision"
+        );
+        assert!(
+            hit_ratio >= 0.95,
+            "alternating alias sets must reuse their layouts"
+        );
     }
 
     #[test]

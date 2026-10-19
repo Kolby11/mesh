@@ -405,6 +405,9 @@ impl ShellComponent for FrontendSurfaceComponent {
             generation,
         );
         let mut needs_rebuild = false;
+        // Whether every runtime this update dirties has a complete record of
+        // the template expressions reading the changed fields.
+        let mut template_reads_known = true;
         let mut service_binding_readers: HashMap<String, HashSet<String>> = HashMap::new();
         let changed_fields = previous_payload
             .as_ref()
@@ -443,17 +446,19 @@ impl ShellComponent for FrontendSurfaceComponent {
                 );
                 continue;
             }
-            if let Some(fields) = &changed_fields
-                && let Some(readers) = runtime
+            let template_readers = changed_fields.as_ref().and_then(|fields| {
+                runtime
                     .script_ctx
                     .template_expressions_reading_service_fields(fields)
+            });
+            let runtime_template_reads_known = template_readers.is_some();
+            if let Some(readers) = template_readers
+                && !readers.is_empty()
             {
-                if !readers.is_empty() {
-                    service_binding_readers
-                        .entry(instance_key.to_string())
-                        .or_default()
-                        .extend(readers);
-                }
+                service_binding_readers
+                    .entry(instance_key.to_string())
+                    .or_default()
+                    .extend(readers);
             }
             // Capability is module-wide, so every component instance of a
             // module that declares `service.x.read` is handed the payload —
@@ -498,6 +503,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 )
             } {
                 needs_rebuild = true;
+                template_reads_known &= runtime_template_reads_known;
             }
             self.sync_runtime_generation(
                 instance_key,
@@ -506,6 +512,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
         *self.runtimes.lock().unwrap() = runtimes;
         if needs_rebuild {
+            let service_binding_readers_empty = service_binding_readers.is_empty();
             for (instance_key, readers) in service_binding_readers {
                 self.pending_service_binding_readers
                     .entry(instance_key)
@@ -526,12 +533,19 @@ impl ShellComponent for FrontendSurfaceComponent {
             } else {
                 HashSet::new()
             };
-            if narrow_nodes.is_empty() {
-                // Luau render hooks usually derive template variables from
-                // services, so direct template field reads are not an exhaustive
-                // dependency index. Evaluate those scripts and compare the
-                // resulting tree through the normal narrow-script path. Its
-                // structural validation retains the full-update fallback.
+            if narrow_nodes.is_empty() && template_reads_known && service_binding_readers_empty {
+                // No evaluated expression reads a changed field, so only an
+                // effect write can reach the tree. Settle effects now: when
+                // they write nothing a template reads, the surface stays clean
+                // and the render loop never schedules a frame for this update.
+                self.invalidate_unread_service_update();
+                self.run_pending_effects();
+            } else if narrow_nodes.is_empty() {
+                // Effects usually derive template variables from services, so
+                // direct template field reads are not an exhaustive dependency
+                // index. Evaluate those scripts and compare the resulting tree
+                // through the normal narrow-script path. Its structural
+                // validation retains the full-update fallback.
                 self.invalidate_script_state_narrow();
             } else {
                 self.invalidate_service_template_nodes(narrow_nodes);
@@ -1022,6 +1036,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 &surface_css_props,
             )
         };
+        self.effects_changed_templates = false;
         self.prune_stale_interaction_targets(&tree);
         self.apply_pending_auto_focus(&tree);
         self.apply_pending_embedded_popover_focus(&tree);

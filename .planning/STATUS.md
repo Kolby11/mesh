@@ -1,12 +1,29 @@
 # Status
 
-**Updated:** 2026-10-18
+**Updated:** 2026-10-19
 
 What is in flight right now. One page, overwritten as work moves. History and
 measurements are in [`log/`](log/README.md). Open work is in
 [`docs/BACKLOG.md`](../docs/BACKLOG.md).
 
 ## Now
+
+- **GPU backend phases 1–2 implemented:** `render::gpu` (feature
+  `renderer-gpu`) runs a headless Skia-GL context. The painter paints through
+  a session on a raster buffer or a GPU target, so no raw-pixel paint path is
+  left. GPU output matches raster on the panel, icon-grid, effects and
+  scroll-replay workloads within a few levels. Next: phase 3, a scene-thread
+  GPU `SceneRenderer` with readback.
+
+- **Rounded raster correctness implemented:** rounded overflow, image/gradient
+  edges and shadows have exact partial/full repaint regressions. Renderer,
+  geometry and shell scroll/theme checks pass; measured color-raster caches
+  replace the slower mask prototype (performance log, 2026-10-19).
+
+- **Unread service updates schedule no frame:** an update no evaluated
+  template reads settles effects at delivery; Appearance under unrelated
+  audio traffic went from a full template pass per update to no frame. Patched
+  frames still pay whole-tree passes (backlog, Performance).
 
 - **D8 implemented:** native D-Bus, PipeWire, route netlink and wlr toplevel
   sources share the bounded stream lifecycle with inotify/socket sources.
@@ -40,9 +57,13 @@ measurements are in [`log/`](log/README.md). Open work is in
 - **Priority 6 in progress:** SH-07, UI-10/RT-08/CMP-05/CMP-12, MOD-11, RES-11
   and RT-07 are done (most landed in the checkpoint; confirmed and logged
   2026-10-18). Rounded fills and borders now paint clip-invariantly; the LSP
-  manifest schema and the scene-thread test are fixed. Next: SH-09/RES-13
-  shared validators, RES-09/RES-10 LSP metadata, then UI-12, RND-05 and
-  RT-11/CMP-11/CMP-13.
+  manifest schema and the scene-thread test are fixed. SH-09/RES-13,
+  RES-09/RES-10, UI-12, RND-05 and RT-11/CMP-11/CMP-13 are verified and
+  closed (2026-10-19); the contract-free LSP completion fallback is removed.
+  Rounded clips, gradients, images and shadows are now fixed too. The retained
+  render tests share the resource-state lock, revision bumps run in child test
+  processes, and LSP theme discovery uses its own profile fixture. A separate
+  image-worker queue-contention fixture remains in the backlog.
 
 - **Priority 5 implemented:** MOD-05/06/07/08/09/10/12,
   SH-10 and RES-08. Shared core package engines, configuration paths/locks,
@@ -66,13 +87,16 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Next
 
-- Priority 6: SH-09/RES-13 and RES-09/RES-10, then the remaining correctness fixes.
+- Isolate the image-worker queue fixture from parallel painter traffic.
+- GPU phase 3: scene-thread GPU renderer with per-surface buffer rings.
 - Remaining D5 (dialog focus scope, menu typeahead), D6 renderer integration
   and D9 workload gates.
 - Wave 5: the [in-surface blur engine](todos/pending/2026-09-30-in-surface-blur-engine.md).
 
 ## Blocked / known baselines
 
+- `mesh-core-shell` serial release at `17224ae1` (2026-10-19): 45 failures;
+  diff failure names against a HEAD worktree, not the counts below.
 - Known fixture failures (serial release, 2026-10-13): shell 27, plus three
   load-sensitive `shell::tests::scheduler` tests that fail in some full runs
   and pass alone; elements 10; `mesh-core-module` 9; `mesh-core-frontend` 2

@@ -4,6 +4,8 @@ This workspace keeps browser-like concerns split by crate:
 
 - `mesh-core-files` owns contained, bounded file reads; theme, locale and
   resources share its descriptor-relative reader.
+- `mesh-core-icon` owns icon-pack validation; module manifests, shell binding
+  preparation and LSP discovery use the same validator.
 - `mesh-core-config` owns shared configuration paths, settings persistence,
   and the advisory control-plane lock.
 - `mesh-core-module` owns package install/uninstall plans, composition/profile

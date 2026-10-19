@@ -1,4 +1,4 @@
-//! Clip-invariant rasterization of rounded rectangles and rounded borders.
+//! Clip-invariant rasterization of rounded fills, borders and clipping masks.
 //!
 //! Skia's anti-aliased rounded-rect coverage depends on the clip it is drawn
 //! under: a partial repaint whose clip cuts an arc, or even one that only cuts
@@ -20,7 +20,9 @@
 //! whose corner regions overlap (pills, small circles) are rasterized whole.
 //! The decomposition needs an integer device translation; any other canvas
 //! matrix, or an overlapping shape too large to rasterize whole, returns
-//! `false` so the caller can draw it directly.
+//! `false` so the caller can draw it directly. Clipping masks instead record a
+//! complete shape as a picture shader and keep its evaluation on the runtime
+//! pipeline, independently of the destination damage rectangle.
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -28,15 +30,17 @@ use std::sync::Arc;
 use mesh_core_elements::lru::ByteLruCache;
 use mesh_core_elements::style::{Color, Corners, Edges};
 use skia_safe::{
-    AlphaType, BlendMode, Canvas, ColorType, Data, FilterMode, IRect, ImageInfo, MipmapMode, Paint,
-    PaintStyle, RRect, RSXform, Rect, Region, SamplingOptions, Vector, images, region::RegionOp,
-    surfaces,
+    AlphaType, BlendMode, Canvas, ColorType, Data, FilterMode, IRect, ImageInfo, Matrix,
+    MipmapMode, Paint, PaintStyle, PictureRecorder, RRect, RSXform, Rect, Region, SamplingOptions,
+    Shader, TileMode, Vector, images, region::RegionOp, surfaces,
 };
 
 use super::geometry::{ClipRect, intersect_clip};
 
 const COVERAGE_CACHE_ENTRIES: usize = 512;
 const COVERAGE_CACHE_BYTES: usize = 4 * 1024 * 1024;
+const CLIP_CACHE_ENTRIES: usize = 128;
+const CLIP_CACHE_BYTES: usize = 32 * 1024 * 1024;
 /// Larger overlapping-corner shapes (big circles) are drawn directly rather
 /// than rasterized whole on every cache miss.
 const MAX_WHOLE_SHAPE_PIXELS: i64 = 256 * 256;
@@ -44,6 +48,87 @@ const MAX_WHOLE_SHAPE_PIXELS: i64 = 256 * 256;
 thread_local! {
     static COVERAGE: RefCell<ByteLruCache<ShapeKey, ShapeCoverage>> =
         RefCell::new(ByteLruCache::new(COVERAGE_CACHE_ENTRIES, COVERAGE_CACHE_BYTES));
+    static CLIP_SHADERS: RefCell<ByteLruCache<ShapeKey, Shader>> =
+        RefCell::new(ByteLruCache::new(CLIP_CACHE_ENTRIES, CLIP_CACHE_BYTES));
+    // Runtime evaluation keeps mask composition on Skia's high-precision
+    // pipeline; the bitmap fast path rounds differently for narrow spans.
+    static MASK_EFFECT: skia_safe::RuntimeEffect = skia_safe::RuntimeEffect::make_for_shader(
+        "uniform shader mask; half4 main(float2 p) { return half4(mask.eval(p).a); }", None
+    ).expect("valid rounded coverage shader");
+}
+
+/// Intersect with coverage rasterized independently of the damage clip.
+pub(super) fn clip(canvas: &Canvas, rect: ClipRect, radii: Corners) {
+    let shape = RoundedShape {
+        rect,
+        outer: super::backend::normalize_corners(rect.width as f32, rect.height as f32, radii),
+        ring: None,
+    };
+    let key = shape.key();
+    let shader = CLIP_SHADERS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(shader) = cache.get(&key) {
+            return Some(shader.clone());
+        }
+        if rect.width <= 0 || rect.height <= 0 {
+            return None;
+        }
+        let bounds = Rect::from_wh(rect.width as f32, rect.height as f32);
+        let mut recorder = PictureRecorder::new();
+        let recording = recorder.begin_recording(bounds, false);
+        let mut paint = solid_paint(Color::WHITE, 1.0);
+        paint.set_anti_alias(true);
+        // A picture shader rasterizes its complete intrinsic bounds, so the
+        // destination damage never cuts the shape during coverage generation.
+        draw_shape(
+            recording,
+            rect.width,
+            rect.height,
+            shape.outer,
+            None,
+            &paint,
+        );
+        let picture = recorder.finish_recording_as_picture(None)?;
+        let shader = picture.to_shader(
+            (TileMode::Decal, TileMode::Decal),
+            FilterMode::Nearest,
+            None,
+            &bounds,
+        );
+        let shader = MASK_EFFECT.with(|effect| {
+            effect.make_shader(
+                Data::new_empty(),
+                &[skia_safe::runtime_effect::ChildPtr::Shader(shader)],
+                None,
+            )
+        })?;
+        // Picture shaders may retain a full RGBA raster, in addition to the
+        // recorded shape.
+        let bytes = (rect.width as usize)
+            .saturating_mul(rect.height as usize)
+            .saturating_mul(4)
+            .saturating_add(picture.approximate_bytes_used());
+        cache.insert(key, shader.clone(), bytes.max(1));
+        Some(shader)
+    });
+    if let Some(shader) = shader {
+        let matrix = Matrix::translate((rect.x as f32, rect.y as f32));
+        canvas.clip_shader(shader.with_local_matrix(&matrix), None);
+    } else {
+        canvas.clip_rrect(
+            rrect(
+                Rect::from_xywh(
+                    rect.x as f32,
+                    rect.y as f32,
+                    rect.width as f32,
+                    rect.height as f32,
+                ),
+                shape.outer,
+            ),
+            None,
+            true,
+        );
+    }
 }
 
 /// A rounded rectangle at integer device bounds, optionally hollowed into a

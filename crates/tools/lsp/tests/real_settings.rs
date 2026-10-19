@@ -66,7 +66,32 @@ fn registry_exposes_the_canonical_graph_snapshot() {
 
 #[test]
 fn discovers_the_shipped_themes() {
-    let registry = registry();
+    let root = tempfile::tempdir().expect("theme discovery workspace");
+    let config = root.path().join("config");
+    std::fs::create_dir_all(config.join("profiles")).unwrap();
+    let theme = root.path().join("modules/gruvbox-dark");
+    std::fs::create_dir_all(&theme).unwrap();
+    for file in ["module.json", "theme.css"] {
+        std::fs::copy(
+            workspace_root()
+                .join("modules/themes/gruvbox-dark")
+                .join(file),
+            theme.join(file),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        config.join("module.json"),
+        r#"{"mesh":{"modulesDir":"../modules"}}"#,
+    )
+    .unwrap();
+    std::fs::write(config.join("active-profile"), "theme-discovery\n").unwrap();
+    std::fs::write(
+        config.join("profiles/theme-discovery.json"),
+        r#"{"schemaVersion":3,"resources":{"theme":"@mesh/gruvbox-dark"}}"#,
+    )
+    .unwrap();
+    let registry = ModuleRegistry::try_discover(root.path()).expect("theme discovery registry");
     assert!(
         registry.themes.contains(&"gruvbox-dark".to_string()),
         "themes found: {:?}",

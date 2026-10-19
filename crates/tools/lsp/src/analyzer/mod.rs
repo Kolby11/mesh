@@ -440,9 +440,7 @@ mesh.locale.$0
     }
 
     #[test]
-    fn import_default_binding_enables_member_completion() {
-        // `local audio = import("mesh.audio")` (no extra names) should bind a
-        // proxy var just like `require`, so `audio.` completes its members.
+    fn import_default_binding_requires_a_contract_for_member_completion() {
         let (source, position) = fixture_with_cursor(
             r#"<template></template>
 
@@ -453,9 +451,11 @@ audio.$0
 "#,
         );
         let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
-        // on_change is always offered for a bound interface proxy.
-        let labels = completion_labels(&doc, position);
-        assert!(labels.contains(&"on_change".to_string()));
+        assert_eq!(
+            doc.interface_proxies.get("audio").map(String::as_str),
+            Some("mesh.audio")
+        );
+        assert!(completion_labels(&doc, position).is_empty());
     }
 
     #[test]

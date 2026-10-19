@@ -136,58 +136,20 @@ impl PixelBuffer {
         dx: i32,
         dy: i32,
     ) -> smallvec::SmallVec<[crate::DamageRect; 2]> {
-        let mut exposed = smallvec::SmallVec::new();
-        let region = crate::DamageRect {
-            x: region.x.min(self.width),
-            y: region.y.min(self.height),
-            width: region.width.min(self.width.saturating_sub(region.x)),
-            height: region.height.min(self.height.saturating_sub(region.y)),
+        let shift = RegionShift::plan(self.width, self.height, region, dx, dy);
+        let Some(copy) = shift.copy else {
+            return shift.exposed;
         };
-        if region.width == 0 || region.height == 0 || (dx == 0 && dy == 0) {
-            return exposed;
-        }
-        let ax = dx.unsigned_abs();
-        let ay = dy.unsigned_abs();
-        if ax >= region.width || ay >= region.height {
-            exposed.push(region);
-            return exposed;
-        }
-
-        let source_x = region.x + if dx < 0 { ax } else { 0 };
-        let source_y = region.y + if dy < 0 { ay } else { 0 };
-        let target_x = region.x + if dx > 0 { ax } else { 0 };
-        let target_y = region.y + if dy > 0 { ay } else { 0 };
-        let rows = region.height - ay;
-        let row_bytes = (region.width - ax) as usize * 4;
-        for step in 0..rows {
+        let row_bytes = copy.width as usize * 4;
+        for step in 0..copy.height {
             // Moving down must copy bottom-up; copy_within handles horizontal
             // overlap in either direction within each row.
-            let row = if dy > 0 { rows - 1 - step } else { step };
-            let source = ((source_y + row) * self.stride + source_x * 4) as usize;
-            let target = ((target_y + row) * self.stride + target_x * 4) as usize;
+            let row = if dy > 0 { copy.height - 1 - step } else { step };
+            let source = ((copy.source_y + row) * self.stride + copy.source_x * 4) as usize;
+            let target = ((copy.target_y + row) * self.stride + copy.target_x * 4) as usize;
             self.data.copy_within(source..source + row_bytes, target);
         }
-        if ay > 0 {
-            exposed.push(crate::DamageRect {
-                x: region.x,
-                y: if dy > 0 { region.y } else { region.y + rows },
-                width: region.width,
-                height: ay,
-            });
-        }
-        if ax > 0 {
-            exposed.push(crate::DamageRect {
-                x: if dx > 0 {
-                    region.x
-                } else {
-                    region.x + region.width - ax
-                },
-                y: target_y,
-                width: ax,
-                height: rows,
-            });
-        }
-        exposed
+        shift.exposed
     }
 
     pub fn width(&self) -> u32 {
@@ -294,40 +256,6 @@ impl PixelBuffer {
         }
     }
 
-    /// Blend a single pixel using source alpha and an extra coverage value.
-    pub fn blend_pixel(&mut self, x: u32, y: u32, color: Color, coverage: u8) {
-        if x >= self.width || y >= self.height || coverage == 0 {
-            return;
-        }
-
-        let offset = (y * self.stride + x * 4) as usize;
-        if offset + 3 >= self.data.len() {
-            return;
-        }
-
-        let src_alpha = (u16::from(color.a) * u16::from(coverage)) / 255;
-        if src_alpha == 0 {
-            return;
-        }
-
-        let inv_alpha = 255u16.saturating_sub(src_alpha);
-        let dst_b = u16::from(self.data[offset]);
-        let dst_g = u16::from(self.data[offset + 1]);
-        let dst_r = u16::from(self.data[offset + 2]);
-        let dst_a = u16::from(self.data[offset + 3]);
-
-        self.data[offset] = ((u16::from(color.b) * src_alpha + dst_b * inv_alpha) / 255) as u8;
-        self.data[offset + 1] = ((u16::from(color.g) * src_alpha + dst_g * inv_alpha) / 255) as u8;
-        self.data[offset + 2] = ((u16::from(color.r) * src_alpha + dst_r * inv_alpha) / 255) as u8;
-        self.data[offset + 3] = (src_alpha + ((dst_a * inv_alpha) / 255)).min(255) as u8;
-    }
-
-    /// Blend a pixel using a normalized floating-point coverage mask.
-    pub fn blend_pixel_f32(&mut self, x: u32, y: u32, color: Color, coverage: f32) {
-        let coverage = (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
-        self.blend_pixel(x, y, color, coverage);
-    }
-
     /// Fill a rectangle with a solid color.
     pub fn fill_rect(&mut self, x: u32, y: u32, w: u32, h: u32, color: Color) {
         self.clear_rect(x, y, w, h, color);
@@ -371,75 +299,280 @@ impl PixelBuffer {
     }
 }
 
-/// A Skia surface kept alive across multiple draws so a paint pass shares
-/// one `surfaces::wrap_pixels`. Code paths that mutate `PixelBuffer::data`
-/// directly (text glyph blending, icon blits) access raw bytes through
-/// `with_buffer`. The active Skia surface internally holds a pointer into
-/// the same backing memory, so writes through either path are visible to
-/// subsequent Skia draws.
-///
-/// The buffer's `data` Vec must not be reallocated while a session is live.
+/// The paint target of one pass: a CPU [`PixelBuffer`] wrapped by a Skia
+/// raster surface, or any other Skia surface (a GPU render target). Every
+/// paint path draws through [`Self::with_canvas`], so one frame plan paints
+/// into either target; the remaining pixel operations — damage clears and
+/// in-place scroll shifts — are session methods with a byte fast path on
+/// raster targets and a canvas path elsewhere.
 pub struct PixelCanvasSession<'a> {
-    buffer: &'a mut PixelBuffer,
-    surface: Option<Surface>,
+    target: SessionTarget<'a>,
     pub(crate) scroll_replay: Option<(Option<usize>, f32, f32)>,
+}
+
+enum SessionTarget<'a> {
+    Raster {
+        buffer: &'a mut PixelBuffer,
+        /// Wraps `buffer`'s pixels; created on first canvas use. The buffer's
+        /// `data` must not be reallocated while it is live.
+        surface: Option<Surface>,
+    },
+    // Constructed by the GPU target and by tests.
+    #[cfg_attr(not(feature = "renderer-gpu"), allow(dead_code))]
+    Surface(&'a mut Surface),
 }
 
 impl<'a> PixelCanvasSession<'a> {
     pub fn new(buffer: &'a mut PixelBuffer) -> Self {
         Self {
-            buffer,
-            surface: None,
+            target: SessionTarget::Raster {
+                buffer,
+                surface: None,
+            },
             scroll_replay: None,
         }
     }
 
-    /// Run `f` against a Skia canvas wrapping the buffer. The wrapping
-    /// surface is created on the first call and reused for subsequent
-    /// calls until the session is dropped. Returns `None` if the buffer
-    /// has zero extent or Skia could not wrap it.
-    pub fn with_canvas<R>(&mut self, f: impl FnOnce(&Canvas) -> R) -> Option<R> {
-        if self.surface.is_none() {
-            if self.buffer.width == 0 || self.buffer.height == 0 || self.buffer.stride == 0 {
-                return None;
-            }
-            let info = ImageInfo::new(
-                (self.buffer.width as i32, self.buffer.height as i32),
-                ColorType::BGRA8888,
-                AlphaType::Premul,
-                None,
-            );
-            let borrows = surfaces::wrap_pixels(
-                &info,
-                self.buffer.data.as_mut_slice(),
-                Some(self.buffer.stride as usize),
-                None,
-            );
-            // SAFETY: skia-safe's `wrap_pixels` returns `Borrows<'_, Surface>`
-            // so the surface cannot outlive the slice borrow at the type
-            // level. We shed that borrow with `release()` so the same
-            // buffer can also be mutated through `with_buffer` without
-            // dropping the surface. The surface stays valid because:
-            //   - `self.buffer` (an `&'a mut PixelBuffer`) outlives the
-            //     session, keeping the `Vec<u8>` allocation alive.
-            //   - The session does not resize `buffer.data`, so Skia's
-            //     internal pixel pointer remains stable.
-            self.surface = borrows.map(|b| unsafe { b.release() });
+    /// Paint into an existing Skia surface, such as a GPU render target. The
+    /// surface must use the premultiplied BGRA layout `PixelBuffer` uses.
+    #[cfg_attr(not(feature = "renderer-gpu"), allow(dead_code))]
+    pub(crate) fn on_surface(surface: &'a mut Surface) -> Self {
+        Self {
+            target: SessionTarget::Surface(surface),
+            scroll_replay: None,
         }
-        self.surface.as_mut().map(|surface| f(surface.canvas()))
     }
 
-    /// Run `f` with raw access to the underlying `PixelBuffer`. Safe to
-    /// interleave with `with_canvas`; the active Skia surface (if any)
-    /// reads from and writes to the same backing memory.
-    pub fn with_buffer<R>(&mut self, f: impl FnOnce(&mut PixelBuffer) -> R) -> R {
-        // Tell Skia that pixel content may be modified externally so it
-        // invalidates any cached snapshots. For raw raster surfaces this
-        // is effectively a no-op, but it is the documented contract.
-        if let Some(surface) = self.surface.as_mut() {
-            surface.notify_content_will_change(skia_safe::surface::ContentChangeMode::Retain);
+    pub fn width(&self) -> u32 {
+        match &self.target {
+            SessionTarget::Raster { buffer, .. } => buffer.width,
+            SessionTarget::Surface(surface) => surface.width().max(0) as u32,
         }
-        f(self.buffer)
+    }
+
+    pub fn height(&self) -> u32 {
+        match &self.target {
+            SessionTarget::Raster { buffer, .. } => buffer.height,
+            SessionTarget::Surface(surface) => surface.height().max(0) as u32,
+        }
+    }
+
+    /// Run `f` against the target's canvas. A raster target's wrapping
+    /// surface is created on the first call and reused until the session is
+    /// dropped. Returns `None` if the target has zero extent or Skia could
+    /// not wrap it.
+    pub fn with_canvas<R>(&mut self, f: impl FnOnce(&Canvas) -> R) -> Option<R> {
+        match &mut self.target {
+            SessionTarget::Raster { buffer, surface } => {
+                if surface.is_none() {
+                    *surface = wrap_buffer(buffer);
+                }
+                surface.as_mut().map(|surface| f(surface.canvas()))
+            }
+            SessionTarget::Surface(surface) => Some(f(surface.canvas())),
+        }
+    }
+
+    /// Replace the pixels of `rect` (device pixels, clamped to the target)
+    /// with `color`, ignoring the canvas matrix and clip. Call between paint
+    /// passes, with no layer open.
+    pub fn clear_rect(&mut self, rect: crate::DamageRect, color: Color) {
+        match &mut self.target {
+            SessionTarget::Raster { buffer, surface } => {
+                notify_external_write(surface.as_mut());
+                buffer.clear_rect(rect.x, rect.y, rect.width, rect.height, color);
+            }
+            SessionTarget::Surface(surface) => {
+                let canvas = surface.canvas();
+                debug_assert_eq!(canvas.save_count(), 1, "clear inside an open layer");
+                canvas.save();
+                canvas.reset_matrix();
+                canvas.draw_irect(device_irect(rect), &src_paint(color));
+                canvas.restore();
+            }
+        }
+    }
+
+    /// Move the pixels of `region` by whole device pixels with the semantics
+    /// of [`PixelBuffer::shift_region_pixels`]: retained pixels are copied
+    /// exactly, and the returned strips keep stale content and must be
+    /// repainted. Call between paint passes, with no layer open.
+    pub fn shift_region(
+        &mut self,
+        region: crate::DamageRect,
+        dx: i32,
+        dy: i32,
+    ) -> smallvec::SmallVec<[crate::DamageRect; 2]> {
+        match &mut self.target {
+            SessionTarget::Raster { buffer, surface } => {
+                notify_external_write(surface.as_mut());
+                buffer.shift_region_pixels(region, dx, dy)
+            }
+            SessionTarget::Surface(surface) => {
+                let shift = RegionShift::plan(
+                    surface.width().max(0) as u32,
+                    surface.height().max(0) as u32,
+                    region,
+                    dx,
+                    dy,
+                );
+                if let Some(copy) = shift.copy {
+                    // A snapshot is the only way to read a GPU target while
+                    // drawing into it; Skia copies the block on write.
+                    let source = skia_safe::IRect::from_xywh(
+                        copy.source_x as i32,
+                        copy.source_y as i32,
+                        copy.width as i32,
+                        copy.height as i32,
+                    );
+                    if let Some(block) = surface.image_snapshot_with_bounds(source) {
+                        let canvas = surface.canvas();
+                        debug_assert_eq!(canvas.save_count(), 1, "shift inside an open layer");
+                        canvas.save();
+                        canvas.reset_matrix();
+                        let mut paint = Paint::default();
+                        paint.set_blend_mode(BlendMode::Src);
+                        canvas.draw_image(
+                            &block,
+                            (copy.target_x as f32, copy.target_y as f32),
+                            Some(&paint),
+                        );
+                        canvas.restore();
+                    }
+                }
+                shift.exposed
+            }
+        }
+    }
+}
+
+fn wrap_buffer(buffer: &mut PixelBuffer) -> Option<Surface> {
+    if buffer.width == 0 || buffer.height == 0 || buffer.stride == 0 {
+        return None;
+    }
+    let info = ImageInfo::new(
+        (buffer.width as i32, buffer.height as i32),
+        ColorType::BGRA8888,
+        AlphaType::Premul,
+        None,
+    );
+    let borrows = surfaces::wrap_pixels(
+        &info,
+        buffer.data.as_mut_slice(),
+        Some(buffer.stride as usize),
+        None,
+    );
+    // SAFETY: skia-safe's `wrap_pixels` returns `Borrows<'_, Surface>` so the
+    // surface cannot outlive the slice borrow at the type level. The session
+    // sheds that borrow with `release()` so its own pixel operations can write
+    // the buffer without dropping the surface. The surface stays valid
+    // because the session's `&'a mut PixelBuffer` outlives it, keeping the
+    // `Vec<u8>` allocation alive, and nothing resizes `buffer.data`, so Skia's
+    // pixel pointer remains stable.
+    borrows.map(|borrows| unsafe { borrows.release() })
+}
+
+/// Tell Skia that a raster target's pixels change behind the canvas, so it
+/// invalidates any snapshot of them.
+fn notify_external_write(surface: Option<&mut Surface>) {
+    if let Some(surface) = surface {
+        surface.notify_content_will_change(skia_safe::surface::ContentChangeMode::Retain);
+    }
+}
+
+fn device_irect(rect: crate::DamageRect) -> skia_safe::IRect {
+    skia_safe::IRect::from_xywh(
+        rect.x.min(i32::MAX as u32) as i32,
+        rect.y.min(i32::MAX as u32) as i32,
+        rect.width.min(i32::MAX as u32) as i32,
+        rect.height.min(i32::MAX as u32) as i32,
+    )
+}
+
+/// The pixel moves of one integral region shift: the retained block, if any,
+/// and the strips of the region that it leaves uncovered.
+struct RegionShift {
+    copy: Option<RegionCopy>,
+    exposed: smallvec::SmallVec<[crate::DamageRect; 2]>,
+}
+
+/// A `width`×`height` block moved from `source` to `target` on one target.
+#[derive(Clone, Copy)]
+struct RegionCopy {
+    source_x: u32,
+    source_y: u32,
+    target_x: u32,
+    target_y: u32,
+    width: u32,
+    height: u32,
+}
+
+impl RegionShift {
+    fn plan(
+        surface_width: u32,
+        surface_height: u32,
+        region: crate::DamageRect,
+        dx: i32,
+        dy: i32,
+    ) -> Self {
+        let mut exposed = smallvec::SmallVec::new();
+        let region = crate::DamageRect {
+            x: region.x.min(surface_width),
+            y: region.y.min(surface_height),
+            width: region.width.min(surface_width.saturating_sub(region.x)),
+            height: region.height.min(surface_height.saturating_sub(region.y)),
+        };
+        if region.width == 0 || region.height == 0 || (dx == 0 && dy == 0) {
+            return Self {
+                copy: None,
+                exposed,
+            };
+        }
+        let ax = dx.unsigned_abs();
+        let ay = dy.unsigned_abs();
+        if ax >= region.width || ay >= region.height {
+            exposed.push(region);
+            return Self {
+                copy: None,
+                exposed,
+            };
+        }
+        let copy = RegionCopy {
+            source_x: region.x + if dx < 0 { ax } else { 0 },
+            source_y: region.y + if dy < 0 { ay } else { 0 },
+            target_x: region.x + if dx > 0 { ax } else { 0 },
+            target_y: region.y + if dy > 0 { ay } else { 0 },
+            width: region.width - ax,
+            height: region.height - ay,
+        };
+        if ay > 0 {
+            exposed.push(crate::DamageRect {
+                x: region.x,
+                y: if dy > 0 {
+                    region.y
+                } else {
+                    region.y + copy.height
+                },
+                width: region.width,
+                height: ay,
+            });
+        }
+        if ax > 0 {
+            exposed.push(crate::DamageRect {
+                x: if dx > 0 {
+                    region.x
+                } else {
+                    region.x + region.width - ax
+                },
+                y: copy.target_y,
+                width: ax,
+                height: copy.height,
+            });
+        }
+        Self {
+            copy: Some(copy),
+            exposed,
+        }
     }
 }
 
@@ -597,13 +730,6 @@ mod tests {
     }
 
     #[test]
-    fn blend_pixel_applies_coverage() {
-        let mut buf = PixelBuffer::new(1, 1);
-        buf.blend_pixel(0, 0, Color::WHITE, 128);
-        assert_eq!(&buf.data()[0..4], &[128, 128, 128, 128]);
-    }
-
-    #[test]
     fn translucent_pixels_are_stored_premultiplied_for_wayland() {
         let mut buf = PixelBuffer::new(1, 1);
         let color = Color {
@@ -633,15 +759,20 @@ mod tests {
 
     #[test]
     fn canvas_session_keeps_backing_storage_stable() {
-        let mut buffer = PixelBuffer::try_new(2, 2).expect("small buffer must allocate");
+        let mut buffer = PixelBuffer::try_new(4, 4).expect("small buffer must allocate");
         let allocation = buffer.data().as_ptr();
 
         {
             let mut session = PixelCanvasSession::new(&mut buffer);
-            session.with_buffer(|buffer| {
-                buffer.set_pixel(0, 0, Color::WHITE);
-                assert_eq!(buffer.data().as_ptr(), allocation);
-            });
+            session.clear_rect(
+                crate::DamageRect {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+                Color::WHITE,
+            );
             assert!(
                 session
                     .with_canvas(|canvas| {
@@ -649,13 +780,20 @@ mod tests {
                     })
                     .is_some()
             );
-            session.with_buffer(|buffer| {
-                buffer.set_pixel(1, 1, Color::WHITE);
-                assert_eq!(buffer.data().as_ptr(), allocation);
-            });
+            session.shift_region(
+                crate::DamageRect {
+                    x: 0,
+                    y: 0,
+                    width: 4,
+                    height: 4,
+                },
+                1,
+                1,
+            );
         }
 
         assert_eq!(buffer.data().as_ptr(), allocation);
+        assert_eq!(buffer.get_pixel(3, 3), Color::BLACK);
     }
 }
 
@@ -706,5 +844,66 @@ mod shift_region_tests {
             &[region],
             "a move past the region exposes all of it"
         );
+    }
+
+    /// Clears and shifts on a non-raster session (the GPU path) must match
+    /// the raster byte fast paths exactly; a raster Skia surface stands in
+    /// for the GPU target so this runs on every host.
+    #[test]
+    fn surface_session_clear_and_shift_match_the_raster_byte_paths() {
+        let fill = |buffer: &mut PixelBuffer| {
+            for (index, pixel) in buffer.data_mut().chunks_exact_mut(4).enumerate() {
+                let alpha = (index * 37 % 256) as u8;
+                pixel.copy_from_slice(&[alpha / 2, alpha / 3, alpha, alpha]);
+            }
+        };
+        let info = ImageInfo::new((9, 7), ColorType::BGRA8888, AlphaType::Premul, None);
+        let region = crate::DamageRect {
+            x: 1,
+            y: 2,
+            width: 7,
+            height: 4,
+        };
+        let cleared = crate::DamageRect {
+            x: 3,
+            y: 0,
+            width: 20,
+            height: 2,
+        };
+        let translucent = Color {
+            r: 200,
+            g: 10,
+            b: 90,
+            a: 120,
+        };
+        for (dx, dy) in [(0, 1), (0, -2), (2, 0), (-3, 1), (1, -1), (8, 0)] {
+            let mut raster = PixelBuffer::new(9, 7);
+            fill(&mut raster);
+            let mut source = PixelBuffer::new(9, 7);
+            fill(&mut source);
+            let mut surface = surfaces::raster(&info, None, None).unwrap();
+            assert!(surface.canvas().write_pixels(
+                &info,
+                source.data(),
+                source.stride() as usize,
+                (0, 0)
+            ));
+
+            let raster_exposed = {
+                let mut session = PixelCanvasSession::new(&mut raster);
+                session.clear_rect(cleared, translucent);
+                session.shift_region(region, dx, dy)
+            };
+            let surface_exposed = {
+                let mut session = PixelCanvasSession::on_surface(&mut surface);
+                session.clear_rect(cleared, translucent);
+                session.shift_region(region, dx, dy)
+            };
+            assert_eq!(raster_exposed, surface_exposed, "shift ({dx},{dy})");
+            let mut read = PixelBuffer::new(9, 7);
+            let stride = read.stride() as usize;
+            assert!(surface.read_pixels(&info, read.data_mut(), stride, (0, 0)));
+            assert_eq!(read.data(), raster.data(), "shift ({dx},{dy})");
+        }
     }
 }

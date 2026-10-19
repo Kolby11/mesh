@@ -1230,71 +1230,9 @@ fn blit_variant_on_canvas(canvas: &Canvas, variant: &RasterVariant, dest_x: i32,
 
 #[cfg(test)]
 fn blit_variant(buffer: &mut PixelBuffer, variant: &RasterVariant, dest_x: i32, dest_y: i32) {
-    let src_x = (-dest_x).max(0) as u32;
-    let src_y = (-dest_y).max(0) as u32;
-    let dst_x = dest_x.max(0) as u32;
-    let dst_y = dest_y.max(0) as u32;
-    if src_x >= variant.width
-        || src_y >= variant.height
-        || dst_x >= buffer.width()
-        || dst_y >= buffer.height()
-    {
-        return;
-    }
-
-    let copy_w = (variant.width - src_x).min(buffer.width() - dst_x);
-    let copy_h = (variant.height - src_y).min(buffer.height() - dst_y);
-    if copy_w == 0 || copy_h == 0 {
-        return;
-    }
-
-    let src_stride = variant.width as usize * 4;
-    let row_bytes = copy_w as usize * 4;
-    let src_x_offset = src_x as usize * 4;
-    let dst_x_offset = dst_x as usize * 4;
-    if variant.fully_opaque {
-        for row in 0..copy_h as usize {
-            let src_start = (src_y as usize + row) * src_stride + src_x_offset;
-            let dst_start = (dst_y as usize + row) * buffer.stride() as usize + dst_x_offset;
-            let src_end = src_start + row_bytes;
-            let dst_end = dst_start + row_bytes;
-            if src_end <= variant.pixels.len() && dst_end <= buffer.data().len() {
-                buffer.data_mut()[dst_start..dst_end]
-                    .copy_from_slice(&variant.pixels[src_start..src_end]);
-            }
-        }
-        return;
-    }
-
-    let dst_stride = buffer.stride() as usize;
-    for row in 0..copy_h as usize {
-        let src_row_start = (src_y as usize + row) * src_stride + src_x_offset;
-        let dst_row_start = (dst_y as usize + row) * dst_stride + dst_x_offset;
-        let src_row_end = src_row_start + row_bytes;
-        let dst_row_end = dst_row_start + row_bytes;
-        if src_row_end > variant.pixels.len() || dst_row_end > buffer.data().len() {
-            continue;
-        }
-
-        let src_row = &variant.pixels[src_row_start..src_row_end];
-        let dst_row = &mut buffer.data_mut()[dst_row_start..dst_row_end];
-        for (src_px, dst_px) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
-            let src_alpha = u16::from(src_px[3]);
-            if src_alpha == 0 {
-                continue;
-            }
-            let inv_alpha = 255u16.saturating_sub(src_alpha);
-            let dst_b = u16::from(dst_px[0]);
-            let dst_g = u16::from(dst_px[1]);
-            let dst_r = u16::from(dst_px[2]);
-            let dst_a = u16::from(dst_px[3]);
-
-            dst_px[0] = ((u16::from(src_px[0]) * src_alpha + dst_b * inv_alpha) / 255) as u8;
-            dst_px[1] = ((u16::from(src_px[1]) * src_alpha + dst_g * inv_alpha) / 255) as u8;
-            dst_px[2] = ((u16::from(src_px[2]) * src_alpha + dst_r * inv_alpha) / 255) as u8;
-            dst_px[3] = (src_alpha + ((dst_a * inv_alpha) / 255)).min(255) as u8;
-        }
-    }
+    PixelCanvasSession::new(buffer).with_canvas(|canvas| {
+        blit_variant_on_canvas(canvas, variant, dest_x, dest_y);
+    });
 }
 
 fn variant_from_bgra(width: u32, height: u32, pixels: Vec<u8>) -> RasterVariant {

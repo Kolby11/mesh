@@ -966,7 +966,9 @@ fn rounded_shapes_repaint_identically_under_any_clip() {
         buffer
     };
     let full = paint(full_clip(width, height));
-    let edges = [0, 3, 6, 7, 9, 12, 15, 19, 22, 26, 31, 33, 40, 47, 52, 58, 62, 66, 71];
+    let edges = [
+        0, 3, 6, 7, 9, 12, 15, 19, 22, 26, 31, 33, 40, 47, 52, 58, 62, 66, 71,
+    ];
     for &start in &edges {
         for &end in &edges {
             if end <= start {

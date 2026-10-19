@@ -512,24 +512,47 @@ pub fn paint_selected_display_list_for_module_with_profiling_metrics_and_attribu
     module_id: Option<&str>,
     collect_command_attribution: bool,
 ) -> PaintProfilingMetrics {
+    paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session(
+        commands,
+        &mut PixelCanvasSession::new(buffer),
+        scale,
+        clip,
+        paint_nodes,
+        tooltip,
+        module_id,
+        collect_command_attribution,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session(
+    commands: &SelectedDisplayListPaint<'_>,
+    session: &mut PixelCanvasSession<'_>,
+    scale: f32,
+    clip: Option<(u32, u32, u32, u32)>,
+    paint_nodes: Option<&HashSet<NodeId>>,
+    tooltip: Option<(&str, f32, f32)>,
+    module_id: Option<&str>,
+    collect_command_attribution: bool,
+) -> PaintProfilingMetrics {
     FRONTEND_RENDERER.with(|engine| {
         let engine = engine.borrow();
         profiling::reset_raster_metrics();
         engine.reset_text_cache_metrics();
         let traversal_started = std::time::Instant::now();
         let command_attribution = if collect_command_attribution {
-            engine.render_selected_display_list_for_module_with_attribution(
+            engine.render_selected_display_list_for_module_with_attribution_in_session(
                 commands,
-                buffer,
+                session,
                 scale,
                 clip,
                 paint_nodes,
                 module_id,
             )
         } else {
-            engine.render_selected_display_list_for_module(
+            engine.render_selected_display_list_for_module_in_session(
                 commands,
-                buffer,
+                session,
                 scale,
                 clip,
                 paint_nodes,
@@ -542,7 +565,7 @@ pub fn paint_selected_display_list_for_module_with_profiling_metrics_and_attribu
             .as_micros()
             .min(u128::from(u64::MAX)) as u64;
         if let Some((tooltip_text, x, y)) = tooltip {
-            engine.render_tooltip_clipped(tooltip_text, x, y, buffer, scale, clip);
+            engine.render_tooltip_clipped_in_session(tooltip_text, x, y, session, scale, clip);
         }
         let raster = profiling::raster_metrics();
         PaintProfilingMetrics {
@@ -571,12 +594,8 @@ pub fn paint_selected_display_list_for_module_with_profiling_metrics_and_attribu
     })
 }
 
-/// Paint a selected display list through several damage clips while sharing
-/// one profiling reset and raster canvas session.
-///
-/// The one-clip case deliberately uses the established single-region path.
-/// Disjoint clips use the command-major fast path. Overlapping clips preserve
-/// the established region-major replay order while still sharing the session.
+/// [`paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution_in_session`]
+/// on a CPU buffer.
 #[allow(clippy::too_many_arguments)]
 pub fn paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution(
     commands: &SelectedDisplayListPaint<'_>,
@@ -588,10 +607,39 @@ pub fn paint_selected_display_list_regions_for_module_with_profiling_metrics_and
     module_id: Option<&str>,
     collect_command_attribution: bool,
 ) -> PaintProfilingMetrics {
+    paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution_in_session(
+        commands,
+        &mut PixelCanvasSession::new(buffer),
+        scale,
+        clips,
+        paint_nodes,
+        tooltip,
+        module_id,
+        collect_command_attribution,
+    )
+}
+
+/// Paint a selected display list through several damage clips while sharing
+/// one profiling reset and canvas session, on a raster or GPU target.
+///
+/// The one-clip case deliberately uses the established single-region path.
+/// Disjoint clips use the command-major fast path. Overlapping clips preserve
+/// the established region-major replay order while still sharing the session.
+#[allow(clippy::too_many_arguments)]
+pub fn paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution_in_session(
+    commands: &SelectedDisplayListPaint<'_>,
+    session: &mut PixelCanvasSession<'_>,
+    scale: f32,
+    clips: &[(u32, u32, u32, u32)],
+    paint_nodes: Option<&HashSet<NodeId>>,
+    tooltip: Option<(&str, f32, f32)>,
+    module_id: Option<&str>,
+    collect_command_attribution: bool,
+) -> PaintProfilingMetrics {
     if clips.len() == 1 {
-        return paint_selected_display_list_for_module_with_profiling_metrics_and_attribution(
+        return paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session(
             commands,
-            buffer,
+            session,
             scale,
             clips.first().copied(),
             paint_nodes,
@@ -610,18 +658,18 @@ pub fn paint_selected_display_list_regions_for_module_with_profiling_metrics_and
         engine.reset_text_cache_metrics();
         let traversal_started = std::time::Instant::now();
         let command_attribution = if collect_command_attribution {
-            engine.render_selected_display_list_regions_for_module_with_attribution(
+            engine.render_selected_display_list_regions_for_module_with_attribution_in_session(
                 commands,
-                buffer,
+                session,
                 scale,
                 clips,
                 paint_nodes,
                 module_id,
             )
         } else {
-            engine.render_selected_display_list_regions_for_module(
+            engine.render_selected_display_list_regions_for_module_in_session(
                 commands,
-                buffer,
+                session,
                 scale,
                 clips,
                 paint_nodes,
@@ -635,7 +683,14 @@ pub fn paint_selected_display_list_regions_for_module_with_profiling_metrics_and
             .min(u128::from(u64::MAX)) as u64;
         if let Some((tooltip_text, x, y)) = tooltip {
             for &clip in clips {
-                engine.render_tooltip_clipped(tooltip_text, x, y, buffer, scale, Some(clip));
+                engine.render_tooltip_clipped_in_session(
+                    tooltip_text,
+                    x,
+                    y,
+                    session,
+                    scale,
+                    Some(clip),
+                );
             }
         }
         let raster = profiling::raster_metrics();

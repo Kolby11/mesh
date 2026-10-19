@@ -26,6 +26,16 @@ style resolution, render-object synchronization, display-list ordering, damage,
 and profiling. Skia currently executes low-level painter commands. Presentation
 and Wayland surface commits remain outside the painter.
 
+Shell visual damage comes from the retained display list's world bounds,
+including ancestor transforms, scrolling and clips. Changed nodes contribute
+both previous and current bounds so moved pixels are repainted.
+Rounded clipping coverage and complete gradient/shadow rasters are prepared
+independently of destination damage. The painter retains their bounded geometry caches;
+scroll and partial-repaint paths use the same coverage as a full paint.
+Painting runs through a paint session over a canvas target, either a CPU
+pixel buffer or a GPU render target. Damage clears and in-place scroll shifts
+are session operations, so one selected display list paints into either.
+
 These are implementation choices, not module dependencies. A future backend
 must implement the same backend-neutral painter contract and preserve visible
 behavior before becoming authoritative.

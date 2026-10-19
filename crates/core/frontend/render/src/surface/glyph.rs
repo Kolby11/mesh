@@ -564,52 +564,24 @@ pub fn draw_font_glyph(
     dest_h: i32,
     tint: Color,
 ) -> bool {
-    let px = dest_w.max(dest_h).max(1) as u32;
-    let key = glyph_cache_key(font_path, codepoint, px, supported_axes, axes, tint);
-
-    let glyph = match cache_lookup(key) {
-        Some(value) => value,
-        None => {
-            let raster_started = std::time::Instant::now();
-            let value = rasterize(font_path, None, codepoint, px, axes, supported_axes);
-            profiling::record_icon_image_raster(raster_started.elapsed());
-            cache_store(key, value.clone());
-            value
-        }
-    };
-    let Some(glyph) = glyph else {
-        return false;
-    };
-
-    // Center the rasterized bitmap inside the destination box, accounting
-    // for the glyph's own placement offset (typographic top-of-line vs.
-    // visual ink box).
-    let pad_x = ((dest_w - glyph.width as i32).max(0)) / 2;
-    let pad_y = ((dest_h - glyph.height as i32).max(0)) / 2;
-    let origin_x = dest_x + pad_x + glyph.placement_left.min(0).abs();
-    let origin_y = dest_y + pad_y;
-
-    for row in 0..glyph.height {
-        for col in 0..glyph.width {
-            let alpha = glyph.pixels[(row * glyph.width + col) as usize];
-            if alpha == 0 {
-                continue;
-            }
-            let x = origin_x + col as i32;
-            let y = origin_y + row as i32;
-            if x < 0 || y < 0 {
-                continue;
-            }
-            let pixel = Color {
-                r: tint.r,
-                g: tint.g,
-                b: tint.b,
-                a: ((tint.a as u32 * alpha as u32) / 255) as u8,
-            };
-            buffer.blend_pixel(x as u32, y as u32, pixel, 255);
-        }
-    }
-    true
+    PixelCanvasSession::new(buffer)
+        .with_canvas(|canvas| {
+            draw_font_glyph_on_canvas(
+                canvas,
+                font_path,
+                None,
+                resource_fingerprint(font_path),
+                codepoint,
+                supported_axes,
+                axes,
+                dest_x,
+                dest_y,
+                dest_w,
+                dest_h,
+                tint,
+            )
+        })
+        .unwrap_or(false)
 }
 
 /// Render a glyph from a font pack onto a Skia canvas, using a thread-local

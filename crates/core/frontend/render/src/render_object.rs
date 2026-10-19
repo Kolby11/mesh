@@ -357,7 +357,7 @@ struct RenderObjectPaintData {
 
 type TransformSlot = (u32, u32, u32, u32, u32, u32, u32, u32, u32);
 type GeometrySlot = (u32, u32, u32, u32, u32, u32, u32, u32);
-type ClipSlot = (bool, u32, u32, u32, u32);
+type ClipSlot = (bool, u32, u32, u32, u32, [u32; 4]);
 type AccessibilitySlot = (AccessibilityRoleSlot, Option<Arc<str>>, bool, bool);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -585,7 +585,19 @@ fn origin_value_slot(value: TransformOriginValue) -> (u32, u32) {
 fn clip_slot(node: &WidgetNode, geometry: GeometrySlot) -> ClipSlot {
     let clips = node.computed_style.overflow_x.clips_contents()
         || node.computed_style.overflow_y.clips_contents();
-    (clips, geometry.0, geometry.1, geometry.2, geometry.3)
+    let radius = node.computed_style.border_radius;
+    let radii = if clips {
+        [
+            radius.top_left,
+            radius.top_right,
+            radius.bottom_right,
+            radius.bottom_left,
+        ]
+        .map(f32::to_bits)
+    } else {
+        [0; 4]
+    };
+    (clips, geometry.0, geometry.1, geometry.2, geometry.3, radii)
 }
 
 fn geometry_slot(node: &WidgetNode) -> GeometrySlot {

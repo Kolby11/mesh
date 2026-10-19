@@ -13,8 +13,8 @@ use mesh_core_elements::NodeId;
 use mesh_core_elements::style::BackgroundPaint;
 
 use super::build::command_bounds;
-use super::signature::clip_rect;
 use super::sequence::PaintSequence;
+use super::signature::clip_rect;
 use super::types::*;
 
 /// A scroll scope whose composed viewport pixels can move in place.
@@ -125,8 +125,7 @@ pub(super) fn plan_scroll_shift(
         let left = corners.top_left.max(corners.bottom_left);
         let right = corners.top_right.max(corners.bottom_right);
         let visible_rows = |a: f32, b: f32| b > viewport.y as f32 && a < viewport.bottom() as f32;
-        let visible_columns =
-            |a: f32, b: f32| b > viewport.x as f32 && a < viewport.right() as f32;
+        let visible_columns = |a: f32, b: f32| b > viewport.x as f32 && a < viewport.right() as f32;
         if top > 0.0 && visible_rows(y, y + top) {
             arc_rows.push((y, y + top));
         }
@@ -141,7 +140,9 @@ pub(super) fn plan_scroll_shift(
         }
     }
 
-    anchored.extend(owner_edge_bands(commands, push_index, owner, viewport, axes));
+    anchored.extend(owner_edge_bands(
+        commands, push_index, owner, viewport, axes,
+    ));
     for command in commands.iter().skip(pop_index + 1) {
         let bounds = command_bounds(command);
         if !bounds.intersects(viewport) {

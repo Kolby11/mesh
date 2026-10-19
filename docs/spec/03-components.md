@@ -73,6 +73,9 @@ Readers in structural conditions, loop sources or keys, unkeyed loop bodies,
 component props, or handler bindings use template evaluation and
 retained diffing instead. Service updates and reactive-effect writes patch together;
 failed expressions retain the last good tree and use normal failure reporting.
+A service update whose changed fields no evaluated expression reads settles
+effects at delivery; when they write nothing a template reads, no frame is
+scheduled.
 The script body runs once as setup. Templates and lexical helpers derive
 presentation; `effect(fn)` runs reactive side effects with tracked public scalar
 and service-field reads, conservative compound-input invalidation, per-callback

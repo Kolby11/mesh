@@ -5,7 +5,7 @@
 //! quietly growing different interpretations of the same node.
 
 use crate::layout::LayoutRect;
-use crate::style::{Display, Transform2D, Visibility};
+use crate::style::{Corners, Display, Transform2D, Visibility};
 use crate::tree::WidgetNode;
 
 /// How long hover intent keeps a popover open after the pointer leaves its
@@ -148,6 +148,7 @@ impl Default for AffineTransform {
 pub struct AffineClip {
     pub transform: AffineTransform,
     pub rect: LayoutRect,
+    pub radii: Corners,
 }
 
 impl AffineClip {
@@ -160,10 +161,41 @@ impl AffineClip {
             .inverse()
             .map(|inverse| {
                 let (local_x, local_y) = inverse.transform_point(x, y);
-                local_x >= self.rect.x
+                let inside = local_x >= self.rect.x
                     && local_x < self.rect.x + self.rect.width
                     && local_y >= self.rect.y
-                    && local_y < self.rect.y + self.rect.height
+                    && local_y < self.rect.y + self.rect.height;
+                if !inside {
+                    return false;
+                }
+                let r = self.radii;
+                let scale = [
+                    (self.rect.width, r.top_left + r.top_right),
+                    (self.rect.width, r.bottom_left + r.bottom_right),
+                    (self.rect.height, r.top_left + r.bottom_left),
+                    (self.rect.height, r.top_right + r.bottom_right),
+                ]
+                .into_iter()
+                .filter(|(_, sum)| *sum > 0.0)
+                .map(|(extent, sum)| extent / sum)
+                .fold(1.0, f32::min);
+                let x = local_x - self.rect.x;
+                let y = local_y - self.rect.y;
+                for (dx, dy, radius) in [
+                    (x, y, r.top_left),
+                    (self.rect.width - x, y, r.top_right),
+                    (self.rect.width - x, self.rect.height - y, r.bottom_right),
+                    (x, self.rect.height - y, r.bottom_left),
+                ] {
+                    let radius = radius.max(0.0) * scale;
+                    if dx < radius
+                        && dy < radius
+                        && (dx - radius).powi(2) + (dy - radius).powi(2) > radius.powi(2)
+                    {
+                        return false;
+                    }
+                }
+                true
             })
             .unwrap_or(false)
     }
@@ -546,6 +578,7 @@ pub fn node_layout_bounds(node: &WidgetNode, transform: AffineTransform) -> Layo
 pub fn node_clip(node: &WidgetNode, transform: AffineTransform) -> AffineClip {
     AffineClip {
         transform,
+        radii: node.computed_style.border_radius,
         rect: LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -784,6 +817,7 @@ mod tests {
             .then(AffineTransform::rotation(std::f32::consts::FRAC_PI_4));
         let clip = AffineClip {
             transform,
+            radii: Corners::zero(),
             rect: LayoutRect {
                 x: 0.0,
                 y: 0.0,
@@ -797,8 +831,27 @@ mod tests {
     }
 
     #[test]
+    fn rounded_overflow_clip_membership_uses_normalized_local_radii() {
+        let clip = AffineClip {
+            transform: AffineTransform::translation(20.0, 30.0),
+            rect: LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width: 40.0,
+                height: 40.0,
+            },
+            radii: Corners::all(50.0),
+        };
+        assert!(!clip.contains(20.0, 30.0));
+        assert!(clip.contains(40.0, 30.0));
+        assert!(clip.contains(40.0, 50.0));
+        assert!(!clip.contains(60.0, 50.0));
+    }
+
+    #[test]
     fn affine_clip_intersection_does_not_use_conservative_aabb_overlap() {
         let clip = AffineClip {
+            radii: Corners::zero(),
             transform: AffineTransform::translation(50.0, 50.0)
                 .then(AffineTransform::rotation(std::f32::consts::FRAC_PI_4)),
             rect: LayoutRect {

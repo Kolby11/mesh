@@ -117,6 +117,11 @@ fn retained_dirty_contract_matches_shared_paint_signature_inputs() {
 
 #[test]
 fn resource_revision_invalidates_retained_font_paint_signatures() {
+    if crate::isolate_resource_revision_test(
+        "display_list::tests::signatures::resource_revision_invalidates_retained_font_paint_signatures",
+    ) {
+        return;
+    }
     let text = node(4, "text", 0.0, 0.0, 20.0, 20.0);
     let _resources = crate::resource_state_test_lock();
     let before = primitive_signature(&text, DisplayPrimitiveSlot::Text);

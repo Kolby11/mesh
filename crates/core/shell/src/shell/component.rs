@@ -871,12 +871,18 @@ pub(super) struct FrontendSurfaceComponent {
     /// script-maintained `aria-expanded`. Owned by the disclosure controller.
     expanded_triggers: HashSet<NodeId>,
     reactive_effects_pending: bool,
-    /// Whether the render hooks run for the frame currently being painted
-    /// wrote script state that a template expression actually reads. A render
-    /// hook is only observable through that state, so a hook that ran without
-    /// touching any template input leaves the retained and selective build
-    /// paths valid for this frame.
+    /// Whether effects settled since the last painted frame wrote script state
+    /// that a template expression reads. An effect is only observable through
+    /// that state, so effects that ran without touching any template input
+    /// leave the retained and selective build paths valid. Effects may settle
+    /// at service delivery as well as at paint, so `paint` clears this once
+    /// the frame's tree is built.
     effects_changed_templates: bool,
+    /// Whether the pending `SCRIPT_NARROW` needs a template pass even if no
+    /// effect writes template state. Only a service update whose changed
+    /// fields no evaluated template expression reads leaves this unset; its
+    /// only remaining route to the tree is an effect write.
+    script_narrow_requires_template: bool,
     pub(super) scroll_offsets: HashMap<NodeId, ScrollOffsetState>,
     /// In-flight smooth-scroll animations keyed by scroll-container node ID.
     /// Ticked at the top of `finalize_tree`; each writes an eased offset into
@@ -1365,6 +1371,7 @@ impl FrontendSurfaceComponent {
             expanded_triggers: HashSet::new(),
             reactive_effects_pending: true,
             effects_changed_templates: false,
+            script_narrow_requires_template: false,
             scroll_offsets: HashMap::new(),
             scroll_animations: HashMap::new(),
             scroll_inertia: HashMap::new(),
@@ -1753,11 +1760,30 @@ impl FrontendSurfaceComponent {
     /// The retained tree and display list remain authoritative for sparse versus
     /// structural fallback and pixel damage.
     pub(super) fn invalidate_script_state_narrow(&mut self) {
+        self.script_narrow_requires_template = true;
         self.invalidate(ComponentDirtyFlags::SCRIPT_NARROW);
     }
 
-    /// A write that `try_patch_template_writes` applied no longer needs the
-    /// narrow template pass that was requested so render hooks would run.
+    /// A service update whose changed fields no evaluated template expression
+    /// reads. Effects still run this frame; if they write nothing a template
+    /// reads, `flush_reactive_effects` drops the template pass.
+    pub(super) fn invalidate_unread_service_update(&mut self) {
+        self.invalidate(ComponentDirtyFlags::SCRIPT_NARROW);
+    }
+
+    /// Whether the pending narrow template pass came only from service updates
+    /// that no template reads and that no effect turned into a template write.
+    pub(super) fn script_narrow_is_unread_service_update(&self) -> bool {
+        self.dirty_types
+            .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+            && !self.script_narrow_requires_template
+            && self.pending_service_template_nodes.is_none()
+            && self.pending_service_binding_readers.is_empty()
+    }
+
+    /// Drop the narrow template pass requested so effects would run, once
+    /// `try_patch_template_writes` applied their writes or they wrote nothing a
+    /// template reads.
     pub(super) fn drop_script_narrow_after_patch(&mut self) {
         self.dirty_types.remove(ComponentDirtyFlags::SCRIPT_NARROW);
         if self.dirty_types.is_empty() && !self.style_only_dirty {
@@ -1814,6 +1840,7 @@ impl FrontendSurfaceComponent {
 
         self.last_dirty_types = flags;
         self.dirty_types = ComponentDirtyFlags::empty();
+        self.script_narrow_requires_template = false;
         self.dirty = false;
         self.style_only_dirty = false;
         self.next_frame_only_dirty = false;

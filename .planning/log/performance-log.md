@@ -6005,3 +6005,156 @@ All four are within noise. This is a correctness change, not a speedup.
 set matches `d2c8e294` exactly. A first full workspace run of the earlier
 version differed from the baseline in the seam test above, plus LSP
 `shipped_manifests_validate_cleanly`, which now passes.
+
+
+## 2026-10-19 — unread service updates schedule no frame
+
+Base tree `17224ae1` · area: shell service delivery and effect settling.
+AMD Ryzen 7 7840HS, workspace release profile, `nix develop`.
+
+**Cause.** With D1 patching and finalized memo entries, an audio update the
+Appearance page does not use still cost a frame of `tree_build`. No template
+expression read the changed fields, so no patch target and no service node set
+existed; `handle_service_event` still requested `SCRIPT_NARROW` because effects
+might derive template state from the payload. With no pending node set,
+`narrow_script_update` evaluated the whole template. The reader is the hidden
+`AudioPage`: its `require("mesh.audio")` proxy observes every audio payload.
+
+**Change.** When every runtime the update dirties has complete template read
+records (`template_expressions_reading_service_fields` returns `Some`) and none
+reads a changed field, delivery settles effects immediately. If they write
+nothing a template reads, the narrow pass is dropped and the surface stays clean:
+`wants_render()` is false and the render loop schedules no frame. Effect writes
+still take the binding-patch path, or the narrow path when a patch is not
+possible. First payloads and runtimes without evaluated templates keep the old
+conservative path. `effects_changed_templates` now persists from delivery until
+the frame's tree is built, so an effect that settled early still blocks the
+selective build.
+
+**Benchmark.** `appearance_frame_cost_profile` now paints only when
+`wants_render()` is true, as `Shell::render_components` does, and reports how
+many updates scheduled a frame. Warmup settles the page-enter transitions. A
+second loop publishes contract-valid `percent` changes that the hidden Audio
+page's effect turns into bound writes. The existing loop's payload
+(`volume`/`sink`) is not part of the `mesh.audio` contract, so nothing reads
+it. The baseline ran the same benchmark file in a HEAD worktree.
+
+**Measured.** Both binaries pinned to CPU 4 with `taskset -c 4`, three
+interleaved runs. The desktop was in use, so absolute values sit about 2× above
+the 2026-10-18 entry; compare within this table only.
+
+| Workload | Before | After |
+| --- | --- | --- |
+| Appearance, 550 nodes, 920×900: 60 unrelated audio updates | 10.392–11.081 ms/update, 60/60 frames | 0.021 ms/update, 0/60 frames |
+| Same: 60 hidden-page volume updates (bound effect writes, patched) | 6.673–7.551 ms/update | 6.429–7.376 ms/update |
+| Same: paint only | 2.551–2.587 ms/frame | 2.139–2.921 ms/frame |
+| Same: resource-list scroll | 4.041–4.414 ms/frame | 3.416–4.362 ms/frame |
+| `navigation_frame_cost_profile`: audio poll (read) | 2.484–2.942 ms/frame | 2.348–3.003 ms/frame |
+
+Only the unrelated update moves; its frame is gone, not just cheaper. The other
+rows overlap. Regression `unread_audio_updates_schedule_no_frame` asserts that
+no frame is scheduled; it fails at `17224ae1`. `hidden_audio_page_volume_patches_without_rebuild`
+asserts a patched, non-rebuild frame whose text matches a full rebuild.
+
+**Remaining cost of patched frames.** perf, 1,500 hidden-page volume updates
+(~4.1 ms each, unpinned): `layout_dirty_node_snapshots` fingerprints every node
+(~21% inclusive; `style_fingerprint` + `attributes_fingerprint` ~19% self),
+Taffy incremental layout ~13% for text inside a `display: none` page, the style
+animation pass ~12%, `RetainedDisplayList::update_inner` ~10%,
+`validate_widget_tree` ~5%; delivery plus effect and patch evaluation ~26%.
+Backlog item added.
+
+**Verified.** Serial release `mesh-core-shell`, after versus a HEAD worktree
+with its own target dir: the failure sets differ only by the new regression
+(fails at HEAD) and two tests that asserted `SCRIPT_NARROW` stayed pending after
+a service event. Those now assert that a frame is pending without a template
+rebuild and keep their rendered-text and scoped-retained checks. HEAD has 45
+serial failures, not the 27+3 recorded in STATUS.
+
+## 2026-10-19 — CMP-13 canonical source-path cache verification
+
+Follow-up to the 2026-10-17 rejected deep-schema-equality key experiment.
+Measured the existing replacement implementation; no new cache algorithm was
+introduced in this verification. Local x86_64 development host under
+`nix develop`, release profile (optimization 3, thin LTO, one codegen unit),
+unpinned with other desktop activity. Existing
+`child_settings_resolution_workload`: one child module, one canonical source
+file, 32 numeric props, 2,000 resolutions per sample, four samples per case.
+Each sample compares direct uncached projection against the production
+source-path cache, cleared before the sample and populated on its first lookup.
+These are same-revision path comparisons, not different-build timings.
+
+| Namespace | Direct resolution | Canonical source-path cache |
+| --- | --- | --- |
+| No stored overrides | 0.931–1.007 ms | 0.201–0.213 ms |
+| 32 stored prop overrides | 33.104–41.630 ms | 2.296–3.784 ms |
+
+The workload passed; no named performance gate exists for it. The focused
+`child_settings_cache_refreshes_for_props_and_effective_settings` regression
+also passed, covering settings replacement and source-reload invalidation.
+Catalog adoption clears the cache at the shared adoption boundary. This closes
+the pending replacement-key/populated-namespace measurement from October 17;
+it makes no claim about complete frame latency.
+
+## 2026-10-19 — rounded clips, gradients, images and shadows under damage
+
+Area: CPU Skia painter. AMD Ryzen 7 7840HS, x86_64, `nix develop`, workspace
+release profile (optimization 3, thin LTO, one codegen unit). Reviewed the prior
+rounded-fill/border entry and rejected experiments before implementation.
+
+**Correctness.** Rounded `PainterClip` radii were ignored, background images
+did not carry their rounded boundary into painting, and retained overflow
+clips contained only rectangles. Clips now carry normalized corner geometry
+through affine and retained scroll scopes; point membership uses that geometry.
+Overflow radii participate in the render-object clip fingerprint, so radius
+changes invalidate clean descendant clip stacks. Background images install
+their rounded clip explicitly.
+
+Rounded coverage is recorded at complete intrinsic bounds in a picture shader.
+A runtime shader keeps mask composition on the high-precision pipeline. The
+plain bitmap shader prototype still differed by one channel value under a
+one-pixel-wide clip for translucent gradients and nested image masks; it is
+rejected. High-precision masking passes without a gradient raster cache, but
+its repeated evaluation costs more than retaining the completed color raster.
+Rounded gradients and shadows therefore retain premultiplied RGBA rasters.
+Clip shaders and each effect-raster cache are bounded to 128 entries / 32 MiB
+(the clip budget estimates intrinsic raster plus recorded-picture bytes).
+Geometry keys omit position; color rasters include their colors. Raster
+admission retains the existing 8192-pixel dimension limit and direct-draw
+fallback. Existing transformed solid-fill/border fallbacks are unchanged.
+
+**Rejected cost prototype.** Runtime-masked gradients plus tinted A8 shadow
+rasters passed exact repaint tests, but four paired release samples of the
+workload below took 123.347–125.813 ms for gradients against a direct reference
+of 57.178–63.582 ms; A8 shadows took 98.694–101.740 ms against 16.124–29.849 ms.
+That is 1.94–2.20× / 3.39–6.12× the paired reference time. Retaining color
+rasters replaces this prototype.
+
+**Final cost.** `rounded_effect_raster_cost_workload`: 920×900 CPU raster,
+140 rectangles in a 10×14 grid, each 80×54 with radius 12; four paired samples,
+20 full replays per sample. Gradient colors are RGBA (240,100,40,170) to
+(30,100,240,220); shadows use the first color and blur radius 5. Production
+caches are warmed before sampling. The reference directly draws Skia rounded
+rectangles with a prepared gradient shader or the original mask-filter blur.
+It is a same-process native primitive reference, not a checkout of the old
+shell. Timings below are totals for 20 replays (2,800 shapes).
+
+| Workload | Direct Skia reference | Completed color rasters |
+| --- | --- | --- |
+| Rounded gradients | 85.843–88.293 ms | 31.057–36.257 ms |
+| Blurred shadows | 61.670–75.388 ms | 55.159–64.211 ms |
+
+The desktop and another release build were active; compare paired paths within
+each probe, not absolute timings across the prototype and final probes. No
+named performance gate exists for this correctness workload. No complete-frame
+speedup or cold-cache improvement is claimed.
+
+**Verified.** Final release renderer: 297 passed / 0 failed / 42 ignored; final
+debug renderer: 298 passed / 0 failed / 42 ignored. All six new exact-pixel
+regressions pass, including outside-damage preservation, translucent gradients,
+nested image masks, sharp/blurred shadows, retained radius changes and overflow
+scrolling at scales 1, 1.25 and 2. Release interaction geometry: 10/10. Final
+debug shell `settings_scroll_shift_matches_full_paint` and
+`real_navigation_bar_repaints_existing_transition_state_when_theme_changes_back_to_dark`: 2/2.
+Scoped rustfmt and diff whitespace checks pass. The unrelated shell and GPU
+work in the shared workspace was preserved.

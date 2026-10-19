@@ -775,11 +775,9 @@ fn derived_service_variables_use_narrow_retained_update() {
             .is_empty()
     );
     apply_audio_update(&mut component, 20, false);
-    assert!(
-        component
-            .dirty_types
-            .contains(ComponentDirtyFlags::SCRIPT_NARROW)
-    );
+    // The effect settles at delivery and its bound write patches in place.
+    assert!(component.wants_render());
+    assert!(!component.dirty_types.contains(ComponentDirtyFlags::SCRIPT));
     assert!(!component.surface_pixels_invalid);
     component
         .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
