@@ -18,7 +18,7 @@ use mesh_core_presentation::{
     LayerSurfaceSizePolicy, PopupConfig, PopupPlacement, PresentStatus, PresentationEngine,
     SurfaceConfig,
 };
-use mesh_core_render::{DamageRect, PixelBuffer};
+use mesh_core_render::{DamageRect, PixelBuffer, SurfaceCanvas};
 use std::time::{Duration, Instant};
 
 fn live_engine() -> Option<PresentationEngine> {
@@ -83,8 +83,9 @@ fn layer_surface_configures_and_presents_on_a_live_compositor() {
         .surface_size(surface_id)
         .expect("surface_size must succeed once configured")
         .unwrap_or((1, 1));
-    let buffer =
-        PixelBuffer::try_new(width.max(1), height.max(1)).expect("buffer allocation must succeed");
+    let mut buffer = SurfaceCanvas::from(
+        PixelBuffer::try_new(width.max(1), height.max(1)).expect("buffer allocation must succeed"),
+    );
     let full_damage = DamageRect {
         x: 0,
         y: 0,
@@ -93,7 +94,7 @@ fn layer_surface_configures_and_presents_on_a_live_compositor() {
     };
 
     let status = engine
-        .present_with_damage(surface_id, "live-matrix", true, &buffer, &[full_damage])
+        .present_with_damage(surface_id, "live-matrix", true, &mut buffer, &[full_damage])
         .expect("present must not error once the surface is ready");
     assert_eq!(
         status,
@@ -122,7 +123,8 @@ fn destroyed_surface_reports_missing_instead_of_reconjuring_state() {
 
     engine.destroy_surface(surface_id);
 
-    let buffer = PixelBuffer::try_new(1, 1).expect("buffer allocation must succeed");
+    let mut buffer =
+        SurfaceCanvas::from(PixelBuffer::try_new(1, 1).expect("buffer allocation must succeed"));
     let damage = DamageRect {
         x: 0,
         y: 0,
@@ -130,7 +132,7 @@ fn destroyed_surface_reports_missing_instead_of_reconjuring_state() {
         height: 1,
     };
     let status = engine
-        .present_with_damage(surface_id, "live-matrix", true, &buffer, &[damage])
+        .present_with_damage(surface_id, "live-matrix", true, &mut buffer, &[damage])
         .expect("presenting a destroyed surface id must not error, only report missing");
     assert_eq!(
         status,

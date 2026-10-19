@@ -2383,6 +2383,7 @@ dependencies = [
  "fontdb 0.23.0",
  "image",
  "khronos-egl",
+ "libc",
  "mesh-core-elements",
  "mesh-core-frontend",
  "mesh-core-icon",

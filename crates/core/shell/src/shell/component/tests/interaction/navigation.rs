@@ -10,7 +10,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -82,7 +82,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         "embedded theme selector should open through component state, not legacy surface requests: {activation_requests:?}"
     );
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -154,7 +154,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -191,7 +191,7 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         })
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -230,7 +230,7 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         "embedded language popover should open through component state, not legacy surface requests: {open_requests:?}"
     );
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -315,7 +315,7 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -351,7 +351,7 @@ fn navigation_hover_popovers_close_when_trigger_hover_leaves() {
             })
             .unwrap();
         component
-            .paint(
+            .paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(width, height),
                 &mut buffer,
@@ -361,7 +361,7 @@ fn navigation_hover_popovers_close_when_trigger_hover_leaves() {
 
         hover_ref(&mut component, &theme, width, height, trigger);
         component
-            .paint(
+            .paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(width, height),
                 &mut buffer,
@@ -378,7 +378,7 @@ fn navigation_hover_popovers_close_when_trigger_hover_leaves() {
             .handle_input(&theme, width, height, ComponentInput::PointerLeave)
             .unwrap();
         component
-            .paint(
+            .paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(width, height),
                 &mut buffer,
@@ -394,7 +394,7 @@ fn navigation_hover_popovers_close_when_trigger_hover_leaves() {
         std::thread::sleep(Duration::from_millis(220));
         component.tick().unwrap();
         component
-            .paint(
+            .paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(width, height),
                 &mut buffer,
@@ -410,7 +410,7 @@ fn navigation_hover_popovers_close_when_trigger_hover_leaves() {
         std::thread::sleep(Duration::from_millis(220));
         component.tick().unwrap();
         component
-            .paint(
+            .paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(width, height),
                 &mut buffer,
@@ -440,7 +440,7 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
         })
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -474,7 +474,7 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -507,7 +507,7 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -534,7 +534,7 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -550,7 +550,7 @@ fn navigation_language_popover_closes_when_pointer_leaves_promoted_popup() {
     std::thread::sleep(Duration::from_millis(420));
     component.tick().unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -579,7 +579,7 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
         })
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -590,7 +590,7 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
     let trigger = "languageButton";
     hover_ref(&mut component, &theme, width, height, trigger);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -641,7 +641,7 @@ fn navigation_language_option_cancels_hover_close_and_accepts_mouse_click() {
     std::thread::sleep(Duration::from_millis(420));
     component.tick().unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -818,7 +818,7 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -850,7 +850,7 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
     let trigger = "settingsButton";
     hover_ref(&mut component, &theme, width, height, trigger);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -889,7 +889,7 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
         .handle_input(&theme, width, height, ComponentInput::PointerLeave)
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -919,7 +919,7 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
     std::thread::sleep(Duration::from_millis(420));
     component.tick().unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -942,7 +942,7 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -982,7 +982,7 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
         .unwrap();
 
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1023,7 +1023,7 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
         .unwrap();
 
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1055,7 +1055,7 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
     ));
     assert_eq!(component.focused_key, None);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1087,7 +1087,7 @@ fn navigation_settings_trigger_does_not_reopen_quick_settings_after_opening_sett
     let open_handler = "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onOpenSettings";
 
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1096,7 +1096,7 @@ fn navigation_settings_trigger_does_not_reopen_quick_settings_after_opening_sett
         .unwrap();
     hover_ref(&mut component, &theme, width, height, trigger);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1117,7 +1117,7 @@ fn navigation_settings_trigger_does_not_reopen_quick_settings_after_opening_sett
         [CoreRequest::ShowSurface { surface_id }] if surface_id == "@mesh/settings"
     ));
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1133,7 +1133,7 @@ fn navigation_settings_trigger_does_not_reopen_quick_settings_after_opening_sett
     // shown. A second enter in that state must not create another popup.
     hover_ref(&mut component, &theme, width, height, trigger);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1152,7 +1152,7 @@ fn navigation_settings_trigger_does_not_reopen_quick_settings_after_opening_sett
         .unwrap();
     hover_ref(&mut component, &theme, width, height, trigger);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1185,7 +1185,7 @@ fn navigation_bar_real_surface_keeps_status_copy_non_selectable() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(420, 80);
     component
-        .paint(&theme, SurfaceExtent::unpadded(420, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(420, 80), &mut buffer, 1.0)
         .unwrap();
 
     let tree = component
@@ -1219,7 +1219,7 @@ fn navigation_bar_keyboard_activation_toggles_volume_mute_on_real_surface() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1292,7 +1292,7 @@ fn navigation_bar_pointer_activation_toggles_volume_mute() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1381,7 +1381,7 @@ fn navigation_bar_volume_scroll_changes_level_immediately() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1487,7 +1487,7 @@ fn navigation_bar_volume_scroll_respects_instance_sensitivity() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1559,7 +1559,7 @@ fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1599,7 +1599,7 @@ fn navigation_bar_volume_trigger_keeps_click_capture_during_press_animation() {
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1655,7 +1655,7 @@ fn navigation_bar_keyboard_audio_popover_slider_responds_to_arrow_keys() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 220);
     component
-        .paint(&theme, SurfaceExtent::unpadded(320, 220), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(320, 220), &mut buffer, 1.0)
         .unwrap();
     let tree = component
         .last_tree
@@ -1705,7 +1705,7 @@ fn phase44_navigation_behavior_survives_focused_proof_path() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(960, 80);
     component
-        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
         .unwrap();
     assert!(
         component.last_focused_proof_snapshot().is_some(),
@@ -1724,7 +1724,7 @@ fn phase44_navigation_behavior_survives_focused_proof_path() {
         )
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
         .unwrap();
 
     assert!(
@@ -1753,7 +1753,7 @@ fn navigation_quick_settings_popup_paints_content_laid_out_beyond_the_bar() {
     let (width, height) = (960, 36);
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1762,7 +1762,7 @@ fn navigation_quick_settings_popup_paints_content_laid_out_beyond_the_bar() {
         .unwrap();
     hover_ref(&mut component, &theme, width, height, "settingsButton");
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1796,7 +1796,7 @@ fn navigation_quick_settings_popup_paints_content_laid_out_beyond_the_bar() {
     let mut child_buffer = PixelBuffer::new(request.content_size.0, request.content_size.1);
     assert!(
         component
-            .paint_child_surface(&request.node_key, &mut child_buffer, 1.0, (0, 0), false)
+            .paint_child_surface_raster(&request.node_key, &mut child_buffer, 1.0, (0, 0), false)
             .unwrap()
     );
     let panel_top = buffer_pixel(
@@ -1827,15 +1827,21 @@ fn navigation_quick_settings_popup_animates_open_and_close() {
     let (width, height) = (960, 36);
     let extent = SurfaceExtent::unpadded(width, height);
     let mut buffer = PixelBuffer::new(width, height);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     hover_ref(&mut component, &theme, width, height, "settingsButton");
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     let key = component.child_surface_requests()[0].node_key.clone();
 
     // The runtime maps the popup only after one frame with the entering
     // state, then drops it so the resting style transitions in.
     component.set_entering_child_keys_from_slice(&[key.as_str()]);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     let (entering_opacity, entering_transformed) = popover_style(&component, &key);
     assert_eq!(entering_opacity, 0.0, "the popup should start transparent");
     assert!(
@@ -1843,10 +1849,14 @@ fn navigation_quick_settings_popup_animates_open_and_close() {
         "the popup should start offset and scaled"
     );
     component.set_entering_child_keys_from_slice(&[]);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     std::thread::sleep(Duration::from_millis(40));
     component.tick().unwrap();
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     let (opening_opacity, _) = popover_style(&component, &key);
     assert!(
         opening_opacity > 0.0 && opening_opacity < 1.0,
@@ -1855,7 +1865,9 @@ fn navigation_quick_settings_popup_animates_open_and_close() {
 
     std::thread::sleep(Duration::from_millis(250));
     component.tick().unwrap();
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(popover_style(&component, &key).0, 1.0);
 
     // Leaving the trigger closes the popup once its hover bridge runs out.
@@ -1866,10 +1878,14 @@ fn navigation_quick_settings_popup_animates_open_and_close() {
     component.tick().unwrap();
     assert!(component.child_hide_transition_ms(&key) >= 150);
     component.set_closing_child_keys_from_slice(&[key.as_str()]);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     std::thread::sleep(Duration::from_millis(40));
     component.tick().unwrap();
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     let (closing_opacity, closing_transformed) = popover_style(&component, &key);
     // The exit accelerates: a front-loaded curve had already dropped below
     // 20% here, which read as the popup vanishing without animation.

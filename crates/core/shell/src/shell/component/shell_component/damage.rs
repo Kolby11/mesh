@@ -427,7 +427,7 @@ impl FrontendSurfaceComponent {
     pub(super) fn shift_scrolled_viewports(
         &mut self,
         effective: &mut EffectiveDamage,
-        buffer: &mut PixelBuffer,
+        session: &mut PixelCanvasSession<'_>,
         scale: f32,
         current_tooltip_damage: Option<DamageRect>,
     ) -> Option<Vec<DamageRect>> {
@@ -478,8 +478,7 @@ impl FrontendSurfaceComponent {
             let left = (shift.viewport.x as f32 * scale).ceil() as u32;
             let top = (shift.viewport.y as f32 * scale).ceil() as u32;
             let right = ((shift.viewport.x + shift.viewport.width) as f32 * scale).floor() as u32;
-            let bottom =
-                ((shift.viewport.y + shift.viewport.height) as f32 * scale).floor() as u32;
+            let bottom = ((shift.viewport.y + shift.viewport.height) as f32 * scale).floor() as u32;
             let device = DamageRect {
                 x: left,
                 y: top,
@@ -495,15 +494,23 @@ impl FrontendSurfaceComponent {
                 paint.push(DamageRect { width: 1, ..v });
             }
             if edge(v.x + v.width) {
-                paint.push(DamageRect { x: v.x + v.width - 1, width: 1, ..v });
+                paint.push(DamageRect {
+                    x: v.x + v.width - 1,
+                    width: 1,
+                    ..v
+                });
             }
             if edge(v.y) {
                 paint.push(DamageRect { height: 1, ..v });
             }
             if edge(v.y + v.height) {
-                paint.push(DamageRect { y: v.y + v.height - 1, height: 1, ..v });
+                paint.push(DamageRect {
+                    y: v.y + v.height - 1,
+                    height: 1,
+                    ..v
+                });
             }
-            for strip in buffer.shift_region_pixels(device, dx, dy) {
+            for strip in session.shift_region(device, dx, dy) {
                 let x = (strip.x as f32 / scale).floor() as u32;
                 let y = (strip.y as f32 / scale).floor() as u32;
                 let right = ((strip.x + strip.width) as f32 / scale).ceil() as u32;
@@ -591,4 +598,3 @@ fn avoid_arc_edges(
         height: bottom - top,
     }
 }
-

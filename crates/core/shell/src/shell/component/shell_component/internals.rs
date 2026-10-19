@@ -225,7 +225,7 @@ impl FrontendSurfaceComponent {
     pub(super) fn paint_pixel_regions(
         &self,
         theme: &Theme,
-        buffer: &mut PixelBuffer,
+        session: &mut PixelCanvasSession<'_>,
         scale: f32,
         selected_paint: &mesh_core_render::display_list::SelectedDisplayListPaint<'_>,
         effective_damage: &EffectiveDamage,
@@ -243,9 +243,17 @@ impl FrontendSurfaceComponent {
         }
 
         if effective_damage.full_surface {
-            buffer.clear(mesh_core_elements::style::Color::TRANSPARENT);
+            session.clear_rect(
+                DamageRect {
+                    x: 0,
+                    y: 0,
+                    width: session.width(),
+                    height: session.height(),
+                },
+                mesh_core_elements::style::Color::TRANSPARENT,
+            );
             return self.paint_selected_pixels(
-                buffer,
+                session,
                 scale,
                 selected_paint,
                 None,
@@ -258,7 +266,7 @@ impl FrontendSurfaceComponent {
                 .rect
                 .map(|damage| {
                     self.paint_damage_rect(
-                        buffer,
+                        session,
                         scale,
                         selected_paint,
                         damage,
@@ -271,7 +279,7 @@ impl FrontendSurfaceComponent {
 
         if effective_damage.rects.len() == 1 {
             return self.paint_damage_rect(
-                buffer,
+                session,
                 scale,
                 selected_paint,
                 effective_damage.rects[0],
@@ -286,17 +294,14 @@ impl FrontendSurfaceComponent {
         let device_damage = mesh_core_render::DeviceDamage::from_logical(
             &effective_damage.rects,
             scale,
-            buffer.width(),
-            buffer.height(),
+            session.width(),
+            session.height(),
         );
         let mut physical_regions: smallvec::SmallVec<[(u32, u32, u32, u32); MAX_DAMAGE_RECTS]> =
             smallvec::SmallVec::with_capacity(device_damage.rects().len());
         for physical_damage in device_damage.rects() {
-            buffer.clear_rect(
-                physical_damage.x,
-                physical_damage.y,
-                physical_damage.width,
-                physical_damage.height,
+            session.clear_rect(
+                *physical_damage,
                 mesh_core_elements::style::Color::TRANSPARENT,
             );
             physical_regions.push((
@@ -316,9 +321,9 @@ impl FrontendSurfaceComponent {
                 })
                 .map(|_| (text.as_ref(), *cx, *cy))
         });
-        mesh_core_render::paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution(
+        mesh_core_render::paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution_in_session(
             selected_paint,
-            buffer,
+            session,
             scale,
             physical_regions.as_slice(),
             None,
@@ -330,7 +335,7 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn paint_damage_rect(
         &self,
-        buffer: &mut PixelBuffer,
+        session: &mut PixelCanvasSession<'_>,
         scale: f32,
         selected_paint: &mesh_core_render::display_list::SelectedDisplayListPaint<'_>,
         damage: DamageRect,
@@ -338,12 +343,9 @@ impl FrontendSurfaceComponent {
         current_tooltip_damage: Option<DamageRect>,
     ) -> mesh_core_render::PaintProfilingMetrics {
         let physical_damage =
-            scale_damage_rect_to_buffer(damage, scale, buffer.width(), buffer.height());
-        buffer.clear_rect(
-            physical_damage.x,
-            physical_damage.y,
-            physical_damage.width,
-            physical_damage.height,
+            scale_damage_rect_to_buffer(damage, scale, session.width(), session.height());
+        session.clear_rect(
+            physical_damage,
             mesh_core_elements::style::Color::TRANSPARENT,
         );
         let tooltip_for_damage = tooltip.and_then(|(text, cx, cy)| {
@@ -352,7 +354,7 @@ impl FrontendSurfaceComponent {
                 .map(|_| (text.as_ref(), *cx, *cy))
         });
         self.paint_selected_pixels(
-            buffer,
+            session,
             scale,
             selected_paint,
             Some(physical_damage),
@@ -362,15 +364,15 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn paint_selected_pixels(
         &self,
-        buffer: &mut PixelBuffer,
+        session: &mut PixelCanvasSession<'_>,
         scale: f32,
         selected_paint: &mesh_core_render::display_list::SelectedDisplayListPaint<'_>,
         damage: Option<DamageRect>,
         tooltip: Option<(&str, f32, f32)>,
     ) -> mesh_core_render::PaintProfilingMetrics {
-        mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics_and_attribution(
+        mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session(
             selected_paint,
-            buffer,
+            session,
             scale,
             damage.map(|rect| (rect.x, rect.y, rect.width, rect.height)),
             None,

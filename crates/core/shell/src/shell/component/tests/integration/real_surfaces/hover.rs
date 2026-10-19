@@ -11,7 +11,7 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -64,7 +64,7 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -153,7 +153,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
 
         let mut buffer = PixelBuffer::new(width, height);
         component
-            .paint(
+            .paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(width, height),
                 &mut buffer,
@@ -212,7 +212,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             )
             .unwrap();
         component
-            .paint(
+            .paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(width, height),
                 &mut buffer,
@@ -289,7 +289,13 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             PixelBuffer::new(requests[0].content_size.0, requests[0].content_size.1);
         assert!(
             component
-                .paint_child_surface(&requests[0].node_key, &mut child_buffer, 1.0, (0, 0), false,)
+                .paint_child_surface_raster(
+                    &requests[0].node_key,
+                    &mut child_buffer,
+                    1.0,
+                    (0, 0),
+                    false,
+                )
                 .unwrap(),
             "{trigger} child popup should paint successfully"
         );
@@ -332,7 +338,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
             .handle_input(&theme, width, height, ComponentInput::PointerLeave)
             .unwrap();
         component
-            .paint(
+            .paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(width, height),
                 &mut buffer,
@@ -391,7 +397,7 @@ fn shipped_navigation_resting_control_buttons_do_not_overlap() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,

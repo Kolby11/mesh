@@ -155,6 +155,7 @@ the Wayland blur protocol carries regions but no per-surface kernel settings.
 | `MESH_SETTINGS_PATH` | Overrides the settings file path |
 | `MESH_IPC_SOCKET` | Overrides the Unix IPC socket path |
 | `MESH_BACKEND` | Forces a presentation backend where supported |
+| `MESH_RENDER_GPU` | `0` paints every surface on the CPU and presents SHM buffers |
 | `RUST_LOG` | Controls tracing filters through `tracing-subscriber` |
 
 ## Module manifests

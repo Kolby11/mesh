@@ -178,11 +178,11 @@ end
     let theme = themed_primary("test", "#000000");
     let mut buffer = PixelBuffer::new(160, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
         .unwrap();
     if component.wants_render() {
         component
-            .paint(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
             .unwrap();
     }
 
@@ -190,7 +190,7 @@ end
         .call_namespaced_handler("updateLabel", &[])
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert!(component.retained_tree.last_update_was_scoped());
@@ -216,12 +216,12 @@ end
     let theme = themed_primary("test", "#000000");
     let mut buffer = PixelBuffer::new(160, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
         .unwrap();
 
     component.call_namespaced_handler("hide", &[]).unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert!(!component.retained_tree.last_update_was_scoped());
@@ -285,11 +285,11 @@ fn prime_audio_component(
     buffer: &mut PixelBuffer,
 ) {
     component
-        .paint(theme, SurfaceExtent::unpadded(640, 160), buffer, 1.0)
+        .paint_raster(theme, SurfaceExtent::unpadded(640, 160), buffer, 1.0)
         .unwrap();
     apply_audio_update(component, 10, false);
     component
-        .paint(theme, SurfaceExtent::unpadded(640, 160), buffer, 1.0)
+        .paint_raster(theme, SurfaceExtent::unpadded(640, 160), buffer, 1.0)
         .unwrap();
 }
 
@@ -320,7 +320,7 @@ fn service_field_update_patches_bindings_without_template_evaluation() {
     assert!(!component.has_reactive_effects());
     assert!(component.pending_service_template_nodes.is_some());
     component
-        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
         .unwrap();
 
     assert!(rendered_text(&component).iter().any(|text| text == "20"));
@@ -354,7 +354,9 @@ items = {{id = "a"}, {id = "b"}}
     prime_audio_component(&mut component, &theme, &mut buffer);
     apply_audio_update(&mut component, 20, false);
     apply_audio_update(&mut component, 30, false);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     let snapshot = component.take_invalidation_snapshot().unwrap();
     assert_eq!(snapshot.patched_node_count, 2);
     assert_eq!(snapshot.component.script_narrow, 0);
@@ -363,17 +365,23 @@ items = {{id = "a"}, {id = "b"}}
     assert!(text.iter().any(|text| text == "b:30"));
     let mut rebuilt = PixelBuffer::new(640, 160);
     component.invalidate_script_state();
-    component.paint(&theme, extent, &mut rebuilt, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut rebuilt, 1.0)
+        .unwrap();
     assert_eq!(buffer.data(), rebuilt.data());
 
     apply_audio_update(&mut component, 40, true);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     let snapshot = component.take_invalidation_snapshot().unwrap();
     assert_eq!(snapshot.patched_node_count, 0);
     assert_eq!(snapshot.component.script_narrow, 1);
     assert!(rendered_text(&component).iter().any(|text| text == "muted"));
     component.invalidate_script_state();
-    component.paint(&theme, extent, &mut rebuilt, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut rebuilt, 1.0)
+        .unwrap();
     assert_eq!(buffer.data(), rebuilt.data());
 }
 
@@ -400,11 +408,15 @@ end
     prime_audio_component(&mut component, &theme, &mut buffer);
     let previous = buffer.data().to_vec();
     apply_audio_update(&mut component, 20, true);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(buffer.data(), previous.as_slice());
     assert!(!rendered_text(&component).iter().any(|text| text == "20"));
     apply_audio_update(&mut component, 20, false);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(
         rendered_text(&component)
             .iter()
@@ -423,7 +435,7 @@ fn dynamic_service_template_keeps_full_evaluation_fallback() {
 
     apply_audio_update(&mut component, 20, true);
     component
-        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
         .unwrap();
 
     let text = rendered_text(&component);
@@ -446,7 +458,7 @@ fn service_template_patches_direct_reads_and_effect_writes_together() {
     apply_audio_update(&mut component, 20, false);
     assert!(component.has_reactive_effects());
     component
-        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
         .unwrap();
 
     let text = rendered_text(&component);
@@ -471,7 +483,7 @@ fn service_template_with_inert_effect_still_patches_bindings() {
     apply_audio_update(&mut component, 20, false);
     assert!(component.has_reactive_effects());
     component
-        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
         .unwrap();
 
     assert!(rendered_text(&component).iter().any(|text| text == "20"));
@@ -503,7 +515,7 @@ fn affected_template_eval_beats_full_rebuild() {
         if iteration % 2 == 0 {
             let started = Instant::now();
             apply_audio_update(&mut full, percent, false);
-            full.paint(
+            full.paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(640, 160),
                 &mut full_buffer,
@@ -515,7 +527,7 @@ fn affected_template_eval_beats_full_rebuild() {
             let started = Instant::now();
             apply_audio_update(&mut selective, percent, false);
             selective
-                .paint(
+                .paint_raster(
                     &theme,
                     SurfaceExtent::unpadded(640, 160),
                     &mut selective_buffer,
@@ -527,7 +539,7 @@ fn affected_template_eval_beats_full_rebuild() {
             let started = Instant::now();
             apply_audio_update(&mut selective, percent, false);
             selective
-                .paint(
+                .paint_raster(
                     &theme,
                     SurfaceExtent::unpadded(640, 160),
                     &mut selective_buffer,
@@ -538,7 +550,7 @@ fn affected_template_eval_beats_full_rebuild() {
 
             let started = Instant::now();
             apply_audio_update(&mut full, percent, false);
-            full.paint(
+            full.paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(640, 160),
                 &mut full_buffer,
@@ -596,14 +608,14 @@ end
     let mut scoped_buffer = PixelBuffer::new(64, 16);
     let mut full_buffer = PixelBuffer::new(64, 16);
     scoped
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(64, 16),
             &mut scoped_buffer,
             1.0,
         )
         .unwrap();
-    full.paint(
+    full.paint_raster(
         &theme,
         SurfaceExtent::unpadded(64, 16),
         &mut full_buffer,
@@ -612,7 +624,7 @@ end
     .unwrap();
     if scoped.wants_render() {
         scoped
-            .paint(
+            .paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(64, 16),
                 &mut scoped_buffer,
@@ -621,7 +633,7 @@ end
             .unwrap();
     }
     if full.wants_render() {
-        full.paint(
+        full.paint_raster(
             &theme,
             SurfaceExtent::unpadded(64, 16),
             &mut full_buffer,
@@ -638,7 +650,7 @@ end
             let started = Instant::now();
             scoped.call_namespaced_handler("toggleLabel", &[]).unwrap();
             scoped
-                .paint(
+                .paint_raster(
                     &theme,
                     SurfaceExtent::unpadded(64, 16),
                     &mut scoped_buffer,
@@ -649,7 +661,7 @@ end
 
             let started = Instant::now();
             full.call_namespaced_handler("toggleLabel", &[]).unwrap();
-            full.paint(
+            full.paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(64, 16),
                 &mut full_buffer,
@@ -660,7 +672,7 @@ end
         } else {
             let started = Instant::now();
             full.call_namespaced_handler("toggleLabel", &[]).unwrap();
-            full.paint(
+            full.paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(64, 16),
                 &mut full_buffer,
@@ -672,7 +684,7 @@ end
             let started = Instant::now();
             scoped.call_namespaced_handler("toggleLabel", &[]).unwrap();
             scoped
-                .paint(
+                .paint_raster(
                     &theme,
                     SurfaceExtent::unpadded(64, 16),
                     &mut scoped_buffer,
@@ -780,7 +792,7 @@ fn derived_service_variables_use_narrow_retained_update() {
     assert!(!component.dirty_types.contains(ComponentDirtyFlags::SCRIPT));
     assert!(!component.surface_pixels_invalid);
     component
-        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
         .unwrap();
     assert!(rendered_text(&component).iter().any(|text| text == "20%"));
     assert!(component.retained_tree.last_update_was_scoped());
@@ -794,7 +806,7 @@ fn derived_service_structure_changes_fall_back_to_full_retained_update() {
     prime_audio_component(&mut component, &theme, &mut buffer);
     apply_audio_update(&mut component, 20, true);
     component
-        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
         .unwrap();
     assert!(
         !rendered_text(&component)
@@ -829,7 +841,7 @@ fn derived_service_narrow_end_to_end_benchmark() {
                 component.invalidate_script_state();
             }
             component
-                .paint(&theme, SurfaceExtent::unpadded(640, 160), buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), buffer, 1.0)
                 .unwrap();
             times[index] += start.elapsed();
         }
@@ -858,7 +870,7 @@ function render() label = "legacy" end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 40), &mut buffer, 1.0)
         .unwrap();
     assert!(rendered_text(&component).iter().any(|text| text == "setup"));
     assert!(!component.has_reactive_effects());

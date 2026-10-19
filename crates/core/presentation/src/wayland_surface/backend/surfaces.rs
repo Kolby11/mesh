@@ -53,6 +53,8 @@ impl WaylandSurfaceBackend {
         let seat_state = SeatState::new(&globals, &qh);
 
         let pool = SlotPool::new(256 * 256 * 4, &shm).ok();
+        #[cfg(feature = "gpu")]
+        let dmabuf = DmabufProtocol::bind(&globals, &qh);
 
         let state = State {
             registry_state,
@@ -74,6 +76,8 @@ impl WaylandSurfaceBackend {
             activation_seat: None,
             qh,
             pool,
+            #[cfg(feature = "gpu")]
+            dmabuf,
             surfaces: HashMap::new(),
             surface_ids_by_wl_id: HashMap::new(),
             next_object_generation: 1,
@@ -94,11 +98,21 @@ impl WaylandSurfaceBackend {
             connection_lost: None,
         };
 
-        Ok(Self {
+        #[allow(unused_mut)]
+        let mut backend = Self {
             _conn: conn,
             event_queue,
             state,
-        })
+            #[cfg(feature = "gpu")]
+            gpu: GpuPresenter::Untried,
+        };
+        // Dmabuf feedback names the device to render on; it must have
+        // arrived before the first canvas is allocated.
+        #[cfg(feature = "gpu")]
+        if let Err(error) = backend.event_queue.roundtrip(&mut backend.state) {
+            tracing::warn!("gpu present: dmabuf feedback roundtrip failed: {error}");
+        }
+        Ok(backend)
     }
 
     pub fn set_pointer_interactive(&mut self, interactive: bool) {

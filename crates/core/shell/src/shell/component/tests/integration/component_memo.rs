@@ -74,7 +74,7 @@ fn rebuild(component: &mut FrontendSurfaceComponent, width: u32, height: u32) ->
     let mut buffer = PixelBuffer::new(width, height);
     component.invalidate_script_state();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -126,7 +126,7 @@ label = ""
     let theme = default_theme();
     let mut initial = PixelBuffer::new(160, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut initial, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut initial, 1.0)
         .unwrap();
     // Warm-up: the second build settles embedded container sizes post-layout.
     let first = rebuild(&mut component, 160, 60);
@@ -180,7 +180,7 @@ local Child = require("./components/child.mesh")
     let theme = default_theme();
     let mut initial = PixelBuffer::new(240, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
         .unwrap();
     rebuild(&mut component, 240, 60);
 
@@ -227,7 +227,7 @@ items = { { label = "first" }, { label = "second" } }
     let theme = default_theme();
     let mut initial = PixelBuffer::new(240, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
         .unwrap();
     rebuild(&mut component, 240, 60);
 
@@ -271,7 +271,7 @@ items = { { id = "first", label = "First" }, { id = "second", label = "Second" }
     let theme = default_theme();
     let mut initial = PixelBuffer::new(240, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
         .unwrap();
     rebuild(&mut component, 240, 60);
     let hits_before = component.component_memo_hit_count();
@@ -330,7 +330,7 @@ items = { { id = "first" }, { id = "second" } }
     let theme = default_theme();
     let mut initial = PixelBuffer::new(240, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
         .unwrap();
 
     let first_input =
@@ -385,7 +385,7 @@ items = { "first", "second" }
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 60), &mut buffer, 1.0)
         .unwrap();
 
     let row = first_node_with_attr(
@@ -429,7 +429,7 @@ local Child = require("./components/child.mesh")
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(400, 300);
     component
-        .paint(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
         .unwrap();
     rebuild(&mut component, 400, 300);
 
@@ -553,7 +553,7 @@ fn unchanged_slot_contribution_reuses_memoized_subtree() {
     let theme = default_theme();
     let mut initial = PixelBuffer::new(160, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut initial, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut initial, 1.0)
         .unwrap();
     rebuild(&mut component, 160, 60);
     let hits_before = component.component_memo_hit_count();
@@ -570,7 +570,7 @@ fn catalog_generation_rebinds_affected_slot_host_and_keeps_root_runtime() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
         .unwrap();
 
     let root_runtime_generation = component
@@ -633,7 +633,7 @@ fn catalog_generation_rebinds_affected_slot_host_and_keeps_root_runtime() {
     drop(runtimes);
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
         .unwrap();
     assert!(node_with_content(component.last_tree.as_ref().unwrap(), "static slot 0").is_none());
 }
@@ -646,7 +646,7 @@ fn slot_memoized_rebuild_beats_full_reeval() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(400, 300);
     component
-        .paint(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
         .unwrap();
     rebuild(&mut component, 400, 300);
     let iterations = 200;
@@ -720,7 +720,7 @@ label = ""
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
         .unwrap();
     // Warm-up: settle container sizes and populate the memo.
     rebuild(&mut component, 200, 60);
@@ -728,7 +728,7 @@ label = ""
 
     component.call_namespaced_handler("setLabel", &[]).unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
         .unwrap();
 
     // The prop-changed child missed the memo and rebuilt with the new label;
@@ -790,7 +790,7 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
         .unwrap();
     assert!(
         node_with_content(component.last_tree.as_ref().unwrap(), "0").is_some(),
@@ -813,7 +813,7 @@ end
         )
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
         .unwrap();
     assert_eq!(component.component_memo_hit_count(), hits_before);
     assert!(
@@ -913,7 +913,7 @@ local MenuPopover = require("@mesh/menu-popover")
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
         .unwrap();
     assert!(component.has_promoted_popover_wrappers.get());
     // Warm-up: settle container sizes and populate the memo.
@@ -925,7 +925,7 @@ local MenuPopover = require("@mesh/menu-popover")
     // replayed so finalize_tree still collapses the wrapper out of flow.
     component.invalidate_script_state();
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
         .unwrap();
     assert_eq!(component.component_memo_hit_count(), hits_before + 1);
     assert!(
@@ -998,7 +998,7 @@ end)
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(400, 300);
     component
-        .paint(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
         .unwrap();
     rebuild(&mut component, 400, 300);
 

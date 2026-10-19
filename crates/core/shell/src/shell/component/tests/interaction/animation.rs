@@ -195,7 +195,7 @@ fn component_keyframe_easing_reaches_shell_animation_state() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     let rule = &component
@@ -325,12 +325,12 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(96, 32);
     component
-        .paint(&theme, SurfaceExtent::unpadded(96, 32), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(96, 32), &mut buffer, 1.0)
         .unwrap();
     // Every surface content-measures now; the first paint records measured_size
     // and requests one surface-config settle frame. Paint again so it stabilises.
     component
-        .paint(&theme, SurfaceExtent::unpadded(96, 32), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(96, 32), &mut buffer, 1.0)
         .unwrap();
     component.dirty = false;
 
@@ -379,7 +379,7 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 48);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
         .unwrap();
 
     let key = *component
@@ -398,7 +398,7 @@ end
 
     component.call_namespaced_handler("onClick", &[]).unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
         .unwrap();
 
     assert_eq!(
@@ -430,7 +430,7 @@ fn keyframe_pause_resume_keeps_progress_across_an_iteration_boundary() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     let key = *component
@@ -515,7 +515,7 @@ fn keyframe_animation_finite_completion_stops_render_requests() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
     assert!(component.wants_render());
 
@@ -533,7 +533,7 @@ fn keyframe_animation_finite_completion_stops_render_requests() {
         .expect("monotonic instant subtraction");
     component.dirty = false;
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
     component.dirty = false;
 
@@ -575,7 +575,7 @@ fn keyframe_animation_name_change_restarts_timeline() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 48);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
         .unwrap();
 
     let original_start = Instant::now()
@@ -643,7 +643,7 @@ fn duplicate_keyframe_names_use_distinct_slots_and_replace_only_changed_declarat
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert_eq!(component.keyframe_animations.len(), 2);
@@ -718,7 +718,7 @@ fn keyframe_disappearance_cancels_the_instance_and_timeline() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
     let id = *component
         .keyframe_animations
@@ -763,7 +763,7 @@ fn keyframe_animation_infinite_keeps_render_requests_active() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     let key = *component
@@ -780,7 +780,7 @@ fn keyframe_animation_infinite_keeps_render_requests_active() {
         .expect("monotonic instant subtraction");
     component.dirty = false;
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
     component.dirty = false;
 
@@ -808,7 +808,7 @@ fn paint_keyframe_frame_at(component: &mut FrontendSurfaceComponent, elapsed: Du
     component.dirty = false;
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(
+        .paint_raster(
             &default_theme(),
             SurfaceExtent::unpadded(120, 40),
             &mut buffer,
@@ -835,7 +835,7 @@ fn keyframes_sample_the_authored_value_across_animation_only_frames() {
     );
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(
+        .paint_raster(
             &default_theme(),
             SurfaceExtent::unpadded(120, 40),
             &mut buffer,
@@ -869,7 +869,7 @@ fn a_finished_keyframe_animation_without_fill_restores_the_authored_value() {
     );
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(
+        .paint_raster(
             &default_theme(),
             SurfaceExtent::unpadded(120, 40),
             &mut buffer,
@@ -947,14 +947,14 @@ fn animation_only_tick_uses_scoped_retained_fingerprinting() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert!(component.animation_only_dirty);
     component.set_profiling_enabled(true);
     component.take_profiling_records();
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert!(component.retained_tree.last_update_was_scoped());
@@ -982,7 +982,7 @@ fn a_live_transition_stays_dirty_while_its_delay_pins_the_value() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(80, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(80, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(80, 40), &mut buffer, 1.0)
         .unwrap();
 
     let mut node = event_node("box", "root/0", 0.0, 0.0, 80.0, 20.0, &[]);
@@ -1055,7 +1055,7 @@ fn smooth_scroll_animation_uses_scoped_retained_fingerprinting() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(80, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(80, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(80, 40), &mut buffer, 1.0)
         .unwrap();
 
     component.scroll_animations.insert(
@@ -1071,7 +1071,7 @@ fn smooth_scroll_animation_uses_scoped_retained_fingerprinting() {
     );
     component.invalidate_animation_style_path(ComponentDirtyFlags::VISUAL_REPAINT);
     component
-        .paint(&theme, SurfaceExtent::unpadded(80, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(80, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert!(component.retained_tree.last_update_was_scoped());
@@ -1091,14 +1091,14 @@ fn external_invalidation_cancels_animation_only_retained_scope() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
     assert!(component.animation_only_dirty);
 
     component.invalidate_surface_config();
     assert!(!component.animation_only_dirty);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert!(!component.retained_tree.last_update_was_scoped());
@@ -1119,14 +1119,14 @@ fn animation_scoped_retained_diff_matches_full_pipeline() {
     let mut scoped_buffer = PixelBuffer::new(120, 40);
     let mut full_buffer = PixelBuffer::new(120, 40);
     scoped
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(120, 40),
             &mut scoped_buffer,
             1.0,
         )
         .unwrap();
-    full.paint(
+    full.paint_raster(
         &theme,
         SurfaceExtent::unpadded(120, 40),
         &mut full_buffer,
@@ -1136,14 +1136,14 @@ fn animation_scoped_retained_diff_matches_full_pipeline() {
 
     full.animation_only_dirty = false;
     scoped
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(120, 40),
             &mut scoped_buffer,
             1.0,
         )
         .unwrap();
-    full.paint(
+    full.paint_raster(
         &theme,
         SurfaceExtent::unpadded(120, 40),
         &mut full_buffer,
@@ -1185,14 +1185,14 @@ fn animation_scoped_retained_end_to_end_benchmark() {
     let mut scoped_buffer = PixelBuffer::new(64, 16);
     let mut full_buffer = PixelBuffer::new(64, 16);
     scoped
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(64, 16),
             &mut scoped_buffer,
             1.0,
         )
         .unwrap();
-    full.paint(
+    full.paint_raster(
         &theme,
         SurfaceExtent::unpadded(64, 16),
         &mut full_buffer,
@@ -1207,7 +1207,7 @@ fn animation_scoped_retained_end_to_end_benchmark() {
         if iteration % 2 == 0 {
             let started = Instant::now();
             scoped
-                .paint(
+                .paint_raster(
                     &theme,
                     SurfaceExtent::unpadded(64, 16),
                     &mut scoped_buffer,
@@ -1218,7 +1218,7 @@ fn animation_scoped_retained_end_to_end_benchmark() {
 
             full.animation_only_dirty = false;
             let started = Instant::now();
-            full.paint(
+            full.paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(64, 16),
                 &mut full_buffer,
@@ -1229,7 +1229,7 @@ fn animation_scoped_retained_end_to_end_benchmark() {
         } else {
             full.animation_only_dirty = false;
             let started = Instant::now();
-            full.paint(
+            full.paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(64, 16),
                 &mut full_buffer,
@@ -1240,7 +1240,7 @@ fn animation_scoped_retained_end_to_end_benchmark() {
 
             let started = Instant::now();
             scoped
-                .paint(
+                .paint_raster(
                     &theme,
                     SurfaceExtent::unpadded(64, 16),
                     &mut scoped_buffer,
@@ -1280,7 +1280,7 @@ fn keyframe_animation_missing_name_records_diagnostic() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
@@ -1318,7 +1318,7 @@ fn animation_token_runtime_diagnostic_reaches_component() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
@@ -1364,19 +1364,25 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     let extent = SurfaceExtent::unpadded(120, 40);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     let diagnostics = component.diagnostics.clone().expect("diagnostics handle");
     assert_eq!(diagnostics.error_count(), 0);
 
     // An unrelated change diagnoses only its own node.
     component.call_namespaced_handler("relabel", &[]).unwrap();
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(diagnostics.error_count(), 0);
 
     // The class change keeps the structure and dirties one node; that node
     // must still be diagnosed.
     component.call_namespaced_handler("breakItem", &[]).unwrap();
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert!(matches!(
         diagnostics.health(),
         mesh_core_diagnostics::HealthStatus::Error(message)
@@ -1403,11 +1409,11 @@ fn a_running_animation_rearms_the_next_frame_without_a_second_pass() {
     let mut buffer = PixelBuffer::new(120, 40);
     // The first paint measures the surface and legitimately owes a configure.
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
     for _ in 0..2 {
         component
-            .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
             .unwrap();
         assert!(
             component.wants_render(),
@@ -1437,7 +1443,9 @@ fn momentum_ticks_are_paint_only_and_do_not_request_a_second_pass() {
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(160, 120);
     let mut buffer = PixelBuffer::new(160, 120);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
 
     for _ in 0..3 {
         component
@@ -1453,7 +1461,9 @@ fn momentum_ticks_are_paint_only_and_do_not_request_a_second_pass() {
                 },
             )
             .unwrap();
-        component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
     }
     let node_id = *component
         .scroll_inertia
@@ -1471,7 +1481,9 @@ fn momentum_ticks_are_paint_only_and_do_not_request_a_second_pass() {
     let inertia = component.scroll_inertia.get_mut(&node_id).unwrap();
     inertia.last_input -= Duration::from_millis(100);
     inertia.last_tick -= Duration::from_millis(16);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(component.last_dirty_types, ComponentDirtyFlags::PAINT);
     assert!(component.scroll_offsets[&node_id].y > before);
     assert!(component.wants_render());
@@ -1483,7 +1495,9 @@ fn momentum_ticks_are_paint_only_and_do_not_request_a_second_pass() {
     assert!(!component.wants_immediate_rerender());
 
     // The next frame paints the moved offset without restyling.
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert!(
         !component
             .last_dirty_types
@@ -1497,7 +1511,9 @@ fn smooth_scroll_ticks_are_paint_only_and_do_not_request_a_second_pass() {
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(160, 120);
     let mut buffer = PixelBuffer::new(160, 120);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
 
     component.scroll_animations.insert(
         runtime_node_id_for_key("root/0"),
@@ -1511,7 +1527,9 @@ fn smooth_scroll_ticks_are_paint_only_and_do_not_request_a_second_pass() {
         },
     );
     component.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
 
     assert_eq!(
         component.dirty_types,
@@ -1538,13 +1556,19 @@ fn paint_only_frames_skip_the_style_animation_pass_when_nothing_is_live() {
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(120, 40);
     let mut buffer = PixelBuffer::new(120, 40);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert!(component.transitions.is_empty());
 
     let before = component.style_animation_passes;
     component.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(component.style_animation_passes, before);
 
     // Hover restyles, so the pass runs and starts the transition.
@@ -1556,7 +1580,9 @@ fn paint_only_frames_skip_the_style_animation_pass_when_nothing_is_live() {
             ComponentInput::PointerMove { x: 10.0, y: 10.0 },
         )
         .unwrap();
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(component.style_animation_passes, before + 1);
     assert!(
         !component.transitions.is_empty(),
@@ -1565,7 +1591,9 @@ fn paint_only_frames_skip_the_style_animation_pass_when_nothing_is_live() {
 
     // While it runs, even a paint-only frame samples it.
     component.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(component.style_animation_passes, before + 2);
 }
 
@@ -1615,8 +1643,10 @@ fn consecutive_scroll_frames_annotate_only_scroll_offsets() {
         component.motion_policy.reduced_motion = true;
     }
     for _ in 0..2 {
-        fast.paint(&theme, extent, &mut fast_buffer, 1.0).unwrap();
-        full.paint(&theme, extent, &mut full_buffer, 1.0).unwrap();
+        fast.paint_raster(&theme, extent, &mut fast_buffer, 1.0)
+            .unwrap();
+        full.paint_raster(&theme, extent, &mut full_buffer, 1.0)
+            .unwrap();
     }
 
     for _ in 0..6 {
@@ -1624,8 +1654,10 @@ fn consecutive_scroll_frames_annotate_only_scroll_offsets() {
         scroll_by(&mut full, &theme, -9.0);
         // No stored inputs forces the full walk.
         full.paint_only_annotation_inputs = None;
-        fast.paint(&theme, extent, &mut fast_buffer, 1.0).unwrap();
-        full.paint(&theme, extent, &mut full_buffer, 1.0).unwrap();
+        fast.paint_raster(&theme, extent, &mut fast_buffer, 1.0)
+            .unwrap();
+        full.paint_raster(&theme, extent, &mut full_buffer, 1.0)
+            .unwrap();
         assert_eq!(fast_buffer.data(), full_buffer.data());
     }
     assert!(fast.scroll_only_annotation_frames >= 4);
@@ -1649,10 +1681,14 @@ fn paint_only_frame_with_changed_interaction_state_takes_the_full_annotation() {
     let mut buffer = PixelBuffer::new(120, 120);
     // The first paint owes a configure pass; settle before the paint-only frame.
     for _ in 0..2 {
-        component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
     }
     component.invalidate_paint();
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert!(component.paint_only_annotation_inputs.is_some());
 
     let row = first_node_with_class_token(component.last_tree.as_ref().unwrap(), "row")
@@ -1661,7 +1697,9 @@ fn paint_only_frame_with_changed_interaction_state_takes_the_full_annotation() {
     component.pointer_down_id = Some(row);
     component.invalidate_paint();
     let before = component.scroll_only_annotation_frames;
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(component.scroll_only_annotation_frames, before);
     let active = first_node_with_class_token(component.last_tree.as_ref().unwrap(), "row").unwrap();
     assert!(
@@ -1675,7 +1713,9 @@ fn hovered_tile_scale(source: &str) -> f32 {
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(400, 80);
     let mut buffer = PixelBuffer::new(400, 80);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     let tree = component.last_tree.as_ref().expect("tree");
     let key = first_node_by_class(tree, "pick")
         .and_then(WidgetNode::mesh_key)
@@ -1694,7 +1734,9 @@ fn hovered_tile_scale(source: &str) -> f32 {
         )
         .unwrap();
     for _ in 0..3 {
-        component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
     }
     let tree = component.last_tree.as_ref().expect("tree");
     let tile = first_node_by_class(tree, "pick").expect("picked tile");
@@ -1741,8 +1783,14 @@ apps = {{ {{ id = "a" }}, {{ id = "b" }}, {{ id = "c" }} }}
 </template>
 {TILE_STYLE}"#
     );
-    assert!(hovered_tile_scale(&fixed) > 1.0, "a static hovered button scales");
-    assert!(hovered_tile_scale(&looped) > 1.0, "a for-loop hovered button scales");
+    assert!(
+        hovered_tile_scale(&fixed) > 1.0,
+        "a static hovered button scales"
+    );
+    assert!(
+        hovered_tile_scale(&looped) > 1.0,
+        "a for-loop hovered button scales"
+    );
 }
 
 // cargo test -p mesh-core-shell --release --lib -- keyframe_animation_frame_profile --ignored --nocapture
@@ -1770,14 +1818,14 @@ fn keyframe_animation_frame_profile() {
         let mut buffer = PixelBuffer::new(512, 8);
         for _ in 0..4 {
             component
-                .paint(&theme, SurfaceExtent::unpadded(512, 8), &mut buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(512, 8), &mut buffer, 1.0)
                 .unwrap();
         }
         let frames = 300u32;
         let started = Instant::now();
         for _ in 0..frames {
             component
-                .paint(&theme, SurfaceExtent::unpadded(512, 8), &mut buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(512, 8), &mut buffer, 1.0)
                 .unwrap();
         }
         let elapsed = started.elapsed();

@@ -107,7 +107,7 @@ end
 
     // First paint instantiates the child and installs the live binding.
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
     assert_eq!(
         runtime_value(&component, "observed"),
@@ -164,7 +164,7 @@ value = 0
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
     let child_key = format!("{PARENT_ID}/local:Child");
 
@@ -220,7 +220,7 @@ other = 0
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
     let child_key = format!("{PARENT_ID}/local:Child");
     let iterations = 2_000;
@@ -294,7 +294,7 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     component.call_namespaced_handler("subscribe", &[]).unwrap();
@@ -346,7 +346,7 @@ local function choose(value) selected = value.id; return value.id end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
     fn handler(node: &WidgetNode) -> Option<mesh_core_elements::HandlerTarget> {
         node.event_handlers

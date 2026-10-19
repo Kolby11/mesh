@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::os::unix::io::BorrowedFd;
 use std::sync::Arc;
 
-use mesh_core_render::{DamageRect, PixelBuffer};
+use mesh_core_render::{DamageRect, PixelBuffer, SurfaceCanvas};
 use mesh_core_wayland::WindowStates;
 
 pub use dev_window::{DevWindowEvent as WindowEvent, DevWindowKeyEvent as WindowKeyEvent, KeyMods};
@@ -1248,23 +1248,49 @@ impl PresentationEngine {
         }
     }
 
+    /// Allocate the retained canvas for a surface of `width`×`height` device
+    /// pixels: a GPU target when `allow_gpu` and this backend presents GPU
+    /// buffers, otherwise a CPU buffer. `None` when the allocation fails.
+    pub fn allocate_canvas(
+        &mut self,
+        width: u32,
+        height: u32,
+        allow_gpu: bool,
+    ) -> Option<SurfaceCanvas> {
+        #[cfg(feature = "gpu")]
+        if allow_gpu
+            && let Backend::WaylandSurface(bridge) = &mut self.backend
+            && let Some(target) = bridge.allocate_gpu_target(width, height)
+        {
+            return Some(SurfaceCanvas::Gpu(target));
+        }
+        let _ = allow_gpu;
+        PixelBuffer::try_new(width, height).map(SurfaceCanvas::Raster)
+    }
+
+    /// Whether [`Self::allocate_canvas`] returns GPU targets when allowed.
+    pub fn gpu_canvas_available(&mut self) -> bool {
+        #[cfg(feature = "gpu")]
+        if let Backend::WaylandSurface(bridge) = &mut self.backend {
+            return bridge.gpu_available();
+        }
+        false
+    }
+
     pub fn present(
         &mut self,
         surface_id: &str,
         title: &str,
         visible: bool,
-        buffer: &PixelBuffer,
+        canvas: &mut SurfaceCanvas,
     ) -> Result<PresentStatus, PresentationError> {
-        // `present()` is only used by DevWindow callers. Pass a full-damage
-        // slice so the Wayland path would get a complete upload if ever
-        // reached, but in practice this only hits Backend::DevWindow.
         let full = DamageRect {
             x: 0,
             y: 0,
-            width: buffer.width().max(1),
-            height: buffer.height().max(1),
+            width: canvas.width().max(1),
+            height: canvas.height().max(1),
         };
-        self.present_with_damage(surface_id, title, visible, buffer, &[full])
+        self.present_with_damage(surface_id, title, visible, canvas, &[full])
     }
 
     pub fn present_with_damage(
@@ -1272,16 +1298,21 @@ impl PresentationEngine {
         surface_id: &str,
         title: &str,
         visible: bool,
-        buffer: &PixelBuffer,
+        canvas: &mut SurfaceCanvas,
         damage: &[DamageRect],
     ) -> Result<PresentStatus, PresentationError> {
         let _span =
             tracing::debug_span!("present_with_damage", surface_id, rects = damage.len()).entered();
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => {
-                bridge.present_with_damage(surface_id, title, visible, buffer, damage)
+                bridge.present_with_damage(surface_id, title, visible, canvas, damage)
             }
-            Backend::DevWindow(bridge) => bridge.present(surface_id, title, visible, buffer),
+            Backend::DevWindow(bridge) => match canvas.as_raster() {
+                Some(buffer) => bridge.present(surface_id, title, visible, buffer),
+                None => Err(PresentationError::BufferCopy(
+                    "the dev window presents CPU buffers only".into(),
+                )),
+            },
             Backend::Testing(backend) => {
                 if let Some(reason) = &backend.connection_lost {
                     return Err(PresentationError::ConnectionLost(reason.clone()));
@@ -2430,7 +2461,7 @@ mod tests {
             .configure("panel", SurfaceConfig::default())
             .expect("testing surface configuration succeeds");
         engine.testing_set_surface_configured("panel", false);
-        let buffer = PixelBuffer::new(32, 16);
+        let mut buffer = SurfaceCanvas::from(PixelBuffer::new(32, 16));
         let damage = [DamageRect {
             x: 0,
             y: 0,
@@ -2439,7 +2470,7 @@ mod tests {
         }];
 
         let status = engine
-            .present_with_damage("panel", "Panel", true, &buffer, &damage)
+            .present_with_damage("panel", "Panel", true, &mut buffer, &damage)
             .expect("not-ready is a normal presentation outcome");
 
         assert_eq!(status, PresentStatus::NotReady);
@@ -2449,7 +2480,7 @@ mod tests {
         engine.testing_set_surface_configured("panel", true);
         assert_eq!(
             engine
-                .present_with_damage("panel", "Panel", true, &buffer, &damage)
+                .present_with_damage("panel", "Panel", true, &mut buffer, &damage)
                 .expect("configured surface should present"),
             PresentStatus::Presented
         );
@@ -2462,7 +2493,7 @@ mod tests {
         engine
             .configure("panel", SurfaceConfig::default())
             .expect("testing surface configuration succeeds");
-        let buffer = PixelBuffer::new(32, 16);
+        let mut buffer = SurfaceCanvas::from(PixelBuffer::new(32, 16));
         let damage = [DamageRect {
             x: 0,
             y: 0,
@@ -2475,7 +2506,7 @@ mod tests {
         assert!(!engine.surface_waiting_for_buffer_release("panel"));
         assert_eq!(
             engine
-                .present_with_damage("panel", "Panel", true, &buffer, &damage)
+                .present_with_damage("panel", "Panel", true, &mut buffer, &damage)
                 .unwrap(),
             PresentStatus::NotReady
         );
@@ -2486,7 +2517,7 @@ mod tests {
         assert!(engine.surface_waiting_for_buffer_release("panel"));
         assert_eq!(
             engine
-                .present_with_damage("panel", "Panel", true, &buffer, &damage)
+                .present_with_damage("panel", "Panel", true, &mut buffer, &damage)
                 .unwrap(),
             PresentStatus::NotReady
         );
@@ -2495,7 +2526,7 @@ mod tests {
         assert!(!engine.surface_waiting_for_buffer_release("panel"));
         assert_eq!(
             engine
-                .present_with_damage("panel", "Panel", true, &buffer, &damage)
+                .present_with_damage("panel", "Panel", true, &mut buffer, &damage)
                 .unwrap(),
             PresentStatus::Presented
         );
@@ -2571,7 +2602,7 @@ mod tests {
     fn missing_surface_returns_non_delivery_without_recording_present() {
         let mut engine = PresentationEngine::testing_with_popup_support(false);
         engine.testing_set_surface_missing("panel", true);
-        let buffer = PixelBuffer::new(32, 16);
+        let mut buffer = SurfaceCanvas::from(PixelBuffer::new(32, 16));
         let damage = [DamageRect {
             x: 0,
             y: 0,
@@ -2581,7 +2612,7 @@ mod tests {
 
         assert_eq!(
             engine
-                .present_with_damage("panel", "Panel", true, &buffer, &damage)
+                .present_with_damage("panel", "Panel", true, &mut buffer, &damage)
                 .unwrap(),
             PresentStatus::SurfaceMissing
         );
@@ -2704,7 +2735,7 @@ mod tests {
     #[test]
     fn presents_share_one_explicit_frame_completion() {
         let mut engine = PresentationEngine::testing_with_popup_support(false);
-        let buffer = PixelBuffer::new(32, 16);
+        let mut buffer = SurfaceCanvas::from(PixelBuffer::new(32, 16));
         let damage = [DamageRect {
             x: 0,
             y: 0,
@@ -2719,10 +2750,10 @@ mod tests {
             .configure("overlay", SurfaceConfig::default())
             .expect("overlay config should be accepted");
         engine
-            .present_with_damage("panel", "Panel", true, &buffer, &damage)
+            .present_with_damage("panel", "Panel", true, &mut buffer, &damage)
             .unwrap();
         engine
-            .present_with_damage("overlay", "Overlay", true, &buffer, &damage)
+            .present_with_damage("overlay", "Overlay", true, &mut buffer, &damage)
             .unwrap();
         assert_eq!(engine.testing_completed_frames(), 0);
 
@@ -2734,7 +2765,7 @@ mod tests {
     #[test]
     fn testing_backend_does_not_deliver_unknown_visible_surface_work() {
         let mut engine = PresentationEngine::testing_with_popup_support(false);
-        let buffer = PixelBuffer::new(32, 16);
+        let mut buffer = SurfaceCanvas::from(PixelBuffer::new(32, 16));
         let damage = [DamageRect {
             x: 0,
             y: 0,
@@ -2744,7 +2775,7 @@ mod tests {
 
         assert_eq!(
             engine
-                .present_with_damage("missing", "Missing", true, &buffer, &damage)
+                .present_with_damage("missing", "Missing", true, &mut buffer, &damage)
                 .expect("unknown visible surface is a normal retry outcome"),
             PresentStatus::SurfaceMissing
         );
@@ -2759,7 +2790,7 @@ mod tests {
 
         assert_eq!(
             engine
-                .present_with_damage("missing", "Missing", false, &buffer, &damage)
+                .present_with_damage("missing", "Missing", false, &mut buffer, &damage)
                 .expect("hidden surfaces do not require a compositor object"),
             PresentStatus::Presented
         );

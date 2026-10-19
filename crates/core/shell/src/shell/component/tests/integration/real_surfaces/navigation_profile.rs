@@ -47,7 +47,9 @@ fn paint_if_wanted(
     if !component.wants_render() {
         return false;
     }
-    component.paint(theme, extent(), buffer, 1.0).unwrap();
+    component
+        .paint_raster(theme, extent(), buffer, 1.0)
+        .unwrap();
     true
 }
 
@@ -98,7 +100,9 @@ fn navigation_surface(theme: &Theme, buffer: &mut PixelBuffer) -> FrontendSurfac
         "mesh.brightness",
         serde_json::json!({ "level": 55 }),
     );
-    component.paint(theme, extent(), buffer, 1.0).unwrap();
+    component
+        .paint_raster(theme, extent(), buffer, 1.0)
+        .unwrap();
     component
 }
 
@@ -195,7 +199,9 @@ fn navigation_frame_cost_profile() {
     }
     for _ in 0..4 {
         component.invalidate_paint();
-        component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+        component
+            .paint_raster(&theme, extent(), &mut buffer, 1.0)
+            .unwrap();
     }
     eprintln!(
         "settled extent: {WIDTH}x{}, dirty flags now {:?}",
@@ -206,7 +212,9 @@ fn navigation_frame_cost_profile() {
     // Settle: the first payload of each service is genuinely new.
     for volume in 0..10u32 {
         publish(&mut component, "mesh.audio", audio_payload(volume));
-        component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+        component
+            .paint_raster(&theme, extent(), &mut buffer, 1.0)
+            .unwrap();
     }
 
     // A 1 Hz audio poll: the bar's volume button reads it, everything else
@@ -274,7 +282,9 @@ fn navigation_frame_cost_profile() {
     let started = Instant::now();
     for _ in 0..loop_frames("paint") {
         component.invalidate_paint();
-        component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+        component
+            .paint_raster(&theme, extent(), &mut buffer, 1.0)
+            .unwrap();
     }
     let paint_only = started.elapsed();
     eprintln!(
@@ -300,7 +310,9 @@ fn navigation_frame_cost_profile() {
     let sample_frames = frames.min(240);
     for volume in 0..sample_frames {
         publish(&mut component, "mesh.audio", audio_payload(volume % 100));
-        component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+        component
+            .paint_raster(&theme, extent(), &mut buffer, 1.0)
+            .unwrap();
         let dirty = component.last_dirty_types;
         let narrow_supported = component.selective_service_build_supported;
         // Take rather than read: a zero-damage frame leaves the accumulator
@@ -388,7 +400,9 @@ fn navigation_frame_cost_profile() {
     let _ = component.take_profiling_records();
     for _ in 0..frames {
         component.invalidate_paint();
-        component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+        component
+            .paint_raster(&theme, extent(), &mut buffer, 1.0)
+            .unwrap();
     }
     dump_stages("paint only", component.take_profiling_records(), frames);
 }
@@ -431,7 +445,9 @@ fn navigation_hover_profile() {
     }
     for _ in 0..4 {
         component.invalidate_paint();
-        component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+        component
+            .paint_raster(&theme, extent(), &mut buffer, 1.0)
+            .unwrap();
     }
     let height = SETTLED.load(std::sync::atomic::Ordering::Relaxed);
 
@@ -553,7 +569,9 @@ fn navigation_hover_profile() {
     // Let the pending bridges fire.
     std::thread::sleep(Duration::from_millis(450));
     component.tick().unwrap();
-    component.paint(&theme, extent(), &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent(), &mut buffer, 1.0)
+        .unwrap();
     let still_open = component.child_surface_requests().len();
 
     let steps = step_times.len();

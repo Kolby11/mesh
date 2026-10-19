@@ -530,7 +530,8 @@ fn wayland_parent_click_does_not_cache_padded_size_for_spanning_surface() {
     // the paint buffer is wider/taller because it includes tooltip reserve.
     surface.width = 0;
     surface.height = 56;
-    shell.components[0].parent.paint_buffer = Some(mesh_core_render::PixelBuffer::new(1920, 256));
+    shell.components[0].parent.paint_buffer =
+        Some(mesh_core_render::PixelBuffer::new(1920, 256).into());
 
     shell.presentation_engine.testing_push_event(
         mesh_core_presentation::WindowEvent::PointerButton {

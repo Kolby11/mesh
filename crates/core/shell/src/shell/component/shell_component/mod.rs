@@ -902,7 +902,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         &mut self,
         theme: &Theme,
         extent: SurfaceExtent,
-        buffer: &mut PixelBuffer,
+        canvas: &mut SurfaceCanvas,
         scale: f32,
     ) -> Result<(), ComponentError> {
         let _span = tracing::debug_span!("paint", surface = %self.id()).entered();
@@ -963,10 +963,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         // never notices. Without forcing a full repaint here, only the dirty
         // diff gets drawn into the new buffer and everything else stays
         // transparent.
-        if self.last_painted_buffer_size != Some((buffer.width(), buffer.height())) {
+        if self.last_painted_buffer_size != Some((canvas.width(), canvas.height())) {
             self.surface_pixels_invalid = true;
         }
-        self.last_painted_buffer_size = Some((buffer.width(), buffer.height()));
+        self.last_painted_buffer_size = Some((canvas.width(), canvas.height()));
         // Pointer-enter handlers can update script state while the same input
         // event changes the hovered pseudo-state. The narrow script builder
         // intentionally reuses native subtrees, including their computed
@@ -1200,7 +1200,8 @@ impl ShellComponent for FrontendSurfaceComponent {
             || render_object_dirty.material > 0
         {
             let dirty_ids = self.retained_tree.render_dirty_node_ids();
-            let (mut previous, mut current) = std::mem::take(&mut self.visual_damage_lookup_scratch);
+            let (mut previous, mut current) =
+                std::mem::take(&mut self.visual_damage_lookup_scratch);
             previous.clear();
             current.clear();
             if let Some((commands, surface)) = &self.last_visual_commands {
@@ -1252,9 +1253,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         {
             effective_damage.rect = bounding_damage_rect(&effective_damage.rects, surface_damage);
         }
+        let mut session = canvas.session();
         let present_override = self.shift_scrolled_viewports(
             &mut effective_damage,
-            buffer,
+            &mut session,
             scale,
             current_tooltip_damage,
         );
@@ -1384,7 +1386,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let paint_started = std::time::Instant::now();
         let paint_metrics = self.paint_pixel_regions(
             theme,
-            buffer,
+            &mut session,
             scale,
             &selected_paint,
             &effective_damage,
@@ -1994,7 +1996,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn paint_child_surface(
         &self,
         node_key: &str,
-        buffer: &mut PixelBuffer,
+        canvas: &mut SurfaceCanvas,
         scale: f32,
         content_offset: (u32, u32),
         exiting: bool,
@@ -2018,8 +2020,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         let mut child_root = node.clone();
         child_root.attributes.remove("hidden");
         let scale_policy = mesh_core_render::FractionalScale::new(scale);
-        let logical_width = scale_policy.logical_extent(buffer.width());
-        let logical_height = scale_policy.logical_extent(buffer.height());
+        let logical_width = scale_policy.logical_extent(canvas.width());
+        let logical_height = scale_policy.logical_extent(canvas.height());
         // Promoted roots are hidden in the parent display list, so its
         // subtree stamps may be absent or stop advancing. The retained widget
         // tree still tracks their animation, style and content changes.
@@ -2059,19 +2061,17 @@ impl ShellComponent for FrontendSurfaceComponent {
             &damage_rects,
             DisplayListRepaintPolicy::MinimalDamage,
         );
+        let mut session = canvas.session();
         for damage in damage_rects {
             let physical_damage =
-                scale_damage_rect_to_buffer(damage, scale, buffer.width(), buffer.height());
-            buffer.clear_rect(
-                physical_damage.x,
-                physical_damage.y,
-                physical_damage.width,
-                physical_damage.height,
+                scale_damage_rect_to_buffer(damage, scale, session.width(), session.height());
+            session.clear_rect(
+                physical_damage,
                 mesh_core_elements::style::Color::TRANSPARENT,
             );
-            mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
+            mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session(
                 &selected,
-                buffer,
+                &mut session,
                 scale,
                 Some((
                     physical_damage.x,
@@ -2082,6 +2082,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 None,
                 None,
                 Some(self.compiled.manifest.package.id.as_str()),
+                false,
             );
         }
         Ok(true)

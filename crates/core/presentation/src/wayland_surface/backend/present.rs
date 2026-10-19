@@ -1,6 +1,6 @@
 use super::*;
 use crate::NegotiatedCapabilities;
-use mesh_core_render::DamageRect;
+use mesh_core_render::{DamageRect, SurfaceCanvas};
 use smallvec::SmallVec;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -27,7 +27,7 @@ impl WaylandSurfaceBackend {
         surface_id: &str,
         _title: &str,
         visible: bool,
-        buffer: &PixelBuffer,
+        canvas: &mut SurfaceCanvas,
         damage_rects: &[DamageRect],
     ) -> Result<PresentStatus, PresentationError> {
         if let Some(error) = self.state.connection_lost_error() {
@@ -90,8 +90,15 @@ impl WaylandSurfaceBackend {
         // exposed by `surface_size_if_known`, so shell paint and presentation
         // cannot disagree about the logical destination.
         let output_size = self.output_logical_size_for_surface(surface_id);
+        #[cfg(feature = "gpu")]
+        let gpu = match canvas {
+            SurfaceCanvas::Gpu(_) => self.gpu.context(&self.state.dmabuf),
+            SurfaceCanvas::Raster(_) => None,
+        };
+        #[cfg(feature = "gpu")]
+        let mut gpu_failure = None;
         let (
-            buffer_index,
+            slot,
             copy_damage,
             logical_w,
             logical_h,
@@ -101,10 +108,6 @@ impl WaylandSurfaceBackend {
             physical_damage,
         ) = {
             let state = &mut self.state;
-            let pool = state
-                .pool
-                .as_mut()
-                .ok_or_else(|| PresentationError::BufferAlloc("shm pool not initialised".into()))?;
             let Some(entry) = state.surfaces.get_mut(surface_id) else {
                 return Ok(PresentStatus::SurfaceMissing);
             };
@@ -115,17 +118,17 @@ impl WaylandSurfaceBackend {
             let (logical_w, logical_h) = entry.resolved_extent(output_size);
             let scale = entry.scale;
 
-            // SHM copy must use physical buffer dimensions for the copy region.
-            let physical_w = buffer.width().max(1);
-            let physical_h = buffer.height().max(1);
+            // The copy uses physical buffer dimensions.
+            let physical_w = canvas.width().max(1);
+            let physical_h = canvas.height().max(1);
 
             // Normalize logical damage to device-space edge coverage once. The
-            // exact physical rectangles are reused for SHM copy and protocol
-            // damage, so neither boundary can choose a different rounding rule.
-            // This is the shell's final damage stage (`DeviceDamage`), so the
-            // copied and reported rects are the ones the shell cleared and
-            // painted, disjoint.
-            let mut shm_copy_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]> =
+            // exact physical rectangles are reused for the buffer copy and
+            // protocol damage, so neither boundary can choose a different
+            // rounding rule. This is the shell's final damage stage
+            // (`DeviceDamage`), so the copied and reported rects are the ones
+            // the shell cleared and painted, disjoint.
+            let mut device_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]> =
                 mesh_core_render::DeviceDamage::from_logical(
                     damage_rects,
                     scale,
@@ -136,33 +139,72 @@ impl WaylandSurfaceBackend {
                 .iter()
                 .copied()
                 .collect();
-            if shm_copy_damage.is_empty() {
+            if device_damage.is_empty() {
                 // If the slice is empty (shouldn't normally reach here due to
                 // the skip gate in render.rs), upload the full buffer.
-                shm_copy_damage.push(full_damage(physical_w, physical_h));
+                device_damage.push(full_damage(physical_w, physical_h));
             }
-            let Some((buffer_index, copy_damage)) = entry.copy_into_shm_buffer(
-                pool,
-                buffer.data(),
-                physical_w,
-                physical_h,
-                &shm_copy_damage,
-            )?
-            else {
+            let prepared = match canvas {
+                SurfaceCanvas::Raster(buffer) => {
+                    let pool = state.pool.as_mut().ok_or_else(|| {
+                        PresentationError::BufferAlloc("shm pool not initialised".into())
+                    })?;
+                    entry
+                        .copy_into_shm_buffer(
+                            pool,
+                            buffer.data(),
+                            physical_w,
+                            physical_h,
+                            &device_damage,
+                        )?
+                        .map(|(index, copied)| (BufferSlot::Shm(index), copied))
+                }
+                #[cfg(feature = "gpu")]
+                SurfaceCanvas::Gpu(target) => {
+                    let copied = match gpu {
+                        Some(context) => entry.copy_into_dmabuf_buffer(
+                            context,
+                            &mut state.dmabuf,
+                            &qh,
+                            target,
+                            &device_damage,
+                        ),
+                        None => Err(PresentationError::BufferAlloc(
+                            "GPU presentation is disabled".into(),
+                        )),
+                    };
+                    match copied {
+                        Ok(prepared) => {
+                            prepared.map(|(index, copied)| (BufferSlot::Dmabuf(index), copied))
+                        }
+                        // The shell reallocates a CPU canvas once GPU canvases
+                        // are unavailable, repainting the whole surface.
+                        Err(error) => {
+                            gpu_failure = Some(error);
+                            None
+                        }
+                    }
+                }
+            };
+            let Some((slot, copy_damage)) = prepared else {
+                #[cfg(feature = "gpu")]
+                if let Some(error) = gpu_failure {
+                    self.gpu.disable(&error);
+                }
                 return Ok(PresentStatus::NotReady);
             };
             (
-                buffer_index,
+                slot,
                 copy_damage,
                 logical_w,
                 logical_h,
                 physical_w,
                 physical_h,
                 scale,
-                shm_copy_damage,
+                device_damage,
             )
         };
-        // Stage compositor state only after a reusable SHM buffer has been
+        // Stage compositor state only after a reusable buffer has been
         // prepared. A buffer backpressure/allocation failure must not consume
         // a region update that still needs a successful wl_surface commit.
         let prepared_state = self.prepare_surface_state(surface_id);
@@ -173,10 +215,10 @@ impl WaylandSurfaceBackend {
         let Some(entry) = state.surfaces.get_mut(surface_id) else {
             return Ok(PresentStatus::SurfaceMissing);
         };
-        if let Err(error) = entry.attach_shm_buffer(
+        if let Err(error) = entry.attach_buffer(
             &qh,
             surface_id,
-            buffer_index,
+            slot,
             logical_w,
             logical_h,
             physical_w,
@@ -185,16 +227,16 @@ impl WaylandSurfaceBackend {
             &copy_damage,
             scale,
         ) {
-            // copy_into_shm_buffer consumes the selected slot's accumulated
-            // damage before copying it. Put it back when activation/attach
-            // fails, otherwise a retry would publish a partially refreshed
-            // SHM buffer as if the frame had been delivered.
-            entry.restore_copied_damage(
-                buffer_index,
-                &copy_damage,
-                full_damage(physical_w, physical_h),
-            );
+            // Preparing the buffer consumed the slot's accumulated damage
+            // before copying it. Put it back when activation/attach fails,
+            // otherwise a retry would publish a partially refreshed buffer
+            // as if the frame had been delivered.
+            entry.restore_copied_damage(slot, &copy_damage, full_damage(physical_w, physical_h));
             return Err(error);
+        }
+        #[cfg(feature = "gpu")]
+        if let BufferSlot::Dmabuf(index) = slot {
+            state.dmabuf.busy.insert(entry.dmabuf_buffer_id(index));
         }
         Self::mark_surface_state_committed(entry, prepared_state);
 

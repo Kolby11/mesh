@@ -17,7 +17,7 @@ fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_sta
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(360, 720);
         component
-            .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
             .unwrap();
     }
     component
@@ -96,7 +96,7 @@ fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_sta
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(360, 640);
     component
-        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
         .unwrap();
     component
         .call_namespaced_handler(
@@ -105,7 +105,7 @@ fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_sta
         )
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
         .unwrap();
 
     let text = rendered_text(&component);
@@ -158,7 +158,7 @@ fn debug_inspector_surfaces_view_renders_retained_paint_filtering_counters() {
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(360, 720);
         component
-            .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
             .unwrap();
     }
     component
@@ -228,13 +228,13 @@ fn debug_inspector_surfaces_view_renders_retained_paint_filtering_counters() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(360, 640);
     component
-        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
         .unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(360, 640), &mut buffer, 1.0)
         .unwrap();
 
     let text = rendered_text(&component);
@@ -261,7 +261,7 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(360, 720);
         component
-            .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
             .unwrap();
     }
     component
@@ -341,13 +341,13 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(360, 720);
     component
-        .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
         .unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showModules", &[])
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
         .unwrap();
 
     let text = rendered_text(&component);
@@ -369,7 +369,7 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
         )
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
         .unwrap();
     let filtered_text = rendered_text(&component);
     assert!(
@@ -556,7 +556,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(920, 700);
         component
-            .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
             .unwrap();
     }
     component
@@ -757,7 +757,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(920, 700);
     component
-        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
         .unwrap();
 
     let text = rendered_text(&component);
@@ -775,7 +775,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
         .unwrap();
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "64%"));
@@ -803,7 +803,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAdvanced", &[])
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
         .unwrap();
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Active providers"));
@@ -821,7 +821,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         )
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
         .unwrap();
     let text = rendered_text(&component);
     assert!(
@@ -880,7 +880,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         )
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
         .unwrap();
     let scoped_text = rendered_text(&component);
     assert!(
@@ -918,7 +918,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
         .unwrap();
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Color theme"));
@@ -988,7 +988,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
     slovak_locale.set_locale("sk");
     component.locale_changed(&slovak_locale).unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
         .unwrap();
     let text = rendered_text(&component);
     assert!(
@@ -1002,7 +1002,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
         .unwrap();
     let text = rendered_text(&component);
     assert!(
@@ -1137,13 +1137,13 @@ fn debug_inspector_benchmark_view_renders_canonical_rows_when_profiling_off() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 640);
     component
-        .paint(&theme, SurfaceExtent::unpadded(320, 640), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(320, 640), &mut buffer, 1.0)
         .unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(320, 640), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(320, 640), &mut buffer, 1.0)
         .unwrap();
 
     let text = rendered_text(&component);
@@ -1190,7 +1190,7 @@ fn debug_inspector_benchmark_view_renders_waiting_rows_when_profiling_live_witho
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(360, 720);
         component
-            .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
             .unwrap();
     }
     component
@@ -1225,13 +1225,13 @@ fn debug_inspector_benchmark_view_renders_waiting_rows_when_profiling_live_witho
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 640);
     component
-        .paint(&theme, SurfaceExtent::unpadded(320, 640), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(320, 640), &mut buffer, 1.0)
         .unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(320, 640), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(320, 640), &mut buffer, 1.0)
         .unwrap();
 
     let text = rendered_text(&component);
@@ -1266,7 +1266,7 @@ fn debug_inspector_renders_allocator_mode_and_per_surface_counts() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(360, 720);
     component
-        .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
         .unwrap();
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -1316,7 +1316,7 @@ fn debug_inspector_renders_allocator_mode_and_per_surface_counts() {
         .unwrap();
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
         .unwrap();
     let overview_text = rendered_text(&component);
     assert!(overview_text.iter().any(|line| line == "4.0 KiB / 12 ops"));
@@ -1325,7 +1325,7 @@ fn debug_inspector_renders_allocator_mode_and_per_surface_counts() {
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showSurfaces", &[])
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
         .unwrap();
     let surface_text = rendered_text(&component);
     assert!(
@@ -1346,7 +1346,7 @@ fn debug_inspector_benchmark_view_renders_populated_benchmark_result_rows() {
         let theme = default_theme();
         let mut buffer = PixelBuffer::new(360, 720);
         component
-            .paint(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(360, 720), &mut buffer, 1.0)
             .unwrap();
     }
     component
@@ -1433,13 +1433,13 @@ fn debug_inspector_benchmark_view_renders_populated_benchmark_result_rows() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(320, 720);
     component
-        .paint(&theme, SurfaceExtent::unpadded(320, 720), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(320, 720), &mut buffer, 1.0)
         .unwrap();
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showBenchmark", &[])
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(320, 720), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(320, 720), &mut buffer, 1.0)
         .unwrap();
 
     let text = rendered_text(&component);

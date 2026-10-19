@@ -5,6 +5,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+# Paint on the GPU and present dmabuf buffers when the compositor supports it.
+gpu = ["mesh-core-render/renderer-gpu"]
+
 [dependencies]
 mesh-core-render = { workspace = true }
 mesh-core-surface-policy = { workspace = true }

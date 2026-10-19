@@ -41,7 +41,7 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
         .unwrap();
 
     // Simulate a hover over the button region.  The button key is "root/0/0"
@@ -50,7 +50,7 @@ end
     component.hovered_key = Some("root/0".into());
     component.dirty = true;
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
         .unwrap();
 
     // After the hover restyle the button should be 80px wide.
@@ -130,7 +130,7 @@ button:focus {
 
     // First paint: no focus — button width should be 40px in metrics.
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
         .unwrap();
     let width_before = {
         let runtimes = component.runtimes.lock().unwrap();
@@ -146,7 +146,7 @@ button:focus {
     component.focused_key = Some("root/0".into());
     component.dirty = true;
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
         .unwrap();
     let width_after = {
         let runtimes = component.runtimes.lock().unwrap();
@@ -200,7 +200,7 @@ button:focus {
 
     // Paint without focus.
     component
-        .paint(&theme, SurfaceExtent::unpadded(300, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(300, 80), &mut buffer, 1.0)
         .unwrap();
     let tree_unfocused = component.last_tree.as_ref().unwrap().clone();
     let a11y_unfocused = AccessibilityTree::from_widget_tree(&tree_unfocused);
@@ -222,7 +222,7 @@ button:focus {
     component.focused_key = Some("root/0".into());
     component.dirty = true;
     component
-        .paint(&theme, SurfaceExtent::unpadded(300, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(300, 80), &mut buffer, 1.0)
         .unwrap();
     let tree_focused = component.last_tree.as_ref().unwrap().clone();
     let a11y_focused = AccessibilityTree::from_widget_tree(&tree_focused);
@@ -297,7 +297,7 @@ box {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(CONTENT.0, CONTENT.1 + RESERVE);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::padded(CONTENT, (CONTENT.0, CONTENT.1 + RESERVE)),
             &mut buffer,

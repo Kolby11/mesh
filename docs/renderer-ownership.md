@@ -39,10 +39,15 @@ icon snapshots, GPU ownership and presentation.
 
 `render::gpu`, behind the `renderer-gpu` feature, owns a dynamically loaded
 EGL display, a GLES3 context and Skia's Ganesh `DirectContext`. It is not
-`Send`: the renderer-owning thread creates, uses and drops it. It allocates
-BGRA premultiplied offscreen targets with a synchronous readback for tests and
-parity checks. It does not present; GPU frames are planned to reach the
-compositor as dmabuf buffers committed by the presentation layer. The plan is
+`Send`: the thread that creates it uses and drops it. In the shell that is the
+UI thread, where the painter's thread-local state already lives. The context
+opens on the DRM device the compositor names in its dmabuf feedback.
+
+A surface's retained pixels are a `SurfaceCanvas`: a CPU `PixelBuffer` or a
+GPU render target, both painted through `PixelCanvasSession`. The presentation
+layer allocates canvases and owns the buffers the compositor reads: SHM slots
+for CPU canvases, and exported dmabuf textures, fenced for implicit sync, for
+GPU canvases. Remaining work is in
 [`.planning/todos/pending/2026-07-15-gpu-rendering-backend.md`](../.planning/todos/pending/2026-07-15-gpu-rendering-backend.md).
 
 ## Adapter boundaries

@@ -186,7 +186,7 @@ scroll { height: 60px; overflow-y: auto; }
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 120);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
         .unwrap();
 
     component

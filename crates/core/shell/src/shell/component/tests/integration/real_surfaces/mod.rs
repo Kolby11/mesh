@@ -209,7 +209,7 @@ fn pick_bubble_option(trigger: &str, option_index: usize) -> (Option<usize>, Opt
         .unwrap();
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -218,7 +218,7 @@ fn pick_bubble_option(trigger: &str, option_index: usize) -> (Option<usize>, Opt
         .unwrap();
     hover_ref(&mut component, &theme, width, height, trigger);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -263,7 +263,7 @@ fn pick_bubble_option(trigger: &str, option_index: usize) -> (Option<usize>, Opt
             .unwrap();
     }
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,

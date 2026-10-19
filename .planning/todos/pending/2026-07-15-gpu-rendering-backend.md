@@ -1,121 +1,99 @@
 ---
 created: 2026-07-15T00:00:00.000Z
 revised: 2026-10-19
-title: GPU rendering backend (Skia-GL on the D6 render thread, dmabuf present)
+title: GPU rendering backend (Skia-GL, dmabuf present) — remaining work
 area: rendering
 files:
   - crates/core/frontend/render/src/gpu.rs
-  - crates/core/frontend/render/src/scene_thread.rs
-  - crates/core/frontend/render/src/surface/buffer.rs
-  - crates/core/frontend/render/src/surface/painter/backend.rs
+  - crates/core/frontend/render/src/surface/canvas.rs
+  - crates/core/presentation/src/wayland_surface/backend/gpu.rs
   - crates/core/presentation/src/wayland_surface/backend/present.rs
+  - crates/core/shell/src/shell/runtime/render/mod.rs
 ---
 
 ## Goal
 
-Paint retained display lists on the GPU per surface, with the existing SHM
-software path as a runtime fallback. Unlocks cheap blur/shadow/gradient
-effects (currently CPU-per-damaged-pixel) and removes the full-surface raster
-cost from animation-heavy frames.
+Paint retained display lists on the GPU per surface, with the SHM software
+path as a runtime fallback. Blur, shadow and gradient effects stop costing CPU
+per damaged pixel, and full-surface raster leaves animation-heavy frames.
 
-## Decisions (revised 2026-10-19)
+## Shipped (2026-10-19)
 
-- **Skia Ganesh over GLES3, not wgpu/Vello.** The painter already draws
-  through a Skia `Canvas`; Ganesh uses the same API, so the port is target
-  acquisition, not paint semantics. wgpu cannot express damage-aware partial
-  present. The Vello lane stays open behind the same painter contract.
-- **The renderer runs on the D6 scene thread.** `GpuContext` is not `Send`
-  and is created, used and dropped by the `SceneRenderer` worker.
-- **Present dmabuf buffers from the UI thread, not `eglSwapBuffers`.** The
-  original plan presented through `wl_egl_window` + `eglSwapBuffersWithDamage`.
-  That attaches and commits the `wl_surface` from the GL thread, while the UI
-  thread commits input/opaque/blur regions and window geometry on the same
-  surface — two committers, breaking presentation ownership. Instead the
-  renderer draws into GBM-allocated buffers (imported as EGLImage-backed
-  FBOs) and returns them as `SceneRenderer::Output`; presentation attaches
-  them through `zwp_linux_dmabuf_v1` in the same commit as region state.
-  Buffer age is our own per-buffer damage bookkeeping (as SHM already does),
-  so no `EGL_EXT_buffer_age` dependency.
-- **Display selection.** Tests use `EGL_MESA_platform_surfaceless`. Production
-  must render on the compositor's device: open the EGL display on the
-  render node reported by `zwp_linux_dmabuf_v1` feedback (main device), so
-  hybrid laptops (this dev box: AMD iGPU + NVIDIA dGPU) do not render on one
-  GPU and scan out on the other.
+Phases 1–4 and the rollout part of phase 6 have landed; see the 2026-10-19
+entry in the [performance log](../../log/performance-log.md).
 
-## Phases
+- **Skia Ganesh over GLES3.** The painter draws through a Skia `Canvas` on a
+  `PixelCanvasSession`; the GPU target is the same session API.
+- **The GPU paints on the UI thread, not the D6 scene thread.** Painter
+  state (font database and aliases, glyph/icon/image caches, backdrop frame,
+  tooltip hints, resource job queues) is thread-local on the UI thread. Moving
+  paint to another thread needs SH-11's immutable `PaintContext` first. One
+  EGL context stays current on the UI thread for the whole session.
+- **Each surface keeps a retained GPU target** (`SurfaceCanvas::Gpu`), which
+  plays the role `PixelBuffer` plays for SHM: partial repaints and scroll
+  shifts keep working regardless of which ring buffer the compositor holds.
+  Presentation copies the damage into one of a 2–3 deep ring of dmabuf
+  buffers, each with its own pending damage, like the SHM slots.
+- **No GBM.** Ring buffers are GL `RGBA8` textures exported with
+  `EGL_MESA_image_dma_buf_export` (`DRM_FORMAT_ABGR8888`). Each export's
+  format/modifier is checked against the compositor's dmabuf feedback table
+  before `create_immed`, because importing an unadvertised pair is a protocol
+  error.
+- **Device selection.** The EGL display is opened with
+  `EGL_EXT_platform_device` on the device whose DRM node matches the dmabuf
+  feedback's main device. On this hybrid laptop Hyprland reports the AMD
+  780M; the RTX 4060 is not used.
+- **Synchronization without a CPU wait.** After the copy, an
+  `EGL_ANDROID_native_fence_sync` sync file is imported into the dmabuf as an
+  implicit write fence (`DMA_BUF_IOCTL_IMPORT_SYNC_FILE`, Linux 6.0+). The
+  compositor waits for the GPU; the UI thread does not. Without fence support
+  the frame falls back to a CPU wait (`glFinish`).
+- **Rollout.** The CLI builds with `gpu` by default. GPU presentation turns on
+  when the compositor offers `zwp_linux_dmabuf_v1` v4 feedback and the device
+  exports importable buffers; otherwise one log line names the reason and
+  surfaces paint on the CPU. `MESH_RENDER_GPU=0` forces the CPU. A dmabuf
+  failure mid-session disables GPU presentation, and surfaces reallocate CPU
+  canvases and repaint in full.
+- **Debug overlays stay on the CPU.** The HUD, layout bounds and element
+  highlight read and restore raw pixels, so while any of them (or the debug
+  overlay) is on, surfaces reallocate CPU canvases. In-shell HUD timings
+  therefore measure the CPU path.
 
-### Phase 1 — headless context, offscreen raster, readback (done 2026-10-19)
+## Remaining
 
-`mesh-core-render::gpu` behind the `renderer-gpu` feature: dynamically loaded
-libEGL (no link-time GL dependency), surfaceless display, GLES3 context,
-Skia `DirectContext`, BGRA premultiplied offscreen targets, synchronous
-readback into `PixelBuffer`. Parity test against Skia raster. The nix shell
-now provides libglvnd plus `/run/opengl-driver/lib`.
+### Resource residency (phase 5)
 
-### Phase 2 — painter over a canvas target (done 2026-10-19)
+Icons, images, SVG rasterizations and painter-owned glyph bitmaps are CPU
+`Image`s; Ganesh uploads each one when it is first drawn and caches the
+texture by image identity. Measure text-update and icon-grid frames on the
+GPU path, then keep GPU images keyed by the existing cache keys where uploads
+dominate.
 
-`PixelCanvasSession` is the paint target: a `PixelBuffer` (raster) or any
-Skia surface; `GpuTarget::session()` makes one on a GPU target. Its raw-buffer
-escape hatch (`with_buffer`) is gone. Damage clears and in-place scroll
-shifts are session methods: byte fast paths on raster, Src draws and a
-snapshot self-copy elsewhere. The scrollbar fallback and the tooltip draw on
-the session's canvas. The paint-backend trait's required method takes a
-session. The icon blits and glyph blends were already test-only; they now draw
-through the canvas, and `blend_pixel` plus the dead
-`composite_blurred_buffer` are deleted. Backdrop blur is a backdrop
-`save_layer` and needs no buffer reads. The display-list and region paint
-entry points have `_in_session` variants that a scene-thread renderer calls.
+### Gates (rest of phase 6)
 
-Still raster-only, with no GPU path needed yet: the debug overlay's
-capture/restore copies bytes, and the shell's SHM frame path still calls
-`PixelBuffer::clear_rect`/`shift_region_pixels` before painting. Phase 3
-renders through the session methods instead.
+D9 workload gates on both backends. The parity tests in `gpu::tests` cover
+four small scenes; a canonical-workload pixel parity gate and a GPU frame-cost
+gate (`gpu_frame_cost_workload` is the starting point) are still needed. Live
+GPU presentation has been exercised only on Hyprland with an AMD main device.
 
-### Phase 3 — `SceneRenderer` implementation
+### Scene thread
 
-A GPU `SceneRenderer` on the scene thread: per-surface buffer rings, damage
-replay per buffer, `requires_full_replay` honored, surface removal retires
-GPU resources on the owner thread. Readback output first, so it can drive the
-existing SHM present path end to end before dmabuf exists.
+Moving GPU paint to the D6 render thread, after SH-11. The scene-thread
+handoff and `SceneRenderer` trait exist; the per-surface retained target and
+ring move with the paint.
 
-### Phase 4 — dmabuf presentation
+## Measured
 
-GBM allocation on the compositor's main device, `zwp_linux_dmabuf_v1`
-(v4 feedback for device and format/modifier selection), explicit or implicit
-sync fence before attach, buffer release tracking feeding the ring. SHM stays
-the fallback per surface; the backend id (`skia-raster` / `skia-gl`) joins
-`paint_backend_snapshot()`.
-
-### Phase 5 — resource residency
-
-Upload glyph atlases, images and SVG rasterizations once as GPU images keyed
-by the existing cache keys; measure icon-grid and text-update workloads.
-
-### Phase 6 — parity, gates and rollout
-
-Pixel-parity per canonical workload, D9 gates on both backends, then
-GPU-when-available by default with `MESH_RENDER_GPU=0` as the escape hatch.
-Never fail startup when GL is missing; fall back with one diagnostic.
-
-## Measured so far
-
-- Skia prebuilt binaries with `gl` download for skia-safe 0.97; no source build.
-- GPU vs raster parity on a rect/rounded-rect/gradient scene (96×64,
-  NVIDIA RTX 4060, GLES3): fills and gradients identical; 64 antialiased
-  rounded-curve pixels differ, worst by 41 levels (analytic vs supersampled
-  coverage). Parity checks must budget curve edges, not demand exactness.
-
-- Production painter, GPU target vs `PixelBuffer`, 160×120 at scale 1
-  (debug build, RTX 4060, `MESH_REQUIRE_GPU=1`), as pixels off by more than 2
-  levels and the worst delta: panel chrome, shadow, gradient and text 2/19,200
-  (worst 3); 20-icon grid 0 (1); backdrop blur, filter blur and opacity layers
-  404 (4); retained scroll replay with shifts and strip clears 0 (2). GPU
-  replay equals a fresh GPU paint byte for byte.
+- GPU vs raster parity, production painter, 160×120 (RTX 4060): panel 2/19,200
+  pixels off by more than 2 levels (worst 3); icon grid 0 (1); backdrop/filter
+  blur and opacity layers 404 (4); scroll replay 0 (2).
+- Frame cost (paint + copy to the presented buffer), 920×900 at scale 2:
+  performance log, 2026-10-19 "GPU presentation".
 
 ## Risks / open questions
 
-- skia-safe `gl` increases build time; keep it feature gated.
-- NVIDIA GBM/dmabuf export behavior on driver 580; Mesa on the iGPU.
-- Dev-window (minifb) backend stays raster.
-- Whether readback-to-SHM (Phase 3) is ever a net win — likely not; it is a
-  correctness bridge, not a shipping mode.
+- Compositors whose main device cannot export or import `ABGR8888` with the
+  driver's chosen modifier stay on SHM; this has not been seen yet.
+- NVIDIA as the compositor's main device (proprietary driver, implicit sync
+  through imported fences) is untested live.
+- The dev-window (minifb) backend stays raster.

@@ -11,7 +11,7 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
     navigation.focused_proof_enabled = true;
     let mut navigation_buffer = PixelBuffer::new(960, 80);
     navigation
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(960, 80),
             &mut navigation_buffer,
@@ -112,7 +112,7 @@ fn phase47_navigation_and_audio_surfaces_keep_taffy_layout_geometry() {
         .unwrap();
     let mut audio_buffer = PixelBuffer::new(320, 220);
     audio
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(320, 220),
             &mut audio_buffer,
@@ -143,7 +143,7 @@ fn navigation_bar_keeps_layer_width_dynamic_after_css_measurement() {
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let mut buffer = PixelBuffer::new(960, 80);
     navigation
-        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
         .unwrap();
 
     let mut surface = LayoutRecordingSurface::default();
@@ -176,7 +176,7 @@ fn unmeasured_navigation_bar_measures_its_own_height_not_the_placeholder() {
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
     let mut buffer = PixelBuffer::new(1, 201);
     navigation
-        .paint(
+        .paint_raster(
             &theme,
             // What `render_components` passes before the first configure:
             // no content size on either axis, a buffer of the 1px stand-in
@@ -214,7 +214,7 @@ fn shipped_audio_popover_content_measured_surface_contains_volume_slider() {
 
     let mut buffer = PixelBuffer::new(280, 164);
     audio
-        .paint(&theme, SurfaceExtent::unpadded(280, 164), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(280, 164), &mut buffer, 1.0)
         .unwrap();
 
     // The popover content-measures to its compact vertical slider + percent
@@ -267,7 +267,7 @@ fn shipped_audio_popover_slider_sizes_from_props() {
 
     let mut buffer = PixelBuffer::new(280, 164);
     audio
-        .paint(&theme, SurfaceExtent::unpadded(280, 164), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(280, 164), &mut buffer, 1.0)
         .unwrap();
 
     let tree = audio.last_tree.as_ref().expect("rendered audio popover");

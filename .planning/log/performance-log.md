@@ -6158,3 +6158,53 @@ debug shell `settings_scroll_shift_matches_full_paint` and
 `real_navigation_bar_repaints_existing_transition_state_when_theme_changes_back_to_dark`: 2/2.
 Scoped rustfmt and diff whitespace checks pass. The unrelated shell and GPU
 work in the shared workspace was preserved.
+
+## 2026-10-19 — GPU presentation: Skia-GL paint and fenced dmabuf buffers
+
+Area: renderer, Wayland presentation, shell surface targets. AMD Ryzen 7
+7840HS with Radeon 780M (Hyprland's main device) and RTX 4060 Laptop,
+`nix develop`, workspace release profile. Design and remaining work:
+[GPU backend note](../todos/pending/2026-07-15-gpu-rendering-backend.md).
+
+Each surface keeps a retained `SurfaceCanvas`: a CPU `PixelBuffer` or a Skia
+Ganesh render target on an EGL device context matching the dmabuf feedback's
+main device. Presentation copies the frame's damage into one of a 2–3 deep
+ring of GL textures exported with `EGL_MESA_image_dma_buf_export`, then
+imports an `EGL_ANDROID_native_fence_sync` sync file into the dmabuf as an
+implicit write fence. GPU paint stays on the UI thread (painter state is
+thread-local there; the scene-thread move waits for SH-11). On by default in
+the CLI; `MESH_RENDER_GPU=0` or any unsupported step falls back to SHM.
+
+**Workload.** `gpu::tests::frame_cost::gpu_frame_cost_workload` (ignored
+benchmark, `--features renderer-gpu`): a 920×900 logical surface at scale 2
+(1840×1800 px) with a gradient root, a 6×10 grid of rounded, bordered,
+shadowed cards with text, and an 840×260 frosted panel (backdrop blur 12).
+Per frame: clear and repaint one damage rect, then copy it to the buffer the
+compositor reads (SHM row copy on CPU; GPU copy plus fence on GPU). 40 frames
+per sample, 4 samples after a warm-up, ranges per frame. GPU samples end with
+one `glFinish`, so they include GPU completion.
+
+| Damage | CPU raster + SHM copy | AMD 780M | RTX 4060 |
+| --- | --- | --- | --- |
+| Full surface | 35.447–36.183 ms | 1.847–1.971 ms | 2.474–2.588 ms |
+| Frosted panel (840×260) | 16.627–16.825 ms | 0.965–1.243 ms | 1.206–1.280 ms |
+| Small widget (138×76) | 0.196–0.237 ms | 0.215–0.246 ms | 0.231–0.246 ms |
+
+**Rejected: CPU wait per present.** The first version waited for the GPU
+(`flush_submit_and_sync_cpu`) before attaching each buffer. Same workload,
+earlier run: AMD full 4.144–4.499 ms, frosted 2.818–3.725 ms, small widget
+0.473–0.786 ms (2–3× the CPU path for small damage). The imported fence
+replaces it; the wait remains only as the fallback when the fence cannot be
+attached (kernels before 6.0).
+
+**Live check.** Release shell under Hyprland: `gpu present: enabled` on the
+780M. Top-bar captures against `MESH_RENDER_GPU=0`: 118 of 316,800 pixels
+differ by more than 4% (antialiasing); clock and counter updates presented
+correctly across ring buffers.
+
+**Verified.** `mesh-core-render` release: 297 passed (default), 306 passed with
+`renderer-gpu` (`MESH_REQUIRE_GPU=1` for `gpu::`). `mesh-core-presentation`:
+111 passed / 3 failed with and without `gpu`; the same 3 config tests fail at
+`ef6f3c8b`. `mesh-core-shell` serial release: 866 passed / 45 failed with and
+without `gpu`, failure names identical to an `ef6f3c8b` worktree. No named
+gate exists yet.

@@ -11,6 +11,8 @@ mod config;
 mod damage;
 mod entry;
 mod events;
+#[cfg(feature = "gpu")]
+mod gpu;
 mod present;
 mod protocol;
 mod shm;
@@ -23,6 +25,8 @@ pub(in crate::wayland_surface) use blur::*;
 pub use config::*;
 use damage::*;
 pub(in crate::wayland_surface) use entry::*;
+#[cfg(feature = "gpu")]
+pub(in crate::wayland_surface) use gpu::{DmabufProtocol, DmabufRing, GpuPresenter};
 pub(in crate::wayland_surface) use protocol::*;
 use shm::*;
 
@@ -32,4 +36,6 @@ pub struct WaylandSurfaceBackend {
     _conn: Connection,
     event_queue: EventQueue<State>,
     state: State,
+    #[cfg(feature = "gpu")]
+    gpu: GpuPresenter,
 }

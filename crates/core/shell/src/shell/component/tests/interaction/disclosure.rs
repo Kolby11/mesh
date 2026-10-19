@@ -66,7 +66,7 @@ fn repaint(component: &mut FrontendSurfaceComponent) {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(WIDTH, HEIGHT);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(WIDTH, HEIGHT),
             &mut buffer,

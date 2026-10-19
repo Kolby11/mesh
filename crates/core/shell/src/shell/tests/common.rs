@@ -573,7 +573,7 @@ impl super::types::ShellComponent for RecordingComponent {
         &mut self,
         _theme: &mesh_core_theme::Theme,
         _extent: crate::shell::types::SurfaceExtent,
-        _buffer: &mut mesh_core_render::PixelBuffer,
+        _canvas: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         Ok(())
@@ -693,7 +693,7 @@ impl super::types::ShellComponent for IndexedRecordingComponent {
         &mut self,
         _theme: &mesh_core_theme::Theme,
         _extent: crate::shell::types::SurfaceExtent,
-        _buffer: &mut mesh_core_render::PixelBuffer,
+        _canvas: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         Ok(())
@@ -864,7 +864,7 @@ impl super::types::ShellComponent for FocusRecordingComponent {
         &mut self,
         _theme: &mesh_core_theme::Theme,
         _extent: crate::shell::types::SurfaceExtent,
-        _buffer: &mut mesh_core_render::PixelBuffer,
+        _canvas: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         Ok(())
@@ -1056,15 +1056,18 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
         &mut self,
         _theme: &mesh_core_theme::Theme,
         _extent: crate::shell::types::SurfaceExtent,
-        buffer: &mut mesh_core_render::PixelBuffer,
+        buffer: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
-        buffer.clear(mesh_core_elements::style::Color {
-            r: 8,
-            g: 8,
-            b: 8,
-            a: 255,
-        });
+        buffer
+            .as_raster_mut()
+            .expect("test canvases are CPU buffers")
+            .clear(mesh_core_elements::style::Color {
+                r: 8,
+                g: 8,
+                b: 8,
+                a: 255,
+            });
         Ok(())
     }
 
@@ -1108,7 +1111,7 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
     fn paint_child_surface(
         &self,
         node_key: &str,
-        buffer: &mut mesh_core_render::PixelBuffer,
+        buffer: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
         _content_offset: (u32, u32),
         exiting: bool,
@@ -1116,12 +1119,15 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
         let mut state = self.state.lock().unwrap();
         state.painted_nodes.push(node_key.to_string());
         state.exiting_paints.push(exiting);
-        buffer.clear(mesh_core_elements::style::Color {
-            r: 24,
-            g: 48,
-            b: 96,
-            a: 255,
-        });
+        buffer
+            .as_raster_mut()
+            .expect("test canvases are CPU buffers")
+            .clear(mesh_core_elements::style::Color {
+                r: 24,
+                g: 48,
+                b: 96,
+                a: 255,
+            });
         Ok(true)
     }
 
@@ -1253,7 +1259,7 @@ impl super::types::ShellComponent for TransitionRecordingComponent {
         &mut self,
         _theme: &mesh_core_theme::Theme,
         _extent: crate::shell::types::SurfaceExtent,
-        _buffer: &mut mesh_core_render::PixelBuffer,
+        _canvas: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         Ok(())
@@ -1347,7 +1353,7 @@ impl super::types::ShellComponent for InputSizeRecordingComponent {
         &mut self,
         _theme: &mesh_core_theme::Theme,
         _extent: crate::shell::types::SurfaceExtent,
-        _buffer: &mut mesh_core_render::PixelBuffer,
+        _canvas: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         Ok(())
@@ -1447,7 +1453,7 @@ impl super::types::ShellComponent for PopupGeometryRecordingComponent {
         &mut self,
         _theme: &mesh_core_theme::Theme,
         _extent: crate::shell::types::SurfaceExtent,
-        _buffer: &mut mesh_core_render::PixelBuffer,
+        _canvas: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         Ok(())
@@ -1559,7 +1565,7 @@ impl super::types::ShellComponent for SurfaceConfigLifecycleComponent {
         &mut self,
         _theme: &mesh_core_theme::Theme,
         _extent: crate::shell::types::SurfaceExtent,
-        _buffer: &mut mesh_core_render::PixelBuffer,
+        _canvas: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         self.measured = Some(self.content_size);
@@ -1663,7 +1669,7 @@ impl super::types::ShellComponent for MeasuredLayerGeometryComponent {
         &mut self,
         _theme: &mesh_core_theme::Theme,
         _extent: crate::shell::types::SurfaceExtent,
-        _buffer: &mut mesh_core_render::PixelBuffer,
+        _canvas: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         self.current_size = self.declared_size;
@@ -1753,7 +1759,7 @@ impl super::types::ShellComponent for DeadlineTickComponent {
         &mut self,
         _theme: &mesh_core_theme::Theme,
         _extent: crate::shell::types::SurfaceExtent,
-        _buffer: &mut mesh_core_render::PixelBuffer,
+        _canvas: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         Ok(())
@@ -1847,7 +1853,7 @@ impl super::types::ShellComponent for DirtyHiddenComponent {
         &mut self,
         _theme: &mesh_core_theme::Theme,
         _extent: crate::shell::types::SurfaceExtent,
-        _buffer: &mut mesh_core_render::PixelBuffer,
+        _canvas: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         Ok(())

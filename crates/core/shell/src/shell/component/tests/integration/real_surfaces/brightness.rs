@@ -18,7 +18,7 @@ fn shipped_navigation_brightness_uses_one_level_icon_and_scrolls_both_input_kind
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -139,7 +139,7 @@ fn shipped_navigation_brightness_uses_configured_scroll_sensitivity() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -224,7 +224,7 @@ fn shipped_navigation_brightness_falls_back_for_invalid_scroll_sensitivity() {
     let height = 80;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -285,7 +285,7 @@ fn shipped_navigation_service_poll_uses_narrow_damage() {
             );
         }
         component
-            .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
             .unwrap();
     }
     assert!(component.retained_tree.last_update_was_scoped());

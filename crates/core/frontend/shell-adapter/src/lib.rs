@@ -11,7 +11,7 @@ pub use mesh_core_elements::{
     PopoverPlacementField,
 };
 use mesh_core_locale::LocaleEngine;
-use mesh_core_render::{DamageRect, DisplayPaintCommand, PixelBuffer};
+use mesh_core_render::{DamageRect, DisplayPaintCommand, SurfaceCanvas};
 use mesh_core_scripting::ScriptError;
 use mesh_core_theme::Theme;
 use mesh_core_wayland::{KeyboardMode, ShellSurface, WindowStates};
@@ -1660,7 +1660,7 @@ pub trait ShellComponent: Send {
         &mut self,
         theme: &Theme,
         extent: SurfaceExtent,
-        buffer: &mut PixelBuffer,
+        canvas: &mut SurfaceCanvas,
         scale: f32,
     ) -> Result<(), ComponentError>;
     fn theme_changed(&mut self) -> Result<(), ComponentError>;
@@ -1857,7 +1857,7 @@ pub trait ShellComponent: Send {
     fn paint_child_surface(
         &self,
         _node_key: &str,
-        _buffer: &mut PixelBuffer,
+        _canvas: &mut SurfaceCanvas,
         _scale: f32,
         _content_offset: (u32, u32),
         _exiting: bool,

@@ -227,6 +227,14 @@ impl WaylandRole {
     }
 }
 
+/// A prepared presentation buffer of one surface.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum BufferSlot {
+    Shm(usize),
+    #[cfg(feature = "gpu")]
+    Dmabuf(usize),
+}
+
 pub(in crate::wayland_surface) struct SurfaceEntry {
     pub(in crate::wayland_surface) role: WaylandRole,
     pub(in crate::wayland_surface) cfg: SurfaceConfig,
@@ -245,6 +253,8 @@ pub(in crate::wayland_surface) struct SurfaceEntry {
     shm_buffer_bytes: usize,
     shm_pool_config: Option<ShmPoolConfig>,
     next_shm_buffer: usize,
+    #[cfg(feature = "gpu")]
+    dmabuf_ring: DmabufRing,
     buffer_backpressured: bool,
     pub(in crate::wayland_surface) frame_pending_since: Option<Instant>,
     generations: SurfaceGenerations,
@@ -297,6 +307,8 @@ impl SurfaceEntry {
             shm_buffer_bytes: 0,
             shm_pool_config: None,
             next_shm_buffer: 0,
+            #[cfg(feature = "gpu")]
+            dmabuf_ring: DmabufRing::default(),
             buffer_backpressured: false,
             frame_pending_since: None,
             generations: SurfaceGenerations::new(object_generation),
@@ -769,11 +781,33 @@ impl SurfaceEntry {
         Ok(Some((index, smallvec![full])))
     }
 
-    pub(super) fn attach_shm_buffer(
+    #[cfg(feature = "gpu")]
+    pub(super) fn copy_into_dmabuf_buffer(
+        &mut self,
+        context: &mut mesh_core_render::gpu::GpuContext,
+        dmabuf: &mut DmabufProtocol,
+        qh: &QueueHandle<State>,
+        source: &mut mesh_core_render::gpu::GpuTarget,
+        damage: &[DamageRect],
+    ) -> Result<Option<(usize, SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]>)>, PresentationError>
+    {
+        let prepared =
+            self.dmabuf_ring
+                .prepare(context, dmabuf, qh, &mut self.generations, source, damage)?;
+        self.buffer_backpressured = prepared.is_none();
+        Ok(prepared)
+    }
+
+    #[cfg(feature = "gpu")]
+    pub(super) fn dmabuf_buffer_id(&self, index: usize) -> ObjectId {
+        self.dmabuf_ring.slot(index).buffer.id()
+    }
+
+    pub(super) fn attach_buffer(
         &mut self,
         qh: &QueueHandle<State>,
         surface_id: &str,
-        index: usize,
+        slot: BufferSlot,
         logical_width: u32,
         logical_height: u32,
         physical_width: u32,
@@ -782,16 +816,24 @@ impl SurfaceEntry {
         copy_damage: &[DamageRect],
         scale: f32,
     ) -> Result<(), PresentationError> {
-        let buffer_generation = self.shm_buffers[index].generation;
-        let buffer = &self.shm_buffers[index].buffer;
         let wl_surface = self.role.wl_surface();
-
         // Activate the slot before staging any other surface state. If the
         // activation fails, the caller restores the copied damage and no
         // partially prepared commit is acknowledged as presented.
-        buffer
-            .attach_to(wl_surface)
-            .map_err(|error| PresentationError::BufferAttach(error.to_string()))?;
+        let buffer_generation = match slot {
+            BufferSlot::Shm(index) => {
+                self.shm_buffers[index]
+                    .buffer
+                    .attach_to(wl_surface)
+                    .map_err(|error| PresentationError::BufferAttach(error.to_string()))?;
+                self.shm_buffers[index].generation
+            }
+            #[cfg(feature = "gpu")]
+            BufferSlot::Dmabuf(index) => {
+                wl_surface.attach(Some(&self.dmabuf_ring.slot(index).buffer), 0, 0);
+                self.dmabuf_ring.generation(index)
+            }
+        };
 
         // `copy_damage` is everything copied into this buffer: the current
         // frame plus damage accumulated while the slot was busy. Report the
@@ -847,12 +889,21 @@ impl SurfaceEntry {
 
     pub(super) fn restore_copied_damage(
         &mut self,
-        index: usize,
+        slot: BufferSlot,
         copied_damage: &[DamageRect],
         bounds: DamageRect,
     ) {
-        if let Some(buffer) = self.shm_buffers.get_mut(index) {
-            restore_pending_damage(&mut buffer.pending_damage, copied_damage, bounds);
+        match slot {
+            BufferSlot::Shm(index) => {
+                if let Some(buffer) = self.shm_buffers.get_mut(index) {
+                    restore_pending_damage(&mut buffer.pending_damage, copied_damage, bounds);
+                }
+            }
+            #[cfg(feature = "gpu")]
+            BufferSlot::Dmabuf(index) => {
+                self.dmabuf_ring
+                    .restore_damage(index, copied_damage, bounds);
+            }
         }
     }
 
@@ -867,13 +918,22 @@ impl SurfaceEntry {
     /// slot pool learns that a compositor-owned buffer is reusable through its
     /// `wl_buffer.release` event; polling the pool here avoids a timer-based
     /// retry loop while still allowing the next shell pass to proceed promptly.
-    pub(in crate::wayland_surface) fn refresh_buffer_backpressure(&mut self, pool: &mut SlotPool) {
-        if self.buffer_backpressured
-            && self
-                .shm_buffers
+    pub(in crate::wayland_surface) fn refresh_buffer_backpressure(
+        &mut self,
+        pool: Option<&mut SlotPool>,
+        #[cfg(feature = "gpu")] dmabuf_busy: &std::collections::HashSet<ObjectId>,
+    ) {
+        if !self.buffer_backpressured {
+            return;
+        }
+        let shm_free = pool.is_some_and(|pool| {
+            self.shm_buffers
                 .iter()
                 .any(|slot| pool.canvas(&slot.buffer).is_some())
-        {
+        });
+        #[cfg(feature = "gpu")]
+        let shm_free = shm_free || self.dmabuf_ring.has_free_slot(dmabuf_busy);
+        if shm_free {
             self.buffer_backpressured = false;
         }
     }

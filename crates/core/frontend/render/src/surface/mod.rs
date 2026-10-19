@@ -1,5 +1,6 @@
 pub(crate) mod backdrop;
 mod buffer;
+mod canvas;
 mod debug_overlay;
 mod glyph;
 pub(crate) mod icon;
@@ -17,6 +18,7 @@ use mesh_core_elements::NodeId;
 
 pub use backdrop::{BackdropFrame, has_backdrop_image, set_backdrop_image};
 pub use buffer::{PixelBuffer, PixelCanvasSession};
+pub use canvas::SurfaceCanvas;
 pub use debug_overlay::{DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot};
 pub use glyph::GlyphAxes;
 pub use painter::{

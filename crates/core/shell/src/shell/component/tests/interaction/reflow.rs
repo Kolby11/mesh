@@ -24,7 +24,7 @@ fn hidden_child_surface_tracks_retained_tree_changes() {
         .unwrap();
     let mut buffer = PixelBuffer::new(40, 30);
     component
-        .paint_child_surface("root/popup", &mut buffer, 1.0, (0, 0), false)
+        .paint_child_surface_raster("root/popup", &mut buffer, 1.0, (0, 0), false)
         .unwrap();
     assert_eq!(buffer.get_pixel(10, 10).g, 0);
     assert_eq!(buffer.get_pixel(10, 10).r, 255);
@@ -48,7 +48,7 @@ fn hidden_child_surface_tracks_retained_tree_changes() {
             > first
     );
     component
-        .paint_child_surface("root/popup", &mut buffer, 1.0, (0, 0), false)
+        .paint_child_surface_raster("root/popup", &mut buffer, 1.0, (0, 0), false)
         .unwrap();
     assert_eq!(buffer.get_pixel(10, 10).g, 255);
     assert!(
@@ -68,7 +68,7 @@ fn hidden_child_surface_tracks_retained_tree_changes() {
         .unwrap()
         .generation();
     component
-        .paint_child_surface("root/popup", &mut buffer, 1.0, (0, 0), false)
+        .paint_child_surface_raster("root/popup", &mut buffer, 1.0, (0, 0), false)
         .unwrap();
     assert_eq!(
         component
@@ -87,7 +87,7 @@ fn frontend_publication_preserves_current_requests_after_runtime_advances() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 80);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 80), &mut buffer, 1.0)
         .unwrap();
     component.record_frontend_host_effects(vec![CoreRequest::ShowSurface {
         surface_id: "old".into(),
@@ -114,7 +114,7 @@ fn paint_publishes_one_interaction_frame_across_all_phases() {
     let mut buffer = PixelBuffer::new(120, 80);
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 80), &mut buffer, 1.0)
         .unwrap();
 
     let frame = &component.interaction_frame;
@@ -343,7 +343,7 @@ end)
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 120);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 120), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 120), &mut buffer, 1.0)
         .unwrap();
     let render_count_after_first = runtime_number(&component, "render_count");
     let runtime_count_after_first = component.runtimes.lock().unwrap().len();
@@ -354,7 +354,7 @@ end)
     component.hovered_key = Some("root/0/1".into());
     component.dirty = true;
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 120), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 120), &mut buffer, 1.0)
         .unwrap();
 
     assert_eq!(runtime_count_before, runtime_count_after_first);
@@ -446,7 +446,7 @@ end)
     let theme = default_theme();
     let mut wide_buffer = PixelBuffer::new(420, 160);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(420, 160),
             &mut wide_buffer,
@@ -474,7 +474,7 @@ end)
     // and requested one surface-config settle frame. Paint again so it stabilises
     // before asserting the component has quiesced.
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(420, 160),
             &mut wide_buffer,
@@ -492,7 +492,7 @@ end)
     assert!(component.wants_render());
     let mut narrow_buffer = PixelBuffer::new(260, 160);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(260, 160),
             &mut narrow_buffer,
@@ -773,7 +773,7 @@ end
 
     let mut buffer = PixelBuffer::new(240, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     let tree = component
         .last_tree
@@ -823,7 +823,7 @@ slider {
     let mut buffer = PixelBuffer::new(240, 40);
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     let initial = buffer.data().to_vec();
 
@@ -849,7 +849,7 @@ slider {
         )
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     let after_first_drag = buffer.data().to_vec();
 
@@ -862,7 +862,7 @@ slider {
         )
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     let after_second_drag = buffer.data().to_vec();
 
@@ -902,13 +902,13 @@ box {
     let mut buffer = PixelBuffer::new(64, 32);
 
     component
-        .paint(&dark, SurfaceExtent::unpadded(64, 32), &mut buffer, 1.0)
+        .paint_raster(&dark, SurfaceExtent::unpadded(64, 32), &mut buffer, 1.0)
         .unwrap();
     let dark_pixel = buffer_pixel(&buffer, 12, 12);
 
     component.theme_changed().unwrap();
     component
-        .paint(&light, SurfaceExtent::unpadded(64, 32), &mut buffer, 1.0)
+        .paint_raster(&light, SurfaceExtent::unpadded(64, 32), &mut buffer, 1.0)
         .unwrap();
     let light_pixel = buffer_pixel(&buffer, 12, 12);
 
@@ -943,13 +943,13 @@ box {
     let mut buffer = PixelBuffer::new(64, 64);
 
     component
-        .paint(&dark, SurfaceExtent::unpadded(64, 64), &mut buffer, 1.0)
+        .paint_raster(&dark, SurfaceExtent::unpadded(64, 64), &mut buffer, 1.0)
         .unwrap();
     let dark_scrollbar = buffer_pixel(&buffer, 40, 32);
 
     component.theme_changed().unwrap();
     component
-        .paint(&light, SurfaceExtent::unpadded(64, 64), &mut buffer, 1.0)
+        .paint_raster(&light, SurfaceExtent::unpadded(64, 64), &mut buffer, 1.0)
         .unwrap();
     let light_scrollbar = buffer_pixel(&buffer, 40, 32);
 
@@ -982,7 +982,7 @@ fn real_navigation_bar_repaints_when_theme_changes() {
     let mut buffer = PixelBuffer::new(width, height);
 
     component
-        .paint(
+        .paint_raster(
             &dark,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -993,7 +993,7 @@ fn real_navigation_bar_repaints_when_theme_changes() {
 
     component.theme_changed().unwrap();
     component
-        .paint(
+        .paint_raster(
             &light,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1019,7 +1019,7 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
     let mut buffer = PixelBuffer::new(width, height);
 
     component
-        .paint(
+        .paint_raster(
             &dark,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1042,7 +1042,7 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         .unwrap();
     for _ in 0..2 {
         component
-            .paint(
+            .paint_raster(
                 &light,
                 SurfaceExtent::unpadded(width, height),
                 &mut buffer,
@@ -1087,7 +1087,7 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &light,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1125,7 +1125,7 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
         })
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &dark,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1261,7 +1261,7 @@ pub(super) fn component_with_embedded_popover(
     let theme = mesh_core_theme::default_theme();
     let mut buffer = PixelBuffer::new(200, 30);
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 30), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 30), &mut buffer, 1.0)
         .unwrap();
     component
 }

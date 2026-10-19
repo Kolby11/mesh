@@ -7,7 +7,7 @@ fn settings_page_title_keeps_its_full_line_box() {
     let mut buffer = PixelBuffer::new(920, 900);
 
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
 
     let tree = settings.last_tree.as_ref().expect("rendered settings tree");
@@ -30,7 +30,7 @@ fn settings_wrapped_descriptions_expand_to_their_content() {
     let mut buffer = PixelBuffer::new(920, 900);
 
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
 
     let tree = settings.last_tree.as_ref().expect("rendered settings tree");
@@ -46,7 +46,7 @@ fn settings_wrapped_descriptions_expand_to_their_content() {
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
         .unwrap();
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
 
     let tree = settings
@@ -77,13 +77,13 @@ fn settings_tab_switch_resets_scroll_and_replaces_the_visible_page() {
     let mut buffer = PixelBuffer::new(920, 900);
 
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
     settings
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showBluetooth", &[])
         .unwrap();
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
 
     let scroll_id = first_node_with_attr(
@@ -110,7 +110,7 @@ fn settings_tab_switch_resets_scroll_and_replaces_the_visible_page() {
         "switching settings pages should reset the shared scroll container"
     );
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
 
     let command_text = settings
@@ -140,7 +140,7 @@ fn settings_scrollbar_is_conditional_on_overflow() {
     let mut buffer = PixelBuffer::new(920, 900);
 
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
 
     let tree = settings.last_tree.as_ref().expect("rendered settings tree");
@@ -217,14 +217,14 @@ fn settings_appearance_resource_lists_are_bounded() {
         real_frontend_module_component("@mesh/settings", super::super::debug::settings_catalog());
     let mut buffer = PixelBuffer::new(920, 900);
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
     seed_large_settings_resource_catalog(&mut settings);
     settings
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
         .unwrap();
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
     let appearance_tree = settings
         .last_tree
@@ -244,14 +244,14 @@ fn settings_appearance_resource_scroll_keeps_the_existing_tree() {
         real_frontend_module_component("@mesh/settings", super::super::debug::settings_catalog());
     let mut buffer = PixelBuffer::new(920, 900);
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
     seed_large_settings_resource_catalog(&mut settings);
     settings
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
         .unwrap();
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
 
     let tree = settings
@@ -271,7 +271,7 @@ fn settings_appearance_resource_scroll_keeps_the_existing_tree() {
     );
     settings.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
 
     let scrolled = settings
@@ -324,11 +324,11 @@ fn settings_active_page_switch_cost() {
         );
         let mut buffer = PixelBuffer::new(920, 900);
         settings
-            .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
             .unwrap();
         seed_large_settings_resource_catalog(&mut settings);
         settings
-            .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
             .unwrap();
 
         let started = std::time::Instant::now();
@@ -337,7 +337,7 @@ fn settings_active_page_switch_cost() {
             let namespaced = format!("__mesh_embed__::@mesh/settings::{handler}");
             settings.call_namespaced_handler(&namespaced, &[]).unwrap();
             settings
-                .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
                 .unwrap();
             std::hint::black_box(settings.display_list_paint_commands().len());
         }
@@ -370,7 +370,7 @@ fn settings_nav_item_answers_with_one_tooltip_for_the_whole_row() {
     let mut buffer = PixelBuffer::new(920, 900);
 
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
 
     let tree = settings.last_tree.as_ref().expect("rendered settings tree");
@@ -396,7 +396,7 @@ fn settings_fits_a_narrower_configure_and_keeps_requesting_its_size() {
     let (width, height) = (695, 700);
     let mut buffer = PixelBuffer::new(width, height);
     settings
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -425,7 +425,7 @@ fn settings_navigation_classes_and_language_options_derive_from_template_state()
     let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
     let mut buffer = PixelBuffer::new(920, 900);
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
     let active_handler = |settings: &FrontendSurfaceComponent| {
         let tree = settings.last_tree.as_ref().expect("settings tree");
@@ -440,7 +440,7 @@ fn settings_navigation_classes_and_language_options_derive_from_template_state()
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
         .unwrap();
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
     assert!(active_handler(&settings).contains("showAudio"));
 
@@ -470,7 +470,7 @@ fn settings_pages_render_their_template_conditionals_without_errors() {
             .call_namespaced_handler(&format!("__mesh_embed__::@mesh/settings::{handler}"), &[])
             .unwrap();
         settings
-            .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
             .unwrap();
     }
     let diagnostics = settings.diagnostics.as_ref().expect("diagnostics handle");

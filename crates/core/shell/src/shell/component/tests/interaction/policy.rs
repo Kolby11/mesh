@@ -68,7 +68,7 @@ text {
         .unwrap();
     for _ in 0..2 {
         component
-            .paint(&dark, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+            .paint_raster(&dark, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
             .unwrap();
         if !component.wants_immediate_rerender() {
             break;
@@ -89,14 +89,14 @@ text {
         })
         .unwrap();
     component
-        .paint(&light, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .paint_raster(&light, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
         .unwrap();
     // The render hook now runs before the frame snapshots its dirty flags, so
     // the theme swap and the label it derives land in this one pass. If a
     // second pass is still requested it must not erase the first pass's damage.
     if component.wants_immediate_rerender() {
         component
-            .paint(&light, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+            .paint_raster(&light, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
             .unwrap();
     }
 
@@ -153,7 +153,7 @@ slider {
     let mut buffer = PixelBuffer::new(240, 40);
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     component
         .handle_input(
@@ -169,7 +169,7 @@ slider {
         )
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     let after_first_drag = buffer.data().to_vec();
 
@@ -182,7 +182,7 @@ slider {
         )
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert_ne!(
@@ -213,7 +213,7 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
         })
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -241,7 +241,7 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -261,7 +261,7 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
         })
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -302,7 +302,7 @@ fn audio_popover_first_slider_grab_dispatches_change() {
         })
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -373,7 +373,7 @@ fn audio_popover_drag_keeps_fractional_slider_value_visible() {
         })
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -400,7 +400,7 @@ fn audio_popover_drag_keeps_fractional_slider_value_visible() {
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -441,7 +441,7 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
         })
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -481,7 +481,7 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -501,7 +501,7 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
         })
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -525,7 +525,7 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
     // on the backend value and the preserved override is released.
     for _ in 0..3 {
         component
-            .paint(
+            .paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(width, height),
                 &mut buffer,
@@ -565,7 +565,7 @@ fn audio_popover_slider_keyboard_still_steps_after_mouse_drag() {
         })
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -605,7 +605,7 @@ fn audio_popover_slider_keyboard_still_steps_after_mouse_drag() {
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -1269,7 +1269,7 @@ fn handlerless_slider_drag_retained_paint_beats_script_rebuild() {
             component.invalidate_script_state();
         }
         component
-            .paint(theme, SurfaceExtent::unpadded(640, 480), buffer, 1.0)
+            .paint_raster(theme, SurfaceExtent::unpadded(640, 480), buffer, 1.0)
             .unwrap();
     }
 
@@ -1279,14 +1279,14 @@ fn handlerless_slider_drag_retained_paint_beats_script_rebuild() {
     let mut new = test_frontend_component(&source);
     let mut old_buffer = PixelBuffer::new(640, 480);
     let mut new_buffer = PixelBuffer::new(640, 480);
-    old.paint(
+    old.paint_raster(
         &theme,
         SurfaceExtent::unpadded(640, 480),
         &mut old_buffer,
         1.0,
     )
     .unwrap();
-    new.paint(
+    new.paint_raster(
         &theme,
         SurfaceExtent::unpadded(640, 480),
         &mut new_buffer,
@@ -1365,7 +1365,7 @@ end
             component.invalidate_script_state();
         }
         component
-            .paint(theme, SurfaceExtent::unpadded(640, 480), buffer, 1.0)
+            .paint_raster(theme, SurfaceExtent::unpadded(640, 480), buffer, 1.0)
             .unwrap();
     }
 
@@ -1375,14 +1375,14 @@ end
     let mut new = test_frontend_component(&source);
     let mut old_buffer = PixelBuffer::new(640, 480);
     let mut new_buffer = PixelBuffer::new(640, 480);
-    old.paint(
+    old.paint_raster(
         &theme,
         SurfaceExtent::unpadded(640, 480),
         &mut old_buffer,
         1.0,
     )
     .unwrap();
-    new.paint(
+    new.paint_raster(
         &theme,
         SurfaceExtent::unpadded(640, 480),
         &mut new_buffer,

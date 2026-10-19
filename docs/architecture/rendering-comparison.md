@@ -78,7 +78,7 @@ Important current implementation points include:
   Border, Text, Icon, or Generic.
 - the painter boundary is backend-neutral even though Skia is currently the
   authoritative raster implementation.
-- crates/core/presentation preserves damage through Wayland SHM presentation.
+- crates/core/presentation preserves damage through Wayland dmabuf and SHM presentation.
 - Taffy, Parley, AccessKit, AnyRender, and vello_encoding integration/proof
   seams already exist in the workspace.
 
@@ -171,7 +171,7 @@ Geometry, glyph data, clip topology, and unrelated instances remain untouched.
 | Paint identity | DisplayListKey and retained paint subtree | map to stable InstanceId/GeometryId/MaterialId |
 | Frame representation | FramePaintPlan + retained command topology | use as migration source, later share a Visual Scene IR |
 | Damage | logical damage rectangles and replay widening | keep, then add primitive/tile dependency damage |
-| Raster authority | Skia software paint | Skia remains reference; experimental backend runs beside it |
+| Raster authority | Skia paint, Ganesh GL or software | Skia remains reference; experimental backend runs beside it |
 | Resource residency | CPU caches and PixelBuffer-oriented paint | persistent CPU/GPU geometry, material, glyph, image resources |
 | Transform change | can require retained command/replay work | mutate a Transform record independently |
 | Color/theme change | resolved into paint data and replayed | mutate semantic material/token data independently |
@@ -179,7 +179,7 @@ Geometry, glyph data, clip topology, and unrelated instances remain untouched.
 | Animation | MESH animation state drives paint updates | selected paint-only transforms/materials can advance below script |
 | Arbitrary vector path | Skia | reuse Vello/AnyRender-compatible path strategy rather than inventing one |
 | Partial update granularity | dirty nodes, retained subtrees, command spans, damage rectangles | changed scene records and affected tiles |
-| Presentation | Wayland SHM today; GPU migration planned | reuse existing presentation contracts; GPU path is separate from scene model |
+| Presentation | Wayland dmabuf from GPU canvases, SHM fallback | reuse existing presentation contracts; GPU path is separate from scene model |
 | Rollback | current renderer | always retain Skia/reference path until promotion gates pass |
 
 ## What should be reused

@@ -90,7 +90,7 @@ fn phase44_focused_proof_preserves_invalidation_and_damage_payloads() {
     let mut buffer = PixelBuffer::new(960, 80);
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
         .unwrap();
 
     {
@@ -117,7 +117,7 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
     hover_component.set_profiling_enabled(true);
     let mut hover_buffer = PixelBuffer::new(960, 80);
     hover_component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(960, 80),
             &mut hover_buffer,
@@ -150,7 +150,7 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         )
         .unwrap();
     hover_component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(960, 80),
             &mut hover_buffer,
@@ -178,7 +178,7 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         .unwrap();
     let mut popover_buffer = PixelBuffer::new(320, 220);
     popover_component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(320, 220),
             &mut popover_buffer,
@@ -219,7 +219,7 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         )
         .unwrap();
     popover_component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(320, 220),
             &mut popover_buffer,
@@ -236,7 +236,7 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
     keyboard_component.set_profiling_enabled(true);
     let mut keyboard_buffer = PixelBuffer::new(960, 80);
     keyboard_component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(960, 80),
             &mut keyboard_buffer,
@@ -257,7 +257,7 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         )
         .unwrap();
     keyboard_component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(960, 80),
             &mut keyboard_buffer,
@@ -274,7 +274,7 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
     backend_component.set_profiling_enabled(true);
     let mut backend_buffer = PixelBuffer::new(960, 80);
     backend_component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(960, 80),
             &mut backend_buffer,
@@ -295,7 +295,7 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
         })
         .unwrap();
     backend_component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(960, 80),
             &mut backend_buffer,
@@ -516,7 +516,7 @@ fn phase98_pixel_equivalence_backend_update() {
     let mut narrow_buffer = PixelBuffer::new(960, 80);
 
     baseline
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(960, 80),
             &mut baseline_buffer,
@@ -524,7 +524,7 @@ fn phase98_pixel_equivalence_backend_update() {
         )
         .unwrap();
     narrow
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(960, 80),
             &mut narrow_buffer,
@@ -550,7 +550,7 @@ fn phase98_pixel_equivalence_backend_update() {
 
     baseline.invalidate_script_state();
     baseline
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(960, 80),
             &mut baseline_buffer,
@@ -558,7 +558,7 @@ fn phase98_pixel_equivalence_backend_update() {
         )
         .unwrap();
     narrow
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(960, 80),
             &mut narrow_buffer,
@@ -583,7 +583,7 @@ fn phase98_profiling_backend_update_reduced_churn() {
     let mut buffer = PixelBuffer::new(960, 80);
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
         .unwrap();
     component.take_profiling_records();
 
@@ -597,7 +597,7 @@ fn phase98_profiling_backend_update_reduced_churn() {
         .unwrap();
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
         .unwrap();
     let invalidation = component
         .take_invalidation_snapshot()

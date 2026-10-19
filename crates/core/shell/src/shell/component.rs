@@ -365,9 +365,13 @@ impl InstanceKeyInterner {
 }
 
 use mesh_core_render::{
-    DamageRect, DisplayListMetrics, DisplayListRepaintPolicy, DisplayPaintCommand, PixelBuffer,
-    RetainedDisplayList, SharedTextMeasurer, TextCacheMetrics, TextRenderer,
+    DamageRect, DisplayListMetrics, DisplayListRepaintPolicy, DisplayPaintCommand,
+    PixelCanvasSession, RetainedDisplayList, SharedTextMeasurer, SurfaceCanvas, TextCacheMetrics,
+    TextRenderer,
 };
+
+#[cfg(test)]
+use mesh_core_render::PixelBuffer;
 
 const TOOLTIP_OVERLAY_WIDTH: u32 = 352;
 const TOOLTIP_OVERLAY_HEIGHT: u32 = 200;

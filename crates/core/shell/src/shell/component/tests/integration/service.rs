@@ -635,7 +635,7 @@ end)
     let theme = mesh_core_theme::default_theme();
     let mut buffer = PixelBuffer::new(160, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
         .unwrap();
 
     assert!(

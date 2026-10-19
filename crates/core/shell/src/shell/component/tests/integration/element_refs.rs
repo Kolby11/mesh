@@ -28,7 +28,7 @@ end
 
     // Paint once so element metrics + the ref-name -> node-key map are populated.
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
         .unwrap();
     assert_eq!(component.focused_key, None);
 
@@ -85,7 +85,7 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
         .unwrap();
 
     component.call_namespaced_handler("inspect", &[]).unwrap();
@@ -134,7 +134,7 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
         .unwrap();
 
     component.call_namespaced_handler("measure", &[]).unwrap();
@@ -181,7 +181,7 @@ end
 
     // Paint once so overflow annotation populates scroll limits and the ref map.
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
         .unwrap();
     // Nothing scrolled yet.
     assert!(component.scroll_offsets.values().all(|o| o.y == 0.0));
@@ -246,7 +246,7 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 120);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
         .unwrap();
 
     // Set the offset through the live reference.
@@ -264,7 +264,7 @@ end
 
     // Repaint so the new offset is published, then read it back via scroll_top.
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
         .unwrap();
     component.call_namespaced_handler("read_back", &[]).unwrap();
     let read = runtime_value(&component, "scrolled_top")
@@ -303,7 +303,7 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 120);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
         .unwrap();
 
     component
@@ -406,7 +406,7 @@ fn scrollbar_thumb_can_be_dragged_with_the_pointer() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 120);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 120), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 120), &mut buffer, 1.0)
         .unwrap();
 
     let tree = component.last_tree.as_ref().expect("painted tree");
@@ -475,7 +475,7 @@ fn wheel_scroll_eases_instead_of_snapping() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 120);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 120), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 120), &mut buffer, 1.0)
         .unwrap();
 
     component
@@ -512,7 +512,7 @@ fn touchpad_scroll_is_pixel_precise_and_keeps_moving_after_a_flick() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 120);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 120), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 120), &mut buffer, 1.0)
         .unwrap();
 
     component
@@ -591,7 +591,7 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
         .unwrap();
 
     component.call_namespaced_handler("trigger", &[]).unwrap();
@@ -628,7 +628,7 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
         .unwrap();
 
     component.call_namespaced_handler("set_it", &[]).unwrap();
@@ -643,7 +643,7 @@ end
 
     // Repaint so the new value is published, then read it back through the ref.
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
         .unwrap();
     component.call_namespaced_handler("read_it", &[]).unwrap();
     assert_eq!(

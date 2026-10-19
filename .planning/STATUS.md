@@ -12,12 +12,13 @@ measurements are in [`log/`](log/README.md). Open work is in
   run in child processes so parallel painters cannot consume their broker
   admission budget. Gradient-shader test counts follow their thread-local cache.
 
-- **GPU backend phases 1–2 implemented:** `render::gpu` (feature
-  `renderer-gpu`) runs a headless Skia-GL context. The painter paints through
-  a session on a raster buffer or a GPU target, so no raw-pixel paint path is
-  left. GPU output matches raster on the panel, icon-grid, effects and
-  scroll-replay workloads within a few levels. Next: phase 3, a scene-thread
-  GPU `SceneRenderer` with readback.
+- **GPU paint and dmabuf presentation shipped:** surfaces paint into a
+  retained Skia-GL target on the UI thread, and presentation copies damage
+  into fenced dmabuf textures on the compositor's device (AMD 780M under
+  Hyprland here). On by default; `MESH_RENDER_GPU=0`, missing dmabuf feedback,
+  or a failed export falls back to SHM. A full repaint of a frosted
+  1840×1800 px surface is about 1.9 ms instead of 36 ms (performance log).
+  Remaining: resource residency, D9 gates, scene-thread move after SH-11.
 
 - **Rounded raster correctness implemented:** rounded overflow, image/gradient
   edges and shadows have exact partial/full repaint regressions. Renderer,
@@ -79,8 +80,8 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 - **D6 preparation:** immutable scene submissions and a bounded render-thread
   handoff and owned, budgeted font preparation are validated. Icon snapshots,
-  production resource admission, GPU raster and presentation remain open;
-  the current painter is still authoritative.
+  production resource admission and moving GPU paint to that thread remain
+  open; GPU paint runs on the UI thread until SH-11.
 - **Runtime direction follow-ups:** D1 template patching/effects, D2 task
   scheduling with suspending backend callbacks, D3 grants, D4 typed
   contracts and D5 popover disclosure have landed (see
@@ -91,7 +92,8 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Next
 
-- GPU phase 3: scene-thread GPU renderer with per-surface buffer rings.
+- GPU resource residency (icons, images, glyph bitmaps) measured on the GPU
+  path; GPU frame-cost and parity gates.
 - Remaining D5 (dialog focus scope, menu typeahead), D6 renderer integration
   and D9 workload gates.
 - Wave 5: the [in-surface blur engine](todos/pending/2026-09-30-in-surface-blur-engine.md).

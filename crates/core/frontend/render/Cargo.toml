@@ -12,7 +12,7 @@ renderer-parley = ["dep:parley"]
 renderer-accesskit = ["dep:accesskit"]
 renderer-anyrender = ["dep:anyrender", "dep:color", "dep:peniko"]
 renderer-vello-encoding = ["dep:vello_encoding"]
-renderer-gpu = ["skia-safe/gl", "dep:khronos-egl"]
+renderer-gpu = ["skia-safe/gl", "dep:khronos-egl", "dep:libc"]
 renderer-libraries = ["renderer-taffy", "renderer-parley", "renderer-accesskit", "renderer-anyrender", "renderer-vello-encoding"]
 
 [dependencies]
@@ -29,6 +29,7 @@ color = { version = "0.3", optional = true }
 peniko = { version = "0.6", optional = true }
 vello_encoding = { workspace = true, optional = true }
 khronos-egl = { version = "6", features = ["dynamic"], optional = true }
+libc = { workspace = true, optional = true }
 
 cosmic-text = "0.18"
 fontdb = "0.23"

@@ -21,7 +21,7 @@ use mesh_core_presentation::{
     SurfaceExtent as ConfiguredSurfaceExtent, SurfaceLifecycleEvent, SurfacePadding,
     SurfaceStateStatus, UnmeasuredSize,
 };
-use mesh_core_render::{BackdropBlurPolicy, DamageRect, DisplayPaintCommand};
+use mesh_core_render::{BackdropBlurPolicy, DamageRect, DisplayPaintCommand, SurfaceCanvas};
 use mesh_core_wayland::SurfaceRole;
 use smallvec::SmallVec;
 
@@ -306,7 +306,7 @@ impl Shell {
                         .map(|buffer| buffer.width() != 1 || buffer.height() != 1)
                         .unwrap_or(true)
                     {
-                        runtime.parent.paint_buffer = Some(PixelBuffer::new(1, 1));
+                        runtime.parent.paint_buffer = Some(PixelBuffer::new(1, 1).into());
                     }
                     runtime.parent.known_surface_size = None;
                     runtime.parent.last_surface_config = None;
@@ -449,7 +449,10 @@ impl Shell {
                 // rather than a placement it applies, and `apply_window_config`
                 // reads a zero as "no hint" instead of as a span.
                 let fills_output = self.components[index].component.fills_output()
-                    && matches!(surface.edge, Some(mesh_core_wayland::Edge::Top | mesh_core_wayland::Edge::Bottom));
+                    && matches!(
+                        surface.edge,
+                        Some(mesh_core_wayland::Edge::Top | mesh_core_wayland::Edge::Bottom)
+                    );
                 let configure_size_resolved = surface.role == SurfaceRole::Window
                     || fills_output
                     || layer_configure_size_is_resolved(
@@ -746,16 +749,16 @@ impl Shell {
                     self.font_registry.reference_aliases_for_module(&module_id),
                 );
                 mesh_core_render::set_backdrop_frame(self.backdrop_frame(&surface_id));
-                let runtime = &mut self.components[index];
-                if runtime
-                    .parent
-                    .paint_buffer
-                    .as_ref()
-                    .map(|buffer| buffer.width() != physical_w || buffer.height() != physical_h)
-                    .unwrap_or(true)
-                {
-                    let buffer = PixelBuffer::try_new(physical_w, physical_h).ok_or_else(|| {
-                        ShellRunError::BufferAlloc {
+                let gpu = self.gpu_canvas_wanted();
+                if !canvas_matches(
+                    self.components[index].parent.paint_buffer.as_ref(),
+                    (physical_w, physical_h),
+                    gpu,
+                ) {
+                    let buffer = self
+                        .presentation_engine
+                        .allocate_canvas(physical_w, physical_h, gpu)
+                        .ok_or_else(|| ShellRunError::BufferAlloc {
                             surface_id: surface_id.clone(),
                             logical_w: paint_width,
                             logical_h: paint_height,
@@ -764,16 +767,16 @@ impl Shell {
                             scale,
                             requested_bytes,
                             max_bytes: MAX_BUFFER_BYTES,
-                        }
-                    })?;
-                    runtime.parent.paint_buffer = Some(buffer);
+                        })?;
+                    self.components[index].parent.paint_buffer = Some(buffer);
                     // A resized buffer starts fully transparent; `paint()` only
                     // repaints dirty regions against the retained tree, so
                     // without forcing a full present the untouched pixels of a
                     // freshly-allocated buffer never get drawn until something
                     // else marks the whole surface dirty.
-                    runtime.parent.force_full_present = true;
+                    self.components[index].parent.force_full_present = true;
                 }
+                let runtime = &mut self.components[index];
                 let paint_result = runtime.component.paint(
                     self.theme.active(),
                     paint_extent,
@@ -1184,13 +1187,15 @@ impl Shell {
                 .target_mut(target)
                 .paint_buffer
                 .as_mut()
-                .expect("paint buffer initialised");
-            hud_restore = Some(self.debug_overlay.paint_performance_hud(
-                buffer,
-                scale,
-                &hud_snapshot,
-                &flashed_damage,
-            ));
+                .and_then(SurfaceCanvas::as_raster_mut);
+            hud_restore = buffer.map(|buffer| {
+                self.debug_overlay.paint_performance_hud(
+                    buffer,
+                    scale,
+                    &hud_snapshot,
+                    &flashed_damage,
+                )
+            });
             let hud_unit = scale.round().max(1.0);
             present_damage.push(DamageRect {
                 x: 0,
@@ -1213,12 +1218,13 @@ impl Shell {
                         .child_surface_debug_tree(&node_key, (pad_left as f32, pad_top as f32))
                 }
             };
-            if let Some(tree) = debug_tree {
-                let buffer = self.components[index]
+            if let Some(tree) = debug_tree
+                && let Some(buffer) = self.components[index]
                     .target_mut(target)
                     .paint_buffer
                     .as_mut()
-                    .expect("paint buffer initialised");
+                    .and_then(SurfaceCanvas::as_raster_mut)
+            {
                 self.debug_overlay.paint_layout_bounds(&tree, buffer, scale);
                 self.components[index].component.buffer_overlaid();
                 present_damage = vec![DamageRect {
@@ -1241,16 +1247,18 @@ impl Shell {
                     .and_then(|value| value.as_f64())
                     .unwrap_or(0.0) as f32
             };
-            let buffer = self.components[index]
+            if let Some(buffer) = self.components[index]
                 .target_mut(target)
                 .paint_buffer
                 .as_mut()
-                .expect("paint buffer initialised");
-            self.debug_overlay.paint_element_highlight(
-                buffer,
-                scale,
-                (number("x"), number("y"), number("width"), number("height")),
-            );
+                .and_then(SurfaceCanvas::as_raster_mut)
+            {
+                self.debug_overlay.paint_element_highlight(
+                    buffer,
+                    scale,
+                    (number("x"), number("y"), number("width"), number("height")),
+                );
+            }
             self.components[index].component.buffer_overlaid();
             present_damage = vec![DamageRect {
                 x: 0,
@@ -1265,25 +1273,30 @@ impl Shell {
         // An empty `present_damage` means paint produced no changed pixels, so
         // skip the present entirely.
         if !visible || !present_damage.is_empty() {
+            let runtime = &mut self.components[index];
+            let canvas = match target {
+                TargetRef::Parent => &mut runtime.parent,
+                TargetRef::Child(child_index) => &mut runtime.children[child_index].target,
+            }
+            .paint_buffer
+            .as_mut()
+            .expect("paint buffer initialised");
             let present_result = self.presentation_engine.present_with_damage(
                 &surface_id,
-                self.components[index].component.id(),
+                runtime.component.id(),
                 visible,
-                self.components[index]
-                    .target(target)
-                    .paint_buffer
-                    .as_ref()
-                    .expect("paint buffer initialised"),
+                canvas,
                 &present_damage,
             );
             if let Some(restore) = hud_restore.take() {
-                restore.restore(
-                    self.components[index]
-                        .target_mut(target)
-                        .paint_buffer
-                        .as_mut()
-                        .expect("paint buffer initialised"),
-                );
+                if let Some(buffer) = self.components[index]
+                    .target_mut(target)
+                    .paint_buffer
+                    .as_mut()
+                    .and_then(SurfaceCanvas::as_raster_mut)
+                {
+                    restore.restore(buffer);
+                }
             }
             match present_result {
                 Ok(PresentStatus::Presented) => presented = true,
@@ -1380,6 +1393,15 @@ impl Shell {
         Ok(presented)
     }
 
+    /// Whether surfaces paint on the GPU. Debug overlays draw into and
+    /// restore CPU pixels, so they keep surfaces on the CPU while active.
+    pub(super) fn gpu_canvas_wanted(&mut self) -> bool {
+        !(self.debug.enabled
+            || self.debug.show_layout_bounds
+            || self.debug.inspected_element.is_some())
+            && self.presentation_engine.gpu_canvas_available()
+    }
+
     fn resolve_dynamic_surface_size(
         &mut self,
         index: usize,
@@ -1444,6 +1466,12 @@ impl Shell {
             (None, None) | (Some(_), None) => None,
         }
     }
+}
+
+/// Whether a retained canvas can keep serving a surface of `size` device
+/// pixels painted on the GPU (`gpu`) or the CPU.
+pub(super) fn canvas_matches(canvas: Option<&SurfaceCanvas>, size: (u32, u32), gpu: bool) -> bool {
+    canvas.is_some_and(|canvas| (canvas.width(), canvas.height()) == size && canvas.is_gpu() == gpu)
 }
 
 /// Whether a layer-surface config carries a size the compositor can apply as

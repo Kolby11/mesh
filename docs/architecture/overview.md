@@ -26,12 +26,12 @@ frontend entrypoints ──► .mesh compiler ──► Luau service proxies
 component/runtime tree
         │
         ├──► style and Taffy layout
-        ├──► retained render data and software paint
+        ├──► retained render data and Skia paint (GPU or CPU)
         ├──► input, focus, gestures, and accessibility
         └──► diagnostics and profiling
         │
         ▼
-presentation layer ──► Wayland surfaces
+presentation layer ──► Wayland surfaces (dmabuf or SHM buffers)
 ```
 
 The CLI creates `mesh_core_shell::Shell`. The shell discovers modules, loads

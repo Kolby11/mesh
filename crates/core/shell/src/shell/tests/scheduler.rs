@@ -164,7 +164,7 @@ impl super::types::ShellComponent for FloodingTickComponent {
         &mut self,
         _theme: &mesh_core_theme::Theme,
         _extent: crate::shell::types::SurfaceExtent,
-        _buffer: &mut mesh_core_render::PixelBuffer,
+        _buffer: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
     ) -> Result<(), super::types::ComponentError> {
         Ok(())

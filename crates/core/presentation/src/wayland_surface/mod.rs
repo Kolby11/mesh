@@ -19,7 +19,6 @@ use crate::dev_window::{DevWindowEvent, DevWindowKeyEvent, KeyMods};
 use crate::{
     PresentStatus, PresentationError, SurfaceGeneration, SurfaceLifecycleEvent, SurfaceStateStatus,
 };
-use mesh_core_render::PixelBuffer;
 use mesh_core_wayland::{
     Edge, KeyboardMode, Layer as MeshLayer, SurfaceRole, WindowDecorations, WindowOptions,
     WindowStates,

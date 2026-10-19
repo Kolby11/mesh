@@ -34,7 +34,7 @@ fn prop_default_projects_to_css_and_is_readable_in_script() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 80);
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
         .unwrap();
 
     let tree = component.last_tree.as_ref().unwrap();
@@ -101,7 +101,7 @@ fn settings_props_apply_global_and_per_instance_precedence() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 80);
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
         .unwrap();
 
     let slider = first_node_by_class(component.last_tree.as_ref().unwrap(), "slider").unwrap();
@@ -124,7 +124,7 @@ fn duration_prop_projects_to_css_milliseconds() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 80);
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
         .unwrap();
 
     let panel = first_node_by_class(component.last_tree.as_ref().unwrap(), "panel").unwrap();
@@ -167,7 +167,7 @@ fn script_write_to_props_reprojects_into_css() {
     let mut buffer = PixelBuffer::new(200, 80);
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
         .unwrap();
     let slider = first_node_by_class(component.last_tree.as_ref().unwrap(), "slider").unwrap();
     assert_eq!(
@@ -179,7 +179,7 @@ fn script_write_to_props_reprojects_into_css() {
     component.call_namespaced_handler("bump", &[]).unwrap();
     component.invalidate_script_state();
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
         .unwrap();
 
     let slider = first_node_by_class(component.last_tree.as_ref().unwrap(), "slider").unwrap();
@@ -226,7 +226,7 @@ fn invalid_script_override_falls_back_to_the_valid_host_layer() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 80);
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
         .unwrap();
 
     let slider = first_node_by_class(component.last_tree.as_ref().unwrap(), "slider").unwrap();

@@ -192,7 +192,7 @@ input:checked {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 120);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 120), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 120), &mut buffer, 1.0)
         .unwrap();
     let tree = component.last_tree.as_ref().unwrap();
 
@@ -256,11 +256,11 @@ fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 80);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
     if component.wants_render() {
         component
-            .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
             .unwrap();
     }
 
@@ -303,7 +303,7 @@ fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
     );
     component.invalidate_interaction_restyle();
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
 
     let tree = component.last_tree.as_ref().unwrap();
@@ -331,7 +331,7 @@ fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
     component.focus_visible_key = None;
     component.invalidate_interaction_restyle();
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
 
     let tree = component.last_tree.as_ref().unwrap();
@@ -1131,7 +1131,7 @@ fn window_states_project_onto_the_tree_as_css_state() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(400, 300);
     component
-        .paint(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
         .unwrap();
 
     let floating = node_by_mesh_key(component.last_tree.as_ref().unwrap(), "root/0");
@@ -1152,7 +1152,7 @@ fn window_states_project_onto_the_tree_as_css_state() {
     );
     assert!(component.wants_render());
     component
-        .paint(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
         .unwrap();
 
     let filling = node_by_mesh_key(component.last_tree.as_ref().unwrap(), "root/0");
@@ -1204,7 +1204,9 @@ fn theme_only_hover_rules_invalidate_and_restyle_their_nodes() {
     component.theme_changed().unwrap();
     let extent = SurfaceExtent::unpadded(240, 80);
     let mut buffer = PixelBuffer::new(240, 80);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert!(component.module_styles_have_hover_rules());
     let button = first_node_by_tag(component.last_tree.as_ref().unwrap(), "button").unwrap();
     let key = button.mesh_key().unwrap().to_string();
@@ -1213,7 +1215,9 @@ fn theme_only_hover_rules_invalidate_and_restyle_their_nodes() {
     component.hovered_key = Some(key);
     component.hovered_path = vec![id];
     component.invalidate_interaction_restyle();
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(
         first_node_by_tag(component.last_tree.as_ref().unwrap(), "button")
             .unwrap()
@@ -1224,7 +1228,9 @@ fn theme_only_hover_rules_invalidate_and_restyle_their_nodes() {
     component.hovered_key = None;
     component.hovered_path.clear();
     component.invalidate_interaction_restyle();
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     assert_eq!(
         first_node_by_tag(component.last_tree.as_ref().unwrap(), "button")
             .unwrap()

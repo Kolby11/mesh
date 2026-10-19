@@ -24,7 +24,7 @@ end)
 
     // First paint — no service payload yet.
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
 
     // Apply a service payload directly to the ScriptContext, simulating a
@@ -42,7 +42,7 @@ end)
 
     // First paint with the service payload — render fires, vol_pct == 72.
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
     let pct_after_payload = runtime_number(&component, "vol_pct");
     assert!(
@@ -55,7 +55,7 @@ end)
     component.hovered_path = ["root", "root/0"].map(runtime_node_id_for_key).to_vec();
     component.dirty = true;
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
 
     // vol_pct must still reflect the last service update, not be wiped.
@@ -95,7 +95,7 @@ init_count = init_count + 1
 
     // First paint — runtime is initialized, init_count == 1.
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
     let count_after_first = runtime_number(&component, "init_count");
     let runtime_instances_after_first = component.runtimes.lock().unwrap().len();
@@ -112,7 +112,7 @@ init_count = init_count + 1
     component.focused_key = Some("root/0".into());
     component.dirty = true;
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
 
     let count_after_focus = runtime_number(&component, "init_count");
@@ -180,14 +180,14 @@ text {
 
     // First paint to establish baseline.
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 300), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 300), &mut buffer, 1.0)
         .unwrap();
 
     // Trigger a focus-driven pseudo-state restyle.
     component.focused_key = Some("root/0/0".into());
     component.dirty = true;
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 300), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 300), &mut buffer, 1.0)
         .unwrap();
 
     let tree = component.last_tree.as_ref().unwrap();
@@ -254,7 +254,7 @@ fn restyle_state_cleanup_hover_cleared_when_node_removed() {
 
     // First paint to establish the tree structure.
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
 
     // Simulate hovering the second button.
@@ -265,7 +265,7 @@ fn restyle_state_cleanup_hover_cleared_when_node_removed() {
     component.hover_start = Some(std::time::Instant::now());
     component.dirty = true;
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
 
     let tree = component.last_tree.as_ref().unwrap();
@@ -301,7 +301,7 @@ fn restyle_state_cleanup_hover_cleared_when_node_removed() {
     component.hover_start = Some(std::time::Instant::now());
     component.dirty = true;
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
 
     // After the paint, the stale hovered_key must be cleared.

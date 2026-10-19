@@ -117,8 +117,9 @@ Each needs a design and a measured prototype before it is adopted.
       as one-way bindings although the syntax guide documents write-back.
       Implement it for value elements, or remove the syntax and the docs.
 - [ ] **D6:** Connect the immutable scene/render-thread handoff to frozen font/icon
-      resources, GPU raster and presentation. The bounded handoff prototype is
-      implemented; scroll-raster and blur plans are re-scoped around renderer ownership.
+      resources and move GPU paint (shipped on the UI thread) onto it after SH-11.
+      The bounded handoff prototype is implemented; scroll-raster and blur plans
+      are re-scoped around renderer ownership.
 - [ ] **D9:** CI performance gates per workload: idle wakeups, hover, service
       poll, scroll, popover open, theme switch.
 
@@ -343,9 +344,10 @@ of payoff.
 
 ### Architecture
 
-- [ ] Advance GPU rendering on two measured lanes: the conservative Skia-GL
-      migration (scene-thread renderer, dmabuf present — phases 3–6 of its
-      plan) and an experimental persistent-scene/database renderer that extends
-      retained identity into raster resources and tiles. Plans:
-      [GPU backend](../.planning/todos/pending/2026-07-15-gpu-rendering-backend.md) and
-      [persistent scene renderer](../.planning/todos/pending/2026-09-20-persistent-scene-renderer.md).
+- [ ] Finish the Skia-GL backend: GPU resource residency for icons, images and
+      glyph bitmaps, D9 gates on both backends, and moving GPU paint to the
+      scene thread after SH-11. GPU paint and dmabuf presentation are shipped;
+      [remaining work](../.planning/todos/pending/2026-07-15-gpu-rendering-backend.md).
+- [ ] Experimental persistent-scene/database renderer that extends retained
+      identity into raster resources and tiles, measured against the Skia-GL
+      path. [Plan](../.planning/todos/pending/2026-09-20-persistent-scene-renderer.md).

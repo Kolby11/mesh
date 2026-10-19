@@ -53,7 +53,7 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
         .unwrap();
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -69,7 +69,7 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
 
     hover_ref(&mut component, &theme, width, height, "languageButton");
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -100,7 +100,7 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -154,7 +154,7 @@ fn shipped_language_trigger_flag_follows_the_picked_locale() {
         })
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -182,7 +182,7 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
     component.visible = true;
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -191,7 +191,7 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
         .unwrap();
     hover_ref(&mut component, &theme, width, height, "themeButton");
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -252,7 +252,7 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
             )
             .unwrap();
         component
-            .paint(
+            .paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(width, height),
                 &mut buffer,

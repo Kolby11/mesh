@@ -11,6 +11,8 @@ name = "mesh-shell"
 path = "src/main.rs"
 
 [features]
+default = ["gpu"]
+gpu = ["mesh-core-shell/gpu"]
 perf-tracy = ["dep:tracing-tracy", "dep:tracy-client"]
 allocation-profiling = [
     "mesh-core-debug/allocation-profiling",

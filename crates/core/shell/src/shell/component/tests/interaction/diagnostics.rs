@@ -30,7 +30,7 @@ end
     let mut buffer = PixelBuffer::new(240, 40);
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     assert_eq!(rendered_text(&component), vec!["healthy"]);
 
@@ -38,7 +38,7 @@ end
         .call_namespaced_handler("fail_expression", &[])
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert_eq!(
@@ -62,7 +62,7 @@ end
         .call_namespaced_handler("recover_expression", &[])
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     assert_eq!(rendered_text(&component), vec!["healthy"]);
     assert!(
@@ -89,7 +89,7 @@ end
     let mut buffer = PixelBuffer::new(240, 40);
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
 
     let tree = component.last_tree.as_ref().expect("placeholder tree");
@@ -129,7 +129,7 @@ end
     let mut buffer = PixelBuffer::new(240, 40);
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
 
     let tree = component.last_tree.as_ref().expect("placeholder tree");
@@ -218,7 +218,7 @@ end)
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -229,7 +229,7 @@ end)
         .unwrap();
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert_eq!(
@@ -262,7 +262,7 @@ fn raw_service_state_update_schedules_repaint_without_proxy_tracking() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     component.dirty = false;
 
@@ -279,7 +279,7 @@ fn raw_service_state_update_schedules_repaint_without_proxy_tracking() {
         "raw ScriptState changes should schedule repaint even without proxy tracking"
     );
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     let tree = component.last_tree.as_ref().unwrap();
     fn first_title(node: &WidgetNode) -> Option<&str> {
@@ -311,7 +311,7 @@ label = "static"
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
 
     // The first payload arrives before any read set is known to be complete,
@@ -324,7 +324,7 @@ label = "static"
         })
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     component.dirty = false;
 
@@ -379,7 +379,7 @@ end)
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -389,7 +389,7 @@ end)
         })
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert_eq!(
@@ -440,7 +440,7 @@ end)
         })
         .unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     component.clear_runtime_dirty_states();
     component.dirty = false;
@@ -471,7 +471,7 @@ end)
         "changing audio.state.percent should schedule a repaint"
     );
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
     assert_eq!(
         runtime_value(&component, "volumeLevel"),
@@ -495,7 +495,7 @@ end)
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
         .unwrap();
 
     let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");

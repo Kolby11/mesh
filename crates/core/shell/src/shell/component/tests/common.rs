@@ -1634,3 +1634,59 @@ pub(super) fn first_node_with_class_token<'a>(
         .iter()
         .find_map(|child| first_node_with_class_token(child, token))
 }
+
+/// Paint into a CPU buffer the test can read back.
+pub(crate) trait PaintRaster {
+    fn paint_raster(
+        &mut self,
+        theme: &Theme,
+        extent: SurfaceExtent,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+    ) -> Result<(), ComponentError>;
+
+    fn paint_child_surface_raster(
+        &self,
+        node_key: &str,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        content_offset: (u32, u32),
+        exiting: bool,
+    ) -> Result<bool, ComponentError>;
+}
+
+impl<T: ShellComponent + ?Sized> PaintRaster for T {
+    fn paint_raster(
+        &mut self,
+        theme: &Theme,
+        extent: SurfaceExtent,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+    ) -> Result<(), ComponentError> {
+        let mut canvas = SurfaceCanvas::Raster(std::mem::replace(buffer, PixelBuffer::new(1, 1)));
+        let result = self.paint(theme, extent, &mut canvas, scale);
+        *buffer = std::mem::replace(
+            canvas.as_raster_mut().expect("tests paint CPU canvases"),
+            PixelBuffer::new(1, 1),
+        );
+        result
+    }
+
+    fn paint_child_surface_raster(
+        &self,
+        node_key: &str,
+        buffer: &mut PixelBuffer,
+        scale: f32,
+        content_offset: (u32, u32),
+        exiting: bool,
+    ) -> Result<bool, ComponentError> {
+        let mut canvas = SurfaceCanvas::Raster(std::mem::replace(buffer, PixelBuffer::new(1, 1)));
+        let result =
+            self.paint_child_surface(node_key, &mut canvas, scale, content_offset, exiting);
+        *buffer = std::mem::replace(
+            canvas.as_raster_mut().expect("tests paint CPU canvases"),
+            PixelBuffer::new(1, 1),
+        );
+        result
+    }
+}

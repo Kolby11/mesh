@@ -919,7 +919,7 @@ local function choose(value, event) selected = value.value; button = event.point
     let theme = default_theme();
     let mut buffer = mesh_core_render::PixelBuffer::new(160, 80);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
         .unwrap();
     let node = first_node_by_class(component.last_tree.as_ref().unwrap(), "callback").unwrap();
     let x = node.layout.x + node.layout.width / 2.0;

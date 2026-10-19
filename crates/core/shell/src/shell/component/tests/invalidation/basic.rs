@@ -110,7 +110,7 @@ function changeLabel() label = "done" end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
         .unwrap();
     let dirty_types_before = component.dirty_types;
 
@@ -169,11 +169,11 @@ function hide() visible = nil end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 80);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
     while component.wants_render() {
         component
-            .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
             .unwrap();
     }
     let visible_pixels = buffer.data().to_vec();
@@ -191,11 +191,11 @@ function hide() visible = nil end
     assert_eq!(runtime, None);
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
     while component.wants_render() {
         component
-            .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
             .unwrap();
     }
 
@@ -224,17 +224,17 @@ function update() label = "after" end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(640, 160);
     component
-        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
         .unwrap();
     while component.wants_render() {
         component
-            .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
             .unwrap();
     }
 
     component.call_namespaced_handler("update", &[]).unwrap();
     component
-        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), &mut buffer, 1.0)
         .unwrap();
     let snapshot = component
         .take_invalidation_snapshot()
@@ -249,7 +249,7 @@ function update() label = "after" end
     let mut rebuilt = PixelBuffer::new(640, 160);
     component.invalidate_script_state();
     component
-        .paint(&theme, SurfaceExtent::unpadded(640, 160), &mut rebuilt, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), &mut rebuilt, 1.0)
         .unwrap();
     assert_eq!(buffer.data(), rebuilt.data());
 }
@@ -275,14 +275,22 @@ function reorder() items = {{id = "b", label = "second"}, {id = "a", label = "fi
     rebuilt.force_full_template_build = true;
     let mut actual = PixelBuffer::new(640, 160);
     let mut expected = PixelBuffer::new(640, 160);
-    patched.paint(&theme, extent, &mut actual, 1.0).unwrap();
-    rebuilt.paint(&theme, extent, &mut expected, 1.0).unwrap();
+    patched
+        .paint_raster(&theme, extent, &mut actual, 1.0)
+        .unwrap();
+    rebuilt
+        .paint_raster(&theme, extent, &mut expected, 1.0)
+        .unwrap();
     for handler in ["update", "reorder", "update"] {
         patched.call_namespaced_handler(handler, &[]).unwrap();
         rebuilt.call_namespaced_handler(handler, &[]).unwrap();
-        patched.paint(&theme, extent, &mut actual, 1.0).unwrap();
+        patched
+            .paint_raster(&theme, extent, &mut actual, 1.0)
+            .unwrap();
         rebuilt.invalidate_script_state();
-        rebuilt.paint(&theme, extent, &mut expected, 1.0).unwrap();
+        rebuilt
+            .paint_raster(&theme, extent, &mut expected, 1.0)
+            .unwrap();
         assert_eq!(actual.data(), expected.data(), "{handler}");
         let snapshot = patched.take_invalidation_snapshot().unwrap();
         if handler == "reorder" {
@@ -309,15 +317,21 @@ function hide() visible = false end
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(320, 100);
     let mut actual = PixelBuffer::new(320, 100);
-    component.paint(&theme, extent, &mut actual, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut actual, 1.0)
+        .unwrap();
     component.call_namespaced_handler("hide", &[]).unwrap();
-    component.paint(&theme, extent, &mut actual, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut actual, 1.0)
+        .unwrap();
     let snapshot = component.take_invalidation_snapshot().unwrap();
     assert_eq!(snapshot.patched_node_count, 0);
     assert!(snapshot.retained.removed > 0);
     let mut expected = PixelBuffer::new(320, 100);
     component.invalidate_script_state();
-    component.paint(&theme, extent, &mut expected, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut expected, 1.0)
+        .unwrap();
     assert_eq!(actual.data(), expected.data());
 }
 
@@ -341,14 +355,14 @@ function toggle() expanded = not expanded end
     let mut narrow_buffer = PixelBuffer::new(320, 100);
     let mut full_buffer = PixelBuffer::new(320, 100);
     narrow
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(320, 100),
             &mut narrow_buffer,
             1.0,
         )
         .unwrap();
-    full.paint(
+    full.paint_raster(
         &theme,
         SurfaceExtent::unpadded(320, 100),
         &mut full_buffer,
@@ -360,14 +374,14 @@ function toggle() expanded = not expanded end
     full.call_namespaced_handler("toggle", &[]).unwrap();
     full.invalidate_script_state();
     narrow
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(320, 100),
             &mut narrow_buffer,
             1.0,
         )
         .unwrap();
-    full.paint(
+    full.paint_raster(
         &theme,
         SurfaceExtent::unpadded(320, 100),
         &mut full_buffer,
@@ -413,7 +427,7 @@ function update() label0 = label0 == "row 00" and "changed" or "row 00" end
     let mut uncached_sparse_buffer = PixelBuffer::new(800, 1000);
     let mut full_buffer = PixelBuffer::new(800, 1000);
     narrow
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(800, 1000),
             &mut narrow_buffer,
@@ -421,14 +435,14 @@ function update() label0 = label0 == "row 00" and "changed" or "row 00" end
         )
         .unwrap();
     uncached_sparse
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(800, 1000),
             &mut uncached_sparse_buffer,
             1.0,
         )
         .unwrap();
-    full.paint(
+    full.paint_raster(
         &theme,
         SurfaceExtent::unpadded(800, 1000),
         &mut full_buffer,
@@ -441,7 +455,7 @@ function update() label0 = label0 == "row 00" and "changed" or "row 00" end
     for _ in 0..iterations {
         narrow.call_namespaced_handler("update", &[]).unwrap();
         narrow
-            .paint(
+            .paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(800, 1000),
                 &mut narrow_buffer,
@@ -467,7 +481,7 @@ function update() label0 = label0 == "row 00" and "changed" or "row 00" end
             .script_ctx
             .clear_template_expression_cache();
         uncached_sparse
-            .paint(
+            .paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(800, 1000),
                 &mut uncached_sparse_buffer,
@@ -490,7 +504,7 @@ function update() label0 = label0 == "row 00" and "changed" or "row 00" end
             .script_ctx
             .clear_template_expression_cache();
         full.invalidate_script_state();
-        full.paint(
+        full.paint_raster(
             &theme,
             SurfaceExtent::unpadded(800, 1000),
             &mut full_buffer,
@@ -546,7 +560,7 @@ function update() {handler_body} end
     let mut unbound_buffer = PixelBuffer::new(200, 60);
     let mut bound_buffer = PixelBuffer::new(200, 60);
     unbound
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(200, 60),
             &mut unbound_buffer,
@@ -554,7 +568,7 @@ function update() {handler_body} end
         )
         .unwrap();
     bound
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(200, 60),
             &mut bound_buffer,
@@ -567,7 +581,7 @@ function update() {handler_body} end
         }
         if unbound.wants_render() {
             unbound
-                .paint(
+                .paint_raster(
                     &theme,
                     SurfaceExtent::unpadded(200, 60),
                     &mut unbound_buffer,
@@ -577,7 +591,7 @@ function update() {handler_body} end
         }
         if bound.wants_render() {
             bound
-                .paint(
+                .paint_raster(
                     &theme,
                     SurfaceExtent::unpadded(200, 60),
                     &mut bound_buffer,
@@ -594,7 +608,7 @@ function update() {handler_body} end
         unbound.call_namespaced_handler("update", &[]).unwrap();
         if unbound.wants_render() {
             unbound
-                .paint(
+                .paint_raster(
                     &theme,
                     SurfaceExtent::unpadded(200, 60),
                     &mut unbound_buffer,
@@ -613,7 +627,7 @@ function update() {handler_body} end
         bound.call_namespaced_handler("update", &[]).unwrap();
         if bound.wants_render() {
             bound
-                .paint(
+                .paint_raster(
                     &theme,
                     SurfaceExtent::unpadded(200, 60),
                     &mut bound_buffer,
@@ -681,7 +695,7 @@ fn targeted_interaction_restyle_uses_scoped_retained_fingerprinting() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     component.hovered_path = ["root", "root/0", "root/0/0"]
@@ -690,7 +704,7 @@ fn targeted_interaction_restyle_uses_scoped_retained_fingerprinting() {
     component.hovered_key = Some("root/0/0".into());
     component.invalidate_interaction_restyle();
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert!(component.retained_tree.last_update_was_scoped());
@@ -747,7 +761,7 @@ fn finalized_dirty_frames_match_full_capture_without_state_selectors() {
             component.invalidate_interaction_restyle();
         }
         component
-            .paint(&theme, SurfaceExtent::unpadded(180, 120), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(180, 120), &mut buffer, 1.0)
             .unwrap();
         let tree = component.last_tree.as_ref().unwrap();
         let actual = component.last_frame_snapshot.as_ref().unwrap();
@@ -794,7 +808,7 @@ fn targeted_interaction_animation_merges_scoped_retained_roots() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     component.hovered_path = ["root", "root/0", "root/0/0"]
@@ -803,7 +817,7 @@ fn targeted_interaction_animation_merges_scoped_retained_roots() {
     component.hovered_key = Some("root/0/0".into());
     component.invalidate_interaction_restyle();
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     let actual = component.last_frame_snapshot.as_ref().unwrap();
@@ -844,14 +858,14 @@ scroll { width: 80px; height: 40px; overflow-y: auto; }
     let mut scoped_buffer = PixelBuffer::new(80, 40);
     let mut full_buffer = PixelBuffer::new(80, 40);
     scoped
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(80, 40),
             &mut scoped_buffer,
             1.0,
         )
         .unwrap();
-    full.paint(
+    full.paint_raster(
         &theme,
         SurfaceExtent::unpadded(80, 40),
         &mut full_buffer,
@@ -870,14 +884,14 @@ scroll { width: 80px; height: 40px; overflow-y: auto; }
     scoped.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
     full.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
     scoped
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(80, 40),
             &mut scoped_buffer,
             1.0,
         )
         .unwrap();
-    full.paint(
+    full.paint_raster(
         &theme,
         SurfaceExtent::unpadded(80, 40),
         &mut full_buffer,
@@ -911,14 +925,14 @@ fn paint_only_scoped_retained_end_to_end_benchmark() {
     let mut scoped_buffer = PixelBuffer::new(64, 16);
     let mut full_buffer = PixelBuffer::new(64, 16);
     scoped
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(64, 16),
             &mut scoped_buffer,
             1.0,
         )
         .unwrap();
-    full.paint(
+    full.paint_raster(
         &theme,
         SurfaceExtent::unpadded(64, 16),
         &mut full_buffer,
@@ -934,7 +948,7 @@ fn paint_only_scoped_retained_end_to_end_benchmark() {
             let started = Instant::now();
             scoped.invalidate_paint();
             scoped
-                .paint(
+                .paint_raster(
                     &theme,
                     SurfaceExtent::unpadded(64, 16),
                     &mut scoped_buffer,
@@ -945,7 +959,7 @@ fn paint_only_scoped_retained_end_to_end_benchmark() {
 
             let started = Instant::now();
             full.invalidate_paint();
-            full.paint(
+            full.paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(64, 16),
                 &mut full_buffer,
@@ -956,7 +970,7 @@ fn paint_only_scoped_retained_end_to_end_benchmark() {
         } else {
             let started = Instant::now();
             full.invalidate_paint();
-            full.paint(
+            full.paint_raster(
                 &theme,
                 SurfaceExtent::unpadded(64, 16),
                 &mut full_buffer,
@@ -968,7 +982,7 @@ fn paint_only_scoped_retained_end_to_end_benchmark() {
             let started = Instant::now();
             scoped.invalidate_paint();
             scoped
-                .paint(
+                .paint_raster(
                     &theme,
                     SurfaceExtent::unpadded(64, 16),
                     &mut scoped_buffer,
@@ -999,7 +1013,7 @@ fn surface_transition_annotation_forces_full_retained_fingerprinting() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     component.surface_entering = true;
@@ -1007,7 +1021,7 @@ fn surface_transition_annotation_forces_full_retained_fingerprinting() {
     component.hovered_key = Some("root/0".into());
     component.invalidate_interaction_restyle();
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
     assert!(!component.retained_tree.last_update_was_scoped());
@@ -1092,11 +1106,11 @@ surface { width: 200px; height: 80px; }
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 80);
     component
-        .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
         .unwrap();
     if component.wants_render() {
         component
-            .paint(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(200, 80), &mut buffer, 1.0)
             .unwrap();
     }
     assert!(!component.wants_render());
@@ -1132,11 +1146,11 @@ button:hover { background: #444444; }
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 48);
     component
-        .paint(&theme, SurfaceExtent::unpadded(120, 48), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 48), &mut buffer, 1.0)
         .unwrap();
     if component.wants_render() {
         component
-            .paint(&theme, SurfaceExtent::unpadded(120, 48), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(120, 48), &mut buffer, 1.0)
             .unwrap();
     }
     assert!(!component.wants_render());
@@ -1279,11 +1293,11 @@ surface { width: 1000px; height: 80px; }
         let mut component = test_frontend_component(&source);
         let mut buffer = PixelBuffer::new(1000, 80);
         component
-            .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
             .unwrap();
         if component.wants_render() {
             component
-                .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
                 .unwrap();
         }
         if force_state_agnostic_focus {
@@ -1300,7 +1314,7 @@ surface { width: 1000px; height: 80px; }
             });
             component.invalidate_interaction_restyle();
             component
-                .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
                 .unwrap();
         }
         started.elapsed()
@@ -1471,11 +1485,11 @@ surface { width: 1000px; height: 80px; }
         let mut component = test_frontend_component(&source);
         let mut buffer = PixelBuffer::new(1000, 80);
         component
-            .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
             .unwrap();
         if component.wants_render() {
             component
-                .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
                 .unwrap();
         }
         let started = Instant::now();
@@ -1489,7 +1503,7 @@ surface { width: 1000px; height: 80px; }
             }
             if component.wants_render() {
                 component
-                    .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                    .paint_raster(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
                     .unwrap();
             }
         }
@@ -1531,11 +1545,11 @@ surface { width: 1000px; height: 80px; }
         let mut component = test_frontend_component(&source);
         let mut buffer = PixelBuffer::new(1000, 80);
         component
-            .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
             .unwrap();
         if component.wants_render() {
             component
-                .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
                 .unwrap();
         }
         let started = Instant::now();
@@ -1549,7 +1563,7 @@ surface { width: 1000px; height: 80px; }
             }
             if component.wants_render() {
                 component
-                    .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                    .paint_raster(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
                     .unwrap();
             }
         }
@@ -1591,11 +1605,11 @@ surface { width: 1000px; height: 80px; }
         let mut component = test_frontend_component(&source);
         let mut buffer = PixelBuffer::new(1000, 80);
         component
-            .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
             .unwrap();
         if component.wants_render() {
             component
-                .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
                 .unwrap();
         }
 
@@ -1608,7 +1622,7 @@ surface { width: 1000px; height: 80px; }
             component.interaction_snapshot_valid = !force_old_fallback;
             component.invalidate_interaction_restyle();
             component
-                .paint(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(1000, 80), &mut buffer, 1.0)
                 .unwrap();
         }
         started.elapsed()
@@ -1670,14 +1684,14 @@ fn phase18_script_and_text_invalidations_take_full_rebuild_paint_path() {
 
     component.set_profiling_enabled(true);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
         .unwrap();
     component.take_invalidation_snapshot();
     component.take_profiling_records();
 
     component.invalidate_interaction_restyle();
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
         .unwrap();
     let restyle_snapshot = component
         .take_invalidation_snapshot()
@@ -1694,7 +1708,7 @@ fn phase18_script_and_text_invalidations_take_full_rebuild_paint_path() {
 
     component.invalidate_script_state();
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
         .unwrap();
     let script_snapshot = component
         .take_invalidation_snapshot()
@@ -1712,7 +1726,7 @@ fn phase18_script_and_text_invalidations_take_full_rebuild_paint_path() {
 
     component.invalidate_text_state();
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
         .unwrap();
     let text_snapshot = component
         .take_invalidation_snapshot()
@@ -1775,7 +1789,7 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(240, 80);
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
     assert_eq!(
         first_node_by_tag(component.last_tree.as_ref().unwrap(), "text")
@@ -1794,7 +1808,7 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
     );
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
         .unwrap();
     assert_eq!(
         first_node_by_tag(component.last_tree.as_ref().unwrap(), "text")
@@ -2555,7 +2569,7 @@ local Child = require("./components/child.mesh")
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(100, 40);
     component
-        .paint(&theme, SurfaceExtent::unpadded(100, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(100, 40), &mut buffer, 1.0)
         .unwrap();
     assert_eq!(
         first_node_by_class(component.last_tree.as_ref().unwrap(), "reload-style-target")
@@ -2577,7 +2591,7 @@ local Child = require("./components/child.mesh")
     );
 
     component
-        .paint(&theme, SurfaceExtent::unpadded(100, 40), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(100, 40), &mut buffer, 1.0)
         .unwrap();
     assert_eq!(
         first_node_by_class(component.last_tree.as_ref().unwrap(), "reload-style-target")
@@ -2599,7 +2613,7 @@ fn retained_paint_path_records_phase26_cpu_attribution_stages() {
 
     component.set_profiling_enabled(true);
     component
-        .paint(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 48), &mut buffer, 1.0)
         .unwrap();
 
     let stages: std::collections::HashSet<_> = component
@@ -2649,13 +2663,19 @@ function update() label = "after" end
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(640, 160);
     let mut buffer = PixelBuffer::new(640, 160);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     while component.wants_render() {
-        component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
     }
 
     component.call_namespaced_handler("update", &[]).unwrap();
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     let snapshot = component
         .take_invalidation_snapshot()
         .expect("handler paint records invalidation");
@@ -2672,7 +2692,9 @@ function update() label = "after" end
     // The patched frame matches what a full rebuild paints.
     let mut rebuilt = PixelBuffer::new(640, 160);
     component.invalidate_script_state();
-    component.paint(&theme, extent, &mut rebuilt, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut rebuilt, 1.0)
+        .unwrap();
     assert_eq!(buffer.data(), rebuilt.data());
 }
 
@@ -2703,13 +2725,19 @@ button.after { background: #0000ff; width: 200px; }
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(640, 160);
     let mut buffer = PixelBuffer::new(640, 160);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     while component.wants_render() {
-        component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
     }
 
     component.call_namespaced_handler("update", &[]).unwrap();
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     let snapshot = component.take_invalidation_snapshot().unwrap();
     assert!(snapshot.patched_node_count >= 2);
     assert_eq!(snapshot.component.script_narrow, 0);
@@ -2725,7 +2753,9 @@ button.after { background: #0000ff; width: 200px; }
 
     let mut rebuilt = PixelBuffer::new(640, 160);
     component.invalidate_script_state();
-    component.paint(&theme, extent, &mut rebuilt, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut rebuilt, 1.0)
+        .unwrap();
     let rebuilt_button =
         first_node_by_tag(component.last_tree.as_ref().unwrap(), "button").unwrap();
     assert_eq!(patched_button.accessibility.label.as_deref(), Some("after"));
@@ -2765,10 +2795,14 @@ end
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(320, 80);
     let mut buffer = PixelBuffer::new(320, 80);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
 
     component.call_namespaced_handler("show", &[]).unwrap();
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     let tree = component.last_tree.as_ref().expect("tree");
     assert!(content_of(tree, "visible"), "the {{#if}} body must appear");
 }
@@ -2788,10 +2822,14 @@ function toggle() hidden = not hidden end
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(240, 80);
     let mut buffer = PixelBuffer::new(240, 80);
-    component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     for hidden in [true, false, true, false] {
         component.call_namespaced_handler("toggle", &[]).unwrap();
-        component.paint(&theme, extent, &mut buffer, 1.0).unwrap();
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
         let node = first_node_by_tag(component.last_tree.as_ref().unwrap(), "button").unwrap();
         assert_eq!(
             node.computed_style.display == mesh_core_elements::Display::None,

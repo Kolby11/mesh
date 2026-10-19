@@ -9,7 +9,7 @@ pub use mesh_core_frontend_shell_adapter::{
     SurfaceExtent, SurfaceId, TabFocusTarget,
 };
 use mesh_core_presentation::{LayerSurfaceSizePolicy, PopupConfig, SurfaceConfig};
-use mesh_core_render::{DamageRect, PixelBuffer};
+use mesh_core_render::{DamageRect, SurfaceCanvas};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -44,7 +44,7 @@ pub(super) const COMPONENT_FAILURES_BEFORE_QUARANTINE: u32 = 3;
 /// surfaces (parent + popups) instead of the old 1:1 component↔surface model.
 pub(super) struct SurfaceTarget {
     pub(super) surface_id: SurfaceId,
-    pub(super) paint_buffer: Option<PixelBuffer>,
+    pub(super) paint_buffer: Option<SurfaceCanvas>,
     pub(super) last_surface_config: Option<SurfaceConfig>,
     pub(super) surface_size_policy: LayerSurfaceSizePolicy,
     /// Last surface size resolved by shell/presentation without requiring a

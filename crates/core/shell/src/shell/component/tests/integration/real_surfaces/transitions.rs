@@ -11,7 +11,7 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
 
     let mut buffer = PixelBuffer::new(112, 92);
     theme_selector
-        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     let entering_tree = theme_selector
         .last_tree
@@ -54,7 +54,7 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
     );
 
     theme_selector
-        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     let launched_tree = theme_selector
         .last_tree
@@ -85,7 +85,7 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
     );
 
     theme_selector
-        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     let replay_tree = theme_selector
         .last_tree
@@ -111,12 +111,12 @@ fn set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only() {
 
     let mut buffer = PixelBuffer::new(112, 92);
     theme_selector
-        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     // Settle past the entering frame so the baseline paint below isn't itself
     // carrying `mesh-surface-entering`.
     theme_selector
-        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
 
     let popover_key = theme_selector
@@ -132,7 +132,7 @@ fn set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only() {
     // its own CSS exit transition still has time left to run.
     theme_selector.set_closing_child_keys([popover_key.clone()].into_iter().collect());
     theme_selector
-        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
 
     let exiting_tree = theme_selector
@@ -158,7 +158,7 @@ fn set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only() {
     // paint — it does not retroactively rewind the in-flight transition.
     theme_selector.set_closing_child_keys(std::collections::HashSet::new());
     theme_selector
-        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     let reopened_tree = theme_selector
         .last_tree
@@ -184,7 +184,7 @@ fn set_entering_child_keys_scopes_entrance_to_popover_subtree_only() {
 
     let mut buffer = PixelBuffer::new(112, 92);
     theme_selector
-        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     let popover_key = theme_selector
         .last_tree
@@ -196,7 +196,7 @@ fn set_entering_child_keys_scopes_entrance_to_popover_subtree_only() {
 
     theme_selector.set_entering_child_keys([popover_key].into_iter().collect());
     theme_selector
-        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
 
     let tree = theme_selector.last_tree.as_ref().expect("entering tree");
@@ -225,7 +225,7 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
 
     let mut buffer = PixelBuffer::new(112, 92);
     theme_selector
-        .paint(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(112, 92), &mut buffer, 1.0)
         .unwrap();
     let tree = theme_selector
         .last_tree
@@ -309,7 +309,7 @@ fn shipped_language_popover_cycles_three_bubble_options_on_scroll() {
         .unwrap();
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -319,7 +319,7 @@ fn shipped_language_popover_cycles_three_bubble_options_on_scroll() {
 
     hover_ref(&mut component, &theme, width, height, "languageButton");
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -366,7 +366,7 @@ fn shipped_language_popover_cycles_three_bubble_options_on_scroll() {
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -473,7 +473,7 @@ fn shipped_language_popover_rotates_on_two_finger_trackpad_scroll() {
         .unwrap();
     let mut buffer = PixelBuffer::new(width, height);
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -482,7 +482,7 @@ fn shipped_language_popover_rotates_on_two_finger_trackpad_scroll() {
         .unwrap();
     hover_ref(&mut component, &theme, width, height, "languageButton");
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -519,7 +519,7 @@ fn shipped_language_popover_rotates_on_two_finger_trackpad_scroll() {
             .unwrap();
     }
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,
@@ -549,7 +549,7 @@ fn shipped_language_popover_rotates_on_two_finger_trackpad_scroll() {
         )
         .unwrap();
     component
-        .paint(
+        .paint_raster(
             &theme,
             SurfaceExtent::unpadded(width, height),
             &mut buffer,

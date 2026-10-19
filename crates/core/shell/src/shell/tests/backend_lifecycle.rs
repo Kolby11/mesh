@@ -1407,6 +1407,7 @@ fn frontend_module_activation_mounts_shipped_surface_live() {
         .parent
         .paint_buffer
         .as_ref()
+        .and_then(mesh_core_render::SurfaceCanvas::as_raster)
         .expect("settings surface should have a full-shell paint buffer");
     let opaque_pixels = buffer
         .data()

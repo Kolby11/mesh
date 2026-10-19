@@ -63,14 +63,14 @@ fn appearance_surface(theme: &Theme, buffer: &mut PixelBuffer) -> FrontendSurfac
     let mut settings =
         real_frontend_module_component("@mesh/settings", super::super::debug::settings_catalog());
     settings
-        .paint(theme, SurfaceExtent::unpadded(920, 900), buffer, 1.0)
+        .paint_raster(theme, SurfaceExtent::unpadded(920, 900), buffer, 1.0)
         .unwrap();
     seed_large_resource_catalog(&mut settings, 240);
     settings
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
         .unwrap();
     settings
-        .paint(theme, SurfaceExtent::unpadded(920, 900), buffer, 1.0)
+        .paint_raster(theme, SurfaceExtent::unpadded(920, 900), buffer, 1.0)
         .unwrap();
     settings
 }
@@ -157,7 +157,7 @@ fn hidden_audio_page_volume_patches_without_rebuild() {
         "a bound volume write must schedule a frame"
     );
     settings
-        .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
     let snapshot = settings
         .take_invalidation_snapshot()
@@ -243,14 +243,14 @@ fn appearance_frame_cost_profile() {
     for volume in 0..10u32 {
         publish_audio(&mut settings, volume);
         settings
-            .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
             .unwrap();
     }
     // Let the page-enter transitions finish so the loops below measure only
     // what each update schedules.
     while settings.wants_render() {
         settings
-            .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
             .unwrap();
     }
 
@@ -267,7 +267,7 @@ fn appearance_frame_cost_profile() {
         if settings.wants_render() {
             service_frames += 1;
             settings
-                .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
                 .unwrap();
         }
     }
@@ -283,7 +283,7 @@ fn appearance_frame_cost_profile() {
         if settings.wants_render() {
             read_frames += 1;
             settings
-                .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
                 .unwrap();
         }
     }
@@ -294,7 +294,7 @@ fn appearance_frame_cost_profile() {
     for _ in 0..FRAMES {
         settings.invalidate_paint();
         settings
-            .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
             .unwrap();
     }
     let paint_only = started.elapsed();
@@ -314,7 +314,7 @@ fn appearance_frame_cost_profile() {
         );
         settings.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
         settings
-            .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
             .unwrap();
     }
     let scroll = started.elapsed();
@@ -350,7 +350,7 @@ fn appearance_frame_cost_profile() {
         publish_audio(&mut settings, volume % 100);
         if settings.wants_render() {
             settings
-                .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
                 .unwrap();
         }
     }
@@ -364,7 +364,7 @@ fn appearance_frame_cost_profile() {
         publish_audio_percent(&mut settings, tick % 100);
         if settings.wants_render() {
             settings
-                .paint(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+                .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
                 .unwrap();
         }
     }
@@ -390,7 +390,7 @@ fn render_loop_frame(
     let mut passes = 0;
     loop {
         settings
-            .paint(theme, SurfaceExtent::unpadded(920, 900), buffer, 1.0)
+            .paint_raster(theme, SurfaceExtent::unpadded(920, 900), buffer, 1.0)
             .unwrap();
         passes += 1;
         if !settings.wants_immediate_rerender() || passes >= 2 {
@@ -610,47 +610,46 @@ fn settings_scroll_shift_matches_full_paint() {
         .unwrap();
     while render_loop_frame(&mut settings, &theme, &mut buffer) > 0 {}
 
-    let assert_matches_full_paint = |settings: &FrontendSurfaceComponent,
-                                     buffer: &PixelBuffer,
-                                     label: &str| {
-        let selected = settings.retained_display_list.select_paint_commands(
-            Some(DamageRect {
-                x: 0,
-                y: 0,
-                width: 920,
-                height: 900,
-            }),
-            mesh_core_render::DisplayListRepaintPolicy::FullSurface,
-        );
-        let mut fresh = PixelBuffer::new(920, 900);
-        mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
-            &selected,
-            &mut fresh,
-            1.0,
-            None,
-            None,
-            None,
-            Some("@mesh/settings"),
-        );
-        let mut differing = 0usize;
-        let mut worst = 0u8;
-        for (painted, full) in buffer.data().chunks(4).zip(fresh.data().chunks(4)) {
-            let delta = painted
-                .iter()
-                .zip(full)
-                .map(|(a, b)| a.abs_diff(*b))
-                .max()
-                .unwrap_or(0);
-            if delta > 0 {
-                differing += 1;
-                worst = worst.max(delta);
+    let assert_matches_full_paint =
+        |settings: &FrontendSurfaceComponent, buffer: &PixelBuffer, label: &str| {
+            let selected = settings.retained_display_list.select_paint_commands(
+                Some(DamageRect {
+                    x: 0,
+                    y: 0,
+                    width: 920,
+                    height: 900,
+                }),
+                mesh_core_render::DisplayListRepaintPolicy::FullSurface,
+            );
+            let mut fresh = PixelBuffer::new(920, 900);
+            mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
+                &selected,
+                &mut fresh,
+                1.0,
+                None,
+                None,
+                None,
+                Some("@mesh/settings"),
+            );
+            let mut differing = 0usize;
+            let mut worst = 0u8;
+            for (painted, full) in buffer.data().chunks(4).zip(fresh.data().chunks(4)) {
+                let delta = painted
+                    .iter()
+                    .zip(full)
+                    .map(|(a, b)| a.abs_diff(*b))
+                    .max()
+                    .unwrap_or(0);
+                if delta > 0 {
+                    differing += 1;
+                    worst = worst.max(delta);
+                }
             }
-        }
-        assert!(
-            differing == 0,
-            "{label}: {differing} pixels differ, worst channel delta {worst}"
-        );
-    };
+            assert!(
+                differing == 0,
+                "{label}: {differing} pixels differ, worst channel delta {worst}"
+            );
+        };
     let dy_steps = [-4.0, -4.0, -8.0, -4.0, 4.0, -3.5, -4.0, -12.0, 8.0, -4.0];
     for (frame, dy) in dy_steps.into_iter().enumerate() {
         settings
@@ -685,7 +684,7 @@ fn settle(settings: &mut FrontendSurfaceComponent, theme: &Theme, buffer: &mut P
     let mut frames = 0;
     while settings.wants_render() {
         settings
-            .paint(theme, SurfaceExtent::unpadded(920, 900), buffer, 1.0)
+            .paint_raster(theme, SurfaceExtent::unpadded(920, 900), buffer, 1.0)
             .unwrap();
         frames += 1;
         assert!(frames < 600, "the Appearance page never settled");

@@ -1,5 +1,6 @@
 use super::*;
 use skia_safe::{Canvas, Color, Color4f, Paint, Point, RRect, Rect, TileMode, gradient};
+use std::os::unix::fs::MetadataExt;
 
 /// Hosts without libEGL, the surfaceless platform or a GLES3 driver skip the
 /// GPU tests rather than failing; `MESH_REQUIRE_GPU=1` makes absence a failure
@@ -521,5 +522,336 @@ mod painter_parity {
                 worst: 16,
             },
         );
+    }
+}
+
+/// The first render node's device number, as a compositor's dmabuf feedback
+/// would report it.
+fn first_render_node() -> Option<u64> {
+    let mut nodes: Vec<_> = std::fs::read_dir("/dev/dri")
+        .ok()?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("renderD"))
+        .map(|entry| entry.path())
+        .collect();
+    nodes.sort();
+    std::fs::metadata(nodes.first()?).ok().map(|m| m.rdev())
+}
+
+fn device_context_or_skip() -> Option<GpuContext> {
+    let Some(device) = first_render_node() else {
+        if std::env::var_os("MESH_REQUIRE_GPU").is_some() {
+            panic!("GPU required but no render node exists");
+        }
+        eprintln!("skipping GPU test: no render node");
+        return None;
+    };
+    match GpuContext::on_drm_device(device) {
+        Ok(context) => Some(context),
+        Err(error) if std::env::var_os("MESH_REQUIRE_GPU").is_none() => {
+            eprintln!("skipping GPU test: {error}");
+            None
+        }
+        Err(error) => panic!("GPU required but unavailable: {error}"),
+    }
+}
+
+#[test]
+fn device_context_exports_dmabuf_targets_holding_copied_damage() {
+    let Some(mut context) = device_context_or_skip() else {
+        return;
+    };
+    if !context.supports_dmabuf_export() {
+        eprintln!("skipping: {} cannot export dmabufs", context.renderer());
+        return;
+    }
+    let (width, height) = (64, 32);
+    let mut source = context.offscreen_target(width, height).unwrap();
+    source.canvas().clear(Color::from_argb(255, 200, 30, 10));
+    let mut target = context.dmabuf_target(width, height).unwrap();
+    let planes = target.planes();
+    assert!(!planes.planes.is_empty());
+    assert_eq!(planes.fourcc, DRM_FORMAT_ABGR8888);
+    assert!(planes.planes[0].stride >= width * 4);
+
+    target.canvas().clear(Color::TRANSPARENT);
+    let damage = DamageRect {
+        x: 8,
+        y: 4,
+        width: 16,
+        height: 8,
+    };
+    target.copy_from(&mut source, &[damage]);
+    context.flush();
+    // Kernels before 6.0 cannot import sync files; presentation then waits.
+    let fenced = context.attach_write_fence(&target);
+    assert!(
+        fenced || std::env::var_os("MESH_REQUIRE_GPU").is_none(),
+        "{} cannot fence a dmabuf for implicit sync",
+        context.renderer()
+    );
+    context.finish();
+
+    let info = ImageInfo::new(
+        (width as i32, height as i32),
+        ColorType::RGBA8888,
+        AlphaType::Premul,
+        None,
+    );
+    let mut pixels = vec![0u8; (width * height * 4) as usize];
+    assert!(
+        target
+            .surface
+            .read_pixels(&info, &mut pixels, (width * 4) as usize, (0, 0))
+    );
+    let pixel = |x: u32, y: u32| {
+        let offset = ((y * width + x) * 4) as usize;
+        [
+            pixels[offset],
+            pixels[offset + 1],
+            pixels[offset + 2],
+            pixels[offset + 3],
+        ]
+    };
+    assert_eq!(pixel(10, 6), [200, 30, 10, 255], "damage is copied");
+    assert_eq!(pixel(2, 2), [0, 0, 0, 0], "outside damage is untouched");
+}
+
+/// UI-thread cost of one frame on each backend, from paint through the
+/// buffer the compositor reads: CPU raster plus the SHM row copy, against
+/// GPU paint plus the dmabuf copy and the completion wait. Run with
+/// `cargo test -p mesh-core-render --release --features renderer-gpu --lib
+/// gpu_frame_cost -- --ignored --nocapture`.
+mod frame_cost {
+    use super::*;
+    use crate::display_list::{DisplayListRepaintPolicy, RetainedDisplayList};
+    use crate::{FrontendRenderEngine, PixelCanvasSession};
+    use mesh_core_elements::WidgetNode;
+    use mesh_core_elements::layout::LayoutRect;
+    use mesh_core_elements::style::{
+        BackgroundPaint, BoxShadow, Color as StyleColor, Corners, Dimension, Edges,
+        StyleLinearGradient, VisualFilter,
+    };
+    use std::time::{Duration, Instant};
+
+    const LOGICAL: (u32, u32) = (920, 900);
+    const SCALE: f32 = 2.0;
+    const FRAMES: usize = 40;
+    const SAMPLES: usize = 4;
+
+    fn node(id: u64, tag: &str, (x, y, width, height): (f32, f32, f32, f32)) -> WidgetNode {
+        let mut node = WidgetNode::new(tag);
+        node.id = id;
+        node.layout = LayoutRect {
+            x,
+            y,
+            width,
+            height,
+        };
+        node.computed_style.width = Dimension::Px(width);
+        node.computed_style.height = Dimension::Px(height);
+        node
+    }
+
+    fn color(r: u8, g: u8, b: u8, a: u8) -> StyleColor {
+        StyleColor { r, g, b, a }
+    }
+
+    /// A Settings-sized surface: gradient backdrop, a 6×10 grid of rounded,
+    /// shadowed cards with text, and a frosted panel over the top third.
+    fn settings_scene() -> WidgetNode {
+        let mut root = node(1, "box", (0.0, 0.0, 920.0, 900.0));
+        root.computed_style.background_paint =
+            BackgroundPaint::LinearGradient(StyleLinearGradient {
+                from: color(30, 60, 110, 255),
+                to: color(110, 40, 90, 255),
+            });
+        let mut id = 10;
+        for row in 0..10 {
+            for column in 0..6 {
+                let (x, y) = (16.0 + column as f32 * 150.0, 16.0 + row as f32 * 88.0);
+                let mut card = node(id, "box", (x, y, 138.0, 76.0));
+                card.computed_style.background_color = color(40, 50, 70, 230);
+                card.computed_style.border_radius = Corners::all(12.0);
+                card.computed_style.border_width = Edges::all(1.0);
+                card.computed_style.border_color = color(120, 150, 190, 255);
+                card.computed_style.box_shadow = BoxShadow {
+                    offset_x: 0.0,
+                    offset_y: 4.0,
+                    blur_radius: 10.0,
+                    spread_radius: 0.0,
+                    color: color(0, 0, 0, 120),
+                    inset: false,
+                };
+                let mut label = node(id + 1, "text", (x + 12.0, y + 12.0, 110.0, 18.0));
+                label
+                    .attributes
+                    .insert("content".into(), format!("Setting {row}.{column}").into());
+                label.computed_style.color = color(240, 244, 248, 255);
+                label.computed_style.font_size = 13.0;
+                label.computed_style.line_height = 1.3;
+                label.computed_style.padding = Edges::zero();
+                card.children.push(label);
+                root.children.push(card);
+                id += 2;
+            }
+        }
+        let mut frosted = node(id, "box", (40.0, 40.0, 840.0, 260.0));
+        frosted.computed_style.background_color = color(255, 255, 255, 36);
+        frosted.computed_style.border_radius = Corners::all(18.0);
+        frosted.computed_style.backdrop_filter = VisualFilter::blur(12.0);
+        root.children.push(frosted);
+        root
+    }
+
+    fn logical(x: u32, y: u32, width: u32, height: u32) -> DamageRect {
+        DamageRect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    fn device(rect: DamageRect) -> DamageRect {
+        let scale = |value: u32| (value as f32 * SCALE) as u32;
+        logical(
+            scale(rect.x),
+            scale(rect.y),
+            scale(rect.width),
+            scale(rect.height),
+        )
+    }
+
+    /// Clear and repaint `damage` (logical) through the session.
+    fn paint(
+        engine: &FrontendRenderEngine,
+        list: &RetainedDisplayList,
+        session: &mut PixelCanvasSession<'_>,
+        damage: DamageRect,
+    ) {
+        let selected = list
+            .select_paint_commands_for_rects(&[damage], DisplayListRepaintPolicy::MinimalDamage);
+        let clip = device(damage);
+        session.clear_rect(clip, StyleColor::TRANSPARENT);
+        engine.render_selected_display_list_regions_for_module_in_session(
+            &selected,
+            session,
+            SCALE,
+            &[(clip.x, clip.y, clip.width, clip.height)],
+            None,
+            None,
+        );
+    }
+
+    /// The SHM upload: copy damaged rows of `source` into a mapped buffer.
+    fn copy_rows(source: &PixelBuffer, target: &mut [u8], rect: DamageRect) {
+        let stride = source.stride() as usize;
+        let row = rect.width as usize * 4;
+        for y in rect.y..rect.y + rect.height {
+            let start = y as usize * stride + rect.x as usize * 4;
+            target[start..start + row].copy_from_slice(&source.data()[start..start + row]);
+        }
+    }
+
+    fn summary(samples: &[Duration]) -> String {
+        let per_frame: Vec<f64> = samples
+            .iter()
+            .map(|sample| sample.as_secs_f64() * 1000.0 / FRAMES as f64)
+            .collect();
+        let min = per_frame.iter().copied().fold(f64::MAX, f64::min);
+        let max = per_frame.iter().copied().fold(0.0, f64::max);
+        format!("{min:.3}–{max:.3} ms/frame")
+    }
+
+    fn render_nodes() -> Vec<u64> {
+        let mut nodes: Vec<_> = std::fs::read_dir("/dev/dri")
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with("renderD"))
+            .map(|entry| entry.path())
+            .collect();
+        nodes.sort();
+        nodes
+            .iter()
+            .filter_map(|path| std::fs::metadata(path).ok().map(|m| m.rdev()))
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn gpu_frame_cost_workload() {
+        let _guard = crate::resource_state_test_lock();
+        let engine = FrontendRenderEngine::new();
+        let root = settings_scene();
+        let mut list = RetainedDisplayList::default();
+        list.set_backdrop_blur_policy(crate::display_list::BackdropBlurPolicy::InSurfaceFilter);
+        list.update(&root, LOGICAL.0, LOGICAL.1, true, true);
+        let (width, height) = (
+            (LOGICAL.0 as f32 * SCALE) as u32,
+            (LOGICAL.1 as f32 * SCALE) as u32,
+        );
+        let workloads = [
+            ("full surface", logical(0, 0, LOGICAL.0, LOGICAL.1)),
+            ("frosted panel", logical(40, 40, 840, 260)),
+            ("small widget", logical(476, 544, 138, 76)),
+        ];
+        eprintln!(
+            "surface {}x{} logical at scale {SCALE} ({width}x{height} px), {FRAMES} frames x {SAMPLES} samples",
+            LOGICAL.0, LOGICAL.1
+        );
+        let mut cpu = PixelBuffer::new(width, height);
+        let mut shm = vec![0u8; cpu.data().len()];
+        for (name, damage) in workloads {
+            let mut samples = Vec::new();
+            for _ in 0..=SAMPLES {
+                let started = Instant::now();
+                for _ in 0..FRAMES {
+                    paint(
+                        &engine,
+                        &list,
+                        &mut PixelCanvasSession::new(&mut cpu),
+                        damage,
+                    );
+                    copy_rows(&cpu, &mut shm, device(damage));
+                }
+                samples.push(started.elapsed());
+            }
+            samples.remove(0);
+            eprintln!("cpu raster + shm copy, {name}: {}", summary(&samples));
+        }
+        for node in render_nodes() {
+            let Ok(mut context) = GpuContext::on_drm_device(node) else {
+                continue;
+            };
+            if !context.supports_dmabuf_export() {
+                continue;
+            }
+            let renderer = context.renderer().to_owned();
+            let mut retained = context.offscreen_target(width, height).unwrap();
+            let mut ring = [
+                context.dmabuf_target(width, height).unwrap(),
+                context.dmabuf_target(width, height).unwrap(),
+            ];
+            for (name, damage) in workloads {
+                let mut samples = Vec::new();
+                for _ in 0..=SAMPLES {
+                    let started = Instant::now();
+                    for frame in 0..FRAMES {
+                        paint(&engine, &list, &mut retained.session(), damage);
+                        ring[frame % 2].copy_from(&mut retained, &[device(damage)]);
+                        context.submit_for(&ring[frame % 2]);
+                    }
+                    context.finish();
+                    samples.push(started.elapsed());
+                }
+                samples.remove(0);
+                eprintln!(
+                    "gpu ({renderer}) + dmabuf copy, {name}: {}",
+                    summary(&samples)
+                );
+            }
+        }
     }
 }

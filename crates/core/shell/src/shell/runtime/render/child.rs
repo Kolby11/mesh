@@ -553,16 +553,19 @@ impl Shell {
         }
 
         {
-            let child = &mut self.components[index].children[child_index];
-            if child
-                .target
-                .paint_buffer
-                .as_ref()
-                .map(|buffer| buffer.width() != physical_w || buffer.height() != physical_h)
-                .unwrap_or(true)
-            {
-                let buffer = PixelBuffer::try_new(physical_w, physical_h).ok_or_else(|| {
-                    ShellRunError::BufferAlloc {
+            let gpu = self.gpu_canvas_wanted();
+            if !super::canvas_matches(
+                self.components[index].children[child_index]
+                    .target
+                    .paint_buffer
+                    .as_ref(),
+                (physical_w, physical_h),
+                gpu,
+            ) {
+                let buffer = self
+                    .presentation_engine
+                    .allocate_canvas(physical_w, physical_h, gpu)
+                    .ok_or_else(|| ShellRunError::BufferAlloc {
                         surface_id: child_surface_id.clone(),
                         logical_w: width,
                         logical_h: height,
@@ -571,8 +574,8 @@ impl Shell {
                         scale,
                         requested_bytes,
                         max_bytes: MAX_BUFFER_BYTES,
-                    }
-                })?;
+                    })?;
+                let child = &mut self.components[index].children[child_index];
                 child.target.paint_buffer = Some(buffer);
                 child.last_paint_generation = None;
                 child.last_paint_exiting = None;

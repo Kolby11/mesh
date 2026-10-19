@@ -22,7 +22,7 @@ fn unavailable_interface_runtime_failure_is_not_retried_every_frame() {
     navigation.visible = true;
     let mut buffer = PixelBuffer::new(960, 80);
     navigation
-        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
         .unwrap();
 
     let failed = navigation
@@ -56,7 +56,7 @@ fn unavailable_interface_runtime_failure_is_not_retried_every_frame() {
     }
     navigation.invalidate(ComponentDirtyFlags::TREE_REBUILD);
     navigation
-        .paint(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
+        .paint_raster(&theme, SurfaceExtent::unpadded(960, 80), &mut buffer, 1.0)
         .unwrap();
     assert!(contains_text(
         navigation.last_tree.as_ref().unwrap(),

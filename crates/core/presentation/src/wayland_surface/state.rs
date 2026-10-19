@@ -211,6 +211,8 @@ pub(super) struct State {
     pub(super) activation_seat: Option<SeatId>,
     pub(super) qh: QueueHandle<State>,
     pub(super) pool: Option<SlotPool>,
+    #[cfg(feature = "gpu")]
+    pub(super) dmabuf: super::backend::DmabufProtocol,
     pub(super) surfaces: HashMap<String, SurfaceEntry>,
     pub(super) surface_ids_by_wl_id: HashMap<ObjectId, Arc<str>>,
     /// Next unique identity for a compositor surface role. Values are never
@@ -746,11 +748,12 @@ impl State {
     /// release is the wakeup for a blocked surface; it must not depend on the
     /// frame-callback timeout used for pacing.
     pub(super) fn refresh_buffer_backpressure(&mut self) {
-        let Some(pool) = self.pool.as_mut() else {
-            return;
-        };
         for entry in self.surfaces.values_mut() {
-            entry.refresh_buffer_backpressure(pool);
+            entry.refresh_buffer_backpressure(
+                self.pool.as_mut(),
+                #[cfg(feature = "gpu")]
+                &self.dmabuf.busy,
+            );
         }
     }
 
