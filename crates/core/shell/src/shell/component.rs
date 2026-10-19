@@ -1183,6 +1183,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// Pseudo-state dependencies in the cached aggregate. Interaction diffs
     /// use this to target only states that can change CSS for this surface.
     cached_restyle_state_dependencies: StyleStateDependencies,
+    cached_layout_state_dependencies: StyleStateDependencies,
     /// Cached `StyleRuleIndex` built from `cached_restyle_rules`. Reused
     /// across restyle passes; `is_for()` verifies identity against the rules
     /// slice before each restyle so a rules rebuild forces a rebuild here too.
@@ -1510,6 +1511,7 @@ impl FrontendSurfaceComponent {
             cached_restyle_rules: None,
             cached_restyle_rules_contribution_count: 0,
             cached_restyle_state_dependencies: StyleStateDependencies::default(),
+            cached_layout_state_dependencies: StyleStateDependencies::default(),
             cached_style_rule_index: None,
             style_rules_generation: 0,
             runtime_style_diagnostic_fingerprint: None,
@@ -1706,9 +1708,6 @@ impl FrontendSurfaceComponent {
         self.next_frame_only_dirty = false;
         self.dirty_types |= flags;
         self.style_only_dirty = true;
-        if invalidation_requires_pixel_repaint(flags) {
-            self.surface_pixels_invalid = true;
-        }
     }
 
     pub(super) fn invalidate_animation_style_path(&mut self, flags: ComponentDirtyFlags) {
@@ -1717,9 +1716,6 @@ impl FrontendSurfaceComponent {
         self.dirty_types |= flags;
         self.style_only_dirty = true;
         self.animation_only_dirty = exclusively_animation;
-        if invalidation_requires_pixel_repaint(flags) {
-            self.surface_pixels_invalid = true;
-        }
     }
 
     /// Schedule the next frame for a live smooth scroll or momentum tick. Like
@@ -1808,7 +1804,14 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn invalidate_hover_change(&mut self, tooltip_may_change: bool) {
         if self.module_styles_have_hover_rules() {
-            self.invalidate_interaction_restyle();
+            let mut flags = ComponentDirtyFlags::INTERACTION_RESTYLE;
+            if !self
+                .cached_layout_state_dependencies
+                .contains(mesh_core_elements::PseudoState::Hovered)
+            {
+                flags.remove(ComponentDirtyFlags::LAYOUT);
+            }
+            self.invalidate_style_path(flags);
         } else if tooltip_may_change {
             self.invalidate_paint();
         }

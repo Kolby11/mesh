@@ -1844,3 +1844,164 @@ fn keyframe_animation_frame_profile() {
         );
     }
 }
+
+#[test]
+fn hover_and_transition_damage_matches_full_repaint() {
+    let theme = default_theme();
+    for scale in [1.0, 1.25, 2.0] {
+        for hover_style in [
+            "background: #58a4dc; border-radius: 12px; box-shadow: 3px 2px 4px #0008;",
+            "opacity: 0.4; transform: translateX(8px) scale(1.1);",
+            "width: 84px; padding: 4px;",
+        ] {
+            let source = format!(
+                r#"
+<template><column class="scene"><box class="target" /><box class="other" /></column></template>
+<style>
+.scene {{ width: 240px; height: 160px; padding: 20px; gap: 16px; background: linear-gradient(#1c2840, #697885); }}
+.target {{ width: 64px; height: 40px; background: #d35770; border: 2px solid #eee; border-radius: 6px; transition: all 60ms linear; }}
+.target:hover {{ {hover_style} }}
+.other {{ width: 140px; height: 30px; background: #32a589; border-radius: 9px; }}
+</style>"#
+            );
+            let mut component = test_frontend_component(&source);
+            let width = (240.0 * scale) as u32;
+            let height = (160.0 * scale) as u32;
+            let extent = SurfaceExtent::unpadded(240, 160);
+            let mut buffer = PixelBuffer::new(width, height);
+            for _ in 0..3 {
+                component
+                    .paint_raster(&theme, extent, &mut buffer, scale)
+                    .unwrap();
+            }
+            component.take_present_damage();
+            let mut partial_frames = 0;
+            for hovered in [true, false, true, false] {
+                let event = if hovered {
+                    ComponentInput::PointerMove { x: 40.0, y: 35.0 }
+                } else {
+                    ComponentInput::PointerLeave
+                };
+                component.handle_input(&theme, 240, 160, event).unwrap();
+                assert!(
+                    !component.surface_pixels_invalid,
+                    "interaction keeps retained pixels"
+                );
+                for frame in 0..9 {
+                    component
+                        .paint_raster(&theme, extent, &mut buffer, scale)
+                        .unwrap();
+                    assert!(
+                        !component.surface_pixels_invalid,
+                        "animation keeps retained pixels"
+                    );
+                    let selected = component.retained_display_list.select_paint_commands(
+                        Some(DamageRect {
+                            x: 0,
+                            y: 0,
+                            width: 240,
+                            height: 160,
+                        }),
+                        mesh_core_render::DisplayListRepaintPolicy::FullSurface,
+                    );
+                    let mut fresh = PixelBuffer::new(width, height);
+                    mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
+                        &selected,
+                        &mut fresh,
+                        scale,
+                        None,
+                        None,
+                        None,
+                        Some(component.id()),
+                    );
+                    let differing = buffer
+                        .data()
+                        .chunks(4)
+                        .zip(fresh.data().chunks(4))
+                        .filter(|(painted, full)| painted != full)
+                        .count();
+                    assert_eq!(
+                        differing, 0,
+                        "scale {scale}, hover {hovered}, frame {frame}, {hover_style}"
+                    );
+                    if component
+                        .take_present_damage()
+                        .iter()
+                        .any(|rect| rect.width < 240 || rect.height < 160)
+                    {
+                        partial_frames += 1;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            assert!(
+                partial_frames > 0,
+                "retained diff must produce partial damage"
+            );
+        }
+    }
+}
+
+#[test]
+fn paint_only_hover_skips_layout_and_layout_rules_still_reflow() {
+    let theme = default_theme();
+    for (property, needs_layout) in [
+        (
+            "background: #e34; opacity: 0.7; transform: scale(1.1);",
+            false,
+        ),
+        ("width: 90px;", true),
+        ("font-size: 24px;", true),
+        ("--child-width: 90px;", true),
+    ] {
+        let source = format!(
+            r#"
+<template><row><box class="target" /><box class="sibling" /></row></template>
+<style>
+row {{ width: 240px; height: 80px; }}
+.target {{ width: 60px; height: 40px; background: #48a; }}
+.target:hover {{ {property} }}
+.sibling {{ width: 20px; height: 20px; background: #6b5; }}
+</style>"#
+        );
+        let mut component = test_frontend_component(&source);
+        let mut buffer = PixelBuffer::new(240, 80);
+        let extent = SurfaceExtent::unpadded(240, 80);
+        for _ in 0..3 {
+            component
+                .paint_raster(&theme, extent, &mut buffer, 1.0)
+                .unwrap();
+        }
+        component.set_profiling_enabled(true);
+        component.take_profiling_records();
+        component
+            .handle_input(
+                &theme,
+                240,
+                80,
+                ComponentInput::PointerMove { x: 20.0, y: 20.0 },
+            )
+            .unwrap();
+        assert_eq!(
+            component.dirty_types.contains(ComponentDirtyFlags::LAYOUT),
+            needs_layout,
+            "{property}"
+        );
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
+        assert_eq!(
+            component
+                .take_profiling_records()
+                .iter()
+                .any(|record| record.stage == mesh_core_debug::ProfilingStage::Layout),
+            needs_layout,
+            "{property}"
+        );
+        if property.starts_with("width") {
+            let target =
+                first_node_by_class(component.last_tree.as_ref().unwrap(), "target").unwrap();
+            assert_eq!(target.layout.width, 90.0);
+        }
+    }
+}

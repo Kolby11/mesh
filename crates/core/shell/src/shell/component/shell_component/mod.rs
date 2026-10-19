@@ -788,6 +788,10 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn request_paint(&mut self) {
+        // Resource completions change pixels without changing node fingerprints,
+        // even when another node gives the child list nonempty partial damage.
+        self.child_display_lists.get_mut().clear();
+        self.surface_pixels_invalid = true;
         self.invalidate_paint();
     }
 

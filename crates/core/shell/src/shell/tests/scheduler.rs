@@ -289,3 +289,71 @@ fn idle_watch_set_reconcile_profile() {
         elapsed.as_secs_f64() * 1e6 / f64::from(iterations)
     );
 }
+
+#[test]
+fn scheduler_uses_focus_grab_expiry_without_component_work() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    park_reload_deadlines(&mut shell);
+    shell
+        .presentation_engine
+        .testing_set_focus_grab_deadline(Some(Instant::now() + Duration::from_millis(120)));
+    let sleep = shell.next_runtime_sleep(false);
+    assert!(sleep <= Duration::from_millis(120), "{sleep:?}");
+    assert!(sleep >= Duration::from_millis(80), "{sleep:?}");
+    shell
+        .presentation_engine
+        .testing_set_focus_grab_deadline(Some(Instant::now() - Duration::from_millis(1)));
+    assert_eq!(shell.next_runtime_sleep(false), Duration::ZERO);
+}
+
+#[test]
+fn scheduler_uses_frame_callback_escape_for_dirty_visible_targets() {
+    let state = Arc::new(Mutex::new(DirtyHiddenState::default()));
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    park_reload_deadlines(&mut shell);
+    shell.register_component(Box::new(DirtyHiddenComponent::new(
+        "@test/callback",
+        None,
+        state,
+    )));
+    shell
+        .core
+        .surfaces
+        .get_mut("@test/callback")
+        .unwrap()
+        .visible = true;
+    let surface = shell.surfaces.get_mut("@test/callback").unwrap();
+    surface.visible = true;
+    surface.width = 120;
+    surface.height = 36;
+    shell
+        .presentation_engine
+        .testing_set_surface_frame_pending("@test/callback", true);
+    shell
+        .presentation_engine
+        .testing_set_frame_callback_deadline(
+            "@test/callback",
+            Instant::now() + Duration::from_millis(50),
+        );
+    let sleep = shell.next_runtime_sleep(false);
+    assert!(sleep <= Duration::from_millis(50), "{sleep:?}");
+    assert!(sleep >= Duration::from_millis(20), "{sleep:?}");
+    shell
+        .presentation_engine
+        .testing_set_frame_callback_deadline(
+            "@test/callback",
+            Instant::now() - Duration::from_millis(1),
+        );
+    assert_eq!(shell.next_runtime_sleep(false), Duration::ZERO);
+    shell
+        .core
+        .surfaces
+        .get_mut("@test/callback")
+        .unwrap()
+        .visible = false;
+    assert!(shell.next_runtime_sleep(false) >= Duration::from_secs(30));
+}

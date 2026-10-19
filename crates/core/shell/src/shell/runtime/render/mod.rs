@@ -67,17 +67,16 @@ impl Shell {
                 runtime.component.request_paint();
             }
         }
-        let icon_resolutions_ready = mesh_core_render::poll_icon_resolution_jobs();
-        let icon_rasters_ready = mesh_core_render::poll_icon_raster_jobs();
-        let glyph_rasters_ready = mesh_core_render::poll_glyph_raster_jobs();
-        let image_decodes_ready = mesh_core_render::poll_image_decode_jobs();
-        if icon_resolutions_ready
-            || icon_rasters_ready
-            || glyph_rasters_ready
-            || image_decodes_ready
-        {
-            for runtime in &mut self.components {
+        mesh_core_render::poll_icon_resolution_jobs();
+        mesh_core_render::poll_icon_raster_jobs();
+        mesh_core_render::poll_glyph_raster_jobs();
+        mesh_core_render::poll_image_decode_jobs();
+        for runtime in &mut self.components {
+            if runtime.resource_paints.take_ready() {
                 runtime.component.request_paint();
+                for child in &mut runtime.children {
+                    child.last_paint_generation = None;
+                }
             }
         }
         self.drain_surface_lifecycle_events()?;
@@ -98,7 +97,8 @@ impl Shell {
         let mut any_component_presented = false;
         let mut rendered_ready_component = false;
         'component: for index in 0..self.components.len() {
-            let surface_id = self.components[index].surface_id.clone();
+            let runtime = &mut self.components[index];
+            let surface_id = runtime.surface_id.as_str();
             // Ahead of the `wants_render` gate: a compositor state change is
             // precisely what makes an otherwise-quiet window want to render.
             // Asking behind the gate would strand a fullscreened surface at its
@@ -111,13 +111,11 @@ impl Shell {
             // clears the states itself, because a layer surface has none.
             if self
                 .surfaces
-                .get(&surface_id)
+                .get(surface_id)
                 .is_some_and(|surface| surface.role == SurfaceRole::Window)
             {
-                let states = self.presentation_engine.window_states(&surface_id);
-                self.components[index]
-                    .component
-                    .surface_window_states_changed(states);
+                let states = self.presentation_engine.window_states(surface_id);
+                runtime.component.surface_window_states_changed(states);
                 // The compositor's configured size has to cross the gate for the
                 // same reason the states do — and it is the more urgent of the
                 // two. During an interactive resize the pointer is grabbed by
@@ -131,12 +129,12 @@ impl Shell {
                 // and repaints per configure instead, so what the compositor
                 // scales is never more than a frame stale.
                 if let Some((width, height)) =
-                    self.presentation_engine.window_configured_size(&surface_id)
+                    self.presentation_engine.window_configured_size(surface_id)
                 {
                     let resolved_size = (width.max(1), height.max(1));
-                    if self.components[index].parent.known_surface_size != Some(resolved_size) {
-                        self.components[index].parent.known_surface_size = Some(resolved_size);
-                        self.components[index]
+                    if runtime.parent.known_surface_size != Some(resolved_size) {
+                        runtime.parent.known_surface_size = Some(resolved_size);
+                        runtime
                             .component
                             .surface_size_changed(resolved_size.0, resolved_size.1);
                     }
@@ -154,6 +152,8 @@ impl Shell {
             if !self.components[index].component.wants_render() {
                 continue;
             }
+            let _resource_scope = self.components[index].resource_paints.enter();
+            let surface_id = self.components[index].surface_id.clone();
             let visible = self.surface_is_effectively_visible(&surface_id);
             if !visible
                 && self.components[index].parent.last_surface_config.is_none()

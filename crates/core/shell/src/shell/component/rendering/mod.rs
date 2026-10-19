@@ -9,6 +9,45 @@ pub(in crate::shell::component) use annotate::*;
 
 use super::*;
 
+fn state_rule_requires_layout<'a>(
+    selector: &mesh_core_component::style::Selector,
+    mut properties: impl Iterator<Item = &'a str>,
+) -> bool {
+    selector_contains_state(selector)
+        && properties.any(|property| {
+            // Unknown properties and custom variables stay conservative: a
+            // variable can feed an inherited font or a descendant's dimensions.
+            !matches!(
+                property,
+                "color"
+                    | "background"
+                    | "background-color"
+                    | "background-image"
+                    | "border-color"
+                    | "border-radius"
+                    | "border-top-left-radius"
+                    | "border-top-right-radius"
+                    | "border-bottom-left-radius"
+                    | "border-bottom-right-radius"
+                    | "opacity"
+                    | "transform"
+                    | "transform-origin"
+                    | "box-shadow"
+                    | "filter"
+                    | "backdrop-filter"
+                    | "mix-blend-mode"
+                    | "z-index"
+                    | "visibility"
+                    | "text-align"
+                    | "text-overflow"
+                    | "icon-fill"
+                    | "icon-weight"
+                    | "icon-grade"
+                    | "icon-optical-size"
+            )
+        })
+}
+
 impl FrontendSurfaceComponent {
     pub(super) fn record_profiling_stage(
         &mut self,
@@ -145,8 +184,20 @@ impl FrontendSurfaceComponent {
                 );
             }
             let mut state_dependencies = StyleStateDependencies::default();
+            let mut layout_state_dependencies = StyleStateDependencies::default();
             for rule in &rules {
                 collect_selector_state_dependencies(&rule.selector, &mut state_dependencies);
+                if state_rule_requires_layout(
+                    &rule.selector,
+                    rule.declarations
+                        .iter()
+                        .map(|declaration| declaration.property.as_str()),
+                ) {
+                    collect_selector_state_dependencies(
+                        &rule.selector,
+                        &mut layout_state_dependencies,
+                    );
+                }
             }
             let theme = self.active_theme.borrow();
             for rule in theme
@@ -155,8 +206,20 @@ impl FrontendSurfaceComponent {
                 .chain(theme.modules().values().flat_map(|module| &module.rules))
             {
                 collect_selector_state_dependencies(&rule.selector, &mut state_dependencies);
+                if state_rule_requires_layout(
+                    &rule.selector,
+                    rule.declarations
+                        .iter()
+                        .map(|(property, _)| property.as_str()),
+                ) {
+                    collect_selector_state_dependencies(
+                        &rule.selector,
+                        &mut layout_state_dependencies,
+                    );
+                }
             }
             self.cached_restyle_state_dependencies = state_dependencies;
+            self.cached_layout_state_dependencies = layout_state_dependencies;
             rules.sort_by_key(|rule| selector_contains_state(&rule.selector));
 
             self.cached_restyle_rules = Some(rules);

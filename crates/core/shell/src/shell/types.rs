@@ -134,6 +134,7 @@ pub(super) struct ComponentRuntime {
     /// Immutable identity of the component, equal to its parent surface id.
     pub(super) surface_id: SurfaceId,
     pub(super) component: Box<dyn ShellComponent>,
+    pub(super) resource_paints: mesh_core_render::ResourcePaintConsumer,
     /// Every `.mesh` source path that contributes to this component
     /// (entrypoint + locally imported sub-components), with each file's
     /// last-seen mtime. The hot-reload watcher recompiles when *any* of
@@ -288,6 +289,7 @@ impl ComponentRuntime {
             surface_id,
             component,
             source_paths,
+            resource_paints: Default::default(),
             mounted: false,
             failure_count: 0,
             quarantined: false,

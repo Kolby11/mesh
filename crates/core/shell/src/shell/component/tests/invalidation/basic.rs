@@ -1168,7 +1168,7 @@ button:hover { background: #444444; }
     assert!(!requires_tree_rebuild);
     assert!(can_use_retained_path);
     assert!(flags.contains(ComponentDirtyFlags::STYLE));
-    assert!(flags.contains(ComponentDirtyFlags::LAYOUT));
+    assert!(!flags.contains(ComponentDirtyFlags::LAYOUT));
     assert!(flags.contains(ComponentDirtyFlags::PAINT));
 }
 

@@ -1305,3 +1305,71 @@ fn promoted_popover_keeps_its_intrinsic_size_beyond_the_parent_edge() {
     );
     assert!(request.content_size.0 >= 300, "{:?}", request.content_size);
 }
+
+#[test]
+fn explicit_repaint_refreshes_child_pixels_alongside_unrelated_style_damage() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let mut child = event_node("box", "root/popup", 0.0, 0.0, 40.0, 30.0, &[]);
+    child.mark_promoted_popover();
+    child.attributes.insert("hidden".into(), "true".into());
+    child.computed_style.background_color = Color {
+        r: 40,
+        g: 80,
+        b: 120,
+        a: 255,
+    };
+    let mut chip = event_node("box", "root/popup/chip", 0.0, 0.0, 5.0, 5.0, &[]);
+    chip.computed_style.background_color = Color {
+        r: 255,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    child.children.push(chip);
+    let mut tree = root_with(vec![child]);
+    component.retained_tree.update(&tree);
+    component.last_tree = Some(tree.clone());
+    let mut buffer = PixelBuffer::new(40, 30);
+    component
+        .paint_child_surface_raster("root/popup", &mut buffer, 1.0, (0, 0), false)
+        .unwrap();
+    let expected = buffer.get_pixel(30, 20);
+    buffer.clear(Color::TRANSPARENT);
+    tree.children[0].children[0]
+        .computed_style
+        .background_color
+        .g = 255;
+    component.retained_tree.update(&tree);
+    component.last_tree = Some(tree);
+    component.request_paint();
+    component
+        .paint_child_surface_raster("root/popup", &mut buffer, 1.0, (0, 0), false)
+        .unwrap();
+    assert_eq!(buffer.get_pixel(30, 20), expected);
+    assert_eq!(buffer.get_pixel(2, 2).g, 255);
+}
+
+#[test]
+fn explicit_repaint_refreshes_parent_pixels_without_display_list_changes() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box /></template><style>box { width: 40px; height: 30px; background: #285078; }</style>
+"#,
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(40, 30);
+    let mut buffer = PixelBuffer::new(40, 30);
+    for _ in 0..3 {
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
+    }
+    let expected = buffer.data().to_vec();
+    buffer.clear(Color::TRANSPARENT);
+    component.request_paint();
+    assert!(component.surface_pixels_invalid);
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+    assert_eq!(buffer.data(), expected);
+}
