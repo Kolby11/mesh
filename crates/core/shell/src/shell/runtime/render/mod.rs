@@ -748,7 +748,15 @@ impl Shell {
                 mesh_core_render::set_font_aliases(
                     self.font_registry.reference_aliases_for_module(&module_id),
                 );
-                mesh_core_render::set_backdrop_frame(self.backdrop_frame(&surface_id));
+                let paint_context = mesh_core_render::PaintContext {
+                    blur_quality: blur_quality_from_settings(&self.settings.render.blur),
+                    backdrop_policy,
+                    backdrop: self.backdrop_frame(&surface_id),
+                    ..Default::default()
+                };
+                self.components[index]
+                    .component
+                    .set_paint_context(paint_context);
                 let gpu = self.gpu_canvas_wanted();
                 if !canvas_matches(
                     self.components[index].parent.paint_buffer.as_ref(),

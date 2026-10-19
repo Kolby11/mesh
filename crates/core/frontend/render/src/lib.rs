@@ -6,7 +6,10 @@ mod fractional_scale;
 #[cfg(feature = "renderer-gpu")]
 pub mod gpu;
 pub mod library_adapters;
+mod paint_context;
 mod paint_input;
+pub use paint_context::PaintContext;
+pub mod prepared_scene;
 pub mod scene_thread;
 
 #[cfg(feature = "renderer-parley")]
@@ -100,3 +103,8 @@ pub(crate) fn isolate_resource_state_test(test_name: &str) -> bool {
     );
     true
 }
+
+pub use surface::{
+    paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session_with_context,
+    paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution_in_session_with_context,
+};

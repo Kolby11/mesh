@@ -396,5 +396,4 @@ fn normalized_mouse_pos(surface: &WindowSurface) -> Option<(f32, f32)> {
 }
 
 #[cfg(test)]
-mod tests {
-}
+mod tests {}

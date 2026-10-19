@@ -350,6 +350,35 @@ impl<B: SceneRenderer> SceneRenderThread<B> {
         Some(completed)
     }
 
+    /// Wait for a commit at a synchronous presentation boundary. Idle workers
+    /// and callers sleep on the condition variable; worker exit wakes waiters.
+    pub fn wait_completed(
+        &self,
+        key: SceneSurface,
+        timeout: std::time::Duration,
+    ) -> Option<RenderedScene<B::Output, B::Error>> {
+        let state = self.shared.state.lock().unwrap();
+        let (mut state, _) = self
+            .shared
+            .changed
+            .wait_timeout_while(state, timeout, |state| {
+                !state.closed
+                    && state
+                        .surfaces
+                        .get(&key)
+                        .is_some_and(|surface| !surface.removed && surface.completed.is_none())
+            })
+            .unwrap();
+        let surface = state.surfaces.get_mut(&key)?;
+        let completed = surface.completed.take()?;
+        surface.delivered = if completed.output.is_ok() {
+            completed.commit
+        } else {
+            0
+        };
+        Some(completed)
+    }
+
     /// Acknowledge successful presentation on the UI submission thread. Until
     /// acknowledged, later commits require full replay because their damage
     /// may refer to pixels the user has never seen.
@@ -486,6 +515,7 @@ fn run_worker<B: SceneRenderer>(
             }
         };
         if publish {
+            shared.changed.notify_all();
             (shared.wake_ui)();
         }
     }

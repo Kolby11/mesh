@@ -409,6 +409,25 @@ mod painter_parity {
         );
     }
 
+    struct RecordedSceneTestRenderer {
+        context: GpuContext,
+    }
+    impl crate::scene_thread::SceneRenderer for RecordedSceneTestRenderer {
+        type Resources = crate::prepared_scene::PreparedScene;
+        type Output = PixelBuffer;
+        type Error = crate::gpu::GpuError;
+        fn render(
+            &mut self,
+            frame: &crate::scene_thread::SceneFrame<Self::Resources>,
+        ) -> Result<PixelBuffer, Self::Error> {
+            let mut target = self.context.offscreen_target(WIDTH, HEIGHT)?;
+            target.canvas().clear(skia_safe::Color::TRANSPARENT);
+            frame.snapshot().resources().draw(target.canvas());
+            target.read_back(&mut self.context)
+        }
+        fn remove_surface(&mut self, _: crate::scene_thread::SceneSurface) {}
+    }
+
     fn assert_full_paint_parity(name: &str, root: &WidgetNode, budget: Budget) -> PixelBuffer {
         let _guard = crate::resource_state_test_lock();
         let engine = FrontendRenderEngine::new();
@@ -425,6 +444,49 @@ mod painter_parity {
             "{name}: {:?}",
             engine.painter_diagnostics()
         );
+        let list = display_list(root);
+        let mut recording = crate::prepared_scene::SceneCanvas::new(WIDTH, HEIGHT).unwrap();
+        recording.begin(list.frame_paint_plan());
+        paint(&engine, &mut recording.session(), root, None);
+        let snapshot = recording
+            .snapshot(crate::FractionalScale::identity())
+            .unwrap();
+        let surface = snapshot.surface();
+        let worker = crate::scene_thread::SceneRenderThread::spawn(
+            1,
+            || {
+                Ok::<_, crate::gpu::GpuError>(RecordedSceneTestRenderer {
+                    context: GpuContext::headless()?,
+                })
+            },
+            || {},
+        )
+        .unwrap();
+        worker.submit(snapshot).unwrap();
+        let result = worker
+            .wait_completed(surface, std::time::Duration::from_secs(10))
+            .expect("recorded GPU scene completed")
+            .output
+            .unwrap();
+        assert_within(
+            &format!("{name} recorded worker"),
+            &result,
+            &cpu,
+            Budget {
+                differing_per_mille: budget.differing_per_mille,
+                worst: budget.worst,
+            },
+        );
+        assert_within(
+            &format!("{name} recorded/direct GPU"),
+            &result,
+            &gpu,
+            Budget {
+                differing_per_mille: 1,
+                worst: 3,
+            },
+        );
+        worker.shutdown().unwrap();
         assert_within(name, &gpu, &cpu, budget);
         cpu
     }
@@ -781,9 +843,13 @@ mod frame_cost {
     }
 
     fn summary(samples: &[Duration]) -> String {
+        summary_for(samples, FRAMES)
+    }
+
+    fn summary_for(samples: &[Duration], frames: usize) -> String {
         let per_frame: Vec<f64> = samples
             .iter()
-            .map(|sample| sample.as_secs_f64() * 1000.0 / FRAMES as f64)
+            .map(|sample| sample.as_secs_f64() * 1000.0 / frames as f64)
             .collect();
         let min = per_frame.iter().copied().fold(f64::MAX, f64::min);
         let max = per_frame.iter().copied().fold(0.0, f64::max);
@@ -803,6 +869,113 @@ mod frame_cost {
             .iter()
             .filter_map(|path| std::fs::metadata(path).ok().map(|m| m.rdev()))
             .collect()
+    }
+
+    struct FinishedSceneRenderer(crate::gpu::scene::GpuSceneRenderer);
+    impl crate::scene_thread::SceneRenderer for FinishedSceneRenderer {
+        type Resources = crate::prepared_scene::PreparedScene;
+        type Output = crate::gpu::scene::GpuSceneOutput;
+        type Error = crate::gpu::scene::GpuSceneError;
+        fn render(
+            &mut self,
+            frame: &crate::scene_thread::SceneFrame<Self::Resources>,
+        ) -> Result<Self::Output, Self::Error> {
+            let output = self.0.render(frame)?;
+            self.0.finish();
+            Ok(output)
+        }
+        fn remove_surface(&mut self, surface: crate::scene_thread::SceneSurface) {
+            self.0.remove_surface(surface);
+        }
+    }
+
+    #[test]
+    #[ignore = "release scene handoff measurement"]
+    fn gpu_scene_handoff_profile() {
+        let _guard = crate::resource_state_test_lock();
+        let mut list = RetainedDisplayList::default();
+        list.set_backdrop_blur_policy(crate::BackdropBlurPolicy::InSurfaceFilter);
+        list.update(&settings_scene(), LOGICAL.0, LOGICAL.1, true, true);
+        let size = (
+            (LOGICAL.0 as f32 * SCALE) as u32,
+            (LOGICAL.1 as f32 * SCALE) as u32,
+        );
+        let full = logical(0, 0, LOGICAL.0, LOGICAL.1);
+        let engine = FrontendRenderEngine::new();
+        for drm_device in render_nodes() {
+            let Ok(mut context) = GpuContext::on_drm_device(drm_device) else {
+                continue;
+            };
+            if context.dmabuf_target(1, 1).is_err() {
+                continue;
+            }
+            let renderer = context.renderer().to_owned();
+            let worker = crate::scene_thread::SceneRenderThread::spawn(
+                1,
+                move || {
+                    Ok::<_, crate::gpu::scene::GpuSceneError>(FinishedSceneRenderer(
+                        crate::gpu::scene::GpuSceneRenderer::new(drm_device)?,
+                    ))
+                },
+                || {},
+            )
+            .unwrap();
+            let mut retained = context.offscreen_target(size.0, size.1).unwrap();
+            let mut ring = context.dmabuf_target(size.0, size.1).unwrap();
+            let mut recording = crate::prepared_scene::SceneCanvas::new(size.0, size.1).unwrap();
+            for (name, damage) in [
+                ("full", full),
+                ("frosted", logical(40, 40, 840, 260)),
+                ("widget", logical(476, 544, 138, 76)),
+            ] {
+                let mut direct_samples = Vec::new();
+                let mut threaded_samples = Vec::new();
+                let mut prepare_samples = Vec::new();
+                for sample in 0..4 {
+                    let started = Instant::now();
+                    for _ in 0..20 {
+                        paint(&engine, &list, &mut retained.session(), damage);
+                        ring.copy_from(&mut retained, &[device(damage)]);
+                        context.submit_for(&ring);
+                        context.finish();
+                    }
+                    let direct = started.elapsed();
+                    let started = Instant::now();
+                    let mut preparation = Duration::ZERO;
+                    for _ in 0..20 {
+                        let prepare = Instant::now();
+                        let mut plan = list.frame_paint_plan().clone();
+                        plan.damage.logical = vec![damage].into();
+                        recording.begin(&plan);
+                        paint(&engine, &list, &mut recording.session(), full);
+                        let snapshot = recording
+                            .snapshot(crate::FractionalScale::new(SCALE))
+                            .unwrap();
+                        preparation += prepare.elapsed();
+                        let commit = worker.submit(snapshot).unwrap();
+                        let output = worker
+                            .wait_completed(recording.surface, Duration::from_secs(10))
+                            .unwrap()
+                            .output
+                            .unwrap();
+                        assert!(worker.acknowledge_presented(recording.surface, commit));
+                        drop(output);
+                    }
+                    if sample > 0 {
+                        direct_samples.push(direct / 20);
+                        threaded_samples.push(started.elapsed() / 20);
+                        prepare_samples.push(preparation / 20);
+                    }
+                }
+                eprintln!(
+                    "scene handoff {renderer}, {name}, 920x900 logical scale2, 20 frames/sample: direct {} threaded {} UI preparation {}",
+                    summary_for(&direct_samples, 1),
+                    summary_for(&threaded_samples, 1),
+                    summary_for(&prepare_samples, 1)
+                );
+            }
+            worker.shutdown().unwrap();
+        }
     }
 
     #[test]

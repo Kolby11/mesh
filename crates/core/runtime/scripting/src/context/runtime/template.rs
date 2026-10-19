@@ -83,9 +83,10 @@ impl ScriptContext {
         match cache.service_reads.get_mut(expression_source) {
             Some(dependencies) => dependencies.extend(reads.iter().cloned()),
             None => {
-                cache
-                    .service_reads
-                    .insert(expression_source.to_owned(), reads.iter().cloned().collect());
+                cache.service_reads.insert(
+                    expression_source.to_owned(),
+                    reads.iter().cloned().collect(),
+                );
             }
         }
         if let Some(member_read_table) = &handle.member_reads {
@@ -101,7 +102,9 @@ impl ScriptContext {
                 let mut names: Vec<_> = member_read_table
                     .pairs::<LuaValue, bool>()
                     .filter_map(|entry| match entry {
-                        Ok((LuaValue::String(name), true)) => name.to_str().ok().map(|name| name.to_owned()),
+                        Ok((LuaValue::String(name), true)) => {
+                            name.to_str().ok().map(|name| name.to_owned())
+                        }
                         _ => None,
                     })
                     .collect();

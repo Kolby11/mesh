@@ -1806,7 +1806,6 @@ impl Shell {
         mesh_core_config::log_settings_diagnostics("settings", settings_store.diagnostics());
         let settings = mesh_core_config::resolve_shell_locale_settings(settings_store.shell());
 
-        mesh_core_render::set_blur_quality(blur_quality_from_settings(&settings.render.blur));
         apply_backdrop_settings(&settings.render.backdrop);
         let (theme, theme_watch) = default_theme_state(&settings);
         let locale = LocaleEngine::with_fallback_locale(

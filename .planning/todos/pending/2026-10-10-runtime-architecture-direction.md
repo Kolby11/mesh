@@ -113,8 +113,14 @@ keyboard toggling, Escape with focus return, outside-press and focus-leave
 dismissal from core. The controller proposes changes through a simple
 `open={variable}` write-back plus `openchange`, and triggers get `:expanded`,
 derived accessible `expanded` and tooltip suppression. Shipped popovers no
-longer forward events to their triggers. Dialog focus scope and dismissal and
-menu typeahead/nesting remain open.
+longer forward events to their triggers.
+
+**Shipped remainder (2026-10-20):** dialog/sheet and explicit focus scopes,
+modal Tab trapping, focus entry/return, Escape/outside dismissal, and menu
+prefix search, first/last navigation and nested-menu entry/return. Closed
+dialogs, sheets and menus are absent from layout, painting and semantics.
+The keyboard spec and elements guide define the authoring contract; October's
+log records validation. This direction note remains for the other open items.
 
 ## D6. Threaded scene commit and GPU raster
 
@@ -198,12 +204,23 @@ requires full topology and surface replay. A partial-damage plan cannot be used
 as if the skipped frame had been presented. Resource and output leases retire
 outside the queue lock so cleanup can re-enter resource ownership mechanisms.
 
-This is an unwired preparation seam, not a shipped GPU painter. Frozen font/icon
-resource adapters, GPU raster and presentation, buffer-age damage, and the
-production component adapter remain D6 work. The existing painter stays the
-reference. CI exercises queue bounds with a 1,000-commit burst, supersession,
-removal, presentation acknowledgment, failed-frame recovery, resource pinning,
-thread ownership, and teardown; no rendering speedup is claimed.
+**Shipped integration (2026-10-20):** the UI prepares a complete Skia picture
+with pinned immutable raster images, icon variants, glyph pages, backdrop and
+tooltip settings. Layout and glyph preparation use the same UI font database;
+the worker never resolves assets or loads an installed font catalog. This
+prepared-raster adapter replaces the need to freeze all host font sources in
+the production worker. `FrozenFontDatabase` remains an optional lower-level
+adapter. Immutable `PaintContext` values replace shell paint-setting mutations.
+
+The scene worker owns retained GPU pixels, at most three exported textures per
+surface and a shared 512 MiB target budget. Partial damage clips picture replay;
+export slots accumulate pending damage while compositor-held. Descriptor-only
+outputs and incarnation-specific leases cross to Wayland; buffer release,
+supersession, removal and shutdown never call GL on the UI thread. Presentation
+currently waits on completion, so frame-N/frame-N+1 pipelining remains separate.
+Parity, lifetime, queue, buffer backpressure and live-compositor checks accompany
+the implementation. Measurements are in the performance log; small damage
+frames pay complete UI recording overhead. No universal speedup is claimed.
 
 ### D7 token lowering contract
 
@@ -223,7 +240,7 @@ not establish an end-to-end theme-switch improvement.
 preserves face metadata and provides explicit ID remapping; layout and painting
 must consume the same prepared database. Source reservations stay attached to
 cloned databases, including worker-thread clones. Cancellation or byte-budget
-failure drops the entire candidate. Production integration must select a host
-font-catalog residency policy rather than assuming every installed font fits
-within one resource budget. Icon/resource snapshots and GPU presentation remain
-open.
+failure drops the entire candidate. Production scene integration uses prepared glyph images rather than copying
+the full installed catalog. Consumers that use this adapter must still select
+a host font-catalog residency policy rather than assuming every installed font
+fits within one resource budget.

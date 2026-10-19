@@ -763,6 +763,12 @@ impl State {
 
     pub(super) fn remove_surface(&mut self, surface_id: &str) -> Option<SurfaceEntry> {
         let entry = self.surfaces.remove(surface_id)?;
+        #[cfg(feature = "gpu")]
+        let entry = {
+            let mut entry = entry;
+            entry.retire_dmabuf_buffers(&mut self.dmabuf);
+            entry
+        };
         self.surface_ids_by_wl_id.remove(&entry.wl_surface().id());
         Some(entry)
     }

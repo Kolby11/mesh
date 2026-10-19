@@ -394,7 +394,6 @@ impl Shell {
         }
 
         self.reconcile_icon_shell_default();
-        mesh_core_render::set_blur_quality(blur_quality_from_settings(&self.settings.render.blur));
         super::apply_backdrop_settings(&self.settings.render.backdrop);
 
         let mut requests = VecDeque::new();

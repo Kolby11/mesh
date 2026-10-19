@@ -195,6 +195,9 @@ impl FrontendSurfaceComponent {
         tree: &WidgetNode,
         input: ComponentInput,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        if let Some(requests) = self.primitive_input(tree, &input)? {
+            return Ok(requests);
+        }
         if !self.disclosures.has_entries() {
             return self.dispatch_component_input_with_tree(tree, input);
         }

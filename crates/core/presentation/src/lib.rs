@@ -1264,9 +1264,9 @@ impl PresentationEngine {
         #[cfg(feature = "gpu")]
         if allow_gpu
             && let Backend::WaylandSurface(bridge) = &mut self.backend
-            && let Some(target) = bridge.allocate_gpu_target(width, height)
+            && let Some(target) = bridge.allocate_scene_canvas(width, height)
         {
-            return Some(SurfaceCanvas::Gpu(target));
+            return Some(SurfaceCanvas::Scene(target));
         }
         let _ = allow_gpu;
         PixelBuffer::try_new(width, height).map(SurfaceCanvas::Raster)

@@ -24,12 +24,12 @@ entry in the [performance log](../../log/performance-log.md).
 
 - **Skia Ganesh over GLES3.** The painter draws through a Skia `Canvas` on a
   `PixelCanvasSession`; the GPU target is the same session API.
-- **The GPU paints on the UI thread, not the D6 scene thread.** Painter
-  state (font database and aliases, glyph/icon/image caches, backdrop frame,
-  tooltip hints, resource job queues) is thread-local on the UI thread. Moving
-  paint to another thread needs SH-11's immutable `PaintContext` first. One
-  EGL context stays current on the UI thread for the whole session.
-- **Each surface keeps a retained GPU target** (`SurfaceCanvas::Gpu`), which
+- **GPU execution runs on the scene worker.** The UI prepares an immutable
+  Skia recording with pinned glyph/icon/image/backdrop resources and explicit
+  `PaintContext` values. The worker owns EGL, retained targets, export textures
+  and fences; Wayland receives descriptors and release leases. Presentation
+  currently waits for completion. See `docs/renderer-ownership.md`.
+- **Each surface keeps a retained GPU target** (on the scene worker), which
   plays the role `PixelBuffer` plays for SHM: partial repaints and scroll
   shifts keep working regardless of which ring buffer the compositor holds.
   Presentation copies the damage into one of a 2–3 deep ring of dmabuf
@@ -46,7 +46,7 @@ entry in the [performance log](../../log/performance-log.md).
 - **Synchronization without a CPU wait.** After the copy, an
   `EGL_ANDROID_native_fence_sync` sync file is imported into the dmabuf as an
   implicit write fence (`DMA_BUF_IOCTL_IMPORT_SYNC_FILE`, Linux 6.0+). The
-  compositor waits for the GPU; the UI thread does not. Without fence support
+  compositor waits for the GPU; the render thread does not. Without fence support
   the frame falls back to a CPU wait (`glFinish`).
 - **Rollout.** The CLI builds with `gpu` by default. GPU presentation turns on
   when the compositor offers `zwp_linux_dmabuf_v1` v4 feedback and the device
@@ -75,12 +75,6 @@ D9 workload gates on both backends. The parity tests in `gpu::tests` cover
 four small scenes; a canonical-workload pixel parity gate and a GPU frame-cost
 gate (`gpu_frame_cost_workload` is the starting point) are still needed. Live
 GPU presentation has been exercised only on Hyprland with an AMD main device.
-
-### Scene thread
-
-Moving GPU paint to the D6 render thread, after SH-11. The scene-thread
-handoff and `SceneRenderer` trait exist; the per-surface retained target and
-ring move with the paint.
 
 ## Measured
 

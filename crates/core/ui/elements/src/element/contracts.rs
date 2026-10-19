@@ -316,6 +316,10 @@ static CHOICE_EVENTS: &[ElementEventDef] = &[
 ];
 static ACTIVATE_EVENTS: &[ElementEventDef] =
     &[event("activate", "element", "Command or item activation")];
+static MENU_EVENTS: &[ElementEventDef] = &[
+    event("activate", "element", "Command or item activation"),
+    event("openchange", "open", "Open state change"),
+];
 static OPEN_EVENTS: &[ElementEventDef] = &[event("openchange", "open", "Open state change")];
 static SCROLL_EVENTS: &[ElementEventDef] = &[event("scroll", "offset", "Scroll position change")];
 
@@ -362,6 +366,8 @@ macro_rules! attribute_profile {
             attr("role", ElementAttributeType::String, "Accessibility role"),
             attr("aria-role", ElementAttributeType::String, "Accessibility role override"),
             attr("title", ElementAttributeType::String, "Accessible title"),
+            attr("focus-scope", ElementAttributeType::Boolean, "Own focus entry and return"),
+            attr("modal", ElementAttributeType::Boolean, "Trap focus inside a focus scope"),
             $($extra),*
         ]
     };
@@ -448,7 +454,8 @@ macro_rules! schema_attributes {
             attr("checked", ElementAttributeType::Boolean, "Checked state"),
             attr("selected", ElementAttributeType::Boolean, "Selected state"),
             attr("expanded", ElementAttributeType::Boolean, "Expanded state"),
-            attr("value", ElementAttributeType::String, "Current value")
+            attr("value", ElementAttributeType::String, "Current value"),
+            attr("open", ElementAttributeType::Boolean, "Open state")
         )
     };
     (Container) => {
@@ -535,7 +542,7 @@ macro_rules! element_schema {
             (Radio, "radio", "input", "CheckboxElement", ChoiceMenu, AccessibilityRole::Checkbox, true, true, CHECKABLE_FIELDS, CHOICE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
             (RadioGroup, "radio-group", "input", "RadioGroupElement", ChoiceMenu, AccessibilityRole::Region, false, false, EMPTY_FIELDS, CHOICE_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
             (SegmentedControl, "segmented-control", "input", "SegmentedControlElement", ChoiceMenu, AccessibilityRole::Toolbar, true, true, EMPTY_FIELDS, CHOICE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
-            (Menu, "menu", "row", "MenuElement", ChoiceMenu, AccessibilityRole::Menu, true, true, EMPTY_FIELDS, ACTIVATE_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Menu, "menu", "row", "MenuElement", ChoiceMenu, AccessibilityRole::Menu, true, true, EMPTY_FIELDS, MENU_EVENTS, STRUCTURE_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
             (MenuItem, "menu-item", "row", "MenuItemElement", ChoiceMenu, AccessibilityRole::MenuItem, true, true, EMPTY_FIELDS, ACTIVATE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
             (CommandItem, "command-item", "row", "MenuItemElement", ChoiceMenu, AccessibilityRole::MenuItem, true, true, EMPTY_FIELDS, ACTIVATE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
             (PreferenceRow, "preference-row", "row", "PreferenceRowElement", ChoiceMenu, AccessibilityRole::Region, true, false, EMPTY_FIELDS, ACTIVATE_EVENTS, CONTROL_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),

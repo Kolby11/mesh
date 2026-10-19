@@ -8,6 +8,14 @@ impl FrontendSurfaceComponent {
         next_key: Option<String>,
         focus_visible: bool,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let next_key = if let Some(scope) = mesh_core_interaction::active_modal_scope(tree) {
+            next_key
+                .filter(|key| mesh_core_interaction::scope_contains(scope, key))
+                .or_else(|| collect_focus_traversal(tree).into_iter().next())
+                .or_else(|| scope.mesh_key().map(str::to_owned))
+        } else {
+            next_key
+        };
         let next_key = next_key
             .filter(|key| node_can_receive_interaction(tree, key, InteractionTarget::Focus));
 
@@ -101,6 +109,9 @@ impl FrontendSurfaceComponent {
         tree: &WidgetNode,
         backward: bool,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
+        if mesh_core_interaction::active_modal_scope(tree).is_some() {
+            return self.advance_keyboard_focus(tree, backward);
+        }
         let traversal = collect_focus_traversal(tree);
         let current = self.focused_key.clone();
 

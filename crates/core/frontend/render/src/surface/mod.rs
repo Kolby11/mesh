@@ -191,6 +191,7 @@ pub struct PaintProfilingMetrics {
 }
 
 thread_local! {
+    static CONTEXT_RENDERER: RefCell<FrontendRenderEngine> = RefCell::new(FrontendRenderEngine::new());
     static FRONTEND_RENDERER: RefCell<FrontendRenderEngine> = RefCell::new(FrontendRenderEngine::new());
     static BACKDROP_BLUR_POLICY: Cell<BackdropBlurPolicy> = const { Cell::new(BackdropBlurPolicy::CompositorRegion) };
 }
@@ -541,8 +542,21 @@ pub fn paint_selected_display_list_for_module_with_profiling_metrics_and_attribu
     module_id: Option<&str>,
     collect_command_attribution: bool,
 ) -> PaintProfilingMetrics {
-    FRONTEND_RENDERER.with(|engine| {
-        let engine = engine.borrow();
+    paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session_with_context(commands, session, scale, clip, paint_nodes, tooltip, module_id, collect_command_attribution, None)
+}
+
+pub fn paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session_with_context(
+    commands: &SelectedDisplayListPaint<'_>,
+    session: &mut PixelCanvasSession<'_>,
+    scale: f32,
+    clip: Option<(u32, u32, u32, u32)>,
+    paint_nodes: Option<&HashSet<NodeId>>,
+    tooltip: Option<(&str, f32, f32)>,
+    module_id: Option<&str>,
+    collect_command_attribution: bool,
+    context: Option<&crate::PaintContext>,
+) -> PaintProfilingMetrics {
+    with_paint_engine(context, |engine| {
         profiling::reset_raster_metrics();
         engine.reset_text_cache_metrics();
         let traversal_started = std::time::Instant::now();
@@ -642,8 +656,22 @@ pub fn paint_selected_display_list_regions_for_module_with_profiling_metrics_and
     module_id: Option<&str>,
     collect_command_attribution: bool,
 ) -> PaintProfilingMetrics {
+    paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution_in_session_with_context(commands, session, scale, clips, paint_nodes, tooltip, module_id, collect_command_attribution, None)
+}
+
+pub fn paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution_in_session_with_context(
+    commands: &SelectedDisplayListPaint<'_>,
+    session: &mut PixelCanvasSession<'_>,
+    scale: f32,
+    clips: &[(u32, u32, u32, u32)],
+    paint_nodes: Option<&HashSet<NodeId>>,
+    tooltip: Option<(&str, f32, f32)>,
+    module_id: Option<&str>,
+    collect_command_attribution: bool,
+    context: Option<&crate::PaintContext>,
+) -> PaintProfilingMetrics {
     if clips.len() == 1 {
-        return paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session(
+        return paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session_with_context(
             commands,
             session,
             scale,
@@ -652,14 +680,14 @@ pub fn paint_selected_display_list_regions_for_module_with_profiling_metrics_and
             tooltip,
             module_id,
             collect_command_attribution,
+            context,
         );
     }
     if clips.is_empty() {
         return PaintProfilingMetrics::default();
     }
 
-    FRONTEND_RENDERER.with(|engine| {
-        let engine = engine.borrow();
+    with_paint_engine(context, |engine| {
         profiling::reset_raster_metrics();
         engine.reset_text_cache_metrics();
         let traversal_started = std::time::Instant::now();
@@ -775,5 +803,20 @@ mod tests {
             without_tooltip.traversal_micros,
             with_tooltip.traversal_micros
         );
+    }
+}
+
+fn with_paint_engine<R>(
+    context: Option<&crate::PaintContext>,
+    paint: impl FnOnce(&FrontendRenderEngine) -> R,
+) -> R {
+    if let Some(context) = context {
+        CONTEXT_RENDERER.with(|engine| {
+            let engine = engine.borrow();
+            engine.apply_context(context);
+            paint(&engine)
+        })
+    } else {
+        FRONTEND_RENDERER.with(|engine| paint(&engine.borrow()))
     }
 }

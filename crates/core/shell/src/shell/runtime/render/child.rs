@@ -612,6 +612,15 @@ impl Shell {
         {
             return Ok(false);
         }
+        let paint_context = mesh_core_render::PaintContext {
+            blur_quality: blur_quality_from_settings(&self.settings.render.blur),
+            backdrop_policy: mesh_core_render::backdrop_blur_policy(),
+            backdrop: self.backdrop_frame(&child_surface_id),
+            ..Default::default()
+        };
+        self.components[index]
+            .component
+            .set_paint_context(paint_context);
         let painted = {
             let runtime = &mut self.components[index];
             let buffer = runtime.children[child_index]

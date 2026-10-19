@@ -416,6 +416,24 @@ impl DoubleEndedIterator for PaintOrderChildren<'_> {
 }
 
 impl WidgetNode {
+    /// Explicitly closed disclosure containers take no space and expose no targets.
+    /// An omitted `open` preserves always-visible structural containers.
+    pub fn is_closed_container(&self) -> bool {
+        let source = self
+            .attributes
+            .get("data-mesh-element")
+            .map(String::as_str)
+            .unwrap_or(self.tag.as_str());
+        matches!(source, "dialog" | "sheet" | "menu")
+            && self
+                .attributes
+                .get("open")
+                .is_some_and(|value| {
+                    let value = value.trim();
+                    value.is_empty() || value == "0" || value.eq_ignore_ascii_case("false") || value.eq_ignore_ascii_case("none")
+                })
+    }
+
     pub fn new(tag: impl Into<String>) -> Self {
         Self {
             id: next_node_id(),

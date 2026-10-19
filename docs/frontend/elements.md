@@ -148,7 +148,27 @@ Menus use roving focus for command rows. Use child `icon`, `text`, and `shortcut
 
 Phase 90 adds native source semantics for the container and collection elements needed by shipped shell surfaces.
 
-Containers include `popover`, `dialog`, `tabs`, `tab`, `accordion`, and `details`. `panel` and `sheet` remain configured containers for now. Popover focus and escape behavior continue to use the existing shell cross-surface popover system; Phase 90 does not add a full in-tree modal trap or backdrop model.
+Containers include `popover`, `dialog`, `sheet`, `tabs`, `tab`, `accordion`, and
+`details`. Dialogs and sheets own a modal focus scope by default. Opening moves
+focus inside; Tab/Shift+Tab wrap there; closing restores the opener. Set
+`modal="false"` for ordinary traversal, or use `focus-scope="true"` on another
+container to opt into focus entry/return (`modal="true"` also traps focus).
+
+Bind `open={visible}` to a script variable. Escape and outside primary presses
+write false and emit `openchange` with `{ open, reason }`; expression bindings
+use an `onopenchange` handler to accept the proposal. Outside modal presses are
+consumed, including release, so background controls cannot activate. A dialog
+or sheet without `open` remains visible as a structural container. Explicit
+`open=false` hides dialogs, sheets and menus from layout, paint and semantics.
+Backdrop appearance remains authored styling.
+
+Menus support `Home`/`End`, enabled-row Up/Down navigation across grouping
+wrappers, and text typeahead against accessible labels or child text. Prefixes
+expire after 700 ms; repeating a character cycles matches. Nest a
+`<menu open={submenu_open}>` inside a menu item: Right (Left in RTL), Enter or
+Space opens and enters it; Left (Right in RTL) or Escape closes that level and
+returns to the parent item. The same `openchange` binding contract applies.
+Popovers retain the shell cross-surface focus system.
 
 Inline `<popover>` nodes are promoted to compositor popups when open, which lets a short parent surface such as a panel host content that paints outside its own buffer. Author placement with `anchor-ref`, `anchor`, `gravity`, `offset-x`, `offset-y`, and `constrain`; avoid manifest surface geometry for embeddable popovers.
 
@@ -249,7 +269,7 @@ For Phase 90, diagnostics validate container and collection boolean state attrib
 
 ## Deferred Element Behavior
 
-The following families remain defined by the native element taxonomy but are not expanded yet: rich data-driven option APIs, nested menu popups, full modal focus traps/backdrops, rich table/tree behavior, full gallery proof, distinct `meter` runtime behavior, distinct action button runtimes, and full multiline text editing.
+The following families remain defined by the native element taxonomy but are not expanded yet: rich data-driven option APIs, authored modal backdrops, rich table/tree behavior, full gallery proof, distinct `meter` runtime behavior, distinct action button runtimes, and full multiline text editing.
 
 ## Relationship To HTML Qt And Flutter
 

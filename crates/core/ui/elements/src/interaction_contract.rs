@@ -352,7 +352,8 @@ impl NodeEligibility {
         let attributes = LocalStateAttributes::read(node);
         let visual_visible = node.computed_style.display != Display::None
             && matches!(node.computed_style.visibility, Visibility::Visible)
-            && !attributes.hidden;
+            && !attributes.hidden
+            && !node.is_closed_container();
         Self {
             visual_visible,
             semantic_visible: visual_visible && !attributes.aria_hidden && !attributes.inert,

@@ -1373,3 +1373,49 @@ fn explicit_repaint_refreshes_parent_pixels_without_display_list_changes() {
         .unwrap();
     assert_eq!(buffer.data(), expected);
 }
+
+#[test]
+fn complete_scene_frames_match_raster_at_fractional_scale() {
+    let source = r#"
+        <template><box><text>Prepared scene</text><box class="chip" /></box></template>
+        <style>
+            box { width: 120px; height: 80px; background: #243040; }
+            text { color: #ffffff; font-size: 14px; }
+            .chip { width: 40px; height: 20px; background: #ff8040; border-radius: 5px; }
+        </style>
+    "#;
+    let theme = default_theme();
+    for scale in [1.0, 1.25, 2.0] {
+        let mut raster_component = test_frontend_component(source);
+        let mut scene_component = test_frontend_component(source);
+        let policy = mesh_core_render::FractionalScale::new(scale);
+        let size = (policy.physical_extent(120), policy.physical_extent(80));
+        let mut raster = PixelBuffer::new(size.0, size.1);
+        let mut scene = mesh_core_render::SurfaceCanvas::Scene(
+            mesh_core_render::prepared_scene::SceneCanvas::new(size.0, size.1).unwrap(),
+        );
+        for _ in 0..2 {
+            raster_component.request_paint();
+            scene_component.request_paint();
+            raster_component
+                .paint_raster(&theme, SurfaceExtent::unpadded(120, 80), &mut raster, scale)
+                .unwrap();
+            scene_component
+                .paint(&theme, SurfaceExtent::unpadded(120, 80), &mut scene, scale)
+                .unwrap();
+            let mesh_core_render::SurfaceCanvas::Scene(recording) = &mut scene else {
+                unreachable!()
+            };
+            let snapshot = recording.snapshot(policy).unwrap();
+            let mut replay = PixelBuffer::new(size.0, size.1);
+            mesh_core_render::PixelCanvasSession::new(&mut replay)
+                .with_canvas(|canvas| snapshot.resources().draw(canvas));
+            assert_eq!(
+                replay.data(),
+                raster.data(),
+                "complete scene differs at scale {scale}"
+            );
+            assert!(raster.data().iter().any(|channel| *channel != 0));
+        }
+    }
+}

@@ -616,6 +616,11 @@ impl FrontendSurfaceComponent {
             .keybind_subscribers(tree)
             .into_iter()
             .filter(|subscriber| subscriber.keybind_id == shortcut.keybind_id)
+            .filter(|subscriber| {
+                mesh_core_interaction::active_modal_scope(tree).is_none_or(|scope| {
+                    mesh_core_interaction::scope_contains(scope, &subscriber.node_key)
+                })
+            })
             .collect::<Vec<_>>();
         if subscribers.is_empty() {
             self.record_keybind_diagnostic(

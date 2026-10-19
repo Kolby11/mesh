@@ -18,6 +18,26 @@ surface** (`keyboard_mode` + runtime focus transfers, shell-owned).
   siblings, Tab transfer, `Escape`, and return focus to the trigger — the
   same traversal works across promoted popover surfaces
   ([03 §1.1](03-components.md)).
+- Menus own their command rows across grouping wrappers. `Home`/`End` select
+  the first/last enabled row. Committed text searches accessible labels or
+  rendered text with a 700 ms prefix timeout; repeating one character cycles
+  matching rows. Disabled rows and nested menu contents are excluded.
+- Nest a `<menu open={variable}>` inside its parent command row. `ArrowRight`
+  opens it and focuses its first enabled row; `ArrowLeft` or `Escape` closes
+  that level and returns to the parent row. Left/right reverse for RTL menus;
+  Enter/Space also open a submenu. Open proposals use the same binding
+  write-back and `openchange` event as popovers.
+- Open `dialog`/`sheet` elements establish a focus scope, move focus inside,
+  and restore the previous eligible target when closed or removed. They are
+  modal by default: Tab wraps inside the innermost painted modal scope,
+  pointer focus and keybind dispatch stay inside, and an empty scope owns
+  focus itself. `modal="false"` allows ordinary Tab traversal outside.
+  Other containers may opt in with `focus-scope="true"` and `modal="true"`.
+- For dialogs/sheets with an explicit `open` attribute, Escape or an outside
+  primary press proposes `open=false` through a simple binding and emits
+  `openchange` with reason `escape` or `outside`. Modal outside presses and
+  their releases are consumed. Omitted `open` keeps structural containers
+  visible; explicit false removes dialog/sheet/menu layout, paint and semantics.
 - `onkeydown` / `onkeyup` fire only on the focused element (never
   surface-global); handlers receive `event.key` + `event.modifiers`.
 - Activation keys are shell props with user overrides in the settings store

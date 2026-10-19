@@ -32,9 +32,11 @@ both previous and current bounds so moved pixels are repainted.
 Rounded clipping coverage and complete gradient/shadow rasters are prepared
 independently of destination damage. The painter retains their bounded geometry caches;
 scroll and partial-repaint paths use the same coverage as a full paint.
-Painting runs through a paint session over a canvas target, either a CPU
-pixel buffer or a GPU render target. Damage clears and in-place scroll shifts
-are session operations, so one selected display list paints into either.
+Painting runs through a paint session over CPU pixels or an immutable scene
+recording. The UI prepares glyph/icon/image resources using the same font state
+as layout. GPU execution and retained textures belong to the render thread;
+Wayland attaches descriptor-only outputs. Partial damage and full replay share
+the same recorded scene. CPU scroll shifts remain a raster fallback mechanism.
 
 These are implementation choices, not module dependencies. A future backend
 must implement the same backend-neutral painter contract and preserve visible

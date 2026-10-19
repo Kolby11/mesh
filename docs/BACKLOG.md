@@ -40,8 +40,6 @@ unless an item says otherwise. IDs point into the
 
 ### Priority 8 — Structural mechanics
 
-- [ ] **SH-11:** Immutable per-frame `PaintContext` replacing thread-local render
-      setters; prerequisite for the parallel-paint items under Threading.
 - [ ] **SH-08:** Extract `shell/component/**` into a `mesh-core-frontend-runtime`
       crate.
 - [ ] **UI-09:** Per-element behaviour table in `mesh-core-interaction` (after
@@ -108,13 +106,6 @@ Each needs a design and a measured prototype before it is adopted.
 - [ ] **D4:** Providers send typed field patches instead of whole snapshots, and
       no JSON on the frame path. Validation, ranges/defaults and `.d.luau`
       generation have shipped, and LSP proxy types use the same mapping.
-- [ ] **D5:** Remaining interaction primitives: a focus scope with modal trap,
-      Escape and outside dismissal for `dialog`/`sheet`, and menu typeahead and
-      nested menus. Popover disclosure (`open-on`) has shipped.
-- [ ] **D6:** Connect the immutable scene/render-thread handoff to frozen font/icon
-      resources and move GPU paint (shipped on the UI thread) onto it after SH-11.
-      The bounded handoff prototype is implemented; scroll-raster and blur plans
-      are re-scoped around renderer ownership.
 - [ ] **D9:** CI performance gates per workload: idle wakeups, hover, service
       poll, scroll, popover open, theme switch.
 
@@ -352,6 +343,8 @@ of payoff.
       serial VM-bound phase and a parallel paint/SHM phase (rayon) (K).
 - [ ] Pipeline paint of frame N against script work of frame N+1, after the
       per-surface split.
+- [ ] Narrow complete scene preparation by retained command/resource revision;
+      small damage frames still record the whole scene before GPU execution.
 - [ ] Tile-parallel raster for large damage, above a measured threshold only.
 - [ ] Move blocking file IO off the shell thread — i18n catalog mounts,
       settings and theme reloads, and icon/SVG cache-miss rasterization on the
@@ -400,8 +393,8 @@ of payoff.
 ### Architecture
 
 - [ ] Finish the Skia-GL backend: GPU resource residency for icons, images and
-      glyph bitmaps, D9 gates on both backends, and moving GPU paint to the
-      scene thread after SH-11. GPU paint and dmabuf presentation are shipped;
+      glyph bitmaps and D9 gates on both backends. Scene-worker GPU paint and
+      dmabuf presentation are shipped;
       [remaining work](../.planning/todos/pending/2026-07-15-gpu-rendering-backend.md).
 - [ ] Experimental persistent-scene/database renderer that extends retained
       identity into raster resources and tiles, measured against the Skia-GL

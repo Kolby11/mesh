@@ -179,6 +179,9 @@ fn css_edge_to_i32(value: f32) -> i32 {
 }
 
 impl ShellComponent for FrontendSurfaceComponent {
+    fn set_paint_context(&mut self, context: mesh_core_render::PaintContext) {
+        self.paint_context = context;
+    }
     fn id(&self) -> &str {
         &self.compiled.manifest.package.id
     }
@@ -1041,9 +1044,12 @@ impl ShellComponent for FrontendSurfaceComponent {
             )
         };
         self.effects_changed_templates = false;
-        self.prune_stale_interaction_targets(&tree);
         self.apply_pending_auto_focus(&tree);
         self.apply_pending_embedded_popover_focus(&tree);
+        if tree_was_rebuilt || bindings_patched || self.primitives_need_focus_refresh() {
+            self.refresh_focus_scopes(&tree);
+        }
+        self.prune_stale_interaction_targets(&tree);
         if tree_was_rebuilt || bindings_patched {
             self.refresh_disclosures(&tree);
         }
@@ -1160,7 +1166,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let display_list_started = std::time::Instant::now();
         let display_list_span = tracing::debug_span!("display_list_update").entered();
         self.retained_display_list
-            .set_backdrop_blur_policy(mesh_core_render::backdrop_blur_policy());
+            .set_backdrop_blur_policy(self.paint_context.backdrop_policy);
         let display_list_metrics = self.retained_display_list.update_for_retained_fingerprints(
             &tree,
             retained_tree_generation,
@@ -1257,13 +1263,27 @@ impl ShellComponent for FrontendSurfaceComponent {
         {
             effective_damage.rect = bounding_damage_rect(&effective_damage.rects, surface_damage);
         }
+        let complete_scene = canvas.is_scene();
+        if let SurfaceCanvas::Scene(scene) = canvas {
+            let mut plan = self.retained_display_list.frame_paint_plan().clone();
+            plan.inputs.surface_size = Some((paint_width, paint_height));
+            plan.damage.logical = effective_damage.rects.clone().into();
+            plan.damage.surface = surface_damage;
+            plan.damage.logical_bounds = effective_damage.rect.unwrap_or_default();
+            plan.damage.full_surface = effective_damage.full_surface;
+            scene.begin(&plan);
+        }
         let mut session = canvas.session();
-        let present_override = self.shift_scrolled_viewports(
-            &mut effective_damage,
-            &mut session,
-            scale,
-            current_tooltip_damage,
-        );
+        let present_override = if complete_scene {
+            None
+        } else {
+            self.shift_scrolled_viewports(
+                &mut effective_damage,
+                &mut session,
+                scale,
+                current_tooltip_damage,
+            )
+        };
         let _paint_damage = if effective_damage.full_surface {
             Some(surface_damage)
         } else {
@@ -1388,12 +1408,28 @@ impl ShellComponent for FrontendSurfaceComponent {
         );
 
         let paint_started = std::time::Instant::now();
+        let full_selection;
+        let full_damage;
+        let (record_selection, record_damage) = if complete_scene {
+            full_selection = self
+                .retained_display_list
+                .select_paint_commands(Some(surface_damage), DisplayListRepaintPolicy::FullSurface);
+            full_damage = EffectiveDamage {
+                rects: vec![surface_damage],
+                rect: Some(surface_damage),
+                full_surface: true,
+                policy: DisplayListRepaintPolicy::FullSurface,
+            };
+            (&full_selection, &full_damage)
+        } else {
+            (&selected_paint, &effective_damage)
+        };
         let paint_metrics = self.paint_pixel_regions(
             theme,
             &mut session,
             scale,
-            &selected_paint,
-            &effective_damage,
+            record_selection,
+            record_damage,
             paint_bounding_rect,
             tooltip.as_ref(),
             current_tooltip_damage,
@@ -2032,7 +2068,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let retained_generation = self.retained_tree.generation();
         let mut child_display_lists = self.child_display_lists.borrow_mut();
         let display_list = child_display_lists.get_or_insert(node.id);
-        display_list.set_backdrop_blur_policy(mesh_core_render::backdrop_blur_policy());
+        display_list.set_backdrop_blur_policy(self.paint_context.backdrop_policy);
         display_list.update_at_for_retained_generation_with_dirty_nodes(
             &child_root,
             retained_generation,
@@ -2061,9 +2097,23 @@ impl ShellComponent for FrontendSurfaceComponent {
             });
         }
         display_list.expand_damage_for_blur_regions(&mut damage_rects);
+        let complete_scene = canvas.is_scene();
+        if let SurfaceCanvas::Scene(scene) = canvas {
+            scene.begin(display_list.frame_paint_plan());
+            damage_rects = vec![DamageRect {
+                x: 0,
+                y: 0,
+                width: logical_width,
+                height: logical_height,
+            }];
+        }
         let selected = display_list.select_paint_commands_for_rects(
             &damage_rects,
-            DisplayListRepaintPolicy::MinimalDamage,
+            if complete_scene {
+                DisplayListRepaintPolicy::FullSurface
+            } else {
+                DisplayListRepaintPolicy::MinimalDamage
+            },
         );
         let mut session = canvas.session();
         for damage in damage_rects {
@@ -2073,7 +2123,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 physical_damage,
                 mesh_core_elements::style::Color::TRANSPARENT,
             );
-            mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session(
+            mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session_with_context(
                 &selected,
                 &mut session,
                 scale,
@@ -2087,6 +2137,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 None,
                 Some(self.compiled.manifest.package.id.as_str()),
                 false,
+                Some(&self.paint_context),
             );
         }
         Ok(true)

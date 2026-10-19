@@ -29,6 +29,7 @@ mod disclosure;
 mod input;
 mod interaction_state;
 mod memo;
+mod primitives;
 mod rendering;
 mod runtime;
 mod runtime_tree;
@@ -846,6 +847,7 @@ pub(super) struct FrontendSurfaceComponent {
     pending_embedded_popover_focus_restore: bool,
     /// Triggers and hover/deadline state of this surface's `<popover>`s.
     disclosures: DisclosureRegistry,
+    primitives: primitives::PrimitiveState,
     /// Set when focus is transferred INTO this surface from another via Tab.
     /// `(surface_id, key)` of the trigger element to return to when Tab/
     /// Shift+Tab leaves this surface's chain. None for top-level surfaces
@@ -966,6 +968,7 @@ pub(super) struct FrontendSurfaceComponent {
     window_states: WindowSurfaceState,
     last_painted_buffer_size: Option<(u32, u32)>,
     surface_pixels_invalid: bool,
+    paint_context: mesh_core_render::PaintContext,
     /// The immutable locale decision prepared by the shell's graph
     /// coordinator. All component instances receive the same Arc for a
     /// generation; surfaces never read or parse catalog files themselves.
@@ -1363,6 +1366,7 @@ impl FrontendSurfaceComponent {
             embedded_popover_return_focus: None,
             pending_embedded_popover_focus_restore: false,
             disclosures: DisclosureRegistry::default(),
+            primitives: primitives::PrimitiveState::default(),
             return_focus: None,
             close_on_focus_leave: false,
             triggered_popovers: HashMap::new(),
@@ -1418,6 +1422,7 @@ impl FrontendSurfaceComponent {
             },
             last_painted_buffer_size: None,
             surface_pixels_invalid: true,
+            paint_context: mesh_core_render::PaintContext::default(),
             locale: Arc::new(LocaleSnapshot::new("en", "en")),
             interface_catalog: interface_catalog.into(),
             last_tree: None,

@@ -6407,3 +6407,59 @@ was not in the earlier failure list, which I could not reconcile.
 **Open:** the sweep's estimate of the hover cost was too high for this
 workload. A bigger hover-frame win is more likely on a larger surface such as
 Settings; `appearance_frame_cost_profile` does not measure hover there.
+
+## 2026-10-20 — SH-11 / D6 production scene-worker integration
+
+GPU execution now uses the bounded scene worker. The UI lowers a complete Skia
+picture using an explicit frame `PaintContext`; immutable raster images, icon
+variants, glyph pages, backdrop shaders and tooltip settings stay pinned by the
+picture. Layout and glyph preparation share the UI font database, so production
+does not duplicate the entire installed font catalog into a frozen worker font
+database. `FrozenFontDatabase` remains available for other consumers.
+
+The worker owns EGL/Ganesh, retained pixels, damage copies and fenced exported
+textures. Each surface has at most three exports; targets share a 512 MiB byte
+budget. Only duplicated dmabuf descriptors, damage and independent release
+leases cross to Wayland. Successful attachment acknowledges the scene. Removed
+protocol buffers retire their textures rather than falsely releasing storage
+still held by the compositor. Old releases cannot unlock newly leased textures.
+Errors retain the existing full-repaint SHM fallback. The production queue
+admits 64 surface incarnations; idle workers block on a condition variable.
+
+Presentation currently waits for worker completion. This moves GPU ownership,
+but does not pipeline frame N raster with frame N+1 scripts. Full immutable
+recording also removes the GPU path's in-place scroll shift; damage replay is
+still partial. Pipelining and narrower recording remain backlog work. The
+rejected-experiments table was checked before implementation.
+
+**Measurement:** `gpu_scene_handoff_profile`, workspace release (thin LTO,
+one codegen unit), Ryzen 7 7840HS, desktop in use. A synthetic Settings-like
+920×900 logical surface at scale 2 (1840×1800 pixels), with frosted/gradient
+cards; full damage, one 840×260 frosted panel, or one 138×76 widget. Three
+alternating samples per side after one warm-up, 20 frames/sample. Both paths
+include GPU completion: direct production painter + retained-to-dmabuf copy,
+versus complete UI preparation + queue/wait + worker damage replay/copy.
+These are per-frame ranges, not an idle or whole-shell responsiveness claim.
+
+| GPU / damage | Direct | Scene worker including preparation | UI preparation alone |
+| --- | --- | --- | --- |
+| RTX 4060 Laptop / full | 2.493–2.892 ms | 2.803–2.998 ms | 0.415–0.446 ms |
+| RTX 4060 Laptop / frosted | 1.181–1.234 ms | 1.707–1.869 ms | 0.348–0.405 ms |
+| RTX 4060 Laptop / widget | 0.238–0.311 ms | 1.064–1.449 ms | 0.390–0.553 ms |
+| AMD 780M / full | 4.162–4.570 ms | 4.157–4.377 ms | 0.504–0.622 ms |
+| AMD 780M / frosted | 2.299–3.038 ms | 2.813–3.065 ms | 0.455–0.523 ms |
+| AMD 780M / widget | 0.450–0.546 ms | 1.315–1.462 ms | 0.363–0.404 ms |
+
+Small partial frames regress under the synchronous complete-recording path;
+this is accepted ownership infrastructure, not a universal speedup. There is
+no relative speed gate for this migration; D9 workload gates remain separate.
+
+**Verified:** debug renderer suite 318 passed / 13 ignored, presentation suite
+112 passed. Recorded GPU scenes are compared against direct GPU and CPU panel,
+icon-grid and effect scenes. Tests cover immutable source lifetime, disjoint
+damage, queue bounds/coalescing, failure recovery, leases and shutdown. A new
+production component scene/raster byte comparison passes at scales 1, 1.25 and
+2 across repeated frames. Required-GPU live compositor presentation passed six
+frames on the current Hyprland session, including release and teardown; NVIDIA
+as compositor main device remains untested. Full shell comparison is recorded
+in the monthly log when complete.

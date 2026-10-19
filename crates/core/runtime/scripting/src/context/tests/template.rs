@@ -371,7 +371,10 @@ fn template_expression_call_profile() {
     let rows = (0..200)
         .map(|index| {
             let mut locals = serde_json::Map::new();
-            locals.insert("item".into(), serde_json::json!({ "name": format!("row {index}") }));
+            locals.insert(
+                "item".into(),
+                serde_json::json!({ "name": format!("row {index}") }),
+            );
             locals.insert("index".into(), serde_json::json!(index));
             locals
         })
@@ -381,7 +384,10 @@ fn template_expression_call_profile() {
     let started = std::time::Instant::now();
     for _ in 0..frames {
         for locals in &rows {
-            std::hint::black_box(ctx.evaluate_template_expression(row_expression, locals).unwrap());
+            std::hint::black_box(
+                ctx.evaluate_template_expression(row_expression, locals)
+                    .unwrap(),
+            );
         }
     }
     let row_time = started.elapsed();
@@ -389,7 +395,10 @@ fn template_expression_call_profile() {
     for _ in 0..frames {
         for _ in 0..10 {
             for expression in &member_expressions {
-                std::hint::black_box(ctx.evaluate_template_expression(expression, &empty).unwrap());
+                std::hint::black_box(
+                    ctx.evaluate_template_expression(expression, &empty)
+                        .unwrap(),
+                );
             }
         }
     }

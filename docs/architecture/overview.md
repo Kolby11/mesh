@@ -44,6 +44,13 @@ are applied. Overflow then uses that geometry. Component memo entries preserve
 pre-animation styles and semantic projections while retaining original authored
 inputs; previews continue to produce a complete laid-out tree.
 
+GPU frames prepare a complete immutable Skia scene on the UI thread with pinned
+raster resources and explicit frame paint settings. A bounded worker owns EGL,
+retained targets and fenced dmabuf exports; Wayland receives only descriptors
+and release leases. Presentation currently waits for scene completion, while
+partial damage, compositor backpressure and SHM fallback remain authoritative.
+See [renderer ownership](../renderer-ownership.md).
+
 Interaction restyles and animation ticks preserve the surface's retained pixels;
 the display-list diff selects damage. Paint-only hover rules reuse layout, while
 layout declarations and custom variables conservatively request geometry work.

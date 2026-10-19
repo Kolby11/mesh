@@ -8,6 +8,19 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
+- **D5 interaction primitives implemented:** modal dialog/sheet focus scopes,
+  focus entry/return and dismissal, menu typeahead and nested-menu navigation.
+  Nine new shell regressions and 50 interaction tests pass. The broader shell
+  interaction suite retains the same six failures as today's recorded baseline.
+
+- **SH-11 → D6 integrated:** explicit frame paint inputs and complete immutable
+  Skia scenes pin glyph/icon/image/backdrop resources. The worker owns EGL,
+  retained pixels and fenced export slots; Wayland owns descriptor imports and
+  release leases. Renderer/presentation suites and required-GPU live presentation
+  pass. Shell failure names match the 41-name baseline exactly; release
+  measurements are in the performance log (small partial frames regress).
+  Presentation currently waits for completion; frame pipelining stays separate.
+
 - **Glass theme coherence implemented:** glass surfaces, text, gradients and
   shadows derive from the shared material family or contract roles; Violet
   Glass retains its tuned values. Doctor and LSP warn about fixed component
@@ -45,12 +58,12 @@ measurements are in [`log/`](log/README.md). Open work is in
   admission budget. Gradient-shader test counts follow their thread-local cache.
 
 - **GPU paint and dmabuf presentation shipped:** surfaces paint into a
-  retained Skia-GL target on the UI thread, and presentation copies damage
+  retained Skia-GL target on the scene worker, which copies damage
   into fenced dmabuf textures on the compositor's device (AMD 780M under
   Hyprland here). On by default; `MESH_RENDER_GPU=0`, missing dmabuf feedback,
   or a failed export falls back to SHM. A full repaint of a frosted
   1840×1800 px surface is about 1.9 ms instead of 36 ms (performance log).
-  Remaining: resource residency, D9 gates, scene-thread move after SH-11.
+  Remaining: resource residency and D9 gates.
 
 - **Rounded raster correctness implemented:** rounded overflow, image/gradient
   edges and shadows have exact partial/full repaint regressions. Renderer,
@@ -110,15 +123,11 @@ measurements are in [`log/`](log/README.md). Open work is in
 - **Priority 4 committed:** CMP-07, CMP-02/08, A1, A7, A5 and RES-06/RES-12
   landed in `934c4648`. Inspector Ctrl+Tab and niri/Sway providers are unchecked live.
 
-- **D6 preparation:** immutable scene submissions and a bounded render-thread
-  handoff and owned, budgeted font preparation are validated. Icon snapshots,
-  production resource admission and moving GPU paint to that thread remain
-  open; GPU paint runs on the UI thread until SH-11.
 - **Runtime direction follow-ups:** D1 template patching/effects, D2 task
   scheduling with suspending backend callbacks, D3 grants, D4 typed
   contracts and D5 popover disclosure have landed (see
   [October's log](log/2026-10.md)). D8 completes D2 stream hooks and `stop`.
-  D5 disclosure still needs a check in a live compositor.
+  D5 disclosure and modal/menu interactions still need a live compositor check.
 - **Scroll wave 4 item 15:** the [bounded scroll raster cache](todos/pending/2026-09-30-scroll-raster-cache.md).
   Production wiring is deferred by the revised D6 ownership and measurement contract.
 
@@ -126,8 +135,7 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 - GPU resource residency (icons, images, glyph bitmaps) measured on the GPU
   path; GPU frame-cost and parity gates.
-- Remaining D5 (dialog focus scope, menu typeahead), D6 renderer integration
-  and D9 workload gates.
+- D9 workload gates; frame-N/frame-N+1 pipelining after the scene integration.
 - Wave 5: the [in-surface blur engine](todos/pending/2026-09-30-in-surface-blur-engine.md).
 
 ## Blocked / known baselines

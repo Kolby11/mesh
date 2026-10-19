@@ -56,8 +56,16 @@ pub(super) fn predicted_origin(
     output: (f32, f32),
 ) -> (f32, f32) {
     let (out_w, out_h) = output;
-    let w = if surface.width == 0 { out_w } else { surface.width as f32 };
-    let h = if surface.height == 0 { out_h } else { surface.height as f32 };
+    let w = if surface.width == 0 {
+        out_w
+    } else {
+        surface.width as f32
+    };
+    let h = if surface.height == 0 {
+        out_h
+    } else {
+        surface.height as f32
+    };
     let zone: f32 = if surface.exclusive_zone < 0 {
         0.0
     } else {
@@ -132,7 +140,10 @@ mod tests {
         let output = (2880.0, 1800.0);
         let mut bar = layer_surface(Edge::Top, Layer::Top, (2846, 40), 52);
         bar.margin_top = 8;
-        assert_eq!(predicted_origin(bar, std::iter::empty(), output), (17.0, 8.0));
+        assert_eq!(
+            predicted_origin(bar, std::iter::empty(), output),
+            (17.0, 8.0)
+        );
 
         let mut cards = layer_surface(Edge::Top, Layer::Bottom, (0, 600), 0);
         cards.margin_top = 490;
@@ -143,10 +154,16 @@ mod tests {
         );
 
         let wallpaper = layer_surface(Edge::Top, Layer::Background, (0, 1800), -1);
-        assert_eq!(predicted_origin(wallpaper, std::iter::once(bar), output), (0.0, 0.0));
+        assert_eq!(
+            predicted_origin(wallpaper, std::iter::once(bar), output),
+            (0.0, 0.0)
+        );
 
         let mut dock = layer_surface(Edge::Bottom, Layer::Top, (700, 106), 117);
         dock.margin_bottom = 11;
-        assert_eq!(predicted_origin(dock, std::iter::empty(), output), (1090.0, 1683.0));
+        assert_eq!(
+            predicted_origin(dock, std::iter::empty(), output),
+            (1090.0, 1683.0)
+        );
     }
 }

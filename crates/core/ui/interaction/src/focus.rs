@@ -31,7 +31,12 @@ pub fn collect_focus_traversal(node: &WidgetNode) -> Vec<String> {
     );
 
     order_focus_targets(&mut targets);
-    targets.into_iter().map(|target| target.key).collect()
+    let scope = crate::active_modal_scope(node);
+    targets
+        .into_iter()
+        .map(|target| target.key)
+        .filter(|key| scope.is_none_or(|scope| crate::scope_contains(scope, key)))
+        .collect()
 }
 
 pub fn next_focus_target(

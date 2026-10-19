@@ -91,12 +91,66 @@ impl WaylandSurfaceBackend {
         // cannot disagree about the logical destination.
         let output_size = self.output_logical_size_for_surface(surface_id);
         #[cfg(feature = "gpu")]
-        let gpu = match canvas {
-            SurfaceCanvas::Gpu(_) => self.gpu.context(&self.state.dmabuf),
-            SurfaceCanvas::Raster(_) => None,
-        };
+        let mut rendered_scene = None;
+        #[cfg(feature = "gpu")]
+        if let SurfaceCanvas::Scene(scene) = canvas {
+            let worker = self.gpu.worker(&self.state.dmabuf).cloned();
+            let result = (|| {
+                let worker = worker.as_ref().ok_or_else(|| {
+                    PresentationError::BufferAlloc("GPU presentation is disabled".into())
+                })?;
+                let scale = self
+                    .state
+                    .surfaces
+                    .get(surface_id)
+                    .map(|entry| entry.scale)
+                    .unwrap_or(1.0);
+                let snapshot = scene
+                    .snapshot(mesh_core_render::FractionalScale::new(scale))
+                    .ok_or_else(|| {
+                        PresentationError::BufferAlloc("scene recording is incomplete".into())
+                    })?;
+                let commit = worker.submit(snapshot).map_err(|error| {
+                    PresentationError::BufferAlloc(format!("scene submit: {error:?}"))
+                })?;
+                let completed = worker
+                    .wait_completed(scene.surface, std::time::Duration::from_secs(2))
+                    .ok_or_else(|| {
+                        PresentationError::BufferAlloc(
+                            "scene worker did not complete the frame".into(),
+                        )
+                    })?;
+                if !worker.is_current(scene.surface, completed.commit) || completed.commit != commit
+                {
+                    return Err(PresentationError::BufferAlloc(
+                        "scene output was superseded".into(),
+                    ));
+                }
+                Ok((commit, completed.output))
+            })();
+            match result {
+                Ok((commit, Ok(output))) => rendered_scene = Some((scene.surface, commit, output)),
+                Ok((_, Err(mesh_core_render::gpu::scene::GpuSceneError::BuffersBusy))) => {
+                    if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
+                        entry.mark_buffer_backpressured();
+                    }
+                    return Ok(PresentStatus::NotReady);
+                }
+                Ok((_, Err(error))) => {
+                    self.gpu
+                        .disable(&PresentationError::BufferAlloc(error.to_string()));
+                    return Ok(PresentStatus::NotReady);
+                }
+                Err(error) => {
+                    self.gpu.disable(&error);
+                    return Ok(PresentStatus::NotReady);
+                }
+            }
+        }
         #[cfg(feature = "gpu")]
         let mut gpu_failure = None;
+        #[cfg(feature = "gpu")]
+        let mut scene_commit = None;
         let (
             slot,
             copy_damage,
@@ -160,30 +214,27 @@ impl WaylandSurfaceBackend {
                         .map(|(index, copied)| (BufferSlot::Shm(index), copied))
                 }
                 #[cfg(feature = "gpu")]
-                SurfaceCanvas::Gpu(target) => {
-                    let copied = match gpu {
-                        Some(context) => entry.copy_into_dmabuf_buffer(
-                            context,
-                            &mut state.dmabuf,
-                            &qh,
-                            target,
-                            &device_damage,
-                        ),
-                        None => Err(PresentationError::BufferAlloc(
-                            "GPU presentation is disabled".into(),
-                        )),
-                    };
+                SurfaceCanvas::Scene(_) => {
+                    let (surface, commit, output) = rendered_scene
+                        .take()
+                        .expect("scene was rendered before importing descriptors");
+                    let copied = entry.copy_into_dmabuf_buffer(&mut state.dmabuf, &qh, output);
                     match copied {
                         Ok(prepared) => {
+                            scene_commit = Some((surface, commit));
                             prepared.map(|(index, copied)| (BufferSlot::Dmabuf(index), copied))
                         }
-                        // The shell reallocates a CPU canvas once GPU canvases
-                        // are unavailable, repainting the whole surface.
                         Err(error) => {
                             gpu_failure = Some(error);
                             None
                         }
                     }
+                }
+                #[cfg(not(feature = "gpu"))]
+                SurfaceCanvas::Scene(_) => {
+                    return Err(PresentationError::BufferAlloc(
+                        "scene GPU support is disabled".into(),
+                    ));
                 }
             };
             let Some((slot, copy_damage)) = prepared else {
@@ -236,9 +287,16 @@ impl WaylandSurfaceBackend {
         }
         #[cfg(feature = "gpu")]
         if let BufferSlot::Dmabuf(index) = slot {
+            entry.mark_dmabuf_attached(index, &mut state.dmabuf);
             state.dmabuf.busy.insert(entry.dmabuf_buffer_id(index));
         }
         Self::mark_surface_state_committed(entry, prepared_state);
+        #[cfg(feature = "gpu")]
+        if let Some((surface, commit)) = scene_commit {
+            if let Some(worker) = self.gpu.worker(&self.state.dmabuf) {
+                worker.acknowledge_presented(surface, commit);
+            }
+        }
 
         Ok(PresentStatus::Presented)
     }

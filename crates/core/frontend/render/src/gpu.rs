@@ -6,6 +6,8 @@
 //! are read back, and [`DmabufTarget`]s export their storage as dmabuf planes
 //! that the presentation layer wraps in `wl_buffer`s and commits.
 
+pub mod scene;
+
 use std::ffi::c_void;
 use std::fmt;
 use std::os::fd::{FromRawFd, OwnedFd};

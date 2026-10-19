@@ -825,7 +825,7 @@ where
     children
 }
 
-/// Record which script variable a popover's `open={variable}` reads, so the
+/// Record which script variable an element's `open={variable}` reads, so the
 /// core disclosure controller can write its open/close decisions back to the
 /// owning instance. Only a bare identifier is writable; any other expression
 /// leaves `openchange` as the only channel.
@@ -900,7 +900,7 @@ fn build_element_node(
     }) {
         attributes.insert("_mesh_bind_this".into(), binding.to_string());
     }
-    if source_tag == "popover" {
+    if matches!(source_tag, "popover" | "dialog" | "sheet" | "menu") {
         record_open_binding(
             &element.attributes,
             build_style.namespace_handlers.then_some(instance_key),

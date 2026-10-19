@@ -782,20 +782,36 @@ impl SurfaceEntry {
     }
 
     #[cfg(feature = "gpu")]
+    pub(in crate::wayland_surface) fn retire_dmabuf_buffers(
+        &mut self,
+        dmabuf: &mut DmabufProtocol,
+    ) {
+        self.dmabuf_ring.retire(dmabuf);
+    }
+
+    #[cfg(feature = "gpu")]
+    pub(super) fn mark_buffer_backpressured(&mut self) {
+        self.buffer_backpressured = true;
+    }
+
+    #[cfg(feature = "gpu")]
     pub(super) fn copy_into_dmabuf_buffer(
         &mut self,
-        context: &mut mesh_core_render::gpu::GpuContext,
         dmabuf: &mut DmabufProtocol,
         qh: &QueueHandle<State>,
-        source: &mut mesh_core_render::gpu::GpuTarget,
-        damage: &[DamageRect],
+        output: mesh_core_render::gpu::scene::GpuSceneOutput,
     ) -> Result<Option<(usize, SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]>)>, PresentationError>
     {
-        let prepared =
-            self.dmabuf_ring
-                .prepare(context, dmabuf, qh, &mut self.generations, source, damage)?;
+        let prepared = self
+            .dmabuf_ring
+            .prepare(dmabuf, qh, &mut self.generations, output)?;
         self.buffer_backpressured = prepared.is_none();
         Ok(prepared)
+    }
+
+    #[cfg(feature = "gpu")]
+    pub(super) fn mark_dmabuf_attached(&self, index: usize, dmabuf: &mut DmabufProtocol) {
+        self.dmabuf_ring.mark_attached(index, dmabuf);
     }
 
     #[cfg(feature = "gpu")]

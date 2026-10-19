@@ -1,27 +1,25 @@
-//! GPU presentation: surfaces paint into a retained Skia-GL target, and each
-//! present copies the damage into one of a ring of dmabuf-backed buffers that
-//! the compositor imports through `zwp_linux_dmabuf_v1`.
-//!
-//! The EGL context lives on the compositor's main device from the default
-//! dmabuf feedback, so buffers are importable without a cross-GPU copy. The
-//! retained target plays the role `PixelBuffer` plays for SHM: the shell's
-//! partial repaints and scroll shifts stay correct regardless of which ring
-//! buffer the compositor still holds.
+//! Descriptor-only Wayland integration for render-thread GPU scenes.
+//! EGL targets and copies stay on the scene worker; protocol buffer release
+//! leases prevent worker texture reuse while the compositor holds the storage.
 
 use super::*;
 use mesh_core_render::DamageRect;
-use mesh_core_render::gpu::{DRM_FORMAT_ABGR8888, DmabufTarget, GpuContext, GpuTarget};
-use smallvec::{SmallVec, smallvec};
+use mesh_core_render::gpu::DRM_FORMAT_ABGR8888;
+use mesh_core_render::gpu::scene::{GpuBufferRelease, GpuSceneOutput, GpuSceneRenderer};
+use mesh_core_render::prepared_scene::SceneCanvas;
+use mesh_core_render::scene_thread::SceneRenderThread;
+use smallvec::SmallVec;
 use smithay_client_toolkit::dmabuf::{DmabufFeedback, DmabufHandler, DmabufState};
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::os::fd::AsFd;
+use std::sync::Arc;
 use wayland_client::globals::GlobalList;
 use wayland_client::protocol::wl_buffer::WlBuffer;
 use wayland_protocols::wp::linux_dmabuf::zv1::client::{
     zwp_linux_buffer_params_v1, zwp_linux_dmabuf_feedback_v1::ZwpLinuxDmabufFeedbackV1,
 };
 
-const DMABUF_RING_DEPTH: usize = 2;
 const DMABUF_RING_MAX: usize = 3;
 
 /// Dmabuf protocol state kept on [`State`] so dispatch can reach it.
@@ -30,6 +28,7 @@ pub(in crate::wayland_surface) struct DmabufProtocol {
     pub(in crate::wayland_surface) feedback: Option<DmabufFeedback>,
     /// `wl_buffer`s attached and not yet released by the compositor.
     pub(in crate::wayland_surface) busy: HashSet<ObjectId>,
+    releases: HashMap<ObjectId, GpuBufferRelease>,
 }
 
 impl DmabufProtocol {
@@ -42,6 +41,7 @@ impl DmabufProtocol {
             state,
             feedback: None,
             busy: HashSet::new(),
+            releases: HashMap::new(),
         }
     }
 
@@ -105,6 +105,9 @@ impl DmabufHandler for State {
 
     fn released(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, buffer: &WlBuffer) {
         self.dmabuf.busy.remove(&buffer.id());
+        if let Some(release) = self.dmabuf.releases.remove(&buffer.id()) {
+            release.release();
+        }
     }
 }
 
@@ -115,20 +118,20 @@ smithay_client_toolkit::delegate_dmabuf!(State);
 /// a surface is explicitly asked to paint on the CPU.
 pub(in crate::wayland_surface) enum GpuPresenter {
     Untried,
-    Ready(Box<GpuContext>),
+    Ready(Arc<SceneRenderThread<GpuSceneRenderer>>),
     Unavailable,
 }
 
 impl GpuPresenter {
-    pub(in crate::wayland_surface) fn context(
+    pub(in crate::wayland_surface) fn worker(
         &mut self,
         dmabuf: &DmabufProtocol,
-    ) -> Option<&mut GpuContext> {
+    ) -> Option<&Arc<SceneRenderThread<GpuSceneRenderer>>> {
         if matches!(self, Self::Untried) {
             *self = match Self::start(dmabuf) {
-                Ok(context) => {
-                    tracing::info!(renderer = context.renderer(), "gpu present: enabled");
-                    Self::Ready(Box::new(context))
+                Ok(worker) => {
+                    tracing::info!("gpu present: scene worker enabled");
+                    Self::Ready(Arc::new(worker))
                 }
                 Err(reason) => {
                     tracing::info!("gpu present: disabled, painting on the CPU: {reason}");
@@ -137,19 +140,17 @@ impl GpuPresenter {
             };
         }
         match self {
-            Self::Ready(context) => Some(context),
-            Self::Untried | Self::Unavailable => None,
+            Self::Ready(worker) => Some(worker),
+            _ => None,
         }
     }
 
-    /// Stop presenting GPU buffers for the rest of the session. Surfaces see
-    /// the change on their next canvas check and repaint on the CPU.
     pub(in crate::wayland_surface) fn disable(&mut self, reason: &PresentationError) {
         tracing::warn!("gpu present: disabled, painting on the CPU: {reason}");
         *self = Self::Unavailable;
     }
 
-    fn start(dmabuf: &DmabufProtocol) -> Result<GpuContext, String> {
+    fn start(dmabuf: &DmabufProtocol) -> Result<SceneRenderThread<GpuSceneRenderer>, String> {
         if std::env::var("MESH_RENDER_GPU").is_ok_and(|value| value == "0") {
             return Err("MESH_RENDER_GPU=0".into());
         }
@@ -159,27 +160,32 @@ impl GpuPresenter {
         let device = dmabuf
             .main_device()
             .ok_or("compositor reported no dmabuf main device")?;
-        let mut context = GpuContext::on_drm_device(device).map_err(|error| error.to_string())?;
-        if !context.supports_dmabuf_export() {
-            return Err(format!("{} cannot export dmabufs", context.renderer()));
-        }
-        let probe = context
-            .dmabuf_target(1, 1)
-            .map_err(|error| error.to_string())?;
-        let planes = probe.planes();
+        let (send_probe, probe) = std::sync::mpsc::sync_channel(1);
+        let worker = SceneRenderThread::spawn(
+            64,
+            move || {
+                let mut renderer = GpuSceneRenderer::new(device)?;
+                let planes = renderer.probe()?;
+                let _ = send_probe.send(planes);
+                Ok(renderer)
+            },
+            || {},
+        )
+        .map_err(|error| format!("scene worker: {error:?}"))?;
+        let planes = probe.recv().map_err(|error| error.to_string())?;
         if planes.fourcc != DRM_FORMAT_ABGR8888 || !dmabuf.accepts(planes.fourcc, planes.modifier) {
             return Err(format!(
                 "compositor does not import format {:#x} modifier {:#x}",
                 planes.fourcc, planes.modifier
             ));
         }
-        Ok(context)
+        Ok(worker)
     }
 }
 
 pub(super) struct DmabufSlot {
     generation: u64,
-    target: DmabufTarget,
+    output: GpuSceneOutput,
     pub(super) buffer: WlBuffer,
     pending_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]>,
 }
@@ -196,10 +202,18 @@ impl Drop for DmabufSlot {
 pub(in crate::wayland_surface) struct DmabufRing {
     pub(super) slots: Vec<DmabufSlot>,
     size: Option<(u32, u32)>,
-    next: usize,
 }
 
 impl DmabufRing {
+    pub(in crate::wayland_surface) fn retire(&mut self, dmabuf: &mut DmabufProtocol) {
+        for slot in self.slots.drain(..) {
+            dmabuf.busy.remove(&slot.buffer.id());
+            if let Some(release) = dmabuf.releases.remove(&slot.buffer.id()) {
+                release.retire();
+            }
+        }
+    }
+
     pub(super) fn slot(&self, index: usize) -> &DmabufSlot {
         &self.slots[index]
     }
@@ -225,79 +239,42 @@ impl DmabufRing {
             .any(|slot| !busy.contains(&slot.buffer.id()))
     }
 
-    /// Bring a free ring buffer up to date with `source` and submit the copy;
-    /// the buffer carries a fence the compositor waits on.
-    /// Returns the buffer and the device rects copied into it (this frame's
-    /// damage plus what accumulated while it was busy), or `None` when the
-    /// compositor holds every buffer.
-    #[allow(clippy::too_many_arguments)]
+    /// Import only owned descriptors. Raster, copies, fences and texture
+    /// destruction run on the scene worker, never in the Wayland dispatcher.
     pub(super) fn prepare(
         &mut self,
-        context: &mut GpuContext,
         dmabuf: &mut DmabufProtocol,
         qh: &QueueHandle<State>,
         generations: &mut SurfaceGenerations,
-        source: &mut GpuTarget,
-        damage: &[DamageRect],
+        output: GpuSceneOutput,
     ) -> Result<Option<(usize, SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]>)>, PresentationError>
     {
-        let size = (source.width().max(1), source.height().max(1));
-        let full = full_damage(size.0, size.1);
+        let size = (output.width, output.height);
         if self.size != Some(size) {
             for slot in self.slots.drain(..) {
                 dmabuf.busy.remove(&slot.buffer.id());
+                if let Some(release) = dmabuf.releases.remove(&slot.buffer.id()) {
+                    release.retire();
+                }
             }
             self.size = Some(size);
-            self.next = 0;
         }
-        while self.slots.len() < DMABUF_RING_DEPTH {
-            let slot = self.allocate(context, dmabuf, qh, generations, size)?;
-            self.slots.push(slot);
+        let index = self
+            .slots
+            .iter()
+            .position(|slot| !dmabuf.busy.contains(&slot.buffer.id()))
+            .unwrap_or(self.slots.len());
+        if index >= DMABUF_RING_MAX {
+            return Ok(None);
         }
-        for slot in &mut self.slots {
-            extend_pending_damage(&mut slot.pending_damage, damage, full);
-        }
-        let len = self.slots.len();
-        let free = (0..len)
-            .map(|offset| (self.next + offset) % len)
-            .find(|&index| !dmabuf.busy.contains(&self.slots[index].buffer.id()));
-        let index = match free {
-            Some(index) => index,
-            None if len < DMABUF_RING_MAX => {
-                let slot = self.allocate(context, dmabuf, qh, generations, size)?;
-                self.slots.push(slot);
-                len
-            }
-            None => return Ok(None),
-        };
-        let slot = &mut self.slots[index];
-        let copied = std::mem::take(&mut slot.pending_damage);
-        slot.target.copy_from(source, &copied);
-        context.submit_for(&slot.target);
-        self.next = (index + 1) % self.slots.len();
-        Ok(Some((index, copied)))
-    }
-
-    fn allocate(
-        &self,
-        context: &mut GpuContext,
-        dmabuf: &DmabufProtocol,
-        qh: &QueueHandle<State>,
-        generations: &mut SurfaceGenerations,
-        (width, height): (u32, u32),
-    ) -> Result<DmabufSlot, PresentationError> {
-        let target = context
-            .dmabuf_target(width, height)
-            .map_err(|error| PresentationError::BufferAlloc(format!("dmabuf target: {error}")))?;
-        let planes = target.planes();
-        // The driver picks the modifier per allocation, and importing an
-        // unadvertised pair is a protocol error.
+        let planes = &output.planes;
         if !dmabuf.accepts(planes.fourcc, planes.modifier) {
             return Err(PresentationError::BufferAlloc(format!(
                 "compositor does not import format {:#x} modifier {:#x}",
                 planes.fourcc, planes.modifier
             )));
         }
+        let generation = generations.allocate_buffer()?;
         let params = dmabuf
             .state
             .create_params(qh)
@@ -312,37 +289,47 @@ impl DmabufRing {
             );
         }
         let (buffer, params) = params.create_immed(
-            width as i32,
-            height as i32,
+            size.0 as i32,
+            size.1 as i32,
             planes.fourcc,
             zwp_linux_buffer_params_v1::Flags::empty(),
             qh,
         );
         params.destroy();
-        Ok(DmabufSlot {
-            generation: generations.allocate_buffer()?,
-            target,
+        let copied = output.damage.iter().copied().collect();
+        let slot = DmabufSlot {
+            generation,
+            output,
             buffer,
-            pending_damage: smallvec![full_damage(width, height)],
-        })
+            pending_damage: SmallVec::new(),
+        };
+        if index == self.slots.len() {
+            self.slots.push(slot);
+        } else {
+            self.slots[index] = slot;
+        }
+        Ok(Some((index, copied)))
+    }
+
+    pub(super) fn mark_attached(&self, index: usize, dmabuf: &mut DmabufProtocol) {
+        let slot = &self.slots[index];
+        dmabuf
+            .releases
+            .insert(slot.buffer.id(), slot.output.attached());
     }
 }
 
 impl WaylandSurfaceBackend {
     pub fn gpu_available(&mut self) -> bool {
-        self.gpu.context(&self.state.dmabuf).is_some()
+        self.gpu.worker(&self.state.dmabuf).is_some()
     }
 
-    /// A retained GPU paint target, or `None` when GPU presentation is
-    /// unavailable or the allocation failed.
-    pub fn allocate_gpu_target(&mut self, width: u32, height: u32) -> Option<GpuTarget> {
-        let context = self.gpu.context(&self.state.dmabuf)?;
-        match context.offscreen_target(width.max(1), height.max(1)) {
-            Ok(target) => Some(target),
-            Err(error) => {
-                tracing::warn!("gpu present: {error}; painting this surface on the CPU");
-                None
-            }
-        }
+    pub fn allocate_scene_canvas(&mut self, width: u32, height: u32) -> Option<SceneCanvas> {
+        let worker = Arc::clone(self.gpu.worker(&self.state.dmabuf)?);
+        let mut canvas = SceneCanvas::new(width.max(1), height.max(1))?;
+        canvas.on_retire(move |surface| {
+            worker.remove_surface(surface);
+        });
+        Some(canvas)
     }
 }

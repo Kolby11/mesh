@@ -320,6 +320,11 @@ enum SessionTarget<'a> {
     // Constructed by the GPU target and by tests.
     #[cfg_attr(not(feature = "renderer-gpu"), allow(dead_code))]
     Surface(&'a mut Surface),
+    Recording {
+        canvas: &'a Canvas,
+        width: u32,
+        height: u32,
+    },
 }
 
 impl<'a> PixelCanvasSession<'a> {
@@ -343,8 +348,20 @@ impl<'a> PixelCanvasSession<'a> {
         }
     }
 
+    pub(crate) fn on_recording(canvas: &'a Canvas, width: u32, height: u32) -> Self {
+        Self {
+            target: SessionTarget::Recording {
+                canvas,
+                width,
+                height,
+            },
+            scroll_replay: None,
+        }
+    }
+
     pub fn width(&self) -> u32 {
         match &self.target {
+            SessionTarget::Recording { width, .. } => *width,
             SessionTarget::Raster { buffer, .. } => buffer.width,
             SessionTarget::Surface(surface) => surface.width().max(0) as u32,
         }
@@ -352,6 +369,7 @@ impl<'a> PixelCanvasSession<'a> {
 
     pub fn height(&self) -> u32 {
         match &self.target {
+            SessionTarget::Recording { height, .. } => *height,
             SessionTarget::Raster { buffer, .. } => buffer.height,
             SessionTarget::Surface(surface) => surface.height().max(0) as u32,
         }
@@ -370,6 +388,7 @@ impl<'a> PixelCanvasSession<'a> {
                 surface.as_mut().map(|surface| f(surface.canvas()))
             }
             SessionTarget::Surface(surface) => Some(f(surface.canvas())),
+            SessionTarget::Recording { canvas, .. } => Some(f(canvas)),
         }
     }
 
@@ -378,6 +397,9 @@ impl<'a> PixelCanvasSession<'a> {
     /// passes, with no layer open.
     pub fn clear_rect(&mut self, rect: crate::DamageRect, color: Color) {
         match &mut self.target {
+            SessionTarget::Recording { canvas, .. } => {
+                canvas.draw_irect(device_irect(rect), &src_paint(color));
+            }
             SessionTarget::Raster { buffer, surface } => {
                 notify_external_write(surface.as_mut());
                 buffer.clear_rect(rect.x, rect.y, rect.width, rect.height, color);
@@ -404,6 +426,9 @@ impl<'a> PixelCanvasSession<'a> {
         dy: i32,
     ) -> smallvec::SmallVec<[crate::DamageRect; 2]> {
         match &mut self.target {
+            SessionTarget::Recording { .. } => {
+                panic!("complete scenes cannot shift retained pixels")
+            }
             SessionTarget::Raster { buffer, surface } => {
                 notify_external_write(surface.as_mut());
                 buffer.shift_region_pixels(region, dx, dy)

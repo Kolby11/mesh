@@ -476,7 +476,7 @@ impl FrontendSurfaceComponent {
 
     /// Propose an open-state change to the popover's owner: write its simple
     /// `open` binding, then dispatch `openchange`.
-    fn set_disclosure_open(
+    pub(super) fn set_disclosure_open(
         &mut self,
         tree: &WidgetNode,
         popover_key: &str,

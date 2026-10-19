@@ -18,37 +18,46 @@ research and migration gates are retained in
 | Presentation | `crates/core/presentation/` | Owns presented buffers and normalized surface input |
 | Wayland | `crates/core/platform/wayland/` and presentation Wayland modules | Owns compositor protocol integration and surface commits |
 
-## Scene handoff preparation
+## Scene preparation and handoff
 
-`render::scene_thread` owns immutable `FramePaintPlan` submissions, resource
-leases and a bounded render-thread queue. The worker creates and destroys its
-backend on the same thread. Superseded outputs cannot be presented; skipped or
-unacknowledged commits force complete replay. This interface is preparatory:
-the shell still uses the current raster painter and presentation path.
+The UI thread resolves an explicit per-frame `PaintContext` and prepares a
+complete Skia recording through `PixelCanvasSession`. `PreparedScene` pins the
+immutable picture and its raster images, icon variants, glyph pages, shaders,
+backdrop and tooltip inputs. Text shaping uses the same UI font database as
+layout; the worker receives prepared glyph images and never reopens font or
+icon files or consults the live resource registry. This avoids copying the
+entire installed font catalog into each scene. `FrozenFontDatabase` remains
+available for consumers that need owned font sources rather than prepared glyphs.
 
-`resources::FrozenFontDatabase` prepares owned font sources for that handoff.
-It copies file, mapped and binary inputs into immutable byte buffers, preserves
-face metadata and generic families, and exposes an original-to-frozen face ID
-mapping. Collection faces share one byte reservation, which remains live through
-cloned font databases. Preparation uses the shared resource byte budget and
-cancellation token. Layout and painting must receive the same prepared database.
-Production integration still needs a policy for large installed font catalogs,
-icon snapshots, GPU ownership and presentation.
+`render::scene_thread` admits at most 64 surface incarnations in production,
+with one pending scene and one completed output per surface and one active
+render. Commits coalesce, and only current outputs may be attached. Missing
+presentation acknowledgement, skipped commits, extent/scale/resource changes
+and new targets force full replay. Removed canvas incarnations retire on the
+worker. Queue waits use a condition variable.
 
-## GPU context
+## GPU and presentation ownership
 
-`render::gpu`, behind the `renderer-gpu` feature, owns a dynamically loaded
-EGL display, a GLES3 context and Skia's Ganesh `DirectContext`. It is not
-`Send`: the thread that creates it uses and drops it. In the shell that is the
-UI thread, where the painter's thread-local state already lives. The context
-opens on the DRM device the compositor names in its dmabuf feedback.
+`render::gpu::scene` creates, uses and destroys EGL, Ganesh, retained surface
+pixels and exported dmabuf textures on the render thread, on the compositor's
+DRM device. A shared 512 MiB admission budget bounds those targets; each surface
+has at most three export slots. Partial frames replay the complete immutable
+picture under disjoint device damage clips. Each export slot accumulates damage
+while unavailable, then receives the corresponding copy from retained pixels.
 
-A surface's retained pixels are a `SurfaceCanvas`: a CPU `PixelBuffer` or a
-GPU render target, both painted through `PixelCanvasSession`. The presentation
-layer allocates canvases and owns the buffers the compositor reads: SHM slots
-for CPU canvases, and exported dmabuf textures, fenced for implicit sync, for
-GPU canvases. Remaining work is in
-[`.planning/todos/pending/2026-07-15-gpu-rendering-backend.md`](../.planning/todos/pending/2026-07-15-gpu-rendering-backend.md).
+Only duplicated dmabuf descriptors, dimensions, damage and a release lease cross
+to Wayland. Presentation checks the format/modifier before import, attaches the
+buffer and acknowledges its scene only after a successful commit. A
+`wl_buffer.release` returns its lease; dropping an output never calls GL. Leases
+carry independent identities, so an old release cannot unlock a reused texture.
+GPU errors switch subsequent canvases to SHM with a full repaint. Debug overlays
+and the dev-window backend use CPU pixels.
+
+The initial production integration waits for worker completion at the
+presentation boundary. GPU execution has moved threads; scripts for frame N+1
+are not yet overlapped with frame N raster. The worker sleeps when idle.
+Scroll layer caching, blur caches and resource atlas residency remain separate
+measured follow-ups in the backlog.
 
 ## Adapter boundaries
 

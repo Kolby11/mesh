@@ -48,5 +48,6 @@ mod gestures;
 mod keybinds;
 mod navigation;
 mod policy;
+mod primitives;
 mod pseudo;
 mod reflow;

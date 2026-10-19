@@ -45,6 +45,7 @@ pub(super) fn validate_known_attribute_value(
     value: &str,
 ) -> Option<ElementDiagnostic> {
     match (tag, name) {
+        (_, "focus-scope" | "modal") => validate_bool_attribute(tag, name, value),
         ("grid", "columns" | "rows") => validate_grid_tracks(tag, name, value),
         ("progress", "min" | "max" | "value") => validate_number_attribute(tag, name, value),
         ("progress", "indeterminate") => validate_bool_attribute(tag, name, value),
@@ -64,14 +65,14 @@ pub(super) fn validate_known_attribute_value(
         (
             "select" | "option" | "checkbox" | "switch" | "radio" | "radio-group" | "menu"
             | "menu-item" | "command-item" | "preference-row",
-            "disabled" | "checked" | "selected" | "expanded" | "required" | "invalid",
+            "disabled" | "checked" | "selected" | "expanded" | "required" | "invalid" | "open",
         ) => validate_bool_attribute(tag, name, value),
         (
             "popover" | "dialog" | "sheet" | "tabs" | "tab" | "accordion" | "details" | "list"
             | "list-item" | "table" | "cell" | "tree" | "empty-state",
             "open" | "expanded" | "selected" | "active" | "disabled" | "hidden",
         ) => validate_bool_attribute(tag, name, value),
-        ("dialog" | "popover", "label" | "aria-label") if value.trim().is_empty() => {
+        ("dialog" | "sheet" | "popover", "label" | "aria-label") if value.trim().is_empty() => {
             Some(invalid_attr(
                 tag,
                 name,

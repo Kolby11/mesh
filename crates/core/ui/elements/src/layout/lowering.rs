@@ -121,7 +121,11 @@ pub(super) fn taffy_style_for_node(
     }
 
     let mut taffy = taffy_style::Style {
-        display: match style.display {
+        display: match if node.is_closed_container() {
+            Display::None
+        } else {
+            style.display
+        } {
             Display::Flex => taffy_style::Display::Flex,
             Display::None => taffy_style::Display::None,
         },
@@ -484,7 +488,7 @@ pub(super) fn write_taffy_layout_with_parent(
     viewport_w: f32,
     viewport_h: f32,
 ) {
-    if node.computed_style.display == Display::None {
+    if node.computed_style.display == Display::None || node.is_closed_container() {
         zero_layout_subtree(node);
         return;
     }

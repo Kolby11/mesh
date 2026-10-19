@@ -1563,6 +1563,7 @@ pub enum ServiceEvent {
 }
 
 pub trait ShellComponent: Send {
+    fn set_paint_context(&mut self, _context: mesh_core_render::PaintContext) {}
     fn id(&self) -> &str;
     fn surface_id(&self) -> &str;
     /// Return the last atomically published frontend frame. The snapshot is

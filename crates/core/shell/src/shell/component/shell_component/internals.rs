@@ -184,7 +184,8 @@ impl FrontendSurfaceComponent {
             })
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "Inter".into());
-        mesh_core_render::set_tooltip_paint_font_family(font_family.clone());
+        self.paint_context.tooltip_font_family = font_family.clone();
+        self.paint_context.tooltip_colors = resolve_tooltip_colors(theme);
         let (text_w, text_h) =
             SharedTextMeasurer.measure_styled(&text, &font_family, 12.0, 400, 1.3, Some(320.0));
         let tooltip_size = (
@@ -211,20 +212,20 @@ impl FrontendSurfaceComponent {
             placement.paint_y + element_offset.map(|(_, y)| y).unwrap_or(0.0) + sample.translate_y;
 
         // Set per-frame tooltip rendering hints from the animation sample.
-        mesh_core_render::set_tooltip_paint_opacity(placement.opacity);
+        self.paint_context.tooltip_opacity = placement.opacity;
         let center_x = matches!(
             placement.side,
             tooltip::PlacedSide::Bottom | tooltip::PlacedSide::Top
         );
-        mesh_core_render::set_tooltip_center_x(center_x);
-        mesh_core_render::set_tooltip_paint_scale(sample.scale);
+        self.paint_context.tooltip_center_x = center_x;
+        self.paint_context.tooltip_scale = sample.scale;
 
         Some((Arc::clone(&tooltip_target.text), paint_x, paint_y))
     }
 
     pub(super) fn paint_pixel_regions(
         &self,
-        theme: &Theme,
+        _theme: &Theme,
         session: &mut PixelCanvasSession<'_>,
         scale: f32,
         selected_paint: &mesh_core_render::display_list::SelectedDisplayListPaint<'_>,
@@ -236,10 +237,6 @@ impl FrontendSurfaceComponent {
         let _span = tracing::debug_span!("paint_pixel_regions").entered();
         if effective_damage.rects.is_empty() {
             return mesh_core_render::PaintProfilingMetrics::default();
-        }
-
-        if tooltip.is_some() {
-            mesh_core_render::set_tooltip_paint_colors(resolve_tooltip_colors(theme));
         }
 
         if effective_damage.full_surface {
@@ -321,7 +318,7 @@ impl FrontendSurfaceComponent {
                 })
                 .map(|_| (text.as_ref(), *cx, *cy))
         });
-        mesh_core_render::paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution_in_session(
+        mesh_core_render::paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution_in_session_with_context(
             selected_paint,
             session,
             scale,
@@ -330,6 +327,7 @@ impl FrontendSurfaceComponent {
             tooltip_for_regions,
             Some(self.compiled.manifest.package.id.as_str()),
             self.profiling_enabled,
+            Some(&self.paint_context),
         )
     }
 
@@ -370,7 +368,7 @@ impl FrontendSurfaceComponent {
         damage: Option<DamageRect>,
         tooltip: Option<(&str, f32, f32)>,
     ) -> mesh_core_render::PaintProfilingMetrics {
-        mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session(
+        mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session_with_context(
             selected_paint,
             session,
             scale,
@@ -379,6 +377,7 @@ impl FrontendSurfaceComponent {
             tooltip,
             Some(self.compiled.manifest.package.id.as_str()),
             self.profiling_enabled,
+            Some(&self.paint_context),
         )
     }
 

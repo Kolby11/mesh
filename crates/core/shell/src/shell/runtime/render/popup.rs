@@ -199,19 +199,38 @@ mod overlay_reserve_tests {
     #[test]
     fn reserve_is_dropped_on_the_axis_of_a_bottom_or_right_anchor() {
         let reserve = |edge| {
-            let (w, h, padding) =
-                surface_geometry_with_overlay_reserve("@test/dock", SurfaceRole::Layer, edge, 120, 80);
+            let (w, h, padding) = surface_geometry_with_overlay_reserve(
+                "@test/dock",
+                SurfaceRole::Layer,
+                edge,
+                120,
+                80,
+            );
             (w, h, padding.right, padding.bottom)
         };
         let (_, top_h, _, top_bottom) = reserve(Some(Edge::Top));
-        assert!(top_h > 80 && top_bottom > 0, "a top bar keeps room for tooltips below it");
+        assert!(
+            top_h > 80 && top_bottom > 0,
+            "a top bar keeps room for tooltips below it"
+        );
 
         let (_, bottom_h, bottom_right, bottom_bottom) = reserve(Some(Edge::Bottom));
-        assert_eq!((bottom_h, bottom_bottom), (80, 0), "a dock must sit on the bottom edge");
-        assert!(bottom_right > 0, "the width reserve is unaffected by a bottom anchor");
+        assert_eq!(
+            (bottom_h, bottom_bottom),
+            (80, 0),
+            "a dock must sit on the bottom edge"
+        );
+        assert!(
+            bottom_right > 0,
+            "the width reserve is unaffected by a bottom anchor"
+        );
 
         let (right_w, _, right_right, right_bottom) = reserve(Some(Edge::Right));
-        assert_eq!((right_w, right_right), (120, 0), "a right panel must sit on the right edge");
+        assert_eq!(
+            (right_w, right_right),
+            (120, 0),
+            "a right panel must sit on the right edge"
+        );
         assert!(right_bottom > 0);
     }
 }
