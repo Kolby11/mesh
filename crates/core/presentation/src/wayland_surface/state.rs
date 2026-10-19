@@ -449,6 +449,29 @@ impl State {
         }
     }
 
+    pub(super) fn next_keyboard_repeat_at(&self) -> Option<Instant> {
+        self.input_seats
+            .values()
+            .filter_map(|seat| seat.keyboard_repeat.as_ref())
+            .map(|repeat| repeat.next_at)
+            .min()
+    }
+
+    pub(super) fn next_focus_grab_deadline(&self) -> Option<Instant> {
+        let now = Instant::now();
+        self.input_seats
+            .values()
+            .filter_map(|seat| {
+                seat.focus_grab_surface_id.as_ref()?;
+                Some(
+                    seat.focus_grab_requested_at
+                        .and_then(|at| at.checked_add(SURFACE_FOCUS_GRAB_TIMEOUT))
+                        .unwrap_or(now),
+                )
+            })
+            .min()
+    }
+
     pub(super) fn push_due_keyboard_repeats(&mut self) {
         let now = Instant::now();
         let seat_ids = self.input_seat_order.clone();

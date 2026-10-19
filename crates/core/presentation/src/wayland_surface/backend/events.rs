@@ -14,6 +14,16 @@ impl WaylandSurfaceBackend {
         self.dispatch_pending()
     }
 
+    /// The next instant a held key is due to repeat, so the shell loop can
+    /// sleep until then instead of waiting for an unrelated wakeup.
+    pub fn next_keyboard_repeat_at(&self) -> Option<Instant> {
+        self.state.next_keyboard_repeat_at()
+    }
+
+    pub fn next_focus_grab_deadline(&self) -> Option<Instant> {
+        self.state.next_focus_grab_deadline()
+    }
+
     pub fn poll_events(&mut self) -> Result<Vec<DevWindowEvent>, PresentationError> {
         self.dispatch_available()?;
         self.release_expired_surface_focus_grab()?;

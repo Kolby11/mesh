@@ -369,6 +369,8 @@ struct TestingBackend {
     unconfigured_surfaces: HashSet<String>,
     missing_surfaces: HashSet<String>,
     frame_pending_surfaces: HashSet<String>,
+    frame_callback_deadlines: HashMap<String, std::time::Instant>,
+    focus_grab_deadline: Option<std::time::Instant>,
     buffer_backpressured_surfaces: HashSet<String>,
     surface_scales: HashMap<String, f32>,
     full_redraw_surfaces: HashSet<String>,
@@ -427,6 +429,7 @@ fn drop_testing_events_for_surface(backend: &mut TestingBackend, surface_id: &st
 
 fn clear_testing_presentation_waits(backend: &mut TestingBackend, surface_id: &str) {
     backend.frame_pending_surfaces.remove(surface_id);
+    backend.frame_callback_deadlines.remove(surface_id);
     backend.buffer_backpressured_surfaces.remove(surface_id);
 }
 
@@ -540,6 +543,7 @@ impl PresentationEngine {
                     .insert(surface_id.to_string());
             } else {
                 backend.frame_pending_surfaces.remove(surface_id);
+                backend.frame_callback_deadlines.remove(surface_id);
             }
         }
     }
@@ -1521,6 +1525,48 @@ impl PresentationEngine {
         }
     }
 
+    /// Deadline after which an outstanding frame callback stops gating a surface.
+    pub fn surface_frame_callback_deadline(&self, surface_id: &str) -> Option<std::time::Instant> {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.surface_frame_callback_deadline(surface_id),
+            Backend::Testing(backend) => backend
+                .frame_pending_surfaces
+                .contains(surface_id)
+                .then(|| backend.frame_callback_deadlines.get(surface_id).copied())
+                .flatten(),
+            Backend::DevWindow(_) => None,
+        }
+    }
+
+    /// Next temporary focus-grab expiry; `None` when no grab is active.
+    pub fn next_focus_grab_deadline(&self) -> Option<std::time::Instant> {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.next_focus_grab_deadline(),
+            Backend::Testing(backend) => backend.focus_grab_deadline,
+            Backend::DevWindow(_) => None,
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_set_focus_grab_deadline(&mut self, deadline: Option<std::time::Instant>) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            backend.focus_grab_deadline = deadline;
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_set_frame_callback_deadline(
+        &mut self,
+        surface_id: &str,
+        deadline: std::time::Instant,
+    ) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            backend
+                .frame_callback_deadlines
+                .insert(surface_id.to_owned(), deadline);
+        }
+    }
+
     pub fn surface_waiting_for_frame_callback(&self, surface_id: &str) -> bool {
         match &self.backend {
             Backend::WaylandSurface(bridge) => {
@@ -1615,6 +1661,15 @@ impl PresentationEngine {
                     Err(PresentationError::ConnectionLost(reason.clone()))
                 })
             }
+        }
+    }
+
+    /// Next held-key repeat time on the Wayland backend; `None` when no key is
+    /// repeating or the backend delivers no repeats.
+    pub fn next_keyboard_repeat_at(&self) -> Option<std::time::Instant> {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.next_keyboard_repeat_at(),
+            Backend::DevWindow(_) | Backend::Testing(_) => None,
         }
     }
 

@@ -298,6 +298,37 @@ impl Shell {
             .min(self.next_shell_settings_reload_check)
             .min(self.next_watch_reconcile);
 
+        if let Some(repeat_at) = self.presentation_engine.next_keyboard_repeat_at() {
+            if repeat_at <= now {
+                return Duration::ZERO;
+            }
+            next_deadline = next_deadline.min(repeat_at);
+        }
+
+        if let Some(deadline) = self.presentation_engine.next_focus_grab_deadline() {
+            next_deadline = next_deadline.min(deadline);
+        }
+        for runtime in &self.components {
+            if runtime.quarantined
+                || (!runtime.component.wants_render() && !runtime.resource_paints.is_ready())
+            {
+                continue;
+            }
+            for target in runtime.targets() {
+                let surface_id = target.surface_id.as_str();
+                if self.surface_is_effectively_visible(surface_id)
+                    && self
+                        .presentation_engine
+                        .surface_waiting_for_frame_callback(surface_id)
+                    && let Some(deadline) = self
+                        .presentation_engine
+                        .surface_frame_callback_deadline(surface_id)
+                {
+                    next_deadline = next_deadline.min(deadline);
+                }
+            }
+        }
+
         for state in self.command_throttle.values() {
             if state.pending.is_none() {
                 continue;
@@ -365,7 +396,10 @@ impl Shell {
                         .last_paint_resource_revision
                         .is_some_and(|seen| seen != resource_revision)
             });
-            if !runtime.component.wants_render() && !resource_revision_changed {
+            if !runtime.component.wants_render()
+                && !runtime.resource_paints.is_ready()
+                && !resource_revision_changed
+            {
                 return false;
             }
             // A component drives its parent surface plus any child popups from
