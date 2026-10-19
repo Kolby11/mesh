@@ -8,6 +8,11 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
+- **Two-way value bindings implemented:** compiler-generated Luau change
+  callbacks write input, slider and checkbox/switch edits back to script
+  variables before explicit change handlers. Six binding regressions and
+  thirteen scripting callback tests pass; compiler retains its two known failures.
+
 - **CSS profile gaps implemented:** gradient shorthand, theme color syntax,
   multiple evenly spaced stops and shadow lists are supported. CPU render
   tests pass (306); elements retain the 10 documented fixture failures.

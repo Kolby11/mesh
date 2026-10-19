@@ -334,3 +334,49 @@ function enable() optional = function() count = count + 1 end end
     owner.call_callback(&callback, &[]).unwrap();
     assert_eq!(owner.state.get("count"), Some(json!(1)));
 }
+
+#[test]
+fn value_write_back_callback_notifies_template_readers_and_effects() {
+    let (mut context, component) = context(
+        r#"
+<template><slider value={volume} onchange={function(...) volume = ... end} /></template>
+<script lang="luau">
+volume = 10
+effect(function() observed = volume * 2 end)
+</script>"#,
+    );
+    assert!(context.run_reactive_effects().is_empty());
+    let read = component
+        .template_expressions
+        .iter()
+        .find(|expression| expression.source() == "volume")
+        .unwrap();
+    context
+        .evaluate_compiled_template_expression(read, &Map::new())
+        .unwrap();
+    let setter = component
+        .template_expressions
+        .iter()
+        .find(|expression| expression.source().contains("function"))
+        .unwrap();
+    let callback = handle(
+        context
+            .bind_event_expression(setter, &Map::new(), "write-back", true)
+            .unwrap()
+            .unwrap(),
+    );
+    context.state.clear_dirty();
+    context.call_callback(&callback, &[json!(37.5)]).unwrap();
+    assert!(context.state.is_dirty());
+    assert!(context.dirty_state_affects_template());
+    assert!(context.run_reactive_effects().is_empty());
+    assert_eq!(context.state.get("volume"), Some(json!(37.5)));
+    assert_eq!(context.state.get("observed"), Some(json!(75)));
+    assert_eq!(
+        context
+            .evaluate_compiled_template_expression(read, &Map::new())
+            .unwrap()
+            .0,
+        json!(37.5)
+    );
+}

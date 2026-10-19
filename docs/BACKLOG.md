@@ -111,9 +111,6 @@ Each needs a design and a measured prototype before it is adopted.
 - [ ] **D5:** Remaining interaction primitives: a focus scope with modal trap,
       Escape and outside dismissal for `dialog`/`sheet`, and menu typeahead and
       nested menus. Popover disclosure (`open-on`) has shipped.
-- [ ] `bind:attr` two-way bindings never write back: the compiler lowers them
-      as one-way bindings although the syntax guide documents write-back.
-      Implement it for value elements, or remove the syntax and the docs.
 - [ ] **D6:** Connect the immutable scene/render-thread handoff to frozen font/icon
       resources and move GPU paint (shipped on the UI thread) onto it after SH-11.
       The bounded handoff prototype is implemented; scroll-raster and blur plans

@@ -1,4 +1,5 @@
 mod accessibility;
+mod bindings;
 mod compile;
 mod render;
 mod style;
@@ -149,7 +150,45 @@ pub struct TemplateExpressionResult {
 pub fn collect_template_expressions(
     component: &ComponentFile,
 ) -> Vec<mesh_core_expression::SharedCompiledExpression> {
-    component.template_expressions.clone()
+    use mesh_core_component::template::{AttributeValue, TemplateNode};
+    fn visit(
+        nodes: &[TemplateNode],
+        expressions: &mut Vec<mesh_core_expression::SharedCompiledExpression>,
+    ) {
+        for node in nodes {
+            match node {
+                TemplateNode::Element(element) => {
+                    if let Ok(Some(lowered)) = bindings::lower_value_bindings(element) {
+                        for attr in &lowered.attributes {
+                            if let AttributeValue::EventHandlerExpression { expression, .. } =
+                                &attr.value
+                            {
+                                if !expressions
+                                    .iter()
+                                    .any(|existing| existing.source() == expression.source())
+                                {
+                                    expressions.push(expression.clone());
+                                }
+                            }
+                        }
+                    }
+                    visit(&element.children, expressions);
+                }
+                TemplateNode::Component(component) => visit(&component.children, expressions),
+                TemplateNode::If(branch) => {
+                    visit(&branch.then_children, expressions);
+                    visit(&branch.else_children, expressions);
+                }
+                TemplateNode::For(repeat) => visit(&repeat.children, expressions),
+                _ => {}
+            }
+        }
+    }
+    let mut expressions = component.template_expressions.clone();
+    if let Some(template) = &component.template {
+        visit(&template.root, &mut expressions);
+    }
+    expressions
 }
 
 /// Expressions whose consumers require template evaluation rather than a
@@ -179,6 +218,9 @@ pub fn collect_unpatchable_template_expressions(component: &ComponentFile) -> Ha
             match node {
                 TemplateNode::Element(element) => {
                     attributes(&element.attributes, unkeyed, out);
+                    if let Ok(Some(lowered)) = bindings::lower_value_bindings(element) {
+                        attributes(&lowered.attributes, unkeyed, out);
+                    }
                     visit(&element.children, unkeyed, out);
                 }
                 TemplateNode::Component(component) => {

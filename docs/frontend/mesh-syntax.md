@@ -366,7 +366,19 @@ state.
 ```
 
 The runtime reads the initial value from script state and writes back on
-change. The variable should be initialized in `<script>`.
+change: text inputs assign strings, sliders assign numbers, and checkboxes or
+switches assign booleans. Native `<slider bind:value="volume" />`,
+`<checkbox bind:checked="enabled" />`, and `<switch bind:checked="enabled" />`
+use the same contract. The `input` range and checkbox forms above lower to
+those native controls.
+
+Initialize the variable in `<script>`; use a public reactive assignment such
+as `searchQuery = ""` so other template readers and effects observe edits.
+The target must be a variable name, not an expression, table path, or loop
+item. Unsupported element/attribute pairs are compile errors. Write-back runs
+before an explicit `onchange` handler, which receives the same typed value;
+that handler is resolved at change time. Ordinary `value={searchQuery}`
+bindings remain one-way.
 
 Native element behavior is proven through shipped shell surfaces. Prefer the
 semantic element that matches the workflow, but keep behavior shell-native:

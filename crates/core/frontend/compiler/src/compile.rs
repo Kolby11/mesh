@@ -804,6 +804,25 @@ fn validate_template_nodes(
                         span: element.span,
                     });
                 }
+                crate::bindings::lower_value_bindings(element).map_err(|message| {
+                    CompileFrontendError::StandaloneComponentViolation {
+                        path: path.to_path_buf(),
+                        message,
+                        span: element.span,
+                    }
+                })?;
+                for attr in &element.attributes {
+                    if let AttributeValue::TwoWayBinding(target) = &attr.value {
+                        if loop_locals.contains(target.trim()) {
+                            return Err(CompileFrontendError::StandaloneComponentViolation {
+                                path: path.to_path_buf(),
+                                message: "two-way binding cannot assign a loop-local snapshot"
+                                    .into(),
+                                span: attr.span.unwrap_or(element.span),
+                            });
+                        }
+                    }
+                }
                 if strict_scope {
                     validate_attributes(&element.attributes, path, allowed_symbols, loop_locals)?;
                 }
@@ -898,6 +917,17 @@ fn validate_template_nodes(
                 )?;
             }
             TemplateNode::Component(component_ref) => {
+                if let Some(attr) = component_ref
+                    .props
+                    .iter()
+                    .find(|attr| matches!(attr.value, AttributeValue::TwoWayBinding(_)))
+                {
+                    return Err(CompileFrontendError::StandaloneComponentViolation {
+                        path: path.to_path_buf(),
+                        message: "two-way bindings require a native value element".into(),
+                        span: attr.span.unwrap_or(component_ref.span),
+                    });
+                }
                 if strict_scope {
                     validate_attributes(&component_ref.props, path, allowed_symbols, loop_locals)?;
                 }
@@ -1539,6 +1569,42 @@ title = "Default"
             &HashMap::from([("Child".to_string(), child)]),
         )
         .expect("public script field rejected as child input");
+    }
+
+    #[test]
+    fn two_way_bindings_validate_targets_and_loop_scope() {
+        for (markup, message) in [
+            (r#"<input bind:value="value + 1" />"#, "variable name"),
+            (r#"<text bind:value="value" />"#, "not supported"),
+            (
+                r#"{#for value in values}<input bind:value="value" />{/for}"#,
+                "loop-local",
+            ),
+            (r#"<input bind:value="missing" />"#, "missing"),
+        ] {
+            let root = component(&format!(
+                r#"<template>{markup}</template><script lang="luau">value = 1; values = {{1, 2}}</script>"#
+            ));
+            let error = validate_standalone_imports(
+                &root,
+                &path("main.mesh"),
+                Path::new("/tmp"),
+                &HashMap::new(),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains(message), "{error}");
+            assert!(error.source_span().is_some());
+        }
+        let root = component(
+            r#"<template><input bind:value="value" /></template><script lang="luau">value = "initial"</script>"#,
+        );
+        validate_standalone_imports(
+            &root,
+            &path("main.mesh"),
+            Path::new("/tmp"),
+            &HashMap::new(),
+        )
+        .unwrap();
     }
 
     #[test]

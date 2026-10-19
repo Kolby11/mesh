@@ -867,6 +867,10 @@ fn build_element_node(
     composition: Option<&dyn FrontendCompositionResolver>,
     selective: Option<(&WidgetNode, &HashSet<NodeId>)>,
 ) -> WidgetNode {
+    let lowered = crate::bindings::lower_value_bindings(element)
+        .ok()
+        .flatten();
+    let element = lowered.as_ref().unwrap_or(element);
     let source_tag = element.tag.as_str();
     // Runtime tags are static strings; keep them borrowed and let the node own
     // the single allocation instead of building an owned copy to clone from.

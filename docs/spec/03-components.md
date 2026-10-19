@@ -100,6 +100,16 @@ invalidates its template binding even when JSON state did not change.
 Backend and interface props remain targets (§2); this function transport is
 for component callbacks.
 
+**Shipped two-way value bindings:** `bind:value="variable"` on inputs and
+sliders and `bind:checked="variable"` on checkboxes/switches assign user edits
+through ordinary Luau callbacks in the owning component scope. Text, numeric,
+and boolean values retain their types. The assignment precedes an authored
+`onchange` callback, resolved at change time. Targets are initialized variable
+names; reactive public members notify template readers and effects. Loop-local
+snapshots, table paths, and unsupported element/attribute pairs are rejected.
+`input type="range"` and `input type="checkbox"` bindings lower to the native
+slider and checkbox controls. See the [syntax guide](../frontend/mesh-syntax.md#two-way-binding).
+
 ### 1.1 Popovers and escape-bounds UI
 
 **Status: shipped.** Surfaces are containers, not authoring units. An in-tree
