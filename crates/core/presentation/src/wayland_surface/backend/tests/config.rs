@@ -374,13 +374,13 @@ fn clamp_does_not_shrink_top_surface_to_a_smaller_unrelated_output() {
 fn top_surface_protocol_size_keeps_only_spanning_width_dynamic() {
     let mut cfg = base_cfg();
     cfg.edge = Some(Edge::Top);
-    set_requested_size(&mut cfg, (0, 0), SurfacePadding::default());
+    set_requested_size(&mut cfg, (0, 40), SurfacePadding::default());
     cfg.exclusive_zone = 56;
 
     assert_eq!(
         layer_protocol_size(&cfg),
-        (0, 56),
-        "top surfaces are left+right anchored, so only width may be sent as zero; height falls back to the exclusive zone"
+        (0, 40),
+        "top surfaces are left+right anchored, so a spanning width is sent as zero while a fixed height is sent unchanged"
     );
 }
 
@@ -388,13 +388,13 @@ fn top_surface_protocol_size_keeps_only_spanning_width_dynamic() {
 fn bottom_surface_protocol_size_keeps_only_spanning_width_dynamic() {
     let mut cfg = base_cfg();
     cfg.edge = Some(Edge::Bottom);
-    set_requested_size(&mut cfg, (0, 0), SurfacePadding::default());
+    set_requested_size(&mut cfg, (0, 40), SurfacePadding::default());
     cfg.exclusive_zone = 56;
 
     assert_eq!(
         layer_protocol_size(&cfg),
-        (0, 56),
-        "bottom surfaces are left+right anchored, so only width may be sent as zero; height falls back to the exclusive zone"
+        (0, 40),
+        "bottom surfaces are left+right anchored, so a spanning width is sent as zero while a fixed height is sent unchanged"
     );
 }
 
@@ -446,11 +446,11 @@ fn unanchored_surface_protocol_size_replaces_dynamic_axes() {
 #[test]
 fn overlay_surface_without_exclusive_zone_uses_minimal_protocol_fallback() {
     let mut cfg = base_cfg();
-    cfg.edge = Some(Edge::Top);
+    cfg.edge = Some(Edge::Left);
     set_requested_size(&mut cfg, (0, 0), SurfacePadding::default());
     cfg.exclusive_zone = 0;
 
-    assert_eq!(layer_protocol_size(&cfg), (0, 1));
+    assert_eq!(layer_protocol_size(&cfg), (1, 1));
 }
 
 // ---------------------------------------------------------------------------

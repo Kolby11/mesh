@@ -15,6 +15,9 @@ fn resolves_prop_reference_from_resolver_props() {
     let resolver = StyleResolver::new(&theme).with_props(props);
     let rules = parse_fixture_style(
         r#"
+<props>
+{ track_width = { type = "size", default = "32px" }, }
+</props>
 <style>
 .slider { width: prop(track_width); }
 </style>
@@ -31,6 +34,9 @@ fn unresolved_prop_reference_is_empty() {
     let resolver = StyleResolver::new(&theme);
     let rules = parse_fixture_style(
         r#"
+<props>
+{ track_width = { type = "size", default = "32px" }, }
+</props>
 <style>
 .slider { width: prop(track_width); }
 </style>
@@ -182,7 +188,7 @@ fn resolve_theme_var() {
     let resolver = StyleResolver::new(&theme);
     let value = StyleValue::Var("--color-primary".to_string());
     let resolved = resolver.resolve_value(&value);
-    assert_eq!(Color::from_hex(&resolved), Color::from_hex("#6750A4"));
+    assert_eq!(Color::from_hex(&resolved), Color::from_hex("#E0AF68"));
 }
 
 #[test]

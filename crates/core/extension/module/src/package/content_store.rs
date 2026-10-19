@@ -733,6 +733,28 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// Read-only snapshots cannot be removed by `remove_dir_all`, so make the
+    /// tree writable before deleting it.
+    fn remove_snapshot_tree(root: &Path) {
+        fn make_writable(path: &Path) {
+            if let Ok(metadata) = fs::symlink_metadata(path) {
+                let mut permissions = metadata.permissions();
+                #[allow(clippy::permissions_set_readonly_false)]
+                permissions.set_readonly(false);
+                let _ = fs::set_permissions(path, permissions);
+                if metadata.is_dir() {
+                    if let Ok(entries) = fs::read_dir(path) {
+                        for entry in entries.flatten() {
+                            make_writable(&entry.path());
+                        }
+                    }
+                }
+            }
+        }
+        make_writable(root);
+        fs::remove_dir_all(root).unwrap();
+    }
+
     fn temp_dir(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
             "mesh-content-store-{name}-{}",
@@ -769,7 +791,7 @@ mod tests {
         assert!(fs::metadata(&first.path).unwrap().permissions().readonly());
         assert_eq!(store.object(&first.digest).unwrap(), first.path);
 
-        fs::remove_dir_all(root).unwrap();
+        remove_snapshot_tree(&root);
     }
 
     #[test]
@@ -800,7 +822,7 @@ mod tests {
 
         let changed = ActivationSnapshot::new(7, BTreeMap::new(), None).unwrap();
         assert!(store.publish_snapshot(&changed).is_err());
-        fs::remove_dir_all(root).unwrap();
+        remove_snapshot_tree(&root);
     }
 
     #[cfg(unix)]
@@ -815,7 +837,7 @@ mod tests {
         let error = store.active_snapshot().unwrap_err();
 
         assert!(error.to_string().contains("symlink"));
-        fs::remove_dir_all(root).unwrap();
+        remove_snapshot_tree(&root);
     }
 
     #[test]
@@ -844,7 +866,7 @@ mod tests {
             fs::read_to_string(source.join("module.json")).unwrap()
         );
         assert!(fs::metadata(destination).unwrap().permissions().readonly());
-        fs::remove_dir_all(root).unwrap();
+        remove_snapshot_tree(&root);
     }
 
     #[test]
@@ -888,6 +910,6 @@ mod tests {
         assert!(active.modules.contains_key("@me/example"));
         assert_eq!(MeshLock::from_path(&lock_path).unwrap().generation, 1);
 
-        fs::remove_dir_all(root).unwrap();
+        remove_snapshot_tree(&root);
     }
 }

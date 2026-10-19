@@ -1134,7 +1134,8 @@ fn animation_scoped_retained_diff_matches_full_pipeline() {
     )
     .unwrap();
 
-    full.animation_only_dirty = false;
+    // The first paints leave measurement dirt behind. Settle it so the frame
+    // that follows is driven by the animation alone.
     scoped
         .paint_raster(
             &theme,
@@ -1150,6 +1151,14 @@ fn animation_scoped_retained_diff_matches_full_pipeline() {
         1.0,
     )
     .unwrap();
+
+    // Mark only the scoped side as an animation tick, as the frame timer does,
+    // and advance both timelines together: a sample at the same instant changes
+    // nothing, so the scoped path needs a visible animation step to run.
+    scoped.invalidate_animation_style_path(ComponentDirtyFlags::VISUAL_REPAINT);
+    full.animation_only_dirty = false;
+    paint_keyframe_frame_at(&mut scoped, Duration::from_millis(250));
+    paint_keyframe_frame_at(&mut full, Duration::from_millis(250));
 
     assert!(scoped.retained_tree.last_update_was_scoped());
     assert!(!full.retained_tree.last_update_was_scoped());

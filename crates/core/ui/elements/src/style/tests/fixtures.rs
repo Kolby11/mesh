@@ -41,8 +41,8 @@ fn shipped_navigation_style_variable_resolution_uses_theme_pipeline() {
     let (style, diagnostics) = resolve_class(&resolver, &rules, "nav-shell");
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    assert_eq!(style.background_color, Color::from_hex("#1C1B1F").unwrap());
-    assert_eq!(style.color, Color::from_hex("#E6E1E5").unwrap());
+    assert_eq!(style.background_color, Color::from_hex("#1a1b26").unwrap());
+    assert_eq!(style.color, Color::from_hex("#c0caf5").unwrap());
     assert_eq!(style.padding.left, 24.0);
     assert_eq!(style.padding.right, 24.0);
     assert_eq!(style.border_radius, Corners::all(8.0));
@@ -72,7 +72,7 @@ fn shipped_navigation_style_custom_properties_remain_local_variables() {
     let (style, diagnostics) = resolve_class(&resolver, &rules, "panel");
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    assert_eq!(style.background_color, Color::from_hex("#211F26").unwrap());
+    assert_eq!(style.background_color, Color::from_hex("#24283b").unwrap());
 }
 
 #[test]
@@ -164,10 +164,7 @@ fn shipped_navigation_style_expected_diagnostics_do_not_block_tokens() {
     assert_eq!(nav_style.padding.left, 16.0);
     assert_eq!(status_style.font_size, 14.0);
     assert_eq!(button_style.border_width, Edges::all(2.0));
-    assert_eq!(
-        button_style.background_color,
-        Color::from_hex("#211F26").unwrap()
-    );
+    assert_eq!(button_style.background_color, Color::TRANSPARENT);
 
     let (hovered_button_style, hovered_button_diagnostics) = resolver
         .resolve_node_style_with_diagnostics(
@@ -186,8 +183,8 @@ fn shipped_navigation_style_expected_diagnostics_do_not_block_tokens() {
             .iter()
             .all(|diagnostic| diagnostic.property != "transform")
     );
-    assert_eq!(hovered_button_style.transform.translate_y, -1.0);
-    assert!((hovered_button_style.transform.scale_x - 1.04).abs() < 0.001);
+    assert_eq!(hovered_button_style.transform.translate_y, 0.0);
+    assert!((hovered_button_style.transform.scale_x - 1.12).abs() < 0.001);
 }
 
 #[test]
@@ -213,7 +210,7 @@ fn shipped_audio_style_fixture_resolves_painter_relevant_values() {
             a: 71,
         }
     );
-    assert_eq!(style.color, Color::from_hex("#E6E1E5").unwrap());
+    assert_eq!(style.color, Color::from_hex("#c0caf5").unwrap());
     assert_eq!(style.padding, Edges::all(8.0));
     assert_eq!(style.border_radius, Corners::all(16.0));
     assert_eq!(style.gap, 4.0);

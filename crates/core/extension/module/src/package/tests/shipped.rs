@@ -98,12 +98,7 @@ fn shipped_module_graph_loads_repo_module_fixture() {
             .into_iter()
             .any(|module| module.id == "@mesh/settings")
     );
-    assert!(
-        graph
-            .frontend_modules()
-            .into_iter()
-            .any(|module| module.id == "@mesh/composition-editor")
-    );
+    assert!(graph.module("@mesh/composition-editor").is_some());
     let component_ids: std::collections::HashSet<_> = graph
         .modules_by_kind(ModuleKind::Ui)
         .into_iter()

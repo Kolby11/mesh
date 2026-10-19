@@ -523,6 +523,7 @@ fn locale_graph_fixture(root: &std::path::Path) -> InstalledModuleGraph {
 fn graph_locale_commit_replaces_catalog_and_retains_last_known_good_on_failure() {
     let root = tempfile::tempdir().unwrap();
     let catalog_path = root.path().join("locale-module/config/i18n/en.json");
+    fs::create_dir_all(catalog_path.parent().unwrap()).unwrap();
     fs::write(&catalog_path, r#"{ "hello": "Hello" }"#).unwrap();
     let graph = locale_graph_fixture(root.path());
 

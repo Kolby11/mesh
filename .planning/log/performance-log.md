@@ -6361,3 +6361,49 @@ Pinning and reversing the order produces both positive and negative paired
 p50 differences; the final p90 is also noisy. These samples support the
 structural scroll gates, not a scroll speedup claim. The higher sequential
 profile scroll range remains recorded in the preceding table.
+
+## 2026-10-19 — hover repaint and hover layout skip: measured, no step win
+
+Change under test: commit `228ef3f5`, which stops `:hover` and transition
+invalidations from setting `surface_pixels_invalid`, and drops LAYOUT from
+hover-only restyles when no hovered state rule touches a layout property.
+
+**Baseline** is HEAD with only the hover-specific lines restored
+(`invalidation_requires_pixel_repaint` blocks and the old
+`invalidate_interaction_restyle()` call). `cc37c6f2`, the commit before
+`228ef3f5`, does not compile on its own, so it was not usable as a baseline.
+
+Release (`cargo test -p mesh-core-shell --release -- <name> --ignored
+--nocapture`), three runs each, AMD Ryzen 7 7840HS, same machine session:
+
+| Workload | Baseline (three runs) | Candidate (three runs) |
+| --- | --- | --- |
+| `navigation_hover_profile` step p50 | 1.464, 1.577, 1.500 ms | 1.611, 1.450, 1.472 ms |
+| `navigation_hover_profile` step p90 | 2.016, 2.888, 2.074 ms | 2.643, 1.883, 2.131 ms |
+| `appearance_frame_cost_profile` paint only | 1.786, 1.702, 1.679 ms/frame | 1.675, 1.657, 1.719 ms/frame |
+| `appearance_frame_cost_profile` resource-list scroll | 2.305, 2.313, 2.403 ms/frame | 2.309, 2.227, 2.319 ms/frame |
+| `appearance_frame_cost_profile` hidden-page volume | 4.736, 4.030, 4.049 ms/frame | 4.137, 4.420, 3.974 ms/frame |
+
+**Result: no measurable change.** The ranges overlap on every row. The
+navigation bar is about 112 nodes, so its full-surface repaint was already
+cheap, and the step time is dominated by input handling and other per-frame
+work the change does not touch. The appearance profile does not send any hover,
+so it could not show a hover effect in the first place.
+
+**Parity.** These pass on the candidate: `hover_and_transition_damage_matches_full_repaint`
+(1.0, 1.25 and 2.0 scale, partial damage on hover frames),
+`settings_scroll_shift_matches_full_paint`,
+`structural_handler_write_on_narrow_path_matches_full_rebuild_pixels`, and the
+render-crate tests `sparse_hover_repaint_under_frosted_root_matches_full_repaint`,
+`hover_inside_in_surface_frosted_panel_matches_full_repaint`,
+`sparse_repaint_with_backdrop_damage_expansion_matches_full_repaint` and
+`retained_content_scope_scroll_matches_full_paint_with_text_and_damage`.
+
+**Failing, not caused by this change:** `animation_scoped_retained_diff_matches_full_pipeline`
+(`animation.rs:1154`, `last_update_was_scoped()`). It fails on the candidate, on
+the hover-reverted baseline, and at `0b47dd1c`, which predates this session. It
+was not in the earlier failure list, which I could not reconcile.
+
+**Open:** the sweep's estimate of the hover cost was too high for this
+workload. A bigger hover-frame win is more likely on a larger surface such as
+Settings; `appearance_frame_cost_profile` does not measure hover there.

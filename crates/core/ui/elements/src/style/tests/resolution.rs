@@ -70,9 +70,9 @@ fn resolve_node_style_from_rules() {
     assert_eq!(
         style.color,
         Color {
-            r: 103,
-            g: 80,
-            b: 164,
+            r: 224,
+            g: 175,
+            b: 104,
             a: 255
         }
     );

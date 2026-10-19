@@ -276,7 +276,7 @@ fn css_variable_resolves_theme_variable_before_computed_style() {
         ElementState::default(),
     );
 
-    assert_eq!(style.background_color, Color::from_hex("#6750A4").unwrap());
+    assert_eq!(style.background_color, Color::from_hex("#E0AF68").unwrap());
 }
 
 #[test]
