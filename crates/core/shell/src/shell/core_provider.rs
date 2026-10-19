@@ -172,8 +172,15 @@ const THEME_COMMANDS: [CoreServiceCommand; 4] = [
     CoreServiceCommand {
         name: "set_theme",
         translate: |payload| {
+            let scope = match payload.get("scope") {
+                None | Some(serde_json::Value::Null) => None,
+                Some(scope) => Some(mesh_core_frontend_shell_adapter::ThemeScope::parse(
+                    scope.as_str()?,
+                )?),
+            };
             Some(CoreRequest::SetTheme {
                 theme_id: required_text(payload, "theme_id")?,
+                scope,
             })
         },
     },
@@ -265,7 +272,7 @@ mod tests {
                 "set_theme",
                 &serde_json::json!({ "theme_id": "nord" })
             ),
-            Some(CoreRequest::SetTheme { theme_id }) if theme_id == "nord"
+            Some(CoreRequest::SetTheme { theme_id, scope: None }) if theme_id == "nord"
         ));
         assert!(matches!(
             registry.request(

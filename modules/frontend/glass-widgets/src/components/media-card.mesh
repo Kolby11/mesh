@@ -117,7 +117,7 @@ end
         padding: 17px 22px 17px 17px;
         align-items: center;
         border-radius: 25px;
-        border: 1px solid var(--color-glass-rim);
+        border: 1px solid var(--glass-rim);
         background-image: linear-gradient(to bottom, #a466f03d, #4a1fa02e);
         box-shadow: 0 20px 48px #0a021a73;
         backdrop-filter: blur(6px) refract(40px 30px) dispersion(4px);
@@ -248,7 +248,7 @@ end
 
     .card:hover {
         transform: translateY(var(--animation-lift-hover));
-        border-color: var(--color-glass-rim-hover);
+        border-color: var(--glass-rim-hover);
     }
 
     .ctl {
@@ -259,7 +259,7 @@ end
     }
 
     .ctl:hover {
-        border-color: var(--color-glass-rim-hover);
+        border-color: var(--glass-rim-hover);
         transform: scale(var(--animation-scale-hover));
     }
 

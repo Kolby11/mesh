@@ -612,7 +612,7 @@ fn set_theme_forces_full_present_on_existing_components() {
     ));
 
     shell
-        .apply_set_theme("@mesh/test-theme:test-light-present")
+        .apply_set_theme("@mesh/test-theme:test-light-present", None)
         .unwrap();
 
     assert!(
@@ -638,7 +638,7 @@ fn set_theme_loads_css_package_and_updates_runtime_setting() {
     ));
 
     shell
-        .apply_set_theme("@mesh/test-theme:mesh-default-light")
+        .apply_set_theme("@mesh/test-theme:mesh-default-light", None)
         .unwrap();
 
     assert_eq!(
@@ -680,6 +680,85 @@ fn set_theme_loads_css_package_and_updates_runtime_setting() {
 }
 
 #[test]
+fn theme_selection_follows_the_user_across_profiles_unless_pinned() {
+    let _env_lock = settings_env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    let settings_path = dir.path().join("settings.json");
+    let graph_path = dir.path().join("module.json");
+    let profiles_dir = dir.path().join("profiles");
+    fs::create_dir_all(&profiles_dir).unwrap();
+    fs::write(&settings_path, "{}").unwrap();
+    fs::write(&graph_path, "{}").unwrap();
+    fs::write(
+        profiles_dir.join("default.json"),
+        r#"{"schemaVersion":3,"roots":{},"settings":{"shell":{"i18n":{"locale":"sk-SK"}}}}"#,
+    )
+    .unwrap();
+    fs::write(dir.path().join("active-profile"), "default\n").unwrap();
+    fs::write(
+        dir.path().join("theme.css"),
+        ":root { --color-surface: #101010; }",
+    )
+    .unwrap();
+    let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+    let _graph_path = EnvGuard::set("MESH_MODULE_GRAPH_PATH", &graph_path);
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(dir.path(), "follow", "theme.css"));
+    let paths = mesh_core_module::package::ProfilePaths::from_root_graph(&graph_path).unwrap();
+    let shared_theme = || {
+        mesh_core_config::SettingsStore::load_from(&settings_path)
+            .unwrap()
+            .to_value()["shell"]["theme"]
+            .clone()
+    };
+
+    shell
+        .apply_set_theme("@mesh/test-theme:follow", None)
+        .unwrap();
+    assert_eq!(shared_theme()["active"], "@mesh/test-theme:follow");
+    let profile = paths.load("default").unwrap();
+    assert_eq!(profile.revision, 0, "an unpinned profile is not rewritten");
+    assert!(profile.settings["shell"].get("theme").is_none());
+    assert_eq!(shell.settings.theme.active, "@mesh/test-theme:follow");
+    assert_eq!(
+        shell.latest_service_state["mesh.theme"].state["scope"],
+        "user"
+    );
+
+    shell
+        .apply_set_theme(
+            "@mesh/test-theme:follow",
+            Some(mesh_core_frontend_shell_adapter::ThemeScope::Profile),
+        )
+        .unwrap();
+    let profile = paths.load("default").unwrap();
+    assert_eq!(
+        profile.settings["shell"]["theme"]["active"],
+        "@mesh/test-theme:follow"
+    );
+    assert_eq!(profile.settings["shell"]["i18n"]["locale"], "sk-SK");
+    assert_eq!(
+        shell.latest_service_state["mesh.theme"].state["scope"],
+        "profile"
+    );
+
+    shell
+        .apply_set_theme(
+            "@mesh/test-theme:follow",
+            Some(mesh_core_frontend_shell_adapter::ThemeScope::User),
+        )
+        .unwrap();
+    let profile = paths.load("default").unwrap();
+    assert!(profile.settings["shell"].get("theme").is_none());
+    assert_eq!(profile.settings["shell"]["i18n"]["locale"], "sk-SK");
+    assert_eq!(shared_theme()["active"], "@mesh/test-theme:follow");
+    assert_eq!(
+        shell.latest_service_state["mesh.theme"].state["scope"],
+        "user"
+    );
+}
+
+#[test]
 fn set_theme_mode_persists_sparse_mode_and_publishes_declared_metadata() {
     let dir = tempfile::tempdir().unwrap();
     let _settings = isolated_settings_file(dir.path());
@@ -705,7 +784,7 @@ fn set_theme_mode_persists_sparse_mode_and_publishes_declared_metadata() {
     ));
 
     shell
-        .apply_set_theme("@mesh/test-theme:mode-theme")
+        .apply_set_theme("@mesh/test-theme:mode-theme", None)
         .unwrap();
     shell.apply_set_theme_mode("light").unwrap();
 
@@ -753,13 +832,13 @@ fn set_theme_rejects_malformed_css_before_persisting_or_swapping() {
         "theme.css",
     ));
     shell
-        .apply_set_theme("@mesh/test-theme:transaction-theme")
+        .apply_set_theme("@mesh/test-theme:transaction-theme", None)
         .unwrap();
     let previous_watch = shell.theme_watch.clone();
 
     fs::write(dir.path().join("theme.css"), "{ malformed").unwrap();
     shell
-        .apply_set_theme("@mesh/test-theme:transaction-theme")
+        .apply_set_theme("@mesh/test-theme:transaction-theme", None)
         .unwrap();
 
     assert_eq!(
@@ -954,7 +1033,7 @@ fn malformed_theme_reload_retains_last_known_good_snapshot() {
         "theme.css",
     ));
     shell
-        .apply_set_theme("@mesh/test-theme:reload-theme")
+        .apply_set_theme("@mesh/test-theme:reload-theme", None)
         .unwrap();
     shell.theme_watch.modified_at = None;
     shell.next_theme_reload_check = std::time::Instant::now();

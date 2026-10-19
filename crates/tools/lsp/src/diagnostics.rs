@@ -20,7 +20,7 @@ pub fn from_document_with_local_tokens(doc: &Document, local_tokens: &[String]) 
         diagnostics.extend(mesh_core_component::unknown_theme_token_reads(component, &doc.source, local_tokens).into_iter().map(|read| Diagnostic {
             range: byte_range_to_lsp_range(&doc.source, read.span.start, read.span.end),
             severity: Some(DiagnosticSeverity::WARNING),
-            message: format!("Token '{}' is outside semantic token contract {}. Declare a local custom property or use an explicitly namespaced private token.", read.name, mesh_core_theme::SEMANTIC_TOKEN_CONTRACT_VERSION),
+            message: format!("Token '{}' is outside semantic token contract {}. Declare it in mesh.theme.tokens with a default built from contract roles, use a token family module, or declare a local custom property.", read.name, mesh_core_theme::SEMANTIC_TOKEN_CONTRACT_VERSION),
             source: Some("mesh-tools-lsp".into()),
             code: Some(NumberOrString::String("mesh.theme.unknown_semantic_token".into())),
             ..Default::default()

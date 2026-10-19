@@ -145,6 +145,17 @@ fn validate_theme_token_key(token_name: &str) -> Result<(), String> {
             "mesh.theme.tokens entry '{token_name}' must use a dotted namespace"
         ));
     }
+    let canonical = mesh_core_theme::module_token_name(token_name);
+    let namespace = canonical.split('.').next().unwrap_or_default();
+    if mesh_core_theme::semantic_token_contract()
+        .tokens
+        .iter()
+        .any(|token| token.name().split('.').next() == Some(namespace))
+    {
+        return Err(format!(
+            "mesh.theme.tokens entry '{token_name}' uses the semantic contract group '{namespace}'; module tokens need their own namespace so they cannot shadow contract roles"
+        ));
+    }
     Ok(())
 }
 
@@ -647,12 +658,20 @@ pub struct ThemeSection {
     pub default_mode: Option<String>,
     #[serde(default)]
     pub extends: Option<String>,
+    /// The module deliberately ignores the active theme (a brand mark, an art
+    /// piece). Package and coverage views show it instead of letting users
+    /// discover it.
+    #[serde(default)]
+    pub independent: bool,
 }
 
 impl ThemeSection {
     pub fn validate(&self) -> Result<(), String> {
-        for token_name in self.tokens.keys() {
+        for (token_name, value) in &self.tokens {
             validate_theme_token_key(token_name)?;
+            if let TokenValue::String(value) = value {
+                validate_theme_value_references(value)?;
+            }
         }
 
         for (component_name, defaults) in &self.defaults.components {

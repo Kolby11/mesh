@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "tokens": [
     {
       "css": "--animation-curves-bezier-emphasized",
@@ -55,6 +55,20 @@
       "css": "--animation-duration-short",
       "kind": "duration",
       "source": "theme"
+    },
+    {
+      "css": "--animation-lift-hover",
+      "kind": "length",
+      "source": "theme",
+      "since": "1.1",
+      "default": "0px"
+    },
+    {
+      "css": "--animation-lift-press",
+      "kind": "length",
+      "source": "theme",
+      "since": "1.1",
+      "default": "0px"
     },
     {
       "css": "--animation-opacity-disabled",
@@ -130,6 +144,13 @@
       "css": "--color-error-container",
       "kind": "color",
       "source": "theme"
+    },
+    {
+      "css": "--color-focus-ring",
+      "kind": "color",
+      "source": "theme",
+      "since": "1.1",
+      "default": "var(--color-primary)"
     },
     {
       "css": "--color-info",

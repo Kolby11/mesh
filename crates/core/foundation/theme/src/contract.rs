@@ -4,7 +4,10 @@ use std::collections::BTreeSet;
 use std::ops::Range;
 use std::sync::OnceLock;
 
-pub const SEMANTIC_TOKEN_CONTRACT_VERSION: &str = "1.0";
+/// The newest semantic token contract this runtime knows.
+pub const SEMANTIC_TOKEN_CONTRACT_VERSION: &str = "1.1";
+
+const FIRST_TOKEN_CONTRACT_VERSION: &str = "1.0";
 
 #[derive(Debug, Deserialize)]
 pub struct SemanticTokenContract {
@@ -17,12 +20,62 @@ pub struct SemanticToken {
     pub css: String,
     pub kind: String,
     pub source: String,
+    /// Contract version that added the role; absent means 1.0.
+    #[serde(default)]
+    pub since: Option<String>,
+    /// Platform value, written in older contract roles, used when the active
+    /// theme omits the token. Roles added after 1.0 carry one so that themes
+    /// declaring an older minor version remain complete.
+    #[serde(default)]
+    pub default: Option<String>,
 }
 
 impl SemanticToken {
     pub fn name(&self) -> String {
         super::canonical_token_name(&self.css)
     }
+
+    pub fn since(&self) -> &str {
+        self.since
+            .as_deref()
+            .unwrap_or(FIRST_TOKEN_CONTRACT_VERSION)
+    }
+
+    /// Whether a theme declaring `version` must supply this token itself.
+    pub fn required_by(&self, version: &str) -> bool {
+        self.source == "theme"
+            && self.default.is_none()
+            && compare_versions(self.since(), version).is_some_and(|order| order.is_le())
+    }
+}
+
+fn parse_version(version: &str) -> Option<(u32, u32)> {
+    let (major, minor) = version.trim().split_once('.')?;
+    Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
+fn compare_versions(left: &str, right: &str) -> Option<std::cmp::Ordering> {
+    Some(parse_version(left)?.cmp(&parse_version(right)?))
+}
+
+/// A theme may declare any minor version of the current major contract up to
+/// the newest one this runtime knows; newer roles fall back to their defaults.
+pub fn is_supported_token_contract(version: &str) -> bool {
+    let (Some(declared), Some(known)) = (
+        parse_version(version),
+        parse_version(SEMANTIC_TOKEN_CONTRACT_VERSION),
+    ) else {
+        return false;
+    };
+    declared.0 == known.0 && declared.1 <= known.1
+}
+
+/// Contract roles with a platform default, as `(dotted name, raw value)`.
+pub fn semantic_token_defaults() -> impl Iterator<Item = (String, &'static str)> {
+    semantic_token_contract()
+        .tokens
+        .iter()
+        .filter_map(|token| Some((token.name(), token.default.as_deref()?)))
 }
 
 pub fn semantic_token_contract() -> &'static SemanticTokenContract {
@@ -137,14 +190,15 @@ pub fn token_is_declared_locally(name: &str, declarations: &BTreeSet<String>) ->
     declarations.contains(&super::canonical_token_name(name))
 }
 
-/// Required theme-supplied vocabulary absent from the stylesheet's root tokens.
-/// Font-role and icon-axis tokens are supplied by resource composition.
-pub fn missing_semantic_tokens(source: &str) -> Result<Vec<String>, String> {
+/// Vocabulary a theme declaring `version` must supply but whose stylesheet
+/// omits from its root tokens. Font-role and icon-axis tokens are supplied by
+/// resource composition; roles with a platform default are never missing.
+pub fn missing_semantic_tokens(source: &str, version: &str) -> Result<Vec<String>, String> {
     let theme = super::parse_theme_css("contract-check", "Contract check", source)?;
     Ok(semantic_token_contract()
         .tokens
         .iter()
-        .filter(|token| token.source == "theme" && !theme.tokens().contains_key(&token.name()))
+        .filter(|token| token.required_by(version) && !theme.tokens().contains_key(&token.name()))
         .map(SemanticToken::name)
         .collect())
 }
@@ -176,6 +230,48 @@ mod tests {
         assert!(!is_standard_token("--animation-default-opacity"));
         assert!(!is_private_token("@unqualified"));
         assert!(is_private_token("@alice/widget.color.accent"));
+    }
+
+    #[test]
+    fn later_minor_roles_carry_defaults_in_earlier_vocabulary() {
+        for token in &semantic_token_contract().tokens {
+            if token.since() == FIRST_TOKEN_CONTRACT_VERSION {
+                continue;
+            }
+            let default = token
+                .default
+                .as_deref()
+                .unwrap_or_else(|| panic!("{} needs a default", token.css));
+            for read in css_token_usage(default).references {
+                let read = semantic_token_contract()
+                    .tokens
+                    .iter()
+                    .find(|candidate| candidate.css == read.name)
+                    .unwrap_or_else(|| panic!("{} default reads {}", token.css, read.name));
+                assert!(
+                    compare_versions(read.since(), token.since())
+                        .unwrap()
+                        .is_lt()
+                );
+            }
+        }
+        assert!(is_supported_token_contract("1.0"));
+        assert!(is_supported_token_contract(SEMANTIC_TOKEN_CONTRACT_VERSION));
+        assert!(!is_supported_token_contract("1.99"));
+        assert!(!is_supported_token_contract("2.0"));
+        assert!(!is_supported_token_contract("one"));
+        let focus = semantic_token_contract()
+            .tokens
+            .iter()
+            .find(|token| token.css == "--color-focus-ring")
+            .unwrap();
+        assert!(!focus.required_by(SEMANTIC_TOKEN_CONTRACT_VERSION));
+        let primary = semantic_token_contract()
+            .tokens
+            .iter()
+            .find(|token| token.css == "--color-primary")
+            .unwrap();
+        assert!(primary.required_by("1.0"));
     }
 
     #[test]

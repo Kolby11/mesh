@@ -145,6 +145,15 @@ shared user default beneath the active profile and instance override. Durable
 service-owned data such as histories or indexes is shared across profiles unless
 the service contract explicitly declares another scope.
 
+**The theme is the exception.** `shell.theme` is the user's choice and follows
+them across shells. A profile's `resources.theme` (from its composition) is a
+recommendation used only while the shared settings select no theme; a
+`shell.theme` in the profile's own settings is a pin. `mesh.theme.set_theme`
+and `set_mode` write where the current value lives: the profile when it pins,
+otherwise the shared settings. `set_theme` with `scope: "profile"` pins the
+active profile; `scope: "user"` releases the pin and writes the shared choice.
+The `mesh.theme` state publishes the effective `scope` (`user` or `profile`).
+
 ## 2. Where defaults come from
 
 | Value | Default source | User override location |

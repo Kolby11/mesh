@@ -156,6 +156,16 @@ evidence and test workloads are in the linked reports.
 - [ ] **S04-PERF-002 / S04-PERF-003 / S04-DEAD-003:** Share one bounded CSS,
       token, and keyframe representation across theme and component paths, then
       measure typed token dependency resolution and reload reuse. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/04-themes.md)
+- [ ] **Theme coherence scan (04 §7):** flag color literals in component styles
+      and honour `mesh.theme.independent`; not started. The glass bar, dock and
+      widgets still hard-code violet fills and text, so under other themes only
+      their rims and hovers follow; move those into `@mesh/glass-material` or
+      contract roles.
+- [ ] **Theme coverage and pinning in the UI:** `mesh-shell theme coverage` and
+      `set_theme { scope }` exist, but the theme selector shows neither coverage
+      nor a "pin to this shell" control.
+- [ ] **LSP completion for module and family tokens:** diagnostics accept them,
+      but `var(--` completion offers only contract roles and local properties.
 
 ### Section 05 — Localization and i18n
 

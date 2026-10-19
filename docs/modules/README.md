@@ -62,7 +62,8 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/network-interface` | interface | `mesh.network` connectivity and Wi-Fi contract |
 | `@mesh/apps-interface` | interface | `mesh.apps` pinned/running application contract |
 | `@mesh/recorder-interface` | interface | `mesh.recorder` screen-recording contract |
-| `@mesh/violet-glass` | theme | Violet glass palette with monospace type |
+| `@mesh/violet-glass` | theme | Violet glass palette with monospace type; tunes `@mesh/glass-material` |
+| `@mesh/glass-material` | library | Token family (`--glass-rim`, `--glass-rim-hover`, `--glass-hover`) shared by the glass bar, dock and widgets |
 | `@mesh/shell-ui-interface` | interface | Named UI extension-point contracts a host surface renders foreign module UI into |
 | `@mesh/icons-default` | icon-pack | Default semantic icon mappings |
 | `@mesh/icons-material-symbols` | icon-pack | Material Symbols font and codepoint mappings |
@@ -75,7 +76,7 @@ desktop layout. See [module-system §5](../spec/01-module-system.md).
 
 | Module | Kind | Contribution |
 | --- | --- | --- |
-| `@mesh/glass` | composition | Liquid-glass desktop: glass bar, desktop cards and dock in the violet glass theme |
+| `@mesh/glass` | composition | Liquid-glass desktop: glass bar, desktop cards and dock; recommends the violet glass theme |
 | `@mesh/desk` | composition | The default desktop: a top navigation bar and a settings window, bound to the PipeWire and backlight providers |
 
 ## Module anatomy

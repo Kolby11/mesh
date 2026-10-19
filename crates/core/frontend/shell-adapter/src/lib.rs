@@ -493,6 +493,32 @@ pub enum ComponentError {
     },
 }
 
+/// Which settings layer owns a theme selection made under an active profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeScope {
+    /// The shared choice that every shell follows.
+    User,
+    /// A pin that applies only to the active profile.
+    Profile,
+}
+
+impl ThemeScope {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "user" => Some(Self::User),
+            "profile" => Some(Self::Profile),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Profile => "profile",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum CoreRequest {
     ToggleSurface {
@@ -561,6 +587,8 @@ pub enum CoreRequest {
     },
     SetTheme {
         theme_id: String,
+        /// `None` keeps the choice where the current value lives.
+        scope: Option<ThemeScope>,
     },
     SetThemeMode {
         mode: String,

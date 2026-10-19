@@ -586,7 +586,7 @@ mod tests {
             None,
             r#"{"roots":{"@mesh/panel#top":{"module":"@mesh/panel",
                  "surface":{"anchor":"top","layer":"top"}}},
-                "settings":{"shell":{"i18n":{"locale":"en-US"},"theme":{"mode":"dark"}}}}"#,
+                "settings":{"shell":{"i18n":{"locale":"en-US"},"render":{"blur":{"passes":2}}}}}"#,
         );
         let resolved = resolve_composition(
             &profile(
@@ -607,7 +607,10 @@ mod tests {
         assert_eq!(surface.layer.as_deref(), Some("top"));
         // Settings merge per key, not per section.
         assert_eq!(resolved.spec.settings["shell"]["i18n"]["locale"], "sk-SK");
-        assert_eq!(resolved.spec.settings["shell"]["theme"]["mode"], "dark");
+        assert_eq!(
+            resolved.spec.settings["shell"]["render"]["blur"]["passes"],
+            2
+        );
     }
 
     #[test]

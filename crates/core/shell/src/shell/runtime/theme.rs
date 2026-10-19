@@ -40,6 +40,44 @@ fn set_profile_theme_mode(settings: &mut serde_json::Value, mode: &str) {
     theme.insert("mode".into(), serde_json::Value::String(mode.into()));
 }
 
+pub(in crate::shell) use mesh_core_frontend_shell_adapter::ThemeScope;
+
+/// Where a theme selection is written. Without an explicit scope the choice
+/// stays where the current value lives: in the profile when it pins its own
+/// theme, otherwise in the shared settings every shell follows. `Profile`
+/// pins; `User` releases a pin, so the shell follows the shared choice again.
+fn theme_write_target(
+    profile: Option<&mut mesh_core_module::package::ShellProfile>,
+    scope: Option<ThemeScope>,
+) -> Option<&mut mesh_core_module::package::ShellProfile> {
+    let profile = profile?;
+    let pinned = mesh_core_module::package::profile_pins_theme(profile);
+    match scope {
+        Some(ThemeScope::Profile) => Some(profile),
+        None if pinned => Some(profile),
+        Some(ThemeScope::User) | None => {
+            if pinned {
+                release_profile_theme(profile);
+            }
+            None
+        }
+    }
+}
+
+fn release_profile_theme(profile: &mut mesh_core_module::package::ShellProfile) {
+    let Some(shell) = profile
+        .settings
+        .get_mut(mesh_core_config::SHELL_NAMESPACE)
+        .and_then(serde_json::Value::as_object_mut)
+    else {
+        return;
+    };
+    shell.remove("theme");
+    if shell.is_empty() {
+        profile.settings.remove(mesh_core_config::SHELL_NAMESPACE);
+    }
+}
+
 /// A validated settings candidate that has not crossed its durable commit
 /// boundary yet. Theme and locale preparation consume this value before any
 /// live shell state changes, so a rejected candidate cannot leave persistence
@@ -47,12 +85,18 @@ fn set_profile_theme_mode(settings: &mut serde_json::Value, mode: &str) {
 pub(in crate::shell) struct ControlPlaneSettingsCandidate {
     pub(in crate::shell) store: SettingsStore,
     pub(in crate::shell) shared_revision: u64,
-    pub(in crate::shell) profile_commit: Option<(
-        mesh_core_module::package::ProfilePaths,
-        String,
-        mesh_core_module::package::ShellProfile,
-        u64,
-    )>,
+    /// The shared document, when a mutation under an active profile changed
+    /// it (a theme choice that follows the user across shells).
+    pub(in crate::shell) shared_update: Option<SettingsStore>,
+    pub(in crate::shell) profile_commit: Option<ProfileSettingsCommit>,
+}
+
+pub(in crate::shell) struct ProfileSettingsCommit {
+    paths: mesh_core_module::package::ProfilePaths,
+    profile_id: String,
+    profile: mesh_core_module::package::ShellProfile,
+    expected_revision: u64,
+    changed: bool,
 }
 
 #[derive(Debug)]
@@ -67,6 +111,7 @@ fn persist_control_plane_settings(
     let ControlPlaneSettingsCandidate {
         mut store,
         shared_revision,
+        shared_update,
         profile_commit,
     } = candidate;
     let shared = SettingsStore::load_from(store.path())
@@ -75,11 +120,28 @@ fn persist_control_plane_settings(
         .check_revision(shared_revision)
         .map_err(|error| ShellRunError::Package(error.to_string()))?;
 
-    let revision = if let Some((paths, profile_id, profile, expected_revision)) = profile_commit {
-        let committed = paths
-            .save_if_revision(&profile_id, &profile, expected_revision)
-            .map_err(|error| ShellRunError::Package(error.to_string()))?;
-        DurableControlPlaneRevision::new(shared_revision, Some(committed.revision))
+    let revision = if let Some(commit) = profile_commit {
+        let mut committed_shared = shared_revision;
+        if let Some(mut shared) = shared_update {
+            shared
+                .save_if_revision(shared_revision)
+                .map_err(|error| ShellRunError::Package(error.to_string()))?;
+            committed_shared = shared.revision();
+        }
+        let profile_revision = if commit.changed || committed_shared == shared_revision {
+            commit
+                .paths
+                .save_if_revision(
+                    &commit.profile_id,
+                    &commit.profile,
+                    commit.expected_revision,
+                )
+                .map_err(|error| ShellRunError::Package(error.to_string()))?
+                .revision
+        } else {
+            commit.expected_revision
+        };
+        DurableControlPlaneRevision::new(committed_shared, Some(profile_revision))
     } else {
         store
             .save_if_revision(shared_revision)
@@ -189,20 +251,37 @@ impl Shell {
             None
         };
 
+        let shared_before = shared.to_value();
+        let profile_before = profile_commit
+            .as_ref()
+            .map(|(_, _, profile)| serde_json::to_value(profile).ok());
         mutate(
             &mut shared,
             profile_commit.as_mut().map(|(_, _, profile)| profile),
         )?;
 
-        let (mut store, profile_commit) = if let Some((paths, profile_id, profile)) = profile_commit
+        let (mut store, shared_update, profile_commit) = if let Some((paths, profile_id, profile)) =
+            profile_commit
         {
             let store =
                 super::super::discovery::effective_profile_settings(shared.clone(), Some(&profile))
                     .map_err(|error| ShellRunError::Package(error.to_string()))?;
+            let changed = profile_before != Some(serde_json::to_value(&profile).ok());
+            let shared_update = (shared.to_value() != shared_before).then_some(shared);
             let expected_revision = profile.revision;
-            (store, Some((paths, profile_id, profile, expected_revision)))
+            (
+                store,
+                shared_update,
+                Some(ProfileSettingsCommit {
+                    paths,
+                    profile_id,
+                    profile,
+                    expected_revision,
+                    changed,
+                }),
+            )
         } else {
-            (shared, None)
+            (shared, None, None)
         };
 
         if let Some(graph) = self.installed_module_graph.as_ref() {
@@ -213,6 +292,7 @@ impl Shell {
         Ok(ControlPlaneSettingsCandidate {
             store,
             shared_revision,
+            shared_update,
             profile_commit,
         })
     }
@@ -492,6 +572,7 @@ impl Shell {
     pub(in crate::shell) fn apply_set_theme(
         &mut self,
         theme_id: &str,
+        scope: Option<ThemeScope>,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let Some(graph) = self
             .installed_module_graph
@@ -506,18 +587,25 @@ impl Shell {
         };
         let theme_id = theme_id.to_owned();
         let settings_candidate = self.prepare_control_plane_settings(|shared, profile| {
-            if let Some(profile) = profile {
-                let target = profile
-                    .settings
-                    .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
-                    .or_insert_with(|| serde_json::json!({}));
-                set_profile_theme_selection(target, &theme_id);
-            } else {
-                shared.merge_namespace(
-                    mesh_core_config::SHELL_NAMESPACE,
-                    &serde_json::json!({ "theme": { "active": theme_id } }),
-                );
-                shared.unset_namespace_field(mesh_core_config::SHELL_NAMESPACE, "theme", "mode");
+            match theme_write_target(profile, scope) {
+                Some(profile) => {
+                    let target = profile
+                        .settings
+                        .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+                        .or_insert_with(|| serde_json::json!({}));
+                    set_profile_theme_selection(target, &theme_id);
+                }
+                None => {
+                    shared.merge_namespace(
+                        mesh_core_config::SHELL_NAMESPACE,
+                        &serde_json::json!({ "theme": { "active": theme_id } }),
+                    );
+                    shared.unset_namespace_field(
+                        mesh_core_config::SHELL_NAMESPACE,
+                        "theme",
+                        "mode",
+                    );
+                }
             }
             Ok(())
         })?;
@@ -559,7 +647,7 @@ impl Shell {
             return Ok(VecDeque::new());
         };
         let settings_candidate = self.prepare_control_plane_settings(|shared, profile| {
-            if let Some(profile) = profile {
+            if let Some(profile) = theme_write_target(profile, None) {
                 let target = profile
                     .settings
                     .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
@@ -675,6 +763,23 @@ impl Shell {
     /// Build the only service state allowed to describe the rendered theme.
     /// Provider mirrors can carry no independent theme identity, mode, token,
     /// or color-scheme facts; those all come from the committed snapshot.
+    /// Whether the active profile pins its own theme. Read from the profile
+    /// document so the published scope can never lag a commit or a switch.
+    fn active_theme_scope(&self) -> ThemeScope {
+        let pinned = self.active_profile_id.as_ref().is_some_and(|profile_id| {
+            mesh_core_module::package::ProfilePaths::from_root_graph(
+                &self.installed_module_graph_path(),
+            )
+            .and_then(|paths| paths.load(profile_id))
+            .is_ok_and(|profile| mesh_core_module::package::profile_pins_theme(&profile))
+        });
+        if pinned {
+            ThemeScope::Profile
+        } else {
+            ThemeScope::User
+        }
+    }
+
     pub(in crate::shell) fn authoritative_theme_service_payload(&self) -> serde_json::Value {
         let snapshot = self.theme.active_snapshot();
         let theme_modes = |theme: &mesh_core_theme::Theme| {
@@ -749,6 +854,7 @@ impl Shell {
             "is_dark": snapshot.color_scheme.eq_ignore_ascii_case("dark"),
             "themes": themes,
             "available": available,
+            "scope": self.active_theme_scope().as_str(),
             "system_resources": system_resources_json(
                 &self.settings,
                 &self.resource_snapshot.host_catalog,

@@ -136,7 +136,7 @@ generations in `model.rs`) are deleted outright.
 | `backend` | Provider implementing interfaces (Luau `main.luau`) | `mesh.implements`, `mesh.uses.binaries`, in-script `props {}` |
 | `interface` | Data-only contract package | `mesh.interface` |
 | `composition` | An installable shell composition: roots, provider bindings, resources, extension point arrangement | `mesh.compose`, `mesh.extends` |
-| `library` | Importable Luau helpers; grants no capabilities | `mesh.provides.libraries` |
+| `library` | Importable Luau helpers or a theme token family; grants no capabilities | `mesh.provides.libraries`, `mesh.theme.tokens` — see [04 §4.1](04-styling.md#41-token-families) |
 | `theme` | Theme tokens + component defaults (CSS) | `mesh.contributes.themes` — see [04](04-styling.md) |
 | `icon-pack` | Semantic icon name → asset mappings | `mesh.contributes.icons` — see [05](05-icons.md) |
 | `font-pack` | Font role → installed family mappings | `mesh.font_pack` — see [06](06-fonts.md) |
@@ -826,6 +826,11 @@ Rules:
   this a composition becomes the privileged layer replaceable modules exist to
   avoid.
 - A composition declares no `entry`, no `mesh.surface`, and no `mesh.implements`.
+- **A composition recommends a theme; it never sets one.** `resources.theme`
+  (a theme module id) applies only while the user has not chosen a theme, so
+  switching shells keeps the user's theme. `compose.settings.shell.theme` is a
+  validation error. A profile may still pin a theme in its own settings
+  ([08 §1.1](08-settings.md#11-profile-scope)).
 - `extends` forks a family: the base composition's decisions plus the deltas you
   disagree with. Cycles are rejected.
 - `mesh.uses.sources` says where to fetch a dependency that is not installed. A

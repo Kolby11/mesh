@@ -22,10 +22,6 @@
   --animation-lift-hover: -3px;
   --animation-lift-press: -1px;
   --color-focus-ring: #f9a8d4;
-  --color-glass-hover: #ffffff2e;
-  --color-glass-press: #ffffff1a;
-  --color-glass-rim: #ffdcff40;
-  --color-glass-rim-hover: #ffe4ff80;
   --effect-backdrop-blur-surface-radius: 24px;
   --effect-backdrop-blur-popup-radius: 18px;
   --effect-backdrop-blur-surface-background: rgba(126, 58, 214, 0.30);
@@ -372,5 +368,15 @@ tooltip {
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+/* Glass material: tints the shared @mesh/glass-material token family for the
+   glass bar, dock and widgets. Without this block they use its defaults. */
+@module "@mesh/glass-material" {
+  :root {
+    --glass-hover: #ffffff2e;
+    --glass-rim: #ffdcff40;
+    --glass-rim-hover: #ffe4ff80;
   }
 }

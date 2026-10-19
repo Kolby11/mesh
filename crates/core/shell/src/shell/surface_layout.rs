@@ -8,7 +8,7 @@ use mesh_core_config::ShellSettings;
 use mesh_core_module::package::{InstalledModuleGraph, ModuleKind};
 use mesh_core_theme::{
     Theme, ThemeDefaults, ThemeEngine, ThemeError, ThemeModule, ThemeModuleLayer, ThemeProvenance,
-    TokenValue, default_theme, load_theme_from_source,
+    TokenValue, default_theme, load_theme_from_source, module_token_name,
 };
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -61,14 +61,22 @@ pub(super) fn prepare_theme_for_graph(
     )?;
     let base = default_theme();
     let module_layers = graph
-        .modules_by_kind(ModuleKind::Ui)
+        .modules_by_kind(ModuleKind::Library)
         .into_iter()
+        .chain(graph.modules_by_kind(ModuleKind::Ui))
         .filter_map(|module| {
-            let section = module.manifest.mesh.theme.as_ref()?;
-            Some(ThemeModuleLayer {
-                module_id: module.id.clone(),
-                module: ThemeModule {
-                    tokens: section.tokens.clone(),
+            let families = graph.theme_token_families(&module.id);
+            let section = module.manifest.mesh.theme.as_ref();
+            if section.is_none() && families.is_empty() {
+                return None;
+            }
+            let module_theme = section
+                .map(|section| ThemeModule {
+                    tokens: section
+                        .tokens
+                        .iter()
+                        .map(|(name, value)| (module_token_name(name), value.clone()))
+                        .collect(),
                     defaults: ThemeDefaults {
                         components: section
                             .defaults
@@ -86,7 +94,12 @@ pub(super) fn prepare_theme_for_graph(
                             .collect(),
                     },
                     rules: Vec::new(),
-                },
+                })
+                .unwrap_or_default();
+            Some(ThemeModuleLayer {
+                module_id: module.id.clone(),
+                module: module_theme,
+                families,
             })
         });
     let mut skipped_overrides = Vec::new();

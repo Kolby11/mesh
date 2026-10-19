@@ -20,13 +20,6 @@
       "active": true
     }
   },
-  "settings": {
-    "shell": {
-      "theme": {
-        "active": "@mesh/tokyo-night:tokyo-night"
-      }
-    }
-  },
   "nodeSlots": {
     "@mesh/navigation-bar#default": {
       "start": {

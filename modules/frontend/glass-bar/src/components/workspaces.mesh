@@ -59,7 +59,7 @@ function onLeave() end
         gap: 7px;
         padding-inline: 13px;
         border-radius: 999px;
-        border: 1px solid var(--color-glass-rim);
+        border: 1px solid var(--glass-rim);
         background-image: linear-gradient(to bottom, #b468ff4d, #7a2ee033);
         box-shadow: 0 4px 14px #14003259;
         backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
@@ -92,7 +92,7 @@ function onLeave() end
 
     .pill:hover {
         transform: translateY(var(--animation-lift-hover));
-        border-color: var(--color-glass-rim-hover);
+        border-color: var(--glass-rim-hover);
     }
 
     .ws {

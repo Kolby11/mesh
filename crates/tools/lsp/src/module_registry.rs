@@ -217,11 +217,25 @@ impl ModuleRegistry {
             .filter(|(_, root)| path.starts_with(root))
             .max_by_key(|(_, root)| root.components().count())
             .map(|(id, _)| id);
-        owner
-            .and_then(|id| self.manifests.get(id))
-            .and_then(|manifest| manifest.theme.as_ref())
-            .map(|theme| theme.tokens.keys().cloned().collect())
-            .unwrap_or_default()
+        let Some(manifest) = owner.and_then(|id| self.manifests.get(id)) else {
+            return Vec::new();
+        };
+        let mut families = manifest
+            .dependencies
+            .modules
+            .keys()
+            .filter_map(|id| self.manifests.get(id))
+            .collect::<Vec<_>>();
+        families.push(manifest);
+        let mut tokens = families
+            .into_iter()
+            .filter_map(|manifest| manifest.theme.as_ref())
+            .flat_map(|theme| theme.tokens.keys())
+            .map(|name| mesh_core_theme::module_token_name(name))
+            .collect::<Vec<_>>();
+        tokens.sort();
+        tokens.dedup();
+        tokens
     }
 
     /// All discovered interface/service names (e.g. "mesh.audio").

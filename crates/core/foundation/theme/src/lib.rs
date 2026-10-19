@@ -10,7 +10,7 @@ pub use contract::*;
 use serde::de::{MapAccess, Visitor};
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -222,8 +222,16 @@ pub struct ThemeStyleRule {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ThemeProvenance {
     BaseRecovery,
-    ThemePack { id: String, mode: String },
-    ModuleContribution { module_id: String },
+    ThemePack {
+        id: String,
+        mode: String,
+    },
+    /// A contract role the selected pack omitted, filled from its platform
+    /// default.
+    ContractDefault,
+    ModuleContribution {
+        module_id: String,
+    },
     UserOverride,
 }
 
@@ -528,6 +536,10 @@ fn normalize_metadata_value(value: String, fallback: &str) -> String {
 pub struct ThemeModuleLayer {
     pub module_id: String,
     pub module: ThemeModule,
+    /// Modules whose declared tokens this module reads as a shared family.
+    /// Their effective values, including theme tuning, become visible inside
+    /// this module's subtree unless it declares the same name itself.
+    pub families: Vec<String>,
 }
 
 /// A source selected by an installed theme contribution.
@@ -752,7 +764,9 @@ impl ThemeCatalog {
     }
 
     /// Resolve a theme by its scoped identity (`owner-module:local-id`), or by
-    /// a bare local id when exactly one pack claims it. Settings and
+    /// a bare local id when exactly one pack claims it, or by a module id
+    /// (a profile's `resources.theme`) when that module contributes exactly
+    /// one theme. Settings and
     /// hand-written configuration name themes the readable way (`nord`), while
     /// the scoped identity stays authoritative and is what a selection writes
     /// back. An ambiguous local id resolves to nothing rather than guessing an
@@ -762,12 +776,16 @@ impl ThemeCatalog {
             return Some(descriptor);
         }
 
-        let mut matches = self
-            .descriptors
-            .values()
-            .filter(|descriptor| descriptor.local_id == id);
-        let first = matches.next()?;
-        matches.next().is_none().then_some(first)
+        let unique = |claims: fn(&ThemePackDescriptor, &str) -> bool| {
+            let mut matches = self
+                .descriptors
+                .values()
+                .filter(|descriptor| claims(descriptor, id));
+            let first = matches.next()?;
+            matches.next().is_none().then_some(first)
+        };
+        unique(|descriptor, id| descriptor.local_id == id)
+            .or_else(|| unique(|descriptor, id| descriptor.owner_module == id))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &ThemePackDescriptor> {
@@ -950,9 +968,14 @@ impl Theme {
         self.provenance.get(value)
     }
 
-    /// Compose one immutable style snapshot from the four runtime layers:
-    /// recovery defaults, a selected graph theme pack/mode, module-owned
-    /// contributions, and sparse user token overrides.
+    /// Compose one immutable style snapshot from recovery defaults, a
+    /// selected graph theme pack/mode, module-owned contributions and sparse
+    /// user token overrides.
+    ///
+    /// Contract roles the pack omits take their platform defaults. Inside a
+    /// module scope the module's own declarations are defaults that the pack's
+    /// `@module` block tunes, so the theme wins over the module and the user
+    /// wins over both.
     pub fn compose_layers(
         base: &Theme,
         pack: &Theme,
@@ -1011,8 +1034,19 @@ impl Theme {
         }
 
         merge_theme_layer(&mut composed, pack, &pack_provenance);
+        for (token, default) in semantic_token_defaults() {
+            if !pack.tokens.contains_key(&token) {
+                composed
+                    .tokens
+                    .insert(token.clone(), parse_token_value(default));
+                composed
+                    .provenance
+                    .insert(token, ThemeProvenance::ContractDefault);
+            }
+        }
 
-        for layer in module_layers {
+        let module_layers = module_layers.into_iter().collect::<Vec<_>>();
+        for layer in &module_layers {
             let module_id = layer.module_id.trim();
             if module_id.is_empty() {
                 return Err(ThemeError::Composition(
@@ -1036,6 +1070,8 @@ impl Theme {
             );
             composed.modules.insert(module_id.to_string(), target);
         }
+        merge_theme_modules(&mut composed, pack, &pack_provenance);
+        share_token_families(&mut composed, &module_layers);
 
         flatten_module_tokens_into(&mut composed.tokens, &composed.modules);
         let mut overrides = user_overrides.iter().collect::<Vec<_>>();
@@ -1234,6 +1270,19 @@ pub fn canonical_token_name(name: &str) -> String {
         .unwrap_or_else(|| name.to_string())
 }
 
+/// Canonical name of a module-declared token. Manifests may spell a token in
+/// dotted form (`glass.color.rim-hover`) or as its CSS property; both name the
+/// property `--glass-color-rim-hover`, which is what components and theme
+/// `@module` blocks read and write.
+pub fn module_token_name(name: &str) -> String {
+    let name = name.trim();
+    if name.starts_with("--") {
+        canonical_token_name(name)
+    } else {
+        canonical_token_name(&format!("--{}", name.replace('.', "-")))
+    }
+}
+
 /// The token name when `value` is exactly one fallback-free `var(--x)`.
 /// `var(--a) var(--b)` and `var(--a, …)` are not aliases.
 fn exact_var_reference(value: &str) -> Option<&str> {
@@ -1386,6 +1435,9 @@ fn merge_theme_layer(composed: &mut Theme, layer: &Theme, provenance: &ThemeProv
             );
         }
     }
+}
+
+fn merge_theme_modules(composed: &mut Theme, layer: &Theme, provenance: &ThemeProvenance) {
     for (module_id, module) in &layer.modules {
         let mut target = composed.modules.get(module_id).cloned().unwrap_or_default();
         merge_theme_module(
@@ -1396,6 +1448,46 @@ fn merge_theme_layer(composed: &mut Theme, layer: &Theme, provenance: &ThemeProv
             provenance,
         );
         composed.modules.insert(module_id.clone(), target);
+    }
+}
+
+/// Copy each family's effective tokens into the modules that read it. A
+/// module's own declaration of the same name, or a theme value targeted at
+/// that module, shadows the family value.
+fn share_token_families(composed: &mut Theme, layers: &[ThemeModuleLayer]) {
+    for layer in layers {
+        let module_id = layer.module_id.trim();
+        for family in &layer.families {
+            if family == module_id {
+                continue;
+            }
+            let Some(tokens) = composed
+                .modules
+                .get(family)
+                .map(|family| family.tokens.clone())
+            else {
+                continue;
+            };
+            let mut shared = Vec::new();
+            let target = composed.modules.entry(module_id.to_string()).or_default();
+            for (token, value) in tokens {
+                if !target.tokens.contains_key(&token) {
+                    target.tokens.insert(token.clone(), value);
+                    shared.push(token);
+                }
+            }
+            for token in shared {
+                if let Some(source) = composed
+                    .provenance
+                    .get(&format!("{family}.{token}"))
+                    .cloned()
+                {
+                    composed
+                        .provenance
+                        .insert(format!("{module_id}.{token}"), source);
+                }
+            }
+        }
     }
 }
 
@@ -1626,17 +1718,58 @@ pub fn load_theme_from_source(
 }
 
 fn embedded_default_theme() -> Theme {
-    parse_theme_css(
+    let mut theme = parse_theme_css(
         "tokyo-night",
         "Tokyo Night",
         include_str!("../../../../../modules/themes/tokyo-night/theme.css"),
     )
-    .expect("embedded default theme css must be valid")
+    .expect("embedded default theme css must be valid");
+    for (token, default) in semantic_token_defaults() {
+        theme
+            .tokens
+            .entry(token)
+            .or_insert_with(|| parse_token_value(default));
+    }
+    theme
 }
 
 #[cfg(test)]
 fn parse_theme(content: &str) -> Result<Theme, serde_json::Error> {
     serde_json::from_str::<RawTheme>(content).map(Theme::from)
+}
+
+/// What one `@module` block of a theme stylesheet tunes.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ThemeModuleTarget {
+    pub module_id: String,
+    /// Dotted names of the module tokens the block sets.
+    pub tokens: BTreeSet<String>,
+    /// Element types (`node`, `button`, …) the block restyles inside the module.
+    pub elements: BTreeSet<String>,
+    /// Selectors that reach into the module's own classes or ids.
+    pub internal_selectors: Vec<String>,
+}
+
+/// Summarize the `@module` blocks of a theme stylesheet, ordered by module id.
+pub fn theme_module_targets(source: &str) -> Result<Vec<ThemeModuleTarget>, String> {
+    let theme = parse_theme_css("module-targets", "Module targets", source)?;
+    let mut targets = theme
+        .modules
+        .iter()
+        .map(|(module_id, module)| ThemeModuleTarget {
+            module_id: module_id.clone(),
+            tokens: module.tokens.keys().cloned().collect(),
+            elements: module.defaults.components.keys().cloned().collect(),
+            internal_selectors: module
+                .rules
+                .iter()
+                .filter(|rule| rule.selector.targets_internals())
+                .map(|rule| rule.selector.to_string())
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    targets.sort_by(|left, right| left.module_id.cmp(&right.module_id));
+    Ok(targets)
 }
 
 fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String> {
@@ -2689,6 +2822,7 @@ mod tests {
             [ThemeModuleLayer {
                 module_id: "@mesh/weather".into(),
                 module,
+                families: Vec::new(),
             }],
             &user,
         )
@@ -2714,6 +2848,129 @@ mod tests {
             composed.provenance_for("@mesh/weather.color.accent"),
             Some(&ThemeProvenance::UserOverride)
         );
+    }
+
+    #[test]
+    fn omitted_contract_roles_take_defaults_resolved_against_the_pack() {
+        let pack = parse_theme_css(
+            "pack",
+            "Pack",
+            ":root { --color-primary: #123456; --animation-lift-hover: -2px; }",
+        )
+        .unwrap();
+        let composed = Theme::compose_layers(
+            &default_theme(),
+            &pack,
+            "@mesh/pack:pack",
+            "dark",
+            [],
+            &HashMap::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            composed
+                .resolve_token_value("--color-focus-ring")
+                .unwrap()
+                .unwrap()
+                .to_string(),
+            "#123456"
+        );
+        assert_eq!(
+            composed.provenance_for("color.focus-ring"),
+            Some(&ThemeProvenance::ContractDefault)
+        );
+        assert_eq!(
+            composed.token("animation.lift-hover").unwrap().to_string(),
+            "-2px"
+        );
+        assert!(default_theme().token("color.focus-ring").is_some());
+    }
+
+    #[test]
+    fn theme_module_blocks_tune_module_and_family_tokens() {
+        let pack = parse_theme_css(
+            "pack",
+            "Pack",
+            r#":root { --color-outline: #444; }
+            @module "@mesh/bar" { :root { --bar-color-edge: #f0f; } }
+            @module "@mesh/material" { :root { --glass-color-rim: #0ff; } }"#,
+        )
+        .unwrap();
+        let declared = |tokens: &[(&str, &str)]| ThemeModule {
+            tokens: tokens
+                .iter()
+                .map(|(name, value)| ((*name).into(), TokenValue::String((*value).into())))
+                .collect(),
+            ..ThemeModule::default()
+        };
+        let layers = [
+            ThemeModuleLayer {
+                module_id: "@mesh/material".into(),
+                module: declared(&[
+                    ("glass.color.rim", "var(--color-outline)"),
+                    ("glass.color.hover", "var(--color-outline)"),
+                ]),
+                families: Vec::new(),
+            },
+            ThemeModuleLayer {
+                module_id: "@mesh/bar".into(),
+                module: declared(&[
+                    ("bar.color.edge", "var(--color-outline)"),
+                    ("glass.color.hover", "#111"),
+                ]),
+                families: vec!["@mesh/material".into()],
+            },
+        ];
+        let composed = Theme::compose_layers(
+            &default_theme(),
+            &pack,
+            "@mesh/pack:pack",
+            "dark",
+            layers,
+            &HashMap::new(),
+        )
+        .unwrap();
+        let module_token =
+            |module: &str, token: &str| composed.modules()[module].tokens[token].to_string();
+        assert_eq!(module_token("@mesh/bar", "bar.color.edge"), "#f0f");
+        assert_eq!(module_token("@mesh/material", "glass.color.rim"), "#0ff");
+        assert_eq!(module_token("@mesh/bar", "glass.color.rim"), "#0ff");
+        assert_eq!(module_token("@mesh/bar", "glass.color.hover"), "#111");
+        assert_eq!(
+            composed.provenance_for("@mesh/bar.bar.color.edge"),
+            Some(&ThemeProvenance::ThemePack {
+                id: "@mesh/pack:pack".into(),
+                mode: "dark".into(),
+            })
+        );
+        assert_eq!(
+            composed.provenance_for("@mesh/bar.glass.color.hover"),
+            Some(&ThemeProvenance::ModuleContribution {
+                module_id: "@mesh/bar".into(),
+            })
+        );
+    }
+
+    #[test]
+    fn module_targets_separate_hooks_from_internal_selectors() {
+        let targets = theme_module_targets(
+            r#"@module "@mesh/bar" {
+                :root { --bar-color-edge: #f0f; }
+                button { border-radius: 4px; }
+                button:hover { opacity: 0.9; }
+                .pill:hover { opacity: 0.8; }
+                #clock { color: red; }
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].module_id, "@mesh/bar");
+        assert_eq!(
+            targets[0].tokens.iter().collect::<Vec<_>>(),
+            ["bar.color.edge"]
+        );
+        assert!(targets[0].elements.contains("button"));
+        assert_eq!(targets[0].internal_selectors, [".pill:hover", "#clock"]);
     }
 
     fn catalog_descriptor(owner: &str, local: &str) -> ThemePackDescriptor {
@@ -2744,6 +3001,11 @@ mod tests {
             "settings name themes the readable way, so a bare local id must resolve"
         );
         assert!(catalog.get("missing").is_none());
+        assert_eq!(
+            catalog.get("@mesh/nord").map(|d| d.id.as_str()),
+            Some("@mesh/nord:nord"),
+            "a module contributing one theme names it"
+        );
     }
 
     #[test]

@@ -1106,6 +1106,38 @@ impl InstalledModuleGraph {
         self.modules.get(id)
     }
 
+    /// Enabled modules whose declared theme tokens `module_id` reads as shared
+    /// families: the `mesh.uses.modules` entries that declare `mesh.theme.tokens`.
+    pub fn theme_token_families(&self, module_id: &str) -> Vec<String> {
+        self.modules
+            .get(module_id)
+            .map(|module| super::token_diagnostics::token_families(&self.modules, module))
+            .unwrap_or_default()
+    }
+
+    /// Dotted names `module_id` may read beyond the semantic contract: its
+    /// own declared tokens and those of its token families.
+    pub fn visible_theme_tokens(&self, module_id: &str) -> Vec<String> {
+        self.modules
+            .get(module_id)
+            .map(|module| {
+                super::token_diagnostics::visible_module_tokens(&self.modules, module)
+                    .into_iter()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// How completely the catalogued theme `theme_id` tunes the enabled
+    /// modules' styling hooks, or `None` when the catalog has no such theme.
+    pub fn theme_coverage(&self, theme_id: &str) -> Option<super::ThemeCoverage> {
+        let descriptor = self.theme_catalog.get(theme_id)?;
+        Some(super::token_diagnostics::theme_coverage(
+            &self.modules,
+            descriptor,
+        ))
+    }
+
     /// Stable content identity for this normalized graph snapshot.
     pub fn revision(&self) -> u64 {
         self.revision

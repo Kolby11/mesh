@@ -43,6 +43,7 @@ fn main() {
         Some("status") => cmd_status(),
         Some("locale") => cmd_locale(&args[2..]),
         Some("resources") => cmd_resources(&args[2..]),
+        Some("theme") => cmd_theme(&args[2..]),
         Some("version") => cmd_version(),
         Some("help") | Some("--help") | Some("-h") => cmd_help(),
         Some(other) => {
@@ -289,6 +290,35 @@ fn cmd_resources(args: &[String]) {
         }
         Some(other) => exit_error(format!(
             "unknown resources subcommand: {other}\nsubcommands: show, icons, fonts, coverage, doctor"
+        )),
+    }
+}
+
+fn cmd_theme(args: &[String]) {
+    match args.first().map(String::as_str) {
+        Some("coverage") => {
+            let graph = load_authoring_snapshot();
+            let theme_id = args.get(1).cloned().unwrap_or_else(|| {
+                load_profile_settings()
+                    .effective()
+                    .shell()
+                    .theme
+                    .active
+                    .clone()
+            });
+            let Some(coverage) = graph.theme_coverage(&theme_id) else {
+                exit_error(format!(
+                    "theme '{theme_id}' is not in the installed catalog"
+                ));
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&coverage).expect("theme coverage serialization")
+            );
+        }
+        other => exit_error(format!(
+            "unknown theme subcommand: {}\nsubcommands: coverage [<theme-id>]",
+            other.unwrap_or("(none)")
         )),
     }
 }
@@ -1628,6 +1658,9 @@ fn cmd_help() {
     println!("              --font-script <module>:<role>:<script>");
     println!("              --optional-font-script <module>:<role>:<script>");
     println!("            doctor               print structured resource diagnostics");
+    println!("  theme     Inspect how themes reach installed modules");
+    println!("            coverage [<theme>]   modules the theme tunes, leaves at defaults,");
+    println!("                                 or styles through internals (default: active)");
     println!("  locale    Inspect graph-backed catalogs");
     println!("            list                 list available locales");
     println!("            active               show locale and fallback chain");

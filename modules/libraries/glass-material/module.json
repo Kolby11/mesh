@@ -1,0 +1,16 @@
+{
+  "name": "@mesh/glass-material",
+  "version": "0.1.0",
+  "description": "Token family for liquid-glass surfaces: rim and hover tints shared by the glass bar, dock and widgets. Defaults follow any theme; themes tune them with an @module block.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "library",
+    "theme": {
+      "tokens": {
+        "glass.rim": "var(--color-outline-variant)",
+        "glass.rim.hover": "var(--color-outline)",
+        "glass.hover": "var(--color-surface-container-high)"
+      }
+    }
+  }
+}

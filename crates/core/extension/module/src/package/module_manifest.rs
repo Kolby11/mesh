@@ -107,6 +107,7 @@ impl ModuleManifest {
                     modes: theme.modes.clone(),
                     default_mode: theme.default_mode.clone(),
                     extends: None,
+                    independent: false,
                 });
         let assets = mesh.contributes.icons.iter().find_map(|contribution| {
             let IconContribution::Path(icons) = contribution else {
@@ -574,6 +575,17 @@ impl MeshModuleSection {
             if let Some(parent) = &self.extends {
                 validate_module_dependency_id("mesh.extends", parent)?;
             }
+            if self.compose.as_ref().is_some_and(|compose| {
+                compose
+                    .settings
+                    .get(mesh_core_config::SHELL_NAMESPACE)
+                    .and_then(|shell| shell.get("theme"))
+                    .is_some()
+            }) {
+                return Err(ModuleManifestError::Validation(
+                    "composition modules must not set shell.theme; the active theme is the user's choice and follows them across shells, so recommend one with mesh.compose.resources.theme".into(),
+                ));
+            }
         } else {
             if self.compose.is_some() {
                 return Err(ModuleManifestError::Validation(
@@ -627,9 +639,9 @@ impl MeshModuleSection {
             ));
         }
         if let Some(theme) = &self.theme {
-            if self.kind != ModuleKind::Ui {
+            if !matches!(self.kind, ModuleKind::Ui | ModuleKind::Library) {
                 return Err(ModuleManifestError::Validation(
-                    "mesh.theme is only supported for ui modules".into(),
+                    "mesh.theme is only supported for ui modules and library token families".into(),
                 ));
             }
             theme.validate().map_err(ModuleManifestError::Validation)?;

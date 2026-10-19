@@ -4,8 +4,31 @@ use super::{
 use mesh_core_config::SettingsStore;
 use std::path::{Path, PathBuf};
 
+/// Whether a profile pins its own theme. The theme is otherwise the user's
+/// shared choice, which every shell follows.
+pub fn profile_pins_theme(profile: &super::ShellProfile) -> bool {
+    profile
+        .settings
+        .get(mesh_core_config::SHELL_NAMESPACE)
+        .and_then(|shell| shell.get("theme"))
+        .and_then(serde_json::Value::as_object)
+        .is_some_and(|theme| !theme.is_empty())
+}
+
+fn shared_selects_theme(document: &serde_json::Value) -> bool {
+    document
+        .get(mesh_core_config::SHELL_NAMESPACE)
+        .and_then(|shell| shell.get("theme"))
+        .and_then(|theme| theme.get("active"))
+        .is_some()
+}
+
 /// Layer a profile's sparse preferences and per-instance surface overrides on
 /// top of shared user defaults. The shared document remains untouched.
+///
+/// A profile's `resources.theme` is a recommendation: it applies only while
+/// the user has not chosen a theme. A theme in the profile's own settings is
+/// a pin and always applies.
 pub fn effective_profile_settings(
     shared: SettingsStore,
     profile: Option<&super::ShellProfile>,
@@ -15,10 +38,16 @@ pub fn effective_profile_settings(
     };
     let path = shared.path().to_path_buf();
     let mut document = shared.to_value();
+    let user_selected_theme = shared_selects_theme(&document);
     let root = document
         .as_object_mut()
         .expect("SettingsStore always serializes an object");
-    if let Some(theme) = &profile.resources.theme {
+    if let Some(theme) = profile
+        .resources
+        .theme
+        .as_ref()
+        .filter(|_| !user_selected_theme)
+    {
         let target = root
             .entry("shell".to_string())
             .or_insert_with(|| serde_json::json!({}));
@@ -231,7 +260,7 @@ mod tests {
             r#"{"name":"@me/config","version":"1","mesh":{"modulesDir":"modules","modules":{}}}"#,
         )
         .unwrap();
-        fs::write(root.join("modules/desk/module.json"), r#"{"name":"@me/desk","version":"1","mesh":{"apiVersion":"0.1","kind":"composition","compose":{"settings":{"shell":{"theme":{"active":"composed"}},"@me/widget":{"density":"compact"}}}}}"#).unwrap();
+        fs::write(root.join("modules/desk/module.json"), r#"{"name":"@me/desk","version":"1","mesh":{"apiVersion":"0.1","kind":"composition","compose":{"settings":{"@me/widget":{"density":"compact"}}}}}"#).unwrap();
         let shared = SettingsStore::from_value(
             root.join("external/settings.json"),
             serde_json::json!({"shell":{"theme":{"active":"shared"}},"@me/widget":{"size":10}}),
@@ -251,7 +280,7 @@ mod tests {
         let before = fs::read(shared.path()).unwrap();
         let mut preferences =
             ProfileSettings::load(&root.join("module.json"), shared.clone()).unwrap();
-        assert_eq!(preferences.effective().shell().theme.active, "composed");
+        assert_eq!(preferences.effective().shell().theme.active, "shared");
         assert_eq!(preferences.effective().shell().i18n.locale, "sk");
         assert_eq!(
             preferences.effective().namespace("@me/widget"),
@@ -278,6 +307,39 @@ mod tests {
                 .contains_key("@me/widget")
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn theme_follows_the_user_unless_the_profile_pins_it() {
+        let unset = SettingsStore::from_value(
+            PathBuf::from("/settings.json"),
+            serde_json::json!({"shell":{"i18n":{"locale":"en"}}}),
+        )
+        .unwrap();
+        let chosen = SettingsStore::from_value(
+            PathBuf::from("/settings.json"),
+            serde_json::json!({"shell":{"theme":{"active":"user"}}}),
+        )
+        .unwrap();
+        let mut profile = ShellProfile::new();
+        profile.resources.theme = Some("@me/recommended".into());
+        let theme = |shared: &SettingsStore, profile: &ShellProfile| {
+            effective_profile_settings(shared.clone(), Some(profile))
+                .unwrap()
+                .shell()
+                .theme
+                .active
+                .clone()
+        };
+        assert_eq!(theme(&unset, &profile), "@me/recommended");
+        assert_eq!(theme(&chosen, &profile), "user");
+        assert!(!profile_pins_theme(&profile));
+        profile.settings.insert(
+            "shell".into(),
+            serde_json::json!({"theme":{"active":"pinned"}}),
+        );
+        assert!(profile_pins_theme(&profile));
+        assert_eq!(theme(&chosen, &profile), "pinned");
     }
 
     #[test]

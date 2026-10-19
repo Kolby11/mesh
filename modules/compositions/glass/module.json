@@ -12,7 +12,8 @@
         "@mesh/glass-dock": ">=0.1.0",
         "@mesh/settings": ">=0.1.0",
         "@mesh/violet-glass": ">=0.1.0",
-        "@mesh/glass-wallpaper": ">=0.1.0"
+        "@mesh/glass-wallpaper": ">=0.1.0",
+        "@mesh/glass-material": ">=0.1.0"
       }
     },
     "compose": {
@@ -53,16 +54,10 @@
         "mesh.recorder": "@mesh/wf-recorder"
       },
       "resources": {
+        "theme": "@mesh/violet-glass",
         "icons": [
           "@mesh/icons-material-symbols"
         ]
-      },
-      "settings": {
-        "shell": {
-          "theme": {
-            "active": "@mesh/violet-glass:violet-glass"
-          }
-        }
       }
     }
   }

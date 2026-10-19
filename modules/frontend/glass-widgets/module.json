@@ -10,6 +10,9 @@
         "mesh.media": ">=1.0",
         "mesh.weather": ">=1.0"
       },
+      "modules": {
+        "@mesh/glass-material": ">=0.1.0"
+      },
       "resources": {
         "icons": [
           "@mesh/icons-material-symbols"

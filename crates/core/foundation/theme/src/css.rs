@@ -34,6 +34,32 @@ pub enum Selector {
     Universal,
 }
 
+impl Selector {
+    /// Whether the selector names a class or id: markup a component may
+    /// rename in any release, unlike element types and their states.
+    pub fn targets_internals(&self) -> bool {
+        match self {
+            Self::Class(_) | Self::Id(_) => true,
+            Self::Compound(parts) => parts.iter().any(Self::targets_internals),
+            Self::Tag(_) | Self::State(..) | Self::Universal => false,
+        }
+    }
+}
+
+impl std::fmt::Display for Selector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Tag(tag) => write!(f, "{tag}"),
+            Self::Class(class) => write!(f, ".{class}"),
+            Self::Id(id) => write!(f, "#{id}"),
+            Self::State(tag, state) if tag == "*" => write!(f, ":{state}"),
+            Self::State(tag, state) => write!(f, "{tag}:{state}"),
+            Self::Compound(parts) => parts.iter().try_for_each(|part| write!(f, "{part}")),
+            Self::Universal => write!(f, "*"),
+        }
+    }
+}
+
 /// Parse one selector and reject combinators, functions, attributes, and
 /// other CSS syntax for which the retained element tree has no matcher.
 pub fn parse_selector(source: &str) -> Result<Selector, String> {

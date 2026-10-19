@@ -9,6 +9,9 @@
       "interfaces": {
         "mesh.apps": ">=1.0"
       },
+      "modules": {
+        "@mesh/glass-material": ">=0.1.0"
+      },
       "capabilities": [
         "shell.surface",
         "theme.read",

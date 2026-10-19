@@ -1950,7 +1950,7 @@ impl Shell {
                 target_closes_on_leave,
                 close_source,
             ),
-            CoreRequest::SetTheme { theme_id } => self.apply_set_theme(&theme_id),
+            CoreRequest::SetTheme { theme_id, scope } => self.apply_set_theme(&theme_id, scope),
             CoreRequest::SetThemeMode { mode } => self.apply_set_theme_mode(&mode),
             CoreRequest::SetLocale { locale } => self.apply_set_locale(&locale),
             CoreRequest::SetIconTheme { theme_id } => self.apply_set_icon_theme(&theme_id),

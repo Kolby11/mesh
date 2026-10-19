@@ -14,9 +14,14 @@ model the renderer uses.
    components reference `var(--color-primary)`. Token groups are prefixes
    (`color`, `spacing`, `typography`, `radius`, `elevation`, `animation`,
    `shadow`, `icon`, `font`). The versioned semantic contract below fixes public
-   names and meanings; themes choose their values. Additional private tokens use
-   module namespaces, and local CSS custom properties remain available.
+   names and meanings; themes choose their values. Components extend it with
+   their own declared tokens and shared token families (§4), each defaulting
+   through contract roles, and local CSS custom properties remain available.
    Unknown-token reads return `nil` and static reads outside the contract warn.
+   **Compatibility is by construction:** every token a component may read
+   resolves through the contract, so any installed component works under any
+   installed theme. A theme can only make a component look more or less
+   tuned, never broken.
 2. **One theme active at a time** (winner-takes-all — mixed token sets
    produce incoherent UI). Modes (dark / light / high-contrast) live *inside*
    a theme and are user-switchable at runtime. This is the deliberate
@@ -32,7 +37,11 @@ model the renderer uses.
    `ComputedStyle::default()`, inherits the theme's `node` rule, then its
    tag rule (`button`), then module-scoped defaults, then local styles.
 5. **Module theme contributions are scoped.** A UI module's tokens/defaults
-   apply only inside its own rendered subtree.
+   apply only inside its own rendered subtree; a token family's tokens apply
+   inside the subtrees of the modules that use it.
+6. **The theme follows the user.** The active theme is a shared user choice
+   that survives switching shells. A composition may recommend a theme; a
+   profile may pin one ([08 §1.1](08-settings.md#11-profile-scope)).
 
 ## 2. Theme pack shape
 
@@ -81,7 +90,7 @@ contract.
 
 ### 2.1 Semantic token contract
 
-**Status: shipped, version 1.0.** The authoritative machine-readable vocabulary
+**Status: shipped, version 1.1.** The authoritative machine-readable vocabulary
 is [semantic-tokens-v1.json](../../crates/core/foundation/theme/src/semantic-tokens-v1.json),
 owned by the platform and independent of any theme stylesheet. It lists CSS
 names, intended value kinds and whether the theme or resource composition
@@ -96,9 +105,16 @@ effects, icon sizes/axes and font roles. Theme modes provide every entry marked
 Base16 palette variables and retired shell recipes are outside the public
 vocabulary. A theme may declare local palette variables and use them internally.
 
-Each theme contribution declares `tokenContract: "1.0"`. Removing or changing
-a role's meaning requires a new major contract; additive vocabulary is versioned
-separately from theme colors and module versions. Only 1.0 is currently known.
+Each theme contribution declares the contract version it was written
+against, e.g. `tokenContract: "1.1"`. Removing or changing a role's meaning
+requires a new major contract. A minor version only adds roles, and every role
+added after 1.0 carries a platform `default` written in older roles (1.1 adds
+`--color-focus-ring` = `var(--color-primary)`, `--animation-lift-hover` and
+`--animation-lift-press` = `0px`). A theme declaring any minor version of the
+current major is therefore complete: roles it omits take their defaults,
+resolved against that theme's own values, with `ContractDefault` provenance.
+Only roles without a default are required of the declared version.
+
 Doctor warns for missing/unknown version declarations, incomplete declared
 contracts and unknown token reads. These authoring warnings leave modules
 loadable. Missing tokens retain normal runtime resolution behavior.
@@ -118,13 +134,18 @@ claiming a new public semantic role.
 longer writes module contributions into the user's theme file; any code doing
 so is deleted).
 
-The **effective theme is composed in memory at load** from three layers:
+The **effective theme is composed in memory at load** from these layers,
+later winning:
 
 ```
-1. active theme pack CSS  (per active mode)
-2. module mesh.theme contributions  (module-scoped, from installed manifests)
-3. user token overrides  (from the settings store, 08)
+1. active theme pack root tokens (per active mode) + contract defaults for omitted roles
+2. module and token-family mesh.theme declarations (module-scoped defaults)
+3. the pack's @module blocks (the theme tuning a module or family)
+4. user token overrides  (from the settings store, 08)
 ```
+
+**Shipped:** the order above, contract defaults, and token-family sharing. A
+module's own declaration of a name shadows the same name from a family.
 
 - No compiled cache artifact; recomposition happens on theme/mode switch,
   module (un)install, and settings change, then `ThemeChanged` fires and
@@ -171,7 +192,51 @@ defaults:
   references are install/load diagnostics.
 - Contributions are not theme-variant-specific in v1.
 - Module tokens are referenced with their prefixed name
-  (`var(--weather-color-sunny)`); root tokens stay unqualified.
+  (`var(--weather-color-sunny)`); root tokens stay unqualified. A dotted
+  manifest name and its CSS property name the same token
+  (`glass.rim.hover` ≡ `--glass-rim-hover`).
+- **Shipped:** a module token's namespace may not be a contract group
+  (`color.rim` is rejected), so it can never shadow a contract role.
+- **Shipped:** each declared token's default must resolve through contract
+  roles or other tokens the module can see; doctor reports
+  `token_default_outside_contract` otherwise. Declared tokens are the
+  module's public styling hooks.
+
+### 4.1 Token families
+
+**Status: shipped.** A `library` module may declare `mesh.theme.tokens` and
+nothing else theme-related. Every enabled module listing it in
+`mesh.uses.modules` sees those tokens in its subtree, so several components
+share one vocabulary that is not part of the core contract (for example
+`@mesh/glass-material`'s `--glass-rim`). Doctor and the LSP accept reads of
+family tokens in the modules that use the family. A family that becomes
+widely shared is a candidate for a future contract minor version.
+
+### 4.2 Theme tuning and component internals
+
+**Status: shipped.** A theme tunes a module or family with an `@module` block:
+
+```css
+@module "@mesh/glass-material" {
+  :root { --glass-rim: #ffdcff40; }   /* declared token: stable hook */
+  button { border-radius: 8px; }      /* element rule: stable */
+  .pill { opacity: 0.9; }             /* class/id: the module's internals */
+}
+```
+
+Declared tokens and element-type rules (with states) are the stable styling
+surface. Class and id selectors reach into markup the module may rename in any
+release; doctor reports `theme_styles_component_internals` for each. A value
+set for a token the installed target does not declare reports
+`theme_sets_undeclared_module_token`. A block for a module that is not
+installed is harmless. **Target:** declared style parts ([A3](../BACKLOG.md))
+become the stable way to restyle a component's internals.
+
+### 4.3 Independent modules
+
+**Status: shipped.** `mesh.theme.independent: true` declares that a module
+deliberately ignores the active theme (a brand mark, an art piece). Coverage
+reports list it so users learn of it before they discover it.
 
 ## 5. User customization
 
@@ -320,6 +385,12 @@ mesh themes set <id> [--mode m]
 mesh themes tokens [group]        # dump effective (composed) tokens
 mesh themes which <token-name>    # which cascade layer supplied the value
 ```
+
+**Shipped:** `mesh-shell theme coverage [<theme>]` (default: the active theme)
+prints which modules and families the theme tunes (tokens set of declared,
+element rules), which declare hooks it leaves at their defaults, independent
+modules, internal selectors, and `@module` targets that are not installed. The
+other commands above remain targets.
 
 ## 9. Element blur (`filter`)
 

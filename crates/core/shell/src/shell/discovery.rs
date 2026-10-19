@@ -1842,10 +1842,11 @@ impl Shell {
                 ("is_dark", "boolean"),
                 ("themes", "object[]"),
                 ("available", "string[]"),
+                ("scope", "string"),
                 ("system_resources", "object"),
             ],
             &[
-                ("set_theme", &[("theme_id", "string")]),
+                ("set_theme", &[("theme_id", "string"), ("scope", "string?")]),
                 ("set_mode", &[("mode", "string")]),
                 ("set_icon_theme", &[("theme_id", "string")]),
                 ("set_font_family", &[("family", "string")]),

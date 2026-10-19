@@ -8,6 +8,14 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
+- **Theme/component compatibility implemented:** contract 1.1 with platform
+  defaults, theme `@module` values over module defaults, `library` token
+  families, internal-selector and undeclared-hook diagnostics,
+  `mesh-shell theme coverage`, and a theme that follows the user across shells
+  (compositions recommend, profiles pin, `set_theme { scope }`). Module tests
+  match the HEAD baseline; the shell-crate baseline comparison is still
+  unfinished (7 theme-named shell failures not yet diffed). See October's log.
+
 - **Render sweep follow-through validated:** hover/transition frames retain
   pixels, paint-only hover skips layout, resource loads repaint only consumers
   (including child targets), and quiet surfaces borrow their IDs. Focus-grab

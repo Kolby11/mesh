@@ -424,7 +424,9 @@ fn mesh_section() -> Node {
                 "theme",
                 false,
                 scalar(
-                    "Theme definition contributed by this module (tokens, modes, base, extends).",
+                    "Styling hooks of a ui module or library token family: `tokens` (dotted \
+                     names with defaults built from semantic contract roles), `defaults`, and \
+                     `independent: true` for a module that ignores the active theme.",
                     "object",
                 ),
             ),
@@ -728,7 +730,14 @@ fn compose_node() -> Node {
                 obj(
                     "Resource selections. Ordered chains replace rather than merge.",
                     vec![
-                        field("theme", false, scalar("Active theme module id.", "string")),
+                        field(
+                            "theme",
+                            false,
+                            scalar(
+                                "Recommended theme; applies only while the user has not chosen one.",
+                                "string",
+                            ),
+                        ),
                         field(
                             "icons",
                             false,
