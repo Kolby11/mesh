@@ -253,21 +253,24 @@ impl FontRegistry {
                         crate::ResourceAssetError::Cancelled { .. } => FontRegistryError::Cancelled,
                         error => FontRegistryError::Asset(error.to_string()),
                     })?;
-                let mut face_database = fontdb::Database::new();
-                face_database.load_font_data(bytes.clone());
-                if !face_database.faces().any(|candidate| {
-                    candidate
-                        .families
-                        .iter()
-                        .any(|(family, _)| family.eq_ignore_ascii_case(&face.family))
-                }) {
+                let loaded_ids = next_database
+                    .load_font_source(fontdb::Source::Binary(std::sync::Arc::new(bytes)));
+                if !loaded_ids
+                    .iter()
+                    .filter_map(|id| next_database.face(*id))
+                    .any(|loaded| {
+                        loaded
+                            .families
+                            .iter()
+                            .any(|(family, _)| family.eq_ignore_ascii_case(&face.family))
+                    })
+                {
                     return Err(FontRegistryError::Asset(format!(
                         "font resource {} has no face named '{}'",
                         face.asset.candidate_path().display(),
                         face.family
                     )));
                 }
-                next_database.load_font_data(bytes);
             }
         }
         if cancellation.is_cancelled() {
@@ -798,6 +801,46 @@ mod tests {
             BTreeSet::from(["latin".into(), "latin-ext".into()])
         );
         assert!(registry.resolve("body").available);
+    }
+
+    #[test]
+    fn bundled_face_must_declare_its_bound_family() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut system_fonts = fontdb::Database::new();
+        system_fonts.load_system_fonts();
+        let system_path = system_fonts
+            .faces()
+            .find_map(|face| match &face.source {
+                fontdb::Source::File(path) => Some(path.clone()),
+                _ => None,
+            })
+            .expect("test environment should provide a file-backed font");
+        std::fs::copy(&system_path, temp.path().join("bundled.ttf")).unwrap();
+        let asset = ResourceAssetHandle::new(temp.path(), "bundled.ttf").unwrap();
+        let family = "No Such Family For Bundled Face Test";
+        let pack = FontPackBindings {
+            module_id: "@mesh/fonts-test".into(),
+            pack_id: "test".into(),
+            required_families: Vec::new(),
+            covers: BTreeMap::new(),
+            mappings: BTreeMap::new(),
+            faces: vec![FontFaceBinding {
+                family: family.into(),
+                asset,
+                weight: 400,
+                style: "normal".into(),
+                stretch: 100,
+                coverage: BTreeSet::new(),
+            }],
+        };
+        let mut registry = FontRegistry::new(Vec::<String>::new());
+        let error = registry
+            .replace(vec![pack], vec!["test".into()])
+            .expect_err("a face that does not declare its family must be rejected");
+        assert!(
+            error.to_string().contains("has no face named"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
