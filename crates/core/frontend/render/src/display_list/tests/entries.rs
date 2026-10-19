@@ -599,7 +599,7 @@ fn display_list_can_force_full_surface_damage() {
 #[test]
 #[cfg(debug_assertions)]
 fn resource_reload_preserves_widget_caller_lineage() {
-    if crate::isolate_resource_revision_test(
+    if crate::isolate_resource_state_test(
         "display_list::tests::entries::resource_reload_preserves_widget_caller_lineage",
     ) {
         return;

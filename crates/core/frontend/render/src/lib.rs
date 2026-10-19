@@ -80,19 +80,19 @@ pub(crate) fn resource_state_test_lock() -> std::sync::MutexGuard<'static, ()> {
 }
 
 #[cfg(test)]
-pub(crate) fn isolate_resource_revision_test(test_name: &str) -> bool {
-    const CHILD_TEST: &str = "MESH_RESOURCE_REVISION_TEST_CHILD";
+pub(crate) fn isolate_resource_state_test(test_name: &str) -> bool {
+    const CHILD_TEST: &str = "MESH_RESOURCE_STATE_TEST_CHILD";
     if std::env::var(CHILD_TEST).as_deref() == Ok(test_name) {
         return false;
     }
 
-    // Revision bumps invalidate every retained list in the process, including
-    // readers that do not otherwise share mutable test resources.
+    // Parallel painters share resource revisions, queues and admission budgets
+    // without taking the test lock, so state-sensitive tests need a process boundary.
     let status = std::process::Command::new(std::env::current_exe().unwrap())
         .args(["--exact", test_name, "--nocapture"])
         .env(CHILD_TEST, test_name)
         .status()
-        .expect("run resource revision test in a child process");
+        .expect("run resource state test in a child process");
     assert!(
         status.success(),
         "isolated test {test_name} failed: {status}"

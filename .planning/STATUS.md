@@ -8,6 +8,10 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
+- **Worker test isolation implemented:** image-decode and SVG worker fixtures
+  run in child processes so parallel painters cannot consume their broker
+  admission budget. Gradient-shader test counts follow their thread-local cache.
+
 - **GPU backend phases 1–2 implemented:** `render::gpu` (feature
   `renderer-gpu`) runs a headless Skia-GL context. The painter paints through
   a session on a raster buffer or a GPU target, so no raw-pixel paint path is
@@ -54,7 +58,7 @@ measurements are in [`log/`](log/README.md). Open work is in
   unrefracted wallpaper paint. Release gates pass; experiments and ranges are in
   the performance log. Included in the workspace checkpoint.
 
-- **Priority 6 in progress:** SH-07, UI-10/RT-08/CMP-05/CMP-12, MOD-11, RES-11
+- **Priority 6 complete:** SH-07, UI-10/RT-08/CMP-05/CMP-12, MOD-11, RES-11
   and RT-07 are done (most landed in the checkpoint; confirmed and logged
   2026-10-18). Rounded fills and borders now paint clip-invariantly; the LSP
   manifest schema and the scene-thread test are fixed. SH-09/RES-13,
@@ -62,8 +66,8 @@ measurements are in [`log/`](log/README.md). Open work is in
   closed (2026-10-19); the contract-free LSP completion fallback is removed.
   Rounded clips, gradients, images and shadows are now fixed too. The retained
   render tests share the resource-state lock, revision bumps run in child test
-  processes, and LSP theme discovery uses its own profile fixture. A separate
-  image-worker queue-contention fixture remains in the backlog.
+  processes, and LSP theme discovery uses its own profile fixture. Image/SVG
+  worker fixtures and gradient-shader counters are isolated too.
 
 - **Priority 5 implemented:** MOD-05/06/07/08/09/10/12,
   SH-10 and RES-08. Shared core package engines, configuration paths/locks,
@@ -87,7 +91,6 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Next
 
-- Isolate the image-worker queue fixture from parallel painter traffic.
 - GPU phase 3: scene-thread GPU renderer with per-surface buffer rings.
 - Remaining D5 (dialog focus scope, menu typeahead), D6 renderer integration
   and D9 workload gates.

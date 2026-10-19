@@ -26,12 +26,6 @@ unless an item says otherwise. IDs point into the
 (evidence and tests); `A2`–`A8` point into the
 [module architecture direction](../.planning/todos/pending/2026-09-30-module-architecture-direction.md).
 
-### Priority 6 — Test isolation
-
-- [ ] Isolate `surface::icon::tests::image_decode_worker_transfers_bounded_image_off_the_paint_path`
-      from parallel painter queue traffic: scheduling can return `Some(false)`
-      instead of `Some(true)` in full debug and release render-suite runs.
-
 ### Priority 7 — Customization and ecosystem
 
 - [ ] **A3:** Style parts (`part="…"`) plus a profile-scoped user stylesheet

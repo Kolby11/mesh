@@ -117,7 +117,7 @@ fn retained_dirty_contract_matches_shared_paint_signature_inputs() {
 
 #[test]
 fn resource_revision_invalidates_retained_font_paint_signatures() {
-    if crate::isolate_resource_revision_test(
+    if crate::isolate_resource_state_test(
         "display_list::tests::signatures::resource_revision_invalidates_retained_font_paint_signatures",
     ) {
         return;

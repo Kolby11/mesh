@@ -11,10 +11,10 @@ use smallvec::SmallVec;
 
 use mesh_core_elements::lru::ByteLruCache;
 use skia_safe::SamplingOptions;
+#[cfg(test)]
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::sync::Arc;
-#[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub(crate) const MAX_EFFECT_BLUR_RADIUS: f32 = 96.0;
 
@@ -61,8 +61,6 @@ const EFFECT_RASTER_CACHE_BYTES: usize = 32 * 1024 * 1024;
 type ShadowRasterKey = (i32, i32, [u32; 4], u32, u32);
 type GradientShaderCacheKey = (u32, u32, i32, i32);
 type RoundedGradientKey = (GradientShaderCacheKey, [u32; 4]);
-#[cfg(test)]
-static GRADIENT_SHADER_CREATIONS: AtomicUsize = AtomicUsize::new(0);
 
 // Keyed by the `Arc<RgbaImage>` allocation's address, so the value holds a
 // strong reference — otherwise a freed allocation could be reused at the same
@@ -73,6 +71,8 @@ struct CachedSkiaImage {
 }
 
 thread_local! {
+    #[cfg(test)]
+    static GRADIENT_SHADER_CREATIONS: Cell<usize> = const { Cell::new(0) };
     static ROUNDED_GRADIENT_CACHE: RefCell<ByteLruCache<RoundedGradientKey, skia_safe::Image>> =
         RefCell::new(ByteLruCache::new(EFFECT_RASTER_CACHE_ENTRIES, EFFECT_RASTER_CACHE_BYTES));
     static SHADOW_RASTER_CACHE: RefCell<ByteLruCache<ShadowRasterKey, skia_safe::Image>> =
@@ -97,12 +97,12 @@ thread_local! {
 #[cfg(test)]
 pub(super) fn reset_gradient_shader_cache_for_tests() {
     GRADIENT_SHADER_CACHE.with(|cache| cache.borrow_mut().clear());
-    GRADIENT_SHADER_CREATIONS.store(0, Ordering::Relaxed);
+    GRADIENT_SHADER_CREATIONS.set(0);
 }
 
 #[cfg(test)]
 pub(super) fn gradient_shader_creations_for_tests() -> usize {
-    GRADIENT_SHADER_CREATIONS.load(Ordering::Relaxed)
+    GRADIENT_SHADER_CREATIONS.get()
 }
 
 #[allow(dead_code)]
@@ -1753,7 +1753,7 @@ impl SkiaPaintBackend {
                 return;
             };
             #[cfg(test)]
-            GRADIENT_SHADER_CREATIONS.fetch_add(1, Ordering::Relaxed);
+            GRADIENT_SHADER_CREATIONS.with(|count| count.set(count.get() + 1));
             if cacheable {
                 GRADIENT_SHADER_CACHE.with(|c| {
                     c.borrow_mut().insert(

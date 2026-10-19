@@ -1990,6 +1990,11 @@ mod tests {
 
     #[test]
     fn icon_raster_worker_transfers_svg_variant_to_cache() {
+        if crate::isolate_resource_state_test(
+            "surface::icon::tests::icon_raster_worker_transfers_svg_variant_to_cache",
+        ) {
+            return;
+        }
         let _guard = icon_test_lock();
         clear_icon_caches();
         let td = tempfile::tempdir().unwrap();
@@ -2019,6 +2024,11 @@ mod tests {
 
     #[test]
     fn image_decode_worker_transfers_bounded_image_off_the_paint_path() {
+        if crate::isolate_resource_state_test(
+            "surface::icon::tests::image_decode_worker_transfers_bounded_image_off_the_paint_path",
+        ) {
+            return;
+        }
         let _guard = icon_test_lock();
         clear_icon_caches();
         let td = tempfile::tempdir().unwrap();
@@ -2056,6 +2066,11 @@ mod tests {
 
     #[test]
     fn icon_raster_worker_returns_external_svg_without_caching() {
+        if crate::isolate_resource_state_test(
+            "surface::icon::tests::icon_raster_worker_returns_external_svg_without_caching",
+        ) {
+            return;
+        }
         let _guard = icon_test_lock();
         clear_icon_caches();
         let td = tempfile::tempdir().unwrap();
