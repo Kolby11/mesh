@@ -53,6 +53,8 @@
         "locale.read",
         "service.audio.control",
         "service.audio.read",
+        "service.brightness.control",
+        "service.brightness.read",
         "service.media.control",
         "service.media.read",
         "service.network.read",
@@ -66,6 +68,7 @@
         "theme.read"
       ],
       "@mesh/glass-dock": [
+        "locale.read",
         "service.apps.launch",
         "service.apps.read",
         "shell.surface",

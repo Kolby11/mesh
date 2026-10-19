@@ -21,10 +21,16 @@
             <icon class="glyph glyph-dark" name={battery_glyph} size="13" />
             <text class="label label-dark">{battery_text}</text>
         </row>
+        <button class="pill round control-trigger" ref="glassControls" title={t("controls.title")} aria-label={t("controls.title")} aria-haspopup="true">
+            <icon class="glyph" name="settings" size="16" />
+            <ControlCenter />
+        </button>
     </row>
 </template>
 
 <script lang="luau">
+local t = import("mesh.i18n", "t")
+local ControlCenter = require("./control-center.mesh")
 local audio = require("mesh.audio")
 local power = require("mesh.power")
 local network = require("mesh.network")
@@ -131,8 +137,9 @@ end
         justify-content: center;
     }
 
-    .chip-btn {
-    }
+    .control-trigger { padding: 0; background-color: transparent; }
+    .control-trigger:focus-visible { border-color: var(--color-focus-ring); }
+    .control-trigger:active { transform: scale(var(--animation-scale-press)); }
 
 
 

@@ -6463,3 +6463,50 @@ production component scene/raster byte comparison passes at scales 1, 1.25 and
 frames on the current Hyprland session, including release and teardown; NVIDIA
 as compositor main device remains untested. Full shell comparison is recorded
 in the monthly log when complete.
+
+## 2026-10-20 — D9 CPU workload budgets
+
+Six absolute workload ceilings now run in a dedicated CI job and the full
+performance runner. `tools/check-performance --workloads-only` builds one
+release shell test binary using Cargo artifact metadata, then launches each
+workload in a fresh process. Missing, duplicate, invalid and over-budget
+measurements fail, as do missing budgets, failed builds, missing test binaries
+and failed workload assertions. Python is declared in the Nix environment.
+
+The service workload checks changing volume tooltips, hover requires rendered
+state changes, popovers must produce child pixels, theme modes must change
+pixels, and scroll retains its one-pass/no repeated restyle/shift assertions.
+Idle models three 120-second reload-maintenance traces and checks the actual
+scheduler sleep deadline. It bounds maintenance wakeups, not all OS wakeups.
+CPU raster and GPU presentation budgets remain distinct; GPU gates stay in the
+renderer backlog. The shared direction note remains linked for unfinished D4.
+
+**Measured:** workspace release, thin LTO, one codegen unit, Ryzen 7 7840HS,
+CPU raster at scale 1. Navigation is 1920×40; Settings Appearance is 920×900,
+with 240 icon-theme and 240 font descriptors, bounded to 166 retained nodes.
+Per sample: 64 audio deliveries, 64 crossings between two navigation controls,
+12 theme-popover first paints, 24 dark/light switches, and 60 finger frames plus
+30 momentum ticks. Three samples use the same compiled binary, each workload
+in a fresh process: the first through the complete gate command, two repeated
+direct test-binary runs. The table reports ranges of p90 milliseconds, except
+idle, which is wakeups/minute. Every sample is below its ceiling.
+
+| Metric | Three-sample range | Ceiling |
+| --- | --- | --- |
+| `d9_hover_p90_ms` | 1.113–1.323 | 16.667 |
+| `d9_idle_wakeups_per_minute` | 30.000–30.000 | 30.000 |
+| `d9_popover_open_p90_ms` | 3.435–6.427 | 100.000 |
+| `d9_scroll_p90_ms` | 2.973–4.603 | 16.667 |
+| `d9_service_update_p90_ms` | 1.986–2.182 | 16.667 |
+| `d9_theme_switch_p90_ms` | 12.184–13.592 | 100.000 |
+
+These establish initial regression budgets; production execution paths are
+unchanged. Theme timing excludes file loading/settings persistence; popover
+timing includes child allocation/raster but excludes compositor presentation.
+
+**Validation:** all five workload tests (six metrics) pass; four runner tests
+cover valid output, harness-prefixed output and rejection paths. The runner
+tests also pass with Python from the updated Nix environment. Shell syntax and
+`git diff --check` pass. A shared-process prototype failed the idle deadline
+assertion after raster tests left resource work pending; separate workload
+processes resolve that contamination while retaining one compiled binary.

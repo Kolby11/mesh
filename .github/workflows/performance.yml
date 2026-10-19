@@ -22,3 +22,14 @@ jobs:
       - uses: cachix/install-nix-action@v31
       - name: Compare release workloads with the stored tolerance band
         run: nix develop -c ./tools/check-performance
+
+  workload-budgets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: Test workload gate failure handling
+        run: python3 tools/test-performance-gates.py
+      - name: Check D9 workload budgets
+        run: nix develop -c ./tools/check-performance --workloads-only

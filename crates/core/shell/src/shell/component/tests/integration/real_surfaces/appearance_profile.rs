@@ -414,7 +414,7 @@ fn percentile(sorted: &[Duration], fraction: f64) -> Duration {
 // cargo test -p mesh-core-shell --release -- settings_scroll_frame_gate --ignored --nocapture
 #[test]
 #[ignore = "release-only Settings touchpad-scroll frame gate"]
-fn settings_scroll_frame_gate() {
+fn d9_settings_scroll_frame_gate() {
     const FINGER_FRAMES: u32 = 60;
     const MOMENTUM_FRAMES: u32 = 30;
     const FRAME_INTERVAL: Duration = Duration::from_millis(16);
@@ -541,7 +541,15 @@ fn settings_scroll_frame_gate() {
         );
     }
 
+    assert!(
+        !frame_times.is_empty(),
+        "scroll must produce measured frames"
+    );
     frame_times.sort();
+    println!(
+        "MESH_PERF metric=d9_scroll_p90_ms value={:.6}",
+        percentile(&frame_times, 0.9).as_secs_f64() * 1000.0
+    );
     let p50 = percentile(&frame_times, 0.5);
     let p90 = percentile(&frame_times, 0.9);
     eprintln!(

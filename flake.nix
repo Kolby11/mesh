@@ -31,6 +31,7 @@
             rustfmt
             clippy
             pkg-config
+            python3
             dbus
             clang
             rustPlatform.bindgenHook

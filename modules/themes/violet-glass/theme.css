@@ -17,8 +17,8 @@
   --animation-duration-medium: 280;
   --animation-duration-short: 180;
   --animation-opacity-disabled: 0.38;
-  --animation-scale-hover: 1.06;
-  --animation-scale-press: 0.92;
+  --animation-scale-hover: 1.04;
+  --animation-scale-press: 0.95;
   --animation-lift-hover: -3px;
   --animation-lift-press: -1px;
   --color-focus-ring: #f9a8d4;
@@ -376,8 +376,8 @@ tooltip {
 @module "@mesh/glass-material" {
   :root {
     --glass-hover: #ffffff2e;
-    --glass-rim: #ffdcff40;
-    --glass-rim-hover: #ffe4ff80;
+    --glass-rim: #f4eaff52;
+    --glass-rim-hover: #fff3ff99;
     --glass-text: #f5ecff;
     --glass-text-muted: #e3cdfa;
     --glass-text-heading: #f8f0ff;
@@ -399,23 +399,24 @@ tooltip {
     --glass-fill-artwork: #ffffff1f;
     --glass-fill-lens: #ffffff03;
     --glass-rim-focused: #ffc2e399;
-    --glass-surface-pill: linear-gradient(to bottom, #b468ff4d, #7a2ee033);
+    --glass-surface-pill: linear-gradient(to bottom, #d4b8ff36, #44206e24);
     --glass-surface-recording: linear-gradient(to bottom, #ff7ab880, #c2408a52);
-    --glass-surface-weather: linear-gradient(to bottom, #8a48ec3d, #36178a2e);
-    --glass-surface-media: linear-gradient(to bottom, #a466f03d, #4a1fa02e);
+    --glass-surface-weather: linear-gradient(to bottom, #aa86eb38, #28124433);
+    --glass-surface-media: linear-gradient(to bottom, #c1a0f53d, #36155930);
     --glass-surface-active: linear-gradient(to bottom, #fbd3ff, #e7a6ff);
-    --glass-surface-dock: linear-gradient(to bottom, #ffffff5c, #ffffff38);
+    --glass-surface-dock: linear-gradient(to bottom, #e9dcff48, #baa2de26);
     --glass-surface-flare: linear-gradient(to bottom, #ffffff3a, #ffffff38);
-    --glass-surface-lens: linear-gradient(to bottom, #ffffff5e, #ffffff2b);
+    --glass-surface-lens: linear-gradient(to bottom, #ffffff30, #ffffff12);
     --glass-surface-focused: linear-gradient(to bottom, #ff9ccf73, #e0559a4d);
     --glass-surface-battery: linear-gradient(to bottom, #ffe3f4e6, #f5b6dccc);
     --glass-surface-battery-low: linear-gradient(to bottom, #ff8fa3e6, #e2466acc);
     --glass-surface-control: linear-gradient(to bottom, #d79bff4d, #9c58f033);
-    --glass-shadow-pill: 0 4px 14px #14003259;
-    --glass-shadow-card: 0 20px 48px #0a021a73;
+    --glass-shadow-pill: 0 4px 14px #10002045, 0 1px 1px #ffffff24;
+    --glass-shadow-card: 0 18px 48px #09021c66, 0 1px 2px #ffffff26;
     --glass-shadow-dock: 0 -6px 24px #0a021a59;
     --glass-shadow-lens: 0 4px 12px #0a021a40;
     --glass-shadow-artwork: 0 8px 22px #0a021a66;
     --glass-text-on-error: #3a1238;
+    --glass-surface-panel: linear-gradient(to bottom, #8060b37a, #24103c66);
   }
 }

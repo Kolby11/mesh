@@ -8,6 +8,23 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
+- **Liquid-glass showcase implemented:** responsive media/weather cards,
+  calendar and control-center popups, dock magnification and app search, lighter
+  shared materials and English/Slovak controls. Local popovers promote correctly.
+  Three integration tests cover seven widths, service commands and input; nine
+  disclosure tests pass. Live GPU rendering checked on Hyprland at 2880×1800.
+
+- **D9 CPU workload gates implemented:** idle maintenance deadlines, navigation
+  hover and service delivery, Settings scroll, popover first paint and theme
+  switching have explicit CI budgets and a focused runner. Gate failure-path
+  checks and all six budgets pass across three release samples. Measurements
+  are in the performance log; GPU presentation budgets remain in the renderer
+  backlog.
+
+- **Inherited-variable diagnostic fix:** live style checks preserve finalized
+  custom properties, avoiding the false `battery.foreground` warning. All six
+  style application tests pass.
+
 - **D5 interaction primitives implemented:** modal dialog/sheet focus scopes,
   focus entry/return and dismissal, menu typeahead and nested-menu navigation.
   Nine new shell regressions and 50 interaction tests pass. The broader shell
@@ -63,7 +80,7 @@ measurements are in [`log/`](log/README.md). Open work is in
   Hyprland here). On by default; `MESH_RENDER_GPU=0`, missing dmabuf feedback,
   or a failed export falls back to SHM. A full repaint of a frosted
   1840×1800 px surface is about 1.9 ms instead of 36 ms (performance log).
-  Remaining: resource residency and D9 gates.
+  Remaining: resource residency and GPU workload gates.
 
 - **Rounded raster correctness implemented:** rounded overflow, image/gradient
   edges and shadows have exact partial/full repaint regressions. Renderer,
@@ -135,7 +152,7 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 - GPU resource residency (icons, images, glyph bitmaps) measured on the GPU
   path; GPU frame-cost and parity gates.
-- D9 workload gates; frame-N/frame-N+1 pipelining after the scene integration.
+- GPU workload gates; frame-N/frame-N+1 pipelining after the scene integration.
 - Wave 5: the [in-surface blur engine](todos/pending/2026-09-30-in-surface-blur-engine.md).
 
 ## Blocked / known baselines

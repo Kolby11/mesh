@@ -188,7 +188,8 @@ impl<'a> StyleResolver<'a> {
     /// Runtime diagnostic passes run immediately after the ordinary restyle,
     /// which has already refreshed this cache. Taking the node directly avoids
     /// rebuilding an owned `Vec<String>` from its `class` attribute for every
-    /// node in the tree.
+    /// node in the tree. The finalized custom properties preserve inherited
+    /// variables when the diagnostic pass resolves this node in isolation.
     pub fn resolve_node_style_with_diagnostics_for_node_indexed(
         &self,
         rules: &[StyleRule],
@@ -197,8 +198,19 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
         debug_assert!(index.is_for(rules));
+        let variables = node.computed_style.custom_properties.clone();
         let attrs = StyleNodeAttrs::from_node(node);
-        self.resolve_node_style_with_attrs_indexed(rules, index, &attrs, context)
+        let mut diagnostics = Vec::new();
+        let style = self.resolve_node_style_with_attrs_indexed_inner(
+            rules,
+            index,
+            &attrs,
+            context,
+            Some(&mut diagnostics),
+            None,
+            Some(&variables),
+        );
+        (style, diagnostics)
     }
 
     pub(super) fn resolve_node_style_with_attrs(

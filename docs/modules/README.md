@@ -26,11 +26,24 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/opacity-test` | surface | `src/main.mesh` | Opacity control surface without compositor blur (disabled by default) |
 | `@mesh/language-popover` | embedded | `src/main.mesh` | Embeddable language chooser |
 | `@mesh/theme-selector` | embedded | `src/main.mesh` | Embeddable theme chooser |
-| `@mesh/glass-bar` | surface | `src/main.mesh` | Floating top bar of glass pills: clock, workspaces, now playing, recording, weather, status |
-| `@mesh/glass-widgets` | surface | `src/main.mesh` | Bottom-layer desktop player and weather cards |
-| `@mesh/glass-dock` | surface | `src/main.mesh` | Bottom dock of pinned and running applications |
+| `@mesh/glass-bar` | surface | `src/main.mesh` | Floating glass islands with clock/calendar, workspaces, media, recording, weather and a live audio/brightness control center |
+| `@mesh/glass-widgets` | surface | `src/main.mesh` | Responsive desktop media and weather cards with colour artwork and a three-point forecast |
+| `@mesh/glass-dock` | surface | `src/main.mesh` | Glass shelf with neighboring-icon magnification and a searchable pinned/running application popup |
 | `@mesh/profile-switcher` | embedded | `src/main.mesh` | Shell switcher trigger; also a `mesh.navigation.item` contribution |
 | `@mesh/profile-menu` | embedded | `src/main.mesh` | Popover listing profiles; selecting one switches live via `mesh.packages` |
+
+The glass composition follows the liquid-glass showcase's floating islands,
+light rims, refracted translucent cards and raised dock lenses. The clock opens
+a month calendar; the rightmost status button opens quick
+controls; the dock's search button opens pinned/running applications. Popups
+support keyboard opening, Escape and outside dismissal through core disclosure.
+Control labels are available in English and Slovak. Audio and brightness use
+capability-gated providers; unavailable controls stay disabled.
+
+Desktop cards use the configurable `top_offset` prop (360px by default), compact
+widths and a stacked layout at 960px or below. The dock reserves space above the
+shelf for its selected and neighboring lenses to rise. Motion uses theme timing
+and easing, with separate entrance animations for islands, cards and popups.
 
 ## Service providers
 

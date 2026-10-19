@@ -6,9 +6,6 @@
                     <icon class="glyph" name="settings" size="15" />
                 </button>
                 <ProfileSwitcher trigger_hover="var(--glass-hover)" />
-                <button class="glyph-btn" onclick={onSearch} title="Search" aria-label="Search">
-                    <icon class="glyph" name="system-search" size="15" />
-                </button>
             </row>
             <Clock />
             <Workspaces />
@@ -39,9 +36,6 @@ function onSettings()
     mesh.shell.show_surface("@mesh/settings")
 end
 
-function onSearch()
-    mesh.shell.show_surface("@mesh/settings")
-end
 </script>
 
 <style>
@@ -49,8 +43,8 @@ end
     shows between clusters as in a floating island layout. */
     .bar {
         width: 100%;
-        height: 42px;
-        margin: 8px 17px 0;
+        height: 48px;
+        margin: 10px 18px 0;
         justify-content: space-between;
         align-items: center;
         gap: 11px;
@@ -60,8 +54,8 @@ end
 
     .cluster {
         height: 100%;
-        flex-grow: 1;
-        flex-basis: 0;
+        flex-grow: 0;
+        flex-shrink: 0;
         min-width: 0;
         align-items: center;
         gap: 8px;
@@ -72,6 +66,8 @@ end
     }
 
     .cluster-center {
+        flex-grow: 1;
+        flex-shrink: 1;
         justify-content: center;
     }
 
@@ -149,5 +145,19 @@ end
     .glyph-btn:active {
         transform: scale(var(--animation-scale-press));
         transition-duration: var(--animation-duration-fast);
+    }
+    .cluster { animation: island-in 420ms var(--animation-curves-bezier-emphasized-decelerate) both; }
+    .cluster-center { animation-delay: 65ms; }
+    .cluster-end { animation-delay: 120ms; }
+    @keyframes island-in {
+        from { opacity: 0; transform: translateY(-16px) scale(0.96); }
+        to { opacity: 1; transform: translateY(0px) scale(1); }
+    }
+    @container (max-width: 1500px) {
+        .bar { gap: 6px; margin: 8px 10px 0; }
+        .cluster { gap: 5px; }
+    }
+    @container (max-width: 1100px) {
+        .cluster-center { display: none; }
     }
 </style>

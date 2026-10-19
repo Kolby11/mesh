@@ -63,8 +63,6 @@ unless an item says otherwise. IDs point into the
       their anchored axis, so tooltips cannot overflow toward the screen; promote tooltips to `xdg_popup`.
 - [ ] **`mesh-shell profile use` live switch:** rejected against a running shell (candidate
       `@mesh/hyprland-wm` fails to initialize), while `mesh.packages.switch_profile` / IPC `shell:switch_profile` commit.
-- [ ] **Local popover components paint inline:** a closed `<popover>` root is hidden only for module
-      components (`render_embedded_instance`); `require("./x.mesh")` popovers paint their content in the trigger row.
 - [ ] **Icon chains during live switch:** newly mounted modules briefly resolve with an empty pack
       chain (`effective_chain=[]`), logging missing-icon warnings until the chain is rebuilt.
 - [ ] **Backdrop placement beyond MESH:** refraction predicts surface origins from MESH's own
@@ -106,8 +104,6 @@ Each needs a design and a measured prototype before it is adopted.
 - [ ] **D4:** Providers send typed field patches instead of whole snapshots, and
       no JSON on the frame path. Validation, ranges/defaults and `.d.luau`
       generation have shipped, and LSP proxy types use the same mapping.
-- [ ] **D9:** CI performance gates per workload: idle wakeups, hover, service
-      poll, scroll, popover open, theme switch.
 
 
 ## 2026-09-01 whole-codebase audit — new open tasks
@@ -393,7 +389,7 @@ of payoff.
 ### Architecture
 
 - [ ] Finish the Skia-GL backend: GPU resource residency for icons, images and
-      glyph bitmaps and D9 gates on both backends. Scene-worker GPU paint and
+      glyph bitmaps and GPU workload gates. Scene-worker GPU paint and
       dmabuf presentation are shipped;
       [remaining work](../.planning/todos/pending/2026-07-15-gpu-rendering-backend.md).
 - [ ] Experimental persistent-scene/database renderer that extends retained

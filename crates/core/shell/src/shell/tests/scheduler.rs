@@ -237,7 +237,7 @@ fn scheduler_includes_watch_reconciliation_deadline() {
 
 #[test]
 #[ignore = "deterministic release-only idle reload deadline count gate"]
-fn coalesced_reload_wakeup_profile() {
+fn d9_coalesced_reload_wakeup_profile() {
     assert!(!cfg!(debug_assertions), "run with --release");
     let mut shell = Shell::new();
     shell.file_watcher_active = true;
@@ -245,6 +245,7 @@ fn coalesced_reload_wakeup_profile() {
     let interval = Duration::from_secs(2);
     // Model three checks completing at different times during each maintenance
     // pass. The old policy added an interval to each completion independently.
+    let mut max_wakeups_per_minute = 0;
     for run in 0..3 {
         let mut independent = std::collections::BTreeSet::new();
         let mut coalesced = std::collections::BTreeSet::new();
@@ -263,7 +264,17 @@ fn coalesced_reload_wakeup_profile() {
             coalesced.len()
         );
         assert_eq!(independent.len(), coalesced.len() * 3);
+        max_wakeups_per_minute = max_wakeups_per_minute.max(coalesced.len() / 2);
     }
+    shell.next_frontend_reload_check = Instant::now() + interval;
+    shell.next_theme_reload_check = shell.next_frontend_reload_check;
+    shell.next_shell_settings_reload_check = shell.next_frontend_reload_check;
+    shell.next_watch_reconcile = shell.next_frontend_reload_check;
+    assert!(
+        shell.next_runtime_sleep(false) >= Duration::from_millis(1900),
+        "idle scheduler must sleep until maintenance"
+    );
+    println!("MESH_PERF metric=d9_idle_wakeups_per_minute value={max_wakeups_per_minute}");
 }
 
 #[test]

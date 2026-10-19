@@ -170,7 +170,7 @@ Space opens and enters it; Left (Right in RTL) or Escape closes that level and
 returns to the parent item. The same `openchange` binding contract applies.
 Popovers retain the shell cross-surface focus system.
 
-Inline `<popover>` nodes are promoted to compositor popups when open, which lets a short parent surface such as a panel host content that paints outside its own buffer. Author placement with `anchor-ref`, `anchor`, `gravity`, `offset-x`, `offset-y`, and `constrain`; avoid manifest surface geometry for embeddable popovers.
+Inline `<popover>` nodes, including roots of local `require("./panel.mesh")` components, are promoted to compositor popups when open, which lets a short parent surface such as a panel host content that paints outside its own buffer. Author placement with `anchor-ref`, `anchor`, `gravity`, `offset-x`, `offset-y`, and `constrain`; avoid manifest surface geometry for embeddable popovers.
 
 ### Popover disclosure
 

@@ -1,0 +1,9 @@
+{
+  "launcher.title": "Aplikácie",
+  "launcher.search": "Nájsť aplikáciu",
+  "launcher.placeholder": "Hľadať aplikáciu…",
+  "launcher.running": "Spustené",
+  "launcher.pinned": "Pripnutá aplikácia",
+  "launcher.empty": "Tu sa zobrazia pripnuté a spustené aplikácie",
+  "launcher.no_match": "Žiadne zodpovedajúce aplikácie"
+}

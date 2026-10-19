@@ -1,6 +1,6 @@
 <props>
 {
-    top_offset = { type = "size", default = "490px", label = "Distance from the top of the screen" },
+    top_offset = { type = "size", default = "360px", label = "Distance from the top of the screen" },
 }
 </props>
 
@@ -24,15 +24,14 @@ local WeatherCard = require("./components/weather-card.mesh")
 </script>
 
 <style>
-    /* One clear full-width surface on the bottom layer. A layer surface
-    anchors to edges, not points, so the cards are placed by splitting the
-    free width in the reference layout's proportions (left : middle : right
-    gaps of 515 : 93 : 473), which holds on any output width. */
+    /* Flexible outer gaps preserve the reference's off-centre composition
+    while the compact layout stacks the cards before they can overlap. */
     .desk {
         width: 100%;
         margin-top: prop(top_offset);
         align-items: flex-start;
-        gap: 0;
+        gap: 28px;
+        padding-inline: 32px;
         exclusive-zone: none;
         background: transparent;
     }
@@ -58,5 +57,16 @@ local WeatherCard = require("./components/weather-card.mesh")
 
     .slot-weather {
         margin-top: 52px;
+    }
+    @container (max-width: 1200px) {
+        .desk { gap: 20px; padding-inline: 24px; }
+        .gap-left, .gap-middle, .gap-right { display: none; }
+    }
+    @container (max-height: 900px) {
+        .desk { margin-top: 180px; }
+    }
+    @container (max-width: 960px) {
+        .desk { flex-direction: column; margin-top: 100px; align-items: center; }
+        .slot-weather { margin-top: 0; }
     }
 </style>

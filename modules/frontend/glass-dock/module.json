@@ -16,14 +16,20 @@
         "shell.surface",
         "theme.read",
         "service.apps.read",
-        "service.apps.launch"
-      ]
+        "service.apps.launch",
+        "locale.read"
+      ],
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      }
     },
     "entry": "src/main.mesh",
     "surface": {
       "anchor": "bottom",
       "layer": "top",
-      "keyboard_mode": "none",
+      "keyboard_mode": "on_demand",
       "visible_on_start": true
     },
     "provides": {
@@ -37,6 +43,26 @@
     },
     "accessibility": {
       "role": "toolbar"
+    },
+    "i18n": {
+      "defaultLocale": "en"
+    },
+    "contributes": {
+      "i18n": [
+        {
+          "id": "en",
+          "locale": "en",
+          "path": "config/i18n/en.json"
+        },
+        {
+          "id": "sk",
+          "locale": "sk",
+          "path": "config/i18n/sk.json"
+        }
+      ]
+    },
+    "icons": {
+      "ignore_shell_default": true
     }
   }
 }

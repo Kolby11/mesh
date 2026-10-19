@@ -4,6 +4,7 @@ mod brightness;
 mod bubbles;
 mod commands;
 mod hover;
+mod glass;
 mod inspector;
 mod layout;
 mod navigation_profile;

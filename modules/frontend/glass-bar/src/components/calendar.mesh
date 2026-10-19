@@ -1,0 +1,97 @@
+<template>
+    <popover class="calendar-shell" open={open} anchor-ref="glassCalendar" anchor="bottom" gravity="bottom" offset-y="12" open-on="click" grab="click" onopenchange={onOpenChange} aria-label={t("calendar.title")}>
+        <column class="calendar">
+            <text class="today-label">{today_label}</text>
+            <row class="month-heading">
+                <text class="month-label">{month_label}</text>
+                <button class="nav" ref="calendarPrevious" onclick={onPrevious} aria-label={t("calendar.previous")}><text>‹</text></button>
+                <button class="nav" onclick={onToday} aria-label={t("calendar.current")}><text>{t("calendar.today")}</text></button>
+                <button class="nav" ref="calendarNext" onclick={onNext} aria-label={t("calendar.next")}><text>›</text></button>
+            </row>
+            <row class="weekdays">{#for label in weekday_labels key={label}}<text class="weekday">{label}</text>{/for}</row>
+            <column class="weeks">
+                {#for week in weeks key={week.index}}
+                    <row class="week">
+                        {#for day in week.days key={day.key}}
+                            <text class="day" class:day-muted={not day.current} class:day-today={day.today}>{day.label}</text>
+                        {/for}
+                    </row>
+                {/for}
+            </column>
+        </column>
+    </popover>
+</template>
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+open = false
+month_offset = 0
+calendar_timestamp = os.time()
+month_label = ""
+today_label = ""
+weekday_labels = {}
+weeks = {}
+local function leap(year) return year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0) end
+local function days_in_month(year, month)
+    if month == 2 then return leap(year) and 29 or 28 end
+    return ({31,28,31,30,31,30,31,31,30,31,30,31})[month]
+end
+effect(function()
+    local now = calendar_timestamp
+    local year = tonumber(os.date("%Y", now)) or 2026
+    local month = tonumber(os.date("%m", now)) or 1
+    local today = tonumber(os.date("%d", now)) or 1
+    local total = year * 12 + month - 1 + month_offset
+    local shown_year, shown_month = math.floor(total / 12), total % 12 + 1
+    month_label = t("calendar.month." .. tostring(shown_month)) .. " " .. tostring(shown_year)
+    local weekdays = {}
+    for index = 1, 7 do weekdays[index] = t("calendar.weekday." .. tostring(index)) end
+    weekday_labels = weekdays
+    today_label = mesh.locale.format_date(now, "full")
+    -- Gregorian weekday of the first, Monday first; no timezone/DST arithmetic.
+    local y = shown_year - (shown_month < 3 and 1 or 0)
+    local offsets = {0,3,2,5,0,3,5,1,4,6,2,4}
+    local sunday_first = (y + math.floor(y/4) - math.floor(y/100) + math.floor(y/400) + offsets[shown_month] + 1) % 7
+    local first = (sunday_first + 6) % 7
+    local previous_month = shown_month == 1 and 12 or shown_month - 1
+    local previous_year = shown_month == 1 and shown_year - 1 or shown_year
+    local previous_days = days_in_month(previous_year, previous_month)
+    local count = days_in_month(shown_year, shown_month)
+    local rows = {}
+    for row = 0, 5 do
+        local cells = {}
+        for col = 0, 6 do
+            local value = row * 7 + col - first + 1
+            local current = value >= 1 and value <= count
+            local label = value < 1 and previous_days + value or value > count and value - count or value
+            cells[#cells + 1] = { key = col, label = tostring(label), current = current, today = current and month_offset == 0 and value == today }
+        end
+        rows[#rows + 1] = { index = row, days = cells }
+    end
+    weeks = rows
+end)
+function onOpenChange(event)
+    if event.open then calendar_timestamp = os.time() end
+end
+function onPrevious() month_offset -= 1 end
+function onNext() month_offset += 1 end
+function onToday() month_offset = 0 end
+</script>
+<style>
+    .calendar-shell { width: fit; height: fit; padding: 16px; background: transparent; opacity: 1; transform: translateY(0px) scale(1); transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-short) var(--animation-curves-bezier-standard); }
+    .calendar-shell.mesh-surface-entering { opacity: 0; transform: translateY(-12px) scale(0.94); }
+    .calendar-shell.mesh-surface-exiting { opacity: 0; transform: translateY(-8px) scale(0.96); transition-duration: var(--animation-duration-fast); }
+    .calendar { width: 364px; padding: 24px; gap: 18px; border-radius: 28px; border: 1px solid var(--glass-rim); background-image: var(--glass-surface-panel); box-shadow: var(--glass-shadow-card); backdrop-filter: blur(20px) refract(20px 18px) dispersion(1px); }
+    .today-label { height: 22px; font-size: 12px; color: var(--glass-text-muted); }
+    .month-heading { width: 100%; gap: 5px; align-items: center; }
+    .month-label { flex-grow: 1; height: 24px; font-size: 17px; font-weight: 600; color: var(--glass-text-heading); }
+    .nav { height: 30px; padding: 4px 8px; justify-content: center; align-items: center; border-radius: 999px; background: var(--glass-fill-inset); }
+    .weekdays, .week { width: 100%; gap: 2px; }
+    .weekday, .day { width: 43px; height: 34px; text-align: center; font-size: 13px; color: var(--glass-text); }
+    .weekday { font-size: 11px; color: var(--glass-text-muted); }
+    .weeks { gap: 4px; }
+    .day-muted { opacity: 0.35; }
+    .day-today { border-radius: 999px; background-image: var(--glass-surface-active); color: var(--glass-text-on-accent); font-weight: 700; }
+    .nav:hover { background: var(--glass-hover); }
+    .nav:active { transform: scale(var(--animation-scale-press)); }
+    .nav:focus-visible { border: 1px solid var(--color-focus-ring); }
+</style>

@@ -15,7 +15,8 @@
         "mesh.media": ">=1.0",
         "mesh.weather": ">=1.0",
         "mesh.network": ">=1.0",
-        "mesh.recorder": ">=1.0"
+        "mesh.recorder": ">=1.0",
+        "mesh.brightness": ">=1.0"
       },
       "resources": {
         "icons": [
@@ -36,7 +37,9 @@
         "service.weather.read",
         "service.network.read",
         "service.recorder.read",
-        "service.recorder.control"
+        "service.recorder.control",
+        "service.brightness.read",
+        "service.brightness.control"
       ],
       "modules": {
         "@mesh/glass-material": ">=0.1.0",
@@ -64,6 +67,23 @@
     },
     "icons": {
       "ignore_shell_default": true
+    },
+    "i18n": {
+      "defaultLocale": "en"
+    },
+    "contributes": {
+      "i18n": [
+        {
+          "id": "en",
+          "locale": "en",
+          "path": "config/i18n/en.json"
+        },
+        {
+          "id": "sk",
+          "locale": "sk",
+          "path": "config/i18n/sk.json"
+        }
+      ]
     }
   }
 }

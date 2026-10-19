@@ -212,6 +212,13 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                     .map(|style| style.rules.as_slice())
                     .unwrap_or(&[]),
             );
+            if embedded_root_is_popover(&node) {
+                self.has_promoted_popover_wrappers.set(true);
+                self.popover_wrapper_marks
+                    .set(self.popover_wrapper_marks.get().wrapping_add(1));
+                node.attributes.insert("hidden".into(), "true".into());
+                node.mark_promoted_popover();
+            }
             annotate_source_file(&mut node, &resolved.source_path.display().to_string());
             apply_prop_handler_calls(&mut node, &props.values, prop_handler_calls);
             if let Some(binding) = bind_this.and_then(|value| simple_state_binding(&value)) {

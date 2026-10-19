@@ -1,16 +1,16 @@
 <template>
-    <row class="card" class:card-idle={not has_track}>
-        <box class="art-frame">
-            <icon class="art" src={art} size="256" hidden={art == ""} />
-            <icon class="art-glyph" name="audio-x-generic" size="44" hidden={art ~= ""} />
+    <row class="media-card" class:media-card-idle={not has_track}>
+        <box class="media-art-frame">
+            <image class="media-art" src={art} alt="Album artwork" hidden={art == ""} />
+            <icon class="media-art-glyph" name="audio-x-generic" size="44" hidden={art ~= ""} />
         </box>
-        <column class="body">
-            <text class="title">{title}</text>
-            <text class="artist">{artist}</text>
-            <row class="progress">
-                <text class="time">{position_text}</text>
+        <column class="media-body">
+            <text class="media-title">{title}</text>
+            <text class="media-artist">{artist}</text>
+            <row class="media-progress">
+                <text class="media-time">{position_text}</text>
                 <slider
-                    class="seek"
+                    class="media-seek"
                     value="{position}"
                     min="0"
                     max="{length}"
@@ -18,17 +18,17 @@
                     disabled={not has_track}
                     aria-label="Seek"
                 />
-                <text class="time">{length_text}</text>
+                <text class="media-time">{length_text}</text>
             </row>
-            <row class="controls">
-                <button class="ctl" onclick={onPrevious} disabled={not has_track} aria-label="Previous track">
-                    <icon class="ctl-glyph" name="media-skip-backward" size="16" />
+            <row class="media-controls">
+                <button class="media-ctl" onclick={onPrevious} disabled={not has_track} aria-label="Previous track">
+                    <icon class="media-ctl-glyph" name="media-skip-backward" size="16" />
                 </button>
-                <button class="ctl ctl-main" onclick={onToggle} disabled={not has_track} aria-label={playing and "Pause" or "Play"}>
-                    <icon class="ctl-glyph" name={playing and "media-playback-pause" or "media-playback-start"} size="16" />
+                <button class="media-ctl media-ctl-main" onclick={onToggle} disabled={not has_track} aria-label={playing and "Pause" or "Play"}>
+                    <icon class="media-ctl-glyph media-ctl-glyph-main" name={playing and "media-playback-pause" or "media-playback-start"} size="16" />
                 </button>
-                <button class="ctl" onclick={onNext} disabled={not has_track} aria-label="Next track">
-                    <icon class="ctl-glyph" name="media-skip-forward" size="16" />
+                <button class="media-ctl" onclick={onNext} disabled={not has_track} aria-label="Next track">
+                    <icon class="media-ctl-glyph" name="media-skip-forward" size="16" />
                 </button>
             </row>
         </column>
@@ -110,29 +110,29 @@ end
 </script>
 
 <style>
-    .card {
-        width: 658px;
-        height: 199px;
-        gap: 20px;
-        padding: 17px 22px 17px 17px;
+    .media-card {
+        width: 480px;
+        height: 186px;
+        gap: 18px;
+        padding: 18px;
         align-items: center;
         border-radius: 25px;
         border: 1px solid var(--glass-rim);
         background-image: var(--glass-surface-media);
         box-shadow: var(--glass-shadow-card);
-        backdrop-filter: blur(6px) refract(40px 30px) dispersion(4px);
+        backdrop-filter: blur(14px) refract(22px 18px) dispersion(1.2px);
         opacity: 1;
-        animation: card-in 520 cubic-bezier(0.05, 0.7, 0.1, 1) both;
+        animation: media-card-in 520 cubic-bezier(0.05, 0.7, 0.1, 1) both;
     }
 
 
-    .card-idle {
-        opacity: 0.72;
+    .media-card-idle {
+        opacity: 0.88;
     }
 
-    .art-frame {
-        width: 162px;
-        height: 162px;
+    .media-art-frame {
+        width: 142px;
+        height: 142px;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
@@ -143,69 +143,69 @@ end
         overflow: hidden;
     }
 
-    .art {
-        width: 162px;
-        height: 162px;
+    .media-art {
+        width: 142px;
+        height: 142px;
         border-radius: 20px;
     }
 
-    .art-glyph {
+    .media-art-glyph {
         width: 62px;
         height: 62px;
         color: var(--glass-text-artwork);
     }
 
-    .body {
+    .media-body {
         flex-grow: 1;
         min-width: 0;
         gap: 2px;
         justify-content: center;
     }
 
-    .title {
+    .media-title {
         height: 36px;
-        font-size: 27px;
+        font-size: 22px;
         font-weight: 600;
         color: var(--glass-text-heading);
         text-overflow: ellipsis;
     }
 
-    .artist {
+    .media-artist {
         height: 25px;
-        font-size: 17px;
+        font-size: 14px;
         color: var(--glass-text-muted);
         text-overflow: ellipsis;
     }
 
-    .progress {
+    .media-progress {
         height: 34px;
         margin-top: 6px;
         align-items: center;
         gap: 11px;
     }
 
-    .time {
+    .media-time {
         height: 22px;
-        font-size: 15px;
+        font-size: 11px;
         font-weight: 500;
         color: var(--glass-text);
     }
 
-    .seek {
+    .media-seek {
         flex-grow: 1;
         height: 31px;
         padding: 0;
         color: var(--glass-text-control);
     }
 
-    .controls {
+    .media-controls {
         height: 45px;
         margin-top: 6px;
         align-items: center;
         gap: 13px;
     }
 
-    .ctl {
+    .media-ctl {
         width: 45px;
         height: 42px;
         padding: 0;
@@ -218,20 +218,20 @@ end
 
 
 
-    .ctl-glyph {
+    .media-ctl-glyph {
         width: 22px;
         height: 22px;
         color: var(--glass-text-strong);
     }
 
-    @keyframes card-in {
+    @keyframes media-card-in {
         0% {
             opacity: 0;
-            transform: translateY(20px);
+            transform: translateY(24px) scale(0.96);
         }
         100% {
             opacity: 1;
-            transform: translateY(0px);
+            transform: translateY(0px) scale(1);
         }
     }
 
@@ -239,37 +239,45 @@ end
     Containers lift by --animation-lift-hover and brighten their rim; controls
     scale by --animation-scale-hover/-press and ring with the focus token. */
 
-    .card {
+    .media-card {
         transform: translateY(0px);
         transition-property: transform, border-color, opacity;
         transition-duration: var(--animation-duration-medium);
         transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
     }
 
-    .card:hover {
+    .media-card:hover {
         transform: translateY(var(--animation-lift-hover));
         border-color: var(--glass-rim-hover);
     }
 
-    .ctl {
+    .media-ctl {
         transform: scale(1);
         transition-property: transform, background-color, border-color, opacity;
         transition-duration: var(--animation-duration-short);
         transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
     }
 
-    .ctl:hover {
+    .media-ctl:hover {
         border-color: var(--glass-rim-hover);
         transform: scale(var(--animation-scale-hover));
     }
 
-    .ctl:focus-visible {
+    .media-ctl:focus-visible {
         border-color: var(--color-focus-ring);
         transform: scale(var(--animation-scale-hover));
     }
 
-    .ctl:active {
+    .media-ctl:active {
         transform: scale(var(--animation-scale-press));
         transition-duration: var(--animation-duration-fast);
+    }
+    .media-ctl-main { width: 56px; border-radius: 999px; background-image: var(--glass-surface-active); }
+    .media-ctl-glyph-main { color: var(--glass-text-on-accent); }
+    @container (max-width: 800px) {
+        .media-card { width: 360px; height: 168px; gap: 12px; padding: 14px; }
+        .media-art-frame, .media-art { width: 112px; height: 132px; }
+        .media-title { font-size: 18px; }
+        .media-controls { gap: 8px; }
     }
 </style>

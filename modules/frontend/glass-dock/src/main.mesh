@@ -1,6 +1,6 @@
 <props>
 {
-    icon_size = { type = "number", default = 56, min = 32, max = 96, step = 2, label = "Icon size" },
+    icon_size = { type = "number", default = 48, min = 32, max = 96, step = 2, label = "Icon size" },
 }
 </props>
 
@@ -9,12 +9,24 @@
         <box class="flare flare-left" aria-hidden="true">
             <box class="flare-cut flare-cut-left" />
         </box>
-        <row class="dock">
+        <row class="dock" onpointerleave={onLeave}>
+            <column class="slot launcher-slot">
+                <button class="tile launcher-tile" ref="glassLauncher" aria-label={t("launcher.title")} title={t("launcher.title")}>
+                    <icon class="launcher-glyph" name="system-search" size="30" />
+                    <Launcher />
+                </button>
+                <box class="dot" />
+            </column>
+            <box class="dock-divider" />
             {#for app in apps key={app.id}}
                 <column class="slot">
                     <button
                         class="tile"
+                        ref={app.id}
                         class:tile-focused={app.focused}
+                        class:tile-hovered={app.hovered}
+                        class:tile-neighbor={app.neighbor}
+                        onpointerenter={onHover(app.index)}
                         onclick={onActivate(app.id)}
                         title={app.name}
                         aria-label={app.name}
@@ -22,7 +34,7 @@
                         <image class="app-icon" src={app.icon} alt="" hidden={not app.has_file} />
                         <icon class="app-icon app-glyph" name="application-x-executable" size="64" hidden={app.has_file} />
                     </button>
-                    <box class="dot" class:dot-running={app.running} />
+                    <box class="dot" class:dot-running={app.running} class:dot-focused={app.focused} />
                 </column>
             {/for}
         </row>
@@ -33,16 +45,22 @@
 </template>
 
 <script lang="luau">
+local t = import("mesh.i18n", "t")
 local apps_service = require("mesh.apps")
+local Launcher = require("./components/launcher.mesh")
+hovered_index = 0
 
 apps = {}
 
 effect(function()
     local list = {}
     if apps_service.available then
-        for _, app in apps_service.apps do
+        for index, app in apps_service.apps do
             list[#list + 1] = {
                 id = app.id,
+                index = index,
+                hovered = hovered_index == index,
+                neighbor = hovered_index > 0 and math.abs(hovered_index - index) == 1,
                 name = app.name,
                 icon = app.icon,
                 has_file = string.sub(app.icon or "", 1, 1) == "/",
@@ -54,6 +72,9 @@ effect(function()
     apps = list
 end)
 
+function onHover(index) hovered_index = index end
+function onLeave() hovered_index = 0 end
+
 function onActivate(id)
     apps_service.activate(id)
 end
@@ -64,6 +85,7 @@ end
     centers the shelf and seats it on the screen edge. */
     .dock-shell {
         width: 100%;
+        padding-top: 24px;
         justify-content: center;
         align-items: flex-end;
         gap: 0;
@@ -74,16 +96,16 @@ end
     /* A glass shelf standing on the screen edge: rounded shoulders on top,
     square to the floor, where the flares below curve it into the edge. */
     .dock {
-        height: 104px;
+        height: 90px;
         padding: 10px 14px 6px;
-        gap: 10px;
+        gap: 8px;
         align-items: flex-start;
         border-radius: 30px 30px 0 0;
         border-width: 1px 1px 0 1px;
         border-color: var(--glass-rim);
         background-image: var(--glass-surface-dock);
         box-shadow: var(--glass-shadow-dock);
-        backdrop-filter: blur(8px) refract(26px 22px) dispersion(2.5px);
+        backdrop-filter: blur(14px) refract(18px 16px) dispersion(1.2px);
     }
 
     /* Concave feet. Each flare is a square of the same glass with a
@@ -124,19 +146,19 @@ end
     /* Each app sits on its own small glass lens, lighter than the shelf; the
     focused app's lens takes the theme accent. */
     .tile {
-        width: 78px;
-        height: 78px;
+        width: 64px;
+        height: 64px;
         padding: 0;
         justify-content: center;
         align-items: center;
-        border-radius: 20px;
+        border-radius: 17px;
         border: 1px solid var(--glass-fill-subtle);
         /* A colour with any alpha counts as authored; alpha 0 would let the
         theme's opaque `button` fill paint over the glass. */
         background-color: var(--glass-fill-lens);
         background-image: var(--glass-surface-lens);
         box-shadow: var(--glass-shadow-lens);
-        backdrop-filter: blur(12px) refract(12px 14px) dispersion(1.5px);
+        backdrop-filter: refract(8px 8px);
     }
 
     .tile-focused,
@@ -202,16 +224,27 @@ end
 
     .tile:hover {
         border-color: var(--glass-rim-hover);
-        transform: scale(var(--animation-scale-hover));
+        transform: translateY(-12px) scale(1.22);
     }
 
     .tile:focus-visible {
         border-color: var(--color-focus-ring);
-        transform: scale(var(--animation-scale-hover));
+        transform: translateY(-12px) scale(1.22);
     }
 
     .tile:active {
-        transform: scale(var(--animation-scale-press));
+        transform: translateY(-6px) scale(0.96);
         transition-duration: var(--animation-duration-fast);
+    }
+    .tile-neighbor { transform: translateY(-4px) scale(1.08); }
+    .tile-hovered { transform: translateY(-12px) scale(1.22); }
+    .dot-focused { width: 14px; background: var(--glass-indicator); }
+    .launcher-glyph { width: 30px; height: 30px; color: var(--glass-text-heading); }
+    .launcher-tile { background-image: var(--glass-surface-control); }
+    .dock-divider { width: 1px; height: 44px; margin: 10px 6px; background: var(--glass-rim); }
+    @container (max-width: 900px) {
+        .tile { width: 50px; height: 54px; border-radius: 14px; }
+        .app-icon { width: 38px; height: 38px; }
+        .dock { height: 78px; gap: 5px; padding-inline: 10px; }
     }
 </style>

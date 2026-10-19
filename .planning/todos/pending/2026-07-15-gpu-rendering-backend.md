@@ -71,7 +71,8 @@ surface shows `TextureOpImpl::onCombineIfPossible` in a profile.
 
 ### Gates (rest of phase 6)
 
-D9 workload gates on both backends. The parity tests in `gpu::tests` cover
+D9 CPU raster workload gates are shipped; GPU workload budgets remain.
+The parity tests in `gpu::tests` cover
 four small scenes; a canonical-workload pixel parity gate and a GPU frame-cost
 gate (`gpu_frame_cost_workload` is the starting point) are still needed. Live
 GPU presentation has been exercised only on Hyprland with an AMD main device.

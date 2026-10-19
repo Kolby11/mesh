@@ -16,104 +16,144 @@ run_benchmark() {
   if [[ -n "$features" ]]; then
     feature_args=(--features "$features")
   fi
-  if ! output="$(cargo test -p "$package" "${feature_args[@]}" --release -- "$test_name" --ignored --nocapture 2>&1)"; then
+  if ! output="$(cargo test -p "$package" "${feature_args[@]}" --release -- "$test_name" --ignored --nocapture --test-threads=1 2>&1)"; then
     printf '%s\n' "$output"
     return 1
   fi
   printf '%s\n' "$output"
-  printf '%s\n' "$output" | awk '/^MESH_PERF metric=/ { print }' >> "$RESULTS"
+  printf '%s\n' "$output" | awk 'match($0, /MESH_PERF metric=/) { print substr($0, RSTART) }' >> "$RESULTS"
+}
+
+run_d9_workloads() {
+  local artifacts test_binary output test_name
+  artifacts="$(cargo test -p mesh-core-shell --release --lib --no-run --message-format=json)"
+  test_binary="$(printf '%s\n' "$artifacts" | python3 -c '
+import json
+import sys
+artifacts = [json.loads(line) for line in sys.stdin if line.strip()]
+executables = [item["executable"] for item in artifacts
+               if item.get("reason") == "compiler-artifact"
+               and item.get("target", {}).get("name") == "mesh_core_shell"
+               and item.get("profile", {}).get("test")
+               and item.get("executable")]
+if len(executables) != 1:
+    sys.exit("expected exactly one shell test executable")
+print(executables[0])
+')"
+  for test_name in d9_navigation_updates d9_popover_open d9_theme_switch \
+      d9_settings_scroll_frame_gate d9_coalesced_reload_wakeup_profile; do
+    if ! output="$("$test_binary" "$test_name" --ignored --nocapture --test-threads=1 2>&1)"; then
+      printf '%s\n' "$output"
+      return 1
+    fi
+    printf '%s\n' "$output"
+    printf '%s\n' "$output" | awk 'match($0, /MESH_PERF metric=/) { print substr($0, RSTART) }' >> "$RESULTS"
+  done
 }
 
 cd "$ROOT"
-cargo test -p mesh-core-render --release --lib scene_thread
-cargo test -p mesh-core-resources --release --lib frozen_font
-cargo test -p mesh-core-scripting --release --lib context::tests::effects
-cargo test -p mesh-core-shell --release --lib legacy_render_is_not_automatically_scheduled
-cargo test -p mesh-core-shell --release --lib template_patching
-cargo test -p mesh-core-shell --release --lib service_field_update_patches
-cargo test -p mesh-core-shell --release --lib service_fields_patch_keyed
-cargo test -p mesh-core-shell --release --lib service_binding_failure
-cargo test -p mesh-core-shell --release --lib keyed_loop_bindings_capture_locals
-cargo test -p mesh-core-shell --release --lib template_function_call_patches
-cargo test -p mesh-core-shell --release --lib shared_binding_and_structural_expression
-run_benchmark mesh-core-shell narrow_handler_damage_beats_forced_full_repaint
-run_benchmark mesh-core-shell coalesced_reload_wakeup_profile
-run_benchmark mesh-core-shell watcher_idle_wait_profile
-run_benchmark mesh-core-scripting native_subscription_idle_profile
-run_benchmark mesh-core-scripting validated_state_publication_profile
-run_benchmark mesh-core-render resource_completion_fanout_profile
-run_benchmark mesh-core-render glass_raster_profile
-run_benchmark mesh-core-render frame_plan_derivation_and_visual_damage_profile
-run_benchmark mesh-core-render label_resize_scroll_viewport_damage_profile
-run_benchmark mesh-core-render alternating_font_alias_surfaces_profile
-run_benchmark mesh-core-shell effect_identity_single_pass_profile
-run_benchmark mesh-core-shell keyframe_animation_frame_profile
-run_benchmark mesh-core-expression cold_expression_compile_profile
-run_benchmark mesh-core-locale cached_icu_formatter_profile
-run_benchmark mesh-core-shell settings_scroll_frame_gate
-run_benchmark mesh-core-elements finalized_memo_and_selector_dependency_profile
-run_benchmark mesh-core-elements typed_keyword_declaration_profile
-run_benchmark mesh-core-shell unbound_handler_write_eliminates_render_pipeline_benchmark
-run_benchmark mesh-core-shell contract_validation_lookup_borrows_interface_name
-run_benchmark mesh-core-shell direct_retained_update_beats_snapshot_map
-run_benchmark mesh-core-shell scoped_retained_update_beats_full_fingerprinting
-run_benchmark mesh-core-shell animation_retained_scope_beats_full_fingerprinting
-run_benchmark mesh-core-shell animation_scoped_retained_end_to_end_benchmark
-run_benchmark mesh-core-shell narrow_script_scope_beats_full_fingerprinting
-run_benchmark mesh-core-shell narrow_script_scoped_end_to_end_benchmark
-run_benchmark mesh-core-render direct_retained_render_object_refs_beat_tree_walk_benchmark
-run_benchmark mesh-core-render stable_child_id_reuse_beats_rewriting_slots
-run_benchmark mesh-core-render direct_diff_result_beats_summary_copy_comparison
-run_benchmark mesh-core-render cached_blur_metadata_beats_text_update_rescans
-run_benchmark mesh-core-render batched_damage_regions_beat_repeated_raster_sessions
-run_benchmark mesh-core-shell direct_dirty_refs_beat_rewalking_for_render_sync
-run_benchmark mesh-core-shell scroll_layout_scope_beats_full_fingerprinting
-run_benchmark mesh-core-shell paint_only_scoped_retained_end_to_end_benchmark
-run_benchmark mesh-core-shell child_display_list_lru_beats_flush_all
-run_benchmark mesh-core-scripting unchanged_effect_inputs_skip_callback_work_benchmark
-run_benchmark mesh-core-scripting template_dependency_rust_gate_beats_lua_table_lookup
-run_benchmark mesh-core-scripting thread_vm_handle_beats_fresh_vm_creation
-run_benchmark mesh-core-scripting lazy_element_metrics_beat_eager_snapshot_conversion
-run_benchmark mesh-core-render performance_hud_native_paint_cost
-run_benchmark mesh-core-interaction borrowed_find_nodes_keys_beat_owned_results
-run_benchmark mesh-core-shell hover_prefix_diff_beats_pairwise_path_scans
-run_benchmark mesh-core-shell borrowed_key_path_beats_owned_strings
-run_benchmark mesh-core-debug allocation_counter_operation_overhead_is_bounded allocation-profiling
-run_benchmark mesh-core-shell allocation_profiler_retained_render_overhead allocation-profiling
-run_benchmark mesh-core-elements single_bucket_candidate_fast_path_beats_sort_dedup
-run_benchmark mesh-core-frontend accessibility_empty_attribute_guard_beats_full_lookup_chain
-run_benchmark mesh-core-interaction scrollable_gate_skips_offset_map_for_non_scrollable_nodes
-run_benchmark mesh-core-interaction node_id_scroll_offsets_beat_string_key_paths
-run_benchmark mesh-core-shell node_id_checked_state_beats_string_keys
-run_benchmark mesh-core-shell node_id_input_values_beat_string_keys
-run_benchmark mesh-core-shell node_id_slider_values_beat_string_keys
-run_benchmark mesh-core-shell node_id_hover_path_beats_string_keys
-run_benchmark mesh-core-shell node_id_focus_state_beats_string_keys
-run_benchmark mesh-core-shell unmatched_prop_handler_calls_skip_presized_vec
-run_benchmark mesh-core-elements element_contract_dispatch_beats_definition_scan
-run_benchmark mesh-core-frontend inherited_mask_buckets_beat_full_candidate_scan
-run_benchmark mesh-core-frontend accessibility_attribute_pass_beats_lookup_chain
-run_benchmark mesh-core-frontend typed_attribute_storage_beats_stringify_then_parse
-run_benchmark mesh-core-frontend shared_module_id_beats_per_node_string
-run_benchmark mesh-core-frontend for_children_capacity_beats_growing
-run_benchmark mesh-core-elements interned_attribute_map_beats_owned_btreemap
-run_benchmark mesh-core-elements style_function_scan_beats_contains_pair
-run_benchmark mesh-core-elements borrowed_style_props_beat_per_resolver_clone
-run_benchmark mesh-core-elements shared_theme_defaults_beat_hashed_deep_clone
-run_benchmark mesh-core-theme shared_theme_alias_resolution_beats_repeated_graph_walks
-run_benchmark mesh-core-elements typed_theme_scalar_reads_beat_repeated_parsing
-run_benchmark mesh-core-elements typed_literal_operations_beat_property_name_dispatch
-run_benchmark mesh-core-elements structural_selector_buckets_beat_global_state_spill
-run_benchmark mesh-core-elements shared_theme_revision_cache_beats_per_resolver_lowering
-run_benchmark mesh-core-elements bounded_style_cache_p95_beats_flush_all
-run_benchmark mesh-core-shell runtime_style_diagnostic_generation_gate_beats_full_tree_fingerprint
-run_benchmark mesh-core-shell affected_template_eval_beats_full_rebuild
-run_benchmark mesh-core-shell retained_single_fingerprint_pass_beats_separate_render_diff
+case "${1:-}" in
+  "") workloads_only=false ;;
+  --workloads-only) workloads_only=true ;;
+  *) printf 'usage: %s [--workloads-only]\n' "$0" >&2; exit 2 ;;
+esac
 
-awk '
-  BEGIN { failed = 0 }
+if ! "$workloads_only"; then
+  cargo test -p mesh-core-render --release --lib scene_thread
+  cargo test -p mesh-core-resources --release --lib frozen_font
+  cargo test -p mesh-core-scripting --release --lib context::tests::effects
+  cargo test -p mesh-core-shell --release --lib legacy_render_is_not_automatically_scheduled
+  cargo test -p mesh-core-shell --release --lib template_patching
+  cargo test -p mesh-core-shell --release --lib service_field_update_patches
+  cargo test -p mesh-core-shell --release --lib service_fields_patch_keyed
+  cargo test -p mesh-core-shell --release --lib service_binding_failure
+  cargo test -p mesh-core-shell --release --lib keyed_loop_bindings_capture_locals
+  cargo test -p mesh-core-shell --release --lib template_function_call_patches
+  cargo test -p mesh-core-shell --release --lib shared_binding_and_structural_expression
+  run_benchmark mesh-core-shell narrow_handler_damage_beats_forced_full_repaint
+  run_benchmark mesh-core-shell watcher_idle_wait_profile
+  run_benchmark mesh-core-scripting native_subscription_idle_profile
+  run_benchmark mesh-core-scripting validated_state_publication_profile
+  run_benchmark mesh-core-render resource_completion_fanout_profile
+  run_benchmark mesh-core-render glass_raster_profile
+  run_benchmark mesh-core-render frame_plan_derivation_and_visual_damage_profile
+  run_benchmark mesh-core-render label_resize_scroll_viewport_damage_profile
+  run_benchmark mesh-core-render alternating_font_alias_surfaces_profile
+  run_benchmark mesh-core-shell effect_identity_single_pass_profile
+  run_benchmark mesh-core-shell keyframe_animation_frame_profile
+  run_benchmark mesh-core-expression cold_expression_compile_profile
+  run_benchmark mesh-core-locale cached_icu_formatter_profile
+  run_benchmark mesh-core-elements finalized_memo_and_selector_dependency_profile
+  run_benchmark mesh-core-elements typed_keyword_declaration_profile
+  run_benchmark mesh-core-shell unbound_handler_write_eliminates_render_pipeline_benchmark
+  run_benchmark mesh-core-shell contract_validation_lookup_borrows_interface_name
+  run_benchmark mesh-core-shell direct_retained_update_beats_snapshot_map
+  run_benchmark mesh-core-shell scoped_retained_update_beats_full_fingerprinting
+  run_benchmark mesh-core-shell animation_retained_scope_beats_full_fingerprinting
+  run_benchmark mesh-core-shell animation_scoped_retained_end_to_end_benchmark
+  run_benchmark mesh-core-shell narrow_script_scope_beats_full_fingerprinting
+  run_benchmark mesh-core-shell narrow_script_scoped_end_to_end_benchmark
+  run_benchmark mesh-core-render direct_retained_render_object_refs_beat_tree_walk_benchmark
+  run_benchmark mesh-core-render stable_child_id_reuse_beats_rewriting_slots
+  run_benchmark mesh-core-render direct_diff_result_beats_summary_copy_comparison
+  run_benchmark mesh-core-render cached_blur_metadata_beats_text_update_rescans
+  run_benchmark mesh-core-render batched_damage_regions_beat_repeated_raster_sessions
+  run_benchmark mesh-core-shell direct_dirty_refs_beat_rewalking_for_render_sync
+  run_benchmark mesh-core-shell scroll_layout_scope_beats_full_fingerprinting
+  run_benchmark mesh-core-shell paint_only_scoped_retained_end_to_end_benchmark
+  run_benchmark mesh-core-shell child_display_list_lru_beats_flush_all
+  run_benchmark mesh-core-scripting unchanged_effect_inputs_skip_callback_work_benchmark
+  run_benchmark mesh-core-scripting template_dependency_rust_gate_beats_lua_table_lookup
+  run_benchmark mesh-core-scripting thread_vm_handle_beats_fresh_vm_creation
+  run_benchmark mesh-core-scripting lazy_element_metrics_beat_eager_snapshot_conversion
+  run_benchmark mesh-core-render performance_hud_native_paint_cost
+  run_benchmark mesh-core-interaction borrowed_find_nodes_keys_beat_owned_results
+  run_benchmark mesh-core-shell hover_prefix_diff_beats_pairwise_path_scans
+  run_benchmark mesh-core-shell borrowed_key_path_beats_owned_strings
+  run_benchmark mesh-core-debug allocation_counter_operation_overhead_is_bounded allocation-profiling
+  run_benchmark mesh-core-shell allocation_profiler_retained_render_overhead allocation-profiling
+  run_benchmark mesh-core-elements single_bucket_candidate_fast_path_beats_sort_dedup
+  run_benchmark mesh-core-frontend accessibility_empty_attribute_guard_beats_full_lookup_chain
+  run_benchmark mesh-core-interaction scrollable_gate_skips_offset_map_for_non_scrollable_nodes
+  run_benchmark mesh-core-interaction node_id_scroll_offsets_beat_string_key_paths
+  run_benchmark mesh-core-shell node_id_checked_state_beats_string_keys
+  run_benchmark mesh-core-shell node_id_input_values_beat_string_keys
+  run_benchmark mesh-core-shell node_id_slider_values_beat_string_keys
+  run_benchmark mesh-core-shell node_id_hover_path_beats_string_keys
+  run_benchmark mesh-core-shell node_id_focus_state_beats_string_keys
+  run_benchmark mesh-core-shell unmatched_prop_handler_calls_skip_presized_vec
+  run_benchmark mesh-core-elements element_contract_dispatch_beats_definition_scan
+  run_benchmark mesh-core-frontend inherited_mask_buckets_beat_full_candidate_scan
+  run_benchmark mesh-core-frontend accessibility_attribute_pass_beats_lookup_chain
+  run_benchmark mesh-core-frontend typed_attribute_storage_beats_stringify_then_parse
+  run_benchmark mesh-core-frontend shared_module_id_beats_per_node_string
+  run_benchmark mesh-core-frontend for_children_capacity_beats_growing
+  run_benchmark mesh-core-elements interned_attribute_map_beats_owned_btreemap
+  run_benchmark mesh-core-elements style_function_scan_beats_contains_pair
+  run_benchmark mesh-core-elements borrowed_style_props_beat_per_resolver_clone
+  run_benchmark mesh-core-elements shared_theme_defaults_beat_hashed_deep_clone
+  run_benchmark mesh-core-theme shared_theme_alias_resolution_beats_repeated_graph_walks
+  run_benchmark mesh-core-elements typed_theme_scalar_reads_beat_repeated_parsing
+  run_benchmark mesh-core-elements typed_literal_operations_beat_property_name_dispatch
+  run_benchmark mesh-core-elements structural_selector_buckets_beat_global_state_spill
+  run_benchmark mesh-core-elements shared_theme_revision_cache_beats_per_resolver_lowering
+  run_benchmark mesh-core-elements bounded_style_cache_p95_beats_flush_all
+  run_benchmark mesh-core-shell runtime_style_diagnostic_generation_gate_beats_full_tree_fingerprint
+  run_benchmark mesh-core-shell affected_template_eval_beats_full_rebuild
+  run_benchmark mesh-core-shell retained_single_fingerprint_pass_beats_separate_render_diff
+
+fi
+run_d9_workloads
+
+awk -v workloads_only="$workloads_only" '
+  BEGIN {
+    failed = 0
+    split("d9_idle_wakeups_per_minute d9_hover_p90_ms d9_service_update_p90_ms d9_scroll_p90_ms d9_popover_open_p90_ms d9_theme_switch_p90_ms", required, " ")
+    for (i in required) expected[required[i]] = 1
+  }
   FNR == NR {
     if ($0 ~ /^#/ || NF == 0) next
+    if (workloads_only == "true" && $1 !~ /^d9_/) next
     direction[$1] = $2
     baseline[$1] = $3 + 0
     tolerance[$1] = $4 + 0
@@ -124,6 +164,10 @@ awk '
     split($2, metric_part, "=")
     split($3, value_part, "=")
     metric = metric_part[2]
+    if (value_part[2] !~ /^[0-9]+([.][0-9]+)?$/) {
+      printf "performance gate: invalid value for %s: %s\n", metric, value_part[2] > "/dev/stderr"
+      failed = 1
+    }
     value[metric] = value_part[2] + 0
     seen[metric]++
   }

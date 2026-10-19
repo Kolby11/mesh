@@ -1,7 +1,8 @@
 # metric                                  direction  baseline  tolerance_percent
 # Relative speedups are intentionally preferred over raw wall time so this gate
 # remains portable across CI runners. The HUD has no equivalent control path,
-# so its per-frame ceiling carries a wider tolerance.
+# so its per-frame ceiling carries a wider tolerance. D9 adds explicit absolute
+# workload ceilings below; they are separate from these relative speed gates.
 #
 # accessibility_empty_attribute_guard_speedup was lowered from 1.60 to 1.15 on
 # 2026-07-27: the interned flat AttributeMap made the unguarded lookup chain it
@@ -82,3 +83,12 @@ selector_dependency_update_speedup       lower      4.00      0
 native_subscription_helper_processes upper 0 0
 native_subscription_idle_events upper 0 0
 resource_completion_repaint_fraction upper 0.0625 0
+
+# D9 absolute budgets, CPU raster at scale 1; see docs/performance-profiling.md.
+# These are ceilings, not historical speedups. No extra tolerance is applied.
+d9_idle_wakeups_per_minute upper 30 0
+d9_hover_p90_ms upper 16.667 0
+d9_service_update_p90_ms upper 16.667 0
+d9_scroll_p90_ms upper 16.667 0
+d9_popover_open_p90_ms upper 100 0
+d9_theme_switch_p90_ms upper 100 0

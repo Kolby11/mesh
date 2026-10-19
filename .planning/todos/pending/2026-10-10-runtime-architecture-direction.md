@@ -164,6 +164,12 @@ observation, not arbitrary D-Bus methods, PipeWire control or every Wayland prot
 
 ## D9. Performance budgets per workload
 
+**Shipped (CPU raster):** all six workload budgets run in CI, including a
+focused `tools/check-performance --workloads-only` job. Workload boundaries,
+initial ceilings and limitations are in
+[profiling guidance](../../../docs/performance-profiling.md#d9-workload-gates).
+GPU execution/presentation budgets remain in the renderer backlog.
+
 - Each workload has a gate in CI: idle wakeups per minute, hover frame, service
   poll update, scroll frame, popover open, and theme switch.
 - Each direction item above lands with its gate's before and after

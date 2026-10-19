@@ -616,3 +616,165 @@ fn navigation_hover_profile() {
         "every popover should close once its hover bridge expires"
     );
 }
+
+fn d9_navigation(theme: &Theme, buffer: &mut PixelBuffer) -> FrontendSurfaceComponent {
+    let mut component = navigation_surface(theme, buffer);
+    if let Some((_, height)) = component.measured_size {
+        SETTLED.store(height, std::sync::atomic::Ordering::Relaxed);
+    }
+    for _ in 0..4 {
+        component.invalidate_paint();
+        component
+            .paint_raster(theme, extent(), buffer, 1.0)
+            .unwrap();
+    }
+    component
+}
+
+fn d9_report(metric: &str, mut samples: Vec<Duration>) {
+    assert!(!samples.is_empty());
+    samples.sort();
+    println!(
+        "MESH_PERF metric={metric} value={:.6}",
+        percentile(&samples, 0.9).as_secs_f64() * 1000.0
+    );
+    eprintln!(
+        "{metric}: n={} p50={:.3}ms p90={:.3}ms",
+        samples.len(),
+        percentile(&samples, 0.5).as_secs_f64() * 1000.0,
+        percentile(&samples, 0.9).as_secs_f64() * 1000.0
+    );
+}
+
+#[test]
+#[ignore = "D9 release workload budget: service delivery and navigation hover"]
+fn d9_navigation_updates() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(WIDTH, HEIGHT);
+    let mut component = d9_navigation(&theme, &mut buffer);
+    let mut service_samples = Vec::new();
+    for percent in 0..64 {
+        let started = Instant::now();
+        publish(&mut component, "mesh.audio", audio_payload(percent));
+        assert!(
+            paint_if_wanted(&mut component, &theme, &mut buffer),
+            "read service update must render"
+        );
+        service_samples.push(started.elapsed());
+        let button =
+            first_node_with_ref(component.last_tree.as_ref().unwrap(), "volumeButton").unwrap();
+        assert!(
+            button
+                .attributes
+                .get("title")
+                .is_some_and(|title| title.contains(&format!("{percent}%"))),
+            "service update must reach the volume tooltip"
+        );
+    }
+    d9_report("d9_service_update_p90_ms", service_samples);
+
+    let triggers = {
+        let tree = component.last_tree.as_ref().unwrap();
+        let mut nodes = Vec::new();
+        collect_popover_triggers(tree, &mut nodes);
+        assert!(nodes.len() >= 2);
+        nodes
+            .iter()
+            .take(2)
+            .map(|node| {
+                let key = node.mesh_key().unwrap();
+                let (left, top, right, bottom) =
+                    find_node_bounds_by_key(tree, key, 0.0, 0.0).unwrap();
+                ((left + right) / 2.0, (top + bottom) / 2.0)
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut hover_samples = Vec::new();
+    for index in 0..64 {
+        let (x, y) = triggers[index % triggers.len()];
+        let started = Instant::now();
+        component
+            .handle_input(
+                &theme,
+                WIDTH,
+                SETTLED.load(std::sync::atomic::Ordering::Relaxed),
+                ComponentInput::PointerMove { x, y },
+            )
+            .unwrap();
+        assert!(
+            paint_if_wanted(&mut component, &theme, &mut buffer),
+            "crossing controls must render hover state"
+        );
+        hover_samples.push(started.elapsed());
+        assert!(component.hovered_key.is_some());
+    }
+    d9_report("d9_hover_p90_ms", hover_samples);
+}
+
+#[test]
+#[ignore = "D9 release workload budget: popover input through first child raster"]
+fn d9_popover_open() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    let theme = default_theme();
+    let mut samples = Vec::new();
+    for _ in 0..12 {
+        let mut buffer = PixelBuffer::new(WIDTH, HEIGHT);
+        let mut component = d9_navigation(&theme, &mut buffer);
+        assert!(component.child_surface_requests().is_empty());
+        let started = Instant::now();
+        hover_ref(
+            &mut component,
+            &theme,
+            WIDTH,
+            SETTLED.load(std::sync::atomic::Ordering::Relaxed),
+            "themeButton",
+        );
+        assert!(paint_if_wanted(&mut component, &theme, &mut buffer));
+        let requests = component.child_surface_requests();
+        assert_eq!(requests.len(), 1, "popover must open");
+        let request = &requests[0];
+        let mut child = PixelBuffer::new(request.content_size.0, request.content_size.1);
+        assert!(
+            component
+                .paint_child_surface_raster(&request.node_key, &mut child, 1.0, (0, 0), false)
+                .unwrap()
+        );
+        samples.push(started.elapsed());
+        assert!(
+            child.data().chunks_exact(4).any(|pixel| pixel[3] > 0),
+            "opened popover must paint pixels"
+        );
+    }
+    d9_report("d9_popover_open_p90_ms", samples);
+}
+
+#[test]
+#[ignore = "D9 release workload budget: theme invalidation through navigation raster"]
+fn d9_theme_switch() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    let themes = [
+        shipped_default_theme_mode("dark"),
+        shipped_default_theme_mode("light"),
+    ];
+    let mut buffer = PixelBuffer::new(WIDTH, HEIGHT);
+    let mut component = d9_navigation(&themes[0], &mut buffer);
+    let mut samples = Vec::new();
+    for index in 1..=24 {
+        let previous = buffer.data().to_vec();
+        let started = Instant::now();
+        component.theme_changed().unwrap();
+        assert!(paint_if_wanted(
+            &mut component,
+            &themes[index % 2],
+            &mut buffer
+        ));
+        samples.push(started.elapsed());
+        assert_ne!(
+            previous,
+            buffer.data(),
+            "switching theme must change painted pixels"
+        );
+    }
+    d9_report("d9_theme_switch_p90_ms", samples);
+}

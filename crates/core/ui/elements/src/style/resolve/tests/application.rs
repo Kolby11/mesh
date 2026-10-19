@@ -2,7 +2,7 @@ use super::super::index::*;
 use super::super::state::*;
 use super::super::*;
 use super::common::*;
-use crate::tree::ElementState;
+use crate::tree::{ElementState, WidgetNode};
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use mesh_core_theme::{Theme, TokenValue};
 use std::collections::HashMap;
@@ -140,6 +140,22 @@ fn custom_properties_inherit_through_initial_style_resolution() {
         Some(&StyleValue::Literal("#123456".into()))
     );
     assert_eq!(child.color, Color::from_css("#123456").unwrap());
+
+    let mut node = WidgetNode::new("text");
+    node.computed_style = child;
+    let (diagnostic_style, diagnostics) = resolver
+        .resolve_node_style_with_diagnostics_for_node_indexed(
+            &rules,
+            &index,
+            &mut node,
+            StyleContext::default(),
+        );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(diagnostic_style.color, node.computed_style.color);
+    assert_eq!(
+        diagnostic_style.custom_properties,
+        node.computed_style.custom_properties
+    );
 }
 
 #[test]

@@ -1,26 +1,26 @@
 <template>
-    <column class="card" class:card-idle={not available}>
-        <row class="top">
-            <icon class="hero" name={glyph} size="72" />
-            <column class="place">
-                <text class="location">{location}</text>
-                <text class="condition">{condition}</text>
+    <column class="weather-card" class:weather-card-idle={not available}>
+        <row class="weather-top">
+            <icon class="weather-hero" name={glyph} size="72" />
+            <column class="weather-place">
+                <text class="weather-location">{location}</text>
+                <text class="weather-condition">{condition}</text>
             </column>
         </row>
-        <row class="bottom">
-            <column class="now">
-                <row class="temp-row">
-                    <text class="temp">{temperature}</text>
-                    <text class="degree">°</text>
+        <row class="weather-bottom">
+            <column class="weather-now">
+                <row class="weather-temp-row">
+                    <text class="weather-temp">{temperature}</text>
+                    <text class="weather-degree">°</text>
                 </row>
-                <text class="feels">{feels}</text>
+                <text class="weather-feels">{feels}</text>
             </column>
-            <row class="forecast">
+            <row class="weather-forecast">
                 {#for point in forecast key={point.key}}
-                    <column class="point">
-                        <text class="point-temp">{point.temperature}</text>
-                        <icon class="point-glyph" name={point.glyph} size="26" />
-                        <text class="point-time">{point.time}</text>
+                    <column class="weather-point">
+                        <text class="weather-point-temp">{point.temperature}</text>
+                        <icon class="weather-point-glyph" name={point.glyph} size="26" />
+                        <text class="weather-point-time">{point.time}</text>
                     </column>
                 {/for}
             </row>
@@ -63,6 +63,11 @@ end
 effect(function()
     available = weather.available == true
     if not available then
+        location = "Weather"
+        condition = "Waiting for forecast"
+        temperature = "--"
+        feels = ""
+        forecast = {}
         return
     end
     local state = weather.condition or "cloudy"
@@ -73,6 +78,7 @@ effect(function()
     feels = "Feels " .. tostring(math.floor((weather.feels_like or 0) + 0.5)) .. "°"
     local points = {}
     for index, point in weather.hourly or {} do
+        if index > 3 then break end
         points[#points + 1] = {
             key = index,
             temperature = tostring(math.floor((point.temperature or 0) + 0.5)) .. "°",
@@ -85,134 +91,134 @@ end)
 </script>
 
 <style>
-    .card {
-        width: 588px;
-        height: 367px;
+    .weather-card {
+        width: 384px;
+        height: 268px;
         gap: 0;
-        padding: 25px 31px 25px 28px;
+        padding: 22px 24px;
         justify-content: space-between;
         border-radius: 25px;
         border: 1px solid var(--glass-rim);
         background-image: var(--glass-surface-weather);
         box-shadow: var(--glass-shadow-card);
-        backdrop-filter: blur(6px) refract(40px 30px) dispersion(4px);
+        backdrop-filter: blur(14px) refract(22px 18px) dispersion(1.2px);
         opacity: 1;
-        animation: card-in 620 cubic-bezier(0.05, 0.7, 0.1, 1) both;
+        animation: weather-card-in 620 cubic-bezier(0.05, 0.7, 0.1, 1) both;
     }
 
 
-    .card-idle {
-        opacity: 0.72;
+    .weather-card-idle {
+        opacity: 0.88;
     }
 
-    .top {
+    .weather-top {
         width: 100%;
         justify-content: space-between;
         align-items: flex-start;
     }
 
-    .hero {
-        width: 101px;
-        height: 101px;
+    .weather-hero {
+        width: 66px;
+        height: 66px;
         color: var(--glass-text-caption);
     }
 
-    .place {
+    .weather-place {
         gap: 0;
         align-items: flex-end;
     }
 
-    .location {
+    .weather-location {
         height: 34px;
-        font-size: 24px;
+        font-size: 14px;
         font-weight: 600;
         color: var(--glass-text-heading);
         text-align: right;
     }
 
-    .condition {
+    .weather-condition {
         height: 28px;
         font-size: 18px;
         color: var(--glass-text-muted);
         text-align: right;
     }
 
-    .bottom {
+    .weather-bottom {
         width: 100%;
         justify-content: space-between;
         align-items: flex-end;
     }
 
-    .now {
+    .weather-now {
         gap: 2px;
     }
 
-    .temp-row {
+    .weather-temp-row {
         gap: 2px;
         align-items: flex-start;
     }
 
-    .temp {
+    .weather-temp {
         height: 84px;
-        font-size: 76px;
+        font-size: 64px;
         font-weight: 700;
         line-height: 1.1;
         color: var(--glass-text-strong);
     }
 
-    .degree {
+    .weather-degree {
         height: 50px;
         font-size: 42px;
         font-weight: 700;
         color: var(--glass-text-strong);
     }
 
-    .feels {
+    .weather-feels {
         height: 25px;
         font-size: 17px;
         font-weight: 500;
         color: var(--glass-text-muted);
     }
 
-    .forecast {
-        gap: 20px;
+    .weather-forecast {
+        gap: 12px;
         align-items: flex-end;
     }
 
-    .point {
+    .weather-point {
         gap: 6px;
         align-items: center;
     }
 
 
-    .point-temp {
+    .weather-point-temp {
         height: 28px;
-        font-size: 20px;
+        font-size: 15px;
         font-weight: 600;
         color: var(--glass-text-heading);
     }
 
-    .point-glyph {
-        width: 36px;
-        height: 36px;
+    .weather-point-glyph {
+        width: 26px;
+        height: 26px;
         color: var(--glass-text-cool);
     }
 
-    .point-time {
+    .weather-point-time {
         height: 22px;
-        font-size: 15px;
+        font-size: 11px;
         font-weight: 500;
         color: var(--glass-text);
     }
 
-    @keyframes card-in {
+    @keyframes weather-card-in {
         0% {
             opacity: 0;
-            transform: translateY(20px);
+            transform: translateY(28px) scale(0.96);
         }
         100% {
             opacity: 1;
-            transform: translateY(0px);
+            transform: translateY(0px) scale(1);
         }
     }
 
@@ -220,27 +226,30 @@ end)
     Containers lift by --animation-lift-hover and brighten their rim; controls
     scale by --animation-scale-hover/-press and ring with the focus token. */
 
-    .card {
+    .weather-card {
         transform: translateY(0px);
         transition-property: transform, border-color, opacity;
         transition-duration: var(--animation-duration-medium);
         transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
     }
 
-    .card:hover {
+    .weather-card:hover {
         transform: translateY(var(--animation-lift-hover));
         border-color: var(--glass-rim-hover);
     }
 
-    .point {
+    .weather-point {
         transform: translateY(0px);
         transition-property: transform, border-color, opacity;
         transition-duration: var(--animation-duration-medium);
         transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
     }
 
-    .point:hover {
+    .weather-point:hover {
         transform: translateY(var(--animation-lift-hover));
         border-color: var(--glass-rim-hover);
+    }
+    @container (max-width: 800px) {
+        .weather-card { width: 360px; height: 248px; }
     }
 </style>

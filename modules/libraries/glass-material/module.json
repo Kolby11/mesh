@@ -48,7 +48,8 @@
         "glass.shadow.dock": "0 -6px 24px color-mix(in srgb, var(--color-shadow) 35%, transparent)",
         "glass.shadow.lens": "0 4px 12px color-mix(in srgb, var(--color-shadow) 25%, transparent)",
         "glass.shadow.artwork": "0 8px 22px color-mix(in srgb, var(--color-shadow) 40%, transparent)",
-        "glass.text.on.error": "var(--color-on-error-container)"
+        "glass.text.on.error": "var(--color-on-error-container)",
+        "glass.surface.panel": "linear-gradient(to bottom, color-mix(in srgb, var(--color-surface-container-high) 70%, transparent), color-mix(in srgb, var(--color-surface-container-low) 54%, transparent))"
       }
     }
   }

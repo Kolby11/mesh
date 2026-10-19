@@ -1,0 +1,118 @@
+<template>
+    <popover class="control-shell" open={open} anchor-ref="glassControls" anchor="bottom" gravity="bottom" offset-y="12" open-on="click" grab="click" aria-label={t("controls.title")}>
+        <column class="panel">
+            <row class="heading">
+                <column class="heading-copy">
+                    <text class="eyebrow">{t("controls.eyebrow")}</text>
+                    <text class="heading-title">{t("controls.welcome")}</text>
+                </column>
+                <button class="round-button" onclick={onSettings} aria-label={t("controls.settings")}><icon name="settings" size="20" /></button>
+            </row>
+            <row class="tiles">
+                <button class="connection" onclick={onSettings} aria-label={network_label}>
+                    <icon class="connection-icon" name={network_glyph} size="24" />
+                    <text class="tile-title">{t("controls.network")}</text>
+                    <text class="caption">{network_label}</text>
+                </button>
+                <button class="connection" class:connection-active={audio_available and not muted} onclick={onMute} disabled={not audio_available} aria-pressed={audio_available and not muted}>
+                    <icon class="connection-icon" name={muted and "audio-volume-muted" or "audio-volume-high"} size="24" />
+                    <text class="tile-title">{not audio_available and t("controls.sound") or muted and t("controls.muted") or t("controls.sound_on")}</text>
+                    <text class="caption">{audio_available and t("controls.toggle") or t("controls.unavailable")}</text>
+                </button>
+            </row>
+            <column class="level">
+                <row class="level-heading"><text class="tile-title">{t("controls.volume")}</text><text class="value">{volume_label}</text></row>
+                <row class="slider-row"><icon name="audio-volume-high" size="20" /><slider class="level-slider" ref="glassVolume" value={volume} min="0" max="100" onchange={onVolume} disabled={not audio_available} aria-label={t("controls.volume")} /></row>
+            </column>
+            <column class="level">
+                <row class="level-heading"><text class="tile-title">{t("controls.brightness")}</text><text class="value">{brightness_label}</text></row>
+                <row class="slider-row"><icon name="weather-clear" size="20" /><slider class="level-slider" ref="glassBrightness" value={brightness_level} min="0" max="100" onchange={onBrightness} disabled={not brightness_available} aria-label={t("controls.brightness")} /></row>
+            </column>
+            <row class="footer"><icon name="battery-full" size="18" /><text class="caption">{battery_label}</text><box class="spacer"/><button class="settings-link" onclick={onSettings}><text>{t("controls.all_settings")}</text></button></row>
+        </column>
+    </popover>
+</template>
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local audio = require("mesh.audio")
+local brightness = require("mesh.brightness")
+local network = require("mesh.network")
+local power = require("mesh.power")
+open = false
+volume = 0
+volume_label = "--"
+muted = false
+audio_available = false
+brightness_level = 0
+brightness_label = "--"
+brightness_available = false
+network_label = t("controls.offline")
+network_glyph = "network-wireless-offline"
+battery_label = t("controls.power_unavailable")
+effect(function()
+    audio_available = audio.available == true
+    volume = math.clamp(math.floor(audio.percent or 0), 0, 100)
+    volume_label = audio_available and (tostring(volume) .. "%") or t("controls.unavailable")
+    muted = audio.muted == true
+    brightness_available = brightness.available == true
+    brightness_level = math.clamp(math.floor(brightness.level or 0), 0, 100)
+    brightness_label = brightness_available and (tostring(brightness_level) .. "%") or t("controls.unavailable")
+    local connected = network.available == true and network.kind ~= "none"
+    network_label = connected and ((network.ssid or "") ~= "" and network.ssid or network.kind or t("controls.connected")) or t("controls.offline")
+    network_glyph = connected and (network.kind == "ethernet" and "network-wired" or "network-wireless-signal-excellent") or "network-wireless-offline"
+    local level = power.level or 0
+    if level <= 1 then level *= 100 end
+    battery_label = power.available and (tostring(math.floor(level + 0.5)) .. "%" .. (power.charging and (" · " .. t("controls.charging")) or (" · " .. t("controls.on_battery")))) or t("controls.power_unavailable")
+end)
+function onMute() audio.toggle_mute() end
+function onVolume(value)
+    volume = math.clamp(tonumber(value) or 0, 0, 100)
+    volume_label = tostring(math.floor(volume)) .. "%"
+    audio.set_volume("default", volume)
+end
+function onBrightness(value)
+    brightness_level = math.clamp(tonumber(value) or 0, 0, 100)
+    brightness_label = tostring(math.floor(brightness_level)) .. "%"
+    brightness.set(brightness_level)
+end
+function onSettings()
+    open = false
+    mesh.shell.show_surface("@mesh/settings")
+end
+</script>
+<style>
+    .control-shell {
+        width: fit; height: fit; padding: 16px; background: transparent;
+        opacity: 1; transform: translateY(0px) scale(1);
+        transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+    .control-shell.mesh-surface-entering { opacity: 0; transform: translateY(-14px) scale(0.94); }
+    .control-shell.mesh-surface-exiting { opacity: 0; transform: translateY(-8px) scale(0.96); transition-duration: var(--animation-duration-fast); }
+    .panel {
+        width: 364px; padding: 24px; gap: 20px; border-radius: 28px;
+        border: 1px solid var(--glass-rim); background-image: var(--glass-surface-panel);
+        box-shadow: var(--glass-shadow-card); backdrop-filter: blur(20px) refract(20px 18px) dispersion(1px);
+    }
+    .heading { width: 100%; align-items: center; gap: 12px; }
+    .heading-copy { flex-grow: 1; gap: 5px; }
+    .eyebrow { height: 16px; font-size: 10px; font-weight: 600; color: var(--glass-text-muted); }
+    .heading-title { height: 24px; font-size: 17px; font-weight: 600; color: var(--glass-text-heading); }
+    .round-button { width: 36px; height: 36px; padding: 0; justify-content: center; align-items: center; border-radius: 999px; background: var(--glass-fill-inset); }
+    .tiles { width: 100%; gap: 12px; }
+    .connection { flex-direction: column; flex-grow: 1; flex-basis: 0; min-width: 0; height: 112px; padding: 14px; gap: 7px; border-radius: 20px; align-items: flex-start; border: 1px solid var(--glass-rim-inset); background: var(--glass-fill-inset); }
+    .connection-active { background-image: var(--glass-surface-control); border-color: var(--glass-rim-accent); }
+    .connection-icon { width: 25px; height: 25px; color: var(--glass-text); }
+    .tile-title { height: 20px; font-size: 13px; font-weight: 600; color: var(--glass-text-heading); }
+    .caption { height: 18px; font-size: 11px; color: var(--glass-text-muted); text-overflow: ellipsis; }
+    .level { width: 100%; gap: 6px; }
+    .level-heading { width: 100%; justify-content: space-between; }
+    .value { height: 20px; font-size: 12px; color: var(--glass-text); }
+    .slider-row { width: 100%; align-items: center; gap: 12px; }
+    .level-slider { flex-grow: 1; height: 28px; padding: 0; color: var(--glass-indicator); }
+    .footer { width: 100%; align-items: center; gap: 8px; }
+    .spacer { flex-grow: 1; }
+    .settings-link { padding: 5px 8px; border-radius: 10px; background: transparent; }
+    .round-button:hover, .settings-link:hover, .connection:hover { background-color: var(--glass-hover); }
+    .round-button:focus-visible, .settings-link:focus-visible, .connection:focus-visible { border: 1px solid var(--color-focus-ring); }
+    .round-button:active, .connection:active { transform: scale(var(--animation-scale-press)); }
+</style>

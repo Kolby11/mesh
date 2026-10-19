@@ -139,3 +139,41 @@ and their stage/target guidance:
 Start a fresh profiling session for each profile so aggregated stage summaries
 contain only that workload. The older hover, surface-open/close, keyboard, and
 backend-update scenarios remain available for interaction regressions.
+
+## D9 workload gates
+
+CI runs `nix develop -c ./tools/check-performance`. To run just the six D9
+budgets locally:
+
+```bash
+nix develop -c ./tools/check-performance --workloads-only
+```
+
+The ceilings live in `config/performance-baseline.tsv`. Missing, duplicate or
+invalid measurements fail the command. The D9 runner builds one release test
+binary, then runs each workload serially in a fresh process to isolate resource
+workers and caches. Setup stays outside the timed samples. Timing gates
+use p90 rather than a single frame or the fastest sample.
+
+| Metric | Workload | Ceiling |
+| --- | --- | --- |
+| `d9_idle_wakeups_per_minute` | Healthy watcher, three reload checks sharing maintenance; three modeled 120-second runs, plus a real scheduler sleep-deadline assertion | 30/min |
+| `d9_hover_p90_ms` | 64 pointer crossings between two navigation controls, input through parent raster | 16.667 ms |
+| `d9_service_update_p90_ms` | 64 changing audio percentages on the navigation bar, delivery through raster, with displayed-value checks | 16.667 ms |
+| `d9_scroll_p90_ms` | Settings Appearance, 240 icon themes and 240 fonts; 60 finger frames and 30 momentum ticks | 16.667 ms |
+| `d9_popover_open_p90_ms` | 12 theme popover openings from separate warmed navigation bars, input through first child raster | 100 ms |
+| `d9_theme_switch_p90_ms` | 24 alternating shipped dark/light modes, invalidation through navigation raster; pixels must change | 100 ms |
+
+These are initial absolute responsiveness ceilings with no extra percentage
+tolerance. They measure CPU raster at scale 1 (navigation 1920 pixels wide at
+its measured height, Settings 920×900), without a compositor. The popover gate
+includes child allocation and painting; theme switching excludes theme file
+loading and persistent settings writes. Hover crossings may also disclose
+navigation popovers. Scroll retains its one-pass, no repeated restyle and
+retained-pixel-shift assertions. Frame pacing sleeps are outside scroll timing.
+
+The idle metric bounds shell reload-maintenance deadlines, not all OS thread
+wakeups or backend service traffic. Native subscription and watcher idle tests
+in the full suite cover those sources separately. These gates do not establish
+GPU execution or Wayland presentation budgets; those remain separate renderer
+work. Disable optional stage profiling when comparing timing results.

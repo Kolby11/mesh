@@ -1,12 +1,13 @@
 <template>
     <row class="clock-group">
-        <row class="pill pill-clock" title={full_label} aria-label={full_label}>
+        <button class="pill pill-clock" ref="glassCalendar" title={full_label} aria-label={full_label}>
             <text class="big">{hours}</text>
             <column class="stack">
                 <text class="small">{minutes}</text>
                 <text class="small small-dim">{seconds}</text>
             </column>
-        </row>
+            <Calendar />
+        </button>
         <row class="pill pill-clock" title={full_label} aria-label={full_label}>
             <text class="big">{day}</text>
             <column class="stack">
@@ -18,6 +19,7 @@
 </template>
 
 <script lang="luau">
+local Calendar = require("./calendar.mesh")
 hours = "--"
 minutes = "--"
 seconds = "--"
