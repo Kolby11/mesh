@@ -412,7 +412,7 @@ of payoff.
       identity into raster resources and tiles, measured against the Skia-GL
       path. [Plan](../.planning/todos/pending/2026-09-20-persistent-scene-renderer.md).
 
-- [ ] **Default-feature test failures (51 in three crates):** shipped-graph tests
+- [ ] **Existing default-feature test failures:** shipped-graph tests
   assume the root graph, but `config/active-profile` is `glass`, so composition is
   profile-driven. Shell real-surface popovers anchor at y 6 instead of 26.
   Triage with `cargo test --workspace --no-fail-fast`; `HEAD` baseline is in

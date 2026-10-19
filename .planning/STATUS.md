@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-19
+**Updated:** 2026-10-20
 
 What is in flight right now. One page, overwritten as work moves. History and
 measurements are in [`log/`](log/README.md). Open work is in
@@ -13,8 +13,9 @@ measurements are in [`log/`](log/README.md). Open work is in
   families, internal-selector and undeclared-hook diagnostics,
   `mesh-shell theme coverage`, and a theme that follows the user across shells
   (compositions recommend, profiles pin, `set_theme { scope }`). Module tests
-  match the HEAD baseline; the shell-crate baseline comparison is still
-  unfinished (7 theme-named shell failures not yet diffed). See October's log.
+  match the baseline. Shell comparison against pre-change `2fb51469` is complete:
+  one introduced registry-field expectation is fixed; the remaining 41 failure
+  names match exactly, including six theme-named failures. See October's log.
 
 - **Render sweep follow-through validated:** hover/transition frames retain
   pixels, paint-only hover skips layout, resource loads repaint only consumers
@@ -125,8 +126,10 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Blocked / known baselines
 
-- `mesh-core-shell` serial release at `17224ae1` (2026-10-19): 45 failures;
-  diff failure names against a HEAD worktree, not the counts below.
+- `mesh-core-shell`, default-feature serial debug (2026-10-20): pre-compatibility
+  `2fb51469` and corrected `f03ce07d` have the same 41 failure names, including
+  six theme-named failures. The introduced `scope` registry expectation is fixed.
+  Use fresh failure-name comparisons rather than historical counts below.
 - Known fixture failures (serial release, 2026-10-13): shell 27, plus three
   load-sensitive `shell::tests::scheduler` tests that fail in some full runs
   and pass alone; elements 10; `mesh-core-module` 9; `mesh-core-frontend` 2

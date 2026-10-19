@@ -532,6 +532,7 @@ fn shell_registers_theme_provider_for_frontend_theme_proxy() {
             "is_dark",
             "themes",
             "available",
+            "scope",
             "system_resources",
         ],
         "theme registry fields must be declared so frontend reads are reactive"
