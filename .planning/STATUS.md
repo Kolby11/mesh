@@ -8,6 +8,13 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
+- **Render sweep follow-through validated:** hover/transition frames retain
+  pixels, paint-only hover skips layout, resource loads repaint only consumers
+  (including child targets), and quiet surfaces borrow their IDs. Focus-grab
+  and callback-escape deadlines join the parallel session's repeat deadline.
+  Exact parity and GPU checks pass; release shell failure names match the
+  baseline (45), renderer passes (306). Measurements are in the performance log.
+
 - **Two-way value bindings implemented:** compiler-generated Luau change
   callbacks write input, slider and checkbox/switch edits back to script
   variables before explicit change handlers. Six binding regressions and

@@ -44,6 +44,14 @@ are applied. Overflow then uses that geometry. Component memo entries preserve
 pre-animation styles and semantic projections while retaining original authored
 inputs; previews continue to produce a complete laid-out tree.
 
+Interaction restyles and animation ticks preserve the surface's retained pixels;
+the display-list diff selects damage. Paint-only hover rules reuse layout, while
+layout declarations and custom variables conservatively request geometry work.
+Asynchronous icon, glyph and image jobs track their requesting component instances,
+including promoted child targets, and repaint only those consumers on completion.
+The event loop includes input-repeat, temporary focus-grab and pending-frame
+escape deadlines alongside component ticks and reload maintenance.
+
 Hot reload uses a managed filesystem watcher that blocks on inotify and a
 control eventfd; watch replacement and shutdown wake that wait directly. With
 a healthy watcher, theme, settings, frontend metadata, and watch-set maintenance

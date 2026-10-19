@@ -81,3 +81,4 @@ finalized_memo_speedup                   lower      1.50      0
 selector_dependency_update_speedup       lower      4.00      0
 native_subscription_helper_processes upper 0 0
 native_subscription_idle_events upper 0 0
+resource_completion_repaint_fraction upper 0.0625 0

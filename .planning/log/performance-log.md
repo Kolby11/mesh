@@ -6246,3 +6246,118 @@ Live top-bar capture against `MESH_RENDER_GPU=0`: 147 differing pixels, all in
 the clock and CPU counter. Icon images and icon-font glyphs still draw one
 texture each; with tens of icons per surface the combining cost is not
 measurable yet.
+
+
+## 2026-10-19 — Retained interaction damage and resource completion consumers
+
+Area: shell invalidation, render resources, hover layout and wake deadlines.
+AMD Ryzen 7 7840HS, workspace release profile (thin LTO, one codegen unit),
+CPU raster harnesses, desktop in use.
+
+**Baseline first.** Two-way bindings were committed separately as `3b68fb5c`;
+the pre-existing sweep inventory is `27ac2c9b`. Release profiles initially
+failed to compile because a shell render test omitted the new shadow-list
+field. Test-only repair `0b47dd1c` establishes the clean baseline. Before this session's
+performance edits, three runs each of `navigation_hover_profile` and
+`appearance_frame_cost_profile` passed. Navigation step p50 was
+1.396–2.071 ms; Appearance unchanged paint requests were 1.782–1.991 ms.
+The baseline test executable was retained for interleaved comparisons.
+
+**Changes.** Interaction restyles and animation ticks preserve retained surface
+pixels, allowing display-list damage to select the repaint. Ordinary unchanged
+paint invalidations can also produce no damage. Explicit host `request_paint`
+still invalidates pixels and clears child display lists: resource completions
+can change pixels without changing a node fingerprint, including alongside
+unrelated partial style damage in a promoted popup.
+
+Icon resolution, file-icon raster, font-glyph raster and image-decode queues
+retain weak subscriptions per resource key. Shared pending jobs collect every
+requester; only current published results notify them. Component runtime paint
+scopes include parent and child targets. Completion polling schedules only those
+components, coalesces their loads, and clears their child paint-generation cache;
+dropped runtimes do not remain alive through subscriptions. A completion drained
+during paint remains visible to the next loop's ready-work check.
+
+Hover rules cache layout dependencies per pseudo-state across component imports,
+contributions and theme rules. Paint-only hover changes omit LAYOUT; dimensions,
+fonts, custom variables and unknown declarations remain conservative. Generic
+interaction updates retain their existing layout obligation. The broader split
+of layout/paint style fingerprints in mixed frames remains in the backlog.
+
+Quiet surfaces borrow their IDs while receiving window-state/resize changes;
+cloning happens after the wants-render gate. Focus-grab expiry and dirty visible
+targets' 50 ms callback-escape deadlines now participate in loop sleep. The
+parallel session's repeat deadline and shared-Arc text-measure key edits were
+left intact; its font-pack parsing change is also present in the candidate.
+These batch timings do not isolate those changes from this session's work.
+
+**Final measurements.** Three interleaved baseline/final executable runs each,
+after builds and other test runs finished. Navigation: 1920 px wide bar,
+25 cycles × four triggers, 100 popover opens, 400 input/frame steps. Appearance:
+920×900, 550 nodes, 60 updates per loop, including hidden Audio-page binding
+updates and a 240-entry resource catalog. Times below are ms per step/frame.
+
+| Workload | Baseline | Final |
+| --- | --- | --- |
+| Navigation hover step p50 | 1.434–1.524 | 1.183–1.237 |
+| Navigation hover step p90 | 1.621–2.231 | 1.452–1.703 |
+| Appearance unchanged paint invalidation | 1.782–1.845 | 0.099–0.106 |
+| Appearance hidden-page volume update | 5.022–5.331 | 4.151–4.277 |
+| Appearance resource-list scroll | 2.480–2.604 | 2.631–2.770 |
+
+The Appearance paint-only loop changes no display-list pixels: its saving is
+skipping raster work on unchanged invalidations, not faster full-surface raster.
+Resource-list scrolling is not improved by this batch. Unrelated audio updates
+still schedule zero of 60 frames on both sides.
+
+`resource_completion_fanout_profile`: 32 components, eight shared resource keys
+requested by two components, 1,000 batches, three release runs. Coalesced repaint
+requests are 2,000 versus the old broadcast's 32,000 in every run (fraction
+0.0625). Gate `resource_completion_repaint_fraction` ≤ 0.0625 is registered in
+`tools/check-performance` and `config/performance-baseline.tsv`. The profile
+measures routing/counts, not renderer throughput; all three gate samples pass.
+
+**Correctness.** `hover_and_transition_damage_matches_full_repaint` requires
+exact equality against a fresh full-surface paint after each of 324 frames:
+three hover styles (colour/radii/shadows, opacity/transform, layout), entry/exit,
+transition samples and scales 1, 1.25 and 2. Paint-only hover layout and layout
+fallback tests pass. Explicit parent and child repaint regressions cover pixels
+outside fingerprint-derived damage. Shared image completion, nested consumer
+scopes, deduplication and dropped-consumer tests pass.
+
+Final serial release shell: 872 passed, 45 failed, 138 ignored; failure names
+are exactly the clean baseline's 45, with no additions or removals. Release
+renderer: 306 passed, zero failed, 43 ignored. Scheduler-focused debug run:
+14 passed. Final GPU shell check, scoped rustfmt, shell syntax and diff checks
+pass. Presentation debug: 111 passed, three config-fixture failures, 11 ignored;
+the existing pre-change release executable reproduces those same three failures.
+Full debug shell before the final parent-pixel regression: 873 passed, 43 failed,
+138 ignored; both explicit-repaint regressions subsequently pass together.
+
+Completed sweep work was removed from the backlog; mixed-frame style hashes and
+render-queued effects remain. No design notes were associated with these items,
+and pending-note links have no orphans.
+
+
+## 2026-10-19 — Dedicated scroll follow-up after retained interaction damage
+
+Follow-up to the retained interaction/resource consumer entry above. The
+sequential Appearance profile's scroll loop was higher in the final batch, so
+`settings_scroll_frame_gate` was also measured: same AMD 7840HS, release,
+920×900 Appearance with 240 resource entries, 60 two-finger input frames plus
+30 momentum frames at 16 ms, three interleaved runs per executable. A second
+three-run comparison reverses the order and pins both executables to CPU 6.
+All runs report 90 frames, 90 passes, zero restyles after the first, and pass
+`settings_scroll_shifted_fraction` (0.983333–1.0, threshold ≥ 0.9).
+
+Times are frame p50 / p90, ms:
+
+| Sampling | Baseline | Final |
+| --- | --- | --- |
+| Unpinned, baseline then final | 2.198–2.498 / 4.325–4.641 | 2.461–2.626 / 4.085–4.445 |
+| CPU 6 pinned, final then baseline | 2.509–2.586 / 4.609–4.913 | 2.428–2.933 / 4.606–7.066 |
+
+Pinning and reversing the order produces both positive and negative paired
+p50 differences; the final p90 is also noisy. These samples support the
+structural scroll gates, not a scroll speedup claim. The higher sequential
+profile scroll range remains recorded in the preceding table.

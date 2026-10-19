@@ -251,15 +251,9 @@ From a read-only code sweep on 2026-10-19; nothing below is measured yet.
 Verify each against `navigation_hover_profile`, `appearance_frame_cost_profile`
 or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
 
-- [ ] Hover and transition ticks set `surface_pixels_invalid`, forcing full
-      surface damage (`component.rs:1703,1714,1940`). Keep pixels valid like
-      `invalidate_scroll` and let the retained diff pick damage; pixel-parity test.
-- [ ] Any finished icon/glyph/image job calls `request_paint()` on every
-      component, forcing full damage everywhere (`runtime/render/mod.rs:70`).
-      Route completions to the nodes/components that requested the resource key.
-- [ ] Every hover runs layout even for paint-only `:hover` rules. Omit LAYOUT
-      when no state rule touches a layout property; split the retained STYLE
-      flag into layout and paint hashes.
+- [ ] Retained layout snapshots still treat every STYLE difference as a layout
+      candidate in mixed frames. Split layout and paint style fingerprints so
+      paint-only nodes do not sync to Taffy when another node needs layout.
 - [ ] Live animations request every vsync during `steps()` holds, delays and
       infinite loops; sleep until the next visible change. The style-animation
       pass walks the whole tree on any restyle (theme `node {}` transition);
@@ -303,11 +297,8 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
       drops descendants of reused subtrees (`build.rs:433`) — add a regression.
 - [ ] Hit testing visits the whole tree without bounds culling and clones a clip
       `Vec` per node on pointer move; hover keys are re-parsed to `NodeId`s.
-- [ ] Regressions: `TextMeasureKey::new` copies four strings per probe (since
-      `8fe08b37`); `render/mod.rs:100` clones the surface id before `wants_render`.
-- [ ] Bugs: held-key repeat and the focus-grab and 50 ms callback-escape
-      deadlines are absent from `next_runtime_sleep` (repeat stalls up to 2 s,
-      then bursts); effects queued during render wait for the next wakeup.
+- [ ] Effects queued during render wait for the next wakeup; settle them or
+      schedule immediate work after painting.
 
 ### Scroll and animation frames
 

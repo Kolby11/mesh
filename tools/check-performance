@@ -41,6 +41,7 @@ run_benchmark mesh-core-shell coalesced_reload_wakeup_profile
 run_benchmark mesh-core-shell watcher_idle_wait_profile
 run_benchmark mesh-core-scripting native_subscription_idle_profile
 run_benchmark mesh-core-scripting validated_state_publication_profile
+run_benchmark mesh-core-render resource_completion_fanout_profile
 run_benchmark mesh-core-render glass_raster_profile
 run_benchmark mesh-core-render frame_plan_derivation_and_visual_damage_profile
 run_benchmark mesh-core-render label_resize_scroll_viewport_damage_profile
