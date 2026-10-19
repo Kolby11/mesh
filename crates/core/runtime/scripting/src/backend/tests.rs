@@ -1739,21 +1739,6 @@ fn backend_command_handler_error_becomes_failed_result() {
 }
 
 #[test]
-fn backend_command_result_return_table_becomes_result() {
-    backend_command_handler_return_table_becomes_result();
-}
-
-#[test]
-fn backend_command_result_nil_defaults_to_ok_result() {
-    backend_command_handler_nil_defaults_to_ok_result();
-}
-
-#[test]
-fn backend_command_result_error_becomes_failed_result() {
-    backend_command_handler_error_becomes_failed_result();
-}
-
-#[test]
 fn exec_returns_structured_result() {
     let mut ctx = BackendScriptContext::new_with_capabilities(
         "@test/backend",

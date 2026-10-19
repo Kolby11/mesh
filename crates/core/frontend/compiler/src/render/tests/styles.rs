@@ -257,59 +257,6 @@ fn prepared_component_styles_match_per_build_rule_merging() {
     );
 }
 
-// cargo test -p mesh-core-frontend --release -- prepared_component_style_rules_avoid_remerge_and_reindex --ignored --nocapture
-#[test]
-#[ignore = "release-only prepared component-style benchmark"]
-fn prepared_component_style_rules_avoid_remerge_and_reindex() {
-    use std::time::Instant;
-
-    let rules = (0..32)
-        .map(|index| {
-            format!(
-                ".item-{index} {{ width: {}px; height: {}px; color: #abcdef; }}",
-                index + 1,
-                index + 2
-            )
-        })
-        .collect::<String>();
-    let component = mesh_core_component::parse_component(&format!(
-        "<template><box class=\"item-31\" /></template><style>{rules}</style>"
-    ))
-    .unwrap();
-    let host = mesh_core_component::parse_component(&format!(
-        "<template><box /></template><style>{rules}</style>"
-    ))
-    .unwrap();
-    let host_rules = &host.style.as_ref().unwrap().rules;
-    let iterations = 20_000usize;
-
-    let rebuild_started = Instant::now();
-    let mut rebuilt_rules = 0usize;
-    for _ in 0..iterations {
-        let prepared = PreparedComponentStyleRules::new(
-            std::hint::black_box(&component),
-            std::hint::black_box(host_rules),
-        );
-        rebuilt_rules += std::hint::black_box(prepared.rules.len());
-    }
-    let rebuild_time = rebuild_started.elapsed();
-
-    let prepared = PreparedComponentStyleRules::new(&component, host_rules);
-    let reuse_started = Instant::now();
-    let mut reused_rules = 0usize;
-    for _ in 0..iterations {
-        reused_rules += std::hint::black_box(&prepared).rules.len();
-    }
-    let reuse_time = reuse_started.elapsed();
-
-    eprintln!(
-        "component style preparation: rebuild {rebuild_time:?}; cached reuse {reuse_time:?}; ratio {:.1}x; rules={rebuilt_rules}/{reused_rules}",
-        rebuild_time.as_secs_f64() / reuse_time.as_secs_f64()
-    );
-    assert_eq!(rebuilt_rules, reused_rules);
-    assert!(reuse_time < rebuild_time);
-}
-
 const PROP_COMPONENT: &str = r#"
 <props>
 {

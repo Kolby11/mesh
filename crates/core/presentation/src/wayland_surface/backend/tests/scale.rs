@@ -29,13 +29,6 @@ fn physical_dimensions_ceil_logical_times_scale() {
 }
 
 #[test]
-fn default_scale_is_1_0() {
-    // SurfaceEntry must default to scale 1.0
-    let default_scale: f32 = 1.0;
-    assert_eq!(default_scale, 1.0);
-}
-
-#[test]
 fn scale_change_detection_uses_f32_epsilon() {
     let current: f32 = 1.5;
     let same: f32 = 1.5;
@@ -59,12 +52,6 @@ fn integer_scale_detection() {
     assert!((2.0_f32 - 2.0_f32.round()).abs() < f32::EPSILON);
     assert!((1.5_f32 - 1.5_f32.round()).abs() > f32::EPSILON);
     assert!((1.25_f32 - 1.25_f32.round()).abs() > f32::EPSILON);
-}
-
-#[test]
-fn buffer_scale_for_integer_scale_equals_exact_value() {
-    let scale: f32 = 2.0;
-    assert_eq!(scale as i32, 2);
 }
 
 #[test]

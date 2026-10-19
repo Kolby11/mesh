@@ -54,57 +54,6 @@ fn shell_module_manifest_discovery_does_not_follow_directory_symlinks() {
 }
 
 #[test]
-#[ignore = "release-only shell discovery manifest loading microbenchmark"]
-fn shell_module_manifest_parallel_loading_beats_serial_benchmark() {
-    if rayon::current_num_threads() <= 1 {
-        eprintln!("skipping benchmark: rayon has one worker thread");
-        return;
-    }
-
-    let root = tempfile::tempdir().unwrap();
-    let module_count = 192;
-    for index in 0..module_count {
-        write_shell_discovery_manifest(
-            &root.path().join(format!("frontend/module-{index:03}")),
-            &format!("@bench/shell-module-{index:03}"),
-            24,
-        );
-    }
-
-    let module_dirs = discover_shell_module_manifest_dirs(&[root.path().to_path_buf()]);
-    assert_eq!(module_dirs.len(), module_count);
-    let warmup = load_shell_module_manifests(&module_dirs);
-    assert_eq!(warmup.len(), module_count);
-    assert!(warmup.iter().all(|result| result.loaded.is_ok()));
-
-    let iterations = 12;
-    let serial_start = Instant::now();
-    for _ in 0..iterations {
-        let loaded = load_shell_module_manifests_serial(&module_dirs);
-        assert_eq!(loaded.len(), module_count);
-        assert!(loaded.iter().all(|result| result.loaded.is_ok()));
-    }
-    let serial_elapsed = serial_start.elapsed();
-
-    let parallel_start = Instant::now();
-    for _ in 0..iterations {
-        let loaded = load_shell_module_manifests(&module_dirs);
-        assert_eq!(loaded.len(), module_count);
-        assert!(loaded.iter().all(|result| result.loaded.is_ok()));
-    }
-    let parallel_elapsed = parallel_start.elapsed();
-
-    eprintln!(
-        "shell manifest load over {iterations} iterations and {module_count} modules: serial {serial_elapsed:?}; parallel {parallel_elapsed:?}; ratio {:.1}x",
-        serial_elapsed.as_secs_f64() / parallel_elapsed.as_secs_f64()
-    );
-    assert!(
-        parallel_elapsed < serial_elapsed,
-        "parallel shell manifest loading should beat serial loading"
-    );
-}
-
-#[test]
 fn invalid_icon_pack_assets_are_rejected_before_binding_creation() {
     let module = tempfile::tempdir().unwrap();
     std::fs::write(

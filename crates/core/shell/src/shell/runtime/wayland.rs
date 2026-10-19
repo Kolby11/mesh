@@ -1007,8 +1007,6 @@ fn take_pending_popup_grab_from_map(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::hint::black_box;
-    use std::time::Instant;
 
     #[test]
     fn split_window_event_preserves_surface_and_payload() {
@@ -1234,44 +1232,6 @@ mod tests {
         assert_eq!(
             source_line_for_node(file.path().to_str().unwrap(), &node),
             Some(3)
-        );
-    }
-
-    #[test]
-    #[ignore = "release-only dispatch surface-id split microbenchmark"]
-    fn dispatch_surface_id_split_benchmark() {
-        const ITERATIONS: usize = 500_000;
-        let surface_id: std::sync::Arc<str> =
-            "@mesh/benchmark-panel/with/a/long/child-surface-id".into();
-        let old_events: Vec<_> = (0..ITERATIONS)
-            .map(|index| WindowEvent::PointerMove {
-                surface_id: surface_id.clone(),
-                x: (index % 256) as f32,
-                y: (index % 128) as f32,
-            })
-            .collect();
-        let new_events = old_events.clone();
-
-        let started = Instant::now();
-        for event in old_events {
-            let target_surface_id = mesh_core_presentation::event_surface_id(&event).to_string();
-            black_box(target_surface_id);
-            black_box(event);
-        }
-        let old_elapsed = started.elapsed();
-
-        let started = Instant::now();
-        for event in new_events {
-            let (target_surface_id, routed) = split_window_event(event);
-            black_box(target_surface_id);
-            black_box(routed);
-        }
-        let new_elapsed = started.elapsed();
-
-        eprintln!("dispatch surface-id target clone: old={old_elapsed:?} split={new_elapsed:?}");
-        assert!(
-            new_elapsed < old_elapsed,
-            "split path should avoid the old per-event target surface id clone"
         );
     }
 }

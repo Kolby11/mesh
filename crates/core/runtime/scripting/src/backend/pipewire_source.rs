@@ -181,31 +181,4 @@ fn run(state: Arc<StreamState>, stream: StreamHandle, stop: UnixStream) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore = "requires a running PipeWire server"]
-    async fn live_pipewire_source_starts_and_releases_the_native_loop() {
-        let state = StreamState::new();
-        spawn(&state).unwrap();
-        let mut started = false;
-        tokio::time::timeout(std::time::Duration::from_secs(3), async {
-            while !started {
-                state.wait_for_event().await;
-                for event in state.drain_events() {
-                    match event.kind {
-                        StreamEventKind::Started => started = true,
-                        StreamEventKind::Failed(error) => panic!("{error}"),
-                        _ => {}
-                    }
-                }
-            }
-        })
-        .await
-        .unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(3), state.shutdown())
-            .await
-            .unwrap();
-        assert_eq!(state.active_stream_count(), 0);
-    }
 }

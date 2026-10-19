@@ -2817,11 +2817,6 @@ mod tests {
         assert_backend_command_handler_error_becomes_failed_result().await;
     }
 
-    #[tokio::test]
-    async fn backend_command_result_handler_error_becomes_failed_result() {
-        assert_backend_command_handler_error_becomes_failed_result().await;
-    }
-
     async fn assert_bundled_command_handler_returns_result_table() {
         let script_path = bundled_backend_script_path("pipewire-audio");
         let script = std::fs::read_to_string(script_path).unwrap();
@@ -2874,11 +2869,6 @@ mod tests {
 
     #[tokio::test]
     async fn bundled_command_handler_returns_result_table() {
-        assert_bundled_command_handler_returns_result_table().await;
-    }
-
-    #[tokio::test]
-    async fn bundled_command_result_handler_returns_result_table() {
         assert_bundled_command_handler_returns_result_table().await;
     }
 

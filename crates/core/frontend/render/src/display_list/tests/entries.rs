@@ -514,66 +514,6 @@ fn display_list_records_removed_entry_damage() {
     assert_eq!(metrics.damage_area, 200);
 }
 
-// cargo test -p mesh-core-render --release -- removal_scan_guard_skips_equal_key_sets --ignored --nocapture
-#[test]
-#[ignore = "release-only display-list removal scan microbenchmark"]
-fn removal_scan_guard_skips_equal_key_sets() {
-    fn old_removed_count(previous: &HashMap<u64, u64>, next: &HashMap<u64, u64>) -> usize {
-        let mut removed = 0usize;
-        for key in previous.keys() {
-            if !next.contains_key(key) {
-                removed += 1;
-            }
-        }
-        removed
-    }
-
-    fn guarded_removed_count(
-        previous: &HashMap<u64, u64>,
-        next: &HashMap<u64, u64>,
-        inserted: usize,
-    ) -> usize {
-        if inserted == 0 && previous.len() == next.len() {
-            return 0;
-        }
-        old_removed_count(previous, next)
-    }
-
-    let previous = (0..1024_u64)
-        .map(|index| (index, index.wrapping_mul(3)))
-        .collect::<HashMap<_, _>>();
-    let next = (0..1024_u64)
-        .map(|index| (index, index.wrapping_mul(5)))
-        .collect::<HashMap<_, _>>();
-    let iterations = 200_000;
-
-    let old_started = std::time::Instant::now();
-    let mut old_total = 0usize;
-    for _ in 0..iterations {
-        old_total +=
-            old_removed_count(std::hint::black_box(&previous), std::hint::black_box(&next));
-    }
-    let old_time = old_started.elapsed();
-
-    let new_started = std::time::Instant::now();
-    let mut new_total = 0usize;
-    for _ in 0..iterations {
-        new_total += guarded_removed_count(
-            std::hint::black_box(&previous),
-            std::hint::black_box(&next),
-            std::hint::black_box(0),
-        );
-    }
-    let new_time = new_started.elapsed();
-
-    eprintln!(
-        "display-list removal scan: full previous-entry scan {old_time:?}; guarded skip {new_time:?}; ratio {:.1}x; counts={old_total}/{new_total}",
-        old_time.as_secs_f64() / new_time.as_secs_f64()
-    );
-    assert_eq!(old_total, new_total);
-    assert!(new_time * 10 < old_time);
-}
-
 #[test]
 fn display_list_clips_damage_to_surface() {
     let mut root = node(1, "box", 80.0, 80.0, 40.0, 40.0);
@@ -864,101 +804,6 @@ fn blur_metadata_reuse_rejects_every_sensitive_dirty_category() {
     }
 }
 
-// cargo test -p mesh-core-render --release -- cached_blur_metadata_beats_text_update_rescans --ignored --nocapture
-#[test]
-#[ignore = "release-only text-update blur metadata benchmark"]
-fn cached_blur_metadata_beats_text_update_rescans() {
-    fn blur_benchmark_tree() -> WidgetNode {
-        let mut root = display_entry_benchmark_tree(60, 20);
-        for row in root.children.iter_mut().step_by(3) {
-            row.children[10].computed_style.backdrop_filter.blur_radius = 8.0;
-        }
-        root
-    }
-
-    let iterations = 2_000_u64;
-    let surface = DamageRect {
-        x: 0,
-        y: 0,
-        width: 240,
-        height: 480,
-    };
-
-    let mut rescanned_root = blur_benchmark_tree();
-    let changed_id = rescanned_root.children[30].children[5].id;
-    let dirty_ids = HashSet::from([changed_id]);
-    let mut rescanned = RetainedDisplayList::default();
-    rescanned.update(&rescanned_root, surface.width, surface.height, false, true);
-    let mut cached_root = blur_benchmark_tree();
-    let mut cached = RetainedDisplayList::default();
-    cached.update(&cached_root, surface.width, surface.height, false, true);
-
-    let mut rescan_time = std::time::Duration::ZERO;
-    let mut cached_time = std::time::Duration::ZERO;
-    let mut rescan_total = 0usize;
-    let mut cached_total = 0usize;
-    for generation in 0..iterations {
-        rescanned_root.children[30].children[5]
-            .attributes
-            .insert("content".into(), generation.to_string());
-        let rescan_started = std::time::Instant::now();
-        rescanned.update_with_dirty_nodes(
-            &rescanned_root,
-            RenderObjectDirtySummary {
-                text: 1,
-                ..Default::default()
-            },
-            &dirty_ids,
-            surface.width,
-            surface.height,
-            false,
-            true,
-        );
-        let backdrop = compute_backdrop_regions(rescanned.paint_commands.as_ref(), surface);
-        let compositor = backdrop_blur_regions_from_tree(&rescanned_root, 0.0, 0.0, surface);
-        rescan_time += rescan_started.elapsed();
-        rescan_total =
-            rescan_total.wrapping_add(std::hint::black_box(backdrop.len() + compositor.len()));
-
-        cached_root.children[30].children[5]
-            .attributes
-            .insert("content".into(), generation.to_string());
-        let cached_started = std::time::Instant::now();
-        cached.update_with_dirty_nodes(
-            &cached_root,
-            RenderObjectDirtySummary {
-                text: 1,
-                ..Default::default()
-            },
-            &dirty_ids,
-            surface.width,
-            surface.height,
-            false,
-            true,
-        );
-        cached_time += cached_started.elapsed();
-        cached_total = cached_total.wrapping_add(std::hint::black_box(
-            cached.backdrop_filter_regions().len() + cached.blur_regions().len(),
-        ));
-    }
-
-    assert_eq!(rescan_total, cached_total);
-    assert_eq!(
-        rescanned.backdrop_filter_regions(),
-        cached.backdrop_filter_regions()
-    );
-    assert_eq!(rescanned.blur_regions(), cached.blur_regions());
-    let speedup = rescan_time.as_secs_f64() / cached_time.as_secs_f64();
-    eprintln!(
-        "text-only display updates over {iterations} 1,261-node blur-bearing frames: rescan {rescan_time:?}; cached metadata {cached_time:?}; ratio {speedup:.2}x"
-    );
-    println!("MESH_PERF metric=text_blur_metadata_cache_speedup value={speedup:.6}");
-    assert!(
-        cached_time * 100 < rescan_time * 98,
-        "cached blur metadata should make text updates at least 1.02x faster"
-    );
-}
-
 /// Batch metrics are a property of the whole ordered primitive stream, so the
 /// retained segment-tree index has to agree with a straight scan of that stream
 /// on every frame — including the sparse frames where the index is patched
@@ -1032,7 +877,6 @@ fn patched_batch_index_matches_a_full_ordered_scan() {
     }
 }
 
-// cargo test -p mesh-core-render --release -- sparse_batch_metrics_beat_the_ordered_walk --ignored --nocapture
 /// The ordered walk visits every node and every primitive slot to rebuild the
 /// batch stream, whatever the dirty set looks like. The retained index descends
 /// to the dirty nodes by their recorded paths and repairs `O(log n)` summaries.

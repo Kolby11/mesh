@@ -9,8 +9,6 @@ use super::resource_broker::{PendingResourceConsumers, ResourceBroker, ResourceB
 use super::{checked_pixel_bytes, resource_generation_is_current};
 use image::imageops::FilterType;
 use mesh_core_elements::lru::ByteLruCache;
-#[cfg(test)]
-use mesh_core_elements::lru::LruCache;
 use mesh_core_elements::style::Color;
 #[cfg(test)]
 use mesh_core_icon::MISSING_ICON_SVG;
@@ -1979,10 +1977,6 @@ mod tests {
         FILE_FRESHNESS_STAT_PROBES.load(Ordering::Relaxed)
     }
 
-    fn file_freshness_uncached_for_benchmark(path: &Path) -> Option<FileFreshness> {
-        resource_fingerprint(path)
-    }
-
     fn write_test_svg(path: &Path) {
         fs::write(
             path,
@@ -2224,108 +2218,6 @@ mod tests {
             Some(IconFileKind::Bitmap)
         );
         assert_eq!(icon_file_kind(Path::new("notes.txt")), None);
-    }
-
-    #[test]
-    #[ignore = "release-only icon extension classification microbenchmark"]
-    fn borrowed_icon_file_kind_beats_lowercase_allocation_benchmark() {
-        let paths = [
-            Path::new("symbol.SVG"),
-            Path::new("photo.PNG"),
-            Path::new("cover.JPEG"),
-            Path::new("tile.BMP"),
-        ];
-        let iterations = 500_000;
-
-        let old_started = std::time::Instant::now();
-        let mut old_matches = 0usize;
-        for _ in 0..iterations {
-            for path in paths {
-                let extension = path.extension().and_then(|value| value.to_str()).unwrap();
-                let extension = extension.to_ascii_lowercase();
-                old_matches += usize::from(matches!(
-                    extension.as_str(),
-                    "svg" | "png" | "jpg" | "jpeg" | "bmp"
-                ));
-            }
-        }
-        let old_time = old_started.elapsed();
-
-        let new_started = std::time::Instant::now();
-        let mut new_matches = 0usize;
-        for _ in 0..iterations {
-            for path in paths {
-                new_matches += usize::from(icon_file_kind(path).is_some());
-            }
-        }
-        let new_time = new_started.elapsed();
-
-        assert_eq!(old_matches, new_matches);
-        println!(
-            "icon extension classification: lowercase allocation {old_time:?}; borrowed comparison {new_time:?}; ratio {:.1}x",
-            old_time.as_secs_f64() / new_time.as_secs_f64()
-        );
-        assert!(
-            new_time < old_time,
-            "borrowed extension classification should beat lowercase allocation"
-        );
-    }
-
-    #[test]
-    #[ignore = "release-only file freshness lookup microbenchmark"]
-    fn direct_file_freshness_beats_ttl_lru_benchmark() {
-        let _guard = icon_test_lock();
-        clear_icon_caches();
-        let td = tempfile::tempdir().unwrap();
-        let path = td.path().join("logo.png");
-        ImageBuffer::from_fn(1, 1, |_, _| Rgba([255u8, 0, 0, 255]))
-            .save(&path)
-            .unwrap();
-        let iterations = 50_000;
-        let identity = source_identity(&path, None);
-        let initial_freshness = file_freshness_uncached_for_benchmark(&path).unwrap();
-        let mut former_cache = LruCache::new(2048);
-        former_cache.insert(
-            Arc::from(path.as_path()),
-            (initial_freshness, std::time::Instant::now()),
-        );
-
-        let old_started = std::time::Instant::now();
-        for _ in 0..iterations {
-            let now = std::time::Instant::now();
-            let (freshness, checked_at) = former_cache.get(path.as_path()).copied().unwrap();
-            std::hint::black_box(
-                now.duration_since(checked_at) < std::time::Duration::from_secs(1),
-            );
-            std::hint::black_box(RasterCacheKey {
-                resource_revision: resource_revision(),
-                source_kind: RasterSourceKind::File,
-                source_identity: Arc::clone(&identity),
-                width: 16,
-                height: 16,
-                tint: encode_tint(tint()),
-                multicolor: true,
-                freshness: Some(freshness),
-            });
-        }
-        let old_time = old_started.elapsed();
-
-        clear_icon_caches();
-        let new_started = std::time::Instant::now();
-        for _ in 0..iterations {
-            std::hint::black_box(raster_file_key(&path, 16, 16, tint(), true).unwrap());
-        }
-        let new_time = new_started.elapsed();
-
-        println!(
-            "file freshness lookup: ttl LRU {old_time:?}; direct stat {new_time:?}; ratio {:.1}x; probes={}",
-            old_time.as_secs_f64() / new_time.as_secs_f64(),
-            file_freshness_stat_probes()
-        );
-        assert!(
-            new_time < old_time,
-            "direct metadata probes should beat the former TTL/LRU path"
-        );
     }
 
     #[cfg(unix)]

@@ -841,44 +841,6 @@ mod tests {
         );
     }
 
-    // cargo test -p mesh-core-shell --release -- animation_live_key_scratch_reuse_beats_fresh_sets --ignored --nocapture
-    #[test]
-    #[ignore = "release-only animation live-key scratch microbenchmark"]
-    fn animation_live_key_scratch_reuse_beats_fresh_sets() {
-        let keys: Vec<String> = (0..512).map(|index| format!("root/{index}")).collect();
-        let iterations = 20_000usize;
-
-        let old_started = Instant::now();
-        let mut old_total = 0usize;
-        for _ in 0..iterations {
-            let mut live = HashSet::new();
-            for key in &keys {
-                live.insert(key.clone());
-            }
-            old_total += std::hint::black_box(live.len());
-        }
-        let old_time = old_started.elapsed();
-
-        let new_started = Instant::now();
-        let mut new_total = 0usize;
-        let mut live = HashSet::new();
-        for _ in 0..iterations {
-            live.clear();
-            for key in &keys {
-                live.insert(key.clone());
-            }
-            new_total += std::hint::black_box(live.len());
-        }
-        let new_time = new_started.elapsed();
-
-        assert_eq!(old_total, new_total);
-        eprintln!(
-            "animation live-key sets: fresh {old_time:?}; scratch reuse {new_time:?}; ratio {:.2}x",
-            old_time.as_secs_f64() / new_time.as_secs_f64()
-        );
-        assert!(new_time < old_time);
-    }
-
     // cargo test -p mesh-core-shell --release --lib animation_node_id_keys_beats_string_keys -- --ignored --nocapture
     #[test]
     #[ignore = "release-only animation NodeId key microbenchmark"]
@@ -936,53 +898,6 @@ mod tests {
         assert_eq!(old_total, new_total);
         eprintln!(
             "animation identity keys: owned strings {old_time:?}; NodeId {new_time:?}; ratio {:.2}x",
-            old_time.as_secs_f64() / new_time.as_secs_f64()
-        );
-        assert!(new_time < old_time);
-    }
-
-    // cargo test -p mesh-core-shell --release -- animation_previous_style_scratch_reuse_beats_fresh_map --ignored --nocapture
-    #[test]
-    #[ignore = "release-only animation previous-style scratch microbenchmark"]
-    fn animation_previous_style_scratch_reuse_beats_fresh_map() {
-        fn build_tree(next_id: &mut usize, width: usize, depth: usize) -> WidgetNode {
-            let id = *next_id;
-            *next_id += 1;
-            let mut node = WidgetNode::new("box");
-            node.set_mesh_key(format!("root/{id}"));
-            if depth > 0 {
-                node.children = (0..width)
-                    .map(|_| build_tree(next_id, width, depth - 1))
-                    .collect();
-            }
-            node
-        }
-
-        let mut next_id = 0;
-        let root = build_tree(&mut next_id, 4, 5);
-        let iterations = 20_000usize;
-
-        let old_started = Instant::now();
-        let mut old_total = 0usize;
-        for _ in 0..iterations {
-            old_total +=
-                std::hint::black_box(collect_visual_styles(std::hint::black_box(&root)).len());
-        }
-        let old_time = old_started.elapsed();
-
-        let new_started = Instant::now();
-        let mut new_total = 0usize;
-        let mut styles = HashMap::new();
-        for _ in 0..iterations {
-            styles.clear();
-            collect_visual_styles_into(std::hint::black_box(&root), &mut styles);
-            new_total += std::hint::black_box(styles.len());
-        }
-        let new_time = new_started.elapsed();
-
-        assert_eq!(old_total, new_total);
-        eprintln!(
-            "animation previous styles: fresh map {old_time:?}; scratch reuse {new_time:?}; ratio {:.2}x",
             old_time.as_secs_f64() / new_time.as_secs_f64()
         );
         assert!(new_time < old_time);

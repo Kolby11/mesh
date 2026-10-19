@@ -2168,32 +2168,6 @@ local audio = require("mesh.audio@>=2.0")
         );
         assert!(shared_clone < deep_clone);
     }
-
-    #[test]
-    #[ignore = "release-only frontend compilation benchmark"]
-    fn parallel_frontend_compilation_beats_sequential_startup() {
-        use std::hint::black_box;
-        use std::time::Instant;
-
-        let modules = shipped_frontend_modules();
-        let iterations = 20;
-
-        let started = Instant::now();
-        for _ in 0..iterations {
-            black_box(compile_sequentially(&modules).unwrap());
-        }
-        let sequential = started.elapsed();
-
-        let started = Instant::now();
-        for _ in 0..iterations {
-            black_box(FrontendCatalog::from_modules(&modules, None).unwrap());
-        }
-        let parallel = started.elapsed();
-
-        eprintln!(
-            "frontend compilation over {iterations} shipped-catalog builds: sequential {sequential:?}, parallel {parallel:?}"
-        );
-    }
 }
 
 fn validate_imported_component_nodes(

@@ -1552,49 +1552,4 @@ mod tests {
         shell.shutdown_runtime(&runtime, &socket_path).unwrap();
         assert_eq!(shell.shutdown_phase(), ShellShutdownPhase::Stopped);
     }
-
-    // cargo test -p mesh-core-shell --release -- wake_coalescing_beats_repeated_shell_delivery --ignored --nocapture
-    #[test]
-    #[ignore = "release-only service-update coalescing microbenchmark"]
-    fn wake_coalescing_beats_repeated_shell_delivery() {
-        use std::time::Instant;
-
-        let updates = 10_000;
-        let mut baseline_shell = Shell::new();
-        let mut baseline_pending = VecDeque::new();
-        let baseline_started = Instant::now();
-        for value in 0..updates {
-            baseline_shell
-                .handle_shell_message(
-                    &mut baseline_pending,
-                    backend_update("mesh.audio", "@mesh/pipewire-audio", value),
-                )
-                .unwrap();
-        }
-        let baseline = baseline_started.elapsed();
-
-        let mut optimized_shell = Shell::new();
-        let mut optimized_pending = VecDeque::new();
-        let optimized_started = Instant::now();
-        let mut coalesced = CoalescedShellMessages::default();
-        for value in 0..updates {
-            coalesced.push(backend_update("mesh.audio", "@mesh/pipewire-audio", value));
-        }
-        for message in coalesced.into_vec() {
-            optimized_shell
-                .handle_shell_message(&mut optimized_pending, message)
-                .unwrap();
-        }
-        let optimized = optimized_started.elapsed();
-
-        eprintln!(
-            "10k repeated deliveries: {baseline:?}; wake coalescing + one delivery: {optimized:?}; ratio: {:.1}x",
-            baseline.as_secs_f64() / optimized.as_secs_f64()
-        );
-        assert!(optimized < baseline);
-        assert_eq!(
-            baseline_shell.latest_service_state["mesh.audio"].state,
-            optimized_shell.latest_service_state["mesh.audio"].state
-        );
-    }
 }

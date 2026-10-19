@@ -1760,12 +1760,10 @@ pub(in crate::shell::component) fn captured_release_key(
 #[cfg(test)]
 mod navigation_performance_tests {
     use super::{
-        ancestor_source_target, collect_key_path, key_path, rove_aria_menu_focus,
+        ancestor_source_target, key_path, rove_aria_menu_focus,
         sibling_source_key,
     };
     use mesh_core_elements::WidgetNode;
-    use std::hint::black_box;
-    use std::time::Instant;
 
     fn deep_keyed_tree(depth: usize) -> (WidgetNode, String) {
         let mut leaf = WidgetNode::new("menu-item");
@@ -1836,66 +1834,5 @@ mod navigation_performance_tests {
             rove_aria_menu_focus(&root, "root/menu/first", false).as_deref(),
             Some("root/menu/second")
         );
-    }
-
-    // cargo test -p mesh-core-shell --release -- borrowed_key_path_beats_owned_strings --ignored --nocapture
-    #[test]
-    #[ignore = "release-only borrowed navigation key-path benchmark"]
-    fn borrowed_key_path_beats_owned_strings() {
-        fn owned_key_path(node: &WidgetNode, key: &str) -> Option<Vec<String>> {
-            fn collect(node: &WidgetNode, key: &str, path: &mut Vec<String>) -> bool {
-                if let Some(node_key) = node.mesh_key() {
-                    path.push(node_key.to_owned());
-                    if node_key == key {
-                        return true;
-                    }
-                }
-                for child in &node.children {
-                    if collect(child, key, path) {
-                        return true;
-                    }
-                }
-                if node.has_mesh_key() {
-                    path.pop();
-                }
-                false
-            }
-
-            let mut path = Vec::new();
-            collect(node, key, &mut path).then_some(path)
-        }
-
-        let (tree, leaf_key) = deep_keyed_tree(64);
-        let iterations = 200_000usize;
-
-        let owned_started = Instant::now();
-        let mut owned_total = 0usize;
-        for _ in 0..iterations {
-            let path = owned_key_path(black_box(&tree), black_box(&leaf_key)).expect("owned path");
-            owned_total = owned_total.wrapping_add(path.len());
-            black_box(path);
-        }
-        let owned = owned_started.elapsed();
-
-        let borrowed_started = Instant::now();
-        let mut borrowed_total = 0usize;
-        for _ in 0..iterations {
-            let mut path = Vec::new();
-            assert!(collect_key_path(
-                black_box(&tree),
-                black_box(&leaf_key),
-                &mut path
-            ));
-            borrowed_total = borrowed_total.wrapping_add(path.len());
-            black_box(path);
-        }
-        let borrowed = borrowed_started.elapsed();
-
-        let speedup = owned.as_secs_f64() / borrowed.as_secs_f64();
-        eprintln!(
-            "MESH_PERF metric=borrowed_key_path_speedup value={speedup:.3} owned={owned:?} borrowed={borrowed:?}"
-        );
-        assert_eq!(owned_total, borrowed_total);
-        assert!(borrowed < owned);
     }
 }

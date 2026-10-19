@@ -2080,30 +2080,4 @@ mod parse_cache_tests {
         );
         assert_eq!(cold.watched_paths.len(), warm.watched_paths.len());
     }
-
-    // cargo test -p mesh-core-frontend --release -- parse_cache_recompile_cost --ignored --nocapture
-    #[test]
-    #[ignore = "release-only recompile benchmark"]
-    fn parse_cache_recompile_cost() {
-        let (manifest, module_dir) = settings_module();
-        const ITERATIONS: u32 = 200;
-        let started = std::time::Instant::now();
-        for _ in 0..ITERATIONS {
-            parsed_component_cache::clear();
-            compile_frontend_module(&manifest, &module_dir).expect("cold compile");
-        }
-        let cold = started.elapsed();
-        compile_frontend_module(&manifest, &module_dir).expect("seed");
-        let started = std::time::Instant::now();
-        for _ in 0..ITERATIONS {
-            compile_frontend_module(&manifest, &module_dir).expect("warm compile");
-        }
-        let warm = started.elapsed();
-        eprintln!(
-            "settings module (7 components) x{ITERATIONS}: reparse {:.3}ms/compile, cached {:.3}ms/compile, {:.2}x",
-            cold.as_secs_f64() * 1000.0 / ITERATIONS as f64,
-            warm.as_secs_f64() * 1000.0 / ITERATIONS as f64,
-            cold.as_secs_f64() / warm.as_secs_f64()
-        );
-    }
 }

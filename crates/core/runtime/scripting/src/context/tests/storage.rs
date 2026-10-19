@@ -2,7 +2,6 @@ use super::super::*;
 use super::common::*;
 use mesh_core_capability::CapabilitySet;
 use mesh_core_elements::VariableStore;
-use std::sync::atomic::Ordering;
 
 #[test]
 fn frontend_storage_flushes_on_unmount_and_loads_before_init() {
@@ -181,43 +180,4 @@ end
 
     ctx.call_handler("set_watched", &[]).unwrap();
     assert!(ctx.state().is_dirty());
-}
-
-// Run with:
-// cargo test -p mesh-core-scripting --release -- storage_tracking_atomic_check_beats_mutex_check --ignored --nocapture
-#[test]
-#[ignore]
-fn storage_tracking_atomic_check_beats_mutex_check() {
-    use std::hint::black_box;
-    use std::sync::Mutex;
-    use std::sync::atomic::AtomicBool;
-    use std::time::Instant;
-
-    let iterations = 1_000_000usize;
-    let tracking_mutex = Mutex::new(false);
-    let mutex_started = Instant::now();
-    let mut mutex_count = 0usize;
-    for _ in 0..iterations {
-        if black_box(*black_box(&tracking_mutex).lock().unwrap()) {
-            mutex_count += 1;
-        }
-    }
-    let mutex_time = mutex_started.elapsed();
-
-    let tracking_atomic = AtomicBool::new(false);
-    let atomic_started = Instant::now();
-    let mut atomic_count = 0usize;
-    for _ in 0..iterations {
-        if black_box(black_box(&tracking_atomic).load(Ordering::Acquire)) {
-            atomic_count += 1;
-        }
-    }
-    let atomic_time = atomic_started.elapsed();
-
-    eprintln!(
-        "storage tracking false check: mutex {mutex_time:?}; atomic {atomic_time:?}; ratio {:.1}x; counts={mutex_count}/{atomic_count}",
-        mutex_time.as_secs_f64() / atomic_time.as_secs_f64()
-    );
-    assert_eq!(mutex_count, atomic_count);
-    assert!(atomic_time < mutex_time);
 }

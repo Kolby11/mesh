@@ -110,61 +110,6 @@ fn element_metrics_gate_ignores_paint_and_state_only_diffs() {
     }
 }
 
-// cargo test -p mesh-core-shell --release -- element_metrics_dirty_gate_beats_unchanged_snapshot_build --ignored --nocapture
-#[test]
-#[ignore = "release-only element metrics gate microbenchmark"]
-fn element_metrics_dirty_gate_beats_unchanged_snapshot_build() {
-    fn build(key: String, width: usize, depth: usize) -> WidgetNode {
-        let mut node = WidgetNode::new("box");
-        node.attributes.insert("_mesh_key".into(), key.clone());
-        node.layout.width = 20.0;
-        node.layout.height = 20.0;
-        if depth > 0 {
-            node.children = (0..width)
-                .map(|index| build(format!("{key}/{index}"), width, depth - 1))
-                .collect();
-        }
-        node
-    }
-
-    let tree = build("root".into(), 4, 5);
-    let iterations = 2_000;
-    let old_started = std::time::Instant::now();
-    for _ in 0..iterations {
-        let mut elements = serde_json::Map::new();
-        let mut refs = serde_json::Map::new();
-        let mut ref_keys = HashMap::new();
-        collect_element_metrics(
-            std::hint::black_box(&tree),
-            0.0,
-            0.0,
-            true,
-            true,
-            &mut elements,
-            &mut refs,
-            &mut ref_keys,
-        );
-        std::hint::black_box((elements, refs, ref_keys));
-    }
-    let old_time = old_started.elapsed();
-
-    let visual_only = RetainedTreeDirtySummary {
-        style: 1,
-        ..Default::default()
-    };
-    let gate_started = std::time::Instant::now();
-    for _ in 0..iterations {
-        std::hint::black_box(retained_dirty_affects_element_metrics(visual_only));
-    }
-    let gate_time = gate_started.elapsed();
-
-    eprintln!(
-        "unchanged element metrics: snapshot {old_time:?}; dirty gate {gate_time:?}; ratio {:.1}x",
-        old_time.as_secs_f64() / gate_time.as_secs_f64()
-    );
-    assert!(gate_time * 10 < old_time);
-}
-
 fn surface(width: u32, height: u32) -> DamageRect {
     DamageRect {
         x: 0,

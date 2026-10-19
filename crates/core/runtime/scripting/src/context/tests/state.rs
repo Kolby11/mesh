@@ -3,7 +3,6 @@ use super::common::*;
 use mesh_core_capability::CapabilitySet;
 use mesh_core_elements::VariableStore;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -41,63 +40,6 @@ fn unchanged_member_state_write_is_skipped() {
             .unwrap()
     );
     assert_eq!(ctx.state().get_ref("label"), Some(&changed_again));
-}
-
-// Run with:
-// cargo test -p mesh-core-scripting --release -- unchanged_member_state_write_benchmark --ignored --nocapture
-#[test]
-#[ignore = "release-only unchanged member-state write microbenchmark"]
-fn unchanged_member_state_write_benchmark() {
-    use std::time::Instant;
-
-    let value = serde_json::json!({
-        "title": "stable prop",
-        "items": [1, 2, 3, 4],
-        "enabled": true
-    });
-    let iterations = 100_000usize;
-    let mut eager = ScriptContext::new("@mesh/eager-member", CapabilitySet::default()).unwrap();
-    let mut gated = ScriptContext::new("@mesh/gated-member", CapabilitySet::default()).unwrap();
-    let mut borrowed =
-        ScriptContext::new("@mesh/borrowed-member", CapabilitySet::default()).unwrap();
-    eager.set_member_state("config", value.clone()).unwrap();
-    gated.set_member_state("config", value.clone()).unwrap();
-    borrowed.set_member_state("config", value.clone()).unwrap();
-
-    let eager_started = Instant::now();
-    for _ in 0..iterations {
-        eager
-            .set_member_state("config", std::hint::black_box(value.clone()))
-            .unwrap();
-    }
-    let eager_time = eager_started.elapsed();
-
-    let gated_started = Instant::now();
-    let mut changed = 0usize;
-    for _ in 0..iterations {
-        changed += gated
-            .set_member_state_if_changed("config", std::hint::black_box(value.clone()))
-            .unwrap() as usize;
-    }
-    let gated_time = gated_started.elapsed();
-
-    let borrowed_started = Instant::now();
-    let mut borrowed_changed = 0usize;
-    for _ in 0..iterations {
-        borrowed_changed += borrowed
-            .set_member_state_if_changed_ref("config", std::hint::black_box(&value))
-            .unwrap() as usize;
-    }
-    let borrowed_time = borrowed_started.elapsed();
-
-    eprintln!(
-        "unchanged member prop: eager {eager_time:?}; owned gate {gated_time:?}; borrowed gate {borrowed_time:?}; borrowed/owned ratio {:.1}x; changed={changed}/{borrowed_changed}",
-        gated_time.as_secs_f64() / borrowed_time.as_secs_f64()
-    );
-    assert_eq!(changed, 0);
-    assert_eq!(borrowed_changed, 0);
-    assert!(gated_time < eager_time);
-    assert!(borrowed_time < gated_time);
 }
 
 #[test]
@@ -179,55 +121,6 @@ fn shared_vm_keeps_host_seeded_globals_local_across_templates_and_handlers() {
         second.state.get("handler_seen"),
         Some(serde_json::json!("@mesh/second"))
     );
-}
-
-// cargo test -p mesh-core-scripting --release -- removed_legacy_module_state_mirror_avoids_proxy_snapshot_serialization --ignored --nocapture
-#[test]
-#[ignore = "release-only legacy module-state mirror microbenchmark"]
-fn removed_legacy_module_state_mirror_avoids_proxy_snapshot_serialization() {
-    use std::time::Instant;
-
-    let mut ctx =
-        ScriptContext::new("@mesh/module-mirror-benchmark", CapabilitySet::default()).unwrap();
-    ctx.load_script("").unwrap();
-    for index in 0..64 {
-        ctx.state_mut().set(
-            format!("value_{index}"),
-            serde_json::json!({
-                "label": format!("value {index}"),
-                "samples": [1, 2, 3, 4, 5, 6, 7, 8]
-            }),
-        );
-    }
-    ctx.state_mut().register_proxy(
-        "service",
-        Box::new(|| serde_json::json!({"percent": 72, "muted": false})),
-        None,
-    );
-    let iterations = 20_000usize;
-
-    let mirrored_started = Instant::now();
-    let mut mirrored_total = 0usize;
-    for _ in 0..iterations {
-        mirrored_total =
-            mirrored_total.wrapping_add(ctx.legacy_module_state_mirror_for_benchmark());
-    }
-    let mirrored_time = mirrored_started.elapsed();
-
-    let removed_started = Instant::now();
-    let mut removed_total = 0u64;
-    for _ in 0..iterations {
-        removed_total =
-            removed_total.wrapping_add(std::hint::black_box(ctx.state().mutation_generation()));
-    }
-    let removed_time = removed_started.elapsed();
-
-    eprintln!(
-        "legacy module.state mirror: serialized {mirrored_time:?}; removed-path bookkeeping {removed_time:?}; ratio {:.1}x; totals={mirrored_total}/{removed_total}",
-        mirrored_time.as_secs_f64() / removed_time.as_secs_f64()
-    );
-    assert!(mirrored_total > 0);
-    assert!(removed_time < mirrored_time);
 }
 
 #[test]
@@ -525,97 +418,6 @@ fn lazy_reactive_fingerprint_skips_value_construction() {
     assert!(!state.is_dirty());
 }
 
-// cargo test -p mesh-core-scripting --release -- reactive_fingerprint_setter_beats_clone_and_deep_compare --ignored --nocapture
-#[test]
-#[ignore = "release-only reactive service-state fingerprint microbenchmark"]
-fn reactive_fingerprint_setter_beats_clone_and_deep_compare() {
-    let payload = serde_json::json!({
-        "available": true,
-        "devices": (0..32)
-            .map(|index| serde_json::json!({
-                "id": format!("sink-{index}"),
-                "name": format!("Audio device {index}"),
-                "volume": 64
-            }))
-            .collect::<Vec<_>>()
-    });
-    let fingerprint = ScriptContext::service_payload_fingerprint(&payload);
-    let iterations = 50_000usize;
-
-    let mut compared = ScriptState::new();
-    compared.set("audio", payload.clone());
-    compared.clear_dirty();
-    let compared_started = std::time::Instant::now();
-    for _ in 0..iterations {
-        compared.set("audio", std::hint::black_box(&payload).clone());
-    }
-    let compared_time = compared_started.elapsed();
-
-    let mut fingerprinted = ScriptState::new();
-    fingerprinted.set_with_fingerprint("audio", &payload, fingerprint);
-    fingerprinted.clear_dirty();
-    let fingerprinted_started = std::time::Instant::now();
-    for _ in 0..iterations {
-        fingerprinted.set_with_fingerprint("audio", std::hint::black_box(&payload), fingerprint);
-    }
-    let fingerprinted_time = fingerprinted_started.elapsed();
-
-    eprintln!(
-        "unchanged reactive payload over {iterations} writes: clone/deep-compare {compared_time:?}; fingerprint {fingerprinted_time:?}; ratio {:.2}x",
-        compared_time.as_secs_f64() / fingerprinted_time.as_secs_f64()
-    );
-    assert_eq!(compared.get("audio"), fingerprinted.get("audio"));
-    assert!(!compared.is_dirty());
-    assert!(!fingerprinted.is_dirty());
-    assert!(fingerprinted_time < compared_time);
-}
-
-// Run with:
-// cargo test -p mesh-core-scripting --release -- host_value_fingerprint_beats_repeated_deep_compare --ignored --nocapture
-#[test]
-#[ignore]
-fn host_value_fingerprint_beats_repeated_deep_compare() {
-    use std::time::Instant;
-
-    let mut large_map = serde_json::Map::new();
-    for index in 0..1_000usize {
-        large_map.insert(
-            format!("node_{index}"),
-            serde_json::json!({
-                "x": index,
-                "y": index + 1,
-                "width": 20,
-                "height": 12,
-                "label": format!("node {index}")
-            }),
-        );
-    }
-    let large_value = serde_json::Value::Object(large_map);
-    let iterations = 20_000usize;
-
-    let mut deep_state = ScriptState::new();
-    deep_state.set_host_value("elements", large_value.clone());
-    let deep_start = Instant::now();
-    for _ in 0..iterations {
-        deep_state.set_host_value("elements", large_value.clone());
-    }
-    let deep_ns = deep_start.elapsed().as_nanos().max(1);
-
-    let mut fingerprint_state = ScriptState::new();
-    fingerprint_state.set_host_value_with_fingerprint("elements", large_value.clone(), 99);
-    let fingerprint_start = Instant::now();
-    for _ in 0..iterations {
-        fingerprint_state.set_host_value_with_fingerprint("elements", large_value.clone(), 99);
-    }
-    let fingerprint_ns = fingerprint_start.elapsed().as_nanos();
-
-    eprintln!("deep_compare={deep_ns}ns fingerprint_skip={fingerprint_ns}ns");
-    assert!(
-        fingerprint_ns < deep_ns,
-        "fingerprint host writes should be faster for unchanged large values"
-    );
-}
-
 #[test]
 fn snapshot_updates_after_cached_read() {
     let mut state = ScriptState::new();
@@ -683,61 +485,6 @@ fn proxy_snapshot_reuses_cached_variables_but_keeps_proxy_fresh() {
     );
 }
 
-// cargo test -p mesh-core-scripting --release -- cached_proxy_snapshot_variables_beat_rebuilding_locals --ignored --nocapture
-#[test]
-#[ignore = "release-only proxy snapshot variable-cache microbenchmark"]
-fn cached_proxy_snapshot_variables_beat_rebuilding_locals() {
-    let mut state = ScriptState::new();
-    for index in 0..128 {
-        state.set(
-            format!("value_{index}"),
-            serde_json::json!({
-                "label": format!("value {index}"),
-                "samples": [1, 2, 3, 4, 5, 6, 7, 8]
-            }),
-        );
-    }
-    state.register_proxy(
-        "service",
-        Box::new(|| serde_json::json!({"percent": 72, "muted": false})),
-        None,
-    );
-    let iterations = 20_000usize;
-
-    let old_started = std::time::Instant::now();
-    let mut old_total = 0usize;
-    for _ in 0..iterations {
-        let mut object = serde_json::Map::with_capacity(state.variables.len() + 1);
-        for (key, value) in &state.variables {
-            object.insert(key.clone(), value.as_ref().clone());
-        }
-        object.insert(
-            "service".to_string(),
-            serde_json::json!({"percent": 72, "muted": false}),
-        );
-        old_total = old_total.wrapping_add(std::hint::black_box(object.len()));
-    }
-    let old_time = old_started.elapsed();
-
-    let _ = state.snapshot();
-    let new_started = std::time::Instant::now();
-    let mut new_total = 0usize;
-    for _ in 0..iterations {
-        let snapshot = state.snapshot();
-        new_total = new_total.wrapping_add(std::hint::black_box(
-            snapshot.as_object().map_or(0, serde_json::Map::len),
-        ));
-    }
-    let new_time = new_started.elapsed();
-
-    eprintln!(
-        "proxy snapshot locals: rebuild {old_time:?}; cached {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
-        old_time.as_secs_f64() / new_time.as_secs_f64()
-    );
-    assert_eq!(old_total, new_total);
-    assert!(new_time < old_time);
-}
-
 #[test]
 fn script_state_clone_shares_variable_values() {
     let mut state = ScriptState::new();
@@ -761,54 +508,4 @@ fn script_state_clone_shares_variable_values() {
         "cloning ScriptState should not recursively clone JSON variable values"
     );
     assert_eq!(cloned.get("elements"), state.get("elements"));
-}
-
-// Run with:
-// cargo test -p mesh-core-scripting --release -- script_state_clone_is_shallow_for_large_values --ignored --nocapture
-#[test]
-#[ignore]
-fn script_state_clone_is_shallow_for_large_values() {
-    use std::time::Instant;
-
-    let mut large_map = serde_json::Map::new();
-    for index in 0..1_000usize {
-        large_map.insert(
-            format!("node_{index}"),
-            serde_json::json!({
-                "x": index,
-                "y": index + 1,
-                "width": 20,
-                "height": 12,
-                "label": format!("node {index}")
-            }),
-        );
-    }
-    let large_value = serde_json::Value::Object(large_map);
-
-    let mut deep_map = HashMap::new();
-    deep_map.insert("elements".to_string(), large_value.clone());
-
-    let mut state = ScriptState::new();
-    state.set("elements", large_value);
-
-    let iterations = 20_000usize;
-    let deep_start = Instant::now();
-    for _ in 0..iterations {
-        let cloned = deep_map.clone();
-        assert!(cloned.contains_key("elements"));
-    }
-    let deep_ns = deep_start.elapsed().as_nanos().max(1);
-
-    let shallow_start = Instant::now();
-    for _ in 0..iterations {
-        let cloned = state.clone();
-        assert!(cloned.value_arc_ptr("elements").is_some());
-    }
-    let shallow_ns = shallow_start.elapsed().as_nanos();
-
-    eprintln!("deep_hashmap_clone={deep_ns}ns shallow_script_state_clone={shallow_ns}ns");
-    assert!(
-        shallow_ns.saturating_mul(2) <= deep_ns,
-        "ScriptState clone should be at least 2x faster for large JSON values"
-    );
 }

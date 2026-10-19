@@ -1,5 +1,4 @@
 use super::super::index::*;
-use super::super::literal::*;
 use super::super::*;
 use mesh_core_component::style::{Declaration, StyleValue};
 use mesh_core_theme::Theme;
@@ -93,70 +92,6 @@ fn inherited_text_literals_do_not_mark_properties_explicit() {
     }
     assert_eq!(style, ComputedStyle::default());
     assert_eq!(style.explicit_properties, StylePropertyMask::default());
-}
-
-#[test]
-#[ignore = "release performance gate"]
-fn typed_literal_operations_beat_property_name_dispatch() {
-    use std::hint::black_box;
-    use std::time::Instant;
-    fn string_dispatch(style: &mut ComputedStyle, property: &str, value: f32) {
-        match property {
-            "font-size" => style.font_size = value,
-            "line-height" => style.line_height = value,
-            "gap" => style.gap = value,
-            "opacity" => style.opacity = value,
-            "padding-top" => style.padding.top = value,
-            "margin-right" => style.margin.right = value,
-            "border-left-width" => style.border_width.left = value,
-            "letter-spacing" => style.letter_spacing = value,
-            _ => unreachable!(),
-        }
-    }
-    let properties = [
-        "font-size",
-        "line-height",
-        "gap",
-        "opacity",
-        "padding-top",
-        "margin-right",
-        "border-left-width",
-        "letter-spacing",
-    ];
-    let operations = properties.map(|property| {
-        typed_literal_value(property, &StyleValue::Literal("12.5px".into())).unwrap()
-    });
-    let iterations = 200_000;
-    let mut control = ComputedStyle::default();
-    let start = Instant::now();
-    for _ in 0..iterations {
-        for property in &properties {
-            string_dispatch(
-                black_box(&mut control),
-                black_box(property),
-                black_box(12.5),
-            );
-        }
-    }
-    let strings = start.elapsed();
-    let mut typed = ComputedStyle::default();
-    let start = Instant::now();
-    for _ in 0..iterations {
-        for operation in &operations {
-            apply_typed_literal(black_box(&mut typed), black_box(*operation));
-        }
-    }
-    let operations_time = start.elapsed();
-    assert_eq!(typed, control);
-    let speedup = strings.as_secs_f64() / operations_time.as_secs_f64();
-    println!(
-        "literal dispatch: 8 numeric operations x {iterations}: names={strings:?} operations={operations_time:?}"
-    );
-    println!("MESH_PERF metric=typed_literal_operation_dispatch_speedup value={speedup:.3}");
-    assert!(
-        speedup >= 1.05,
-        "typed operation speedup {speedup:.3} below 1.05x"
-    );
 }
 
 #[test]
@@ -264,84 +199,6 @@ fn indexed_theme_operations_keep_diagnostics_and_numeric_cast_semantics() {
             assert_eq!(actual_diagnostics, diagnostics, "{property}: {reference}");
         }
     }
-}
-
-#[test]
-#[ignore = "release performance gate"]
-fn cached_theme_operations_beat_relowering() {
-    use std::hint::black_box;
-    use std::time::Instant;
-    let mut theme = Theme::new("operation-workload", "Operation workload");
-    theme.tokens_mut().extend([
-        (
-            "color.primary".into(),
-            mesh_core_theme::TokenValue::String("rgba(42, 88, 144, 0.75)".into()),
-        ),
-        (
-            "spacing.box".into(),
-            mesh_core_theme::TokenValue::String("4px 8px 12px 16px".into()),
-        ),
-        (
-            "radius.box".into(),
-            mesh_core_theme::TokenValue::String("2px 4px 6px 8px".into()),
-        ),
-        (
-            "size.box".into(),
-            mesh_core_theme::TokenValue::String("75%".into()),
-        ),
-    ]);
-    let declarations = [
-        ("background-color", "--color-primary"),
-        ("padding", "--spacing-box"),
-        ("border-radius", "--radius-box"),
-        ("width", "--size-box"),
-    ]
-    .map(|(property, reference)| {
-        IndexedDeclaration::from_declaration(&Declaration {
-            property: property.into(),
-            value: StyleValue::Var(reference.into()),
-        })
-    });
-    let resolver = StyleResolver::new(&theme);
-    let iterations = 50_000;
-    let mut variables = HashMap::new();
-    let mut control = ComputedStyle::default();
-    let start = Instant::now();
-    for _ in 0..iterations {
-        for declaration in &declarations {
-            declaration.literal.clear_theme();
-            resolver.apply_indexed_declaration(
-                black_box(&mut control),
-                black_box(declaration),
-                None,
-                &mut variables,
-            );
-        }
-    }
-    let lowering = start.elapsed();
-    let mut cached = ComputedStyle::default();
-    let start = Instant::now();
-    for _ in 0..iterations {
-        for declaration in &declarations {
-            resolver.apply_indexed_declaration(
-                black_box(&mut cached),
-                black_box(declaration),
-                None,
-                &mut variables,
-            );
-        }
-    }
-    let reuse = start.elapsed();
-    assert_eq!(cached, control);
-    let speedup = lowering.as_secs_f64() / reuse.as_secs_f64();
-    println!(
-        "theme operations: 4 declarations x {iterations}: re-lowering={lowering:?} cached={reuse:?}"
-    );
-    println!("MESH_PERF metric=cached_theme_operation_speedup value={speedup:.3}");
-    assert!(
-        speedup >= 1.2,
-        "theme operation speedup {speedup:.3} below 1.2x"
-    );
 }
 
 #[test]

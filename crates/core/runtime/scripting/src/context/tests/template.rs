@@ -141,28 +141,6 @@ fn template_expression_reads_gate_unbound_public_member_writes() {
     assert!(ctx.dirty_state_affects_template());
 }
 
-// cargo test -p mesh-core-scripting --release -- template_dependency_rust_gate_beats_lua_table_lookup --ignored --nocapture
-#[test]
-#[ignore = "release-only template dependency gate microbenchmark"]
-fn template_dependency_rust_gate_beats_lua_table_lookup() {
-    let mut ctx = ScriptContext::new("@mesh/dependency-gate", CapabilitySet::default()).unwrap();
-    ctx.load_script("label = 'visible'\ntelemetry = 0").unwrap();
-    let iterations = 1_000_000;
-    let (lua_time, rust_time, lua_hits, rust_hits) =
-        ctx.benchmark_template_dependency_gate(iterations);
-
-    eprintln!(
-        "{iterations} template dependency probes: Lua table {lua_time:?}; Rust cache {rust_time:?}; ratio {:.2}x",
-        lua_time.as_secs_f64() / rust_time.as_secs_f64()
-    );
-    eprintln!(
-        "MESH_PERF metric=template_dependency_gate_speedup value={:.6}",
-        lua_time.as_secs_f64() / rust_time.as_secs_f64()
-    );
-    assert_eq!(lua_hits, rust_hits);
-    assert!(rust_time < lua_time);
-}
-
 #[test]
 fn a_template_calling_a_helper_rerenders_when_the_helper_inputs_change() {
     let mut ctx = ScriptContext::new("@test/template-helper", CapabilitySet::default()).unwrap();

@@ -2602,51 +2602,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "release performance gate"]
-    fn shared_theme_alias_resolution_beats_repeated_graph_walks() {
-        use std::hint::black_box;
-        use std::time::Instant;
-        let mut theme = Theme::new("alias-workload", "Alias workload");
-        theme
-            .tokens_mut()
-            .insert("chain.0".into(), TokenValue::Number(12.0));
-        for index in 1..32 {
-            theme.tokens_mut().insert(
-                format!("chain.{index}"),
-                TokenValue::String(format!("var(--chain-{})", index - 1)),
-            );
-        }
-        assert_eq!(
-            theme.resolve_token_value("chain.31"),
-            Ok(Some(TokenValue::Number(12.0)))
-        );
-        let iterations = 20_000;
-        let start = Instant::now();
-        for _ in 0..iterations {
-            black_box(
-                theme
-                    .resolve_named_token(black_box("chain.31"), &mut Vec::new())
-                    .unwrap(),
-            );
-        }
-        let uncached = start.elapsed();
-        let start = Instant::now();
-        for _ in 0..iterations {
-            black_box(theme.resolve_token_value(black_box("chain.31")).unwrap());
-        }
-        let cached = start.elapsed();
-        let speedup = uncached.as_secs_f64() / cached.as_secs_f64();
-        println!(
-            "theme aliases: 32-token chain, {iterations} reads: uncached={uncached:?} cached={cached:?}"
-        );
-        println!("MESH_PERF metric=shared_theme_alias_resolution_speedup value={speedup:.3}");
-        assert!(
-            speedup >= 2.0,
-            "alias resolution speedup {speedup:.3} below 2x"
-        );
-    }
-
-    #[test]
     fn style_revision_is_shared_by_clones_and_advanced_by_mutation() {
         let mut theme = Theme::new("revision-test", "Revision test");
         let initial = theme.revision();

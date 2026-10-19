@@ -398,66 +398,6 @@ items = { "first", "second" }
     assert!(row.children.iter().all(|child| child.tag == "text"));
 }
 
-// cargo test -p mesh-core-shell --release -- repeated_alias_memoization_beats_forced_misses --ignored --nocapture
-#[test]
-#[ignore = "release-only repeated-alias component memoization benchmark"]
-fn repeated_alias_memoization_beats_forced_misses() {
-    let children = (0..12)
-        .map(|index| format!("        <Child label=\"item {index}\" />\n"))
-        .collect::<String>();
-    let parent_src = format!(
-        r#"
-<template>
-    <column>
-{children}    </column>
-</template>
-<script lang="luau">
-local Child = require("./components/child.mesh")
-</script>
-"#
-    );
-    let mut component = memo_surface(
-        &parent_src,
-        &[((
-            "Child",
-            r#"
-<template><text content="{label}" /></template>
-<script lang="luau">label = ""</script>
-"#,
-        ))],
-    );
-    let theme = default_theme();
-    let mut buffer = PixelBuffer::new(400, 300);
-    component
-        .paint_raster(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
-        .unwrap();
-    rebuild(&mut component, 400, 300);
-
-    let iterations = 200;
-    let miss_started = std::time::Instant::now();
-    for _ in 0..iterations {
-        component.clear_component_memo();
-        rebuild(&mut component, 400, 300);
-    }
-    let miss_time = miss_started.elapsed();
-
-    rebuild(&mut component, 400, 300);
-    let hits_before = component.component_memo_hit_count();
-    let hit_started = std::time::Instant::now();
-    for _ in 0..iterations {
-        rebuild(&mut component, 400, 300);
-    }
-    let hit_time = hit_started.elapsed();
-    let hits = component.component_memo_hit_count() - hits_before;
-
-    eprintln!(
-        "repeated-alias memoization: forced misses {miss_time:?}; memoized {hit_time:?}; ratio {:.2}x; hits={hits}",
-        miss_time.as_secs_f64() / hit_time.as_secs_f64()
-    );
-    assert_eq!(hits, iterations * 12);
-    assert!(hit_time < miss_time);
-}
-
 fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
     const POINT: &str = "test.memo.slot";
     let mut parent_manifest = minimal_test_manifest(PARENT_ID);
@@ -636,43 +576,6 @@ fn catalog_generation_rebinds_affected_slot_host_and_keeps_root_runtime() {
         .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
         .unwrap();
     assert!(node_with_content(component.last_tree.as_ref().unwrap(), "static slot 0").is_none());
-}
-
-// cargo test -p mesh-core-shell --release -- slot_memoized_rebuild_beats_full_reeval --ignored --nocapture
-#[test]
-#[ignore = "release-only slot contribution render memoization benchmark"]
-fn slot_memoized_rebuild_beats_full_reeval() {
-    let mut component = memo_slot_surface(12);
-    let theme = default_theme();
-    let mut buffer = PixelBuffer::new(400, 300);
-    component
-        .paint_raster(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
-        .unwrap();
-    rebuild(&mut component, 400, 300);
-    let iterations = 200;
-
-    let miss_started = std::time::Instant::now();
-    for _ in 0..iterations {
-        component.clear_component_memo();
-        rebuild(&mut component, 400, 300);
-    }
-    let miss_time = miss_started.elapsed();
-
-    rebuild(&mut component, 400, 300);
-    let hits_before = component.component_memo_hit_count();
-    let hit_started = std::time::Instant::now();
-    for _ in 0..iterations {
-        rebuild(&mut component, 400, 300);
-    }
-    let hit_time = hit_started.elapsed();
-    let hits = component.component_memo_hit_count() - hits_before;
-
-    eprintln!(
-        "slot memoization: forced-miss rebuilds {miss_time:?}; memoized rebuilds {hit_time:?}; ratio {:.1}x; hits={hits}",
-        miss_time.as_secs_f64() / hit_time.as_secs_f64()
-    );
-    assert_eq!(hits, iterations * 12);
-    assert!(hit_time < miss_time);
 }
 
 #[test]

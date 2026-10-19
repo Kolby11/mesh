@@ -4,7 +4,6 @@ use mesh_core_capability::{Capability, CapabilitySet};
 use mesh_core_elements::VariableStore;
 use mesh_core_frontend_abi::{FrontendEffect, SurfaceEffect, SurfaceRole};
 use serde_json::Value;
-use std::collections::HashMap;
 
 #[test]
 fn interface_proxy_tracks_top_level_field_reads() {
@@ -85,50 +84,6 @@ end
     let tracked = ctx.tracked_fields_for_service("audio");
     assert_eq!(tracked.len(), 1);
     assert!(tracked.contains("percent"));
-}
-
-// Run with:
-// cargo test -p mesh-core-scripting --release -- repeated_interface_field_reads_use_proxy_seen_cache --ignored --nocapture
-#[test]
-#[ignore]
-fn repeated_interface_field_reads_use_proxy_seen_cache() {
-    use std::time::Instant;
-
-    let iterations = 20_000usize;
-    let old_tracked =
-        std::sync::Mutex::new(HashMap::<String, std::collections::HashSet<String>>::new());
-    let old_start = Instant::now();
-    for _ in 0..iterations {
-        old_tracked
-            .lock()
-            .unwrap()
-            .entry("audio".to_string())
-            .or_default()
-            .insert("percent".to_string());
-    }
-    let old_ns = old_start.elapsed().as_nanos().max(1);
-
-    let observed = std::sync::Mutex::new(std::collections::HashSet::<String>::new());
-    let cached_tracked =
-        std::sync::Mutex::new(HashMap::<String, std::collections::HashSet<String>>::new());
-    let cached_start = Instant::now();
-    for _ in 0..iterations {
-        if observed.lock().unwrap().insert("percent".to_string()) {
-            cached_tracked
-                .lock()
-                .unwrap()
-                .entry("audio".to_string())
-                .or_default()
-                .insert("percent".to_string());
-        }
-    }
-    let cached_ns = cached_start.elapsed().as_nanos();
-
-    eprintln!("shared_tracking_every_read={old_ns}ns proxy_seen_cache={cached_ns}ns");
-    assert!(
-        cached_ns < old_ns,
-        "proxy seen-field cache should avoid repeated shared tracking work"
-    );
 }
 
 #[test]
@@ -636,149 +591,6 @@ end
         second.state.get("second_percent"),
         Some(serde_json::json!(64))
     );
-}
-
-// cargo test -p mesh-core-scripting --release -- binary_service_payload_markers_beat_formatted_strings --ignored --nocapture
-#[test]
-#[ignore = "release-only service payload marker microbenchmark"]
-fn binary_service_payload_markers_beat_formatted_strings() {
-    let mut ctx = ScriptContext::new("@mesh/marker-bench", CapabilitySet::default()).unwrap();
-    let iterations = 1_000_000usize;
-    let (formatted, binary, formatted_hits, binary_hits) =
-        ctx.benchmark_service_payload_marker_probes(iterations);
-
-    eprintln!(
-        "service payload marker over {iterations} probes: formatted {formatted:?}; binary {binary:?}; ratio {:.2}x",
-        formatted.as_secs_f64() / binary.as_secs_f64()
-    );
-    assert_eq!(formatted_hits, iterations);
-    assert_eq!(binary_hits, iterations);
-    assert!(binary < formatted);
-}
-
-// cargo test -p mesh-core-scripting --release -- shared_service_payload_fingerprint_beats_per_context_hashing --ignored --nocapture
-#[test]
-#[ignore = "release-only service payload fan-out fingerprint microbenchmark"]
-fn shared_service_payload_fingerprint_beats_per_context_hashing() {
-    fn make_contexts(count: usize) -> Vec<ScriptContext> {
-        let vm = SurfaceVm::new();
-        let caps = CapabilitySet::from_ids(["service.audio.read"]);
-        (0..count)
-            .map(|index| {
-                let mut ctx =
-                    ScriptContext::new(format!("@mesh/fingerprint-bench-{index}"), caps.clone())
-                        .unwrap();
-                ctx.attach_shared_vm(&vm);
-                ctx
-            })
-            .collect()
-    }
-
-    let context_count = 8usize;
-    let iterations = 5_000usize;
-    let payloads = (0..iterations)
-        .map(|index| {
-            serde_json::json!({
-                "percent": index % 100,
-                "muted": index % 2 == 0,
-                "devices": [
-                    { "id": "sink-0", "name": "Speakers", "volume": index % 100 },
-                    { "id": "sink-1", "name": "Headphones", "volume": (index + 7) % 100 }
-                ]
-            })
-        })
-        .collect::<Vec<_>>();
-    let mut repeated_hash_contexts = make_contexts(context_count);
-    let mut shared_hash_contexts = make_contexts(context_count);
-
-    let repeated_started = std::time::Instant::now();
-    for payload in &payloads {
-        for ctx in &mut repeated_hash_contexts {
-            ctx.apply_service_payload("audio", payload);
-        }
-    }
-    let repeated_time = repeated_started.elapsed();
-
-    let shared_started = std::time::Instant::now();
-    for payload in &payloads {
-        let fingerprint = ScriptContext::service_payload_fingerprint(payload);
-        for ctx in &mut shared_hash_contexts {
-            ctx.apply_service_payload_with_fingerprint("audio", payload, fingerprint);
-        }
-    }
-    let shared_time = shared_started.elapsed();
-
-    eprintln!(
-        "service payload fan-out over {iterations}x{context_count}: per-context hash {repeated_time:?}; shared hash {shared_time:?}; ratio {:.2}x",
-        repeated_time.as_secs_f64() / shared_time.as_secs_f64()
-    );
-    assert_eq!(
-        repeated_hash_contexts[0].service_payload_marker_for_test("audio"),
-        shared_hash_contexts[0].service_payload_marker_for_test("audio")
-    );
-    assert!(shared_time < repeated_time);
-}
-
-// cargo test -p mesh-core-scripting --release -- cached_service_payload_fingerprint_beats_runtime_seed_rehashing --ignored --nocapture
-#[test]
-#[ignore = "release-only cached service payload seed microbenchmark"]
-fn cached_service_payload_fingerprint_beats_runtime_seed_rehashing() {
-    fn make_contexts(count: usize) -> Vec<ScriptContext> {
-        let vm = SurfaceVm::new();
-        let caps = CapabilitySet::from_ids(["service.audio.read"]);
-        (0..count)
-            .map(|index| {
-                let mut ctx =
-                    ScriptContext::new(format!("@mesh/cached-seed-bench-{index}"), caps.clone())
-                        .unwrap();
-                ctx.attach_shared_vm(&vm);
-                ctx
-            })
-            .collect()
-    }
-
-    let payload = serde_json::json!({
-        "available": true,
-        "devices": [
-            { "id": "sink-0", "name": "Speakers", "volume": 64 },
-            { "id": "sink-1", "name": "Headphones", "volume": 57 }
-        ]
-    });
-    let fingerprint = ScriptContext::service_payload_fingerprint(&payload);
-    let context_count = 8usize;
-    let iterations = 50_000usize;
-    let mut rehash_contexts = make_contexts(context_count);
-    let mut cached_contexts = make_contexts(context_count);
-
-    let rehash_started = std::time::Instant::now();
-    for _ in 0..iterations {
-        for ctx in &mut rehash_contexts {
-            ctx.apply_service_payload("audio", std::hint::black_box(&payload));
-        }
-    }
-    let rehash_time = rehash_started.elapsed();
-
-    let cached_started = std::time::Instant::now();
-    for _ in 0..iterations {
-        for ctx in &mut cached_contexts {
-            ctx.apply_service_payload_with_fingerprint(
-                "audio",
-                std::hint::black_box(&payload),
-                fingerprint,
-            );
-        }
-    }
-    let cached_time = cached_started.elapsed();
-
-    eprintln!(
-        "cached service seed over {iterations}x{context_count}: rehash {rehash_time:?}; cached fingerprint {cached_time:?}; ratio {:.2}x",
-        rehash_time.as_secs_f64() / cached_time.as_secs_f64()
-    );
-    assert_eq!(
-        rehash_contexts[0].service_payload_marker_for_test("audio"),
-        cached_contexts[0].service_payload_marker_for_test("audio")
-    );
-    assert!(cached_time < rehash_time);
 }
 
 #[test]

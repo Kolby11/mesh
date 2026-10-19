@@ -836,55 +836,6 @@ mod tests {
         record_tracked_field_once(&tracked, "audio", "percent");
         assert!(tracked.lock().unwrap()["audio"].contains("percent"));
     }
-
-    // cargo test -p mesh-core-scripting --release -- tracked_field_duplicate_read_gate_benchmark --ignored --nocapture
-    #[test]
-    #[ignore = "release-only tracked service-field read microbenchmark"]
-    fn tracked_field_duplicate_read_gate_benchmark() {
-        fn old_record(
-            tracked_service_fields: &Arc<Mutex<HashMap<String, HashSet<String>>>>,
-            service_name: &str,
-            key: &str,
-        ) {
-            tracked_service_fields
-                .lock()
-                .unwrap()
-                .entry(service_name.to_string())
-                .or_default()
-                .insert(key.to_string());
-        }
-
-        let iterations = 1_000_000usize;
-        let old_tracked = sink();
-        old_record(&old_tracked, "audio", "percent");
-        let old_started = std::time::Instant::now();
-        for _ in 0..iterations {
-            old_record(
-                std::hint::black_box(&old_tracked),
-                std::hint::black_box("audio"),
-                std::hint::black_box("percent"),
-            );
-        }
-        let old_time = old_started.elapsed();
-
-        let new_tracked = sink();
-        record_tracked_field_once(&new_tracked, "audio", "percent");
-        let new_started = std::time::Instant::now();
-        for _ in 0..iterations {
-            record_tracked_field_once(
-                std::hint::black_box(&new_tracked),
-                std::hint::black_box("audio"),
-                std::hint::black_box("percent"),
-            );
-        }
-        let new_time = new_started.elapsed();
-
-        eprintln!(
-            "duplicate tracked service reads: allocate-insert {old_time:?}; borrowed-gate {new_time:?}; ratio {:.1}x",
-            old_time.as_secs_f64() / new_time.as_secs_f64()
-        );
-        assert!(new_time < old_time);
-    }
 }
 
 #[cfg(test)]

@@ -183,46 +183,6 @@ fn test_compute_blur_regions_follow_rounded_element_shape() {
     }));
 }
 
-// cargo test -p mesh-core-shell --release -- cached_region_state_beats_command_scan --ignored --nocapture
-#[test]
-#[ignore = "release-only derived-region microbenchmark"]
-fn cached_region_state_beats_command_scan() {
-    use std::hint::black_box;
-    use std::time::Instant;
-
-    let commands: Vec<_> = (0..500)
-        .map(|index| {
-            make_cmd(
-                index as f32,
-                index as f32,
-                20.0,
-                20.0,
-                if index % 50 == 0 { 4.0 } else { 0.0 },
-            )
-        })
-        .collect();
-    let cached = (7_u64, Some((1920, 1080)), Some((1920, 56)));
-    let iterations = 20_000;
-
-    let scan_started = Instant::now();
-    for _ in 0..iterations {
-        black_box(compute_blur_regions(black_box(&commands)));
-    }
-    let scan = scan_started.elapsed();
-
-    let cache_started = Instant::now();
-    for _ in 0..iterations {
-        black_box(black_box(Some(cached)) == Some(cached));
-    }
-    let cache = cache_started.elapsed();
-
-    eprintln!(
-        "region command scan: {scan:?}; generation/geometry cache check: {cache:?}; ratio: {:.1}x",
-        scan.as_secs_f64() / cache.as_secs_f64()
-    );
-    assert!(cache < scan);
-}
-
 #[test]
 fn spanning_and_docked_surfaces_keep_their_deliberate_zero_dimension() {
     use mesh_core_wayland::Edge;

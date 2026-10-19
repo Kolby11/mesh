@@ -240,36 +240,4 @@ fn io_error(error: wayland_client::backend::WaylandError) -> std::io::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore = "requires a running Wayland compositor"]
-    async fn live_wayland_source_reports_support_and_cancels() {
-        let state = StreamState::new();
-        spawn(&state, "foreign-toplevel").unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(3), async {
-            loop {
-                state.wait_for_event().await;
-                for event in state.drain_events() {
-                    match event.kind {
-                        StreamEventKind::Started => {
-                            println!("Wayland foreign-toplevel supported");
-                            return;
-                        }
-                        StreamEventKind::Failed(error) if error.contains("does not advertise") => {
-                            return;
-                        }
-                        StreamEventKind::Failed(error) => panic!("{error}"),
-                        _ => {}
-                    }
-                }
-            }
-        })
-        .await
-        .unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(3), state.shutdown())
-            .await
-            .unwrap();
-        assert_eq!(state.active_stream_count(), 0);
-    }
 }

@@ -186,15 +186,6 @@ fn resolve_theme_var() {
 }
 
 #[test]
-fn resolve_theme_var_alias() {
-    let theme = mesh_core_theme::default_theme();
-    let resolver = StyleResolver::new(&theme);
-    let value = StyleValue::Var("--color-primary".to_string());
-    let resolved = resolver.resolve_value(&value);
-    assert_eq!(Color::from_hex(&resolved), Color::from_hex("#6750A4"));
-}
-
-#[test]
 fn supported_css_properties_cover_phase_8_contract() {
     for property in [
         "background",

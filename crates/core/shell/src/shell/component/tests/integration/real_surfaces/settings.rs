@@ -153,10 +153,6 @@ fn settings_scrollbar_is_conditional_on_overflow() {
     );
 }
 
-fn count_tree_nodes(node: &WidgetNode) -> usize {
-    1 + node.children.iter().map(count_tree_nodes).sum::<usize>()
-}
-
 fn count_class_token(node: &WidgetNode, token: &str) -> usize {
     usize::from(
         node.attributes
@@ -297,69 +293,6 @@ fn settings_appearance_resource_scroll_keeps_the_existing_tree() {
                 )
             }),
         "scrolling Appearance should keep resource content in the retained display list"
-    );
-}
-
-// cargo test -p mesh-core-shell --release -- settings_active_page_switch_cost --ignored --nocapture
-#[test]
-#[ignore = "release-only real Settings page-switch benchmark"]
-fn settings_active_page_switch_cost() {
-    const SWITCHES: usize = 24;
-    let theme = default_theme();
-    let handlers = [
-        "showWifi",
-        "showAudio",
-        "showBluetooth",
-        "showAppearance",
-        "showDevice",
-        "showAdvanced",
-    ];
-    let mut samples = Vec::new();
-    let mut node_counts = Vec::new();
-
-    for sample in 0..5 {
-        let mut settings = real_frontend_module_component(
-            "@mesh/settings",
-            super::super::debug::settings_catalog(),
-        );
-        let mut buffer = PixelBuffer::new(920, 900);
-        settings
-            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
-            .unwrap();
-        seed_large_settings_resource_catalog(&mut settings);
-        settings
-            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
-            .unwrap();
-
-        let started = std::time::Instant::now();
-        for index in 0..SWITCHES {
-            let handler = handlers[(index + sample) % handlers.len()];
-            let namespaced = format!("__mesh_embed__::@mesh/settings::{handler}");
-            settings.call_namespaced_handler(&namespaced, &[]).unwrap();
-            settings
-                .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
-                .unwrap();
-            std::hint::black_box(settings.display_list_paint_commands().len());
-        }
-        samples.push(started.elapsed());
-        node_counts.push(count_tree_nodes(
-            settings.last_tree.as_ref().expect("rendered Settings tree"),
-        ));
-    }
-
-    samples.sort_unstable();
-    node_counts.sort_unstable();
-    eprintln!(
-        "Settings {SWITCHES}-page switch samples: {:?}..{:?}, median {:?}; final tree nodes {}..{}",
-        samples[0],
-        samples[samples.len() - 1],
-        samples[samples.len() / 2],
-        node_counts[0],
-        node_counts[node_counts.len() - 1],
-    );
-    eprintln!(
-        "MESH_PERF metric=settings_page_switch_ms value={:.3}",
-        samples[samples.len() / 2].as_secs_f64() * 1000.0
     );
 }
 

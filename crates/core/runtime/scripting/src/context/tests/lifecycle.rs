@@ -265,45 +265,6 @@ end
     assert_eq!(ctx.state.get("first"), ctx.state.get("second"));
 }
 
-// Run with:
-// cargo test -p mesh-core-scripting --release -- cached_lifecycle_self_table_beats_rebuilding --ignored --nocapture
-#[test]
-#[ignore]
-fn cached_lifecycle_self_table_beats_rebuilding() {
-    use std::time::Instant;
-
-    let source = r#"
-function render(self)
-    local id = self.meta.module_id
-end
-"#;
-    let iterations = 20_000usize;
-
-    let mut rebuild_ctx =
-        ScriptContext::new("@test/self-rebuild", CapabilitySet::default()).unwrap();
-    rebuild_ctx.load_script(source).unwrap();
-    let rebuild_start = Instant::now();
-    for _ in 0..iterations {
-        rebuild_ctx.clear_cached_self_table_for_benchmark();
-        rebuild_ctx.call_render_lifecycle().unwrap();
-    }
-    let rebuild_ns = rebuild_start.elapsed().as_nanos().max(1);
-
-    let mut cached_ctx = ScriptContext::new("@test/self-cached", CapabilitySet::default()).unwrap();
-    cached_ctx.load_script(source).unwrap();
-    let cached_start = Instant::now();
-    for _ in 0..iterations {
-        cached_ctx.call_render_lifecycle().unwrap();
-    }
-    let cached_ns = cached_start.elapsed().as_nanos();
-
-    eprintln!("rebuild_self_table={rebuild_ns}ns cached_self_table={cached_ns}ns");
-    assert!(
-        cached_ns < rebuild_ns,
-        "cached lifecycle self table should beat rebuilding it per render"
-    );
-}
-
 #[test]
 fn handler_receives_event_payload_argument() {
     let caps = CapabilitySet::default();

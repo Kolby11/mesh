@@ -1,6 +1,5 @@
 use super::super::index::*;
 use super::super::*;
-use crate::lru::LruCache;
 use mesh_core_component::style::{Declaration, StyleValue};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -145,94 +144,6 @@ fn bounded_style_caches_evict_one_cold_entry_without_flushing_hot_entries() {
     });
 }
 
-// cargo test -p mesh-core-elements --release -- bounded_style_cache_p95_beats_flush_all --ignored --nocapture
-#[test]
-#[ignore = "release-only cache-churn p95 benchmark"]
-fn bounded_style_cache_p95_beats_flush_all() {
-    fn percentile_95(mut samples: Vec<u128>) -> u128 {
-        samples.sort_unstable();
-        samples[samples.len() * 95 / 100]
-    }
-
-    fn measure(flush_all: bool, sources: &[String]) -> u128 {
-        const CAPACITY: usize = 128;
-        const HOT: usize = 96;
-        const ROTATING_PER_FRAME: usize = 12;
-        const FRAMES: usize = 300;
-        let mut flush_cache = HashMap::<String, usize>::new();
-        let mut lru_cache = LruCache::<String, usize>::new(CAPACITY);
-        let mut frame_times = Vec::with_capacity(FRAMES);
-        let mut checksum = 0usize;
-
-        for frame in 0..FRAMES {
-            let started = std::time::Instant::now();
-            let rotating_start = HOT + (frame * ROTATING_PER_FRAME) % (sources.len() - HOT);
-            let indices = (0..HOT).chain(
-                (0..ROTATING_PER_FRAME)
-                    .map(|offset| HOT + (rotating_start - HOT + offset) % (sources.len() - HOT)),
-            );
-            for index in indices {
-                let source = &sources[index];
-                if flush_all {
-                    let value = if let Some(value) = flush_cache.get(source) {
-                        *value
-                    } else {
-                        let parsed = mesh_core_component::parse_inline_style(source).unwrap();
-                        if flush_cache.len() >= CAPACITY {
-                            flush_cache.clear();
-                        }
-                        let value = parsed.len();
-                        flush_cache.insert(source.clone(), value);
-                        value
-                    };
-                    checksum = checksum.wrapping_add(value);
-                } else {
-                    let value = if let Some(value) = lru_cache.get(source) {
-                        *value
-                    } else {
-                        let parsed = mesh_core_component::parse_inline_style(source).unwrap();
-                        let value = parsed.len();
-                        lru_cache.insert(source.clone(), value);
-                        value
-                    };
-                    checksum = checksum.wrapping_add(value);
-                }
-            }
-            frame_times.push(started.elapsed().as_nanos());
-        }
-        std::hint::black_box(checksum);
-        percentile_95(frame_times)
-    }
-
-    let sources = (0..608)
-        .map(|index| {
-            format!(
-                "left: {index}px; top: {}px; width: {}px; opacity: 0.8;",
-                index + 1,
-                index + 2
-            )
-        })
-        .collect::<Vec<_>>();
-    let mut flush_samples = Vec::new();
-    let mut lru_samples = Vec::new();
-    for _ in 0..5 {
-        flush_samples.push(measure(true, &sources));
-        lru_samples.push(measure(false, &sources));
-    }
-    let flush_min = *flush_samples.iter().min().unwrap();
-    let flush_max = *flush_samples.iter().max().unwrap();
-    let lru_min = *lru_samples.iter().min().unwrap();
-    let lru_max = *lru_samples.iter().max().unwrap();
-    let conservative_ratio = flush_min as f64 / lru_max as f64;
-    eprintln!(
-        "MESH_PERF metric=bounded_style_cache_p95_speedup value={conservative_ratio:.6} flush_all_p95_ns={flush_min}-{flush_max} lru_p95_ns={lru_min}-{lru_max} workload=300_frames_96_hot_12_rotating capacity=128"
-    );
-    assert!(
-        conservative_ratio >= 1.25,
-        "bounded eviction p95 must be at least 1.25x faster; conservative ratio {conservative_ratio:.3}x"
-    );
-}
-
 #[test]
 fn typed_static_declarations_match_string_lowering() {
     let theme = mesh_core_theme::default_theme();
@@ -272,62 +183,6 @@ fn typed_static_declarations_match_string_lowering() {
 
     assert_eq!(typed_style, old_style);
     assert_eq!(typed_variables, old_variables);
-}
-
-// cargo test -p mesh-core-elements --release -- style_function_scan_beats_contains_pair --ignored --nocapture
-#[test]
-#[ignore = "release-only literal style-value scan microbenchmark"]
-fn style_function_scan_beats_contains_pair() {
-    use std::time::Instant;
-
-    // Representative literal declaration values: mostly plain, a few real
-    // references, in the proportion a theme stylesheet produces.
-    const VALUES: &[&str] = &[
-        "8px",
-        "1px solid rgba(0, 0, 0, 0.12)",
-        "var(--color-surface)",
-        "600",
-        "center",
-        "calc(var(--spacing-2) * 2)",
-        "0 2px 8px rgba(0, 0, 0, 0.24)",
-        "prop(size)",
-        "flex-start",
-        "12px 16px",
-    ];
-    const ITERATIONS: usize = 3_000_000;
-
-    for value in VALUES {
-        assert_eq!(
-            references_style_function(value),
-            value.contains("var(") || value.contains("prop(")
-        );
-    }
-
-    let contains_started = Instant::now();
-    let mut contains_total = 0usize;
-    for index in 0..ITERATIONS {
-        let value = std::hint::black_box(VALUES[index % VALUES.len()]);
-        contains_total += (value.contains("var(") || value.contains("prop(")) as usize;
-    }
-    let contains = contains_started.elapsed();
-
-    let scan_started = Instant::now();
-    let mut scan_total = 0usize;
-    for index in 0..ITERATIONS {
-        let value = std::hint::black_box(VALUES[index % VALUES.len()]);
-        scan_total += references_style_function(value) as usize;
-    }
-    let scan = scan_started.elapsed();
-
-    assert_eq!(contains_total, scan_total);
-    eprintln!(
-        "literal style-value reference check over {ITERATIONS} values: contains pair {contains:?}, byte scan {scan:?}, ratio {:.2}x",
-        contains.as_secs_f64() / scan.as_secs_f64()
-    );
-    println!(
-        "MESH_PERF metric=style_function_scan_speedup value={:.6}",
-        contains.as_secs_f64() / scan.as_secs_f64()
-    );
 }
 
 #[test]

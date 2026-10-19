@@ -1082,7 +1082,6 @@ fn apply_accessibility_shortcut(
 #[cfg(test)]
 mod shortcut_annotation_tests {
     use super::*;
-    use std::time::Instant;
 
     fn keyed_node(keybind: Option<&str>, children: Vec<WidgetNode>) -> WidgetNode {
         let mut node = WidgetNode::new("button");
@@ -1091,40 +1090,6 @@ mod shortcut_annotation_tests {
         }
         node.children = children.into();
         node
-    }
-
-    fn shortcut_tree(rows: usize, cols: usize, keybinds: usize) -> WidgetNode {
-        let mut root = WidgetNode::new("box");
-        for row in 0..rows {
-            let mut row_node = WidgetNode::new("row");
-            for col in 0..cols {
-                let id = (row * cols + col) % keybinds;
-                row_node
-                    .children
-                    .push(keyed_node(Some(&format!("action-{id}")), Vec::new()));
-            }
-            root.children.push(row_node);
-        }
-        root
-    }
-
-    fn old_annotate_nodes_by_keybind(
-        node: &mut WidgetNode,
-        keybind_id: &str,
-        accessibility_shortcut: &str,
-    ) {
-        if node
-            .attributes
-            .get("keybind")
-            .is_some_and(|value| value == keybind_id)
-        {
-            apply_accessibility_shortcut(node, false, accessibility_shortcut);
-            return;
-        }
-
-        for child in &mut node.children {
-            old_annotate_nodes_by_keybind(child, keybind_id, accessibility_shortcut);
-        }
     }
 
     #[test]
@@ -1151,121 +1116,6 @@ mod shortcut_annotation_tests {
             tree.children[1].accessibility.keyboard_shortcut.as_deref(),
             Some("Super+space")
         );
-    }
-
-    // cargo test -p mesh-core-shell --release -- shortcut_annotation_single_walk_beats_per_shortcut_tree_walks --ignored --nocapture
-    #[test]
-    #[ignore = "release-only shortcut annotation traversal microbenchmark"]
-    fn shortcut_annotation_single_walk_beats_per_shortcut_tree_walks() {
-        let rows = 120;
-        let cols = 20;
-        let keybinds = 24;
-        let iterations = 1_000usize;
-        let shortcuts: HashMap<String, Vec<String>> = (0..keybinds)
-            .map(|index| {
-                (
-                    format!("action-{index}"),
-                    vec![format!("Control+{}", char::from(b'a' + (index as u8 % 26)))],
-                )
-            })
-            .collect();
-
-        let old_started = Instant::now();
-        let mut old_total = 0usize;
-        for _ in 0..iterations {
-            let mut tree = shortcut_tree(rows, cols, keybinds);
-            for (keybind_id, labels) in &shortcuts {
-                for label in labels {
-                    old_annotate_nodes_by_keybind(&mut tree, keybind_id, label);
-                }
-            }
-            old_total = old_total.saturating_add(std::hint::black_box(
-                tree.children[0].children[0]
-                    .accessibility
-                    .keyboard_shortcut
-                    .as_deref()
-                    .unwrap_or("")
-                    .len(),
-            ));
-        }
-        let old_time = old_started.elapsed();
-
-        let new_started = Instant::now();
-        let mut new_total = 0usize;
-        for _ in 0..iterations {
-            let mut tree = shortcut_tree(rows, cols, keybinds);
-            annotate_nodes_by_keybind(&mut tree, &shortcuts);
-            new_total = new_total.saturating_add(std::hint::black_box(
-                tree.children[0].children[0]
-                    .accessibility
-                    .keyboard_shortcut
-                    .as_deref()
-                    .unwrap_or("")
-                    .len(),
-            ));
-        }
-        let new_time = new_started.elapsed();
-
-        assert_eq!(old_total, new_total);
-        eprintln!(
-            "shortcut annotation over {iterations} iterations with {keybinds} keybinds: per-shortcut walks {old_time:?}; single walk {new_time:?}"
-        );
-        assert!(
-            new_time < old_time,
-            "single traversal should beat one tree walk per shortcut declaration"
-        );
-    }
-
-    // cargo test -p mesh-core-shell --release -- cached_shortcut_accessibility_index_beats_rebuild --ignored --nocapture
-    #[test]
-    #[ignore = "release-only cached shortcut index microbenchmark"]
-    fn cached_shortcut_accessibility_index_beats_rebuild() {
-        let keybinds = 24;
-        let resolved: Vec<_> = (0..keybinds)
-            .map(|index| ResolvedSurfaceShortcut {
-                keybind_id: format!("action-{index}"),
-                key: char::from(b'a' + (index as u8 % 26)).to_string(),
-                modifiers: vec!["Control".into()],
-                trigger_kind: mesh_core_module::KeybindTriggerKind::Shortcut,
-                source: KeybindResolutionSource::ModuleDefault,
-            })
-            .collect();
-        let mut cached = HashMap::with_capacity(resolved.len());
-        for shortcut in &resolved {
-            cached
-                .entry(shortcut.keybind_id.clone())
-                .or_insert_with(Vec::new)
-                .push(format_shortcut_for_accessibility(shortcut));
-        }
-        let iterations = 1_000usize;
-
-        let old_started = Instant::now();
-        let mut old_total = 0usize;
-        for _ in 0..iterations {
-            let mut rebuilt = HashMap::with_capacity(resolved.len());
-            for shortcut in &resolved {
-                rebuilt
-                    .entry(shortcut.keybind_id.clone())
-                    .or_insert_with(Vec::new)
-                    .push(format_shortcut_for_accessibility(shortcut));
-            }
-            old_total += std::hint::black_box(rebuilt.len());
-        }
-        let old_time = old_started.elapsed();
-
-        let new_started = Instant::now();
-        let mut new_total = 0usize;
-        for _ in 0..iterations {
-            new_total += std::hint::black_box(cached.len());
-        }
-        let new_time = new_started.elapsed();
-
-        assert_eq!(old_total, new_total);
-        eprintln!(
-            "shortcut accessibility index: rebuild {old_time:?}; cached borrow {new_time:?}; ratio {:.1}x",
-            old_time.as_secs_f64() / new_time.as_secs_f64()
-        );
-        assert!(new_time < old_time);
     }
 }
 

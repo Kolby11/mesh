@@ -410,8 +410,6 @@ pub(super) fn selectable_text_target_key(tree: &WidgetNode, x: f32, y: f32) -> O
 #[cfg(test)]
 mod selectable_text_target_key_tests {
     use super::*;
-    use std::hint::black_box;
-    use std::time::Instant;
 
     fn positioned_node(key: &str, tag: &str, x: f32, y: f32, w: f32, h: f32) -> WidgetNode {
         let mut node = WidgetNode::new(tag);
@@ -540,35 +538,4 @@ mod selectable_text_target_key_tests {
         );
     }
 
-    // Run with:
-    // cargo test -p mesh-core-shell --release -- fused_selectable_text_lookup_beats_per_key_tree_walk --ignored --nocapture
-    #[test]
-    #[ignore]
-    fn fused_selectable_text_lookup_beats_per_key_tree_walk() {
-        let tree = chain_tree_with_padding(40, 200);
-        let iterations = 2_000usize;
-
-        let old_start = Instant::now();
-        let mut old_total = 0usize;
-        for _ in 0..iterations {
-            let key = old_selectable_text_target_key(black_box(&tree), 10.0, 10.0);
-            old_total = old_total.wrapping_add(key.map_or(0, |k| k.len()));
-        }
-        let old_time = old_start.elapsed();
-
-        let new_start = Instant::now();
-        let mut new_total = 0usize;
-        for _ in 0..iterations {
-            let key = selectable_text_target_key(black_box(&tree), 10.0, 10.0);
-            new_total = new_total.wrapping_add(key.map_or(0, |k| k.len()));
-        }
-        let new_time = new_start.elapsed();
-
-        eprintln!(
-            "selectable text target: per-key walk {old_time:?}; fused {new_time:?}; ratio {:.1}x; totals={old_total}/{new_total}",
-            old_time.as_secs_f64() / new_time.as_secs_f64()
-        );
-        assert_eq!(old_total, new_total);
-        assert!(new_time < old_time);
-    }
 }

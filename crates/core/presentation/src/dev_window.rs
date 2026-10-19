@@ -397,34 +397,4 @@ fn normalized_mouse_pos(surface: &WindowSurface) -> Option<(f32, f32)> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    #[ignore = "release-only event surface-id clone microbenchmark"]
-    fn arc_surface_id_clone_beats_owned_string_clone_benchmark() {
-        const ITERATIONS: usize = 2_000_000;
-        let owned = String::from("@mesh/benchmark-panel/with/a/long/child-surface-id");
-        let shared: Arc<str> = Arc::from(owned.as_str());
-
-        let old_started = std::time::Instant::now();
-        for _ in 0..ITERATIONS {
-            std::hint::black_box(owned.clone());
-        }
-        let old_time = old_started.elapsed();
-
-        let new_started = std::time::Instant::now();
-        for _ in 0..ITERATIONS {
-            std::hint::black_box(Arc::clone(&shared));
-        }
-        let new_time = new_started.elapsed();
-
-        eprintln!(
-            "event surface-id clone over {ITERATIONS} events: String {old_time:?}, Arc<str> {new_time:?}, ratio {:.1}x",
-            old_time.as_secs_f64() / new_time.as_secs_f64()
-        );
-        assert!(
-            new_time < old_time,
-            "shared surface IDs should beat owned String clones"
-        );
-    }
 }

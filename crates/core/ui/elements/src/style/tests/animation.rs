@@ -1,6 +1,5 @@
 use super::super::parse::parse_transition_properties;
 use super::super::*;
-use super::resolution::*;
 use crate::tree::ElementState;
 use mesh_core_component::style::{Selector, StyleRule, StyleValue};
 
@@ -478,16 +477,6 @@ mix-blend-mode: multiply;
     assert_eq!(style.overflow_x, Overflow::Hidden);
     assert_eq!(style.overflow_y, Overflow::Hidden);
     assert_eq!(style.mix_blend_mode, BlendMode::Multiply);
-}
-
-#[test]
-fn pseudo_state_rules_still_apply_after_variable_support() {
-    pseudo_state_rules_apply_when_state_matches();
-}
-
-#[test]
-fn container_query_rules_still_apply_after_variable_support() {
-    container_query_rules_apply_against_context();
 }
 
 #[test]

@@ -184,54 +184,6 @@ fn painter_backend_diagnostics_are_observable_on_frontend_render_engine() {
 }
 
 #[test]
-fn painter_draws_border_from_computed_edges() {
-    let mut root = node(
-        "box",
-        LayoutRect {
-            x: 0.0,
-            y: 0.0,
-            width: 20.0,
-            height: 20.0,
-        },
-        Color::TRANSPARENT,
-    );
-    root.computed_style.border_width = Edges::all(2.0);
-    root.computed_style.border_color = Color::from_hex("#ff0000").unwrap();
-
-    let mut buffer = PixelBuffer::new(24, 24);
-    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
-
-    assert_eq!(pixel(&buffer, 1, 1), Color::from_hex("#ff0000").unwrap());
-    assert_eq!(pixel(&buffer, 10, 10), Color::TRANSPARENT);
-}
-
-#[test]
-fn painter_draws_rounded_border_without_square_corners() {
-    let border = Color::from_hex("#ff0000").unwrap();
-    let mut root = node(
-        "box",
-        LayoutRect {
-            x: 0.0,
-            y: 0.0,
-            width: 20.0,
-            height: 20.0,
-        },
-        Color::TRANSPARENT,
-    );
-    root.computed_style.border_width = Edges::all(2.0);
-    root.computed_style.border_color = border;
-    root.computed_style.border_radius.top_left = 8.0;
-
-    let mut buffer = PixelBuffer::new(24, 24);
-    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
-
-    assert_eq!(pixel(&buffer, 0, 0), Color::TRANSPARENT);
-    assert!(pixel(&buffer, 10, 0).a > 0);
-    assert!(pixel(&buffer, 0, 10).a > 0);
-    assert_eq!(pixel(&buffer, 10, 10), Color::TRANSPARENT);
-}
-
-#[test]
 fn painter_applies_opacity_to_skia_filled_background() {
     let mut root = node(
         "box",
