@@ -218,6 +218,18 @@ impl FrontendSurfaceComponent {
                     );
                 }
             }
+            for rule in theme.user_stylesheet() {
+                collect_selector_state_dependencies(&rule.state, &mut state_dependencies);
+                if state_rule_requires_layout(
+                    &rule.state,
+                    rule.declarations.iter().map(|decl| decl.property.as_str()),
+                ) {
+                    collect_selector_state_dependencies(
+                        &rule.state,
+                        &mut layout_state_dependencies,
+                    );
+                }
+            }
             self.cached_restyle_state_dependencies = state_dependencies;
             self.cached_layout_state_dependencies = layout_state_dependencies;
             rules.sort_by_key(|rule| selector_contains_state(&rule.selector));

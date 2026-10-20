@@ -819,11 +819,15 @@ fn line_column_to_offset(source: &str, line: usize, column: usize) -> usize {
         .min(source.len())
 }
 
-fn validate_source_structure(source: &str, source_base: usize) -> Result<(), LoweringError> {
+pub(crate) fn validate_source_structure(
+    source: &str,
+    source_base: usize,
+) -> Result<(), LoweringError> {
     let mut in_comment = false;
     let mut in_quote = None;
     let mut escaped = false;
     let mut last_close = None;
+    let mut open_braces = Vec::new();
     let bytes = source.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
@@ -852,9 +856,21 @@ fn validate_source_structure(source: &str, source_base: usize) -> Result<(), Low
             index += 2;
             continue;
         }
+        if bytes[index] == b'\\' {
+            index += 2;
+            continue;
+        }
         if bytes[index] == b'\'' || bytes[index] == b'"' {
             in_quote = Some(bytes[index]);
+        } else if bytes[index] == b'{' {
+            open_braces.push(index);
         } else if bytes[index] == b'}' {
+            if open_braces.pop().is_none() {
+                return Err(error(
+                    "unexpected closing CSS brace",
+                    SourceSpan::new(source_base + index, source_base + index + 1),
+                ));
+            }
             last_close = Some(index);
         }
         index += 1;
@@ -875,6 +891,12 @@ fn validate_source_structure(source: &str, source_base: usize) -> Result<(), Low
                 source_base + source.len().saturating_sub(1),
                 source_base + source.len(),
             ),
+        ));
+    }
+    if let Some(open) = open_braces.last() {
+        return Err(error(
+            "missing closing CSS brace",
+            SourceSpan::new(source_base + open, source_base + source.len()),
         ));
     }
     if let Some(close) = last_close {

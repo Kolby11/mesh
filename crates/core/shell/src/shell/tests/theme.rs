@@ -1220,3 +1220,62 @@ fn publishing_a_theme_service_method_names_the_proxy_call() {
         "{outcome:?}"
     );
 }
+
+#[test]
+fn user_part_stylesheet_reloads_atomically_from_profile_preferences() {
+    let _env_lock = settings_env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    let settings_path = dir.path().join("settings.json");
+    let graph_path = dir.path().join("module.json");
+    fs::write(
+        &settings_path,
+        r#"{"shell":{"theme":{"active":"@mesh/test-theme:parts"}}}"#,
+    )
+    .unwrap();
+    fs::write(&graph_path, "{}").unwrap();
+    fs::create_dir_all(dir.path().join("profiles")).unwrap();
+    fs::write(dir.path().join("active-profile"), "default\n").unwrap();
+    let profile_path = dir.path().join("profiles/default.json");
+    let write_profile = |css: &str| {
+        fs::write(&profile_path, serde_json::json!({"schemaVersion":3,"roots":{},"settings":{"shell":{"theme":{"stylesheet":css}}}}).to_string()).unwrap();
+    };
+    write_profile("@mesh/bar::part(frame) { opacity: .5; }");
+    fs::write(
+        dir.path().join("theme.css"),
+        ":root { --color-surface: #123456; }",
+    )
+    .unwrap();
+    let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+    let _graph_path = EnvGuard::set("MESH_MODULE_GRAPH_PATH", &graph_path);
+    let mut shell = Shell::new();
+    let graph = graph_with_theme_source(dir.path(), "parts", "theme.css");
+    let prepared = crate::shell::prepare_theme_state_for_graph(&shell.settings, &graph)
+        .unwrap()
+        .unwrap();
+    assert_eq!(prepared.engine.active().user_stylesheet().len(), 1);
+    shell.theme = prepared.engine;
+    shell.theme_watch = prepared.watch;
+    shell.installed_module_graph = Some(graph);
+    let old_revision = shell.theme.active().revision();
+
+    write_profile("@mesh/bar::part(frame) { opacity: .7; }");
+    shell.settings_watch.modified_at = None;
+    shell.next_shell_settings_reload_check = std::time::Instant::now();
+    shell.reload_locale_if_settings_changed().unwrap();
+    assert!(shell.settings.theme.stylesheet.contains(".7"));
+    assert_ne!(shell.theme.active().revision(), old_revision);
+    let last_good = shell.theme.active().revision();
+
+    write_profile(".private { opacity: .1; }");
+    shell.settings_watch.modified_at = None;
+    shell.next_shell_settings_reload_check = std::time::Instant::now();
+    shell.reload_locale_if_settings_changed().unwrap();
+    assert_eq!(shell.theme.active().revision(), last_good);
+    assert!(shell.settings.theme.stylesheet.contains(".7"));
+
+    write_profile("");
+    shell.settings_watch.modified_at = None;
+    shell.next_shell_settings_reload_check = std::time::Instant::now();
+    shell.reload_locale_if_settings_changed().unwrap();
+    assert!(shell.theme.active().user_stylesheet().is_empty());
+}

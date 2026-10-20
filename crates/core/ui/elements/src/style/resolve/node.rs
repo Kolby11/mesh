@@ -114,6 +114,7 @@ impl<'a> StyleResolver<'a> {
         classes: &[String],
         id: Option<&str>,
         inline_style: Option<&str>,
+        parts: Option<&str>,
         context: StyleContext,
         state: ElementState,
         module_id: Option<&str>,
@@ -123,6 +124,7 @@ impl<'a> StyleResolver<'a> {
         let mut attrs = StyleNodeAttrs::new(tag, classes, id, state);
         attrs.module_id = module_id;
         attrs.inline_style = inline_style;
+        attrs.parts = parts;
         self.resolve_node_style_with_attrs_indexed_inner(
             rules,
             index,
@@ -459,6 +461,28 @@ impl<'a> StyleResolver<'a> {
                             let diagnostic_sink = diagnostics
                                 .as_mut()
                                 .map(|diagnostics| ("@inline", &mut **diagnostics));
+                            self.apply_indexed_declaration_with_mask(
+                                &mut style,
+                                declaration,
+                                diagnostic_sink,
+                                &mut scratch_variables,
+                                Some(&mut explicit_properties),
+                            );
+                        }
+                    }
+                    for (rule, declarations) in self
+                        .theme
+                        .user_stylesheet()
+                        .iter()
+                        .zip(&self.user_declarations)
+                    {
+                        if !self.user_rule_matches(rule, attrs) {
+                            continue;
+                        }
+                        for declaration in declarations.iter().filter(|decl| pass.includes(decl)) {
+                            let diagnostic_sink = diagnostics
+                                .as_mut()
+                                .map(|diagnostics| ("@user::part", &mut **diagnostics));
                             self.apply_indexed_declaration_with_mask(
                                 &mut style,
                                 declaration,

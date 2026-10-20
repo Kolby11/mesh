@@ -205,3 +205,28 @@ current repository graph remain backlog work.
 Source discovery uses the checkout, `$MESH_HOME/modules` and the system module
 roots. TOML `config.toml` is no longer loaded; package availability and desktop
 choices belong to the canonical root graph and profiles.
+
+## Customizing public style parts
+
+Expose an element from a module with `part="frame"`, then add CSS to the active
+profile's `settings.shell.theme.stylesheet` string:
+
+```json
+{
+  "settings": {
+    "shell": {
+      "theme": {
+        "stylesheet": "@mesh/navigation-bar::part(frame) { border-radius: 12px; }"
+      }
+    }
+  }
+}
+```
+
+Merge this into the existing profile settings. Changes reload live; invalid CSS
+leaves the previous live style intact. User rules override component and inline
+styles and may use theme variables and pseudo-states, such as
+`@mesh/navigation-bar::part(volume-button):hover { opacity: 0.8; }`. Only named
+public parts in the owning module match. An empty stylesheet clears the profile's
+customization. LSP completes public parts; `mesh-shell config doctor` reports
+removed or missing targets. See [the styling contract](../spec/04-styling.md#44-public-style-parts-and-user-stylesheets).

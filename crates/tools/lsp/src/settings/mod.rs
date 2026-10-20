@@ -18,6 +18,7 @@ use tower_lsp::lsp_types::{CompletionItem, Diagnostic, Hover, Position, Url};
 use crate::json;
 use crate::module_registry::ModuleRegistry;
 
+mod parts;
 pub mod schema;
 
 /// True if `uri` points at a MESH settings file.
@@ -30,6 +31,9 @@ pub fn is_settings_uri(uri: &Url) -> bool {
     let Some(path) = uri.to_file_path().ok() else {
         return false;
     };
+    if is_profile_uri(uri) {
+        return true;
+    }
     if path.file_name().and_then(|name| name.to_str()) != Some("settings.json") {
         return false;
     }
@@ -42,6 +46,35 @@ pub fn is_settings_uri(uri: &Url) -> bool {
             .and_then(|name| name.to_str()),
         Some("config") | Some("mesh")
     )
+}
+
+fn is_profile_uri(uri: &Url) -> bool {
+    uri.to_file_path().ok().is_some_and(|path| {
+        path.extension().is_some_and(|ext| ext == "json")
+            && path.parent().is_some_and(|parent| {
+                parent.file_name().is_some_and(|name| name == "profiles")
+                    && parent.parent().is_some_and(|root| {
+                        root.file_name()
+                            .is_some_and(|name| name == "config" || name == "mesh")
+                    })
+            })
+    })
+}
+
+fn document_schema(doc: &SettingsDocument, registry: &ModuleRegistry) -> json::schema::Node {
+    if is_profile_uri(&doc.uri) {
+        json::schema::open_obj(
+            "Shell profile",
+            vec![json::schema::field(
+                "settings",
+                false,
+                schema::root(registry),
+            )],
+            json::schema::scalar("Profile composition field", "value"),
+        )
+    } else {
+        schema::root(registry)
+    }
 }
 
 /// An open settings document.
@@ -61,7 +94,10 @@ pub fn complete(
     position: Position,
     registry: &ModuleRegistry,
 ) -> Vec<CompletionItem> {
-    json::complete::complete(&schema::root(registry), &doc.source, position)
+    if let Some(items) = parts::complete(doc, position, registry) {
+        return items;
+    }
+    json::complete::complete(&document_schema(doc, registry), &doc.source, position)
 }
 
 pub fn hover(
@@ -69,11 +105,17 @@ pub fn hover(
     position: Position,
     registry: &ModuleRegistry,
 ) -> Option<Hover> {
-    json::hover::hover(&schema::root(registry), &doc.source, position)
+    json::hover::hover(&document_schema(doc, registry), &doc.source, position)
 }
 
 pub fn diagnostics(doc: &SettingsDocument, registry: &ModuleRegistry) -> Vec<Diagnostic> {
-    json::diagnostics::check(&schema::root(registry), &doc.source, "mesh-settings")
+    let mut diagnostics = json::diagnostics::check(
+        &document_schema(doc, registry),
+        &doc.source,
+        "mesh-settings",
+    );
+    diagnostics.extend(parts::diagnostics(doc, registry));
+    diagnostics
 }
 
 #[cfg(test)]

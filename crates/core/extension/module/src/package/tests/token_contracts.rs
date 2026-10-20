@@ -531,3 +531,62 @@ fn shipped_glass_material_resolves_and_paints_under_every_theme_mode() {
         }
     }
 }
+
+#[test]
+fn doctor_reports_removed_parts_but_retains_uninstalled_targets() {
+    let dir = temp_dir("public-style-parts");
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("module.json"), r#"{"name":"@alice/parts","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"src/main.mesh"}}"#).unwrap();
+    fs::write(
+        dir.join("src/main.mesh"),
+        "<template><box part=\"frame\"/><icon class=\"private\" part=\"glyph\"/></template>",
+    )
+    .unwrap();
+    fs::create_dir_all(dir.join("extras")).unwrap();
+    fs::write(
+        dir.join("extras/alternate.mesh"),
+        "<template><text part=\"label\"/></template>",
+    )
+    .unwrap();
+    let graph = InstalledModuleGraph::from_parts(
+        root_with_modules(&[("@alice/parts", ModuleKind::Ui)], &[], None),
+        vec![load_module_manifest(&dir).unwrap()],
+    )
+    .unwrap();
+    assert_eq!(
+        graph
+            .style_parts("@alice/parts")
+            .into_iter()
+            .collect::<Vec<_>>(),
+        ["frame", "glyph", "label"]
+    );
+    assert!(
+        graph
+            .user_stylesheet_diagnostics("@alice/parts::part(glyph) { width: 20px; }")
+            .is_empty()
+    );
+    let diagnostics = graph.user_stylesheet_diagnostics(
+        "@alice/parts::part(private) { width: 20px; } @alice/missing::part(glyph) { width: 20px; }",
+    );
+    assert_eq!(diagnostics.len(), 2);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|message| message.contains("no longer exposes style part 'private'"))
+    );
+    assert!(
+        diagnostics
+            .iter()
+            .any(|message| message.contains("no installed module; rule retained"))
+    );
+    fs::write(
+        dir.join("src/main.mesh"),
+        "<template><box part=\"frame\"/></template>",
+    )
+    .unwrap();
+    assert!(
+        graph.user_stylesheet_diagnostics("@alice/parts::part(glyph) { width: 20px; }")[0]
+            .contains("no longer exposes")
+    );
+    fs::remove_dir_all(dir).unwrap();
+}

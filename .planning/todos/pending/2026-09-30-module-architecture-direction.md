@@ -21,18 +21,6 @@ consumers call `audio:supports("per-app-volume")`. Adding a feature is a minor
 version; a provider without it degrades cleanly. Validation rejects use of an
 unsupported feature's members.
 
-## A3. Style parts and a user stylesheet layer
-
-**Problem.** Customization stops at theme tokens and declared props. Anything
-else requires editing module source, which updates then overwrite.
-
-**Direction.** Authors mark public styling targets (`<icon part="glyph">`). A
-profile-scoped user stylesheet may target them
-(`@mesh/navigation-bar::part(glyph) { … }`). Parts are the module's versioned
-styling API, like props; unmarked elements stay private. Customization tiers
-become props (settings UI), parts (CSS), fork (A4) — only the last breaks
-updates. LSP completes parts; doctor warns on removed parts.
-
 ## A4. Tracked forks instead of in-place edits
 
 **Problem.** "Directly editable modules" conflicts with receiving updates;
@@ -77,5 +65,5 @@ their UIs are modules.
 
 ## Order
 
-A1, A7 and A5 have landed (see the October log). Next A3 and A6 (largest
-visible customization wins), A2, A8, and A4.
+A1, A7, A5 and A3 have landed (see the October log). Next A6 (independent
+widgets), A2, A8, and A4.

@@ -2014,3 +2014,49 @@ row {{ width: 240px; height: 80px; }}
         }
     }
 }
+
+#[test]
+fn user_part_hover_rules_schedule_restyle_and_classify_layout() {
+    for (declarations, needs_layout) in [("opacity: 0.4", false), ("width: 90px", true)] {
+        let mut theme = default_theme();
+        theme
+            .set_user_stylesheet(&format!(
+                "@test/reactive-surface::part(target):hover {{ {declarations}; }}"
+            ))
+            .unwrap();
+        let mut component = test_frontend_component(
+            r#"
+<template><row><box part="target" class="target"/><box class="sibling"/></row></template>
+<style>row { width: 240px; height: 80px; } .target { width: 60px; height: 40px; } .sibling { width: 20px; height: 20px; }</style>"#,
+        );
+        let mut buffer = PixelBuffer::new(240, 80);
+        let extent = SurfaceExtent::unpadded(240, 80);
+        for _ in 0..3 {
+            component
+                .paint_raster(&theme, extent, &mut buffer, 1.0)
+                .unwrap();
+        }
+        component.take_profiling_records();
+        component
+            .handle_input(
+                &theme,
+                240,
+                80,
+                ComponentInput::PointerMove { x: 20.0, y: 20.0 },
+            )
+            .unwrap();
+        assert_eq!(
+            component.dirty_types.contains(ComponentDirtyFlags::LAYOUT),
+            needs_layout
+        );
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
+        let target = first_node_by_class(component.last_tree.as_ref().unwrap(), "target").unwrap();
+        if needs_layout {
+            assert_eq!(target.layout.width, 90.0);
+        } else {
+            assert_eq!(target.computed_style.opacity, 0.4);
+        }
+    }
+}

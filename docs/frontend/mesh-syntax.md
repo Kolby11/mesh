@@ -291,9 +291,23 @@ Write static attributes as XML-style name/value pairs:
 <input type="range" min="0" max="100" />
 ```
 
+### Public style parts
+
+Expose stable styling targets on native elements with static names:
+
+```xml
+<button part="volume-button"><icon part="glyph volume-glyph" name="audio-volume-high" /></button>
+```
+
+Parts belong to the module authoring the element. Users customize them through
+profile CSS such as `@mesh/navigation-bar::part(glyph) { opacity: 0.8; }` in
+`settings.shell.theme.stylesheet`. Names are space-separated identifiers;
+`part` accepts static strings on native elements. Renaming a public part is a
+compatibility change. See [the public styling contract](../spec/04-styling.md#44-public-style-parts-and-user-stylesheets).
+
 ### Dynamic attribute binding
 
-Use `{}` to bind an expression to any attribute value:
+Use `{}` to bind an expression to runtime attribute values (`part` stays static):
 
 ```xml
 <button title={volume_tooltip} aria-label={volume_aria_label}>

@@ -72,7 +72,17 @@ fn release_profile_theme(profile: &mut mesh_core_module::package::ShellProfile) 
     else {
         return;
     };
+    let stylesheet = shell
+        .get("theme")
+        .and_then(|theme| theme.get("stylesheet"))
+        .cloned();
     shell.remove("theme");
+    if let Some(stylesheet) = stylesheet {
+        shell.insert(
+            "theme".into(),
+            serde_json::json!({ "stylesheet": stylesheet }),
+        );
+    }
     if shell.is_empty() {
         profile.settings.remove(mesh_core_config::SHELL_NAMESPACE);
     }
@@ -1283,5 +1293,25 @@ impl Shell {
                 Some(&durable_revision),
             ),
         })
+    }
+}
+
+#[cfg(test)]
+mod part_tests {
+    use super::*;
+
+    #[test]
+    fn releasing_a_theme_pin_preserves_profile_stylesheet() {
+        let mut profile = mesh_core_module::package::ShellProfile::new();
+        profile.settings.insert("shell".into(), serde_json::json!({"theme":{"active":"pinned","stylesheet":"@mesh/bar::part(frame) { opacity: .5; }"}}));
+        assert!(mesh_core_module::package::profile_pins_theme(&profile));
+        release_profile_theme(&mut profile);
+        assert!(!mesh_core_module::package::profile_pins_theme(&profile));
+        assert!(
+            profile.settings["shell"]["theme"]["stylesheet"]
+                .as_str()
+                .unwrap()
+                .contains("::part")
+        );
     }
 }

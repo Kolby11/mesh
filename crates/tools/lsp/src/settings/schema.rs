@@ -214,6 +214,9 @@ fn doc_for(path: &str) -> &'static str {
         // shell.theme
         "shell.theme" => "Theme selection. Winner-takes-all: exactly one theme is active.",
         "shell.theme.active" => "Id of the active theme.",
+        "shell.theme.stylesheet" => {
+            "User CSS targeting @scope/module::part(name). Store in a profile settings.shell.theme.stylesheet to customize that shell; applies after component and inline styles. Exposed parts form a versioned module API."
+        }
 
         // shell.i18n
         "shell.i18n" => "Locale selection for shell and module text.",

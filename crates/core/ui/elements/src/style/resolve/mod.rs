@@ -28,6 +28,7 @@ use cache::*;
 
 /// Resolves style values against a theme's design tokens.
 pub struct StyleResolver<'a> {
+    user_declarations: Vec<Vec<index::IndexedDeclaration>>,
     reuse_finalized: bool,
     incremental_matching: bool,
     theme_rule_indexes: RefCell<
@@ -61,6 +62,25 @@ impl<'a> StyleResolver<'a> {
     pub fn new(theme: &'a Theme) -> Self {
         Self {
             theme,
+            user_declarations: theme
+                .user_stylesheet()
+                .iter()
+                .map(|rule| {
+                    rule.declarations
+                        .iter()
+                        .map(|decl| {
+                            index::IndexedDeclaration::from_declaration(
+                                &mesh_core_component::style::Declaration {
+                                    property: decl.property.clone(),
+                                    value: mesh_core_component::style::classify_style_value(
+                                        &decl.value,
+                                    ),
+                                },
+                            )
+                        })
+                        .collect()
+                })
+                .collect(),
             reuse_finalized: false,
             incremental_matching: false,
             theme_rule_indexes: RefCell::new(HashMap::new()),
@@ -75,6 +95,18 @@ impl<'a> StyleResolver<'a> {
         }
     }
 
+    fn user_rule_matches(
+        &self,
+        rule: &mesh_core_theme::parts::PartRule,
+        attrs: &StyleNodeAttrs<'_>,
+    ) -> bool {
+        attrs.module_id == Some(rule.module.as_str())
+            && attrs
+                .parts
+                .is_some_and(|parts| parts.split_whitespace().any(|part| part == rule.part))
+            && selector_matches_attrs(&rule.state, attrs)
+    }
+
     fn theme_dependencies_preserve_matches(
         &self,
         module_id: Option<&str>,
@@ -82,6 +114,11 @@ impl<'a> StyleResolver<'a> {
         new: &StyleNodeAttrs<'_>,
         context: StyleContext,
     ) -> bool {
+        for rule in self.theme.user_stylesheet() {
+            if self.user_rule_matches(rule, old) != self.user_rule_matches(rule, new) {
+                return false;
+            }
+        }
         if old.state_mask == new.state_mask && old.classes.iter().eq(new.classes.iter()) {
             return true;
         }

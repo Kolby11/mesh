@@ -945,6 +945,7 @@ fn build_element_node(
             style_classes,
             style_id,
             attributes.get("style").map(String::as_str),
+            attributes.get("part").map(String::as_str),
             container_context,
             element_state,
             Some(&manifest.package.id),
@@ -958,7 +959,15 @@ fn build_element_node(
     node.event_handler_calls = event_handler_calls;
     node.computed_style = computed_style;
     if let Some(parent_style) = parent_style {
-        inherit_text_style(&mut node.computed_style, parent_style, inherited_mask);
+        let explicit = node.computed_style.explicit_properties;
+        let mask = StylePropertyMask {
+            color: inherited_mask.color || explicit.color,
+            font_family: inherited_mask.font_family || explicit.font_family,
+            font_size: inherited_mask.font_size || explicit.font_size,
+            font_weight: inherited_mask.font_weight || explicit.font_weight,
+            line_height: inherited_mask.line_height || explicit.line_height,
+        };
+        inherit_text_style(&mut node.computed_style, parent_style, mask);
     }
     node.accessibility = accessibility_for_element(source_tag, tag, &node.attributes);
     let mut accessibility_baseline = mesh_core_elements::AccessibilityInfo::default();

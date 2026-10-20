@@ -5,6 +5,7 @@
 //! inherit from the active theme.
 mod contract;
 pub mod css;
+pub mod parts;
 pub use contract::*;
 
 use serde::de::{MapAccess, Visitor};
@@ -817,6 +818,8 @@ pub struct Theme {
     modules: HashMap<String, ThemeModule>,
     #[serde(default)]
     rules: Vec<ThemeStyleRule>,
+    #[serde(skip)]
+    user_stylesheet: Vec<parts::PartRule>,
     /// Effective-value provenance for a composed snapshot. It is deliberately
     /// not serialized because it describes the current graph/settings inputs,
     /// not portable theme-file content.
@@ -848,6 +851,7 @@ impl Theme {
             metadata: ThemeMetadata::default(),
             modules: HashMap::new(),
             rules: Vec::new(),
+            user_stylesheet: Vec::new(),
             provenance: BTreeMap::new(),
             user_override_diagnostics: Vec::new(),
             revision: next_theme_revision(),
@@ -858,6 +862,18 @@ impl Theme {
     fn invalidate_style_snapshot(&mut self) {
         self.revision = next_theme_revision();
         self.resolved_tokens = Arc::default();
+    }
+
+    /// Replace user part rules atomically, preserving this snapshot on invalid CSS.
+    pub fn set_user_stylesheet(&mut self, source: &str) -> Result<(), String> {
+        let rules = parts::parse_user_stylesheet(source)?;
+        self.user_stylesheet = rules;
+        self.invalidate_style_snapshot();
+        Ok(())
+    }
+
+    pub fn user_stylesheet(&self) -> &[parts::PartRule] {
+        &self.user_stylesheet
     }
 
     pub fn revision(&self) -> u64 {
@@ -1342,6 +1358,7 @@ impl From<RawTheme> for Theme {
             metadata: raw.metadata,
             modules: raw.modules,
             rules: raw.rules,
+            user_stylesheet: Vec::new(),
             provenance: BTreeMap::new(),
             user_override_diagnostics: Vec::new(),
             revision: next_theme_revision(),
@@ -1782,6 +1799,7 @@ fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String>
         metadata: ThemeMetadata::default(),
         modules: HashMap::new(),
         rules: Vec::new(),
+        user_stylesheet: Vec::new(),
         provenance: BTreeMap::new(),
         user_override_diagnostics: Vec::new(),
         revision: next_theme_revision(),

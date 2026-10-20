@@ -22,6 +22,7 @@ pub struct ModuleRegistry {
     pub snapshot: Option<AuthoringSnapshot>,
     /// Maps module-id → Manifest for all discovered modules.
     pub manifests: HashMap<String, Manifest>,
+    pub style_parts: HashMap<String, std::collections::BTreeSet<String>>,
     /// Maps module-id → directory containing its manifest.
     pub module_dirs: HashMap<String, PathBuf>,
     /// Maps module-id → resolved main entrypoint path when present.
@@ -50,6 +51,7 @@ impl ModuleRegistry {
         Self {
             snapshot: None,
             manifests: HashMap::new(),
+            style_parts: HashMap::new(),
             module_dirs: HashMap::new(),
             module_entrypoints: HashMap::new(),
             interface_fields: HashMap::new(),
@@ -122,6 +124,9 @@ impl ModuleRegistry {
             registry
                 .module_dirs
                 .insert(module_id.clone(), module_dir.clone());
+            registry
+                .style_parts
+                .insert(module_id.clone(), snapshot.style_parts(&module_id));
             registry.manifests.insert(module_id, manifest);
         }
 

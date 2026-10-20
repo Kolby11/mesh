@@ -156,13 +156,13 @@ module's own declaration of a name shadows the same name from a family.
 - The base shell defaults pack is the template and recovery point: creating a
   theme = copy base, edit `theme.css`, select in settings.
 
-Per-node resolution order (unchanged, shipped):
+Per-node resolution order (shipped):
 
 ```
 ComputedStyle::default()
 → base shell defaults → active theme node → active theme tag rule
 → module-scope node → module-scope tag rule
-→ local stylesheet rules → pseudo-state rules
+→ local stylesheet rules → pseudo-state rules → inline styles → user part rules
 ```
 
 ## 4. Module theme contributions (`mesh.theme`)
@@ -229,14 +229,65 @@ surface. Class and id selectors reach into markup the module may rename in any
 release; doctor reports `theme_styles_component_internals` for each. A value
 set for a token the installed target does not declare reports
 `theme_sets_undeclared_module_token`. A block for a module that is not
-installed is harmless. **Target:** declared style parts ([A3](../BACKLOG.md))
-become the stable way to restyle a component's internals.
+installed is harmless. Declared style parts (§4.4) provide a stable public
+way to restyle exposed component elements.
 
 ### 4.3 Independent modules
 
 **Status: shipped.** `mesh.theme.independent: true` declares that a module
 deliberately ignores the active theme (a brand mark, an art piece). Coverage
 reports list it so users learn of it before they discover it.
+
+### 4.4 Public style parts and user stylesheets
+
+**Status: shipped.** Native elements expose static, space-separated names with
+`part="glyph volume-glyph"`. Names start with an ASCII letter or underscore and
+continue with ASCII letters, digits, underscores or hyphens. Bindings, empty
+names and `part` on a component instance are rejected. A part belongs to the
+module authoring that element, including its local components; importing a
+component does not transfer its parts to the host module. Parts are a versioned
+public styling API: renaming or removing one is a compatibility change.
+
+The user stylesheet lives in `settings.shell.theme.stylesheet` in a profile's
+JSON document. Shared `shell.theme.stylesheet` can supply a fallback; a profile
+string replaces it, and an empty string disables it for that profile. A stylesheet
+alone does not pin the theme, and releasing a theme pin preserves the stylesheet.
+
+```json
+{
+  "settings": {
+    "shell": {
+      "theme": {
+        "stylesheet": "@mesh/navigation-bar::part(frame) { border-radius: 12px; }"
+      }
+    }
+  }
+}
+```
+
+Each rule targets one scoped module and one exposed part:
+`@mesh/navigation-bar::part(glyph) { opacity: 0.8; }`. Optional pseudo-states may
+follow `::part()`: `:hover`, `:focus`, `:focus-visible`, `:active`, `:disabled`,
+`:checked` and the window states in §6.1; multiple states require all to match.
+Class/id selectors, private element targets, combinators, imports, container
+queries and keyframes are rejected in user CSS. Ordinary supported declarations,
+`var()` references and custom properties retain the normal style semantics.
+Rules apply in source order **after component and inline declarations**. Custom
+properties are resolved before ordinary properties across the full cascade.
+A part name never matches another module or an unmarked element.
+
+Profile activation, theme selection and settings reload prepare the stylesheet
+with the candidate theme. Invalid CSS retains the last-known-good live settings
+and theme; removing the string's contents clears its effects. The stylesheet
+limit is 256 KiB. Interaction dependencies include user rules, including layout
+invalidation for geometry or custom-property changes.
+
+LSP completes exposed module parts inside the stylesheet string in settings and
+profile documents. LSP and `mesh-shell config doctor` warn when a referenced part
+is missing or its module is uninstalled; those rules remain stored so restoring
+or reinstalling the module restores the customization. The navigation bar
+exposes `frame`, `start`, `center`, `end`, `volume-button`, `glyph` and
+`volume-glyph`.
 
 ## 5. User customization
 

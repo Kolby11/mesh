@@ -85,6 +85,13 @@ fn validate_inline_styles(
                 validate_inline_styles(source, declarations, &element.children)?;
             }
             TemplateNode::Component(component) => {
+                if let Some(attribute) = component.props.iter().find(|attr| attr.name == "part") {
+                    return Err(semantic_error(
+                        source,
+                        attribute.span.unwrap_or(component.span),
+                        "part is declared on native elements, not component instances",
+                    ));
+                }
                 validate_attributes(source, declarations, &component.props)?;
                 validate_inline_styles(source, declarations, &component.children)?;
             }
@@ -107,6 +114,24 @@ fn validate_attributes(
     attributes: &[Attribute],
 ) -> Result<(), ParseError> {
     for attribute in attributes {
+        if attribute.name == "part" {
+            let valid = match &attribute.value {
+                crate::AttributeValue::Static(value) => {
+                    !value.trim().is_empty()
+                        && value
+                            .split_whitespace()
+                            .all(mesh_core_theme::parts::valid_part_name)
+                }
+                _ => false,
+            };
+            if !valid {
+                return Err(semantic_error(
+                    source,
+                    attribute.span.unwrap_or_default(),
+                    "part requires static, space-separated public names (letters, digits, '_' and '-')",
+                ));
+            }
+        }
         if attribute.name != "style" {
             continue;
         }

@@ -28,8 +28,6 @@ unless an item says otherwise. IDs point into the
 
 ### Priority 7 — Customization and ecosystem
 
-- [ ] **A3:** Style parts (`part="…"`) plus a profile-scoped user stylesheet
-      targeting `::part()`.
 - [ ] **A6 / RES-05:** Ship bar widgets as separate `mesh.navigation.item`
       modules with per-instance props; share volume presentation in a library.
 - [ ] **A2:** Optional named features inside contracts with `supports()` checks.

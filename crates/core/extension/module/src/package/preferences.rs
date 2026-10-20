@@ -12,7 +12,7 @@ pub fn profile_pins_theme(profile: &super::ShellProfile) -> bool {
         .get(mesh_core_config::SHELL_NAMESPACE)
         .and_then(|shell| shell.get("theme"))
         .and_then(serde_json::Value::as_object)
-        .is_some_and(|theme| !theme.is_empty())
+        .is_some_and(|theme| theme.keys().any(|key| key != "stylesheet"))
 }
 
 fn shared_selects_theme(document: &serde_json::Value) -> bool {
@@ -307,6 +307,34 @@ mod tests {
                 .contains_key("@me/widget")
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn profile_stylesheets_are_sparse_and_do_not_pin_theme_selection() {
+        let shared = SettingsStore::from_value(
+            PathBuf::from("/settings.json"),
+            serde_json::json!({"shell":{"theme":{"active":"shared"}}}),
+        )
+        .unwrap();
+        let mut first = ShellProfile::new();
+        first.settings.insert(
+            "shell".into(),
+            serde_json::json!({"theme":{"stylesheet":"@mesh/bar::part(frame) { opacity: .5; }"}}),
+        );
+        let second = ShellProfile::new();
+        assert!(!profile_pins_theme(&first));
+        let effective = effective_profile_settings(shared.clone(), Some(&first)).unwrap();
+        assert_eq!(effective.shell().theme.active, "shared");
+        assert!(!effective.shell().theme.stylesheet.is_empty());
+        assert!(
+            effective_profile_settings(shared.clone(), Some(&second))
+                .unwrap()
+                .shell()
+                .theme
+                .stylesheet
+                .is_empty()
+        );
+        assert!(shared.shell().theme.stylesheet.is_empty());
     }
 
     #[test]

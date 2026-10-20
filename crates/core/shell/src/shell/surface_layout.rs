@@ -136,6 +136,9 @@ pub(super) fn prepare_theme_for_graph(
         module_layers,
         &user_overrides,
     )?;
+    theme
+        .set_user_stylesheet(&settings.theme.stylesheet)
+        .map_err(ThemeError::Composition)?;
     for message in skipped_overrides {
         theme.push_user_override_diagnostic(message);
     }

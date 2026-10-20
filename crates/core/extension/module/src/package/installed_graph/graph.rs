@@ -1102,6 +1102,50 @@ impl InstalledModuleGraph {
         })
     }
 
+    /// Public style parts declared by native elements in a module's components.
+    pub fn style_parts(&self, module_id: &str) -> BTreeSet<String> {
+        let Some(module) = self.modules.get(module_id) else {
+            return BTreeSet::new();
+        };
+        let Some(dir) = module.manifest_path.parent() else {
+            return BTreeSet::new();
+        };
+        scan_mesh_files_recursive(dir)
+            .into_iter()
+            .filter_map(|(_, source)| mesh_core_component::parse_component(&source).ok())
+            .flat_map(|component| mesh_core_component::style_parts(&component))
+            .collect()
+    }
+
+    /// Warn about stale public targets without discarding user customization.
+    pub fn user_stylesheet_diagnostics(&self, source: &str) -> Vec<String> {
+        let rules = match mesh_core_theme::parts::parse_user_stylesheet(source) {
+            Ok(rules) => rules,
+            Err(error) => return vec![error],
+        };
+        let mut catalogs = BTreeMap::new();
+        let mut diagnostics = BTreeSet::new();
+        for rule in rules {
+            if !self.modules.contains_key(&rule.module) {
+                diagnostics.insert(format!(
+                    "style target {}::part({}) has no installed module; rule retained",
+                    rule.module, rule.part
+                ));
+                continue;
+            }
+            let parts = catalogs
+                .entry(rule.module.clone())
+                .or_insert_with(|| self.style_parts(&rule.module));
+            if !parts.contains(&rule.part) {
+                diagnostics.insert(format!(
+                    "{} no longer exposes style part '{}'; update the user stylesheet",
+                    rule.module, rule.part
+                ));
+            }
+        }
+        diagnostics.into_iter().collect()
+    }
+
     pub fn module(&self, id: &str) -> Option<&InstalledModuleNode> {
         self.modules.get(id)
     }

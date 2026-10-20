@@ -1,8 +1,10 @@
 mod color_literals;
 pub use color_literals::{ComponentColorLiteral, component_color_literals};
 pub mod parser;
+mod parts;
 pub mod style;
 mod token_usage;
+pub use parts::style_parts;
 pub use token_usage::{ThemeTokenRead, unknown_theme_token_reads};
 /// Single-file component parser for `.mesh` files.
 ///

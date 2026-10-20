@@ -625,3 +625,29 @@ fn token_props_resolve_css_and_dotted_names_through_the_theme() {
         assert_eq!(text.computed_style.font_size, 32.0, "{reference}");
     }
 }
+
+#[test]
+fn user_parts_apply_in_preview_and_preserve_explicit_text_inheritance() {
+    let component = mesh_core_component::parse_component(r#"
+<template><column><text part="label" style="font-size: 10px">Public</text><text>Private</text></column></template>
+<style>column { font-size: 12px; } text { height: 20px; }</style>"#).unwrap();
+    let mut manifest = test_manifest();
+    manifest.package.id = "@test/preview".into();
+    let mut theme = mesh_core_theme::default_theme();
+    theme
+        .set_user_stylesheet(&format!(
+            "{}::part(label) {{ font-size: 27px; width: 80px; }}",
+            manifest.package.id
+        ))
+        .unwrap();
+    let rules = &component.style.as_ref().unwrap().rules;
+    let tree = build_widget_tree_from_component(
+        &component, &manifest, &theme, 200.0, 80.0, None, "root", None, rules,
+    );
+    let public = find_tag(&tree, "text").unwrap();
+    assert_eq!(public.computed_style.font_size, 27.0);
+    assert_eq!(
+        public.computed_style.width,
+        mesh_core_elements::style::Dimension::Px(80.0)
+    );
+}

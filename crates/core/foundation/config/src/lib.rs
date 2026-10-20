@@ -99,6 +99,7 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
             FieldSpec::new("mode", FieldKind::Str),
             FieldSpec::new("mode_policy", FieldKind::ThemeModePolicy),
             FieldSpec::new("tokens", FieldKind::Map(&THEME_TOKEN_VALUE)),
+            FieldSpec::new("stylesheet", FieldKind::Str),
         ]),
     ),
     FieldSpec::new(
@@ -338,6 +339,9 @@ pub struct ThemeSettings {
     pub mode_policy: ThemeModePolicy,
     #[serde(default)]
     pub tokens: HashMap<String, JsonValue>,
+    /// User CSS targeting the owning modules' public style parts.
+    #[serde(default)]
+    pub stylesheet: String,
 }
 
 impl Default for ThemeSettings {
@@ -347,6 +351,7 @@ impl Default for ThemeSettings {
             mode: None,
             mode_policy: ThemeModePolicy::Manual,
             tokens: HashMap::new(),
+            stylesheet: String::new(),
         }
     }
 }

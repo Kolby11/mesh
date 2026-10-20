@@ -272,6 +272,7 @@ pub(crate) struct FinalizedStyle {
     classes: Vec<String>,
     id: Option<String>,
     inline_style: Option<String>,
+    parts: Option<String>,
     hidden: Option<String>,
     promoted: (bool, bool),
     module_id: Option<String>,
@@ -291,6 +292,7 @@ impl FinalizedStyle {
             && self.module_id.as_deref() == node.module_id()
             && self.id.as_deref() == node.attributes.get("id").map(String::as_str)
             && self.inline_style.as_deref() == node.attributes.get("style").map(String::as_str)
+            && self.parts.as_deref() == node.attributes.get("part").map(String::as_str)
             && self.state == node.state
             && self.classes.iter().map(String::as_str).eq(node
                 .attributes
@@ -315,6 +317,7 @@ impl FinalizedStyle {
                 .unwrap_or_default(),
             id: node.attributes.get("id").cloned(),
             inline_style: node.attributes.get("style").cloned(),
+            parts: node.attributes.get("part").cloned(),
             hidden: node.attributes.get("hidden").cloned(),
             promoted: (node.is_promoted_popover(), node.is_promoted_window()),
             module_id: node.module_id().map(str::to_owned),
@@ -358,11 +361,14 @@ impl FinalizedStyle {
         if self.tag != attrs.tag
             || self.id.as_deref() != attrs.id
             || self.inline_style.as_deref() != attrs.inline_style
+            || self.parts.as_deref() != attrs.parts
             || self.module_id.as_deref() != attrs.module_id
         {
             return false;
         }
-        let old = StyleNodeAttrs::new(&self.tag, &self.classes, self.id.as_deref(), self.state);
+        let mut old = StyleNodeAttrs::new(&self.tag, &self.classes, self.id.as_deref(), self.state);
+        old.module_id = self.module_id.as_deref();
+        old.parts = self.parts.as_deref();
         index.changed_dependencies_preserve_matches(rules, &old, &attrs, context)
             && resolver.theme_dependencies_preserve_matches(
                 self.module_id.as_deref(),

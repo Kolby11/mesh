@@ -31,7 +31,7 @@ Lowercase tags are built-in MESH elements. PascalCase tags are imported componen
 
 ## Common Attributes
 
-Common attributes include `id`, `class`, `style`, `ref`, `label`, `aria-label`, `role`, `aria-role`, `title`, `disabled`, `readonly`, `required`, `value`, `checked`, `selected`, `expanded`, and `invalid`. Element-specific phases may add narrower attributes, but shared attributes keep diagnostics and Luau state handling consistent across families.
+Common attributes include `id`, `class`, `part`, `style`, `ref`, `label`, `aria-label`, `role`, `aria-role`, `title`, `disabled`, `readonly`, `required`, `value`, `checked`, `selected`, `expanded`, and `invalid`. Element-specific phases may add narrower attributes, but shared attributes keep diagnostics and Luau state handling consistent across families.
 
 ## Layout And Display Elements
 

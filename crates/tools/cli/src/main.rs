@@ -1387,6 +1387,14 @@ fn cmd_config_doctor() {
     // is resolved here — no surfaces are created and no Wayland connection is
     // made.
     let authoring_graph = load_authoring_snapshot();
+    for message in authoring_graph.user_stylesheet_diagnostics(&store.shell().theme.stylesheet) {
+        diagnostics.push(mesh_core_config::SettingsDiagnostic::warning(
+            "shell",
+            "theme.stylesheet",
+            message,
+            "target an installed module's declared style parts",
+        ));
+    }
     let mut shell = Shell::new();
     shell.discover_modules();
     if let Err(err) = shell.resolve_modules() {

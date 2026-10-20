@@ -77,6 +77,11 @@ const BOOL_VALUES: &[&str] = &["true", "false"];
 
 const MESH_ELEMENT_ATTRS: &[AttrDef] = &[
     AttrDef {
+        name: "part",
+        description: "Static, space-separated public style part names",
+        values: &[],
+    },
+    AttrDef {
         name: "class",
         description: "CSS class name(s)",
         values: &[],

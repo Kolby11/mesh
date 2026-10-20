@@ -8,6 +8,11 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
+- **A3 public style parts implemented:** static native-element parts and profile
+  user CSS support live reload, preview, state/layout invalidation, LSP completion
+  and doctor diagnostics. Theme pins preserve custom CSS. Affected checks pass;
+  frontend retains its two documented failures. Next customization item is A6.
+
 - **K parallel CPU raster implemented:** multi-surface CPU frames record paint
   in the VM phase and replay into each buffer on rayon before present; 3×
   1840×1800 full repaints 74.8–76.1 → 39.2–40.6 ms. Shell failure names match

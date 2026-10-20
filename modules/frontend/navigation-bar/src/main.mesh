@@ -8,16 +8,16 @@
 </props>
 
 <template>
-    <row class="nav-shell" class:nav-shell-blur={props.blur_enabled}>
-        <row class="status-cluster">
+    <row part="frame" class="nav-shell" class:nav-shell-blur={props.blur_enabled}>
+        <row part="start" class="status-cluster">
             <slot name="start" extension-point="mesh.navigation.item" mode="customizable" />
         </row>
 
-        <row class="center-cluster">
+        <row part="center" class="center-cluster">
             <slot name="center" extension-point="mesh.navigation.item" mode="customizable" />
         </row>
 
-        <row ref="control-cluster" class="right-cluster">
+        <row part="end" ref="control-cluster" class="right-cluster">
             <slot name="end" extension-point="mesh.navigation.item" mode="customizable" />
         </row>
     </row>

@@ -358,6 +358,7 @@ macro_rules! attribute_profile {
         &[
             attr("id", ElementAttributeType::String, "Template id attribute"),
             attr("class", ElementAttributeType::String, "Style class list"),
+            attr("part", ElementAttributeType::String, "Static public style part names"),
             attr("style", ElementAttributeType::String, "Inline style rules"),
             attr("ref", ElementAttributeType::String, "Template ref attribute"),
             attr("data-mesh-element", ElementAttributeType::String, "Original source element tag before runtime lowering"),

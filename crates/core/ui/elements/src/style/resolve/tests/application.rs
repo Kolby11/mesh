@@ -245,3 +245,101 @@ fn shared_typed_theme_value_cache_is_bounded() {
             .is_missing()
     );
 }
+
+#[test]
+fn user_part_cascade_respects_module_and_explicit_exposure() {
+    let mut theme = Theme::new("parts", "Parts");
+    theme.set_user_stylesheet("@mesh/bar::part(glyph) { --size: 23px; width: var(--size); opacity: .3; } @mesh/bar::part(glyph) { opacity: .6; } @mesh/bar::part(glyph):hover { width: 42px; }").unwrap();
+    let rules = vec![StyleRule {
+        selector: Selector::Tag("icon".into()),
+        declarations: vec![Declaration {
+            property: "opacity".into(),
+            value: StyleValue::Literal(".8".into()),
+        }],
+        container_query: None,
+    }];
+    let index = StyleRuleIndex::new(&rules);
+    let resolver = StyleResolver::new(&theme);
+    for (module, part, hover, expected) in [
+        ("@mesh/bar", Some("decoration glyph"), false, Some(23.0)),
+        ("@mesh/bar", Some("glyph"), true, Some(42.0)),
+        ("@other/bar", Some("glyph"), false, None),
+        ("@mesh/bar", None, false, None),
+        ("@mesh/bar", Some("glyph-extra"), false, None),
+    ] {
+        let mut node = WidgetNode::new("icon");
+        node.set_module_id(module);
+        node.attributes.insert("style".into(), "opacity: .9".into());
+        if let Some(part) = part {
+            node.attributes.insert("part".into(), part.into());
+        }
+        node.state.hovered = hover;
+        let (style, diagnostics) = resolver.resolve_node_style_with_diagnostics_for_node_indexed(
+            &rules,
+            &index,
+            &mut node,
+            StyleContext::default(),
+        );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            style.width,
+            expected
+                .map(crate::style::Dimension::Px)
+                .unwrap_or(crate::style::Dimension::Auto)
+        );
+        assert_eq!(style.opacity, if expected.is_some() { 0.6 } else { 0.9 });
+    }
+}
+
+#[test]
+fn user_part_memo_tracks_hover_exposure_and_replaced_stylesheets() {
+    let mut theme = Theme::new("parts", "Parts");
+    theme
+        .set_user_stylesheet(
+            "@mesh/bar::part(glyph) { opacity: .6; } @mesh/bar::part(glyph):hover { opacity: .2; }",
+        )
+        .unwrap();
+    let rules = vec![];
+    let index = StyleRuleIndex::new(&rules);
+    let mut node = WidgetNode::new("icon");
+    node.set_module_id("@mesh/bar");
+    node.attributes.insert("part".into(), "glyph".into());
+    let resolver = StyleResolver::new(&theme)
+        .with_incremental_matching()
+        .with_finalized_memo_styles(true);
+    resolver.restyle_subtree_with_index(&mut node, &rules, &index, StyleContext::default(), None);
+    assert_eq!(node.computed_style.opacity, 0.6);
+    let cached = node.finalized_style.clone().unwrap();
+    node.state.hovered = true;
+    assert!(!cached.same_matching_rules(
+        &mut node,
+        &rules,
+        &index,
+        StyleContext::default(),
+        &resolver
+    ));
+    node.finalized_style_valid = false;
+    resolver.restyle_subtree_with_index(&mut node, &rules, &index, StyleContext::default(), None);
+    assert_eq!(node.computed_style.opacity, 0.2);
+    node.attributes.remove("part");
+    assert!(!node.finalized_style.as_ref().unwrap().matches_node(&node));
+    node.finalized_style_valid = false;
+    resolver.restyle_subtree_with_index(&mut node, &rules, &index, StyleContext::default(), None);
+    assert_eq!(node.computed_style.opacity, 1.0);
+    drop(resolver);
+    node.attributes.insert("part".into(), "glyph".into());
+    let revision = theme.revision();
+    assert!(
+        theme
+            .set_user_stylesheet(".private { opacity: .1; }")
+            .is_err()
+    );
+    assert_eq!(theme.revision(), revision);
+    theme
+        .set_user_stylesheet("@mesh/bar::part(glyph) { opacity: .8; }")
+        .unwrap();
+    StyleResolver::new(&theme)
+        .with_finalized_memo_styles(true)
+        .restyle_subtree_with_index(&mut node, &rules, &index, StyleContext::default(), None);
+    assert_eq!(node.computed_style.opacity, 0.8);
+}
