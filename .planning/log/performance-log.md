@@ -6747,3 +6747,27 @@ both sides with identical failure names, diffed against a `HEAD` worktree.
 D9 workloads pass on both sides. Profiles: `backdrop_prepare_profile`,
 `glass_bar_clock_tick_profile`, `glass_dock_hover_animation_profile`
 (ignored, release-only).
+
+## 2026-10-20 — glass D9 workload gates
+
+`tools/check-performance` now runs three glass workloads beside the desk-bar
+D9 gates (`real_surfaces/glass.rs`, violet-glass theme with glass-material,
+CPU raster at scale 1). Three release runs on the development machine:
+
+| Metric | Workload | p90 | Ceiling |
+| --- | --- | --- | --- |
+| `d9_glass_dashboard_open_p90_ms` | 12 dashboard mounts + system/media/weather payloads + first 1920×1080 raster | 16.9–27.5 ms (p50 13.2–22.4) | 100 ms |
+| `d9_glass_dock_frame_p90_ms` | dock, 10 pinned / 150 installed apps, 2880×180, 180 steps, 55–66 requested frames | 6.5–8.4 ms (p50 2.6–2.9) | 16.667 ms |
+| `d9_glass_clock_tick_p90_ms` | 60 glass-bar clock ticks, 2880×100 | 1.25–1.79 ms (p50 1.0–1.6) | 16.667 ms |
+
+The test dashboard open is far below the 100–160 ms live first open, which
+adds the GPU first frame and a real backdrop. It gates the tree-build part.
+
+**Workload bug fixed.** `glass_bar_clock_tick_profile` drove ticks at
+`start + 1001 ms × n`, which ran ahead of real time. `task.sleep` re-queues
+from `Instant::now()`, so `run_due_tasks` kept re-running the clock task
+until real time caught up. The profile's per-tick wall times were ~1,001 ms,
+and its stage records summed many task re-runs per tick; the live glass-bar
+stage means in the entry above came from the running shell and are unaffected.
+Both the profile and the gate now tick at the component's next task
+deadline. The module compile step moved into a shared `GlassCatalog`.

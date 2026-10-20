@@ -163,6 +163,9 @@ use p90 rather than a single frame or the fastest sample.
 | `d9_scroll_p90_ms` | Settings Appearance, 240 icon themes and 240 fonts; 60 finger frames and 30 momentum ticks | 16.667 ms |
 | `d9_popover_open_p90_ms` | 12 theme popover openings from separate warmed navigation bars, input through first child raster | 100 ms |
 | `d9_theme_switch_p90_ms` | 24 alternating shipped dark/light modes, invalidation through navigation raster; pixels must change | 100 ms |
+| `d9_glass_dashboard_open_p90_ms` | 12 glass dashboard mounts with system, media and weather payloads, mount through first 1920×1080 raster | 100 ms |
+| `d9_glass_dock_frame_p90_ms` | Glass dock with 10 pinned and 150 installed apps at 2880×180; 180 steps crossing tiles every sixth, requested frames only, including the `dock-in` entrance | 16.667 ms |
+| `d9_glass_clock_tick_p90_ms` | 60 glass bar clock ticks at 2880×100, due script tasks through raster | 16.667 ms |
 
 These are initial absolute responsiveness ceilings with no extra percentage
 tolerance. They measure CPU raster at scale 1 (navigation 1920 pixels wide at
@@ -171,6 +174,9 @@ includes child allocation and painting; theme switching excludes theme file
 loading and persistent settings writes. Hover crossings may also disclose
 navigation popovers. Scroll retains its one-pass, no repeated restyle and
 retained-pixel-shift assertions. Frame pacing sleeps are outside scroll timing.
+The glass gates use the violet-glass theme with glass-material; the dashboard
+gate compiles its modules once outside the timed region. Clock ticks run at the
+clock task's own deadline, because task sleeps re-queue from the wall clock.
 
 The idle metric bounds shell reload-maintenance deadlines, not all OS thread
 wakeups or backend service traffic. Native subscription and watcher idle tests

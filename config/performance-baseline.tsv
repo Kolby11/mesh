@@ -92,3 +92,6 @@ d9_service_update_p90_ms upper 16.667 0
 d9_scroll_p90_ms upper 16.667 0
 d9_popover_open_p90_ms upper 100 0
 d9_theme_switch_p90_ms upper 100 0
+d9_glass_dashboard_open_p90_ms upper 100 0
+d9_glass_dock_frame_p90_ms upper 16.667 0
+d9_glass_clock_tick_p90_ms upper 16.667 0

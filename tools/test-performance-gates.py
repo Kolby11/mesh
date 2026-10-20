@@ -31,6 +31,9 @@ names = {
     "d9_theme_switch": [("theme_switch_p90_ms", 1)],
     "d9_coalesced_reload_wakeup_profile": [("idle_wakeups_per_minute", 30)],
     "d9_settings_scroll_frame_gate": [("scroll_p90_ms", 1)],
+    "d9_glass_dashboard_open": [("glass_dashboard_open_p90_ms", 1)],
+    "d9_glass_dock_animation": [("glass_dock_frame_p90_ms", 1)],
+    "d9_glass_bar_clock_tick": [("glass_clock_tick_p90_ms", 1)],
 }
 case = os.environ["GATE_CASE"]
 if case == "test-failure":
@@ -64,7 +67,7 @@ for argument in sys.argv:
     def test_complete_measurements_pass(self):
         result = self.run_gate()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(result.stdout.count(" PASS"), 6)
+        self.assertEqual(result.stdout.count(" PASS"), 9)
 
     def test_harness_prefix_preserves_measurements(self):
         result = self.run_gate("harness-prefix")

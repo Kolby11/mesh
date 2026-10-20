@@ -48,111 +48,140 @@ fn theme() -> Theme {
     .unwrap()
 }
 
-fn host(name: &str) -> FrontendSurfaceComponent {
-    let mut entries = HashMap::new();
-    for module in [
-        "glass-bar",
-        "glass-widgets",
-        "glass-dock",
-        "profile-switcher",
-        "profile-menu",
-    ] {
-        let dir = root().join("modules/frontend").join(module);
-        let manifest = mesh_core_module::manifest::load_canonical_manifest(&dir)
-            .unwrap()
-            .manifest;
-        let compiled = compile_frontend_module(&manifest, &dir)
-            .unwrap_or_else(|error| panic!("{module}: {error}"));
-        entries.insert(
-            format!("@mesh/{module}"),
-            FrontendCatalogEntry {
-                module_dir: dir,
-                compiled: compiled.into(),
-            },
-        );
-    }
-    let id = format!("@mesh/{name}");
-    let entry = entries[&id].clone();
-    let mut interfaces = InterfaceCatalog::default();
-    for interface in [
-        "apps",
-        "audio",
-        "brightness",
-        "media",
-        "network",
-        "power",
-        "recorder",
-        "weather",
-        "wm",
-    ] {
-        let path = root()
-            .join("modules/interfaces")
-            .join(interface)
-            .join("module.json");
-        let json: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        let contract = &json["mesh"]["interface"];
+const GLASS_MODULES: [&str; 6] = [
+    "glass-bar",
+    "glass-widgets",
+    "glass-dock",
+    "glass-dashboard",
+    "profile-switcher",
+    "profile-menu",
+];
+
+/// Compiled glass modules, contracts and locale, shared by every surface the
+/// tests mount. Building it compiles every module, so workloads that time a
+/// surface open prepare it once outside the measured region.
+struct GlassCatalog {
+    entries: HashMap<String, FrontendCatalogEntry>,
+    interfaces: InterfaceCatalog,
+    locale: mesh_core_locale::LocaleEngine,
+}
+
+impl GlassCatalog {
+    fn new() -> Self {
+        let mut entries = HashMap::new();
+        for module in GLASS_MODULES {
+            let dir = root().join("modules/frontend").join(module);
+            let manifest = mesh_core_module::manifest::load_canonical_manifest(&dir)
+                .unwrap()
+                .manifest;
+            let compiled = compile_frontend_module(&manifest, &dir)
+                .unwrap_or_else(|error| panic!("{module}: {error}"));
+            entries.insert(
+                format!("@mesh/{module}"),
+                FrontendCatalogEntry {
+                    module_dir: dir,
+                    compiled: compiled.into(),
+                },
+            );
+        }
+        let mut interfaces = InterfaceCatalog::default();
+        for interface in [
+            "apps",
+            "audio",
+            "brightness",
+            "media",
+            "network",
+            "notifications",
+            "power",
+            "recorder",
+            "system",
+            "visualizer",
+            "weather",
+            "wm",
+        ] {
+            let path = root()
+                .join("modules/interfaces")
+                .join(interface)
+                .join("module.json");
+            let json: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            let contract = &json["mesh"]["interface"];
+            interfaces.register_contract(
+                mesh_core_service::contract::parse_interface_contract(
+                    contract["name"].as_str().unwrap(),
+                    contract["version"].as_str().unwrap(),
+                    &contract["contract"],
+                )
+                .unwrap(),
+            );
+            interfaces.register_provider(mesh_core_service::InterfaceProvider {
+                interface: contract["name"].as_str().unwrap().into(),
+                version: Some(contract["version"].as_str().unwrap().into()),
+                base_module: None,
+                provider_module: "@test/glass-services".into(),
+                backend_name: interface.into(),
+                priority: 1,
+            });
+        }
         interfaces.register_contract(
             mesh_core_service::contract::parse_interface_contract(
-                contract["name"].as_str().unwrap(),
-                contract["version"].as_str().unwrap(),
-                &contract["contract"],
+                "mesh.packages",
+                "1.0",
+                &serde_json::json!({"state": [
+                {"name":"profiles","type":"string[]"}, {"name":"active_profile","type":"string"}
+            ], "methods": [{"name":"switch_profile", "args":[{"name":"profile_id","type":"string"}]}]}),
             )
             .unwrap(),
         );
-        interfaces.register_provider(mesh_core_service::InterfaceProvider {
-            interface: contract["name"].as_str().unwrap().into(),
-            version: Some(contract["version"].as_str().unwrap().into()),
-            base_module: None,
-            provider_module: "@test/glass-services".into(),
-            backend_name: interface.into(),
-            priority: 1,
-        });
+        let mut locale = mesh_core_locale::LocaleEngine::new("en");
+        for module in ["glass-bar", "glass-dock", "glass-dashboard"] {
+            let path = root()
+                .join("modules/frontend")
+                .join(module)
+                .join("config/i18n/en.json");
+            let catalog: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            locale.load_module_catalog(
+                &format!("@mesh/{module}"),
+                mesh_core_locale::compile_catalog("en", &catalog),
+            );
+        }
+        Self {
+            entries,
+            interfaces,
+            locale,
+        }
     }
-    interfaces.register_contract(
-        mesh_core_service::contract::parse_interface_contract(
-            "mesh.packages",
-            "1.0",
-            &serde_json::json!({"state": [
-            {"name":"profiles","type":"string[]"}, {"name":"active_profile","type":"string"}
-        ], "methods": [{"name":"switch_profile", "args":[{"name":"profile_id","type":"string"}]}]}),
-        )
-        .unwrap(),
-    );
-    let catalog = FrontendCatalog {
-        modules: entries,
-        ..Default::default()
-    };
-    let mut locale = mesh_core_locale::LocaleEngine::new("en");
-    for module in ["glass-bar", "glass-dock"] {
-        let path = root()
-            .join("modules/frontend")
-            .join(module)
-            .join("config/i18n/en.json");
-        let catalog: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        locale.load_module_catalog(
-            &format!("@mesh/{module}"),
-            mesh_core_locale::compile_catalog("en", &catalog),
+
+    fn mount(&self, name: &str) -> FrontendSurfaceComponent {
+        let id = format!("@mesh/{name}");
+        let entry = self.entries[&id].clone();
+        let catalog = FrontendCatalog {
+            modules: self.entries.clone(),
+            ..Default::default()
+        };
+        let mut component = FrontendSurfaceComponent::new_for_test(
+            (*entry.compiled).clone(),
+            entry.module_dir,
+            catalog,
+            self.interfaces.clone(),
+            test_settings_store(),
         );
+        component.locale = self.locale.snapshot();
+        component
+            .mount(ComponentContext {
+                component_id: id.clone(),
+                surface_id: id.clone(),
+                diagnostics: Diagnostics::new(id),
+            })
+            .unwrap();
+        component.visible = true;
+        component
     }
-    let mut component = FrontendSurfaceComponent::new_for_test(
-        (*entry.compiled).clone(),
-        entry.module_dir,
-        catalog,
-        interfaces,
-        test_settings_store(),
-    );
-    component.locale = locale.snapshot();
-    component
-        .mount(ComponentContext {
-            component_id: id.clone(),
-            surface_id: id.clone(),
-            diagnostics: Diagnostics::new(id),
-        })
-        .unwrap();
-    component.visible = true;
-    component
+}
+
+fn host(name: &str) -> FrontendSurfaceComponent {
+    GlassCatalog::new().mount(name)
 }
 
 fn paint(component: &mut FrontendSurfaceComponent, width: u32, height: u32) -> PixelBuffer {
@@ -418,11 +447,11 @@ fn glass_bar_clock_tick_profile() {
     component
         .paint_raster(&theme, extent, &mut pixels, 1.0)
         .unwrap();
-    let start = std::time::Instant::now();
-    let mut tick = |component: &mut FrontendSurfaceComponent, second: u32| {
-        component
-            .run_due_script_tasks(start + Duration::from_millis(1_001 * u64::from(second)))
-            .unwrap();
+    // Task sleeps re-queue from the wall clock, so a tick time that runs
+    // ahead of it would re-run the clock task until real time caught up.
+    let mut tick = |component: &mut FrontendSurfaceComponent, _second: u32| {
+        let due = component.next_script_task_deadline().expect("clock task");
+        component.run_due_script_tasks(due).unwrap();
         component
             .paint_raster(&theme, extent, &mut pixels, 1.0)
             .unwrap();
@@ -559,4 +588,148 @@ fn glass_dock_hover_animation_profile() {
         );
         component.set_profiling_enabled(false);
     }
+}
+
+fn d9_report(metric: &str, mut samples: Vec<Duration>) {
+    assert!(!samples.is_empty());
+    samples.sort();
+    let at = |fraction: f64| {
+        samples[((samples.len() - 1) as f64 * fraction).round() as usize].as_secs_f64() * 1000.0
+    };
+    println!("MESH_PERF metric={metric} value={:.6}", at(0.9));
+    eprintln!(
+        "{metric}: n={} p50={:.3}ms p90={:.3}ms",
+        samples.len(),
+        at(0.5),
+        at(0.9)
+    );
+}
+
+fn dashboard_payloads(component: &mut FrontendSurfaceComponent) {
+    update(
+        component,
+        "mesh.system",
+        serde_json::json!({"available":true,"cpu":37,"memory":52,"uptime":93_784}),
+    );
+    update(
+        component,
+        "mesh.media",
+        serde_json::json!({"available":true,"playing":true,"title":"Track","artist":"Artist","position":42,"length":215}),
+    );
+    update(
+        component,
+        "mesh.weather",
+        serde_json::json!({"available":true,"location":"Bratislava","temperature":17,"unit":"C","condition":"cloudy","is_day":true}),
+    );
+}
+
+// Each sample mounts the dashboard, delivers its services and paints the
+// first frame: the work a first open pays before anything is on screen.
+#[test]
+#[ignore = "D9 release workload budget: glass dashboard mount through first raster"]
+fn d9_glass_dashboard_open() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    const WIDTH: u32 = 1920;
+    const HEIGHT: u32 = 1080;
+    let theme = theme();
+    let catalog = GlassCatalog::new();
+    let extent = SurfaceExtent::unpadded(WIDTH, HEIGHT);
+    let mut samples = Vec::new();
+    for _ in 0..12 {
+        let mut pixels = PixelBuffer::new(WIDTH, HEIGHT);
+        let started = std::time::Instant::now();
+        let mut component = catalog.mount("glass-dashboard");
+        dashboard_payloads(&mut component);
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+        samples.push(started.elapsed());
+        assert!(
+            pixels.data().chunks_exact(4).any(|pixel| pixel[3] > 0),
+            "opened dashboard must paint pixels"
+        );
+        let texts = rendered_text(&component);
+        assert!(texts.iter().any(|text| text == "Bratislava"), "{texts:?}");
+    }
+    d9_report("d9_glass_dashboard_open_p90_ms", samples);
+}
+
+// Only frames the component asks for are timed, like the shell's frame
+// callbacks; the first pass covers the shelf's `dock-in` entrance.
+#[test]
+#[ignore = "D9 release workload budget: glass dock hover animation frames"]
+fn d9_glass_dock_animation() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    const WIDTH: u32 = 2880;
+    const HEIGHT: u32 = 180;
+    let theme = theme();
+    let mut component = host("glass-dock");
+    update(&mut component, "mesh.apps", glass_apps_payload(10, 150));
+    let extent = SurfaceExtent::unpadded(WIDTH, HEIGHT);
+    let mut pixels = PixelBuffer::new(WIDTH, HEIGHT);
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    let tiles: Vec<_> = (0..10)
+        .map(|index| {
+            let key = reference(&component, &format!("app-{index}"));
+            find_node_bounds_by_key(component.last_tree.as_ref().unwrap(), &key, 0.0, 0.0).unwrap()
+        })
+        .collect();
+    let mut samples = Vec::new();
+    for step in 0..180usize {
+        let started = std::time::Instant::now();
+        if step % 6 == 0 {
+            let (left, top, right, bottom) = tiles[(step / 6) % tiles.len()];
+            component
+                .handle_input(
+                    &theme,
+                    WIDTH,
+                    HEIGHT,
+                    ComponentInput::PointerMove {
+                        x: (left + right) / 2.0,
+                        y: (top + bottom) / 2.0,
+                    },
+                )
+                .unwrap();
+        }
+        if component.wants_render() {
+            component
+                .paint_raster(&theme, extent, &mut pixels, 1.0)
+                .unwrap();
+            samples.push(started.elapsed());
+        }
+    }
+    assert!(samples.len() >= 30, "hover must animate: {} frames", samples.len());
+    d9_report("d9_glass_dock_frame_p90_ms", samples);
+}
+
+#[test]
+#[ignore = "D9 release workload budget: glass bar clock tick through raster"]
+fn d9_glass_bar_clock_tick() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    const WIDTH: u32 = 2880;
+    const HEIGHT: u32 = 100;
+    let theme = theme();
+    let mut component = host("glass-bar");
+    let extent = SurfaceExtent::unpadded(WIDTH, HEIGHT);
+    let mut pixels = PixelBuffer::new(WIDTH, HEIGHT);
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    // Task sleeps re-queue from the wall clock, so ticks use the clock
+    // task's own deadline rather than a synthetic time that runs ahead.
+    let mut samples = Vec::new();
+    for second in 1..=64u64 {
+        let due = component.next_script_task_deadline().expect("clock task");
+        let started = std::time::Instant::now();
+        component.run_due_script_tasks(due).unwrap();
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+        if second > 4 {
+            samples.push(started.elapsed());
+        }
+    }
+    d9_report("d9_glass_clock_tick_p90_ms", samples);
 }

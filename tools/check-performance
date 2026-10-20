@@ -41,7 +41,8 @@ if len(executables) != 1:
 print(executables[0])
 ')"
   for test_name in d9_navigation_updates d9_popover_open d9_theme_switch \
-      d9_settings_scroll_frame_gate d9_coalesced_reload_wakeup_profile; do
+      d9_settings_scroll_frame_gate d9_coalesced_reload_wakeup_profile \
+      d9_glass_dashboard_open d9_glass_dock_animation d9_glass_bar_clock_tick; do
     if ! output="$("$test_binary" "$test_name" --ignored --nocapture --test-threads=1 2>&1)"; then
       printf '%s\n' "$output"
       return 1
@@ -148,7 +149,7 @@ run_d9_workloads
 awk -v workloads_only="$workloads_only" '
   BEGIN {
     failed = 0
-    split("d9_idle_wakeups_per_minute d9_hover_p90_ms d9_service_update_p90_ms d9_scroll_p90_ms d9_popover_open_p90_ms d9_theme_switch_p90_ms", required, " ")
+    split("d9_idle_wakeups_per_minute d9_hover_p90_ms d9_service_update_p90_ms d9_scroll_p90_ms d9_popover_open_p90_ms d9_theme_switch_p90_ms d9_glass_dashboard_open_p90_ms d9_glass_dock_frame_p90_ms d9_glass_clock_tick_p90_ms", required, " ")
     for (i in required) expected[required[i]] = 1
   }
   FNR == NR {

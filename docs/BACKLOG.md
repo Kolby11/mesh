@@ -324,8 +324,6 @@ of payoff.
 From the 2026-10-20 live `glass` captures; evidence in the
 [performance log](../.planning/log/performance-log.md).
 
-- [ ] Add glass-composition D9 workloads (dashboard open, dock animation, clock
-      tick) to `check-performance`; the current gates use the desk bar only.
 - [ ] A closed `<popover>`'s content stays in the parent tree and every
       per-frame pass walks it (dock launcher: ~1,700 hidden nodes).
 - [ ] Layout-affecting animations still take the full retained update; scope
