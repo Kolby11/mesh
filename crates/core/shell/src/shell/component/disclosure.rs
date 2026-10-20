@@ -113,9 +113,30 @@ impl DisclosureRegistry {
 
 pub(super) fn popover_is_open(node: &WidgetNode) -> bool {
     node.attributes.get("open").is_some_and(|value| {
-        let value = value.trim().to_ascii_lowercase();
-        !matches!(value.as_str(), "" | "false" | "0" | "none")
+        let value = value.trim();
+        !(value.is_empty()
+            || value == "0"
+            || value.eq_ignore_ascii_case("false")
+            || value.eq_ignore_ascii_case("none"))
     })
+}
+
+impl FrontendSurfaceComponent {
+    /// Whether `node` is a promoted popover wrapper whose popover is closed
+    /// and not playing an entrance or exit. Such a subtree is neither painted
+    /// in the parent nor mapped as a child surface, so per-frame passes skip
+    /// it; it is built, restyled and laid out like any other subtree.
+    pub(super) fn is_dormant_popover_wrapper(&self, node: &WidgetNode) -> bool {
+        node.is_promoted_popover()
+            && node.children.first().is_some_and(|popover| {
+                source_element_tag(popover) == "popover"
+                    && !popover_is_open(popover)
+                    && popover.mesh_key().is_none_or(|key| {
+                        !self.closing_child_keys.contains(key)
+                            && !self.entering_child_keys.contains(key)
+                    })
+            })
+    }
 }
 
 pub(super) fn popover_anchor_reference(popover: &WidgetNode) -> Option<&str> {

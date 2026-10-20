@@ -733,3 +733,63 @@ fn d9_glass_bar_clock_tick() {
     }
     d9_report("d9_glass_clock_tick_p90_ms", samples);
 }
+
+fn launcher_wrapper(component: &FrontendSurfaceComponent) -> &WidgetNode {
+    fn find(node: &WidgetNode) -> Option<&WidgetNode> {
+        if node.is_promoted_popover()
+            && node.children.first().is_some_and(|popover| {
+                popover
+                    .attributes
+                    .get("class")
+                    .is_some_and(|class| class.contains("launcher-shell"))
+            })
+        {
+            return Some(node);
+        }
+        node.children.iter().find_map(find)
+    }
+    find(component.last_tree.as_ref().unwrap()).expect("launcher popover wrapper")
+}
+
+#[test]
+fn closed_popover_subtree_is_skipped_until_it_opens_or_exits() {
+    let mut component = host("glass-dock");
+    update(&mut component, "mesh.apps", glass_apps_payload(4, 24));
+    paint(&mut component, 1920, 180);
+    paint(&mut component, 1920, 180);
+    let wrapper = launcher_wrapper(&component);
+    assert!(component.is_dormant_popover_wrapper(wrapper));
+    let popover = &wrapper.children[0];
+    let popover_id = popover.id;
+    let popover_key = popover.mesh_key().unwrap().to_owned();
+
+    press(&mut component, "glassLauncher", 1920, 180);
+    assert_eq!(component.child_surface_requests().len(), 1);
+    assert!(!component.is_dormant_popover_wrapper(launcher_wrapper(&component)));
+    paint(&mut component, 1920, 180);
+
+    component
+        .handle_input(
+            &theme(),
+            1920,
+            180,
+            ComponentInput::KeyPressed {
+                key: "Escape".into(),
+                modifiers: Default::default(),
+            },
+        )
+        .unwrap();
+    paint(&mut component, 1920, 180);
+    assert!(component.child_surface_requests().is_empty());
+    assert!(component.is_dormant_popover_wrapper(launcher_wrapper(&component)));
+
+    // The shell keeps the popup mapped for its exit: the subtree must sample
+    // again, transitioning from the resting style it showed while closed.
+    component.set_closing_child_keys([popover_key].into_iter().collect());
+    assert!(!component.is_dormant_popover_wrapper(launcher_wrapper(&component)));
+    paint(&mut component, 1920, 180);
+    assert!(
+        component.transitions.contains_key(popover_id),
+        "the exit class must start the launcher's own transition"
+    );
+}

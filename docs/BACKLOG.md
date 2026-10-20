@@ -324,8 +324,6 @@ of payoff.
 From the 2026-10-20 live `glass` captures; evidence in the
 [performance log](../.planning/log/performance-log.md).
 
-- [ ] A closed `<popover>`'s content stays in the parent tree and every
-      per-frame pass walks it (dock launcher: ~1,700 hidden nodes).
 - [ ] Layout-affecting animations still take the full retained update; scope
       them like paint/layer animations, adding geometry-moved descendants.
 - [ ] Runtime style diagnostics re-resolve every style-dirty node with

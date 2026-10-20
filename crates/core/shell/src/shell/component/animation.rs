@@ -163,7 +163,12 @@ impl FrontendSurfaceComponent {
         let mut styles = std::mem::take(&mut self.previous_visual_styles_scratch);
         styles.clear();
         if let Some(last_tree) = self.last_tree.as_ref() {
-            collect_visual_styles_into(last_tree, &mut styles);
+            collect_visual_styles_with_container(
+                last_tree,
+                (last_tree.layout.width, last_tree.layout.height),
+                &mut styles,
+                &|node| self.is_dormant_popover_wrapper(node),
+            );
         }
         styles
     }
@@ -287,6 +292,9 @@ impl FrontendSurfaceComponent {
         active_keyframe_bucket: &mut AnimationPropertyBucket,
         dirty_node_ids: &mut HashSet<NodeId>,
     ) {
+        if self.is_dormant_popover_wrapper(node) {
+            return;
+        }
         let entering = ancestor_entering
             || node
                 .attributes
@@ -763,21 +771,27 @@ fn theme_keyframe_stop(theme: &Theme, stop: &ThemeKeyframeStop) -> component_sty
 }
 
 #[cfg(test)]
+#[cfg(test)]
 pub(super) fn collect_visual_styles(root: &WidgetNode) -> HashMap<NodeId, AnimatableStyle> {
     let mut styles = HashMap::new();
-    collect_visual_styles_into(root, &mut styles);
+    collect_visual_styles_with_container(
+        root,
+        (root.layout.width, root.layout.height),
+        &mut styles,
+        &|_| false,
+    );
     styles
-}
-
-fn collect_visual_styles_into(node: &WidgetNode, styles: &mut HashMap<NodeId, AnimatableStyle>) {
-    collect_visual_styles_with_container(node, (node.layout.width, node.layout.height), styles);
 }
 
 fn collect_visual_styles_with_container(
     node: &WidgetNode,
     containing_block: (f32, f32),
     styles: &mut HashMap<NodeId, AnimatableStyle>,
+    skip: &dyn Fn(&WidgetNode) -> bool,
 ) {
+    if skip(node) {
+        return;
+    }
     if node.mesh_key().is_some() {
         styles.insert(
             node.id,
@@ -795,7 +809,7 @@ fn collect_visual_styles_with_container(
         .max(0.0),
     );
     for child in &node.children {
-        collect_visual_styles_with_container(child, child_container, styles);
+        collect_visual_styles_with_container(child, child_container, styles, skip);
     }
 }
 

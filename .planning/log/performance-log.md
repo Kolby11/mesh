@@ -6771,3 +6771,36 @@ and its stage records summed many task re-runs per tick; the live glass-bar
 stage means in the entry above came from the running shell and are unaffected.
 Both the profile and the gate now tick at the component's next task
 deadline. The module compile step moved into a shared `GlassCatalog`.
+
+## 2026-10-21 — skip closed popover subtrees in per-frame passes
+
+A promoted popover wrapper whose `<popover>` is closed, and is neither in
+`entering_child_keys` nor `closing_child_keys`, is now *dormant*
+(`is_dormant_popover_wrapper`). The style-animation pass and the
+previous-visual-style snapshot skip dormant subtrees, and child-surface
+request collection stops at any closed `<popover>`. The subtree is still
+built, restyled and laid out, so opening needs no rebuild. A popover becomes
+non-dormant as soon as the shell marks it closing, so its exit transition
+starts from the resting style kept in the last tree
+(`closed_popover_subtree_is_skipped_until_it_opens_or_exits`).
+
+Before, perf on `glass_dock_hover_animation_profile` (150 launcher apps,
+1,879 nodes) put `apply_style_animations_to_node` at 23% inclusive and
+`collect_child_surface_requests_with_diagnostics` at 2.7%. The hover-step
+time was outside the profiled stages.
+
+Release, dock 2880×180, 10 pinned / 150 installed apps:
+
+| Measure | Before | After |
+| --- | --- | --- |
+| `glass_dock_hover_animation_profile` warm-run p90 (runs 1–2) | 2.41–2.57 ms (one run) | 0.81–0.88 ms (three runs) |
+| `d9_glass_dock_frame_p90_ms` | 6.5–8.4 ms (three runs) | 3.4–4.7 ms (three runs) |
+
+The D9 dock workload paints 82–107 frames instead of 55–66: frames finish
+sooner, so the wall-clock transitions are sampled more often. Dashboard open
+and clock tick are unaffected (17.1–25.3 ms and 0.95–2.5 ms p90). Retained-tree
+annotation, fingerprinting and validation still walk dormant subtrees. They
+were each at most 2.4% after this change.
+
+Verified: release shell lib 900 passed / 42 failed on both sides with
+identical failure names (stashed baseline).

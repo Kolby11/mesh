@@ -46,10 +46,12 @@ pub(super) fn collect_child_surface_requests_with_diagnostics(
         return;
     }
 
-    if source_element_tag(node) == "popover"
-        && popover_is_open(node)
-        && let Some(node_key) = node.mesh_key()
-    {
+    let is_popover = source_element_tag(node) == "popover";
+    // A closed popover maps no surface, so nothing inside it can anchor one.
+    if is_popover && !popover_is_open(node) && !std::ptr::eq(root, node) {
+        return;
+    }
+    if is_popover && let Some(node_key) = node.mesh_key() {
         let placement = match PopoverPlacement::from_node(node) {
             Ok(placement) => Some(placement),
             Err(placement_diagnostics) => {
