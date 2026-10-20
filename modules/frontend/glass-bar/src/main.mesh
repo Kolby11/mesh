@@ -5,6 +5,12 @@
                 <button class="glyph-btn" onclick={onSettings} title="Settings" aria-label="Settings">
                     <icon class="glyph" name="settings" size="15" />
                 </button>
+                <button class="glyph-btn" onclick={onDashboard} title={t("bar.dashboard")} aria-label={t("bar.dashboard")}>
+                    <icon class="glyph" name="view-dashboard" size="15" />
+                </button>
+                <button class="glyph-btn" onclick={onWallpapers} title={t("bar.wallpapers")} aria-label={t("bar.wallpapers")}>
+                    <icon class="glyph" name="preferences-desktop-wallpaper" size="15" />
+                </button>
                 <ProfileSwitcher trigger_hover="var(--glass-hover)" />
             </row>
             <Clock />
@@ -31,9 +37,18 @@ local Recorder = require("./components/recorder.mesh")
 local Weather = require("./components/weather.mesh")
 local Status = require("./components/status.mesh")
 local ProfileSwitcher = require("@mesh/profile-switcher")
+local t = import("mesh.i18n", "t")
 
 function onSettings()
     mesh.shell.show_surface("@mesh/settings")
+end
+
+function onDashboard()
+    mesh.shell.toggle_surface("@mesh/glass-dashboard")
+end
+
+function onWallpapers()
+    mesh.shell.toggle_surface("@mesh/glass-wallpapers")
 end
 
 </script>

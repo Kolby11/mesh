@@ -28,14 +28,20 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/theme-selector` | embedded | `src/main.mesh` | Embeddable theme chooser |
 | `@mesh/glass-bar` | surface | `src/main.mesh` | Floating glass islands with clock/calendar, workspaces, media, recording, weather and a live audio/brightness control center |
 | `@mesh/glass-widgets` | surface | `src/main.mesh` | Responsive desktop media and weather cards with colour artwork and a three-point forecast |
-| `@mesh/glass-dock` | surface | `src/main.mesh` | Glass shelf with neighboring-icon magnification and a searchable pinned/running application popup |
+| `@mesh/glass-dock` | surface | `src/main.mesh` | Glass shelf with neighboring-icon magnification and a searchable launcher with grid and list views of installed applications |
+| `@mesh/glass-notifications` | surface | `src/main.mesh` | Glass notification toasts under the bar; shows itself while a notification is popped up |
+| `@mesh/glass-dashboard` | surface | `src/main.mesh` | Overlay with system meters and history, the current track with a live spectrum, notifications and weather |
+| `@mesh/glass-wallpapers` | surface | `src/main.mesh` | Overlay wallpaper picker: tilted carousel and colour strip; applies through `mesh.theme.set_backdrop_image` |
 | `@mesh/profile-switcher` | embedded | `src/main.mesh` | Shell switcher trigger; also a `mesh.navigation.item` contribution |
 | `@mesh/profile-menu` | embedded | `src/main.mesh` | Popover listing profiles; selecting one switches live via `mesh.packages` |
 
 The glass composition follows the liquid-glass showcase's floating islands,
 light rims, refracted translucent cards and raised dock lenses. The clock opens
 a month calendar; the rightmost status button opens quick
-controls; the dock's search button opens pinned/running applications. Popups
+controls; the dock's search button opens the application launcher. The bar's
+dashboard and wallpaper buttons toggle those overlays, which close with Escape,
+their close button or a click outside the panel. The media card grows a
+spectrum strip while audio plays. Popups
 support keyboard opening, Escape and outside dismissal through core disclosure.
 Control labels are available in English and Slovak. Audio and brightness use
 capability-gated providers; unavailable controls stay disabled.
@@ -60,6 +66,10 @@ and easing, with separate entrance animations for islands, cards and popups.
 | `@mesh/networkmanager-network` | backend | `src/main.luau` | `mesh.network` through `nmcli` |
 | `@mesh/hyprland-apps` | backend | `src/main.luau` | `mesh.apps`: desktop entries joined with Hyprland clients |
 | `@mesh/wf-recorder` | backend | `src/main.luau` | `mesh.recorder` through `wf-recorder` |
+| `@mesh/freedesktop-notifications` | backend | `src/main.luau` | `mesh.notifications`: owns `org.freedesktop.Notifications` through `mesh.dbus_serve` |
+| `@mesh/proc-system` | backend | `src/main.luau` | `mesh.system` from `/proc`, hwmon and `df` |
+| `@mesh/cava-visualizer` | backend | `src/main.luau` | `mesh.visualizer` spectrum bars from `cava` |
+| `@mesh/wallpaper-directory` | backend | `src/main.luau` | `mesh.wallpapers` from one directory, with ImageMagick previews |
 
 ## Interfaces and resource packs
 
@@ -73,7 +83,11 @@ and easing, with separate entrance animations for islands, cards and popups.
 | `@mesh/media-interface` | interface | `mesh.media` now-playing contract |
 | `@mesh/weather-interface` | interface | `mesh.weather` conditions and forecast contract |
 | `@mesh/network-interface` | interface | `mesh.network` connectivity and Wi-Fi contract |
-| `@mesh/apps-interface` | interface | `mesh.apps` pinned/running application contract |
+| `@mesh/apps-interface` | interface | `mesh.apps` pinned, running and installed application contract |
+| `@mesh/notifications-interface` | interface | `mesh.notifications` desktop notification contract |
+| `@mesh/system-interface` | interface | `mesh.system` processor, memory, disk, temperature and network load |
+| `@mesh/visualizer-interface` | interface | `mesh.visualizer` audio spectrum contract |
+| `@mesh/wallpapers-interface` | interface | `mesh.wallpapers` wallpaper library contract |
 | `@mesh/recorder-interface` | interface | `mesh.recorder` screen-recording contract |
 | `@mesh/violet-glass` | theme | Violet glass palette with monospace type; tunes `@mesh/glass-material` |
 | `@mesh/glass-material` | library | Shared surface gradients, translucent fills, text, accents, rims, hovers and shadows; defaults derive from any theme, with Violet Glass tuning the original palette |
@@ -89,7 +103,7 @@ desktop layout. See [module-system §5](../spec/01-module-system.md).
 
 | Module | Kind | Contribution |
 | --- | --- | --- |
-| `@mesh/glass` | composition | Liquid-glass desktop: glass bar, desktop cards and dock; recommends the violet glass theme |
+| `@mesh/glass` | composition | Liquid-glass desktop: glass bar, desktop cards, dock, notification toasts, dashboard and wallpaper picker; recommends the violet glass theme |
 | `@mesh/desk` | composition | The default desktop: a top navigation bar and a settings window, bound to the PipeWire and backlight providers |
 
 ## Module anatomy

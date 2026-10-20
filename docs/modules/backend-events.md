@@ -133,6 +133,50 @@ In a coroutine the call suspends on the bounded host worker pool like
 private bus connection, so it suits occasional reads and controls rather than
 per-frame polling.
 
+## D-Bus services
+
+`mesh.dbus_serve(bus, spec)` owns one well-known name and exports one interface
+at one object path. It needs a `dbus.own:<bus>:<name>` grant and returns a stream
+handle, or `false` without the grant. The name is requested without queueing; a
+name another client owns fails the stream (`replace = true` asks a current owner
+that allows it to hand the name over). Stopping the stream releases the name.
+
+```lua
+local service
+function start(self)
+    service = mesh.dbus_serve("session", {
+        name = "org.example.Echo",
+        path = "/org/example/Echo",
+        interface = "org.example.Echo",
+        methods = { Echo = { ["in"] = "s", out = "s" } },
+        signals = { Echoed = "s" },
+    })
+end
+
+function on_stream_event(self, event)
+    if not service or event.stream.id ~= service.id or event.type ~= "line" then return end
+    local call = mesh.json.decode(event.line)
+    local text = call.body[1].value
+    mesh.dbus_reply(service, call.id, { text })
+    mesh.dbus_emit(service, "Echoed", { text })
+end
+```
+
+Each call to a declared method arrives as a `line` record with `type = "call"`,
+`id`, `member`, `sender`, `signature` and `body` (the `{signature, value}` shape
+used by signal records). The host rejects calls whose signature differs from
+the declared `in` with `InvalidArgs`, answers `Introspect` (generated from the
+spec) and `Ping`, and answers anything else with `UnknownMethod`.
+
+`mesh.dbus_reply(handle, id, args)` encodes `args` against the method's `out`
+signature; `mesh.dbus_reply_error(handle, id, error_name, message)` sends a D-Bus
+error. Each call is answered once; one the provider leaves unanswered gets
+`NoReply` after 25 seconds, and more than 64 unanswered calls are refused with
+`LimitsExceeded`. `mesh.dbus_emit(handle, member, args)` emits a declared signal.
+All three raise an error for malformed values and return `false` for a handle from
+another generation. Arrays longer than 1,024 items in a call body (raw pixel
+data, for example) arrive as `{ elided = <length> }`.
+
 ## Other protocol records
 
 PipeWire records have `event` and the registry object's `id`: `added`, `removed`,

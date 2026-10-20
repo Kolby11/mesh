@@ -1846,4 +1846,28 @@ box { background-color: #000000; }
             mesh_core_elements::Color::from_hex("#000000").unwrap()
         );
     }
+
+    #[test]
+    fn shipped_glass_modules_compile() {
+        let frontend = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../modules/frontend");
+        let mut compiled = Vec::new();
+        for entry in std::fs::read_dir(&frontend).expect("modules/frontend is readable") {
+            let module_dir = entry.unwrap().path();
+            let name = module_dir
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            if !name.starts_with("glass-") {
+                continue;
+            }
+            let loaded = mesh_core_module::manifest::load_canonical_manifest(&module_dir)
+                .unwrap_or_else(|error| panic!("{name} manifest should load: {error}"));
+            compile_frontend_module(&loaded.manifest, &module_dir)
+                .unwrap_or_else(|error| panic!("{name} should compile: {error}"));
+            compiled.push(name);
+        }
+        assert!(compiled.len() >= 4, "found {compiled:?}");
+    }
 }

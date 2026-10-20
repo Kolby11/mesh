@@ -1,0 +1,40 @@
+{
+  "name": "@mesh/cava-visualizer",
+  "version": "0.1.0",
+  "description": "Audio spectrum from cava: 24 bars of whatever is playing, idle while silent.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:sh:[\"-c\",\"c=\\\"${XDG_RUNTIME_DIR:-/tmp}/mesh-cava.conf\\\"; printf '[general]\\\\nbars = 24\\\\nframerate = 30\\\\nsleep_timer = 1\\\\n[output]\\\\nmethod = raw\\\\nraw_target = /dev/stdout\\\\ndata_format = ascii\\\\nascii_max_range = 1000\\\\nbar_delimiter = 59\\\\nframe_delimiter = 10\\\\n[smoothing]\\\\nnoise_reduction = 77\\\\n' > \\\"$c\\\" && exec cava -p \\\"$c\\\"\"]"
+      ],
+      "binaries": [
+        {
+          "name": "cava",
+          "reason": "Analyse the playing audio into spectrum bars.",
+          "packages": {
+            "arch": "cava",
+            "debian": "cava",
+            "fedora": "cava",
+            "nixos": "cava"
+          }
+        }
+      ],
+      "modules": {
+        "@mesh/visualizer-interface": "^1.0.0"
+      }
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.visualizer",
+        "version": "1.0",
+        "provider": "cava",
+        "label": "cava",
+        "priority": 100
+      }
+    ]
+  }
+}

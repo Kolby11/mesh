@@ -7,9 +7,10 @@
 <template>
     <row class="desk">
         <box class="gap-left" />
-        <box class="slot">
+        <column class="slot">
             <MediaCard />
-        </box>
+            <Spectrum />
+        </column>
         <box class="gap-middle" />
         <box class="slot slot-weather">
             <WeatherCard />
@@ -21,6 +22,7 @@
 <script lang="luau">
 local MediaCard = require("./components/media-card.mesh")
 local WeatherCard = require("./components/weather-card.mesh")
+local Spectrum = require("./components/spectrum.mesh")
 </script>
 
 <style>

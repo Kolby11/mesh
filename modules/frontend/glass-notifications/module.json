@@ -1,0 +1,60 @@
+{
+  "name": "@mesh/glass-notifications",
+  "version": "0.1.0",
+  "description": "Liquid-glass notification toasts stacked under the top bar, with actions and dismissal.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "interfaces": {
+        "mesh.notifications": ">=1.0"
+      },
+      "modules": {
+        "@mesh/glass-material": ">=0.1.0"
+      },
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      },
+      "capabilities": [
+        "shell.surface",
+        "theme.read",
+        "locale.read",
+        "service.notifications.read",
+        "service.notifications.control"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "top",
+      "layer": "overlay",
+      "keyboard_mode": "on_demand",
+      "visible_on_start": false
+    },
+    "provides": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Glass notification toasts"
+        }
+      ]
+    },
+    "accessibility": {
+      "role": "status"
+    },
+    "icons": {
+      "ignore_shell_default": true
+    },
+    "i18n": {
+      "defaultLocale": "en"
+    },
+    "contributes": {
+      "i18n": [
+        { "id": "en", "locale": "en", "path": "config/i18n/en.json" },
+        { "id": "sk", "locale": "sk", "path": "config/i18n/sk.json" }
+      ]
+    }
+  }
+}

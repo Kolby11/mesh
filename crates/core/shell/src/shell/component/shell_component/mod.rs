@@ -554,7 +554,8 @@ impl ShellComponent for FrontendSurfaceComponent {
                 self.invalidate_service_template_nodes(narrow_nodes);
             }
         }
-        Ok(self.record_frontend_host_effects(Vec::new()))
+        let requests = self.drain_effect_side_channels();
+        Ok(self.record_frontend_host_effects(requests))
     }
 
     fn deliver_service_call_result(
@@ -595,6 +596,12 @@ impl ShellComponent for FrontendSurfaceComponent {
             source_module,
             generation,
         );
+    }
+
+    fn settle_effects_offscreen(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.run_pending_effects();
+        let requests = self.drain_effect_side_channels();
+        Ok(self.record_frontend_host_effects(requests))
     }
 
     fn observes_service_event(&self, event: &ServiceEvent) -> bool {

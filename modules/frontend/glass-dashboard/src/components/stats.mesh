@@ -1,0 +1,219 @@
+<template>
+    <column class="stats" aria-label={t("stats.title")}>
+        <row class="tiles">
+            {#for gauge in meters key={gauge.id}}
+                <column class="tile" aria-label={gauge.label .. " " .. gauge.value}>
+                    <row class="tile-head">
+                        <icon class="tile-glyph" name={gauge.glyph} size="18" />
+                        <text class="tile-value">{gauge.value}</text>
+                    </row>
+                    <column class="meter">
+                        <box class={"meter-fill meter-" .. gauge.id} style:height={gauge.fill} />
+                    </column>
+                    <text class="tile-label">{gauge.label}</text>
+                </column>
+            {/for}
+        </row>
+        <column class="history">
+            <row class="history-head">
+                <text class="history-title">{t("stats.history")}</text>
+                <text class="history-net">{network_label}</text>
+            </row>
+            <row class="history-bars" aria-hidden="true">
+                {#for bar in history key={bar.key}}
+                    <box class="history-bar" style:height={bar.height} />
+                {/for}
+            </row>
+        </column>
+        <text class="unavailable" hidden={available}>{t("stats.unavailable")}</text>
+    </column>
+</template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local system = require("mesh.system")
+
+local METER_HEIGHT = 92
+local HISTORY_HEIGHT = 54
+local HISTORY_POINTS = 30
+
+available = false
+meters = {}
+history = {}
+network_label = ""
+
+local function percent(used, total)
+    if not total or total <= 0 then
+        return 0
+    end
+    return math.clamp((used or 0) / total * 100, 0, 100)
+end
+
+local function bytes(value)
+    local units = { "B", "KB", "MB", "GB", "TB" }
+    local unit = 1
+    value = value or 0
+    while value >= 1024 and unit < #units do
+        value /= 1024
+        unit += 1
+    end
+    return string.format(unit <= 2 and "%.0f %s" or "%.1f %s", value, units[unit])
+end
+
+local function meter(id, glyph, label, value, fraction)
+    return {
+        id = id,
+        glyph = glyph,
+        label = label,
+        value = value,
+        fill = tostring(math.floor(METER_HEIGHT * math.clamp(fraction, 0, 1) + 0.5)) .. "px",
+    }
+end
+
+effect(function()
+    available = system.available == true
+    local cpu = system.cpu or 0
+    local memory = percent(system.memory_used, system.memory_total)
+    local disk = percent(system.disk_used, system.disk_total)
+    local temperature = system.temperature
+    meters = {
+        meter("cpu", "utilities-system-monitor", t("stats.cpu"), string.format("%d%%", math.floor(cpu + 0.5)), cpu / 100),
+        meter("memory", "memory", t("stats.memory"), string.format("%d%%", math.floor(memory + 0.5)), memory / 100),
+        meter("disk", "drive-harddisk", t("stats.disk"), string.format("%d%%", math.floor(disk + 0.5)), disk / 100),
+        meter(
+            "temperature",
+            "sensors-temperature",
+            t("stats.temperature"),
+            temperature and string.format("%d°", math.floor(temperature + 0.5)) or "--",
+            temperature and (temperature - 25) / 75 or 0
+        ),
+    }
+    local points = {}
+    local samples = system.cpu_history or {}
+    for index = 1, HISTORY_POINTS do
+        local sample = samples[#samples - HISTORY_POINTS + index] or 0
+        points[index] = {
+            key = index,
+            height = tostring(math.max(3, math.floor(HISTORY_HEIGHT * sample / 100 + 0.5))) .. "px",
+        }
+    end
+    history = points
+    network_label = available and t("stats.network", {
+        down = bytes(system.net_rx) .. "/s",
+        up = bytes(system.net_tx) .. "/s",
+    }) or ""
+end)
+</script>
+
+<style>
+    .stats {
+        width: 316px;
+        gap: 14px;
+    }
+
+    .tiles {
+        width: 100%;
+        gap: 10px;
+    }
+
+    .tile {
+        flex-grow: 1;
+        flex-basis: 0;
+        min-width: 0;
+        height: 168px;
+        padding: 12px 10px;
+        gap: 8px;
+        align-items: center;
+        border-radius: 22px;
+        border: 1px solid var(--glass-rim-inset);
+        background: var(--glass-fill-inset);
+    }
+
+    .tile-head {
+        width: 100%;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .tile-glyph {
+        width: 18px;
+        height: 18px;
+        color: var(--glass-text-muted);
+    }
+
+    .tile-value {
+        height: 18px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--glass-text-heading);
+    }
+
+    .meter {
+        width: 26px;
+        height: 92px;
+        justify-content: flex-end;
+        border-radius: 999px;
+        background: var(--glass-meter-track);
+        overflow: hidden;
+    }
+
+    .meter-fill {
+        width: 26px;
+        flex-shrink: 0;
+        border-radius: 999px;
+        transition: height var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .meter-cpu { background-image: var(--glass-meter-cpu); }
+    .meter-memory { background-image: var(--glass-meter-memory); }
+    .meter-disk { background-image: var(--glass-meter-disk); }
+    .meter-temperature { background-image: var(--glass-meter-temperature); }
+
+    .tile-label {
+        height: 16px;
+        font-size: 10px;
+        color: var(--glass-text-muted);
+        text-overflow: ellipsis;
+    }
+
+    .history {
+        width: 100%;
+        padding: 12px 14px;
+        gap: 10px;
+        border-radius: 22px;
+        border: 1px solid var(--glass-rim-inset);
+        background: var(--glass-fill-inset);
+    }
+
+    .history-head {
+        width: 100%;
+        justify-content: space-between;
+    }
+
+    .history-title, .history-net {
+        height: 16px;
+        font-size: 11px;
+        color: var(--glass-text-muted);
+    }
+
+    .history-bars {
+        width: 100%;
+        height: 54px;
+        gap: 3px;
+        align-items: flex-end;
+    }
+
+    .history-bar {
+        flex-grow: 1;
+        flex-basis: 0;
+        border-radius: 3px;
+        background-image: var(--glass-meter-bar);
+        transition: height var(--animation-duration-medium) var(--animation-curves-bezier-standard);
+    }
+
+    .unavailable {
+        height: 18px;
+        font-size: 12px;
+        color: var(--glass-text-muted);
+    }
+</style>

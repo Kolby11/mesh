@@ -1,0 +1,264 @@
+<template>
+    <column class="player" aria-label={t("player.title")}>
+        <box class="art-ring">
+            <box class="art-frame">
+                <image class="art" src={art} alt="" hidden={art == ""} />
+                <icon class="art-glyph" name="audio-x-generic" size="54" hidden={art ~= ""} />
+            </box>
+        </box>
+        <text class="title">{title}</text>
+        <text class="artist">{artist}</text>
+        <row class="spectrum" aria-hidden="true">
+            {#for bar in bars key={bar.key}}
+                <box class="spectrum-bar" style:height={bar.height} />
+            {/for}
+        </row>
+        <row class="progress">
+            <text class="time">{position_text}</text>
+            <slider class="seek" value="{position}" min="0" max="{length}" onchange={onSeek} disabled={not has_track} aria-label={t("player.seek")} />
+            <text class="time">{length_text}</text>
+        </row>
+        <row class="controls">
+            <button class="control" onclick={onPrevious} disabled={not has_track} aria-label={t("player.previous")}>
+                <icon class="control-glyph" name="media-skip-backward" size="18" />
+            </button>
+            <button class="control control-main" onclick={onToggle} disabled={not has_track} aria-label={playing and t("player.pause") or t("player.play")}>
+                <icon class="control-glyph control-glyph-main" name={playing and "media-playback-pause" or "media-playback-start"} size="20" />
+            </button>
+            <button class="control" onclick={onNext} disabled={not has_track} aria-label={t("player.next")}>
+                <icon class="control-glyph" name="media-skip-forward" size="18" />
+            </button>
+        </row>
+    </column>
+</template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local media = require("mesh.media")
+local visualizer = require("mesh.visualizer")
+
+local SPECTRUM_HEIGHT = 44
+local SPECTRUM_BARS = 24
+
+has_track = false
+playing = false
+title = ""
+artist = ""
+art = ""
+position = 0
+length = 1
+position_text = "00:00"
+length_text = "00:00"
+bars = {}
+
+local function clock(seconds)
+    seconds = math.max(0, math.floor(seconds or 0))
+    return string.format("%02d:%02d", seconds // 60, seconds % 60)
+end
+
+local function position_now()
+    local value = media.position or 0
+    if media.state == "playing" then
+        value += os.time() - (media.updated_at or os.time())
+    end
+    local total = media.length or 0
+    return total > 0 and math.min(value, total) or value
+end
+
+local function update_progress()
+    position = math.floor(position_now())
+    position_text = clock(position)
+end
+
+effect(function()
+    has_track = media.available == true and (media.title or "") ~= ""
+    playing = has_track and media.state == "playing"
+    title = has_track and media.title or t("player.idle")
+    artist = has_track and (media.artist or "") or ""
+    art = has_track and (media.art_path or "") or ""
+    length = math.max(1, math.floor(media.length or 0))
+    length_text = clock(media.length)
+    update_progress()
+end)
+
+effect(function()
+    local levels = visualizer.active and visualizer.bars or {}
+    local list = {}
+    for index = 1, SPECTRUM_BARS do
+        local level = math.clamp(tonumber(levels[index]) or 0, 0, 1)
+        list[index] = {
+            key = index,
+            height = tostring(math.max(4, math.floor(SPECTRUM_HEIGHT * level + 0.5))) .. "px",
+        }
+    end
+    bars = list
+end)
+
+task.spawn(function()
+    while true do
+        task.sleep(1000)
+        if playing then
+            update_progress()
+        end
+    end
+end)
+
+function onSeek(value)
+    local target = tonumber(type(value) == "table" and value.value or value)
+    if target then
+        media.seek(target)
+    end
+end
+
+function onPrevious() media.previous() end
+function onToggle() media.play_pause() end
+function onNext() media.next() end
+</script>
+
+<style>
+    .player {
+        width: 292px;
+        padding: 18px 16px;
+        gap: 6px;
+        align-items: center;
+        border-radius: 26px;
+        border: 1px solid var(--glass-rim-inset);
+        background-image: var(--glass-surface-media);
+    }
+
+    .art-ring {
+        width: 164px;
+        height: 164px;
+        justify-content: center;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--glass-rim);
+        background: var(--glass-fill-lens);
+        box-shadow: var(--glass-shadow-artwork);
+    }
+
+    .art-frame {
+        width: 148px;
+        height: 148px;
+        justify-content: center;
+        align-items: center;
+        border-radius: 999px;
+        background: var(--glass-fill-artwork);
+        overflow: hidden;
+    }
+
+    .art {
+        width: 148px;
+        height: 148px;
+        border-radius: 999px;
+    }
+
+    .art-glyph {
+        width: 54px;
+        height: 54px;
+        color: var(--glass-text-artwork);
+    }
+
+    .title {
+        height: 26px;
+        max-width: 260px;
+        margin-top: 8px;
+        font-size: 17px;
+        font-weight: 600;
+        color: var(--glass-text-heading);
+        text-overflow: ellipsis;
+    }
+
+    .artist {
+        height: 18px;
+        max-width: 260px;
+        font-size: 12px;
+        color: var(--glass-text-muted);
+        text-overflow: ellipsis;
+    }
+
+    .spectrum {
+        width: 100%;
+        height: 44px;
+        margin-top: 6px;
+        gap: 3px;
+        align-items: flex-end;
+        justify-content: center;
+    }
+
+    .spectrum-bar {
+        width: 7px;
+        border-radius: 999px;
+        background-image: var(--glass-meter-bar);
+    }
+
+    .progress {
+        width: 100%;
+        height: 28px;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .time {
+        height: 18px;
+        font-size: 10px;
+        color: var(--glass-text);
+    }
+
+    .seek {
+        flex-grow: 1;
+        height: 26px;
+        padding: 0;
+        color: var(--glass-text-control);
+    }
+
+    .controls {
+        align-items: center;
+        gap: 14px;
+    }
+
+    .control {
+        width: 42px;
+        height: 40px;
+        padding: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 12px;
+        border: 1px solid var(--glass-rim-control);
+        background-image: var(--glass-surface-control);
+        transform: scale(1);
+        transition-property: transform, border-color;
+        transition-duration: var(--animation-duration-short);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .control-main {
+        width: 54px;
+        border-radius: 999px;
+        background-image: var(--glass-surface-active);
+    }
+
+    .control-glyph {
+        width: 20px;
+        height: 20px;
+        color: var(--glass-text-strong);
+    }
+
+    .control-glyph-main {
+        color: var(--glass-text-on-accent);
+    }
+
+    .control:hover {
+        border-color: var(--glass-rim-hover);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .control:focus-visible {
+        border-color: var(--color-focus-ring);
+    }
+
+    .control:active {
+        transform: scale(var(--animation-scale-press));
+        transition-duration: var(--animation-duration-fast);
+    }
+</style>

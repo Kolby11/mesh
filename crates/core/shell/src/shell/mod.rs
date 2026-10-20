@@ -284,11 +284,19 @@ impl ShellCompositionMode {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+/// The seat/serial of the primary press that may authorize a click-opened
+/// popup's grab. Popups are created a frame after the click that opens them,
+/// so the credential belongs to the gesture rather than one dispatch: it is
+/// valid while the button is held and for [`POPUP_GRAB_CLICK_WINDOW`] after
+/// release, and the next press replaces it.
+#[derive(Debug, Clone)]
 struct PendingPopupGrab {
+    surface_id: String,
     identity: mesh_core_presentation::PointerButtonIdentity,
-    dispatch_generation: u64,
+    released_at: Option<std::time::Instant>,
 }
+
+const POPUP_GRAB_CLICK_WINDOW: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Translates the user's blur settings into the painter's quality knobs.
 /// Values outside the painter's supported range are clamped rather than
@@ -724,11 +732,8 @@ pub struct Shell {
     active_key_modifiers: KeyModifiers,
     keyboard_focus_surface: Option<SurfaceId>,
     pending_wayland_events: VecDeque<WindowEvent>,
-    /// Click credentials captured from the current Wayland dispatch. Entries
-    /// are consumed when a popup is created and never reused for repositioning
-    /// or a later dispatch generation.
-    pending_popup_grabs: HashMap<String, PendingPopupGrab>,
-    popup_grab_generation: u64,
+    /// Consumed when a popup is created; never reused for repositioning.
+    pending_popup_grab: Option<PendingPopupGrab>,
     transfer_owned_keyboard_modes: HashMap<SurfaceId, mesh_core_wayland::KeyboardMode>,
     service_handlers: HashMap<String, mpsc::Sender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,

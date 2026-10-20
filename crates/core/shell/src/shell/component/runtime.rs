@@ -1405,6 +1405,28 @@ impl FrontendSurfaceComponent {
         Ok(events)
     }
 
+    /// Lower what effects queued outside a handler call: events they
+    /// published and `mesh.shell` operations they requested.
+    pub(super) fn drain_effect_side_channels(&mut self) -> Vec<CoreRequest> {
+        let drained = {
+            let mut runtimes = self.runtimes.lock().unwrap();
+            runtimes
+                .values_mut()
+                .filter_map(|runtime| {
+                    let published = runtime.script_ctx.drain_published_events();
+                    let effects = take_shell_effects(runtime);
+                    (!published.is_empty() || effects.is_some()).then_some((published, effects))
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut requests = Vec::new();
+        for (published, effects) in drained {
+            requests.extend(self.drain_local_script_events(published));
+            requests.extend(self.lower_shell_effects(effects));
+        }
+        requests
+    }
+
     fn lower_shell_effects(
         &self,
         effects: Option<(EffectScope, Vec<FrontendEffect>)>,

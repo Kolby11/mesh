@@ -1,0 +1,267 @@
+<template>
+    <column class="toasts" aria-label={t("toasts.label")}>
+        {#for toast in toasts key={toast.id}}
+            <column class="toast" class:toast-critical={toast.critical}>
+                <row class="toast-head">
+                    <box class="toast-art">
+                        <image class="toast-image" src={toast.picture} alt="" hidden={toast.picture == ""} />
+                        <icon class="toast-glyph" name="notifications" size="22" hidden={toast.picture ~= ""} />
+                    </box>
+                    <button class="toast-copy" onclick={onOpen(toast.id, toast.default_action)} aria-label={toast.summary}>
+                        <row class="toast-meta">
+                            <text class="toast-app">{toast.app}</text>
+                            <text class="toast-time">{toast.age}</text>
+                        </row>
+                        <text class="toast-summary">{toast.summary}</text>
+                        <text class="toast-body" hidden={toast.body == ""}>{toast.body}</text>
+                    </button>
+                    <button class="toast-close" onclick={onDismiss(toast.id)} aria-label={t("toasts.dismiss")} title={t("toasts.dismiss")}>
+                        <icon class="toast-close-glyph" name="window-close" size="16" />
+                    </button>
+                </row>
+                <row class="toast-actions" hidden={not toast.has_actions}>
+                    {#for action in toast.actions key={action.key}}
+                        <button class="toast-action" onclick={onAction(toast.id, action.key)}>
+                            <text>{action.label}</text>
+                        </button>
+                    {/for}
+                </row>
+            </column>
+        {/for}
+    </column>
+</template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local notifications = require("mesh.notifications")
+
+local SURFACE = "@mesh/glass-notifications"
+local MAX_TOASTS = 4
+
+toasts = {}
+local shown = false
+
+local function age(time)
+    local minutes = math.floor((os.time() - (time or os.time())) / 60)
+    return minutes < 1 and t("toasts.now") or t("toasts.minutes", { count = minutes })
+end
+
+effect(function()
+    local list = {}
+    for _, item in notifications.notifications or {} do
+        if item.popup and #list < MAX_TOASTS then
+            local actions, default_action = {}, nil
+            for _, action in item.actions or {} do
+                if action.key == "default" then
+                    default_action = "default"
+                elseif #actions < 3 then
+                    actions[#actions + 1] = { key = action.key, label = action.label }
+                end
+            end
+            local picture = item.image ~= "" and item.image or item.app_icon or ""
+            list[#list + 1] = {
+                id = item.id,
+                app = item.app_name ~= "" and item.app_name or t("toasts.label"),
+                age = age(item.time),
+                summary = item.summary,
+                body = item.body,
+                picture = string.sub(picture, 1, 1) == "/" and picture or "",
+                critical = item.urgency == 2,
+                actions = actions,
+                has_actions = #actions > 0,
+                default_action = default_action,
+            }
+        end
+    end
+    toasts = list
+    local visible = #list > 0
+    if visible ~= shown then
+        shown = visible
+        if visible then
+            mesh.shell.show_surface(SURFACE)
+        else
+            mesh.shell.hide_surface(SURFACE)
+        end
+    end
+end)
+
+function onOpen(id, action)
+    if action then
+        notifications.invoke(id, action)
+    else
+        notifications.hide_popup(id)
+    end
+end
+
+function onAction(id, key)
+    notifications.invoke(id, key)
+end
+
+function onDismiss(id)
+    notifications.dismiss(id)
+end
+</script>
+
+<style>
+    /* Placed after the bars' exclusive zones, under the bar's start islands.
+    The stack is content-sized so pointer input stays on the toasts. */
+    .toasts {
+        width: fit;
+        margin: 8px 0 0 12px;
+        padding: 6px 6px 24px;
+        gap: 10px;
+        exclusive-zone: none;
+        background: transparent;
+    }
+
+    .toast {
+        width: 380px;
+        padding: 14px;
+        gap: 10px;
+        border-radius: 22px;
+        border: 1px solid var(--glass-rim);
+        background-image: var(--glass-surface-panel);
+        box-shadow: var(--glass-shadow-card);
+        backdrop-filter: blur(16px) refract(18px 16px) dispersion(1px);
+        animation: toast-in 420ms var(--animation-curves-bezier-emphasized-decelerate) both;
+        transform: translateY(0px) scale(1);
+        transition-property: transform, border-color;
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .toast:hover {
+        transform: translateY(var(--animation-lift-hover));
+        border-color: var(--glass-rim-hover);
+    }
+
+    .toast-critical {
+        border-color: var(--color-error);
+    }
+
+    .toast-head {
+        width: 100%;
+        gap: 12px;
+        align-items: flex-start;
+    }
+
+    .toast-art {
+        width: 42px;
+        height: 42px;
+        flex-shrink: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 14px;
+        border: 1px solid var(--glass-rim-inset);
+        background: var(--glass-fill-artwork);
+        overflow: hidden;
+    }
+
+    .toast-image {
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+    }
+
+    .toast-glyph {
+        width: 22px;
+        height: 22px;
+        color: var(--glass-text-heading);
+    }
+
+    .toast-copy {
+        flex-direction: column;
+        flex-grow: 1;
+        min-width: 0;
+        padding: 0;
+        gap: 2px;
+        align-items: flex-start;
+        background: transparent;
+    }
+
+    .toast-meta {
+        width: 100%;
+        justify-content: space-between;
+        gap: 8px;
+    }
+
+    .toast-app {
+        height: 16px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--glass-text-muted);
+        text-overflow: ellipsis;
+    }
+
+    .toast-time {
+        height: 16px;
+        font-size: 11px;
+        color: var(--glass-text-muted);
+    }
+
+    .toast-summary {
+        height: 21px;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--glass-text-heading);
+        text-overflow: ellipsis;
+    }
+
+    .toast-body {
+        width: 100%;
+        height: 18px;
+        font-size: 12px;
+        color: var(--glass-text);
+        text-overflow: ellipsis;
+    }
+
+    .toast-actions {
+        padding-left: 54px;
+        gap: 6px;
+    }
+
+    .toast-action {
+        height: 30px;
+        padding: 0 12px;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--glass-rim-control);
+        background-image: var(--glass-surface-control);
+        color: var(--glass-text-strong);
+        font-size: 12px;
+    }
+
+    .toast-close {
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        flex-shrink: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 999px;
+        background: transparent;
+    }
+
+    .toast-close-glyph {
+        width: 16px;
+        height: 16px;
+        color: var(--glass-text-muted);
+    }
+
+    .toast-action:hover, .toast-close:hover {
+        background-color: var(--glass-hover);
+    }
+
+    .toast-copy:focus-visible, .toast-action:focus-visible, .toast-close:focus-visible {
+        border: 1px solid var(--color-focus-ring);
+    }
+
+    .toast-action:active, .toast-close:active {
+        transform: scale(var(--animation-scale-press));
+    }
+
+    @keyframes toast-in {
+        from { opacity: 0; transform: translateY(-18px) scale(0.94); }
+        to { opacity: 1; transform: translateY(0px) scale(1); }
+    }
+</style>

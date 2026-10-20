@@ -644,3 +644,54 @@ end)
         rendered_text(&component)
     );
 }
+
+/// A hidden surface does not paint, which is where deferred effects run, so
+/// the shell settles them offscreen: an effect is how a hidden notification
+/// popup decides to show itself.
+#[test]
+fn hidden_component_settles_effects_and_host_requests_offscreen() {
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box />
+</template>
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+seen_percent = -1
+effect(function()
+    seen_percent = audio.percent or -1
+    if seen_percent > 50 then
+        mesh.shell.show_surface("@test/hidden")
+    end
+end)
+</script>
+"#,
+        audio_network_catalog(),
+        &["service.audio.read", "shell.surface"],
+    );
+
+    let mut requests = component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({ "percent": 64 }),
+        })
+        .unwrap();
+    requests.extend(component.settle_effects_offscreen().unwrap());
+
+    {
+        let runtimes = component.runtimes.lock().unwrap();
+        let runtime = runtimes.values().next().expect("mounted root runtime");
+        assert_eq!(
+            runtime.script_ctx.state().get("seen_percent"),
+            Some(serde_json::json!(64))
+        );
+    }
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ShowSurface { surface_id } if surface_id == "@test/hidden"
+        )),
+        "{requests:?}"
+    );
+}

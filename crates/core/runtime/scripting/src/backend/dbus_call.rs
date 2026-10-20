@@ -21,32 +21,48 @@ pub(super) struct MethodCall {
 /// Encode `call.args` against `call.signature`. Variants use the same
 /// `{signature, value}` JSON shape that D-Bus signal records carry.
 pub(super) fn encode_args(call: &MethodCall) -> Result<Option<Structure<'static>>, String> {
-    if call.signature.is_empty() {
-        if !call.args.is_empty() {
-            return Err("D-Bus arguments require a signature".into());
-        }
+    encode_body(&call.signature, &call.args)
+}
+
+/// Encode a message body: `args` against the concatenated complete types in
+/// `signature`. An empty signature is an empty body.
+pub(super) fn encode_body(
+    signature: &str,
+    args: &[Json],
+) -> Result<Option<Structure<'static>>, String> {
+    if signature.is_empty() && !args.is_empty() {
+        return Err("D-Bus arguments require a signature".into());
+    }
+    let fields = body_types(signature)?;
+    if fields.len() != args.len() {
+        return Err(format!(
+            "D-Bus signature {signature:?} expects {} argument(s), got {}",
+            fields.len(),
+            args.len()
+        ));
+    }
+    if fields.is_empty() {
         return Ok(None);
     }
+    let mut body = StructureBuilder::new();
+    for (field, arg) in fields.iter().zip(args) {
+        body = body.append_field(encode(field, arg)?);
+    }
+    body.build().map(Some).map_err(|error| error.to_string())
+}
+
+/// Split a body signature into its complete types.
+pub(super) fn body_types(signature: &str) -> Result<Vec<Signature>, String> {
+    if signature.is_empty() {
+        return Ok(Vec::new());
+    }
     // Wrapping keeps one-argument and multi-argument signatures uniform.
-    let wrapped = Signature::try_from(format!("({})", call.signature).as_str())
-        .map_err(|error| format!("invalid D-Bus signature {:?}: {error}", call.signature))?;
+    let wrapped = Signature::try_from(format!("({signature})").as_str())
+        .map_err(|error| format!("invalid D-Bus signature {signature:?}: {error}"))?;
     let Signature::Structure(fields) = &wrapped else {
         unreachable!("parenthesized signature parses as a structure");
     };
-    let fields = fields.iter().collect::<Vec<_>>();
-    if fields.len() != call.args.len() {
-        return Err(format!(
-            "D-Bus signature {:?} expects {} argument(s), got {}",
-            call.signature,
-            fields.len(),
-            call.args.len()
-        ));
-    }
-    let mut body = StructureBuilder::new();
-    for (signature, arg) in fields.into_iter().zip(&call.args) {
-        body = body.append_field(encode(signature, arg)?);
-    }
-    body.build().map(Some).map_err(|error| error.to_string())
+    Ok(fields.iter().cloned().collect())
 }
 
 fn integer(value: &Json, signature: &Signature) -> Result<i128, String> {
@@ -222,7 +238,7 @@ impl BusTarget {
         }
     }
 
-    async fn connect(&self) -> zbus::Result<Connection> {
+    pub(super) async fn connect(&self) -> zbus::Result<Connection> {
         match self {
             Self::System => Connection::system().await,
             Self::Session => Connection::session().await,

@@ -28,6 +28,9 @@
         "fs.watch"
       ],
       "@mesh/blur-test": ["shell.surface", "theme.read"],
+      "@mesh/cava-visualizer": [
+        "exec.argv:sh:[\"-c\",\"c=\\\"${XDG_RUNTIME_DIR:-/tmp}/mesh-cava.conf\\\"; printf '[general]\\\\nbars = 24\\\\nframerate = 30\\\\nsleep_timer = 1\\\\n[output]\\\\nmethod = raw\\\\nraw_target = /dev/stdout\\\\ndata_format = ascii\\\\nascii_max_range = 1000\\\\nbar_delimiter = 59\\\\nframe_delimiter = 10\\\\n[smoothing]\\\\nnoise_reduction = 77\\\\n' > \\\"$c\\\" && exec cava -p \\\"$c\\\"\"]"
+      ],
       "@mesh/composition-editor": [
         "service.composition.control",
         "service.composition.read",
@@ -49,6 +52,9 @@
         "exec.argv:uname:[\"-r\"]",
         "exec.argv:uname:[\"-s\"]"
       ],
+      "@mesh/freedesktop-notifications": [
+        "dbus.own:session:org.freedesktop.Notifications"
+      ],
       "@mesh/glass-bar": [
         "locale.read",
         "service.audio.control",
@@ -67,6 +73,18 @@
         "shell.surface",
         "theme.read"
       ],
+      "@mesh/glass-dashboard": [
+        "locale.read",
+        "service.media.control",
+        "service.media.read",
+        "service.notifications.control",
+        "service.notifications.read",
+        "service.system.read",
+        "service.visualizer.read",
+        "service.weather.read",
+        "shell.surface",
+        "theme.read"
+      ],
       "@mesh/glass-dock": [
         "locale.read",
         "service.apps.launch",
@@ -74,11 +92,26 @@
         "shell.surface",
         "theme.read"
       ],
+      "@mesh/glass-notifications": [
+        "locale.read",
+        "service.notifications.control",
+        "service.notifications.read",
+        "shell.surface",
+        "theme.read"
+      ],
       "@mesh/glass-wallpaper": ["shell.surface", "theme.read"],
+      "@mesh/glass-wallpapers": [
+        "locale.read",
+        "service.theme.control",
+        "service.wallpapers.read",
+        "shell.surface",
+        "theme.read"
+      ],
       "@mesh/glass-widgets": [
         "locale.read",
         "service.media.control",
         "service.media.read",
+        "service.visualizer.read",
         "service.weather.read",
         "shell.surface",
         "theme.read"
@@ -89,6 +122,7 @@
         "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.exec_cmd(\\\"*\\\")\"]",
         "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.focus({ window = \\\"address:*\\\" })\"]",
         "exec.argv:sh:[\"-c\", \"for b in \\\"${XDG_DATA_HOME:-$HOME/.local/share}\\\" \\\"$HOME/.nix-profile/share\\\" $(printf %s \\\"${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\\\" | tr : \\\" \\\"); do for t in Papirus-Light Papirus Papirus-Dark Adwaita hicolor; do for s in scalable 256x256 128x128 96x96 64x64 48x48; do for c in apps categories; do for e in svg png; do f=\\\"$b/icons/$t/$s/$c/$1.$e\\\"; [ -f \\\"$f\\\" ] && { printf %s \\\"$f\\\"; exit 0; }; done; done; done; done; for e in svg png; do f=\\\"$b/pixmaps/$1.$e\\\"; [ -f \\\"$f\\\" ] && { printf %s \\\"$f\\\"; exit 0; }; done; done; exit 1\", \"sh\", \"*\"]",
+        "exec.argv:sh:[\"-c\",\"for d in \\\"${XDG_DATA_HOME:-$HOME/.local/share}\\\" \\\"$HOME/.nix-profile/share\\\" $(printf %s \\\"${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\\\" | tr : \\\" \\\"); do [ -d \\\"$d/applications\\\" ] && ls \\\"$d/applications\\\"; done; exit 0\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$HYPRLAND_INSTANCE_SIGNATURE\\\"\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_DATA_HOME:-$HOME/.local/share}:$HOME/.nix-profile/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\\\"\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\\\"\"]",
@@ -147,9 +181,7 @@
         "exec.argv:nmcli:[\"radio\",\"wifi\"]"
       ],
       "@mesh/opacity-test": ["shell.surface", "theme.read"],
-      "@mesh/open-meteo-weather": [
-        "exec.argv:curl:[\"-sf\",\"--max-time\",\"15\",\"*\"]"
-      ],
+      "@mesh/open-meteo-weather": ["exec.argv:curl:[\"-sf\",\"--max-time\",\"15\",\"*\"]"],
       "@mesh/pipewire-audio": [
         "pipewire.observe",
         "exec.argv:wpctl:[\"get-volume\",\"*\"]",
@@ -157,6 +189,10 @@
         "exec.argv:wpctl:[\"set-volume\",\"*\",\"*\"]",
         "exec.argv:wpctl:[\"status\"]",
         "exec.argv:pw-mon:[\"--hide-props\",\"--hide-params\",\"--print-separator\"]"
+      ],
+      "@mesh/proc-system": [
+        "exec.argv:df:[\"-B1\",\"--output=size,used\",\"/\"]",
+        "fs.read"
       ],
       "@mesh/profile-menu": [
         "service.packages.control",
@@ -210,6 +246,10 @@
         "exec.argv:upower:[\"-e\"]",
         "exec.argv:upower:[\"-i\",\"*\"]",
         "exec.argv:upower:[\"--monitor\"]"
+      ],
+      "@mesh/wallpaper-directory": [
+        "exec.argv:sh:[\"-c\",\"d=\\\"$1\\\"; [ \\\"$d\\\" = \\\"~\\\" ] && d=\\\"$HOME\\\"; [ \\\"${d#\\\"~/\\\"}\\\" != \\\"$d\\\" ] && d=\\\"$HOME/${d#\\\"~/\\\"}\\\"; [ -d \\\"$d\\\" ] || exit 1; printf '%s\\\\n' \\\"$d\\\"; find \\\"$d\\\" -maxdepth 1 -type f\",\"sh\",\"*\"]",
+        "exec.argv:sh:[\"-c\",\"f=\\\"$1\\\"; t=\\\"${XDG_CACHE_HOME:-$HOME/.cache}/mesh/wallpaper-thumbs\\\"; mkdir -p \\\"$t\\\" || exit 1; k=\\\"$(printf %s \\\"$f\\\" | cksum | cut -d' ' -f1)-$(stat -c %Y \\\"$f\\\")\\\"; [ -f \\\"$t/$k.jpg\\\" ] || magick \\\"$f[0]\\\" -thumbnail 640x400^ -gravity center -extent 640x400 -quality 82 \\\"$t/$k.jpg\\\" || exit 1; [ -f \\\"$t/$k.color\\\" ] || magick \\\"$t/$k.jpg\\\" -resize 1x1! -format '%[hex:p{0,0}]' info: > \\\"$t/$k.color\\\"; printf '%s\\\\t%s' \\\"$t/$k.jpg\\\" \\\"$(cut -c1-6 \\\"$t/$k.color\\\")\\\"\",\"sh\",\"*\"]"
       ],
       "@mesh/wf-recorder": [
         "exec.argv:pgrep:[\"-x\",\"wf-recorder\"]",

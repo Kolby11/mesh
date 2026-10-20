@@ -1,0 +1,7 @@
+{
+  "toasts.label": "Upozornenia",
+  "toasts.dismiss": "Zavrieť upozornenie",
+  "toasts.open": "Otvoriť",
+  "toasts.now": "teraz",
+  "toasts.minutes": "pred {count} min"
+}

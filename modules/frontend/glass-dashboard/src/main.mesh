@@ -1,0 +1,200 @@
+<template>
+    <box class="overlay">
+        <button class="scrim" onclick={onClose} aria-label={t("dashboard.close")} tabindex="-1" />
+        <column class="dashboard" aria-label={t("dashboard.title")}>
+            <row class="header">
+                <column class="greeting">
+                    <text class="greeting-title">{greeting}</text>
+                    <text class="greeting-date">{date_label}</text>
+                </column>
+                <box class="header-spacer" />
+                <row class="uptime" hidden={uptime_label == ""}>
+                    <text class="uptime-text">{uptime_label}</text>
+                </row>
+                <button class="close" onclick={onClose} keybind="close" onkeybind={onClose} aria-label={t("dashboard.close")} title={t("dashboard.close")}>
+                    <icon class="close-glyph" name="window-close" size="18" />
+                </button>
+            </row>
+            <row class="columns">
+                <Stats />
+                <Player />
+                <Inbox />
+            </row>
+        </column>
+    </box>
+</template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local system = require("mesh.system")
+local Stats = require("./components/stats.mesh")
+local Player = require("./components/player.mesh")
+local Inbox = require("./components/inbox.mesh")
+
+local SURFACE = "@mesh/glass-dashboard"
+
+greeting = ""
+date_label = ""
+uptime_label = ""
+
+local function duration(seconds)
+    seconds = math.max(0, math.floor(seconds or 0))
+    local days, hours, minutes = seconds // 86400, (seconds % 86400) // 3600, (seconds % 3600) // 60
+    if days > 0 then
+        return string.format("%dd %dh", days, hours)
+    end
+    return string.format("%dh %02dm", hours, minutes)
+end
+
+local function tick()
+    local now = os.time()
+    local ok, hour = pcall(os.date, "*t", now)
+    local h = ok and hour.hour or 12
+    greeting = h < 5 and t("dashboard.night")
+        or h < 12 and t("dashboard.morning")
+        or h < 18 and t("dashboard.afternoon")
+        or t("dashboard.evening")
+    date_label = mesh.locale.format_date(now, "full")
+end
+
+effect(function()
+    uptime_label = system.available and t("dashboard.uptime", { time = duration(system.uptime) }) or ""
+end)
+
+tick()
+task.spawn(function()
+    while true do
+        task.sleep(30000)
+        tick()
+    end
+end)
+
+function onClose()
+    mesh.shell.hide_surface(SURFACE)
+end
+</script>
+
+<style>
+    .overlay {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        justify-content: center;
+        align-items: center;
+        exclusive-zone: ignore;
+        background: transparent;
+    }
+
+    .scrim {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        border-radius: 0;
+        background: var(--glass-scrim);
+        opacity: 1;
+        transition: opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard);
+    }
+
+    .dashboard {
+        width: fit;
+        padding: 26px;
+        gap: 22px;
+        border-radius: 34px;
+        border: 1px solid var(--glass-rim);
+        background-image: var(--glass-surface-panel);
+        box-shadow: var(--glass-shadow-card);
+        backdrop-filter: blur(24px) refract(26px 22px) dispersion(1.2px);
+        opacity: 1;
+        transform: translateY(0px) scale(1);
+        transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .dashboard.mesh-surface-entering { opacity: 0; transform: translateY(26px) scale(0.95); }
+    .dashboard.mesh-surface-exiting { opacity: 0; transform: translateY(14px) scale(0.97); transition-duration: var(--animation-duration-fast); }
+    .scrim.mesh-surface-entering, .scrim.mesh-surface-exiting { opacity: 0; }
+
+    .header {
+        width: 100%;
+        align-items: center;
+        gap: 14px;
+    }
+
+    .greeting {
+        gap: 3px;
+    }
+
+    .greeting-title {
+        height: 32px;
+        font-size: 24px;
+        font-weight: 600;
+        color: var(--glass-text-heading);
+    }
+
+    .greeting-date {
+        height: 18px;
+        font-size: 13px;
+        color: var(--glass-text-muted);
+    }
+
+    .header-spacer {
+        flex-grow: 1;
+    }
+
+    .uptime {
+        height: 30px;
+        padding: 0 12px;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--glass-rim-inset);
+        background: var(--glass-fill-inset);
+    }
+
+    .uptime-text {
+        height: 18px;
+        font-size: 12px;
+        color: var(--glass-text);
+    }
+
+    .close {
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--glass-rim-control);
+        background-image: var(--glass-surface-control);
+    }
+
+    .close-glyph {
+        width: 18px;
+        height: 18px;
+        color: var(--glass-text-strong);
+    }
+
+    .close:hover {
+        border-color: var(--glass-rim-hover);
+        transform: scale(var(--animation-scale-hover));
+    }
+
+    .close:focus-visible {
+        border-color: var(--color-focus-ring);
+    }
+
+    .close:active {
+        transform: scale(var(--animation-scale-press));
+    }
+
+    .columns {
+        gap: 18px;
+        align-items: stretch;
+    }
+
+    @container (max-width: 1100px) {
+        .columns { flex-direction: column; }
+        .dashboard { padding: 18px; gap: 16px; }
+    }
+</style>

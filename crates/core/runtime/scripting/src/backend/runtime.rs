@@ -1611,6 +1611,111 @@ impl BackendScriptContext {
         Ok(())
     }
 
+    /// Owned D-Bus names and exported objects. See `dbus_serve`.
+    fn install_dbus_service_api(&mut self, mesh: &Table) -> mlua::Result<()> {
+        let grants = self
+            .capabilities
+            .iter()
+            .filter_map(|id| mesh_core_capability::parse_dbus_own_capability(id))
+            .collect::<Vec<_>>();
+        let services = Arc::new(super::dbus_serve::DbusServices::default());
+        let streams = Arc::clone(&self.streams);
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        let module_id = self.module_id.clone();
+        let registry = Arc::clone(&services);
+        mesh.set(
+            "dbus_serve",
+            self.lua_ref()?
+                .create_function(move |lua, (bus, spec): (String, Table)| {
+                    require_started(&started)?;
+                    let target = super::dbus_call::BusTarget::named(&bus)
+                        .ok_or_else(|| mlua::Error::runtime("bus must be system or session"))?;
+                    let spec =
+                        lua.from_value::<super::dbus_serve::ServiceSpec>(LuaValue::Table(spec))?;
+                    let system = bus == "system";
+                    if !grants
+                        .iter()
+                        .any(|grant| grant.system == system && grant.name == spec.name)
+                    {
+                        tracing::warn!(module_id = %module_id, bus = %bus, name = %spec.name,
+                            "denied backend dbus_serve");
+                        return Ok(LuaValue::Boolean(false));
+                    }
+                    match super::dbus_serve::spawn_service(&streams, &registry, target, spec) {
+                        Ok(handle) => Ok(LuaValue::Table(stream_handle_table(lua, &handle)?)),
+                        Err(error) => Err(mlua::Error::external(error)),
+                    }
+                })?,
+        )?;
+        let owned = |streams: &Arc<super::StreamState>, handle: &Table| -> mlua::Result<_> {
+            let generation: u64 = handle.get("generation")?;
+            let id: u64 = handle.get("id")?;
+            Ok((generation == streams.generation()).then(|| super::StreamId::from_raw(id)))
+        };
+        let streams = Arc::clone(&self.streams);
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        let registry = Arc::clone(&services);
+        mesh.set(
+            "dbus_reply",
+            self.lua_ref()?.create_function(
+                move |lua, (handle, id, args): (Table, u64, Option<LuaValue>)| {
+                    require_started(&started)?;
+                    let Some(stream) = owned(&streams, &handle)? else {
+                        return Ok(false);
+                    };
+                    let args = match args {
+                        None | Some(LuaValue::Nil) => Vec::new(),
+                        Some(args) => lua.from_value::<Vec<serde_json::Value>>(args)?,
+                    };
+                    registry
+                        .reply(stream, id, &args)
+                        .map(|()| true)
+                        .map_err(mlua::Error::runtime)
+                },
+            )?,
+        )?;
+        let streams = Arc::clone(&self.streams);
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        let registry = Arc::clone(&services);
+        mesh.set(
+            "dbus_reply_error",
+            self.lua_ref()?.create_function(
+                move |_, (handle, id, name, message): (Table, u64, String, Option<String>)| {
+                    require_started(&started)?;
+                    let Some(stream) = owned(&streams, &handle)? else {
+                        return Ok(false);
+                    };
+                    registry
+                        .reply_error(stream, id, name, message.unwrap_or_default())
+                        .map(|()| true)
+                        .map_err(mlua::Error::runtime)
+                },
+            )?,
+        )?;
+        let streams = Arc::clone(&self.streams);
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        mesh.set(
+            "dbus_emit",
+            self.lua_ref()?.create_function(
+                move |lua, (handle, member, args): (Table, String, Option<LuaValue>)| {
+                    require_started(&started)?;
+                    let Some(stream) = owned(&streams, &handle)? else {
+                        return Ok(false);
+                    };
+                    let args = match args {
+                        None | Some(LuaValue::Nil) => Vec::new(),
+                        Some(args) => lua.from_value::<Vec<serde_json::Value>>(args)?,
+                    };
+                    services
+                        .emit(stream, &member, &args)
+                        .map(|()| true)
+                        .map_err(mlua::Error::runtime)
+                },
+            )?,
+        )?;
+        Ok(())
+    }
+
     /// Fork-free event sources and socket exchanges. See `host_sources`.
     fn install_native_source_api(&mut self, mesh: &Table) -> mlua::Result<()> {
         let streams = Arc::clone(&self.streams);
@@ -1730,6 +1835,7 @@ impl BackendScriptContext {
             "dbus_call",
             super::task_io::yielding_host_function(self.lua_ref()?, blocking, start)?,
         )?;
+        self.install_dbus_service_api(mesh)?;
         let granted = self.capabilities.contains("net.netlink");
         let streams = Arc::clone(&self.streams);
         let started = Arc::clone(&self.host_side_effects_enabled);

@@ -40,5 +40,7 @@
   "calendar.weekday.4": "Th",
   "calendar.weekday.5": "Fr",
   "calendar.weekday.6": "Sa",
-  "calendar.weekday.7": "Su"
+  "calendar.weekday.7": "Su",
+  "bar.dashboard": "Dashboard",
+  "bar.wallpapers": "Wallpapers"
 }

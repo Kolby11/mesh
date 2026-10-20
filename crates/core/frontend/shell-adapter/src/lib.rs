@@ -602,6 +602,9 @@ pub enum CoreRequest {
     SetFontFamily {
         family: String,
     },
+    SetBackdropImage {
+        path: String,
+    },
     SetProvider {
         interface: String,
         provider_id: String,
@@ -1620,6 +1623,12 @@ pub trait ShellComponent: Send {
     }
     fn observes_service_event(&self, _event: &ServiceEvent) -> bool {
         true
+    }
+    /// Run the effects a service update left for the next paint and return
+    /// the host requests they made. The shell calls this for hidden surfaces,
+    /// which do not paint but may need to react (to show themselves).
+    fn settle_effects_offscreen(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
+        Ok(Vec::new())
     }
     /// Record a payload for a declared-but-unread service without the full
     /// update path. A surface with no tree yet reads no field, so it is not a

@@ -1,19 +1,20 @@
 {
   "name": "@mesh/apps-interface",
-  "version": "1.0.0",
-  "description": "Standard pinned and running application contract for docks and launchers.",
+  "version": "1.1.0",
+  "description": "Standard pinned, running and installed application contract for docks and launchers.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "interface",
     "interface": {
       "name": "mesh.apps",
-      "version": "1.0",
+      "version": "1.1",
       "domain": "apps",
       "relationship": "base",
       "contract": {
         "state": [
           { "name": "available", "type": "boolean", "description": "Whether application state is reachable" },
-          { "name": "apps", "type": "App[]", "description": "Pinned applications in order, followed by running unpinned ones" }
+          { "name": "apps", "type": "App[]", "description": "Pinned applications in order, followed by running unpinned ones" },
+          { "name": "installed", "type": "App[]", "description": "Every launchable desktop entry, sorted by name; empty until indexed" }
         ],
         "methods": [
           { "name": "activate", "args": [{ "name": "id", "type": "string" }], "returns": "Result" }

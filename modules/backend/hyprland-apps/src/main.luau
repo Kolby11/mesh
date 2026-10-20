@@ -3,12 +3,14 @@
 -- Pinned apps are XDG desktop entries; running state comes from Hyprland
 -- clients matched by window class. Window open/close/focus events on the
 -- socket2 stream trigger a client re-read, so the idle path spawns nothing.
+-- Every launchable entry is indexed once, in a task after start, for
+-- launcher grids.
 
 local DEFAULT_PINNED = { "kitty", "firefox", "zen", "vesktop", "spotify", "code", "steam", "blender" }
 local FALLBACK_POLL_MS = 2000
 local SAFETY_POLL_MS = 30000
 
-state = { available = false, apps = {} }
+state = { available = false, apps = {}, installed = {} }
 
 local data_dirs = nil
 -- Desktop id -> parsed entry (or false when no entry exists).
@@ -98,6 +100,8 @@ local function load_entry(id)
                 icon = raw.Icon or id,
                 command = launch_command(raw.Exec),
                 class = string.lower(raw.StartupWMClass or id),
+                listed = raw.NoDisplay ~= "true" and raw.Hidden ~= "true"
+                    and (raw.Type or "Application") == "Application" and (raw.Exec or "") ~= "",
             }
             entries[id] = entry
             class_index[entry.class] = id
@@ -150,10 +154,50 @@ local function app_id_for_class(class)
     return lowered
 end
 
+local LIST_ENTRIES = "for d in \"${XDG_DATA_HOME:-$HOME/.local/share}\" \"$HOME/.nix-profile/share\" $(printf %s \"${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\" | tr : \" \"); do [ -d \"$d/applications\" ] && ls \"$d/applications\"; done; exit 0"
+-- Installed entries without running/focus state; refresh() overlays that.
+local installed_index = {}
+
+local function index_installed()
+    local result = mesh.exec("sh", { "-c", LIST_ENTRIES })
+    local seen, list = {}, {}
+    for file in (result.stdout or ""):gmatch("[^\n]+") do
+        local id = file:match("^(.+)%.desktop$")
+        if id and not seen[id] then
+            seen[id] = true
+            local entry = load_entry(id)
+            if entry and entry.listed then
+                list[#list + 1] = { id = id, name = entry.name, icon = icon_path(entry.icon) }
+            end
+        end
+    end
+    table.sort(list, function(a, b)
+        return string.lower(a.name) < string.lower(b.name)
+    end)
+    installed_index = list
+end
+
+local function installed_with(running)
+    local list = {}
+    for _, app in installed_index do
+        local run = running[app.id]
+        list[#list + 1] = {
+            id = app.id,
+            name = app.name,
+            icon = app.icon,
+            pinned = false,
+            running = run ~= nil,
+            focused = run ~= nil and run.focused,
+            windows = run and run.windows or 0,
+        }
+    end
+    return list
+end
+
 local function refresh()
     local clients = decode(query("clients"))
     if clients == nil then
-        state = { available = false, apps = {} }
+        state = { available = false, apps = {}, installed = installed_with({}) }
         return
     end
     local active = decode(query("activewindow")) or {}
@@ -209,7 +253,7 @@ local function refresh()
     for _, id in order do
         push(id, false)
     end
-    state = { available = true, apps = apps }
+    state = { available = true, apps = apps, installed = installed_with(running) }
 end
 
 local function try_stream()
@@ -229,6 +273,10 @@ end
 function start(self)
     mesh.service.set_poll_interval(try_stream() and SAFETY_POLL_MS or FALLBACK_POLL_MS)
     refresh()
+    task.spawn(function()
+        index_installed()
+        refresh()
+    end)
 end
 
 local CLIENT_EVENTS = {

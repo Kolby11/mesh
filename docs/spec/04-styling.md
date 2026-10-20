@@ -583,6 +583,9 @@ it. Refraction needs pixels MESH holds itself, so it samples one **backdrop
 source**: the image at `shell.render.backdrop.image`, cover-fit to the output.
 A profile that uses liquid glass normally also paints that image as its
 wallpaper (`@mesh/glass-wallpaper`), so what the glass bends is what is shown.
+`mesh.theme.set_backdrop_image { path }` (`service.theme.control`) selects an
+absolute image file, writing where the other appearance settings go, and
+repaints every surface; `mesh.theme` state publishes it as `backdrop_image`.
 
 ```css
 .card {

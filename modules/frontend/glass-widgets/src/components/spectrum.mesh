@@ -1,0 +1,69 @@
+<template>
+    <row class="spectrum-strip" class:spectrum-idle={not active} aria-hidden="true">
+        {#for bar in bars key={bar.key}}
+            <box class="spectrum-bar" style:height={bar.height} />
+        {/for}
+    </row>
+</template>
+
+<script lang="luau">
+local visualizer = require("mesh.visualizer")
+
+local HEIGHT = 56
+local BARS = 24
+
+active = false
+bars = {}
+
+effect(function()
+    active = visualizer.available == true and visualizer.active == true
+    local levels = active and visualizer.bars or {}
+    local list = {}
+    for index = 1, BARS do
+        local level = math.clamp(tonumber(levels[index]) or 0, 0, 1)
+        list[index] = {
+            key = index,
+            height = tostring(math.max(4, math.floor(HEIGHT * level + 0.5))) .. "px",
+        }
+    end
+    bars = list
+end)
+</script>
+
+<style>
+    .spectrum-strip {
+        width: 480px;
+        height: 80px;
+        margin-top: 12px;
+        padding: 12px 18px;
+        gap: 5px;
+        justify-content: center;
+        align-items: flex-end;
+        border-radius: 22px;
+        border: 1px solid var(--glass-rim);
+        background-image: var(--glass-surface-media);
+        box-shadow: var(--glass-shadow-card);
+        backdrop-filter: blur(12px) refract(18px 14px) dispersion(1px);
+        opacity: 1;
+        transform: translateY(0px);
+        transition-property: opacity, transform;
+        transition-duration: var(--animation-duration-long);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .spectrum-idle {
+        opacity: 0;
+        transform: translateY(-12px);
+    }
+
+    .spectrum-bar {
+        flex-grow: 1;
+        flex-basis: 0;
+        border-radius: 999px;
+        background-image: var(--glass-meter-bar);
+    }
+
+    @container (max-width: 800px) {
+        .spectrum-strip { width: 360px; }
+    }
+</style>

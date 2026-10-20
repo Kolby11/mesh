@@ -1,0 +1,36 @@
+{
+  "name": "@mesh/proc-system",
+  "version": "0.1.0",
+  "description": "Live system load from /proc and /sys: processor, memory, root disk, processor temperature and network throughput.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "fs.read",
+        "exec.argv:df:[\"-B1\",\"--output=size,used\",\"/\"]"
+      ],
+      "binaries": [
+        {
+          "name": "df",
+          "reason": "Report the root filesystem's size and use.",
+          "packages": { "arch": "coreutils", "debian": "coreutils", "fedora": "coreutils", "nixos": "coreutils" }
+        }
+      ],
+      "modules": {
+        "@mesh/system-interface": "^1.0.0"
+      }
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.system",
+        "version": "1.0",
+        "provider": "proc",
+        "label": "Linux /proc",
+        "priority": 100
+      }
+    ]
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "name": "@mesh/wallpapers-interface",
+  "version": "1.0.0",
+  "description": "Wallpaper library contract: the images a picker offers. Selecting one is mesh.theme.set_backdrop_image.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.wallpapers",
+      "version": "1.0",
+      "domain": "wallpapers",
+      "relationship": "base",
+      "contract": {
+        "state": [
+          {
+            "name": "available",
+            "type": "boolean",
+            "description": "Whether the wallpaper directory could be read"
+          },
+          {
+            "name": "directory",
+            "type": "string",
+            "description": "Absolute path of the wallpaper directory"
+          },
+          {
+            "name": "wallpapers",
+            "type": "Wallpaper[]",
+            "description": "Images in the directory, sorted by name"
+          }
+        ],
+        "methods": [
+          {
+            "name": "refresh",
+            "returns": "Result"
+          }
+        ],
+        "events": [],
+        "types": {
+          "Wallpaper": {
+            "fields": [
+              {
+                "name": "path",
+                "type": "string"
+              },
+              {
+                "name": "name",
+                "type": "string"
+              },
+              {
+                "name": "thumbnail",
+                "type": "string"
+              },
+              {
+                "name": "color",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "capabilities": {
+          "required": ["service.wallpapers.read"],
+          "methods": {
+            "refresh": ["service.wallpapers.read"]
+          },
+          "permissions": {
+            "service.wallpapers.read": "standard"
+          }
+        }
+      }
+    }
+  }
+}

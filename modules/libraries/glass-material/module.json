@@ -49,7 +49,14 @@
         "glass.shadow.lens": "0 4px 12px color-mix(in srgb, var(--color-shadow) 25%, transparent)",
         "glass.shadow.artwork": "0 8px 22px color-mix(in srgb, var(--color-shadow) 40%, transparent)",
         "glass.text.on.error": "var(--color-on-error-container)",
-        "glass.surface.panel": "linear-gradient(to bottom, color-mix(in srgb, var(--color-surface-container-high) 70%, transparent), color-mix(in srgb, var(--color-surface-container-low) 54%, transparent))"
+        "glass.surface.panel": "linear-gradient(to bottom, color-mix(in srgb, var(--color-surface-container-high) 70%, transparent), color-mix(in srgb, var(--color-surface-container-low) 54%, transparent))",
+        "glass.meter.track": "color-mix(in srgb, var(--color-surface-container) 32%, transparent)",
+        "glass.meter.cpu": "linear-gradient(to bottom, var(--color-primary), var(--color-tertiary))",
+        "glass.meter.memory": "linear-gradient(to bottom, var(--color-primary), var(--color-secondary))",
+        "glass.meter.disk": "linear-gradient(to bottom, var(--color-secondary), var(--color-info))",
+        "glass.meter.temperature": "linear-gradient(to bottom, var(--color-error), var(--color-warning))",
+        "glass.meter.bar": "linear-gradient(to bottom, var(--color-tertiary), color-mix(in srgb, var(--color-primary) 55%, transparent))",
+        "glass.scrim": "color-mix(in srgb, var(--color-scrim) 30%, transparent)"
       }
     }
   }

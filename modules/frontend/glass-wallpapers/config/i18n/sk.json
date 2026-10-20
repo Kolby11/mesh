@@ -1,0 +1,16 @@
+{
+  "picker.title": "Tapety",
+  "picker.close": "Zavrieť výber tapety",
+  "picker.count": "{count} v {directory}",
+  "picker.empty": "V {directory} nie sú žiadne obrázky",
+  "picker.unavailable": "Priečinok s tapetami sa nedá prečítať",
+  "picker.refresh": "Hľadať nové tapety",
+  "picker.current": "Aktuálna tapeta",
+  "picker.use": "Použiť {name} ako tapetu",
+  "picker.hint": "← → prehliadať · Enter použiť · Esc zavrieť",
+  "keybind.close": "Zavrieť výber tapety",
+  "keybind.previous": "Predchádzajúca tapeta",
+  "keybind.next": "Ďalšia tapeta",
+  "keybind.apply": "Použiť túto tapetu",
+  "keybind.category": "Tapety"
+}

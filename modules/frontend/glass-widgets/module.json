@@ -1,14 +1,15 @@
 {
   "name": "@mesh/glass-widgets",
   "version": "0.1.0",
-  "description": "Desktop-layer liquid-glass cards: a now-playing player and a weather forecast.",
+  "description": "Desktop-layer liquid-glass cards: a now-playing player with a live spectrum and a weather forecast.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "ui",
     "uses": {
       "optionalInterfaces": {
         "mesh.media": ">=1.0",
-        "mesh.weather": ">=1.0"
+        "mesh.weather": ">=1.0",
+        "mesh.visualizer": ">=1.0"
       },
       "modules": {
         "@mesh/glass-material": ">=0.1.0"
@@ -24,7 +25,8 @@
         "locale.read",
         "service.media.read",
         "service.media.control",
-        "service.weather.read"
+        "service.weather.read",
+        "service.visualizer.read"
       ]
     },
     "entry": "src/main.mesh",

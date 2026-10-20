@@ -38,33 +38,35 @@ impl Shell {
         }
     }
 
-    fn begin_wayland_input_generation(&mut self) {
-        self.popup_grab_generation = self.popup_grab_generation.wrapping_add(1);
-        self.pending_popup_grabs.clear();
-    }
-
     fn remember_popup_grab(
         &mut self,
         surface_id: &str,
         identity: mesh_core_presentation::PointerButtonIdentity,
     ) {
-        self.pending_popup_grabs.insert(
-            surface_id.to_string(),
-            PendingPopupGrab {
-                identity,
-                dispatch_generation: self.popup_grab_generation,
-            },
-        );
+        self.pending_popup_grab = Some(PendingPopupGrab {
+            surface_id: surface_id.to_string(),
+            identity,
+            released_at: None,
+        });
+    }
+
+    fn release_popup_grab(&mut self, surface_id: &str) {
+        if let Some(pending) = self.pending_popup_grab.as_mut()
+            && pending.surface_id == surface_id
+            && pending.released_at.is_none()
+        {
+            pending.released_at = Some(std::time::Instant::now());
+        }
     }
 
     pub(super) fn take_pending_popup_grab(
         &mut self,
         parent_surface_id: &str,
     ) -> Option<mesh_core_presentation::PointerButtonIdentity> {
-        take_pending_popup_grab_from_map(
-            &mut self.pending_popup_grabs,
-            self.popup_grab_generation,
+        take_pending_popup_grab_at(
+            &mut self.pending_popup_grab,
             parent_surface_id,
+            std::time::Instant::now(),
         )
     }
 
@@ -76,7 +78,6 @@ impl Shell {
     }
 
     pub(in crate::shell) fn dispatch_wayland_inner(&mut self) -> Result<(), ShellRunError> {
-        self.begin_wayland_input_generation();
         let events = match self.presentation_engine.poll_events() {
             Ok(events) => coalesce_input_events(events),
             Err(error) => {
@@ -158,6 +159,20 @@ impl Shell {
                 && *button == mesh_core_presentation::PRIMARY_POINTER_BUTTON
             {
                 self.remember_popup_grab(target_surface_id, *identity);
+            }
+            if let RoutedWindowEvent::PointerButton {
+                button,
+                pressed: false,
+                ..
+            }
+            | RoutedWindowEvent::PointerButtonWithIdentity {
+                button,
+                pressed: false,
+                ..
+            } = &event
+                && *button == mesh_core_presentation::PRIMARY_POINTER_BUTTON
+            {
+                self.release_popup_grab(target_surface_id);
             }
             if matches!(
                 event,
@@ -993,15 +1008,22 @@ fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
     }
 }
 
-fn take_pending_popup_grab_from_map(
-    pending_grabs: &mut std::collections::HashMap<String, PendingPopupGrab>,
-    dispatch_generation: u64,
+fn take_pending_popup_grab_at(
+    pending: &mut Option<PendingPopupGrab>,
     parent_surface_id: &str,
+    now: std::time::Instant,
 ) -> Option<mesh_core_presentation::PointerButtonIdentity> {
-    pending_grabs
-        .remove(parent_surface_id)
-        .filter(|pending| pending.dispatch_generation == dispatch_generation)
-        .map(|pending| pending.identity)
+    if pending
+        .as_ref()
+        .is_none_or(|pending| pending.surface_id != parent_surface_id)
+    {
+        return None;
+    }
+    let pending = pending.take()?;
+    let live = pending.released_at.is_none_or(|released_at| {
+        now.saturating_duration_since(released_at) <= POPUP_GRAB_CLICK_WINDOW
+    });
+    live.then_some(pending.identity)
 }
 
 #[cfg(test)]
@@ -1144,41 +1166,55 @@ mod tests {
     }
 
     #[test]
-    fn popup_grab_identity_is_one_shot_and_generation_bound() {
+    fn popup_grab_identity_is_one_shot_and_bound_to_its_click() {
         let identity = mesh_core_presentation::PointerButtonIdentity {
             seat_id: 3,
             serial: 19,
         };
-        let mut pending = std::collections::HashMap::from([(
-            "panel".to_string(),
-            PendingPopupGrab {
+        let pressed = |released_at| {
+            Some(PendingPopupGrab {
+                surface_id: "panel".into(),
                 identity,
-                dispatch_generation: 4,
-            },
-        )]);
+                released_at,
+            })
+        };
+        let now = std::time::Instant::now();
 
+        let mut pending = pressed(None);
         assert_eq!(
-            take_pending_popup_grab_from_map(&mut pending, 4, "panel"),
-            Some(identity)
+            take_pending_popup_grab_at(&mut pending, "other", now),
+            None,
+            "a press on one surface cannot authorize another surface's popup"
         );
         assert_eq!(
-            take_pending_popup_grab_from_map(&mut pending, 4, "panel"),
+            take_pending_popup_grab_at(&mut pending, "panel", now),
+            Some(identity),
+            "a held press authorizes a popup created on a later frame"
+        );
+        assert_eq!(
+            take_pending_popup_grab_at(&mut pending, "panel", now),
             None,
             "a popup creation consumes its click credential"
         );
 
-        pending.insert(
-            "panel".to_string(),
-            PendingPopupGrab {
-                identity,
-                dispatch_generation: 4,
-            },
-        );
+        let mut pending = pressed(Some(now));
         assert_eq!(
-            take_pending_popup_grab_from_map(&mut pending, 5, "panel"),
-            None,
-            "a credential from an older dispatch cannot authorize a later popup"
+            take_pending_popup_grab_at(&mut pending, "panel", now + POPUP_GRAB_CLICK_WINDOW),
+            Some(identity),
+            "a click-opened popup staged for a frame keeps its credential"
         );
+
+        let mut pending = pressed(Some(now));
+        assert_eq!(
+            take_pending_popup_grab_at(
+                &mut pending,
+                "panel",
+                now + POPUP_GRAB_CLICK_WINDOW + std::time::Duration::from_millis(1),
+            ),
+            None,
+            "a stale click cannot authorize a later popup"
+        );
+        assert!(pending.is_none());
     }
 
     #[test]

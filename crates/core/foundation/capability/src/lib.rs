@@ -248,6 +248,13 @@ impl CapabilityCatalog {
                 PrivilegeLevel::Elevated
             });
         }
+        if let Some(grant) = parse_dbus_own_capability(id) {
+            return Some(if grant.system {
+                PrivilegeLevel::High
+            } else {
+                PrivilegeLevel::Elevated
+            });
+        }
         BUILTIN_CAPABILITIES
             .iter()
             .find_map(|(known, level)| (*known == id).then_some(*level))
@@ -358,6 +365,27 @@ pub fn parse_dbus_call_capability(value: &str) -> Option<DbusCallGrant> {
         system,
         destination,
         interface: interface.to_string(),
+    })
+}
+
+/// A `dbus.own:<bus>:<name>` grant: owning one well-known name and exporting
+/// an object under it with `mesh.dbus_serve`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DbusOwnGrant {
+    pub system: bool,
+    pub name: String,
+}
+
+pub fn parse_dbus_own_capability(value: &str) -> Option<DbusOwnGrant> {
+    let (bus, name) = value.strip_prefix("dbus.own:")?.split_once(':')?;
+    let system = match bus {
+        "system" => true,
+        "session" => false,
+        _ => return None,
+    };
+    dbus_dotted_name(name, true).then(|| DbusOwnGrant {
+        system,
+        name: name.to_string(),
     })
 }
 
@@ -674,6 +702,34 @@ impl Default for CapabilitySet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dbus_own_grants_name_one_bus_name() {
+        let catalog = CapabilityCatalog::builtin();
+        assert_eq!(
+            catalog.validate("dbus.own:session:org.freedesktop.Notifications"),
+            Ok(PrivilegeLevel::Elevated)
+        );
+        assert_eq!(
+            catalog.validate("dbus.own:system:org.mesh.Daemon"),
+            Ok(PrivilegeLevel::High)
+        );
+        for invalid in [
+            "dbus.own:session:*",
+            "dbus.own:user:org.a.B",
+            "dbus.own:session:org",
+            "dbus.own:session::1.42",
+        ] {
+            assert!(catalog.validate(invalid).is_err(), "{invalid}");
+        }
+        assert_eq!(
+            parse_dbus_own_capability("dbus.own:session:org.a.B"),
+            Some(DbusOwnGrant {
+                system: false,
+                name: "org.a.B".into()
+            })
+        );
+    }
 
     #[test]
     fn dbus_call_grants_scope_bus_destination_and_interface() {

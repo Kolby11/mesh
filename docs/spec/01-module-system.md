@@ -994,7 +994,7 @@ the authoritative settings engine or transaction machinery. See
 | mesh.composition | apply_node_slot, reset_node_slot | service.composition.control |
 | `mesh.packages` | `install`, `uninstall`, `set_module_enabled`, `set_provider`, `switch_profile` | `service.packages.control` |
 | `mesh.settings` | `set_prop`, `unset_prop` | `service.settings.control` |
-| `mesh.theme` | `set_theme`, `set_icon_theme`, `set_font_family` | `service.theme.control` |
+| `mesh.theme` | `set_theme`, `set_icon_theme`, `set_font_family`, `set_backdrop_image` | `service.theme.control` |
 | `mesh.locale` | — (state projection; host read/write APIs) | `locale.read` / `locale.write` |
 
 The fifth core interface, mesh.composition, publishes the active profile
@@ -1115,6 +1115,10 @@ without the grant.
   `*` (for per-client services such as StatusNotifier items). `<bus>` is
   `system` (High) or `session` (Elevated). The broad `dbus.system` and
   `dbus.session` grants cover signal subscription only, not calls.
+- **Shipped — owned D-Bus names.** `dbus.own:<bus>:<name>` permits
+  `mesh.dbus_serve` to own one well-known name and export one interface at one
+  object path; `<bus>` is `system` (High) or `session` (Elevated). See
+  [backend host events](../modules/backend-events.md#d-bus-services).
 - **Shipped — exec locale.** Exec children run in `LC_ALL=C.UTF-8` so a
   provider parses the same tool output on every host. A call can ask for
   another locale with an options table, `mesh.exec(program, args, { locale =

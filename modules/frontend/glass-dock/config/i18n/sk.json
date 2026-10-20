@@ -4,6 +4,9 @@
   "launcher.placeholder": "Hľadať aplikáciu…",
   "launcher.running": "Spustené",
   "launcher.pinned": "Pripnutá aplikácia",
-  "launcher.empty": "Tu sa zobrazia pripnuté a spustené aplikácie",
-  "launcher.no_match": "Žiadne zodpovedajúce aplikácie"
+  "launcher.empty": "Nenašli sa žiadne aplikácie",
+  "launcher.no_match": "Žiadne zodpovedajúce aplikácie",
+  "launcher.list": "Zoznam",
+  "launcher.grid": "Mriežka",
+  "launcher.installed": "Nainštalované"
 }

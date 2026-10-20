@@ -1,0 +1,489 @@
+<template>
+    <box class="overlay" keybind="close" onkeybind={onClose}>
+        <button class="scrim" onclick={onClose} aria-label={t("picker.close")} tabindex="-1" />
+        <column class="picker" aria-label={t("picker.title")}>
+            <row class="head">
+                <column class="head-copy">
+                    <text class="title">{t("picker.title")}</text>
+                    <text class="subtitle">{subtitle}</text>
+                </column>
+                <box class="spacer" />
+                <button class="round" onclick={onRefresh} aria-label={t("picker.refresh")} title={t("picker.refresh")}>
+                    <icon class="round-glyph" name="view-refresh" size="18" />
+                </button>
+                <button class="round" onclick={onClose} aria-label={t("picker.close")} title={t("picker.close")}>
+                    <icon class="round-glyph" name="window-close" size="18" />
+                </button>
+            </row>
+            <row class="swatches" hidden={not has_wallpapers}>
+                {#for swatch in swatches key={swatch.path}}
+                    <button
+                        class="swatch"
+                        class:swatch-focused={swatch.focused}
+                        style:background-color={swatch.color}
+                        onclick={onPick(swatch.index)}
+                        aria-label={swatch.name}
+                        title={swatch.name}
+                    />
+                {/for}
+            </row>
+            <row class="carousel" hidden={not has_wallpapers}>
+                <button class="arrow" keybind="previous" onkeybind={onPrevious} onclick={onPrevious} aria-label={t("keybind.previous")}>
+                    <icon class="arrow-glyph" name="go-up" size="20" />
+                </button>
+                <row class="cards">
+                    {#for card in cards key={card.path}}
+                        <button
+                            class="card"
+                            class:card-focused={card.focused}
+                            class:card-left={card.side < 0}
+                            class:card-right={card.side > 0}
+                            class:card-far={card.far}
+                            onclick={onCard(card.index)}
+                            aria-label={card.label}
+                            aria-pressed={card.current}
+                        >
+                            <image class="card-image" src={card.thumbnail} alt="" />
+                            <box class="card-badge" hidden={not card.current}>
+                                <icon class="card-badge-glyph" name="object-select" size="14" />
+                            </box>
+                        </button>
+                    {/for}
+                </row>
+                <button class="arrow arrow-next" keybind="next" onkeybind={onNext} onclick={onNext} aria-label={t("keybind.next")}>
+                    <icon class="arrow-glyph" name="go-up" size="20" />
+                </button>
+            </row>
+            <row class="foot" hidden={not has_wallpapers}>
+                <text class="focused-name">{focused_name}</text>
+                <box class="spacer" />
+                <text class="hint">{t("picker.hint")}</text>
+                <button class="apply" keybind="apply" onkeybind={onApply} onclick={onApply} disabled={focused_current} aria-label={apply_label}>
+                    <icon class="apply-glyph" name="preferences-desktop-wallpaper" size="16" />
+                    <text class="apply-text">{t("keybind.apply")}</text>
+                </button>
+            </row>
+            <column class="empty" hidden={has_wallpapers}>
+                <icon class="empty-glyph" name="preferences-desktop-wallpaper" size="34" />
+                <text class="empty-text">{empty_label}</text>
+            </column>
+        </column>
+    </box>
+</template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local theme = require("mesh.theme")
+local wallpapers = require("mesh.wallpapers")
+
+local SURFACE = "@mesh/glass-wallpapers"
+-- Cards shown on each side of the focused one.
+local WINDOW = 3
+local MAX_SWATCHES = 24
+
+focus = 1
+cards = {}
+swatches = {}
+has_wallpapers = false
+subtitle = ""
+empty_label = ""
+focused_name = ""
+focused_current = true
+apply_label = ""
+
+local function list()
+    return wallpapers.wallpapers or {}
+end
+
+local function clamp_focus(count)
+    if count == 0 then
+        return 1
+    end
+    return math.clamp(focus, 1, count)
+end
+
+-- Follow the wallpaper in use when it changes; previews arriving later
+-- must not pull focus back while browsing.
+local followed = nil
+effect(function()
+    local current = theme.backdrop_image
+    for index, wallpaper in list() do
+        if wallpaper.path == current then
+            if followed ~= current then
+                followed = current
+                focus = index
+            end
+            return
+        end
+    end
+end)
+
+effect(function()
+    local items = list()
+    local count = #items
+    local index = clamp_focus(count)
+    local current = theme.backdrop_image or ""
+    has_wallpapers = count > 0
+    local directory = wallpapers.directory or ""
+    subtitle = has_wallpapers and t("picker.count", { count = count, directory = directory }) or ""
+    empty_label = wallpapers.available and t("picker.empty", { directory = directory }) or t("picker.unavailable")
+
+    local visible = {}
+    for offset = -WINDOW, WINDOW do
+        local position = index + offset
+        local wallpaper = items[position]
+        if wallpaper then
+            visible[#visible + 1] = {
+                path = wallpaper.path,
+                index = position,
+                thumbnail = wallpaper.thumbnail ~= "" and wallpaper.thumbnail or wallpaper.path,
+                label = t("picker.use", { name = wallpaper.name }),
+                focused = offset == 0,
+                side = offset,
+                far = math.abs(offset) >= 2,
+                current = wallpaper.path == current,
+            }
+        end
+    end
+    cards = visible
+
+    local strip = {}
+    for position, wallpaper in items do
+        if #strip >= MAX_SWATCHES then
+            break
+        end
+        if wallpaper.color ~= "" then
+            strip[#strip + 1] = {
+                path = wallpaper.path,
+                index = position,
+                name = wallpaper.name,
+                color = wallpaper.color,
+                focused = position == index,
+            }
+        end
+    end
+    swatches = strip
+
+    local focused = items[index]
+    focused_name = focused and focused.name or ""
+    focused_current = focused == nil or focused.path == current
+    apply_label = focused and t("picker.use", { name = focused.name }) or ""
+end)
+
+local function move(delta)
+    local count = #list()
+    if count > 0 then
+        focus = ((clamp_focus(count) - 1 + delta) % count) + 1
+    end
+end
+
+local function apply(index)
+    local wallpaper = list()[index]
+    if wallpaper then
+        theme.set_backdrop_image(wallpaper.path)
+    end
+end
+
+function onPrevious() move(-1) end
+function onNext() move(1) end
+function onApply() apply(clamp_focus(#list())) end
+
+function onCard(index)
+    if index == focus then
+        apply(index)
+    else
+        focus = index
+    end
+end
+
+function onPick(index)
+    focus = index
+    apply(index)
+end
+
+function onRefresh()
+    wallpapers.refresh()
+end
+
+function onClose()
+    mesh.shell.hide_surface(SURFACE)
+end
+</script>
+
+<style>
+    .overlay {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        justify-content: center;
+        align-items: center;
+        exclusive-zone: ignore;
+        background: transparent;
+    }
+
+    .scrim {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        border-radius: 0;
+        background: var(--glass-scrim);
+        opacity: 1;
+        transition: opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard);
+    }
+
+    .picker {
+        width: fit;
+        max-width: 1500px;
+        padding: 24px 26px;
+        gap: 20px;
+        border-radius: 34px;
+        border: 1px solid var(--glass-rim);
+        background-image: var(--glass-surface-panel);
+        box-shadow: var(--glass-shadow-card);
+        backdrop-filter: blur(22px) refract(24px 20px) dispersion(1.2px);
+        opacity: 1;
+        transform: translateY(0px) scale(1);
+        transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .picker.mesh-surface-entering { opacity: 0; transform: translateY(30px) scale(0.95); }
+    .picker.mesh-surface-exiting { opacity: 0; transform: translateY(16px) scale(0.97); transition-duration: var(--animation-duration-fast); }
+    .scrim.mesh-surface-entering, .scrim.mesh-surface-exiting { opacity: 0; }
+
+    .head {
+        width: 100%;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .head-copy {
+        gap: 3px;
+    }
+
+    .title {
+        height: 30px;
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--glass-text-heading);
+    }
+
+    .subtitle {
+        height: 18px;
+        font-size: 12px;
+        color: var(--glass-text-muted);
+        text-overflow: ellipsis;
+    }
+
+    .spacer {
+        flex-grow: 1;
+    }
+
+    .round {
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--glass-rim-control);
+        background-image: var(--glass-surface-control);
+    }
+
+    .round-glyph {
+        width: 18px;
+        height: 18px;
+        color: var(--glass-text-strong);
+    }
+
+    .swatches {
+        width: 100%;
+        justify-content: center;
+        gap: 8px;
+    }
+
+    .swatch {
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border-radius: 999px;
+        border: 2px solid var(--glass-rim-inset);
+        transform: scale(1);
+        transition: transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .swatch-focused {
+        border-color: var(--glass-text-heading);
+        transform: scale(1.25);
+    }
+
+    .carousel {
+        align-items: center;
+        gap: 14px;
+    }
+
+    .arrow {
+        width: 40px;
+        height: 40px;
+        padding: 0;
+        flex-shrink: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--glass-rim-control);
+        background-image: var(--glass-surface-control);
+        transform: rotate(-90deg);
+    }
+
+    .arrow-next {
+        transform: rotate(90deg);
+    }
+
+    .arrow-glyph {
+        width: 20px;
+        height: 20px;
+        color: var(--glass-text-strong);
+    }
+
+    .cards {
+        height: 250px;
+        align-items: center;
+        gap: 16px;
+    }
+
+    .card {
+        position: relative;
+        width: 224px;
+        height: 140px;
+        padding: 0;
+        flex-shrink: 0;
+        border-radius: 20px;
+        border: 1px solid var(--glass-rim);
+        background: var(--glass-fill-artwork);
+        box-shadow: var(--glass-shadow-card);
+        overflow: hidden;
+        opacity: 0.86;
+        transform: rotate(-6deg) scale(1);
+        transition-property: transform, opacity, border-color;
+        transition-duration: var(--animation-duration-long);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .card-left { transform: rotate(-9deg) translateY(10px) scale(0.94); }
+    .card-right { transform: rotate(-3deg) translateY(-10px) scale(0.94); }
+    .card-far { opacity: 0.55; }
+
+    .card-focused {
+        width: 336px;
+        height: 210px;
+        opacity: 1;
+        border-color: var(--glass-text-heading);
+        transform: rotate(0deg) scale(1);
+    }
+
+    .card-image {
+        width: 100%;
+        height: 100%;
+        border-radius: 20px;
+    }
+
+    .card-badge {
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 26px;
+        height: 26px;
+        justify-content: center;
+        align-items: center;
+        border-radius: 999px;
+        background-image: var(--glass-surface-active);
+    }
+
+    .card-badge-glyph {
+        width: 14px;
+        height: 14px;
+        color: var(--glass-text-on-accent);
+    }
+
+    .foot {
+        width: 100%;
+        align-items: center;
+        gap: 14px;
+    }
+
+    .focused-name {
+        height: 22px;
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--glass-text-heading);
+        text-overflow: ellipsis;
+    }
+
+    .hint {
+        height: 18px;
+        font-size: 11px;
+        color: var(--glass-text-muted);
+    }
+
+    .apply {
+        height: 38px;
+        padding: 0 16px;
+        gap: 8px;
+        align-items: center;
+        border-radius: 999px;
+        background-image: var(--glass-surface-active);
+    }
+
+    .apply-glyph {
+        width: 16px;
+        height: 16px;
+        color: var(--glass-text-on-accent);
+    }
+
+    .apply-text {
+        height: 18px;
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--glass-text-on-accent);
+    }
+
+    .empty {
+        width: 520px;
+        height: 200px;
+        gap: 12px;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .empty-glyph {
+        width: 34px;
+        height: 34px;
+        color: var(--glass-text-muted);
+    }
+
+    .empty-text {
+        height: 20px;
+        font-size: 13px;
+        color: var(--glass-text-muted);
+    }
+
+    .round:hover, .arrow:hover, .card:hover, .swatch:hover {
+        border-color: var(--glass-rim-hover);
+    }
+
+    .round:focus-visible, .arrow:focus-visible, .card:focus-visible, .swatch:focus-visible, .apply:focus-visible {
+        border: 1px solid var(--color-focus-ring);
+    }
+
+    .round:active, .apply:active {
+        transform: scale(var(--animation-scale-press));
+    }
+
+    @container (max-width: 1300px) {
+        .card { width: 176px; height: 110px; }
+        .card-focused { width: 288px; height: 180px; }
+        .cards { height: 220px; gap: 10px; }
+    }
+</style>

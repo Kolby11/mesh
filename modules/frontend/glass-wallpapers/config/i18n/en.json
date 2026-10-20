@@ -1,0 +1,16 @@
+{
+  "picker.title": "Wallpapers",
+  "picker.close": "Close wallpaper picker",
+  "picker.count": "{count} in {directory}",
+  "picker.empty": "No images found in {directory}",
+  "picker.unavailable": "The wallpaper folder could not be read",
+  "picker.refresh": "Look for new wallpapers",
+  "picker.current": "Current wallpaper",
+  "picker.use": "Use {name} as wallpaper",
+  "picker.hint": "← → to browse · Enter to apply · Esc to close",
+  "keybind.close": "Close wallpaper picker",
+  "keybind.previous": "Previous wallpaper",
+  "keybind.next": "Next wallpaper",
+  "keybind.apply": "Use this wallpaper",
+  "keybind.category": "Wallpapers"
+}

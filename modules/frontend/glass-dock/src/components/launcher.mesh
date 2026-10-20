@@ -1,19 +1,41 @@
 <template>
     <popover class="launcher-shell" open={open} anchor-ref="glassLauncher" anchor="top" gravity="top" offset-y="-12" open-on="click" grab="click" aria-label={t("launcher.title")}>
-        <column class="launcher">
-            <row class="heading"><text class="title">{t("launcher.title")}</text><text class="count">{count_label}</text></row>
+        <column class="launcher" class:launcher-grid={grid}>
+            <row class="heading">
+                <text class="title">{t("launcher.title")}</text>
+                <text class="count">{count_label}</text>
+                <box class="heading-spacer" />
+                <button class="view" class:view-on={not grid} onclick={onList} aria-pressed={not grid} aria-label={t("launcher.list")} title={t("launcher.list")}>
+                    <icon class="view-glyph" name="view-list" size="16" />
+                </button>
+                <button class="view" class:view-on={grid} onclick={onGrid} aria-pressed={grid} aria-label={t("launcher.grid")} title={t("launcher.grid")}>
+                    <icon class="view-glyph" name="view-grid" size="16" />
+                </button>
+            </row>
             <input class="search" value={query} oninput={onSearch} placeholder={t("launcher.placeholder")} aria-label={t("launcher.search")} />
             <scroll class="results">
-                <column class="app-list">
+                <column class="result-body">
+                <column class="app-list" hidden={grid}>
                     {#for app in filtered key={app.id}}
                         <button class="app" onclick={onLaunch(app.id)}>
                             <image class="app-art" src={app.icon} alt="" hidden={not app.has_file} />
                             <icon class="app-art" name="application-x-executable" size="28" hidden={app.has_file} />
-                            <column class="app-copy"><text class="app-name">{app.name}</text><text class="app-status">{app.running and t("launcher.running") or t("launcher.pinned")}</text></column>
+                            <column class="app-copy"><text class="app-name">{app.name}</text><text class="app-status">{app.status}</text></column>
                             <box class="running" hidden={not app.running} />
                         </button>
                     {/for}
-                    <text class="empty" hidden={has_results}>{query == "" and t("launcher.empty") or t("launcher.no_match")}</text>
+                </column>
+                <row class="app-grid" hidden={not grid}>
+                    {#for app in filtered key={app.id}}
+                        <button class="cell" onclick={onLaunch(app.id)} aria-label={app.name} title={app.name}>
+                            <image class="cell-art" src={app.icon} alt="" hidden={not app.has_file} />
+                            <icon class="cell-art" name="application-x-executable" size="40" hidden={app.has_file} />
+                            <text class="cell-name">{app.name}</text>
+                            <box class="cell-dot" class:cell-dot-on={app.running} />
+                        </button>
+                    {/for}
+                </row>
+                <text class="empty" hidden={has_results}>{empty_label}</text>
                 </column>
             </scroll>
         </column>
@@ -24,22 +46,36 @@ local t = import("mesh.i18n", "t")
 local apps_service = require("mesh.apps")
 open = false
 query = ""
+grid = true
 filtered = {}
 count_label = ""
 has_results = false
+empty_label = ""
 effect(function()
     local needle = string.lower(query)
+    local installed = apps_service.installed or {}
+    local source = #installed > 0 and installed or apps_service.apps or {}
     local list = {}
-    for _, app in apps_service.apps or {} do
+    for _, app in source do
         if needle == "" or string.find(string.lower(app.name or ""), needle, 1, true) then
-            list[#list + 1] = { id = app.id, name = app.name, icon = app.icon or "", has_file = string.sub(app.icon or "", 1, 1) == "/", running = app.running }
+            list[#list + 1] = {
+                id = app.id,
+                name = app.name,
+                icon = app.icon or "",
+                has_file = string.sub(app.icon or "", 1, 1) == "/",
+                running = app.running,
+                status = app.running and t("launcher.running") or app.pinned and t("launcher.pinned") or t("launcher.installed"),
+            }
         end
     end
     filtered = list
     has_results = #list > 0
     count_label = tostring(#list)
+    empty_label = query == "" and t("launcher.empty") or t("launcher.no_match")
 end)
 function onSearch(value) query = tostring(value or "") end
+function onList() grid = false end
+function onGrid() grid = true end
 function onLaunch(id)
     apps_service.activate(id)
     open = false
@@ -50,7 +86,24 @@ end
     .launcher-shell.mesh-surface-entering { opacity: 0; transform: translateY(20px) scale(0.92); }
     .launcher-shell.mesh-surface-exiting { opacity: 0; transform: translateY(12px) scale(0.96); transition-duration: var(--animation-duration-fast); }
     .launcher { width: 380px; padding: 22px; gap: 18px; border-radius: 28px; border: 1px solid var(--glass-rim); background-image: var(--glass-surface-panel); box-shadow: var(--glass-shadow-card); backdrop-filter: blur(20px) refract(22px 18px) dispersion(1px); }
-    .heading { width: 100%; align-items: center; justify-content: space-between; }
+    .heading { width: 100%; align-items: center; gap: 8px; }
+    .heading-spacer { flex-grow: 1; }
+    .view { width: 30px; height: 30px; padding: 0; justify-content: center; align-items: center; border-radius: 999px; border: 1px solid var(--glass-rim-inset); background: transparent; }
+    .view-on { border-color: var(--glass-rim-accent); background-image: var(--glass-surface-control); }
+    .view-glyph { width: 16px; height: 16px; color: var(--glass-text-strong); }
+    .view:hover { background-color: var(--glass-hover); }
+    .view:focus-visible { border-color: var(--color-focus-ring); }
+    .launcher-grid { width: 560px; }
+    .result-body { width: 100%; }
+    .app-grid { width: 100%; flex-wrap: wrap; gap: 6px; }
+    .cell { flex-direction: column; width: 98px; height: 104px; padding: 10px 4px 6px; gap: 6px; align-items: center; border-radius: 18px; background: transparent; transform: scale(1); transition: transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate); }
+    .cell:hover, .cell:focus-visible { background: var(--glass-hover); transform: scale(var(--animation-scale-hover)); }
+    .cell:focus-visible { border: 1px solid var(--color-focus-ring); }
+    .cell:active { transform: scale(var(--animation-scale-press)); }
+    .cell-art { width: 44px; height: 44px; flex-shrink: 0; }
+    .cell-name { width: 90px; height: 16px; font-size: 11px; text-align: center; color: var(--glass-text-heading); text-overflow: ellipsis; }
+    .cell-dot { width: 5px; height: 5px; border-radius: 999px; background: transparent; }
+    .cell-dot-on { background: var(--glass-indicator); }
     .title { height: 28px; font-size: 20px; font-weight: 600; color: var(--glass-text-heading); }
     .count { height: 22px; font-size: 12px; color: var(--glass-text-muted); }
     .search { width: 100%; height: 44px; padding: 12px; border-radius: 16px; border: 1px solid var(--glass-rim-inset); background: var(--glass-fill-inset); color: var(--glass-text); }

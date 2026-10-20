@@ -534,6 +534,7 @@ fn shell_registers_theme_provider_for_frontend_theme_proxy() {
             "available",
             "scope",
             "system_resources",
+            "backdrop_image",
         ],
         "theme registry fields must be declared so frontend reads are reactive"
     );

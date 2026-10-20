@@ -47,13 +47,20 @@ unless an item says otherwise. IDs point into the
 - [ ] **RT-04:** Stop blocking tokio workers in `mesh.exec`; later an async exec
       host API.
 
+## Glass shell follow-ups (found 2026-10-20)
+
+- [ ] **Paint-time effects cannot reach the shell:** `mesh.shell.*` and published events
+      from effects that settle during paint are lowered only by the next handler call.
+- [ ] **`contributes.keybinds` reads as undeclared:** `config doctor` reports subscribed
+      actions of the glass overlays as undeclared; check that runtime Escape bindings resolve.
+
 ## Glass shell core gaps (found 2026-10-17)
 
 - [ ] **Full-colour icons:** XDG/hicolor resolutions and `<icon src>` are always
       `multicolor: false`; `<image>` has no paint arm and `url()` rejects absolute paths, so docks cannot show app icons in colour.
 - [ ] **Host APIs:** `net.http` and `exec.launch-app` are catalogued but unimplemented
       (providers shell out to `curl` / `hyprctl dispatch`). A StatusNotifier tray still needs
-      D-Bus name ownership and exported objects (watcher/host); `mesh.dbus_call` only calls out.
+      a watcher/host provider; `mesh.dbus_serve` now owns names and exports one object each.
 - [ ] **Tooltips on bottom/right-anchored surfaces:** those surfaces get no tooltip reserve on
       their anchored axis, so tooltips cannot overflow toward the screen; promote tooltips to `xdg_popup`.
 - [ ] **Icon chains during live switch:** newly mounted modules briefly resolve with an empty pack
@@ -139,6 +146,9 @@ evidence and test workloads are in the linked reports.
 - [ ] **Theme coverage and pinning in the UI:** `mesh-shell theme coverage` and
       `set_theme { scope }` exist, but the theme selector shows neither coverage
       nor a "pin to this shell" control.
+- [ ] **`mesh.theme` snapshot exceeds the 64 KiB command budget:** full
+      tokens/provenance plus every host font family are published together and
+      warn at startup; split or page the host font list.
 - [ ] **LSP completion for module and family tokens:** diagnostics accept them,
       but `var(--` completion offers only contract roles and local properties.
 
@@ -330,8 +340,8 @@ of payoff.
 
 - [ ] Bring child popup surfaces into the parallel CPU raster phase and move
       the SHM copy off the shell thread; both still run inside reconcile/present.
-- [ ] Pipeline paint of frame N against script work of frame N+1, after the
-      per-surface split.
+- [ ] Pipeline GPU paint of frame N against script work of frame N+1; GPU
+      presentation still waits for worker completion. Preserve the GPU workload gates.
 - [ ] Narrow complete scene preparation by retained command/resource revision;
       small damage frames still record the whole scene before GPU execution.
 - [ ] Tile-parallel raster for large damage, above a measured threshold only.
@@ -381,10 +391,6 @@ of payoff.
 
 ### Architecture
 
-- [ ] Finish the Skia-GL backend: GPU resource residency for icons, images and
-      glyph bitmaps and GPU workload gates. Scene-worker GPU paint and
-      dmabuf presentation are shipped;
-      [remaining work](../.planning/todos/pending/2026-07-15-gpu-rendering-backend.md).
 - [ ] Experimental persistent-scene/database renderer that extends retained
       identity into raster resources and tiles, measured against the Skia-GL
       path. [Plan](../.planning/todos/pending/2026-09-20-persistent-scene-renderer.md).

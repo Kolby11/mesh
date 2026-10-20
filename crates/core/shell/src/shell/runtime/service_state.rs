@@ -650,6 +650,21 @@ impl Shell {
                 }
             }
         }
+        // Deferred effects run when a surface paints, and a hidden one does
+        // not; settle them here so a hidden surface can still react.
+        let hidden = (0..self.components.len())
+            .filter(|&index| {
+                !self.components[index].quarantined
+                    && !self.surface_is_effectively_visible(&self.components[index].surface_id)
+            })
+            .collect::<Vec<_>>();
+        for component_index in hidden {
+            let runtime = &mut self.components[component_index];
+            match runtime.component.settle_effects_offscreen() {
+                Ok(emitted) => requests.extend(runtime.effect_origin().attribute(emitted)),
+                Err(error) => component_failures.push((component_index, error)),
+            }
+        }
         for (component_index, error) in component_failures {
             self.contain_component_failure(component_index, "service_event_delivery", error);
         }

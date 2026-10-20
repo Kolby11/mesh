@@ -1,0 +1,50 @@
+{
+  "name": "@mesh/freedesktop-notifications",
+  "version": "0.1.0",
+  "description": "Desktop notification daemon: owns org.freedesktop.Notifications on the session bus and publishes what applications send.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "dbus.own:session:org.freedesktop.Notifications"
+      ],
+      "modules": {
+        "@mesh/notifications-interface": "^1.0.0"
+      }
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.notifications",
+        "version": "1.0",
+        "provider": "freedesktop",
+        "label": "Desktop notifications (D-Bus)",
+        "priority": 100
+      }
+    ],
+    "provides": {
+      "settings": {
+        "namespace": "@mesh/freedesktop-notifications",
+        "schema": {
+          "timeout_seconds": {
+            "type": "number",
+            "default": 6,
+            "description": "How long a notification stays popped up when the sender does not say."
+          },
+          "history": {
+            "type": "number",
+            "default": 50,
+            "description": "How many open notifications are kept."
+          },
+          "replace_daemon": {
+            "type": "boolean",
+            "default": false,
+            "description": "Take over from another notification daemon that allows replacement."
+          }
+        }
+      }
+    }
+  }
+}

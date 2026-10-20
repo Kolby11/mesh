@@ -3121,6 +3121,44 @@ fn dbus_call_requires_a_matching_grant_and_startup() {
 }
 
 #[test]
+fn dbus_serve_requires_an_ownership_grant_for_that_name_and_bus() {
+    let serve = "mesh.dbus_serve('session', { name = 'org.mesh.Served', path = '/org/mesh/Served', interface = 'org.mesh.Served' })";
+    for grants in [
+        vec![],
+        vec!["dbus.session".to_string()],
+        vec!["dbus.call:session:*:org.mesh.Served".to_string()],
+        vec!["dbus.own:system:org.mesh.Served".to_string()],
+        vec!["dbus.own:session:org.mesh.Other".to_string()],
+    ] {
+        let mut ctx =
+            BackendScriptContext::new_with_capabilities("@test/dbus-serve", grants.clone());
+        ctx.load_script(&format!(
+            "state = {{}}; function start(self) state.served = {serve} end"
+        ))
+        .unwrap();
+        let state = ctx.call_init().unwrap().unwrap();
+        assert_eq!(state["served"], false, "{grants:?}");
+    }
+    let mut ctx = BackendScriptContext::new("@test/dbus-serve-staging");
+    assert!(
+        ctx.load_script(&format!("{serve}; function start(self) end"))
+            .unwrap_err()
+            .to_string()
+            .contains("before start(self)")
+    );
+    let mut ctx = BackendScriptContext::new("@test/dbus-reply-foreign");
+    ctx.load_script(
+        "state = {}; function start(self) state.replied = mesh.dbus_reply({ id = 1, generation = 999 }, 1, {}) end",
+    )
+    .unwrap();
+    let state = ctx.call_init().unwrap().unwrap();
+    assert_eq!(
+        state["replied"], false,
+        "a handle from another generation is ignored"
+    );
+}
+
+#[test]
 fn stream_callbacks_suspend_and_report_completion_and_failure() {
     for hook in ["on_stream_batch", "on_stream_line"] {
         let mut ctx = BackendScriptContext::new("@test/async-stream");

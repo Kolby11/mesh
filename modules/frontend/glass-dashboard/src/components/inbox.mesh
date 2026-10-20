@@ -1,0 +1,382 @@
+<template>
+    <column class="inbox">
+        <column class="notifications" aria-label={t("inbox.title")}>
+            <row class="inbox-head">
+                <text class="inbox-title">{t("inbox.title")}</text>
+                <row class="inbox-count" hidden={count == 0}>
+                    <text class="inbox-count-text">{count_label}</text>
+                </row>
+                <box class="inbox-spacer" />
+                <button class="chip" class:chip-on={dnd} onclick={onDnd} aria-pressed={dnd} aria-label={t("inbox.dnd")} title={t("inbox.dnd")}>
+                    <icon class="chip-glyph" name={dnd and "notifications-disabled" or "notifications"} size="16" />
+                </button>
+                <button class="chip" onclick={onClear} disabled={count == 0} aria-label={t("inbox.clear")} title={t("inbox.clear")}>
+                    <icon class="chip-glyph" name="edit-clear-all" size="16" />
+                </button>
+            </row>
+            <scroll class="list">
+                <column class="items">
+                    {#for item in items key={item.id}}
+                        <row class="item">
+                            <box class="item-art">
+                                <image class="item-image" src={item.picture} alt="" hidden={item.picture == ""} />
+                                <icon class="item-glyph" name="notifications" size="16" hidden={item.picture ~= ""} />
+                            </box>
+                            <button class="item-copy" onclick={onOpen(item.id, item.default_action)} aria-label={item.summary}>
+                                <text class="item-app">{item.app}</text>
+                                <text class="item-summary">{item.summary}</text>
+                                <text class="item-body" hidden={item.body == ""}>{item.body}</text>
+                            </button>
+                            <button class="item-dismiss" onclick={onDismiss(item.id)} aria-label={t("inbox.dismiss")} title={t("inbox.dismiss")}>
+                                <icon class="item-dismiss-glyph" name="window-close" size="14" />
+                            </button>
+                        </row>
+                    {/for}
+                    <column class="empty" hidden={count > 0}>
+                        <icon class="empty-glyph" name="notifications" size="28" />
+                        <text class="empty-text">{t("inbox.empty")}</text>
+                    </column>
+                </column>
+            </scroll>
+        </column>
+        <row class="weather" aria-label={t("weather.title")}>
+            <icon class="weather-glyph" name={weather_glyph} size="34" />
+            <column class="weather-copy">
+                <text class="weather-temp">{weather_temp}</text>
+                <text class="weather-condition">{weather_condition}</text>
+            </column>
+            <box class="inbox-spacer" />
+            <column class="weather-side">
+                <text class="weather-location">{weather_location}</text>
+                <text class="weather-feels">{weather_feels}</text>
+            </column>
+        </row>
+    </column>
+</template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local notifications = require("mesh.notifications")
+local weather = require("mesh.weather")
+
+local GLYPHS = {
+    clear = "weather-clear",
+    ["partly-cloudy"] = "weather-few-clouds",
+    cloudy = "weather-overcast",
+    fog = "weather-fog",
+    drizzle = "weather-showers-scattered",
+    rain = "weather-showers",
+    snow = "weather-snow",
+    storm = "weather-storm",
+}
+
+items = {}
+count = 0
+count_label = "0"
+dnd = false
+weather_glyph = GLYPHS.cloudy
+weather_temp = "--"
+weather_condition = ""
+weather_location = ""
+weather_feels = ""
+
+effect(function()
+    local list = {}
+    for _, item in notifications.notifications or {} do
+        local default_action = nil
+        for _, action in item.actions or {} do
+            if action.key == "default" then
+                default_action = "default"
+            end
+        end
+        local picture = item.image ~= "" and item.image or item.app_icon or ""
+        list[#list + 1] = {
+            id = item.id,
+            app = item.app_name ~= "" and item.app_name or t("inbox.title"),
+            summary = item.summary,
+            body = item.body,
+            picture = string.sub(picture, 1, 1) == "/" and picture or "",
+            default_action = default_action,
+        }
+    end
+    items = list
+    count = #list
+    count_label = tostring(count)
+    dnd = notifications.dnd == true
+end)
+
+effect(function()
+    if weather.available ~= true then
+        weather_glyph = GLYPHS.cloudy
+        weather_temp = "--"
+        weather_condition = t("weather.waiting")
+        weather_location = ""
+        weather_feels = ""
+        return
+    end
+    local state = weather.condition or "cloudy"
+    weather_glyph = (state == "clear" and weather.is_day == false) and "weather-clear-night" or GLYPHS[state] or GLYPHS.cloudy
+    weather_temp = tostring(math.floor((weather.temperature or 0) + 0.5)) .. "°"
+    weather_condition = GLYPHS[state] and t("weather." .. state) or state
+    weather_location = weather.location or ""
+    weather_feels = t("weather.feels", { value = tostring(math.floor((weather.feels_like or 0) + 0.5)) })
+end)
+
+function onOpen(id, action)
+    if action then
+        notifications.invoke(id, action)
+    end
+end
+
+function onDismiss(id)
+    notifications.dismiss(id)
+end
+
+function onClear()
+    notifications.clear()
+end
+
+function onDnd()
+    notifications.set_dnd(not dnd)
+end
+</script>
+
+<style>
+    .inbox {
+        width: 316px;
+        gap: 14px;
+    }
+
+    .notifications {
+        width: 100%;
+        flex-grow: 1;
+        padding: 14px;
+        gap: 10px;
+        border-radius: 22px;
+        border: 1px solid var(--glass-rim-inset);
+        background: var(--glass-fill-inset);
+    }
+
+    .inbox-head {
+        width: 100%;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .inbox-title {
+        height: 20px;
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--glass-text-heading);
+    }
+
+    .inbox-count {
+        height: 20px;
+        padding: 0 7px;
+        align-items: center;
+        border-radius: 999px;
+        background-image: var(--glass-surface-active);
+    }
+
+    .inbox-count-text {
+        height: 16px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--glass-text-on-accent);
+    }
+
+    .inbox-spacer {
+        flex-grow: 1;
+    }
+
+    .chip {
+        width: 30px;
+        height: 30px;
+        padding: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 999px;
+        border: 1px solid var(--glass-rim-control);
+        background-image: var(--glass-surface-control);
+    }
+
+    .chip-on {
+        background-image: var(--glass-surface-active);
+        border-color: var(--glass-rim-accent);
+    }
+
+    .chip-glyph {
+        width: 16px;
+        height: 16px;
+        color: var(--glass-text-strong);
+    }
+
+    .list {
+        width: 100%;
+        height: 212px;
+        overflow-y: auto;
+    }
+
+    .items {
+        width: 100%;
+        gap: 8px;
+    }
+
+    .item {
+        width: 100%;
+        padding: 10px;
+        gap: 10px;
+        align-items: flex-start;
+        border-radius: 16px;
+        border: 1px solid var(--glass-rim-inset);
+        background: var(--glass-fill-subtle);
+    }
+
+    .item-art {
+        width: 30px;
+        height: 30px;
+        flex-shrink: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 10px;
+        background: var(--glass-fill-artwork);
+        overflow: hidden;
+    }
+
+    .item-image {
+        width: 30px;
+        height: 30px;
+        border-radius: 10px;
+    }
+
+    .item-glyph {
+        width: 16px;
+        height: 16px;
+        color: var(--glass-text-heading);
+    }
+
+    .item-copy {
+        flex-direction: column;
+        flex-grow: 1;
+        min-width: 0;
+        padding: 0;
+        gap: 1px;
+        align-items: flex-start;
+        background: transparent;
+    }
+
+    .item-app {
+        height: 14px;
+        font-size: 10px;
+        color: var(--glass-text-muted);
+        text-overflow: ellipsis;
+    }
+
+    .item-summary {
+        height: 18px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--glass-text-heading);
+        text-overflow: ellipsis;
+    }
+
+    .item-body {
+        height: 16px;
+        font-size: 11px;
+        color: var(--glass-text);
+        text-overflow: ellipsis;
+    }
+
+    .item-dismiss {
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        flex-shrink: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 999px;
+        background: transparent;
+    }
+
+    .item-dismiss-glyph {
+        width: 14px;
+        height: 14px;
+        color: var(--glass-text-muted);
+    }
+
+    .empty {
+        width: 100%;
+        height: 180px;
+        gap: 10px;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .empty-glyph {
+        width: 28px;
+        height: 28px;
+        color: var(--glass-text-muted);
+    }
+
+    .empty-text {
+        height: 18px;
+        font-size: 12px;
+        color: var(--glass-text-muted);
+    }
+
+    .weather {
+        width: 100%;
+        padding: 14px 16px;
+        gap: 12px;
+        align-items: center;
+        border-radius: 22px;
+        border: 1px solid var(--glass-rim-inset);
+        background-image: var(--glass-surface-weather);
+    }
+
+    .weather-glyph {
+        width: 34px;
+        height: 34px;
+        color: var(--glass-text-heading);
+    }
+
+    .weather-copy, .weather-side {
+        gap: 2px;
+    }
+
+    .weather-side {
+        align-items: flex-end;
+    }
+
+    .weather-temp {
+        height: 28px;
+        font-size: 22px;
+        font-weight: 600;
+        color: var(--glass-text-heading);
+    }
+
+    .weather-condition, .weather-feels {
+        height: 16px;
+        font-size: 11px;
+        color: var(--glass-text-muted);
+    }
+
+    .weather-location {
+        height: 18px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--glass-text);
+    }
+
+    .chip:hover, .item-dismiss:hover {
+        background-color: var(--glass-hover);
+    }
+
+    .chip:focus-visible, .item-copy:focus-visible, .item-dismiss:focus-visible {
+        border: 1px solid var(--color-focus-ring);
+    }
+
+    .chip:active, .item-dismiss:active {
+        transform: scale(var(--animation-scale-press));
+    }
+</style>

@@ -168,7 +168,7 @@ const DEBUG_COMMANDS: [CoreServiceCommand; 6] = [
     },
 ];
 
-const THEME_COMMANDS: [CoreServiceCommand; 4] = [
+const THEME_COMMANDS: [CoreServiceCommand; 5] = [
     CoreServiceCommand {
         name: "set_theme",
         translate: |payload| {
@@ -205,6 +205,14 @@ const THEME_COMMANDS: [CoreServiceCommand; 4] = [
         translate: |payload| {
             Some(CoreRequest::SetFontFamily {
                 family: required_text(payload, "family")?,
+            })
+        },
+    },
+    CoreServiceCommand {
+        name: "set_backdrop_image",
+        translate: |payload| {
+            Some(CoreRequest::SetBackdropImage {
+                path: required_text(payload, "path")?,
             })
         },
     },

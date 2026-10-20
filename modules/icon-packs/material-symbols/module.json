@@ -79,7 +79,23 @@
             "weather-snow": "ms/weather_snowy",
             "weather-storm": "ms/thunderstorm",
             "view-dual": "ms/dashboard",
-            "object-select": "ms/check"
+            "object-select": "ms/check",
+            "view-grid": "ms/grid_view",
+            "view-list": "ms/view_list",
+            "view-dashboard": "ms/dashboard",
+            "view-refresh": "ms/refresh",
+            "preferences-desktop-wallpaper": "ms/wallpaper",
+            "notifications": "ms/notifications",
+            "notifications-disabled": "ms/notifications_off",
+            "edit-clear-all": "ms/delete_sweep",
+            "utilities-system-monitor": "ms/speed",
+            "memory": "ms/memory",
+            "drive-harddisk": "ms/hard_drive",
+            "sensors-temperature": "ms/device_thermostat",
+            "go-down": "ms/arrow_downward",
+            "go-up": "ms/arrow_upward",
+            "avatar-default": "ms/person",
+            "audio-visualizer": "ms/graphic_eq"
           }
         }
       ]

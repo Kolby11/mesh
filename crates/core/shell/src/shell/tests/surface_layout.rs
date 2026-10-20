@@ -127,6 +127,34 @@ fn hide_surface_without_transition_unmaps_immediately() {
 }
 
 #[test]
+fn visibility_requests_by_module_id_reach_its_profile_root_surface() {
+    let state = Arc::new(Mutex::new(TransitionRecordingState::default()));
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(TransitionRecordingComponent::instance(
+        "@test/overlay",
+        "@test/overlay#default",
+        Arc::clone(&state),
+    )));
+
+    shell
+        .apply_request(CoreRequest::HideSurface {
+            surface_id: "@test/overlay".into(),
+        })
+        .unwrap();
+    assert!(!shell.core.surfaces["@test/overlay#default"].visible);
+    shell
+        .apply_request(CoreRequest::ToggleSurface {
+            surface_id: "@test/overlay".into(),
+        })
+        .unwrap();
+    assert!(shell.core.surfaces["@test/overlay#default"].visible);
+    assert!(
+        !shell.core.surfaces.contains_key("@test/overlay"),
+        "a module id must not create a phantom surface state"
+    );
+}
+
+#[test]
 fn repeated_visibility_requests_do_not_restart_or_short_circuit_surface_lifecycle() {
     let state = Arc::new(Mutex::new(TransitionRecordingState::default()));
     let mut shell = Shell::new();

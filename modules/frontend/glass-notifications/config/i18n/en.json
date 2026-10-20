@@ -1,0 +1,7 @@
+{
+  "toasts.label": "Notifications",
+  "toasts.dismiss": "Dismiss notification",
+  "toasts.open": "Open",
+  "toasts.now": "now",
+  "toasts.minutes": "{count} min ago"
+}

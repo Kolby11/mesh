@@ -1868,12 +1868,14 @@ impl Shell {
                 ("available", "string[]"),
                 ("scope", "string"),
                 ("system_resources", "object"),
+                ("backdrop_image", "string?"),
             ],
             &[
                 ("set_theme", &[("theme_id", "string"), ("scope", "string?")]),
                 ("set_mode", &[("mode", "string")]),
                 ("set_icon_theme", &[("theme_id", "string")]),
                 ("set_font_family", &[("family", "string")]),
+                ("set_backdrop_image", &[("path", "string")]),
             ],
         );
         theme_contract.events = vec![
@@ -2128,8 +2130,7 @@ impl Shell {
             active_key_modifiers: KeyModifiers::default(),
             keyboard_focus_surface: None,
             pending_wayland_events: VecDeque::new(),
-            pending_popup_grabs: HashMap::new(),
-            popup_grab_generation: 0,
+            pending_popup_grab: None,
             transfer_owned_keyboard_modes: HashMap::new(),
             service_handlers: HashMap::new(),
             backend_runtimes: HashMap::new(),
@@ -2947,7 +2948,13 @@ impl Shell {
         self.core.surfaces.remove(&surface_id);
         self.surfaces.remove(&surface_id);
         self.pending_popover_hides.remove(&surface_id);
-        self.pending_popup_grabs.remove(&surface_id);
+        if self
+            .pending_popup_grab
+            .as_ref()
+            .is_some_and(|pending| pending.surface_id == surface_id)
+        {
+            self.pending_popup_grab = None;
+        }
         self.transfer_owned_keyboard_modes.remove(&surface_id);
         if self.keyboard_focus_surface.as_deref() == Some(surface_id.as_str()) {
             self.keyboard_focus_surface = None;

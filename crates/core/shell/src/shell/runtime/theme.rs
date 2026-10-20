@@ -769,6 +769,47 @@ impl Shell {
         self.commit_control_plane_settings(candidate, Some((theme, watch)), None, true, false)
     }
 
+    /// Select the image `refract()` samples and the glass wallpaper paints.
+    /// The path must name a readable image file; the write lands where the
+    /// other appearance settings do (the active profile, else shared).
+    pub(in crate::shell) fn apply_set_backdrop_image(
+        &mut self,
+        path: &str,
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
+        let path = path.trim();
+        let candidate = std::path::Path::new(path);
+        let image_extension = candidate
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                matches!(
+                    extension.to_ascii_lowercase().as_str(),
+                    "png" | "jpg" | "jpeg" | "webp" | "bmp" | "gif"
+                )
+            });
+        if !candidate.is_absolute() || !image_extension || !candidate.is_file() {
+            tracing::warn!("cannot select backdrop '{path}': not an absolute image file path");
+            return Ok(VecDeque::new());
+        }
+        let path = path.to_owned();
+        let candidate = self.prepare_control_plane_settings(|shared, profile| {
+            let patch = serde_json::json!({ "render": { "backdrop": { "image": path } } });
+            if let Some(profile) = profile {
+                let target = profile
+                    .settings
+                    .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+                    .or_insert_with(|| serde_json::json!({}));
+                mesh_core_config::merge_json(target, &patch);
+            } else {
+                shared.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
+            }
+            Ok(())
+        })?;
+        // The backdrop is not part of any display list, so the theme effect's
+        // full present is what repaints refracting surfaces with the new image.
+        self.commit_control_plane_settings(candidate, None, None, true, false)
+    }
+
     /// Build the only service state allowed to describe the rendered theme.
     /// Provider mirrors can carry no independent theme identity, mode, token,
     /// or color-scheme facts; those all come from the committed snapshot.
@@ -868,6 +909,7 @@ impl Shell {
                 &self.settings,
                 &self.resource_snapshot.host_catalog,
             ),
+            "backdrop_image": self.settings.render.backdrop.image,
         })
     }
 

@@ -1187,6 +1187,7 @@ pub(super) struct TransitionRecordingState {
 }
 
 pub(super) struct TransitionRecordingComponent {
+    pub(super) module_id: String,
     pub(super) surface_id: String,
     pub(super) hide_transition_ms: u64,
     pub(super) state: Arc<Mutex<TransitionRecordingState>>,
@@ -1199,16 +1200,29 @@ impl TransitionRecordingComponent {
         state: Arc<Mutex<TransitionRecordingState>>,
     ) -> Self {
         Self {
+            module_id: surface_id.to_string(),
             surface_id: surface_id.to_string(),
             hide_transition_ms,
             state,
+        }
+    }
+
+    /// A profile root instance: the surface is named by instance, not module.
+    pub(super) fn instance(
+        module_id: &str,
+        surface_id: &str,
+        state: Arc<Mutex<TransitionRecordingState>>,
+    ) -> Self {
+        Self {
+            module_id: module_id.to_string(),
+            ..Self::new(surface_id, 0, state)
         }
     }
 }
 
 impl super::types::ShellComponent for TransitionRecordingComponent {
     fn id(&self) -> &str {
-        &self.surface_id
+        &self.module_id
     }
 
     fn surface_id(&self) -> &str {

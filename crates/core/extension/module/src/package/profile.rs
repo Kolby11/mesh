@@ -574,6 +574,15 @@ impl ShellProfile {
         if let Some(theme) = &activation_spec.resources.theme {
             queue.push_back(theme.clone());
         }
+        // The selected theme is the user's shared choice and follows them
+        // across shells (spec 08 §1.1), so every installed theme stays
+        // selectable regardless of what this composition recommends.
+        queue.extend(
+            manifest_list
+                .iter()
+                .filter(|manifest| manifest.mesh.kind == ModuleKind::Theme)
+                .map(|manifest| manifest.name.clone()),
+        );
         queue.extend(activation_spec.resources.icons().iter().cloned());
         queue.extend(activation_spec.resources.fonts().iter().cloned());
         queue.extend(activation_spec.resources.languages().iter().cloned());
@@ -1286,6 +1295,29 @@ mod tests {
 
         let error = profile.add_root(&backend).unwrap_err().to_string();
         assert!(error.contains("only ui modules"), "{error}");
+    }
+
+    #[test]
+    fn every_installed_theme_is_active_beside_the_recommended_one() {
+        let component = manifest(
+            r#"{"name":"@me/clock","version":"1","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
+        );
+        let theme = |name: &str| {
+            manifest(&format!(
+                r#"{{"name":"{name}","version":"1","mesh":{{"apiVersion":"0.1","kind":"theme","contributes":{{"themes":[{{"id":"t","modes":{{"dark":"theme.css"}},"default_mode":"dark"}}]}}}}}}"#
+            ))
+        };
+        let recommended = theme("@me/recommended");
+        let chosen = theme("@me/chosen");
+        let mut profile = ShellProfile::new();
+        profile.add_root(&component).unwrap();
+        profile.resources.theme = Some("@me/recommended".into());
+
+        let active = profile
+            .active_module_ids([&component, &recommended, &chosen])
+            .unwrap();
+        assert!(active.contains("@me/recommended"));
+        assert!(active.contains("@me/chosen"));
     }
 
     #[test]
