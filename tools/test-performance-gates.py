@@ -79,5 +79,42 @@ for argument in sys.argv:
         self.assertNotEqual(self.run_gate(baseline="# no budgets\n").returncode, 0)
 
 
+class GpuWorkloadGates(unittest.TestCase):
+    def run_gate(self, case):
+        with tempfile.TemporaryDirectory() as directory:
+            cargo = Path(directory) / "cargo"
+            cargo.write_text('''#!/usr/bin/env python3
+import json
+import os
+import sys
+case = os.environ["GATE_CASE"]
+assert os.environ.get("MESH_REQUIRE_GPU") == "1"
+if "--no-run" in sys.argv:
+    if case == "build-failure":
+        sys.exit(1)
+    if case != "missing-artifact":
+        print(json.dumps({"reason": "compiler-artifact", "target": {"name": "mesh_core_render"}, "profile": {"test": True}, "executable": os.path.abspath(sys.argv[0])}))
+    sys.exit(0)
+if case == "test-failure":
+    sys.exit(1)
+assert "--exact" in sys.argv and "--ignored" in sys.argv
+assert any(name in sys.argv for name in ["gpu::tests::frame_cost::gpu_workload_visual_match_gate", "gpu::tests::frame_cost::gpu_workload_frame_cost_gate"])
+print("test result: ok. " + ("0" if case == "zero-tests" else "1") + " passed; 0 failed;")
+''')
+            cargo.chmod(0o755)
+            environment = dict(os.environ, PATH=directory + os.pathsep + os.environ["PATH"], GATE_CASE=case)
+            return subprocess.run([str(ROOT / "tools/check-gpu-performance")], env=environment, capture_output=True, text=True, check=False)
+
+    def test_required_gpu_gates_execute(self):
+        result = self.run_gate("pass")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count("1 passed;"), 2)
+
+    def test_missing_or_failed_gates_fail(self):
+        for case in ["build-failure", "missing-artifact", "test-failure", "zero-tests"]:
+            with self.subTest(case=case):
+                self.assertNotEqual(self.run_gate(case).returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1220,9 +1220,13 @@ fn blit_variant_on_canvas(canvas: &Canvas, variant: &RasterVariant, dest_x: i32,
     );
     let mut paint = Paint::default();
     paint.set_anti_alias(false);
+    let (image, source) = crate::surface::image_pages::resolve(&image);
+    crate::prepared_scene::retain_image(&image);
     canvas.draw_image_rect_with_sampling_options(
         &image,
-        None,
+        source
+            .as_ref()
+            .map(|rect| (rect, skia_safe::canvas::SrcRectConstraint::Strict)),
         dest,
         SamplingOptions::default(),
         &paint,

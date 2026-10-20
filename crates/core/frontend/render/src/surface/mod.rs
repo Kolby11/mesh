@@ -5,6 +5,7 @@ mod debug_overlay;
 mod glyph;
 mod glyph_pages;
 pub(crate) mod icon;
+pub(crate) mod image_pages;
 mod painter;
 mod profiling;
 mod resource_broker;

@@ -36,7 +36,9 @@ Painting runs through a paint session over CPU pixels or an immutable scene
 recording. The UI prepares glyph/icon/image resources using the same font state
 as layout. GPU execution and retained textures belong to the render thread;
 Wayland attaches descriptor-only outputs. Partial damage and full replay share
-the same recorded scene. CPU scroll shifts remain a raster fallback mechanism.
+the same recorded scene. Small scene images and icon bitmaps share immutable
+atlas pages; the worker retains image identities within a bounded cache and
+allows GPU cache headroom beside retained targets. CPU scroll shifts remain a raster fallback mechanism.
 
 These are implementation choices, not module dependencies. A future backend
 must implement the same backend-neutral painter contract and preserve visible

@@ -721,9 +721,13 @@ pub fn draw_font_glyph_on_canvas(
     let mut paint = Paint::default();
     paint.set_anti_alias(false);
     paint.set_argb(tint.a, tint.r, tint.g, tint.b);
+    let (skia_image, source) = crate::surface::image_pages::resolve(&skia_image);
+    crate::prepared_scene::retain_image(&skia_image);
     canvas.draw_image_rect_with_sampling_options(
         &skia_image,
-        None,
+        source
+            .as_ref()
+            .map(|rect| (rect, skia_safe::canvas::SrcRectConstraint::Strict)),
         dest_rect,
         SamplingOptions::default(),
         &paint,

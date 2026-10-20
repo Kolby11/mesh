@@ -185,6 +185,7 @@ impl GlyphPages {
         self.pages.clear();
     }
 
+    #[cfg(test)]
     pub(super) fn bytes(&self) -> usize {
         self.pages.iter().map(|page| page.pixels.len()).sum()
     }

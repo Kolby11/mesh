@@ -177,3 +177,53 @@ wakeups or backend service traffic. Native subscription and watcher idle tests
 in the full suite cover those sources separately. These gates do not establish
 GPU execution or Wayland presentation budgets; those remain separate renderer
 work. Disable optional stage profiling when comparing timing results.
+
+
+## GPU residency and workload gates
+
+```bash
+nix develop -c ./tools/check-gpu-performance
+```
+
+This builds one release renderer test binary and runs two exact tests serially:
+`gpu_workload_visual_match_gate` and `gpu_workload_frame_cost_gate`. It requires
+a DRM render node with GLES3 and dmabuf export; missing GPU support or an empty
+test selection fails. The optional CI job uses a runner labeled `self-hosted`,
+`linux`, `mesh-gpu` when repository variable `MESH_GPU_RUNNER` is `enabled`.
+CPU CI does not substitute software timing for these hardware budgets.
+
+Workloads use a 920×900 logical surface at scale 2 (1840×1800 pixels): 60 rounded,
+shadowed Settings cards under a frosted panel, 40 text lines, and 256 image/icon
+instances from 128 translucent PNG assets plus eight text lines. Frame costs
+include complete UI scene preparation, worker handoff, retained GPU paint,
+dmabuf copy/fence submission and GPU completion. They exclude compositor import
+and scanout. Four warm-up frames precede three samples of 20 frames. Both the
+slowest sample mean and individual-frame p90 must meet the ceilings in the test:
+
+| Workload | Ceiling |
+| --- | --- |
+| Full Settings, full text, full images/icons | 16.67 ms |
+| Frosted panel, small widget, one text line | 12 ms |
+
+Test-only GLES hooks observe bitmap transfer calls. Warm frames must retain
+resource identities and issue zero additional `glTexImage2D` data uploads or
+`glTexSubImage2D` calls. These hooks are absent from production builds.
+
+Visual gates read back the exported dmabuf slot and compare it against CPU raster
+and direct GPU paint, then repeat under large and small partial damage. Recorded/direct GPU
+output permits at most 0.1% of pixels differing by more than two levels, with a
+maximum channel delta of three. CPU/GPU tolerances account for blur and coverage
+rounding: Settings permits 10% / 40 levels; text and assets permit 1% / four
+levels. Both comparisons must pass. Atlas tests separately check exact raster
+pixels, shared snapshot identity, retirement and CPU fallback.
+
+To compare the same workload with automatic Ganesh caching and atlas paging
+turned off in the test harness:
+
+```bash
+MESH_REQUIRE_GPU=1 cargo test -p mesh-core-render --features renderer-gpu --release --lib -- \
+  gpu_workload_automatic_residency_profile --ignored --nocapture --test-threads=1
+```
+
+This keeps scene preparation and GPU completion identical to the gated path;
+it does not model compositor latency or frame pipelining.

@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+export MESH_REQUIRE_GPU=1
+artifacts="$(cargo test -p mesh-core-render --features renderer-gpu --release --lib --no-run --message-format=json-render-diagnostics)"
+test_binary="$(printf '%s\n' "$artifacts" | python3 -c '
+import json
+import sys
+artifacts = [json.loads(line) for line in sys.stdin if line.strip()]
+executables = [item["executable"] for item in artifacts
+               if item.get("reason") == "compiler-artifact"
+               and item.get("target", {}).get("name") == "mesh_core_render"
+               and item.get("profile", {}).get("test")
+               and item.get("executable")]
+if len(executables) != 1:
+    sys.exit("expected exactly one renderer test executable")
+print(executables[0])
+')"
+for test_name in gpu_workload_visual_match_gate gpu_workload_frame_cost_gate; do
+  output="$("$test_binary" "gpu::tests::frame_cost::$test_name" --exact --ignored --nocapture --test-threads=1 2>&1)" || {
+    printf '%s\n' "$output"
+    exit 1
+  }
+  printf '%s\n' "$output"
+  if ! printf '%s\n' "$output" | grep -q 'test result: ok. 1 passed;'; then
+    printf 'GPU gate did not execute exactly one test: %s\n' "$test_name" >&2
+    exit 1
+  fi
+done

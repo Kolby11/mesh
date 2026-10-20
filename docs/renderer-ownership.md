@@ -45,13 +45,32 @@ has at most three export slots. Partial frames replay the complete immutable
 picture under disjoint device damage clips. Each export slot accumulates damage
 while unavailable, then receives the corresponding copy from retained pixels.
 
+Scene recordings also carry their deduplicated raster-image identities. The
+worker retains up to 2,048 identities / 64 MiB (conservatively charged at four
+bytes per pixel) and gives Ganesh that much cache headroom above admitted target
+bytes. Ganesh owns the actual upload cache and evicts under pressure; textures
+are reused by immutable image identity rather than recreated each frame.
+
+On the scene path, icons, icon-font masks and images up to 128×128 pixels share
+1024-wide RGBA or A8 atlas pages. The atlas uses the existing bounded glyph-page
+allocator (two color pages and four mask pages) and a 16 MiB source-identity
+cache. Pages refresh once at the next scene boundary; new cells use their own
+image until that snapshot exists. Strict source rectangles prevent sampling
+neighbors. Full atlases keep existing cells and draw overflow assets from their
+own images. Growth and resource-revision resets leave submitted snapshots immutable. Larger images retain dedicated image identities. CPU paint keeps its
+original raster images; text retains its existing glyph pages.
+
 Only duplicated dmabuf descriptors, dimensions, damage and a release lease cross
 to Wayland. Presentation checks the format/modifier before import, attaches the
 buffer and acknowledges its scene only after a successful commit. A
 `wl_buffer.release` returns its lease; dropping an output never calls GL. Leases
 carry independent identities, so an old release cannot unlock a reused texture.
-GPU errors switch subsequent canvases to SHM with a full repaint. Debug overlays
-and the dev-window backend use CPU pixels.
+GPU errors switch subsequent canvases to SHM with a full repaint. The CLI enables
+GPU presentation by default when compositor device feedback and export support
+are available; `MESH_RENDER_GPU=0` selects SHM. Debug overlays and the dev-window
+backend use CPU pixels. Hyprland presentation has been checked live with the AMD
+780M as the main device; NVIDIA export and offscreen rendering are tested, but
+NVIDIA as compositor main device and other compositor imports remain live checks.
 
 CPU frames split the same way across surfaces. When two or more components want
 to render, each parent `RasterCanvas` records its damage-clipped paint into a
@@ -65,8 +84,7 @@ and the SHM copy stays on the shell thread.
 The initial production integration waits for worker completion at the
 presentation boundary. GPU execution has moved threads; scripts for frame N+1
 are not yet overlapped with frame N raster. The worker sleeps when idle.
-Scroll layer caching, blur caches and resource atlas residency remain separate
-measured follow-ups in the backlog.
+Scroll layer caching and blur caches remain measured follow-ups in the backlog.
 
 ## Adapter boundaries
 

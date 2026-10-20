@@ -7,6 +7,8 @@
 //! that the presentation layer wraps in `wl_buffer`s and commits.
 
 pub mod scene;
+#[cfg(test)]
+mod upload_probe;
 
 use std::ffi::c_void;
 use std::fmt;
@@ -332,8 +334,12 @@ impl GpuContext {
             .map_err(|error| GpuError::Egl("eglMakeCurrent", error))
             .and_then(|()| {
                 let interface = gpu::gl::Interface::new_load_with(|name| {
-                    egl.get_proc_address(name)
-                        .map_or(std::ptr::null(), |function| function as *const c_void)
+                    let pointer = egl
+                        .get_proc_address(name)
+                        .map_or(std::ptr::null(), |function| function as *const c_void);
+                    #[cfg(test)]
+                    let pointer = upload_probe::load(name, pointer);
+                    pointer
                 })
                 .ok_or(GpuError::SkiaInterface)?;
                 let renderer = gl_renderer_name(egl);

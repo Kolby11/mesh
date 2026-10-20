@@ -322,6 +322,7 @@ enum SessionTarget<'a> {
     Surface(&'a mut Surface),
     Recording {
         canvas: &'a Canvas,
+        images: crate::prepared_scene::SceneImages,
         width: u32,
         height: u32,
     },
@@ -387,10 +388,16 @@ impl<'a> PixelCanvasSession<'a> {
         }
     }
 
-    pub(crate) fn on_recording(canvas: &'a Canvas, width: u32, height: u32) -> Self {
+    pub(crate) fn on_recording(
+        canvas: &'a Canvas,
+        width: u32,
+        height: u32,
+        images: crate::prepared_scene::SceneImages,
+    ) -> Self {
         Self {
             target: SessionTarget::Recording {
                 canvas,
+                images,
                 width,
                 height,
             },
@@ -429,7 +436,9 @@ impl<'a> PixelCanvasSession<'a> {
                 surface.as_mut().map(|surface| f(surface.canvas()))
             }
             SessionTarget::Surface(surface) => Some(f(surface.canvas())),
-            SessionTarget::Recording { canvas, .. } => Some(f(canvas)),
+            SessionTarget::Recording { canvas, images, .. } => {
+                Some(crate::prepared_scene::with_images(images, || f(canvas)))
+            }
             SessionTarget::Deferred { recorder, .. } => recorder.recording_canvas().map(f),
         }
     }

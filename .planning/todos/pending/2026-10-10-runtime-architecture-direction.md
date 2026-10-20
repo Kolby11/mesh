@@ -131,7 +131,7 @@ log records validation. This direction note remains for the other open items.
   opacity become layer effects.
 - Presentation stays damage-driven, so idle cost does not rise.
 - Extends the existing GPU lanes
-  ([GPU backend](2026-07-15-gpu-rendering-backend.md),
+  ([GPU renderer ownership](../../../docs/renderer-ownership.md),
   [persistent scene renderer](2026-09-20-persistent-scene-renderer.md)) and
   SH-11's immutable `PaintContext`. It would make much of the scroll raster cache
   and in-surface blur work unnecessary, so re-check those plans against this

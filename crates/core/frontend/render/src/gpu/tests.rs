@@ -5,7 +5,7 @@ use std::os::unix::fs::MetadataExt;
 /// Hosts without libEGL, the surfaceless platform or a GLES3 driver skip the
 /// GPU tests rather than failing; `MESH_REQUIRE_GPU=1` makes absence a failure
 /// on machines that are expected to have one.
-fn context_or_skip() -> Option<GpuContext> {
+pub(super) fn context_or_skip() -> Option<GpuContext> {
     match GpuContext::headless() {
         Ok(context) => Some(context),
         Err(error) if std::env::var_os("MESH_REQUIRE_GPU").is_none() => {
@@ -973,6 +973,330 @@ mod frame_cost {
                     summary_for(&threaded_samples, 1),
                     summary_for(&prepare_samples, 1)
                 );
+            }
+            worker.shutdown().unwrap();
+        }
+    }
+
+    struct WorkloadRenderer {
+        inner: crate::gpu::scene::GpuSceneRenderer,
+        readback: bool,
+    }
+
+    impl crate::scene_thread::SceneRenderer for WorkloadRenderer {
+        type Resources = crate::prepared_scene::PreparedScene;
+        type Output = (
+            crate::gpu::scene::GpuSceneOutput,
+            Option<PixelBuffer>,
+            usize,
+            u64,
+        );
+        type Error = crate::gpu::scene::GpuSceneError;
+        fn render(
+            &mut self,
+            frame: &crate::scene_thread::SceneFrame<Self::Resources>,
+        ) -> Result<Self::Output, Self::Error> {
+            let output = self.inner.render(frame)?;
+            self.inner.finish();
+            let pixels = if self.readback {
+                Some(self.inner.read_back(frame.snapshot().surface(), &output)?)
+            } else {
+                None
+            };
+            Ok((
+                output,
+                pixels,
+                self.inner.residency_admissions(),
+                crate::gpu::upload_probe::count(),
+            ))
+        }
+        fn remove_surface(&mut self, surface: crate::scene_thread::SceneSurface) {
+            self.inner.remove_surface(surface);
+        }
+    }
+
+    fn workload_worker(
+        device: u64,
+        readback: bool,
+        baseline: bool,
+    ) -> crate::scene_thread::SceneRenderThread<WorkloadRenderer> {
+        crate::scene_thread::SceneRenderThread::spawn(
+            1,
+            move || {
+                let mut inner = crate::gpu::scene::GpuSceneRenderer::new(device)?;
+                if baseline {
+                    inner.disable_residency();
+                }
+                Ok::<_, crate::gpu::scene::GpuSceneError>(WorkloadRenderer { inner, readback })
+            },
+            || {},
+        )
+        .unwrap()
+    }
+
+    fn asset_scene(directory: &std::path::Path) -> WidgetNode {
+        let mut root = text_scene();
+        root.children.truncate(8);
+        for index in 0..128 {
+            let path = directory.join(format!("asset-{index}.png"));
+            image::RgbaImage::from_fn(32, 32, |x, y| {
+                image::Rgba([
+                    (x * 8) as u8,
+                    (y * 8) as u8,
+                    (index * 15) as u8,
+                    if (x + y) % 3 == 0 { 128 } else { 255 },
+                ])
+            })
+            .save(&path)
+            .unwrap();
+            for row in 0..2 {
+                let mut image = node(
+                    100 + index * 2 + row,
+                    if row % 2 == 0 { "image" } else { "icon" },
+                    (
+                        16. + (index % 16) as f32 * 55. + row as f32 * 26.,
+                        220. + (index / 16) as f32 * 80.,
+                        24.,
+                        24.,
+                    ),
+                );
+                image
+                    .attributes
+                    .insert("src".into(), path.to_string_lossy().into_owned());
+                image.attributes.insert("size".into(), "24".into());
+                image.computed_style.color = color(220, 240, 255, 255);
+                assert!(image.layout.x + image.layout.width <= LOGICAL.0 as f32);
+                assert!(image.layout.y + image.layout.height <= LOGICAL.1 as f32);
+                root.children.push(image);
+            }
+        }
+        root
+    }
+
+    fn workload_list(root: &WidgetNode) -> RetainedDisplayList {
+        let mut list = RetainedDisplayList::default();
+        list.set_backdrop_blur_policy(crate::BackdropBlurPolicy::InSurfaceFilter);
+        list.update(root, LOGICAL.0, LOGICAL.1, true, true);
+        list
+    }
+
+    fn record_workload(
+        engine: &FrontendRenderEngine,
+        list: &RetainedDisplayList,
+        recording: &mut crate::prepared_scene::SceneCanvas,
+        damage: DamageRect,
+    ) -> crate::scene_thread::SceneSnapshot<crate::prepared_scene::PreparedScene> {
+        let mut plan = list.frame_paint_plan().clone();
+        plan.damage.logical = vec![damage].into();
+        recording.begin(&plan);
+        paint(
+            engine,
+            list,
+            &mut recording.session(),
+            logical(0, 0, LOGICAL.0, LOGICAL.1),
+        );
+        recording
+            .snapshot(crate::FractionalScale::new(SCALE))
+            .unwrap()
+    }
+
+    fn present_workload(
+        worker: &crate::scene_thread::SceneRenderThread<WorkloadRenderer>,
+        snapshot: crate::scene_thread::SceneSnapshot<crate::prepared_scene::PreparedScene>,
+    ) -> (Option<PixelBuffer>, usize, u64) {
+        let surface = snapshot.surface();
+        let commit = worker.submit(snapshot).unwrap();
+        let (output, pixels, admissions, uploads) = worker
+            .wait_completed(surface, Duration::from_secs(10))
+            .expect("GPU workload timed out")
+            .output
+            .unwrap();
+        assert!(worker.acknowledge_presented(surface, commit));
+        drop(output);
+        (pixels, admissions, uploads)
+    }
+
+    /// Uses the production scene renderer and export path; required hardware
+    /// gates fail when no device can export, rather than passing an empty loop.
+    fn workload_devices() -> Vec<u64> {
+        let devices: Vec<_> = render_nodes()
+            .into_iter()
+            .filter(|device| {
+                GpuContext::on_drm_device(*device)
+                    .is_ok_and(|mut context| context.dmabuf_target(1, 1).is_ok())
+            })
+            .collect();
+        assert!(
+            !devices.is_empty() || std::env::var_os("MESH_REQUIRE_GPU").is_none(),
+            "GPU workload gate requires a dmabuf-capable device"
+        );
+        devices
+    }
+
+    #[test]
+    #[ignore = "required-GPU release visual gate"]
+    fn gpu_workload_visual_match_gate() {
+        let _guard = crate::resource_state_test_lock();
+        let engine = FrontendRenderEngine::new();
+        let assets = tempfile::tempdir().unwrap();
+        for (name, root) in [
+            ("settings", settings_scene()),
+            ("text", text_scene()),
+            ("assets", asset_scene(assets.path())),
+        ] {
+            let list = workload_list(&root);
+            let full = logical(0, 0, LOGICAL.0, LOGICAL.1);
+            let mut cpu = PixelBuffer::new(1840, 1800);
+            paint(&engine, &list, &mut PixelCanvasSession::new(&mut cpu), full);
+            assert!(
+                engine.painter_diagnostics().is_empty(),
+                "{name}: {:?}",
+                engine.painter_diagnostics()
+            );
+            for device in workload_devices() {
+                let mut context = GpuContext::on_drm_device(device).unwrap();
+                let mut target = context.offscreen_target(1840, 1800).unwrap();
+                paint(&engine, &list, &mut target.session(), full);
+                let direct = target.read_back(&mut context).unwrap();
+                let worker = workload_worker(device, true, false);
+                let mut recording = crate::prepared_scene::SceneCanvas::new(1840, 1800).unwrap();
+                for damage in [full, logical(40, 40, 840, 260), logical(476, 544, 138, 76)] {
+                    let snapshot = record_workload(&engine, &list, &mut recording, damage);
+                    assert!(
+                        !snapshot.resources().images.is_empty(),
+                        "{name} must contain real raster assets"
+                    );
+                    if name == "assets" {
+                        assert!(snapshot.resources().images.len() >= 1);
+                    }
+                    let (pixels, _, _) = present_workload(&worker, snapshot);
+                    let pixels = pixels.unwrap();
+                    let replay_deltas = pixel_deltas(&pixels, &direct);
+                    let replay_differing = replay_deltas.iter().filter(|delta| **delta > 2).count();
+                    let replay_worst = replay_deltas.iter().copied().max().unwrap();
+                    assert!(
+                        replay_differing * 1000 <= replay_deltas.len() && replay_worst <= 3,
+                        "{name} recorded/direct GPU: {replay_differing}/{} pixels differ, worst {replay_worst}",
+                        replay_deltas.len()
+                    );
+                    let deltas = pixel_deltas(&pixels, &cpu);
+                    let differing = deltas.iter().filter(|delta| **delta > 2).count();
+                    let worst = deltas.iter().copied().max().unwrap();
+                    eprintln!(
+                        "GPU visual {name}, {damage:?}: {differing}/{} pixels >2, worst {worst}",
+                        deltas.len()
+                    );
+                    let (per_mille, max_delta) = if name == "settings" {
+                        (100, 40)
+                    } else {
+                        (10, 4)
+                    };
+                    assert!(
+                        differing * 1000 <= deltas.len() * per_mille && worst <= max_delta,
+                        "GPU visual {name}: {differing}/{} pixels differ, worst {worst}",
+                        deltas.len()
+                    );
+                }
+                worker.shutdown().unwrap();
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "required-GPU release frame-cost gate"]
+    fn gpu_workload_frame_cost_gate() {
+        run_gpu_workload_cost(false);
+    }
+
+    #[test]
+    #[ignore = "release comparison with automatic Ganesh residency"]
+    fn gpu_workload_automatic_residency_profile() {
+        run_gpu_workload_cost(true);
+    }
+
+    fn run_gpu_workload_cost(baseline: bool) {
+        let _paging = crate::surface::image_pages::TestPaging::new(!baseline);
+        let _guard = crate::resource_state_test_lock();
+        let engine = FrontendRenderEngine::new();
+        let assets = tempfile::tempdir().unwrap();
+        let settings = workload_list(&settings_scene());
+        let text = workload_list(&text_scene());
+        let images = workload_list(&asset_scene(assets.path()));
+        let full = logical(0, 0, LOGICAL.0, LOGICAL.1);
+        for device in workload_devices() {
+            let renderer = GpuContext::on_drm_device(device)
+                .unwrap()
+                .renderer()
+                .to_owned();
+            let worker = workload_worker(device, false, baseline);
+            let mut recording = crate::prepared_scene::SceneCanvas::new(1840, 1800).unwrap();
+            for (name, list, damage, budget_ms) in [
+                ("settings_full", &settings, full, 16.67),
+                ("frosted_panel", &settings, logical(40, 40, 840, 260), 12.0),
+                ("small_widget", &settings, logical(476, 544, 138, 76), 12.0),
+                ("text_full", &text, full, 16.67),
+                ("text_line", &text, logical(16, 452, 880, 20), 12.0),
+                ("assets_full", &images, full, 16.67),
+            ] {
+                for _ in 0..4 {
+                    present_workload(
+                        &worker,
+                        record_workload(&engine, list, &mut recording, full),
+                    );
+                }
+                let mut samples = Vec::new();
+                let mut uploads = None;
+                let mut transfers = None;
+                let mut frames = Vec::new();
+                for _ in 0..3 {
+                    let started = Instant::now();
+                    for _ in 0..20 {
+                        let frame_start = Instant::now();
+                        let (_, count, gpu_uploads) = present_workload(
+                            &worker,
+                            record_workload(&engine, list, &mut recording, damage),
+                        );
+                        assert!(
+                            gpu_uploads > 0,
+                            "GPU upload probe must observe cold bitmap transfers"
+                        );
+                        if let Some(previous) = uploads {
+                            assert_eq!(count, previous, "warm {name} changed a resource identity");
+                        }
+                        if let Some(previous) = transfers {
+                            assert_eq!(
+                                gpu_uploads, previous,
+                                "warm {name} transferred bitmap data to GLES"
+                            );
+                        }
+                        uploads = Some(count);
+                        transfers = Some(gpu_uploads);
+                        frames.push(frame_start.elapsed());
+                    }
+                    samples.push(started.elapsed());
+                }
+                frames.sort();
+                let p90_ms =
+                    frames[(frames.len() * 9 / 10).min(frames.len() - 1)].as_secs_f64() * 1000.;
+                let worst_ms = samples
+                    .iter()
+                    .map(|sample| sample.as_secs_f64() * 1000. / 20.)
+                    .fold(0., f64::max);
+                eprintln!(
+                    "GPU gate {renderer}, {name}: {} (budget {budget_ms} ms)",
+                    summary_for(&samples, 20)
+                );
+                eprintln!("GPU gate {name}: p90 {p90_ms:.3} ms, zero warm GLES bitmap transfers");
+                if !baseline {
+                    assert!(
+                        p90_ms <= budget_ms,
+                        "GPU {name} p90 {p90_ms:.3} ms exceeds {budget_ms} ms"
+                    );
+                    assert!(
+                        worst_ms <= budget_ms,
+                        "GPU {name}: {worst_ms:.3} ms exceeds {budget_ms} ms"
+                    );
+                }
             }
             worker.shutdown().unwrap();
         }

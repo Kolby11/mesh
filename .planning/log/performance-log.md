@@ -1486,6 +1486,7 @@ section noted.
 | 2026-10-18 | FNV-1a fingerprint fused into bounded JSON serialization | runtime boundary | Three controlled first-sample attempts on unchanged 128-row / 12,626-byte state, release, 2,000 iterations: 178.085–191.996 ms baseline vs 202.623–204.492 ms fused (0.87–0.95x); each failed the 1.05x gate. Reverted; fast keyed `ahash` over the typed value is the measured alternative |
 | 2026-10-18 | `Arc<[TransitionStyle]>` with a shared default instead of `Vec` in `ComputedStyle` | style | Appearance service frame restyle 2.673–2.723 ms vs 2.672–2.705 ms without it (three runs each, release): no measurable change. The one-entry default `Vec` clone is not a restyle cost driver. Reverted |
 | 2026-10-18 | Finalized memo styles while retaining compiler preliminary layout | component memo | Release, 550-node Appearance, three interleaved unpinned 60-update samples: 10.665–11.395 ms/frame baseline vs 25.345–26.575 ms/frame prototype; intrinsic shaping/font fallback returned in compiler layout. Final implementation defers that pass |
+| 2026-10-20 | Pin raster replay uploads by retaining `TextureFromImage` aliases | GPU residency | Rejected by backend-texture identity test before timing: the API creates uncached uploads; aliases do not pin the picture playback cache. Use immutable raster/page identities and Ganesh cache headroom |
 
 ## 2026-07-30 — element `filter: blur()` subtree layers
 
@@ -6557,3 +6558,90 @@ replays over retained pixels, shift after recorded paint) and two shell tests
 (multi-surface frames defer and present replayed pixels; a lone surface
 paints in place). Shell lib: 42 failures before and after, identical names,
 diffed against a path-limited stash of this change.
+
+
+## 2026-10-20 — GPU bitmap residency and hardware workload gates
+
+Area: Skia scene preparation, bitmap pages, GPU worker and performance CI.
+
+Small scene images, raster icons and icon-font masks now share immutable
+1024-wide RGBA/A8 pages through the existing glyph-page allocator. Cells up to
+128×128 pixels use strict source rectangles; new cells use their original image
+until the next scene-boundary snapshot. Full atlases preserve existing cells
+and cache overflow as standalone images. Resource revisions reset the atlas;
+submitted pictures keep their snapshots. CPU raster keeps its original images,
+and text keeps its existing shared glyph pages.
+
+Prepared scenes carry deduplicated image identities. The GPU worker retains up
+to 2,048 / 64 MiB, conservatively charged at four bytes/pixel, and sets Ganesh's
+cache allowance to admitted target bytes plus 64 MiB. Ganesh owns the actual
+cached uploads and may evict under pressure. No context-bound image crosses the
+UI/worker boundary. The target admission budget remains 512 MiB; the small-asset
+atlas has at most two color/four mask pages and 16 MiB of source identities.
+
+**Gates.** `tools/check-gpu-performance` runs exact release tests
+`gpu_workload_visual_match_gate` and `gpu_workload_frame_cost_gate` with
+`MESH_REQUIRE_GPU=1`. Missing GPU/export support and zero selected tests fail.
+Visual comparisons read the actual exported slot against CPU raster and direct
+GPU paint, including full, large partial and small partial damage. Recorded vs
+direct GPU permits 0.1% of pixels above delta 2 / worst delta 3; CPU/GPU Settings
+permits 10% / 40 for blur/coverage, while text and assets permit 1% / 4. Measured
+Settings CPU/GPU differences: 241,964–250,576 / 3,312,000 pixels above delta 2,
+worst 33; text and assets have zero pixels above delta 2, worst 2. Both GPUs pass.
+
+Frame gates include complete UI preparation, worker handoff, retained paint,
+dmabuf copy/fence submission and GPU completion, excluding compositor import and
+scanout. Three samples of 20 frames follow four warm-ups. Both worst sample mean
+and individual-frame p90 must stay below 16.67 ms for full Settings/text/assets,
+12 ms for frosted-panel/widget/text-line damage. Test-only GLES hooks must first
+observe bitmap transfers, then observe **zero additional transfers on warm
+frames**; resource identities must also remain stable. Hooks are absent from
+production. GPU CI uses `[self-hosted, linux, mesh-gpu]` when repository variable
+`MESH_GPU_RUNNER=enabled`; regular hosted CPU jobs do not simulate GPU budgets.
+
+**Measured.** Workspace release, AMD Radeon 780M (Mesa radeonsi, LLVM 21.1.7,
+Linux 6.12.93) and NVIDIA RTX 4060 Laptop. 920×900 logical at scale 2,
+1840×1800 pixels. Settings is 60 rounded, shadowed cards plus a frosted panel;
+text is 40 lines; assets are 256 visible image/icon instances from 128 distinct
+translucent PNGs plus eight text lines. Three interleaved baseline/candidate
+runs per GPU, each with three 20-frame samples. Baseline uses the same recording,
+resource collector, transfer probes and completion wait, disabling only bitmap
+paging and explicit identity/cache-headroom policy. It is a controlled policy
+comparison, not a checkout of the pre-change shell. Ranges below span all nine
+sample means, milliseconds per completed frame:
+
+| Workload | NVIDIA automatic | NVIDIA resident | AMD automatic | AMD resident |
+| --- | --- | --- | --- | --- |
+| Settings full | 2.416–4.570 | 3.171–4.323 | 4.378–5.164 | 4.500–5.108 |
+| Frosted panel, 840×260 logical | 1.462–2.343 | 1.685–2.557 | 2.854–3.436 | 2.887–3.315 |
+| Widget, 138×76 logical | 0.897–1.551 | 0.968–1.687 | 1.426–1.914 | 1.441–1.734 |
+| Text full | 2.559–4.304 | 2.525–3.637 | 4.178–5.727 | 4.429–5.738 |
+| Text line, 880×20 logical | 0.819–1.315 | 0.916–1.275 | 1.263–1.576 | 1.244–1.880 |
+| 256 image/icon instances | 3.830–6.480 | 1.642–2.522 | 6.258–7.092 | 2.755–3.365 |
+
+The texture-dense workload improves; the other ranges overlap and establish no
+general speedup. Maximum candidate frame p90 across these runs is 7.633 ms.
+All warm samples make zero additional observed GLES bitmap transfers.
+The earlier 80-instance / 16-source probe also had overlapping ranges (AMD
+1.992–2.370 → 1.955–2.455 ms; NVIDIA 1.026–1.695 → 1.387–1.750 ms), motivating
+the denser canonical workload rather than a claim about small icon grids.
+
+**Rejected correctness prototype.** Retaining aliases returned by
+`SkImages::TextureFromImage` does not pin the raster playback upload: repeated
+conversions returned different backend textures in the explicit identity test.
+The implementation was discarded before timing. Residency instead preserves
+raster/page identity and uses Ganesh's existing cached replay uploads. This API
+explicitly uses an uncached texture policy in
+[Skia's implementation](https://raw.githubusercontent.com/google/skia/main/src/gpu/ganesh/image/SkImage_GaneshFactories.cpp).
+
+**Verified.** Required-GPU renderer release suite: 324 passed, 17 ignored,
+zero failures. Both hardware gates pass on both devices, including exported-slot
+visual parity. All six runner failure-path tests pass; shell `cargo check` with
+`gpu`, scoped rustfmt, shell syntax and diff whitespace checks pass. Atlas
+coverage includes exact RGBA/mask pixels, immutable retired snapshots, shared
+identity, bounded overflow and CPU fallback. The completed GPU backend design
+note is removed; current ownership and gate operation live in
+`docs/renderer-ownership.md` and `docs/performance-profiling.md`.
+
+**Next.** GPU presentation still waits for render-worker completion. Frame-N /
+frame-N+1 pipelining and Wave 5 in-surface blur remain separate backlog work.

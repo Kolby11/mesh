@@ -33,3 +33,12 @@ jobs:
         run: python3 tools/test-performance-gates.py
       - name: Check D9 workload budgets
         run: nix develop -c ./tools/check-performance --workloads-only
+
+  gpu-workload-budgets:
+    if: vars.MESH_GPU_RUNNER == 'enabled'
+    runs-on: [self-hosted, linux, mesh-gpu]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check GPU frame cost and visual match
+        run: nix develop -c ./tools/check-gpu-performance

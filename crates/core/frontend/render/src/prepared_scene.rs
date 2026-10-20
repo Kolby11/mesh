@@ -4,11 +4,46 @@
 use crate::{FramePaintPlan, PixelCanvasSession};
 use skia_safe::{Picture, PictureRecorder, Rect};
 use std::sync::Arc;
+use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+
+pub(crate) type SceneImages = Rc<RefCell<BTreeMap<u32, skia_safe::Image>>>;
+
+thread_local! {
+    static RECORDING_IMAGES: RefCell<Option<SceneImages>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn recording_images() -> bool {
+    RECORDING_IMAGES.with(|images| images.borrow().is_some())
+}
+
+pub(crate) fn retain_image(image: &skia_safe::Image) {
+    RECORDING_IMAGES.with(|images| {
+        if let Some(images) = images.borrow().as_ref() {
+            images
+                .borrow_mut()
+                .entry(image.unique_id())
+                .or_insert_with(|| image.clone());
+        }
+    });
+}
+
+pub(crate) fn with_images<R>(images: &SceneImages, draw: impl FnOnce() -> R) -> R {
+    struct Restore(Option<SceneImages>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            RECORDING_IMAGES.with(|images| images.replace(self.0.take()));
+        }
+    }
+    let _restore =
+        Restore(RECORDING_IMAGES.with(|current| current.replace(Some(Rc::clone(images)))));
+    draw()
+}
 
 /// A complete scene. Skia's immutable picture owns every referenced raster
 /// image, shader and glyph page, including assets removed from live caches.
 pub struct PreparedScene {
     picture: Picture,
+    pub(crate) images: Vec<skia_safe::Image>,
     revision: u64,
     size: (u32, u32),
 }
@@ -35,6 +70,7 @@ pub struct SceneCanvas {
     width: u32,
     height: u32,
     recorder: PictureRecorder,
+    images: SceneImages,
     plan: Option<Arc<FramePaintPlan>>,
     prepared: Option<Arc<PreparedScene>>,
     pub surface: crate::scene_thread::SceneSurface,
@@ -59,6 +95,7 @@ impl SceneCanvas {
             width,
             height,
             recorder: PictureRecorder::new(),
+            images: SceneImages::default(),
             plan: None,
             prepared: None,
             surface: crate::scene_thread::SceneSurface { id, incarnation: 1 },
@@ -81,6 +118,8 @@ impl SceneCanvas {
     }
 
     pub fn begin(&mut self, plan: &FramePaintPlan) {
+        crate::surface::image_pages::refresh();
+        self.images.borrow_mut().clear();
         self.recorder = PictureRecorder::new();
         self.recorder
             .begin_recording(Rect::from_wh(self.width as f32, self.height as f32), false);
@@ -95,6 +134,7 @@ impl SceneCanvas {
                 .expect("begin a complete scene before painting"),
             self.width,
             self.height,
+            Rc::clone(&self.images),
         )
     }
 
@@ -106,6 +146,7 @@ impl SceneCanvas {
         if self.prepared.is_none() {
             self.prepared = Some(Arc::new(PreparedScene {
                 picture: self.recorder.finish_recording_as_picture(None)?,
+                images: self.images.borrow().values().cloned().collect(),
                 revision: plan.inputs.resource_revision,
                 size: (self.width, self.height),
             }));

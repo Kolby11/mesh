@@ -282,6 +282,7 @@ pub(super) fn draw(canvas: &Canvas, shape: &RoundedShape, color: Color, clip: Cl
     full.translate((rect.x, rect.y));
     canvas.draw_region(&full, &paint);
     if let Some(atlas) = &coverage.atlas {
+        crate::prepared_scene::retain_image(atlas);
         let transforms: Vec<_> = coverage
             .sprites
             .iter()

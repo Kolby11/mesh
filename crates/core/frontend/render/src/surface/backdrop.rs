@@ -225,6 +225,7 @@ pub(crate) fn draw_refraction(
     let Some(prepared) = source.prepared(output_w, output_h, filter.blur_radius) else {
         return false;
     };
+    crate::prepared_scene::retain_image(&prepared);
     // Surface-local device coordinates -> output coordinates of the prepared image.
     let local = Matrix::translate((-frame.origin.0, -frame.origin.1));
     let Some(backdrop) = prepared.to_shader(

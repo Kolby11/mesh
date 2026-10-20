@@ -1120,6 +1120,7 @@ impl Renderer for SkiaGlyphRenderer<'_> {
             // image's A8 alpha modulates it.
             paint.set_argb(a, r, g, b);
         }
+        crate::prepared_scene::retain_image(paged.as_ref().map_or(&entry.image, |(page, _)| page));
         match paged {
             Some((page, src)) => self.canvas.draw_image_rect_with_sampling_options(
                 page,

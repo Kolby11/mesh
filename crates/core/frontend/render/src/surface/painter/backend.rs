@@ -1365,6 +1365,7 @@ impl SkiaPaintBackend {
             Some(image)
         });
         if let Some(image) = image {
+            crate::prepared_scene::retain_image(&image);
             let save_count = canvas.save();
             canvas.clip_irect(
                 skia_safe::IRect::from_xywh(clipped.x, clipped.y, clipped.width, clipped.height),
@@ -1708,6 +1709,7 @@ impl SkiaPaintBackend {
                 Some(image)
             });
             if let Some(image) = image {
+                crate::prepared_scene::retain_image(&image);
                 let save = canvas.save();
                 canvas.clip_irect(
                     skia_safe::IRect::from_xywh(
@@ -1888,9 +1890,13 @@ impl SkiaPaintBackend {
             rect.width as f32,
             rect.height as f32,
         );
+        let (skia_image, source) = crate::surface::image_pages::resolve(&skia_image);
+        crate::prepared_scene::retain_image(&skia_image);
         canvas.draw_image_rect_with_sampling_options(
             skia_image,
-            None,
+            source
+                .as_ref()
+                .map(|rect| (rect, skia_safe::canvas::SrcRectConstraint::Strict)),
             dst,
             SamplingOptions::default(),
             &skia_paint,

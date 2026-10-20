@@ -89,8 +89,37 @@ impl std::fmt::Display for GpuSceneError {
     }
 }
 
+// Raster identities keep Ganesh's upload keys live. The cache allowance is
+// additional to retained targets, so large surfaces cannot evict all assets.
+struct ImageResidency {
+    images: mesh_core_elements::lru::ByteLruCache<u32, skia_safe::Image>,
+    admissions: usize,
+}
+
+impl ImageResidency {
+    fn new(bytes: usize) -> Self {
+        Self {
+            images: mesh_core_elements::lru::ByteLruCache::new(2048, bytes),
+            admissions: 0,
+        }
+    }
+
+    fn prepare(&mut self, images: &[skia_safe::Image]) {
+        for image in images {
+            if self.images.get(&image.unique_id()).is_some() {
+                continue;
+            }
+            let bytes = image.width() as usize * image.height() as usize * 4;
+            if self.images.insert(image.unique_id(), image.clone(), bytes) {
+                self.admissions += 1;
+            }
+        }
+    }
+}
+
 pub struct GpuSceneRenderer {
     surfaces: BTreeMap<SceneSurface, SurfaceState>,
+    residency: ImageResidency,
     context: GpuContext,
     budget: mesh_core_resources::ResourceByteBudget,
 }
@@ -102,6 +131,7 @@ impl GpuSceneRenderer {
         let context = GpuContext::on_drm_device(device).map_err(GpuSceneError::Gpu)?;
         Ok(Self {
             surfaces: BTreeMap::new(),
+            residency: ImageResidency::new(64 * 1024 * 1024),
             context,
             budget: mesh_core_resources::ResourceByteBudget::new(512 * 1024 * 1024),
         })
@@ -110,6 +140,44 @@ impl GpuSceneRenderer {
     #[cfg(test)]
     pub(crate) fn finish(&mut self) {
         self.context.finish();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn read_back(
+        &mut self,
+        surface: SceneSurface,
+        output: &GpuSceneOutput,
+    ) -> Result<crate::PixelBuffer, GpuSceneError> {
+        let slot = self
+            .surfaces
+            .get_mut(&surface)
+            .unwrap()
+            .slots
+            .iter_mut()
+            .find(|slot| Arc::ptr_eq(&slot.leased, &output.leased))
+            .unwrap();
+        let mut pixels = crate::PixelBuffer::new(output.width, output.height);
+        let stride = pixels.stride() as usize;
+        if slot.target.surface.read_pixels(
+            &super::target_info(output.width, output.height),
+            pixels.data_mut(),
+            stride,
+            (0, 0),
+        ) {
+            Ok(pixels)
+        } else {
+            Err(GpuSceneError::Gpu(super::GpuError::Readback))
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn residency_admissions(&self) -> usize {
+        self.residency.admissions
+    }
+
+    #[cfg(test)]
+    pub(crate) fn disable_residency(&mut self) {
+        self.residency = ImageResidency::new(0);
     }
 
     pub fn probe(&mut self) -> Result<DmabufPlanes, GpuSceneError> {
@@ -149,6 +217,7 @@ impl SceneRenderer for GpuSceneRenderer {
         frame: &SceneFrame<PreparedScene>,
     ) -> Result<GpuSceneOutput, GpuSceneError> {
         let snapshot = frame.snapshot();
+        self.residency.prepare(&snapshot.resources().images);
         let scale = snapshot.scale();
         let size = snapshot.resources().size();
         let resized = self
@@ -210,6 +279,13 @@ impl SceneRenderer for GpuSceneRenderer {
                 skia_safe::region::RegionOp::Union,
             );
         }
+        if self.residency.images.max_bytes() > 0 {
+            self.context.skia.set_resource_cache_limit(
+                self.budget
+                    .used_bytes()
+                    .saturating_add(self.residency.images.max_bytes()),
+            );
+        }
         let canvas = state.retained.canvas();
         canvas.save();
         canvas.clip_region(&region, None);
@@ -264,6 +340,13 @@ impl SceneRenderer for GpuSceneRenderer {
 
     fn remove_surface(&mut self, surface: SceneSurface) {
         self.surfaces.remove(&surface);
+        if self.residency.images.max_bytes() > 0 {
+            self.context.skia.set_resource_cache_limit(
+                self.budget
+                    .used_bytes()
+                    .saturating_add(self.residency.images.max_bytes()),
+            );
+        }
     }
 }
 
@@ -275,6 +358,35 @@ mod tests {
     use crate::{FractionalScale, FramePaintPlan, PixelBuffer};
     use std::os::unix::fs::MetadataExt;
     use std::time::Duration;
+
+    fn raster_image(color: skia_safe::Color) -> skia_safe::Image {
+        let mut surface = skia_safe::surfaces::raster_n32_premul((16, 16)).unwrap();
+        surface.canvas().clear(color);
+        surface.image_snapshot()
+    }
+
+    #[test]
+    fn residency_preserves_identities_and_evicts_by_bytes() {
+        let mut residency = ImageResidency::new(16 * 16 * 4);
+        let red = raster_image(skia_safe::Color::RED);
+        let blue = raster_image(skia_safe::Color::BLUE);
+        residency.prepare(&[red.clone()]);
+        residency.prepare(&[red.clone()]);
+        assert_eq!(residency.admissions, 1);
+        assert_eq!(
+            residency.images.get(&red.unique_id()).unwrap().unique_id(),
+            red.unique_id()
+        );
+        residency.prepare(&[blue]);
+        assert_eq!(residency.images.len(), 1);
+        assert!(!residency.images.contains_key(&red.unique_id()));
+        residency.prepare(&[red]);
+        assert_eq!(residency.admissions, 3);
+        assert!(residency.images.bytes() <= residency.images.max_bytes());
+        let mut disabled = ImageResidency::new(0);
+        disabled.prepare(&[raster_image(skia_safe::Color::RED)]);
+        assert_eq!(disabled.admissions, 0);
+    }
 
     struct InspectRenderer(GpuSceneRenderer);
     impl SceneRenderer for InspectRenderer {
