@@ -723,6 +723,84 @@ impl TooltipAnchor {
     }
 }
 
+/// A node's CSS custom properties: immutable, shared between a parent and
+/// every descendant that declares none of its own, and fingerprinted once.
+///
+/// Cloning is a reference-count increment. Two values are equal when they
+/// hold the same entries; [`fingerprint`](Self::fingerprint) is independent of
+/// map iteration order.
+#[derive(Clone)]
+pub struct CustomProperties(Arc<CustomPropertiesInner>);
+
+struct CustomPropertiesInner {
+    map: HashMap<String, StyleValue>,
+    fingerprint: u64,
+}
+
+impl CustomProperties {
+    pub fn new(map: HashMap<String, StyleValue>) -> Self {
+        let fingerprint = custom_properties_fingerprint(&map);
+        Self(Arc::new(CustomPropertiesInner { map, fingerprint }))
+    }
+
+    /// A stable hash of the entries, computed when the value was built.
+    pub fn fingerprint(&self) -> u64 {
+        self.0.fingerprint
+    }
+
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+fn custom_properties_fingerprint(map: &HashMap<String, StyleValue>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut entries: Vec<_> = map.iter().collect();
+    entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+    let mut hasher = std::hash::DefaultHasher::new();
+    entries.len().hash(&mut hasher);
+    for (key, value) in entries {
+        key.hash(&mut hasher);
+        value.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+impl Default for CustomProperties {
+    fn default() -> Self {
+        static EMPTY: std::sync::LazyLock<CustomProperties> =
+            std::sync::LazyLock::new(|| CustomProperties::new(HashMap::new()));
+        EMPTY.clone()
+    }
+}
+
+impl std::ops::Deref for CustomProperties {
+    type Target = HashMap<String, StyleValue>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0.map
+    }
+}
+
+impl From<HashMap<String, StyleValue>> for CustomProperties {
+    fn from(map: HashMap<String, StyleValue>) -> Self {
+        Self::new(map)
+    }
+}
+
+impl PartialEq for CustomProperties {
+    fn eq(&self, other: &Self) -> bool {
+        self.ptr_eq(other)
+            || (self.0.fingerprint == other.0.fingerprint && self.0.map == other.0.map)
+    }
+}
+
+impl std::fmt::Debug for CustomProperties {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.map.fmt(formatter)
+    }
+}
+
 /// Fully resolved style for a widget node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputedStyle {
@@ -730,7 +808,7 @@ pub struct ComputedStyle {
     /// immutable style snapshot lets both initial tree construction and
     /// targeted restyles pass inherited variables without a separate side
     /// channel.
-    pub custom_properties: HashMap<String, StyleValue>,
+    pub custom_properties: CustomProperties,
     /// Authored inherited properties that won the node's cascade.
     pub explicit_properties: StylePropertyMask,
     /// Inherited properties copied from the parent during this resolution.
@@ -827,7 +905,7 @@ pub struct ComputedStyle {
 impl Default for ComputedStyle {
     fn default() -> Self {
         Self {
-            custom_properties: HashMap::new(),
+            custom_properties: CustomProperties::default(),
             explicit_properties: StylePropertyMask::default(),
             inherited_properties: StylePropertyMask::default(),
             width: Dimension::Auto,

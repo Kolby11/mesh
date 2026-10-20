@@ -65,19 +65,10 @@ impl PaintInput {
     }
 }
 
-/// Hashes the custom-property map in key order so a style snapshot has a
-/// stable variable input regardless of `HashMap` iteration order.
+/// The custom-property map's fingerprint, computed once when the map was
+/// built and shared by every node that inherits it unchanged.
 pub fn paint_variables_fingerprint(style: &ComputedStyle) -> u64 {
-    let mut entries: Vec<_> = style.custom_properties.iter().collect();
-    entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
-
-    let mut hasher = PaintInputHasher::default();
-    entries.len().hash(&mut hasher);
-    for (key, value) in entries {
-        key.hash(&mut hasher);
-        value.hash(&mut hasher);
-    }
-    hasher.finish()
+    style.custom_properties.fingerprint()
 }
 
 fn hash_material(style: &ComputedStyle) -> u64 {

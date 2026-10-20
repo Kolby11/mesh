@@ -246,3 +246,183 @@ fn glass_raster_profile() {
         }
     }
 }
+
+fn full_resolution_blur(source: &BackdropSource, size: (i32, i32), blur: f32) -> Vec<u8> {
+    let mut surface = surfaces::raster_n32_premul(size).unwrap();
+    let (iw, ih) = (source.image.width() as f32, source.image.height() as f32);
+    let scale = (size.0 as f32 / iw).max(size.1 as f32 / ih);
+    let (dw, dh) = (iw * scale, ih * scale);
+    let mut paint = Paint::default();
+    paint.set_image_filter(image_filters::blur(
+        (blur / 2.0, blur / 2.0),
+        TileMode::Clamp,
+        None,
+        None,
+    ));
+    surface.canvas().draw_image_rect_with_sampling_options(
+        &source.image,
+        None,
+        Rect::from_xywh(
+            (size.0 as f32 - dw) / 2.0,
+            (size.1 as f32 - dh) / 2.0,
+            dw,
+            dh,
+        ),
+        SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear),
+        &paint,
+    );
+    pixels(&mut surface)
+}
+
+fn banded_source() -> BackdropSource {
+    let mut surface = surfaces::raster_n32_premul((256, 160)).unwrap();
+    for band in 0..32 {
+        let mut paint = Paint::default();
+        paint.set_color(if band % 2 == 0 {
+            skia_safe::Color::from_argb(255, 250, 240, 20)
+        } else {
+            skia_safe::Color::from_argb(255, 10, 30, 200)
+        });
+        surface
+            .canvas()
+            .draw_rect(Rect::from_xywh(band as f32 * 8.0, 0.0, 8.0, 160.0), &paint);
+    }
+    BackdropSource {
+        path: PathBuf::new(),
+        image: surface.image_snapshot(),
+        prepared: Mutex::new(Vec::new()),
+    }
+}
+
+#[test]
+fn downsampled_blur_matches_full_resolution_blur() {
+    let source = banded_source();
+    let size = (330, 190);
+    for blur in [8.0, 20.0, 48.0] {
+        let image = source.prepared(size.0, size.1, blur).unwrap();
+        assert!(image.width() < size.0, "blur {blur} should downsample");
+        let mut surface = surfaces::raster_n32_premul(size).unwrap();
+        surface.canvas().clear(skia_safe::Color::TRANSPARENT);
+        let frame = BackdropFrame {
+            origin: (0.0, 0.0),
+            output: (size.0 as f32, size.1 as f32),
+        };
+        let mut local = Matrix::translate((-frame.origin.0, -frame.origin.1));
+        local.pre_scale(
+            (
+                size.0 as f32 / image.width() as f32,
+                size.1 as f32 / image.height() as f32,
+            ),
+            None,
+        );
+        let shader = image
+            .to_shader(
+                (TileMode::Clamp, TileMode::Clamp),
+                SamplingOptions::new(FilterMode::Linear, MipmapMode::None),
+                &local,
+            )
+            .unwrap();
+        let filter = VisualFilter {
+            refract: true,
+            blur_radius: blur,
+            ..VisualFilter::NONE
+        };
+        let rect = Rect::from_wh(size.0 as f32, size.1 as f32);
+        assert!(draw_backdrop(
+            surface.canvas(),
+            rect,
+            Corners::zero(),
+            filter,
+            shader
+        ));
+        let reference = full_resolution_blur(&source, size, blur);
+        let actual = pixels(&mut surface);
+        let max_error = reference
+            .iter()
+            .zip(&actual)
+            .map(|(a, b)| a.abs_diff(*b))
+            .max()
+            .unwrap();
+        let mean_error = reference
+            .iter()
+            .zip(&actual)
+            .map(|(a, b)| a.abs_diff(*b) as f64)
+            .sum::<f64>()
+            / reference.len() as f64;
+        // Hard 8px bands sit at the blur cutoff, the worst case for resampling;
+        // Ganesh's own blur downsamples further than this.
+        assert!(
+            max_error <= 20,
+            "blur {blur}: max channel error {max_error}"
+        );
+        assert!(
+            mean_error <= 5.0,
+            "blur {blur}: mean channel error {mean_error}"
+        );
+    }
+}
+
+#[test]
+fn unblurred_and_light_blur_copies_keep_output_resolution() {
+    let source = source();
+    for blur in [0.0, 5.0, 7.5] {
+        let image = source.prepared(160, 90, blur).unwrap();
+        assert_eq!((image.width(), image.height()), (160, 90), "blur {blur}");
+    }
+}
+
+#[test]
+fn prepared_cache_keeps_every_glass_theme_radius() {
+    let source = source();
+    let radii = [0.0, 5.0, 8.0, 12.0, 14.0, 16.0, 20.0, 22.0, 24.0];
+    let first: Vec<_> = radii
+        .iter()
+        .map(|blur| source.prepared(2880, 1800, *blur).unwrap().unique_id())
+        .collect();
+    let second: Vec<_> = radii
+        .iter()
+        .map(|blur| source.prepared(2880, 1800, *blur).unwrap().unique_id())
+        .collect();
+    assert_eq!(first, second, "a theme's radii must not evict each other");
+}
+
+#[test]
+#[ignore = "release-only cold backdrop preparation profile"]
+fn backdrop_prepare_profile() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    let mut wallpaper = surfaces::raster_n32_premul((3840, 2160)).unwrap();
+    for y in (0..2160).step_by(8) {
+        let mut paint = Paint::default();
+        paint.set_color(skia_safe::Color::from_argb(
+            255,
+            (y % 251) as u8,
+            (y % 113) as u8,
+            140,
+        ));
+        wallpaper
+            .canvas()
+            .draw_rect(Rect::from_xywh(0.0, y as f32, 3840.0, 8.0), &paint);
+    }
+    let image = wallpaper.image_snapshot();
+    let image = image.with_default_mipmaps().unwrap_or(image);
+    for run in 0..3 {
+        let source = BackdropSource {
+            path: PathBuf::new(),
+            image: image.clone(),
+            prepared: Mutex::new(Vec::new()),
+        };
+        let mut total = Duration::ZERO;
+        for blur in [0.0, 5.0, 8.0, 12.0, 14.0, 16.0, 20.0, 22.0, 24.0] {
+            let started = Instant::now();
+            let prepared = source.prepared(2880, 1800, blur).unwrap();
+            let elapsed = started.elapsed();
+            total += elapsed;
+            eprintln!(
+                "run={run} blur={blur} copy={}x{} cold_prepare={elapsed:?}",
+                prepared.width(),
+                prepared.height()
+            );
+        }
+        eprintln!("run={run} all nine radii cold_prepare={total:?}");
+    }
+}

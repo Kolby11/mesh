@@ -1105,14 +1105,16 @@ impl ShellComponent for FrontendSurfaceComponent {
             let selection_dirty = self.annotate_selection_tree(&mut tree, theme, false);
             self.retained_update_dirty_nodes.extend(selection_dirty);
         }
-        let mut retained_update_dirty_roots = self.retained_update_dirty_roots.take();
+        let retained_update_dirty_roots = self.retained_update_dirty_roots.take();
         #[cfg(test)]
-        if self.force_full_retained_update {
-            retained_update_dirty_roots = None;
-        }
-        if let Some(dirty_roots) = retained_update_dirty_roots.as_mut() {
-            dirty_roots.extend(animation_dirty_roots.drain());
-        }
+        let retained_update_dirty_roots = retained_update_dirty_roots
+            .filter(|_| !self.force_full_retained_update);
+        // Animation-sampled nodes are already single dirty nodes above. The
+        // sampling pass reports every node whose own sample changed, and the
+        // scoped update re-checks every descendant's layout, so an animated
+        // ancestor does not re-fingerprint its whole subtree (a dock's closed
+        // launcher is ~1,700 nodes under one animated root).
+        animation_dirty_roots.clear();
         self.animation_dirty_node_ids_scratch = animation_dirty_roots;
         self.advance_interaction_frame(
             mesh_core_interaction::InteractionFramePhase::AnimationSampled,

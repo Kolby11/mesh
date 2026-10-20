@@ -1,9 +1,7 @@
 use super::attrs::StyleNodeAttrs;
-use super::cache::CachedThemeTokenValue;
+use super::cache::{CachedThemeTokenValue, VariableSink};
 use super::index::*;
-use super::literal::{
-    LiteralCache, LiteralProperty, TypedLiteralOperation, apply_typed_literal,
-};
+use super::literal::{LiteralCache, LiteralProperty, TypedLiteralOperation, apply_typed_literal};
 use super::matching::*;
 use super::value::split_reference;
 use super::{ResolutionContext, StyleResolver};
@@ -285,7 +283,7 @@ impl<'a> StyleResolver<'a> {
         style: &mut ComputedStyle,
         attrs: &StyleNodeAttrs,
         diagnostics: &mut Option<&mut Vec<StyleDiagnostic>>,
-        variables: &mut HashMap<String, StyleValue>,
+        variables: &mut impl VariableSink,
         pass: DeclarationPass,
     ) {
         let mut apply = |rules: &[mesh_core_theme::ThemeStyleRule], scope: &str| {
@@ -353,7 +351,7 @@ impl<'a> StyleResolver<'a> {
         style: &mut ComputedStyle,
         decl: &IndexedDeclaration,
         diagnostics: Option<(&str, &mut Vec<StyleDiagnostic>)>,
-        variables: &mut HashMap<String, StyleValue>,
+        variables: &mut impl VariableSink,
     ) {
         self.apply_indexed_declaration_with_mask(style, decl, diagnostics, variables, None);
     }
@@ -400,13 +398,16 @@ impl<'a> StyleResolver<'a> {
         style: &mut ComputedStyle,
         decl: &IndexedDeclaration,
         mut diagnostics: Option<(&str, &mut Vec<StyleDiagnostic>)>,
-        variables: &mut HashMap<String, StyleValue>,
+        variables: &mut impl VariableSink,
         mut explicit_properties: Option<&mut StylePropertyMask>,
     ) {
+        if let IndexedProperty::Custom(property) = &decl.property {
+            variables.insert_variable(property, &decl.value);
+            return;
+        }
+        let variables = variables.variables();
         match &decl.property {
-            IndexedProperty::Custom(property) => {
-                variables.insert(property.clone(), decl.value.clone());
-            }
+            IndexedProperty::Custom(_) => {}
             IndexedProperty::StaticDiagnostic { property, message } => {
                 push_indexed_static_style_diagnostic(&mut diagnostics, property, message);
             }

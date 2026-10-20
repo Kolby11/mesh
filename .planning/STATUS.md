@@ -14,12 +14,19 @@ measurements live in [`log/`](log/README.md).
   NVIDIA 4060 pass; renderer release is 324 passed / 17 ignored. The 256-instance
   asset workload improves; other timing ranges overlap. See the performance log.
   GPU CI requires a `mesh-gpu` runner and `MESH_GPU_RUNNER=enabled`.
+- **Live glass performance pass:** backdrop copies are downsampled and stay
+  resident across the theme's blur radii, custom properties are shared and
+  fingerprinted once, and animated nodes no longer re-fingerprint their
+  subtrees. Live dashboard frames are roughly a third of their former cost;
+  see the performance log. Remaining glass items are in the backlog.
 - **Recent shipped work:** A3 public style parts, parallel CPU raster,
   composition startup/live parity and the liquid-glass showcase. Details remain
   in October's log and the performance log.
 
 ## Next
 
+- Glass session backlog: closed-popover subtrees, style-animation pass scope,
+  and glass D9 gates.
 - Pipeline GPU frame N against frame N+1 script work. Presentation currently
   waits for the render worker; preserve the new hardware gates.
 - Wave 5: [in-surface blur engine](todos/pending/2026-09-30-in-surface-blur-engine.md).

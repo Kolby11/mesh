@@ -402,3 +402,161 @@ fn preview(component: &mut FrontendSurfaceComponent, width: u32, height: u32, la
         .unwrap();
     }
 }
+
+// cargo test -p mesh-core-shell --release --lib glass_bar_clock_tick_profile -- --ignored --nocapture
+#[test]
+#[ignore = "release-only glass-bar clock-tick frame-cost profile"]
+fn glass_bar_clock_tick_profile() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    const WIDTH: u32 = 2880;
+    const HEIGHT: u32 = 100;
+    const TICKS: u32 = 60;
+    let theme = theme();
+    let mut component = host("glass-bar");
+    let extent = SurfaceExtent::unpadded(WIDTH, HEIGHT);
+    let mut pixels = PixelBuffer::new(WIDTH, HEIGHT);
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    let start = std::time::Instant::now();
+    let mut tick = |component: &mut FrontendSurfaceComponent, second: u32| {
+        component
+            .run_due_script_tasks(start + Duration::from_millis(1_001 * u64::from(second)))
+            .unwrap();
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+    };
+    for second in 1..=4 {
+        tick(&mut component, second);
+    }
+    for run in 0..3 {
+        component.set_profiling_enabled(true);
+        let _ = component.take_profiling_records();
+        let mut frames = Vec::new();
+        for second in 0..TICKS {
+            let started = std::time::Instant::now();
+            tick(&mut component, 5 + run * TICKS + second);
+            frames.push(started.elapsed());
+        }
+        frames.sort();
+        let total: Duration = frames.iter().sum();
+        eprintln!(
+            "glass-bar clock tick run={run}: mean {:.3}ms p50 {:.3}ms p90 {:.3}ms",
+            total.as_secs_f64() * 1000.0 / f64::from(TICKS),
+            frames[frames.len() / 2].as_secs_f64() * 1000.0,
+            frames[frames.len() * 9 / 10].as_secs_f64() * 1000.0,
+        );
+        super::navigation_profile::dump_stages(
+            "glass-bar clock tick",
+            component.take_profiling_records(),
+            TICKS,
+        );
+        component.set_profiling_enabled(false);
+    }
+}
+
+fn glass_apps_payload(pinned: usize, installed: usize) -> serde_json::Value {
+    let app = |index: usize, pinned: bool| {
+        serde_json::json!({
+            "id": format!("app-{index}"),
+            "name": format!("Application {index}"),
+            "icon": "",
+            "pinned": pinned,
+            "running": index % 3 == 0,
+            "focused": index == 0,
+            "windows": usize::from(index % 3 == 0),
+        })
+    };
+    serde_json::json!({
+        "available": true,
+        "apps": (0..pinned).map(|index| app(index, true)).collect::<Vec<_>>(),
+        "installed": (0..installed).map(|index| app(index, index < pinned)).collect::<Vec<_>>(),
+    })
+}
+
+fn count_nodes(node: &WidgetNode) -> usize {
+    1 + node.children.iter().map(count_nodes).sum::<usize>()
+}
+
+// cargo test -p mesh-core-shell --release --lib glass_dock_hover_animation_profile -- --ignored --nocapture
+#[test]
+#[ignore = "release-only glass-dock hover-animation frame-cost profile"]
+fn glass_dock_hover_animation_profile() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    const WIDTH: u32 = 2880;
+    const HEIGHT: u32 = 180;
+    const FRAMES: u32 = 60;
+    let installed = std::env::var("MESH_BENCH_APPS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(150);
+    let theme = theme();
+    let mut component = host("glass-dock");
+    update(
+        &mut component,
+        "mesh.apps",
+        glass_apps_payload(10, installed),
+    );
+    let extent = SurfaceExtent::unpadded(WIDTH, HEIGHT);
+    let mut pixels = PixelBuffer::new(WIDTH, HEIGHT);
+    // Transitions run on the wall clock; back-to-back paints sample them
+    // mid-flight, which is the per-frame work an animation pays.
+    // Like the shell, paint only frames the component asks for.
+    let mut paint_frame = |component: &mut FrontendSurfaceComponent| {
+        if component.wants_render() {
+            component
+                .paint_raster(&theme, extent, &mut pixels, 1.0)
+                .unwrap();
+        }
+    };
+    paint_frame(&mut component);
+    let nodes = count_nodes(component.last_tree.as_ref().unwrap());
+    let tiles: Vec<_> = (0..10)
+        .map(|index| {
+            let key = reference(&component, &format!("app-{index}"));
+            find_node_bounds_by_key(component.last_tree.as_ref().unwrap(), &key, 0.0, 0.0).unwrap()
+        })
+        .collect();
+    eprintln!("glass-dock: {installed} installed apps, {nodes} nodes");
+    for run in 0..3 {
+        component.set_profiling_enabled(true);
+        let _ = component.take_profiling_records();
+        let mut times = Vec::new();
+        for step in 0..FRAMES {
+            // Cross to the next tile every six frames. The first run also
+            // covers the shelf's 560ms `dock-in` entrance animation.
+            let (left, top, right, bottom) = tiles[(step as usize / 6) % tiles.len()];
+            let begun = std::time::Instant::now();
+            if step % 6 == 0 {
+                component
+                    .handle_input(
+                        &theme,
+                        WIDTH,
+                        HEIGHT,
+                        ComponentInput::PointerMove {
+                            x: (left + right) / 2.0,
+                            y: (top + bottom) / 2.0,
+                        },
+                    )
+                    .unwrap();
+            }
+            paint_frame(&mut component);
+            times.push(begun.elapsed());
+        }
+        times.sort();
+        let total: Duration = times.iter().sum();
+        eprintln!(
+            "glass-dock hover run={run}: mean {:.3}ms p50 {:.3}ms p90 {:.3}ms",
+            total.as_secs_f64() * 1000.0 / f64::from(FRAMES),
+            times[times.len() / 2].as_secs_f64() * 1000.0,
+            times[times.len() * 9 / 10].as_secs_f64() * 1000.0,
+        );
+        super::navigation_profile::dump_stages(
+            "glass-dock hover",
+            component.take_profiling_records(),
+            FRAMES,
+        );
+        component.set_profiling_enabled(false);
+    }
+}

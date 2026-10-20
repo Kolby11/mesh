@@ -15,12 +15,60 @@ pub(super) fn empty_variables() -> &'static HashMap<String, StyleValue> {
     EMPTY.get_or_init(HashMap::new)
 }
 
-// Reusable scratch HashMap for CSS custom-property variable resolution.
-// Cleared at the start of each resolve call to avoid per-node allocations
-// while retaining allocated capacity across calls on the same thread.
+/// Where declaration application writes custom properties and reads them
+/// back for `var()` resolution.
+pub(super) trait VariableSink {
+    fn variables(&self) -> &HashMap<String, StyleValue>;
+    fn insert_variable(&mut self, name: &str, value: &StyleValue);
+}
+
+impl VariableSink for HashMap<String, StyleValue> {
+    fn variables(&self) -> &HashMap<String, StyleValue> {
+        self
+    }
+
+    fn insert_variable(&mut self, name: &str, value: &StyleValue) {
+        self.insert(name.to_owned(), value.clone());
+    }
+}
+
+/// A node's custom properties during its cascade: the inherited shared map
+/// until a declaration changes an entry, then a private copy. Most nodes
+/// declare no variables and finish with their parent's map unchanged.
+pub(super) struct VariableScope {
+    base: CustomProperties,
+    owned: Option<HashMap<String, StyleValue>>,
+}
+
+impl VariableScope {
+    pub(super) fn new(base: CustomProperties) -> Self {
+        Self { base, owned: None }
+    }
+
+    pub(super) fn finish(self) -> CustomProperties {
+        match self.owned {
+            Some(owned) => CustomProperties::new(owned),
+            None => self.base,
+        }
+    }
+}
+
+impl VariableSink for VariableScope {
+    fn variables(&self) -> &HashMap<String, StyleValue> {
+        self.owned.as_ref().unwrap_or(&self.base)
+    }
+
+    fn insert_variable(&mut self, name: &str, value: &StyleValue) {
+        if self.variables().get(name) == Some(value) {
+            return;
+        }
+        self.owned
+            .get_or_insert_with(|| (*self.base).clone())
+            .insert(name.to_owned(), value.clone());
+    }
+}
+
 thread_local! {
-    pub(super) static VARIABLE_SCRATCH: RefCell<HashMap<String, StyleValue>> =
-        RefCell::new(HashMap::new());
     pub(super) static CANDIDATE_RULE_SCRATCH: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
     pub(super) static MATCHED_RULE_SCRATCH: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
     pub(super) static INLINE_STYLE_CACHE: RefCell<LruCache<Arc<str>, CachedInlineStyle>> =
@@ -44,7 +92,7 @@ pub(super) const MAX_THEME_DEFAULT_DECLARATION_CACHE_ENTRIES: usize = 512;
 /// recursive restyle calls.
 #[derive(Debug, Clone, PartialEq)]
 pub(super) struct ParentInheritedStyle {
-    pub(super) custom_properties: HashMap<String, StyleValue>,
+    pub(super) custom_properties: CustomProperties,
     pub(super) color: Color,
     pub(super) font_family: Arc<str>,
     pub(super) font_size: f32,

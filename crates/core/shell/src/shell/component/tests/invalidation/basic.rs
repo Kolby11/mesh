@@ -2210,3 +2210,66 @@ function toggle() hidden = not hidden end
         }
     }
 }
+
+#[test]
+fn animated_ancestor_scoped_update_leaves_nothing_for_a_full_update() {
+    // Only the animated node is fingerprinted, not its subtree. A full
+    // update of the same tree afterwards must find nothing the scoped one
+    // missed, for paint-only, layer, inherited and layout-affecting values.
+    for (rest, hovered) in [
+        ("opacity: 1;", "opacity: 0.2;"),
+        (
+            "transform: translateY(0px);",
+            "transform: translateY(12px);",
+        ),
+        ("color: #202020;", "color: #f0f0f0;"),
+        ("padding: 2px;", "padding: 9px;"),
+        ("width: 60px;", "width: 100px;"),
+    ] {
+        let property = rest.split(':').next().unwrap();
+        let mut component = test_frontend_component(&format!(
+            r#"
+<template><row><column class="target"><box class="leaf" /><text>Label</text><row><box class="leaf" /></row></column><box /></row></template>
+<style>
+.target {{ {rest} transition: {property} 1000ms linear; }}
+.target:hover {{ {hovered} }}
+.leaf {{ width: 10px; height: 10px; background: #808080; }}
+</style>
+"#
+        ));
+        let theme = default_theme();
+        let mut buffer = PixelBuffer::new(160, 80);
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+            .unwrap();
+        component.hovered_path = ["root", "root/0", "root/0/0"]
+            .map(runtime_node_id_for_key)
+            .to_vec();
+        component.hovered_key = Some("root/0/0".into());
+        component.invalidate_interaction_restyle();
+        for frame in 0..4 {
+            std::thread::sleep(Duration::from_millis(15));
+            component
+                .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+                .unwrap();
+            if frame == 0 {
+                continue;
+            }
+            assert!(
+                component.transitions.has_active(Instant::now()),
+                "{property}: transition must be running"
+            );
+            let layout_affecting = matches!(property, "padding" | "width");
+            assert!(
+                layout_affecting || component.retained_tree.last_update_was_scoped(),
+                "{property}: frame {frame} must take the scoped update"
+            );
+            let tree = component.last_tree.clone().unwrap();
+            let missed = component.retained_tree.update(&tree);
+            assert!(
+                !missed.any() && component.retained_tree.render_dirty_node_ids().is_empty(),
+                "{property}: frame {frame} scoped update missed {missed:?}"
+            );
+        }
+    }
+}

@@ -6645,3 +6645,105 @@ note is removed; current ownership and gate operation live in
 
 **Next.** GPU presentation still waits for render-worker completion. Frame-N /
 frame-N+1 pipelining and Wave 5 in-surface blur remain separate backlog work.
+
+
+## 2026-10-20 — live glass session: backdrop preparation, shared custom properties, animation-scoped retained updates
+
+`working tree` · area: liquid-glass backdrop source, style resolution, retained-tree invalidation
+
+**Method.** Three live `tools/profile-shell session` captures of the `glass`
+profile (Hyprland, AMD 780M, eDP 2880×1800 at scale 1, GPU scene worker
+enabled, `profiling` build), each driven by the same IPC script: 8 s idle,
+six `@mesh/glass-dashboard` toggles, four `@mesh/glass-wallpapers` toggles and
+four `@mesh/settings` toggles, 1.5 s apart. Captures are
+`profiles/session/20261020-172800` (before), `-182153` (fixes 1 and 2) and
+`-191017` (all three). Each is one run, so live numbers are indicative; the
+offline profiles below carry the repeated measurements.
+
+**Finding.** Before: opening the dashboard took 150–520 ms per frame. One
+448 ms paint traversal was CPU Skia box blur and bilinear sampling inside
+`BackdropSource::prepared` (11.5% of all shell samples in the capture). The
+glass theme uses nine `backdrop-filter` blur radii (0, 5, 8, 12, 14, 16, 20,
+22, 24 px) against a four-entry cache of full-output copies, so painting the
+dashboard re-blurred the 2880×1800 wallpaper several times per frame. The
+next hotspot was the custom-property map. Each node cloned its parent's
+`HashMap<String, StyleValue>` twice, into a scratch map and back, and then
+sorted and byte-hashed it twice for paint and style fingerprints:
+`paint_variables_fingerprint` 6.2%, `style_fingerprint` 7.4% and map clone
+5.9%. The glass bar spent 4.0 ms restyle plus 6.1 ms layout (means) on each
+one-second clock tick.
+
+**1. Backdrop preparation.** Blurred copies are prepared at a power-of-two
+downsample `f <= sigma / 2` (cap 8) and scaled back up in the refraction
+shader's local matrix. The cover-fit is computed in output coordinates under
+an exact copy/output canvas scale, so rounding the copy size up cannot shift
+the image. The cache is bounded at 96 MiB instead of four entries. The source
+builds its mipmaps once at decode. `backdrop_prepare_profile` (release,
+synthetic 3840×2160 source, 2880×1800 output, all nine radii cold, three
+runs): 1.207–1.261 s before, 0.449–0.504 s after. Warm frames no longer
+re-blur at all: the nine radii stay resident
+(`prepared_cache_keeps_every_glass_theme_radius`). Fidelity is checked
+against a full-resolution blur on hard 8 px bands (the worst case, at the
+blur cutoff): max channel error 9/13/16 and mean 2.7/4.3/2.6 at blur
+8/20/48 px. Ganesh's own blur downsamples further.
+
+*Rejected:* subtracting the resampling variance (`f^2 / 4`) from the copy's
+sigma made blur 8 worse (max 9 → 14, mean 2.7 → 3.6). The residual error
+follows the image derivative, which is Skia's box-blur approximation at a
+different sigma, not over-blur.
+
+**2. Shared custom properties.** `ComputedStyle::custom_properties` is now
+`CustomProperties`: an `Arc`-shared immutable map with its order-independent
+fingerprint computed once. Resolution uses a copy-on-write `VariableScope`
+that keeps the parent's map until a declaration changes an entry (an equal
+re-declaration does not copy). `paint_variables_fingerprint` returns the
+stored hash. D9 theme switch is neutral (twelve interleaved runs, desk
+theme): p50 7.86–10.01 ms before, 8.89–10.50 ms after.
+
+**3. Animation-scoped retained updates.** Animation-sampled nodes were
+recorded both as dirty nodes and as dirty roots. The roots re-fingerprinted
+each animated node's whole subtree, and an animated tree root forced a full
+`update()`. They are now dirty nodes only. The sampling pass reports every
+node whose own sample changed, and the scoped update re-checks every
+descendant's layout fingerprint.
+`animated_ancestor_scoped_update_leaves_nothing_for_a_full_update` runs a full
+update after each scoped frame for opacity, transform, colour, padding and
+width transitions and requires zero leftover dirt. With animated nodes
+removed from the dirty-node set too, it reports seven missed style changes.
+Layout-affecting transitions still take the full update path.
+`glass_dock_hover_animation_profile` (release, 2880×180, 10 dock tiles and
+150 launcher apps, 1,879 nodes, paints gated on `wants_render`, first run =
+the 560 ms `dock-in` entrance, three runs): `render_object_sync` per painted
+frame 2.1–2.9 ms before, 0.25–0.35 ms after. The entrance painted 27–35 frames
+before and 42–44 after. With 0 launcher apps (199 nodes) it was 0.23–0.56 ms
+before, so the closed launcher's 1,680 nodes were the cost.
+
+**Live, per surface, `total_surface_render`** (before → fixes 1+2 → all
+three, single runs):
+
+| Surface | Mean | p90 |
+| --- | --- | --- |
+| Dashboard | 35.7 → 24.0 → 11.0 ms | 59.3 → 76.0 → 28.7 ms |
+| Glass bar | 35.7 → 76.2 → 63.8 ms (startup frame dominated) | 41.2 → 71.8 → 35.1 ms |
+| Wallpaper picker | 74.2 → 47.7 → 14.2 ms | 198.8 → 148.6 → 74.5 ms |
+| Settings | 73.8 → 49.4 → 29.6 ms | 313.1 → 87.7 → 49.3 ms |
+
+Glass-bar stage means: restyle 4.04 → 0.31 → 0.28 ms, layout 6.12 → 2.41 →
+1.28 ms. Dashboard paint traversal max 448 → 73 ms after fix 1.
+
+**Gaps found.** The D9 gates run the desk navigation bar and pass by a wide
+margin on both sides (hover p90 1.00–1.05 ms), so they do not exercise glass
+surfaces. The style-animation pass still walks the whole tree and samples
+`AnimatableStyle` up to four times per node; it was 13% of the dashboard phase
+after fixes 1 and 2. A closed `<popover>`'s content stays in the parent tree
+(1,680 launcher nodes). Runtime style diagnostics re-resolve every style-dirty
+node with diagnostics after each retained update (about 6%). First opens still
+cost 100–160 ms (dashboard `tree_build` plus first GPU frame). New backlog
+lines cover these.
+
+**Verified.** Release: elements lib 296 passed on both sides. Render lib 313 →
+316 passed (three new backdrop tests). Shell lib 899 passed / 42 failed on
+both sides with identical failure names, diffed against a `HEAD` worktree.
+D9 workloads pass on both sides. Profiles: `backdrop_prepare_profile`,
+`glass_bar_clock_tick_profile`, `glass_dock_hover_animation_profile`
+(ignored, release-only).

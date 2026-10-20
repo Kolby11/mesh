@@ -25,9 +25,26 @@ pub struct BackdropFrame {
     pub output: (f32, f32),
 }
 
-/// Cover-fit, pre-blurred copies are full-output rasters; a few cover the
-/// blur radii a stylesheet uses without holding one per element.
-const PREPARED_CACHE_ENTRIES: usize = 4;
+/// Cover-fit, pre-blurred copies are bounded by bytes rather than count: a
+/// glass theme uses around ten blur radii, and evicting one re-blurs the whole
+/// output on the paint path. A 2880x1800 unblurred copy is about 20 MiB;
+/// blurred copies are downsampled and much smaller.
+const PREPARED_CACHE_BYTES: usize = 96 << 20;
+
+/// Largest downsampling of a blurred copy. A Gaussian of sigma `s` leaves
+/// nothing above roughly `1 / s` cycles per pixel, so a copy downsampled by
+/// `f <= s / 2` and bilinearly upsampled is visually identical to the
+/// full-resolution blur while costing `f * f` times fewer pixels.
+const MAX_PREPARED_DOWNSAMPLE: i32 = 8;
+
+fn prepared_downsample(blur: f32) -> i32 {
+    let sigma = blur.max(0.0) / 2.0;
+    let mut factor = 1;
+    while factor < MAX_PREPARED_DOWNSAMPLE && (factor * 2) as f32 <= sigma / 2.0 {
+        factor *= 2;
+    }
+    factor
+}
 
 struct BackdropSource {
     path: PathBuf,
@@ -55,7 +72,10 @@ pub fn set_backdrop_image(path: Option<&Path>) -> Result<(), String> {
     if source.as_ref().is_some_and(|current| current.path == path) {
         return Ok(());
     }
+    // Every prepared copy minifies the source with mipmaps; build them once
+    // instead of on each copy.
     let image = decode(path)?;
+    let image = image.with_default_mipmaps().unwrap_or(image);
     *source = Some(Arc::new(BackdropSource {
         path: path.to_path_buf(),
         image,
@@ -89,7 +109,8 @@ fn decode(path: &Path) -> Result<skia_safe::Image, String> {
 
 impl BackdropSource {
     /// The source cover-fit to a `width` x `height` device output and blurred
-    /// by `blur` device pixels, built once per key.
+    /// by `blur` device pixels, built once per key. A blurred copy may be
+    /// smaller than the output; callers scale it up to `width` x `height`.
     fn prepared(&self, width: i32, height: i32, blur: f32) -> Option<skia_safe::Image> {
         let key = PreparedKey {
             width,
@@ -103,8 +124,17 @@ impl BackdropSource {
             cache.push(entry);
             return Some(image);
         }
-        let mut surface = surfaces::raster_n32_premul(ISize::new(width, height))?;
+        let factor = prepared_downsample(blur);
+        let (copy_w, copy_h) = (
+            (width + factor - 1) / factor,
+            (height + factor - 1) / factor,
+        );
+        let mut surface = surfaces::raster_n32_premul(ISize::new(copy_w, copy_h))?;
         let canvas = surface.canvas();
+        // Cover-fit in output coordinates, then map by the exact copy/output
+        // ratio that `draw_refraction` inverts; rounding the copy size up must
+        // not shift the image.
+        canvas.scale((copy_w as f32 / width as f32, copy_h as f32 / height as f32));
         let (iw, ih) = (self.image.width() as f32, self.image.height() as f32);
         let scale = (width as f32 / iw).max(height as f32 / ih);
         let (dw, dh) = (iw * scale, ih * scale);
@@ -116,6 +146,7 @@ impl BackdropSource {
         );
         let mut paint = Paint::default();
         if blur > 0.0 {
+            // Image-filter sigma is local; the canvas scale maps it into the copy.
             let sigma = blur / 2.0;
             paint.set_image_filter(image_filters::blur(
                 (sigma, sigma),
@@ -132,8 +163,11 @@ impl BackdropSource {
             &paint,
         );
         let image = surface.image_snapshot();
-        if cache.len() >= PREPARED_CACHE_ENTRIES {
-            cache.remove(0);
+        let bytes = |image: &skia_safe::Image| image.width() as usize * image.height() as usize * 4;
+        let mut total =
+            cache.iter().map(|(_, cached)| bytes(cached)).sum::<usize>() + bytes(&image);
+        while total > PREPARED_CACHE_BYTES && !cache.is_empty() {
+            total -= bytes(&cache.remove(0).1);
         }
         cache.push((key, image.clone()));
         Some(image)
@@ -226,8 +260,16 @@ pub(crate) fn draw_refraction(
         return false;
     };
     crate::prepared_scene::retain_image(&prepared);
-    // Surface-local device coordinates -> output coordinates of the prepared image.
-    let local = Matrix::translate((-frame.origin.0, -frame.origin.1));
+    // Prepared-image coordinates -> output coordinates -> surface-local device
+    // coordinates; a downsampled copy scales back up to the output.
+    let mut local = Matrix::translate((-frame.origin.0, -frame.origin.1));
+    local.pre_scale(
+        (
+            output_w as f32 / prepared.width() as f32,
+            output_h as f32 / prepared.height() as f32,
+        ),
+        None,
+    );
     let Some(backdrop) = prepared.to_shader(
         (TileMode::Clamp, TileMode::Clamp),
         SamplingOptions::new(FilterMode::Linear, MipmapMode::None),

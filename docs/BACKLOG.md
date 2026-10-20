@@ -319,6 +319,22 @@ of payoff.
       caches are phases 3–5 of the [in-surface blur engine](../.planning/todos/pending/2026-09-30-in-surface-blur-engine.md),
       gated on the D6 renderer prototype.
 
+### Live glass session
+
+From the 2026-10-20 live `glass` captures; evidence in the
+[performance log](../.planning/log/performance-log.md).
+
+- [ ] Add glass-composition D9 workloads (dashboard open, dock animation, clock
+      tick) to `check-performance`; the current gates use the desk bar only.
+- [ ] A closed `<popover>`'s content stays in the parent tree and every
+      per-frame pass walks it (dock launcher: ~1,700 hidden nodes).
+- [ ] Layout-affecting animations still take the full retained update; scope
+      them like paint/layer animations, adding geometry-moved descendants.
+- [ ] Runtime style diagnostics re-resolve every style-dirty node with
+      diagnostics after each retained update, including animation frames.
+- [ ] First open of a glass surface costs 100–160 ms (tree build plus first GPU
+      frame); prewarm hidden surfaces or split the first frame.
+
 ### Style
 
 - [ ] Typed style declarations: 97.5% of declarations in an Appearance rebuild
