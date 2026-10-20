@@ -1,6 +1,32 @@
 //! Stable identity and lifecycle decisions for in-flight animations.
 
+use std::time::Instant;
+
 use mesh_core_elements::NodeId;
+
+/// When a running animation's sampled value can next differ from the value it
+/// shows now. Callers may skip frames until then; waking early is harmless.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NextChange {
+    /// The value moves continuously and needs every frame.
+    EveryFrame,
+    /// The value is held until this instant (a delay or a `steps()` plateau).
+    At(Instant),
+    /// The value will not change again (finished or paused).
+    Never,
+}
+
+impl NextChange {
+    /// The sooner of two changes.
+    pub fn earliest(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::EveryFrame, _) | (_, Self::EveryFrame) => Self::EveryFrame,
+            (Self::At(a), Self::At(b)) => Self::At(a.min(b)),
+            (Self::At(at), Self::Never) | (Self::Never, Self::At(at)) => Self::At(at),
+            (Self::Never, Self::Never) => Self::Never,
+        }
+    }
+}
 
 /// Identity of one animation declaration on one retained node.
 ///

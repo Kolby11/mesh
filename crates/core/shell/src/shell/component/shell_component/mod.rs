@@ -673,6 +673,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .values()
                 .any(|touch| touch.eligible && touch.long_press_enabled && !touch.long_press_fired)
             || !self.pending_surface_states.borrow().is_empty()
+            || self.animation_hold.is_some()
     }
 
     fn next_tick_deadline(&self) -> Option<std::time::Instant> {
@@ -683,6 +684,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         if let Some(deadline) = [
             self.next_script_task_deadline(),
             self.disclosures.next_deadline(),
+            self.animation_hold.map(|(until, _)| until),
         ]
         .into_iter()
         .flatten()
@@ -723,6 +725,7 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
         let now = std::time::Instant::now();
+        self.wake_due_animation_hold(now);
         let mut requests = self.run_due_script_tasks(now)?;
 
         if self
@@ -789,8 +792,8 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn wants_render(&self) -> bool {
         self.dirty
             || self.style_only_dirty
-            || !self.transitions.is_empty()
-            || self.has_active_keyframe_animation
+            || ((!self.transitions.is_empty() || self.has_active_keyframe_animation)
+                && !self.animation_held(std::time::Instant::now()))
             || !self.scroll_animations.is_empty()
             || !self.scroll_inertia.is_empty()
             || !self.closing_child_keys.is_empty()
@@ -962,6 +965,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // extra one, and so the path decision below can see whether the effects
         // changed anything a template reads.
         self.run_pending_effects();
+        self.wake_due_animation_hold(std::time::Instant::now());
         let animation_only_frame = std::mem::take(&mut self.animation_only_dirty);
         let (requires_tree_rebuild, can_use_retained_path, dirty_types, _) =
             self.take_dirty_for_paint();

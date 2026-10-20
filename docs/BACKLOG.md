@@ -249,10 +249,9 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
 - [ ] Retained layout snapshots still treat every STYLE difference as a layout
       candidate in mixed frames. Split layout and paint style fingerprints so
       paint-only nodes do not sync to Taffy when another node needs layout.
-- [ ] Live animations request every vsync during `steps()` holds, delays and
-      infinite loops; sleep until the next visible change. The style-animation
-      pass walks the whole tree on any restyle (theme `node {}` transition);
-      visit only restyled and animating nodes.
+- [ ] The style-animation pass walks the whole tree on any restyle (theme
+      `node {}` transition); visit only restyled and animating nodes. Now ~3–4%
+      of glass dashboard and clock frames, so low payoff.
 - [ ] A rounded `overflow` ancestor sends every descendant down the affine path
       with a shader clip per node (`display_list/types.rs:566`). Use a rect clip
       for nodes missing the corner squares; longer term, push/pop clip scopes.

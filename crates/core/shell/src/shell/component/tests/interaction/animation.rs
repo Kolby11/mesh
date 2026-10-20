@@ -2060,3 +2060,76 @@ fn user_part_hover_rules_schedule_restyle_and_classify_layout() {
         }
     }
 }
+
+#[test]
+fn stepped_animation_sleeps_through_its_plateaus() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="caret" /></template>
+<style>
+.caret { width: 2px; height: 20px; background: white; animation: blink 400ms steps(1) infinite; }
+@keyframes blink {
+  50% { opacity: 0; }
+  100% { opacity: 0; }
+}
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(40, 40);
+    let mut buffer = PixelBuffer::new(40, 40);
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+    // The first paint schedules its own follow-up frame.
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+    let (until, _) = component
+        .animation_hold
+        .expect("a stepped animation holds until its next step");
+    assert!(until > std::time::Instant::now());
+    assert!(
+        !component.wants_render(),
+        "a plateau must not request a frame"
+    );
+    assert!(component.wants_tick());
+    assert_eq!(component.next_tick_deadline(), Some(until));
+
+    while std::time::Instant::now() < until {
+        std::thread::sleep(until - std::time::Instant::now());
+    }
+    assert!(component.wants_render(), "the step boundary requests a frame");
+    component.tick().unwrap();
+    let opacity_before = component.last_tree.as_ref().unwrap().children[0]
+        .computed_style
+        .opacity;
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+    let opacity_after = component.last_tree.as_ref().unwrap().children[0]
+        .computed_style
+        .opacity;
+    assert_ne!(opacity_before, opacity_after, "the woken frame shows the step");
+    assert!(component.animation_hold.is_some_and(|(next, _)| next > until));
+}
+
+#[test]
+fn continuous_animation_keeps_requesting_frames() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="panel" /></template>
+<style>
+.panel { width: 10px; height: 10px; animation: fade 400ms linear infinite; }
+@keyframes fade { 100% { opacity: 0; } }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(40, 40);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(40, 40), &mut buffer, 1.0)
+        .unwrap();
+    assert!(component.animation_hold.is_none());
+    assert!(component.wants_render());
+}

@@ -6804,3 +6804,33 @@ were each at most 2.4% after this change.
 
 Verified: release shell lib 900 passed / 42 failed on both sides with
 identical failure names (stashed baseline).
+
+## 2026-10-21 — held animations sleep until their next visible change
+
+`wants_render` used to stay true for as long as any transition or keyframe
+animation was live. A `steps()` plateau, a transition delay or an infinite
+stepped loop (a blinking caret) therefore repainted identical pixels every
+vsync. `ActiveTransition::next_change` and `ActiveKeyframeAnimation::next_change`
+now report `NextChange::{EveryFrame, At(t), Never}`: a delay holds until it
+ends, and a `steps()` easing holds until its next interval boundary. A keyframe
+rule holds only if every segment easing is `steps()` with at most 120
+intervals; the boundary set covers every stop pair, so the reported time may
+be early but never late. When every live animation holds, the component stores
+`animation_hold` instead of raising dirt. `wants_render` is false until the
+hold ends, `next_tick_deadline` wakes the loop at that instant, and the tick
+(or any paint) raises the stored dirt.
+
+Measured with a 60 Hz test loop over 3 s (release) on a 1000 ms `steps(1)
+infinite` blink: 7 paints, two of them the initial paint and its follow-up.
+Before, `wants_render` was true on every iteration of the same loop (~180
+paints), by construction.
+
+Payoff for scoping the style-animation pass to restyled and animating nodes,
+measured before deciding: after the dormant-popover change it is 3.1% of
+`d9_glass_bar_clock_tick` and 3.8% of the new `glass_dashboard_spectrum_profile`
+(151 nodes, 32-bar visualizer update per frame; 3.2–3.5 ms mean, with the
+Player component's per-frame rebuild at 1.1 ms). The backlog line is kept as
+low payoff.
+
+Verified: animation crate 46 passed; release shell lib 903 passed / 42 failed,
+with the same failure names as the stashed baseline.

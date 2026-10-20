@@ -13,7 +13,8 @@ use mesh_core_elements::style::{
     AnimationDirection, AnimationFillMode, AnimationIterationCount, AnimationPlayState,
 };
 
-use super::easing::{Easing, apply_easing};
+use super::easing::{Easing, apply_easing, step_count};
+use super::instance::NextChange;
 use super::transition::AnimatableStyle;
 use crate::Interpolate;
 
@@ -163,6 +164,68 @@ impl ActiveKeyframeAnimation {
             .effective_now(now)
             .saturating_duration_since(self.started_at);
         elapsed >= self.delay + total_active_duration
+    }
+
+    /// When [`Self::current_with_rule`] can next return a different value.
+    /// Only animations whose every segment eases with `steps()` hold between
+    /// frames; the result may be early, never late.
+    pub fn next_change(&self, rule: &KeyframeRule, now: Instant) -> NextChange {
+        /// Above this many intervals a step plateau is shorter than a frame
+        /// at any practical duration, so the scan is not worth it.
+        const MAX_STEPS: u32 = 120;
+
+        if self.play_state == AnimationPlayState::Paused || self.finished(now) {
+            return NextChange::Never;
+        }
+        let elapsed = now.saturating_duration_since(self.started_at);
+        if elapsed < self.delay {
+            return NextChange::At(self.started_at + self.delay);
+        }
+        if self.duration.is_zero() || rule.stops.is_empty() {
+            return NextChange::EveryFrame;
+        }
+        let mut counts = Vec::new();
+        for easing in iter::once(self.easing).chain(rule.stops.iter().filter_map(|s| s.easing)) {
+            match step_count(easing) {
+                Some(count) if count <= MAX_STEPS => counts.push(count),
+                _ => return NextChange::EveryFrame,
+            }
+        }
+        counts.sort_unstable();
+        counts.dedup();
+
+        // Every step boundary of every segment a property could span, in
+        // directed progress. Segments run between any two stop offsets.
+        let mut offsets = vec![0.0f64, 1.0];
+        offsets.extend(rule.stops.iter().map(|stop| f64::from(stop.offset)));
+        offsets.sort_by(f64::total_cmp);
+        offsets.dedup();
+        let mut boundaries = Vec::new();
+        for (index, &from) in offsets.iter().enumerate() {
+            for &to in &offsets[index + 1..] {
+                for &count in &counts {
+                    for step in 0..=count {
+                        let at = from + (to - from) * f64::from(step) / f64::from(count);
+                        boundaries.push(at);
+                        boundaries.push(1.0 - at);
+                    }
+                }
+            }
+        }
+
+        let active = elapsed - self.delay;
+        let duration = self.duration.as_secs_f64();
+        let iteration = (active.as_secs_f64() / duration).floor();
+        let raw_now = active.as_secs_f64() / duration - iteration;
+        let next_raw = boundaries
+            .into_iter()
+            .filter(|&raw| raw > raw_now + 1e-9)
+            .fold(1.0f64, f64::min);
+        let next = self.started_at + self.delay + self.duration.mul_f64(iteration + next_raw);
+        match self.total_active_duration() {
+            Some(total) => NextChange::At(next.min(self.started_at + self.delay + total)),
+            None => NextChange::At(next),
+        }
     }
 
     fn effective_now(&self, now: Instant) -> Instant {
@@ -695,5 +758,63 @@ mod tests {
                 assert_eq!(resumed.transform.translate_x, paused.transform.translate_x);
             }
         }
+    }
+
+    fn blink() -> KeyframeRule {
+        KeyframeRule {
+            name: "blink".into(),
+            stops: vec![
+                KeyframeStop {
+                    offset: 0.5,
+                    style: style(0.0, 0.0),
+                    easing: None,
+                    properties: opacity(),
+                },
+                KeyframeStop {
+                    offset: 1.0,
+                    style: style(0.0, 0.0),
+                    easing: None,
+                    properties: opacity(),
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn stepped_keyframes_hold_until_their_next_boundary() {
+        let ms = Duration::from_millis;
+        let mut animation = animation();
+        let start = animation.started_at;
+        animation.rule_name = "blink".into();
+        animation.easing = Easing::Steps(1, mesh_core_elements::StepPosition::JumpEnd);
+        animation.iteration_count = AnimationIterationCount::Infinite;
+        let rule = blink();
+        assert_eq!(animation.next_change(&rule, start + ms(100)), NextChange::At(start + ms(500)));
+        assert_eq!(animation.next_change(&rule, start + ms(700)), NextChange::At(start + ms(1000)));
+        assert_eq!(animation.next_change(&rule, start + ms(2100)), NextChange::At(start + ms(2500)));
+        // Every value change lands on a reported boundary.
+        let mut at = start;
+        while at < start + ms(3000) {
+            let NextChange::At(next) = animation.next_change(&rule, at) else {
+                panic!("a stepped animation holds");
+            };
+            let held = animation.current_with_rule(&rule, style(1.0, 0.0), at);
+            let mut probe = at;
+            while probe < next {
+                assert_eq!(
+                    animation.current_with_rule(&rule, style(1.0, 0.0), probe).map(|s| s.opacity),
+                    held.map(|s| s.opacity)
+                );
+                probe += ms(7);
+            }
+            at = next;
+        }
+
+        animation.delay = ms(200);
+        animation.easing = Easing::Linear;
+        assert_eq!(animation.next_change(&rule, start + ms(50)), NextChange::At(start + ms(200)));
+        assert_eq!(animation.next_change(&rule, start + ms(300)), NextChange::EveryFrame);
+        animation.set_play_state(AnimationPlayState::Paused, start + ms(300));
+        assert_eq!(animation.next_change(&rule, start + ms(400)), NextChange::Never);
     }
 }

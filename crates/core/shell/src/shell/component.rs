@@ -1097,6 +1097,9 @@ pub(super) struct FrontendSurfaceComponent {
     animation_dirty_node_ids_scratch: HashSet<NodeId>,
     has_animatable_style_rules: bool,
     has_active_keyframe_animation: bool,
+    /// Every live animation is holding its value (a delay or a `steps()`
+    /// plateau) until this instant; the dirt to raise when it arrives.
+    animation_hold: Option<(Instant, ComponentDirtyFlags)>,
     has_promoted_popover_wrappers: Cell<bool>,
     has_error_placeholders: Cell<bool>,
     /// Instances whose runtime creation failed in a way no later frame can
@@ -1481,6 +1484,7 @@ impl FrontendSurfaceComponent {
             animation_dirty_node_ids_scratch: HashSet::new(),
             has_animatable_style_rules,
             has_active_keyframe_animation: false,
+            animation_hold: None,
             has_promoted_popover_wrappers: Cell::new(false),
             has_error_placeholders: Cell::new(false),
             failed_runtime_creations: RefCell::new(HashMap::new()),
@@ -1713,6 +1717,22 @@ impl FrontendSurfaceComponent {
         self.next_frame_only_dirty = false;
         self.dirty_types |= flags;
         self.style_only_dirty = true;
+    }
+
+    /// Whether live animations are holding their values right now, so a
+    /// frame would repaint identical pixels.
+    pub(super) fn animation_held(&self, now: Instant) -> bool {
+        self.animation_hold.is_some_and(|(until, _)| now < until)
+    }
+
+    /// Raise the held animation's dirt once its hold has elapsed.
+    pub(super) fn wake_due_animation_hold(&mut self, now: Instant) {
+        if let Some((until, flags)) = self.animation_hold
+            && until <= now
+        {
+            self.animation_hold = None;
+            self.invalidate_animation_style_path(flags);
+        }
     }
 
     pub(super) fn invalidate_animation_style_path(&mut self, flags: ComponentDirtyFlags) {

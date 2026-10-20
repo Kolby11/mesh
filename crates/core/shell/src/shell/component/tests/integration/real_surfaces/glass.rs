@@ -793,3 +793,62 @@ fn closed_popover_subtree_is_skipped_until_it_opens_or_exits() {
         "the exit class must start the launcher's own transition"
     );
 }
+
+// cargo test -p mesh-core-shell --release --lib glass_dashboard_spectrum_profile -- --ignored --nocapture
+#[test]
+#[ignore = "release-only glass-dashboard spectrum frame-cost profile"]
+fn glass_dashboard_spectrum_profile() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    const WIDTH: u32 = 1920;
+    const HEIGHT: u32 = 1080;
+    const FRAMES: u32 = 120;
+    let theme = theme();
+    let mut component = host("glass-dashboard");
+    dashboard_payloads(&mut component);
+    let extent = SurfaceExtent::unpadded(WIDTH, HEIGHT);
+    let mut pixels = PixelBuffer::new(WIDTH, HEIGHT);
+    let mut frame = |component: &mut FrontendSurfaceComponent, index: u32| {
+        let bars: Vec<f64> = (0..32)
+            .map(|bar| (f64::from((index * 7 + bar * 13) % 100)) / 100.0)
+            .collect();
+        update(
+            component,
+            "mesh.visualizer",
+            serde_json::json!({"available":true,"active":true,"bars":bars}),
+        );
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+    };
+    for index in 0..30 {
+        frame(&mut component, index);
+    }
+    eprintln!(
+        "glass-dashboard: {} nodes",
+        count_nodes(component.last_tree.as_ref().unwrap())
+    );
+    for run in 0..3 {
+        component.set_profiling_enabled(true);
+        let _ = component.take_profiling_records();
+        let mut times = Vec::new();
+        for index in 0..FRAMES {
+            let begun = std::time::Instant::now();
+            frame(&mut component, 30 + run * FRAMES + index);
+            times.push(begun.elapsed());
+        }
+        times.sort();
+        let total: Duration = times.iter().sum();
+        eprintln!(
+            "glass-dashboard spectrum run={run}: mean {:.3}ms p50 {:.3}ms p90 {:.3}ms",
+            total.as_secs_f64() * 1000.0 / f64::from(FRAMES),
+            times[times.len() / 2].as_secs_f64() * 1000.0,
+            times[times.len() * 9 / 10].as_secs_f64() * 1000.0,
+        );
+        super::navigation_profile::dump_stages(
+            "glass-dashboard spectrum",
+            component.take_profiling_records(),
+            FRAMES,
+        );
+        component.set_profiling_enabled(false);
+    }
+}

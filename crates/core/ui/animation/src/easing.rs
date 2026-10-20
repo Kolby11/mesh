@@ -50,6 +50,14 @@ pub fn apply_easing(easing: Easing, t: f32) -> f32 {
     }
 }
 
+/// The interval count of a `steps()` easing; `None` for a continuous curve.
+pub fn step_count(easing: Easing) -> Option<u32> {
+    match easing {
+        Easing::Steps(count, _) => Some(count.max(1)),
+        _ => None,
+    }
+}
+
 /// Evaluate a CSS `steps(n, <position>)` timing function at progress `t`.
 ///
 /// The output is a staircase: the current interval index divided by the number

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use crate::shell::component::{ComponentDirtyFlags, SurfaceCssProps};
 use mesh_core_animation::{
-    AnimationInstanceId, AnimationLifecycle,
+    AnimationInstanceId, AnimationLifecycle, NextChange,
     keyframes::{
         ActiveKeyframeAnimation, KeyframeRule as RenderKeyframeRule,
         KeyframeStop as RenderKeyframeStop,
@@ -254,6 +254,7 @@ impl FrontendSurfaceComponent {
         self.animation_live_keys_scratch = live_keys;
         self.animation_live_keyframe_keys_scratch = live_keyframe_keys;
 
+        self.animation_hold = None;
         if has_active_animation || has_active_keyframe_animation {
             // Animations only mutate style/layout, never script state — keep
             // the cheap restyle-only path engaged so we don't drag the Luau
@@ -270,9 +271,28 @@ impl FrontendSurfaceComponent {
             } else {
                 ComponentDirtyFlags::VISUAL_REPAINT
             };
-            self.invalidate_animation_style_path(flags);
+            // A delay or `steps()` plateau repaints identical pixels every
+            // vsync; sleep until the earliest sample that can differ.
+            match self.animation_next_change(now) {
+                NextChange::At(until) if until > now => {
+                    self.animation_hold = Some((until, flags));
+                }
+                _ => self.invalidate_animation_style_path(flags),
+            }
         }
         dirty_node_ids
+    }
+
+    fn animation_next_change(&self, now: Instant) -> NextChange {
+        self.keyframe_animations.iter().fold(
+            self.transitions.next_change(now),
+            |next, (instance_id, animation)| {
+                next.earliest(match self.keyframe_rules.get(instance_id) {
+                    Some(compiled) => animation.next_change(&compiled.rule, now),
+                    None => NextChange::EveryFrame,
+                })
+            },
+        )
     }
 
     fn apply_style_animations_to_node(

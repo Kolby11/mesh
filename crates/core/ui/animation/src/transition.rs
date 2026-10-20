@@ -9,8 +9,8 @@ use mesh_core_elements::{
     style::{Color, Visibility},
 };
 
-use super::easing::{Easing, apply_easing};
-use super::instance::{AnimationLifecycle, AnimationStep};
+use super::easing::{Easing, apply_easing, step_count};
+use super::instance::{AnimationLifecycle, AnimationStep, NextChange};
 use super::interpolate::Interpolate;
 use super::policy::MotionPolicy;
 
@@ -495,6 +495,26 @@ impl ActiveTransition {
         self.started_at + self.delay + self.duration
     }
 
+    /// When [`Self::current`] can next return a different value.
+    pub fn next_change(&self, now: Instant) -> NextChange {
+        if self.finished(now) {
+            return NextChange::Never;
+        }
+        let active_from = self.started_at + self.delay;
+        if now < active_from {
+            return NextChange::At(active_from);
+        }
+        let Some(steps) = step_count(self.easing) else {
+            return NextChange::EveryFrame;
+        };
+        let raw = (now - active_from).as_secs_f64() / self.duration.as_secs_f64();
+        let next_step = (raw * f64::from(steps)).floor() + 1.0;
+        if next_step >= f64::from(steps) {
+            return NextChange::At(self.ends_at());
+        }
+        NextChange::At(active_from + self.duration.mul_f64(next_step / f64::from(steps)))
+    }
+
     /// How reconciling this instance against a removed or idle declaration is
     /// classified: reaching the endpoint completes, anything earlier cancels.
     fn ended_lifecycle(&self, now: Instant) -> AnimationLifecycle {
@@ -625,6 +645,16 @@ impl TransitionAnimator {
         });
         let active = &self.active;
         self.authored.retain(|key, _| active.contains_key(key));
+    }
+
+    /// The earliest [`ActiveTransition::next_change`] across every instance.
+    pub fn next_change(&self, now: Instant) -> NextChange {
+        self.active
+            .values()
+            .flatten()
+            .fold(NextChange::Never, |next, instance| {
+                next.earliest(instance.next_change(now))
+            })
     }
 
     pub fn has_active(&self, now: Instant) -> bool {
@@ -1626,5 +1656,40 @@ mod tests {
         assert_eq!(mid.font_size, 15.0);
         assert_eq!(mid.gap, 8.0);
         assert_eq!(mid.inset_top, Some(10.0));
+    }
+
+    fn timed_transition(easing: Easing, delay_ms: u64, started_at: Instant) -> ActiveTransition {
+        let style = AnimatableStyle::from_node(&WidgetNode::new("box"));
+        ActiveTransition {
+            from: style,
+            to: style,
+            started_at,
+            duration: Duration::from_millis(1000),
+            delay: Duration::from_millis(delay_ms),
+            easing,
+            source: TransitionStyle::default(),
+            entry: 0,
+            reversing_start: style,
+            reversing_factor: 1.0,
+        }
+    }
+
+    #[test]
+    fn transition_holds_through_its_delay_and_step_plateaus() {
+        let start = Instant::now();
+        let ms = Duration::from_millis;
+        let delayed = timed_transition(Easing::Linear, 300, start);
+        assert_eq!(delayed.next_change(start), NextChange::At(start + ms(300)));
+        assert_eq!(delayed.next_change(start + ms(400)), NextChange::EveryFrame);
+
+        let stepped = timed_transition(
+            Easing::Steps(4, mesh_core_elements::StepPosition::JumpEnd),
+            0,
+            start,
+        );
+        assert_eq!(stepped.next_change(start + ms(10)), NextChange::At(start + ms(250)));
+        assert_eq!(stepped.next_change(start + ms(600)), NextChange::At(start + ms(750)));
+        assert_eq!(stepped.next_change(start + ms(800)), NextChange::At(start + ms(1000)));
+        assert_eq!(stepped.next_change(start + ms(1000)), NextChange::Never);
     }
 }
