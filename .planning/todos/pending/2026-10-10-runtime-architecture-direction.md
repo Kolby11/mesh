@@ -6,7 +6,10 @@ and template calls. Shipped frontend `render()` hooks are migrated to derived
 expressions and tracked effects; backend tasks and the remaining architecture
 tracks are still open. Backlog lines are under
 "Runtime architecture direction" in
-[`docs/BACKLOG.md`](../../../docs/BACKLOG.md). This note builds on
+[`docs/BACKLOG.md`](../../../docs/BACKLOG.md). What happens to a change after the write (typed node properties, one dirty
+set for every pass) is planned in the
+[change-proportional pipeline](2026-10-21-change-proportional-pipeline.md),
+now the next priority. This note builds on
 [the authoring-model review](2026-10-10-authoring-model.md) and
 [script timers and typed shell ops](../../log/2026-10.md).
 

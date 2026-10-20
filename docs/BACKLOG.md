@@ -18,6 +18,31 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---
 
+## Change-proportional frame pipeline — next implementation priority
+
+Frame cost scales with tree size times about ten passes, not with what
+changed; scoping single passes buys only 3–10% each. Do these in order before
+other performance work. Evidence, the Qt Quick / GTK4 comparison, exit
+criteria and the items folded in here:
+[design](../.planning/todos/pending/2026-10-21-change-proportional-pipeline.md).
+
+- [ ] **P0:** Live-shell benchmark under the glass profile (dashboard open,
+      dock hover, Settings scroll, clock tick) plus per-pass "nodes visited"
+      counters with a structural gate; the D9 CPU gates miss the live gap.
+- [ ] **P1:** Typed node properties for the core element set and a `NodeState`
+      bitflag field replacing the `_mesh_*` state attributes; setters report
+      their change class (style/layout/paint/a11y/hit/structure).
+- [ ] **P2:** One per-frame dirty set, fed by typed setters, state flags,
+      animation samples and layout results, drives every pass; retire
+      fingerprint/diff discovery to a test-only verifier. Prototype on the
+      glass dock and dashboard first.
+- [ ] **P3:** Bindings compile to typed setters, and list/compound sources
+      become keyed stores so an item change patches its properties instead of
+      rebuilding the component (finishes D1; with D4 typed patches).
+- [ ] **P4:** GPU-first pipelined rendering: GPU raster by default where
+      hardware gates pass, frame N's GPU work overlapping frame N+1's script
+      and layout, and scene preparation narrowed by retained revision (D6).
+
 ## 2026-09-30 block review and module-architecture direction
 
 Ordered by implementation priority: finish a tier before starting the next
@@ -240,18 +265,16 @@ been measured and reverted.
 Every optimization lands with a representative benchmark, and a checked relative
 gate where the win is structural.
 
+The items below are local fixes. The large wins are the
+[change-proportional frame pipeline](#change-proportional-frame-pipeline--next-implementation-priority)
+at the top of this file; prefer it over further single-pass scoping.
+
 ### Render sweep findings
 
 From a read-only code sweep on 2026-10-19; nothing below is measured yet.
 Verify each against `navigation_hover_profile`, `appearance_frame_cost_profile`
 or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
 
-- [ ] Retained layout snapshots still treat every STYLE difference as a layout
-      candidate in mixed frames. Split layout and paint style fingerprints so
-      paint-only nodes do not sync to Taffy when another node needs layout.
-- [ ] The style-animation pass walks the whole tree on any restyle (theme
-      `node {}` transition); visit only restyled and animating nodes. Now ~3–4%
-      of glass dashboard and clock frames, so low payoff.
 - [ ] A rounded `overflow` ancestor sends every descendant down the affine path
       with a shader clip per node (`display_list/types.rs:566`). Use a rect clip
       for nodes missing the corner squares; longer term, push/pop clip scopes.
@@ -303,15 +326,6 @@ of payoff.
 - [ ] Fractional momentum scroll frames, and scopes over a non-uniform backdrop
       (gradient, image, partial cover), still replay the whole viewport; a
       transparent content raster could cover them ([design](../.planning/todos/pending/2026-09-30-scroll-raster-cache.md)).
-- [ ] Unscoped restyle frames still fingerprint the whole tree
-      (`retained_tree.update`). Scroll momentum no longer takes this path; what
-      remains (resize, theme, window state) also relayouts, so diffing only
-      restyled nodes needs layout-changed nodes reported too.
-- [ ] Binding-patch frames still pay whole-tree passes for a few patched
-      nodes: `layout_dirty_node_snapshots` fingerprints every node, the style
-      animation pass and display-list diff walk the tree, and the tree is
-      revalidated. Scope them to the patched/affected set; patches inside a
-      `display: none` subtree should skip layout entirely.
 - [ ] In-surface blur re-blurs and repaints a frosted element's whole read
       region on any nearby change (a hover inside a frosted panel is ~7x a plain
       repaint). Backdrop root, clamped edges and the blurred-backdrop/filter-layer
@@ -323,10 +337,6 @@ of payoff.
 From the 2026-10-20 live `glass` captures; evidence in the
 [performance log](../.planning/log/performance-log.md).
 
-- [ ] Layout-affecting animations still take the full retained update; scope
-      them like paint/layer animations, adding geometry-moved descendants.
-- [ ] Runtime style diagnostics re-resolve every style-dirty node with
-      diagnostics after each retained update, including animation frames.
 - [ ] First open of a glass surface costs 100–160 ms (tree build plus first GPU
       frame); prewarm hidden surfaces or split the first frame.
 
@@ -339,22 +349,10 @@ From the 2026-10-20 live `glass` captures; evidence in the
       not declaration application. _(detail: "P2 — typing & interning")_
       _(detail: "P2 — architecture")_
 
-### Typing and interning
-
-- [ ] Interned `Symbol` / `TagId` types and a typed `WidgetNode`. Attributes,
-      module ids, and element tags are done; widget-tree **tags**, attribute
-      **values**, and the broader symbol types remain. Profiling now puts the
-      dominant remaining build cost in style resolution, not further attribute
-      work. _(detail: "P2 — typing & interning")_
-
 ### Threading
 
 - [ ] Bring child popup surfaces into the parallel CPU raster phase and move
       the SHM copy off the shell thread; both still run inside reconcile/present.
-- [ ] Pipeline GPU paint of frame N against script work of frame N+1; GPU
-      presentation still waits for worker completion. Preserve the GPU workload gates.
-- [ ] Narrow complete scene preparation by retained command/resource revision;
-      small damage frames still record the whole scene before GPU execution.
 - [ ] Tile-parallel raster for large damage, above a measured threshold only.
 - [ ] Move blocking file IO off the shell thread — i18n catalog mounts,
       settings and theme reloads, and icon/SVG cache-miss rasterization on the
@@ -372,9 +370,6 @@ From the 2026-10-20 live `glass` captures; evidence in the
 
 ### Rendering and paint
 
-- [ ] Establish one canonical render-frame snapshot and transform/clip model;
-      unify invalidation, display-list reuse, damage, blur regions, and hit
-      testing around cumulative affine transforms. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).
 - [ ] Complete paint semantics for opacity layers, four-edge borders,
       four-corner radii, text physical scaling, and stable equal-z ordering;
       add retained and pixel regressions. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).

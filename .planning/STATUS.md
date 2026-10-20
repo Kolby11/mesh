@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-10-20
+**Updated:** 2026-10-21
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and
 measurements live in [`log/`](log/README.md).
@@ -25,10 +25,15 @@ measurements live in [`log/`](log/README.md).
 
 ## Next
 
-- Glass session backlog: closed-popover subtrees, style-animation pass scope,
-  and glass D9 gates.
-- Pipeline GPU frame N against frame N+1 script work. Presentation currently
-  waits for the render worker; preserve the new hardware gates.
+- **Change-proportional frame pipeline (P0–P4)** is the next implementation
+  priority: live benchmark and visited-node counters, typed node properties
+  and state flags, one dirty set driving every pass, bindings as typed
+  setters, then GPU-first pipelining.
+  [Design](todos/pending/2026-10-21-change-proportional-pipeline.md); backlog
+  lines at the top of `docs/BACKLOG.md`. Single-pass scoping buys 3–10% and is
+  deprioritized.
+- Glass D9 gates, closed-popover pruning and held-animation sleep landed
+  2026-10-21 (performance log).
 - Wave 5: [in-surface blur engine](todos/pending/2026-09-30-in-surface-blur-engine.md).
 - Continue customization with A6; see the backlog for other open work.
 
