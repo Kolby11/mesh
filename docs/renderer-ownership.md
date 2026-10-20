@@ -53,6 +53,15 @@ carry independent identities, so an old release cannot unlock a reused texture.
 GPU errors switch subsequent canvases to SHM with a full repaint. Debug overlays
 and the dev-window backend use CPU pixels.
 
+CPU frames split the same way across surfaces. When two or more components want
+to render, each parent `RasterCanvas` records its damage-clipped paint into a
+Skia picture during the serial, VM-bound pass; the shell then replays every
+surface's pictures into its own `PixelBuffer` on the rayon pool before any
+present. Pictures pin their resources, so replay needs no painter thread-locals.
+Any pixel read — scroll shifts, debug overlays, the SHM copy — replays pending
+pictures first. Child popup surfaces still paint and present inside reconcile,
+and the SHM copy stays on the shell thread.
+
 The initial production integration waits for worker completion at the
 presentation boundary. GPU execution has moved threads; scripts for frame N+1
 are not yet overlapped with frame N raster. The worker sleeps when idle.

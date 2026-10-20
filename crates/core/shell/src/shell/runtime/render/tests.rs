@@ -210,3 +210,200 @@ fn spanning_and_docked_surfaces_keep_their_deliberate_zero_dimension() {
     ));
     assert!(!layer_configure_size_is_resolved(None, 0, 0, 700));
 }
+
+/// Paints its whole surface one colour through a canvas session and records
+/// whether that paint was deferred for parallel replay.
+struct SolidSurface {
+    surface_id: String,
+    color: Color,
+    dirty: bool,
+    deferred_paints: Arc<std::sync::Mutex<Vec<bool>>>,
+}
+
+impl crate::shell::types::ShellComponent for SolidSurface {
+    fn id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn surface_id(&self) -> &str {
+        &self.surface_id
+    }
+
+    fn initial_visibility(&self) -> Option<bool> {
+        Some(true)
+    }
+
+    fn mount(
+        &mut self,
+        _ctx: crate::shell::types::ComponentContext,
+    ) -> Result<Vec<CoreRequest>, crate::shell::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_core_event(
+        &mut self,
+        _event: &crate::shell::types::CoreEvent,
+    ) -> Result<Vec<CoreRequest>, crate::shell::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn handle_service_event(
+        &mut self,
+        _event: &ServiceEvent,
+    ) -> Result<Vec<CoreRequest>, crate::shell::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn tick(&mut self) -> Result<Vec<CoreRequest>, crate::shell::types::ComponentError> {
+        Ok(Vec::new())
+    }
+
+    fn request_paint(&mut self) {
+        self.dirty = true;
+    }
+
+    fn wants_render(&self) -> bool {
+        self.dirty
+    }
+
+    fn wants_immediate_rerender(&self) -> bool {
+        false
+    }
+
+    fn render(
+        &mut self,
+        surface: &mut dyn mesh_core_wayland::ShellSurface,
+    ) -> Result<(), crate::shell::types::ComponentError> {
+        surface.set_size(64, 24);
+        Ok(())
+    }
+
+    fn paint(
+        &mut self,
+        _theme: &mesh_core_theme::Theme,
+        _extent: crate::shell::types::SurfaceExtent,
+        canvas: &mut mesh_core_render::SurfaceCanvas,
+        _scale: f32,
+    ) -> Result<(), crate::shell::types::ComponentError> {
+        let (width, height) = (canvas.width(), canvas.height());
+        canvas.session().clear_rect(
+            DamageRect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            },
+            self.color,
+        );
+        let deferred = matches!(
+            canvas,
+            mesh_core_render::SurfaceCanvas::Raster(raster) if raster.has_pending()
+        );
+        self.deferred_paints.lock().unwrap().push(deferred);
+        self.dirty = false;
+        Ok(())
+    }
+
+    fn theme_changed(&mut self) -> Result<(), crate::shell::types::ComponentError> {
+        Ok(())
+    }
+}
+
+fn solid_surface_shell(colors: &[Color]) -> (Shell, Vec<Arc<std::sync::Mutex<Vec<bool>>>>) {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    let mut paints = Vec::new();
+    for (index, &color) in colors.iter().enumerate() {
+        let deferred_paints = Arc::new(std::sync::Mutex::new(Vec::new()));
+        shell.register_component(Box::new(SolidSurface {
+            surface_id: format!("@test/solid-{index}"),
+            color,
+            dirty: true,
+            deferred_paints: deferred_paints.clone(),
+        }));
+        paints.push(deferred_paints);
+    }
+    (shell, paints)
+}
+
+fn assert_presented_color(shell: &mut Shell, index: usize, color: Color) {
+    let canvas = shell.components[index]
+        .parent
+        .paint_buffer
+        .as_mut()
+        .expect("painted canvas");
+    let mesh_core_render::SurfaceCanvas::Raster(raster) = canvas else {
+        panic!("test canvases are CPU buffers");
+    };
+    assert!(!raster.has_pending(), "frame replayed every recording");
+    let pixel = raster.buffer_mut().get_pixel(10, 10);
+    assert_eq!(
+        (pixel.r, pixel.g, pixel.b, pixel.a),
+        (color.r, color.g, color.b, color.a)
+    );
+}
+
+#[test]
+fn surfaces_painting_in_one_frame_rasterize_after_the_vm_phase() {
+    let colors = [
+        Color {
+            r: 255,
+            g: 0,
+            b: 0,
+            a: 255,
+        },
+        Color {
+            r: 0,
+            g: 0,
+            b: 255,
+            a: 255,
+        },
+        Color {
+            r: 0,
+            g: 255,
+            b: 0,
+            a: 255,
+        },
+    ];
+    let (mut shell, paints) = solid_surface_shell(&colors);
+
+    shell.render_components().unwrap();
+
+    for (index, color) in colors.iter().enumerate() {
+        // A first configure takes a second, measured pass in the same frame;
+        // both recordings replay in order.
+        let paints = paints[index].lock().unwrap();
+        assert!(!paints.is_empty() && paints.iter().all(|&deferred| deferred));
+        drop(paints);
+        assert_presented_color(&mut shell, index, *color);
+    }
+    let presented = shell.presentation_engine.testing_presented_surfaces();
+    for index in 0..colors.len() {
+        assert!(presented.contains(&format!("@test/solid-{index}")));
+    }
+}
+
+#[test]
+fn a_lone_painting_surface_rasterizes_in_place() {
+    let color = Color {
+        r: 40,
+        g: 80,
+        b: 120,
+        a: 255,
+    };
+    let (mut shell, paints) = solid_surface_shell(&[color, color]);
+    shell.render_components().unwrap();
+
+    let first_frame_paints = [0, 1].map(|index| paints[index].lock().unwrap().len());
+
+    shell.components[1].component.request_paint();
+    shell.render_components().unwrap();
+
+    assert_eq!(paints[0].lock().unwrap().len(), first_frame_paints[0]);
+    let lone = paints[1].lock().unwrap();
+    assert_eq!(lone.len(), first_frame_paints[1] + 1);
+    assert_eq!(lone.last(), Some(&false));
+    drop(lone);
+    assert_presented_color(&mut shell, 1, color);
+}

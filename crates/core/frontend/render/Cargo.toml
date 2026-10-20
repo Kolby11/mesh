@@ -44,4 +44,5 @@ zeno = "0.3"
 mesh-core-frontend = { workspace = true }
 mesh-core-module = { workspace = true }
 mesh-core-theme = { workspace = true }
+rayon = { workspace = true }
 tempfile = "3"

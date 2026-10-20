@@ -1663,7 +1663,7 @@ impl<T: ShellComponent + ?Sized> PaintRaster for T {
         buffer: &mut PixelBuffer,
         scale: f32,
     ) -> Result<(), ComponentError> {
-        let mut canvas = SurfaceCanvas::Raster(std::mem::replace(buffer, PixelBuffer::new(1, 1)));
+        let mut canvas = SurfaceCanvas::from(std::mem::replace(buffer, PixelBuffer::new(1, 1)));
         let result = self.paint(theme, extent, &mut canvas, scale);
         *buffer = std::mem::replace(
             canvas.as_raster_mut().expect("tests paint CPU canvases"),
@@ -1680,7 +1680,7 @@ impl<T: ShellComponent + ?Sized> PaintRaster for T {
         content_offset: (u32, u32),
         exiting: bool,
     ) -> Result<bool, ComponentError> {
-        let mut canvas = SurfaceCanvas::Raster(std::mem::replace(buffer, PixelBuffer::new(1, 1)));
+        let mut canvas = SurfaceCanvas::from(std::mem::replace(buffer, PixelBuffer::new(1, 1)));
         let result =
             self.paint_child_surface(node_key, &mut canvas, scale, content_offset, exiting);
         *buffer = std::mem::replace(

@@ -1269,7 +1269,7 @@ impl PresentationEngine {
             return Some(SurfaceCanvas::Scene(target));
         }
         let _ = allow_gpu;
-        PixelBuffer::try_new(width, height).map(SurfaceCanvas::Raster)
+        PixelBuffer::try_new(width, height).map(SurfaceCanvas::from)
     }
 
     /// Whether [`Self::allocate_canvas`] returns GPU targets when allowed.
@@ -1311,7 +1311,7 @@ impl PresentationEngine {
             Backend::WaylandSurface(bridge) => {
                 bridge.present_with_damage(surface_id, title, visible, canvas, damage)
             }
-            Backend::DevWindow(bridge) => match canvas.as_raster() {
+            Backend::DevWindow(bridge) => match canvas.as_raster_mut() {
                 Some(buffer) => bridge.present(surface_id, title, visible, buffer),
                 None => Err(PresentationError::BufferCopy(
                     "the dev window presents CPU buffers only".into(),

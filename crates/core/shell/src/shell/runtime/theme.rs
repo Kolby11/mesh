@@ -968,6 +968,7 @@ impl Shell {
         }
 
         let (store, profile_revision) = match SettingsStore::load_from(&self.settings_watch.path)
+            .map_err(|error| error.to_string())
             .and_then(|shared| {
                 let profile = self.active_profile_id.as_ref().and_then(|profile_id| {
                     mesh_core_module::package::ProfilePaths::from_root_graph(
@@ -976,9 +977,19 @@ impl Shell {
                     .and_then(|paths| paths.load(profile_id))
                     .ok()
                 });
+                let profile = profile
+                    .map(|profile| {
+                        let graph = self.installed_module_graph.as_ref().ok_or_else(|| {
+                            "active profile has no committed module graph".to_string()
+                        })?;
+                        super::super::discovery::resolve_profile(&profile, graph)
+                            .map_err(|error| error.to_string())
+                    })
+                    .transpose()?;
                 let profile_revision = profile.as_ref().map(|profile| profile.revision);
                 super::super::discovery::effective_profile_settings(shared, profile.as_ref())
                     .map(|store| (store, profile_revision))
+                    .map_err(|error| error.to_string())
             }) {
             Ok((mut store, profile_revision)) => {
                 if let Some(graph) = self.installed_module_graph.as_ref()

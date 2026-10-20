@@ -49,6 +49,8 @@ raster resources and explicit frame paint settings. A bounded worker owns EGL,
 retained targets and fenced dmabuf exports; Wayland receives only descriptors
 and release leases. Presentation currently waits for scene completion, while
 partial damage, compositor backpressure and SHM fallback remain authoritative.
+CPU frames with several painting surfaces record their paint serially and
+rasterize the recordings in parallel before presenting.
 See [renderer ownership](../renderer-ownership.md).
 
 Interaction restyles and animation ticks preserve the surface's retained pixels;

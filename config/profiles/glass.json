@@ -3,38 +3,8 @@
   "from": {
     "module": "@mesh/glass"
   },
-  "roots": {
-    "@mesh/glass-wallpaper#default": {
-      "module": "@mesh/glass-wallpaper",
-      "entrypoint": "main",
-      "active": true
-    },
-    "@mesh/glass-bar#default": {
-      "module": "@mesh/glass-bar",
-      "entrypoint": "main",
-      "active": true
-    },
-    "@mesh/glass-widgets#default": {
-      "module": "@mesh/glass-widgets",
-      "entrypoint": "main",
-      "active": true
-    },
-    "@mesh/glass-dock#default": {
-      "module": "@mesh/glass-dock",
-      "entrypoint": "main",
-      "active": true
-    },
-    "@mesh/settings#default": {
-      "module": "@mesh/settings",
-      "entrypoint": "main",
-      "active": true
-    }
-  },
   "settings": {
     "shell": {
-      "theme": {
-        "active": "@mesh/violet-glass:violet-glass"
-      },
       "render": {
         "backdrop": {
           "image": "/home/kolby/Pictures/Wallpapers/forest.jpg"

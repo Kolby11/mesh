@@ -958,6 +958,15 @@ its consumers:
 Unrelated modules activate either way. [02 §3](02-installation.md) applies the
 same rule at install time.
 
+Startup and live switching resolve the complete `extends` chain and profile
+before mounting frontend roots or computing effective settings. Inherited roots,
+surface overrides, settings, resources, and slot placements therefore have the
+same meaning in both paths. Resolution preserves the stored profile revision;
+it never writes inherited defaults into the sparse profile. Shared-settings
+reloads apply the same resolved composition. `resources.theme` remains a
+recommendation beneath the user's shared theme choice; profile theme settings
+explicitly pin a theme.
+
 Live profile switching is transactional: validate the candidate, diff it
 against the active graph, retain identical service instances, initialize new
 services and hidden surfaces, reveal the new roots, then remove orphaned

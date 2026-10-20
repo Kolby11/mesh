@@ -199,7 +199,8 @@ impl WaylandSurfaceBackend {
                 device_damage.push(full_damage(physical_w, physical_h));
             }
             let prepared = match canvas {
-                SurfaceCanvas::Raster(buffer) => {
+                SurfaceCanvas::Raster(raster) => {
+                    let buffer = raster.buffer_mut();
                     let pool = state.pool.as_mut().ok_or_else(|| {
                         PresentationError::BufferAlloc("shm pool not initialised".into())
                     })?;

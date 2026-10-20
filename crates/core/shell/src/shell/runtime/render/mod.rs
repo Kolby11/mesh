@@ -27,6 +27,17 @@ use smallvec::SmallVec;
 
 const DEBUG_INSPECTOR_SURFACE_ID: &str = "@mesh/debug-inspector";
 
+/// A parent surface painted in phase 1 of a frame, awaiting raster replay and
+/// present.
+struct PaintedSurface {
+    index: usize,
+    surface_id: String,
+    paint_size: (u32, u32),
+    scale: f32,
+    total_render_started: Option<std::time::Instant>,
+    allocation_started: Option<mesh_core_debug::allocation::AllocationCounters>,
+}
+
 pub(super) fn revisioned_surface_config(
     previous: Option<&SurfaceConfig>,
     mut next: SurfaceConfig,
@@ -96,6 +107,17 @@ impl Shell {
 
         let mut any_component_presented = false;
         let mut rendered_ready_component = false;
+        // Phase 1 below runs everything that needs the component VMs serially
+        // and leaves each CPU canvas holding recorded pictures; phase 2 then
+        // rasterizes those in parallel. A lone painting surface has nothing to
+        // overlap with, so it keeps rasterizing in place.
+        let defer_raster = self
+            .components
+            .iter()
+            .filter(|runtime| runtime.component.wants_render())
+            .nth(1)
+            .is_some();
+        let mut painted = Vec::new();
         'component: for index in 0..self.components.len() {
             let runtime = &mut self.components[index];
             let surface_id = runtime.surface_id.as_str();
@@ -785,16 +807,16 @@ impl Shell {
                     self.components[index].parent.force_full_present = true;
                 }
                 let runtime = &mut self.components[index];
-                let paint_result = runtime.component.paint(
-                    self.theme.active(),
-                    paint_extent,
+                let canvas = runtime
+                    .parent
+                    .paint_buffer
+                    .as_mut()
+                    .expect("paint buffer initialised");
+                canvas.set_deferred_raster(defer_raster);
+                let paint_result =
                     runtime
-                        .parent
-                        .paint_buffer
-                        .as_mut()
-                        .expect("paint buffer initialised"),
-                    scale,
-                );
+                        .component
+                        .paint(self.theme.active(), paint_extent, canvas, scale);
                 if let Err(error) = paint_result {
                     self.contain_component_failure(index, "build", &error);
                     self.components[index].parent.force_full_present = true;
@@ -870,39 +892,107 @@ impl Shell {
                 self.record_surface_invalidation(&surface_id, Some(component_id), invalidation);
             }
 
-            // Present the component's parent surface. Child popup targets paint
-            // their own subtree and are presented separately during reconcile.
-            let presented = self.present_surface_target(
+            painted.push(PaintedSurface {
                 index,
-                TargetRef::Parent,
-                component_id,
-                paint_width,
-                paint_height,
+                surface_id,
+                paint_size: (paint_width, paint_height),
                 scale,
                 total_render_started,
                 allocation_started,
-            )?;
-            any_component_presented |= presented;
+            });
+        }
 
-            let child_presented = match self.reconcile_child_surface_requests(
-                index,
-                component_id,
-                &surface_id,
-                scale,
-                total_render_started,
-            ) {
-                Ok(presented) => presented,
-                Err(ShellRunError::Component(error)) => {
-                    self.contain_component_failure(index, "build", &error);
-                    self.components[index].parent.force_full_present = true;
-                    continue;
+        self.replay_deferred_raster(&painted);
+
+        for (position, surface) in painted.iter().enumerate() {
+            match self.present_painted_surface(surface) {
+                Ok(presented) => any_component_presented |= presented,
+                Err(error) => {
+                    // These surfaces painted but will not present this frame;
+                    // their damage is still queued in the component.
+                    for skipped in &painted[position + 1..] {
+                        self.components[skipped.index].component.request_paint();
+                    }
+                    return Err(error);
                 }
-                Err(error) => return Err(error),
-            };
-            any_component_presented |= child_presented;
+            }
         }
         self.render_stalled = rendered_ready_component && !any_component_presented;
         Ok(())
+    }
+
+    /// Phase 2 of a frame: rasterize the pictures recorded by phase 1, one
+    /// surface per worker. Canvases are disjoint and the pictures own every
+    /// resource they draw, so no shell or painter state crosses threads.
+    fn replay_deferred_raster(&mut self, painted: &[PaintedSurface]) {
+        use rayon::prelude::*;
+
+        let mut targets = painted.iter().map(|surface| surface.index).peekable();
+        let mut jobs = Vec::new();
+        for (index, runtime) in self.components.iter_mut().enumerate() {
+            if targets.peek() != Some(&index) {
+                continue;
+            }
+            targets.next();
+            if let Some(mesh_core_render::SurfaceCanvas::Raster(raster)) =
+                runtime.parent.paint_buffer.as_mut()
+                && let Some(replay) = raster.replay()
+            {
+                jobs.push((runtime.surface_id.as_str(), replay));
+            }
+        }
+        let timings: Vec<_> = if jobs.len() > 1 {
+            jobs.into_par_iter()
+                .map(|(surface_id, replay)| (surface_id.to_owned(), replay.run()))
+                .collect()
+        } else {
+            jobs.into_iter()
+                .map(|(surface_id, replay)| (surface_id.to_owned(), replay.run()))
+                .collect()
+        };
+        if self.profiling_enabled() {
+            for (surface_id, elapsed) in timings {
+                self.record_surface_profiling_stage(
+                    &surface_id,
+                    None,
+                    mesh_core_debug::ProfilingStage::Paint,
+                    elapsed,
+                    Some("deferred_raster"),
+                );
+            }
+        }
+    }
+
+    /// Phase 3 of a frame: present a parent surface, then reconcile its child
+    /// surfaces, which paint and present their own subtrees in place.
+    fn present_painted_surface(&mut self, surface: &PaintedSurface) -> Result<bool, ShellRunError> {
+        let index = surface.index;
+        let component_id = surface.surface_id.as_str();
+        let presented = self.present_surface_target(
+            index,
+            TargetRef::Parent,
+            component_id,
+            surface.paint_size.0,
+            surface.paint_size.1,
+            surface.scale,
+            surface.total_render_started,
+            surface.allocation_started,
+        )?;
+        match self.reconcile_child_surface_requests(
+            index,
+            component_id,
+            &surface.surface_id,
+            surface.scale,
+            surface.total_render_started,
+        ) {
+            Ok(child_presented) => Ok(presented | child_presented),
+            Err(ShellRunError::Component(error)) => {
+                self.contain_component_failure(index, "build", &error);
+                self.components[index].parent.force_full_present = true;
+                Ok(presented)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Act on close requests from window surfaces (title-bar button, compositor

@@ -51,9 +51,6 @@ unless an item says otherwise. IDs point into the
 
 ## Glass shell core gaps (found 2026-10-17)
 
-- [ ] **Composition resolution at startup:** `load_frontend_components` and
-      `effective_profile_settings` read the raw profile, so a `from` composition's
-      roots, settings and `resources.theme` never apply; `config/profiles/glass.json` repeats them.
 - [ ] **Full-colour icons:** XDG/hicolor resolutions and `<icon src>` are always
       `multicolor: false`; `<image>` has no paint arm and `url()` rejects absolute paths, so docks cannot show app icons in colour.
 - [ ] **Host APIs:** `net.http` and `exec.launch-app` are catalogued but unimplemented
@@ -61,8 +58,6 @@ unless an item says otherwise. IDs point into the
       D-Bus name ownership and exported objects (watcher/host); `mesh.dbus_call` only calls out.
 - [ ] **Tooltips on bottom/right-anchored surfaces:** those surfaces get no tooltip reserve on
       their anchored axis, so tooltips cannot overflow toward the screen; promote tooltips to `xdg_popup`.
-- [ ] **`mesh-shell profile use` live switch:** rejected against a running shell (candidate
-      `@mesh/hyprland-wm` fails to initialize), while `mesh.packages.switch_profile` / IPC `shell:switch_profile` commit.
 - [ ] **Icon chains during live switch:** newly mounted modules briefly resolve with an empty pack
       chain (`effective_chain=[]`), logging missing-icon warnings until the chain is rebuilt.
 - [ ] **Backdrop placement beyond MESH:** refraction predicts surface origins from MESH's own
@@ -335,8 +330,8 @@ of payoff.
 
 ### Threading
 
-- [ ] Parallelize paint across surfaces: phase-split `render_components` into a
-      serial VM-bound phase and a parallel paint/SHM phase (rayon) (K).
+- [ ] Bring child popup surfaces into the parallel CPU raster phase and move
+      the SHM copy off the shell thread; both still run inside reconcile/present.
 - [ ] Pipeline paint of frame N against script work of frame N+1, after the
       per-surface split.
 - [ ] Narrow complete scene preparation by retained command/resource revision;

@@ -1712,10 +1712,35 @@ pub(in crate::shell) fn load_configured_profile(
     Ok(Some((profile_id, profile)))
 }
 
+pub(in crate::shell) fn resolve_profile(
+    profile: &ShellProfile,
+    graph: &InstalledModuleGraph,
+) -> Result<ShellProfile, mesh_core_module::package::ModuleManifestError> {
+    let mut resolved = mesh_core_module::package::resolve_composition(
+        profile,
+        graph.modules().into_iter().map(|node| &node.manifest),
+    )?
+    .to_profile();
+    resolved.revision = profile.revision;
+    Ok(resolved)
+}
+
 pub(in crate::shell) fn startup_composition(
     graph_path: &Path,
 ) -> (ShellCompositionMode, Option<(String, ShellProfile)>) {
-    match load_configured_profile(graph_path) {
+    match load_configured_profile(graph_path).and_then(|configured| {
+        configured
+            .map(|(id, profile)| {
+                if profile.from.is_none() {
+                    return Ok((id, profile));
+                }
+                let graph = mesh_core_module::package::load_authoring_snapshot_for_profile(
+                    graph_path, &profile,
+                )?;
+                Ok((id, resolve_profile(&profile, &graph)?))
+            })
+            .transpose()
+    }) {
         Ok(None) => (ShellCompositionMode::LegacyNoProfile, None),
         Ok(Some((profile_id, profile))) => (
             ShellCompositionMode::ConfiguredProfile {
@@ -2618,7 +2643,7 @@ impl Shell {
             let paths = mesh_core_module::package::ProfilePaths::from_root_graph(
                 &self.installed_module_graph_path(),
             )?;
-            let profile = paths.load(&profile_id)?;
+            let profile = resolve_profile(&paths.load(&profile_id)?, &graph)?;
             let entries = frontend_catalog.mountable_roots();
             for (instance_id, root) in profile.roots.iter().filter(|(_, root)| root.is_active()) {
                 let entry = entries.get(&root.module).ok_or_else(|| {
@@ -2691,8 +2716,7 @@ impl Shell {
             let paths = mesh_core_module::package::ProfilePaths::from_root_graph(
                 &self.installed_module_graph_path(),
             )?;
-            paths
-                .load(profile_id)?
+            resolve_profile(&paths.load(profile_id)?, graph)?
                 .roots
                 .into_iter()
                 .filter(|(_, root)| root.is_active() && root.module == module_id)

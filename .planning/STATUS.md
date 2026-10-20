@@ -8,6 +8,18 @@ measurements are in [`log/`](log/README.md). Open work is in
 
 ## Now
 
+- **K parallel CPU raster implemented:** multi-surface CPU frames record paint
+  in the VM phase and replay into each buffer on rayon before present; 3×
+  1840×1800 full repaints 74.8–76.1 → 39.2–40.6 ms. Shell failure names match
+  the baseline. Child popups and the SHM copy stay serial; frame pipelining is
+  next in the backlog.
+
+- **Composition startup/live parity implemented:** inherited roots, settings,
+  resources and user deltas resolve before startup and candidate mounts; shared
+  settings reloads preserve them. Glass/Desk profiles no longer repeat defaults.
+  Regression coverage includes round-trip switches, revisions and rollback;
+  Glass → Desk → Glass passed live on Wayland through CLI acknowledgements.
+
 - **Liquid-glass showcase implemented:** responsive media/weather cards,
   calendar and control-center popups, dock magnification and app search, lighter
   shared materials and English/Slovak controls. Local popovers promote correctly.

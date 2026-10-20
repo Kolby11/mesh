@@ -6510,3 +6510,50 @@ tests also pass with Python from the updated Nix environment. Shell syntax and
 `git diff --check` pass. A shared-process prototype failed the idle deadline
 assertion after raster tests left resource work pending; separate workload
 processes resolve that contamination while retaining one compiled binary.
+
+
+## 2026-10-20 — K: parallel CPU raster across surfaces
+
+Area: shell frame loop, CPU raster canvas. AMD Ryzen 7 7840HS (16 threads),
+`nix develop`, workspace release profile. Removed the "parallelize paint across
+surfaces" backlog item.
+
+`render_components` now runs in three phases. Phase 1 (serial, VM-bound) is
+unchanged up to paint, except that when two or more components want to render,
+each parent `RasterCanvas` records its damage-clipped paint into a Skia picture
+instead of rasterizing. Phase 2 replays every surface's pictures into its own
+`PixelBuffer` on the rayon pool. Phase 3 presents each parent and reconciles its
+children in the original order. Pictures pin their images and glyph pages, so
+replay needs none of the painter's thread-local caches — this replaces the
+original plan of running `paint_pixel_regions` itself on workers. Any pixel
+read (scroll shift, debug overlay, SHM copy, dev window) replays pending
+pictures first. Child popups and the SHM copy remain serial (new backlog line).
+
+**Workload.** `gpu::tests::frame_cost::parallel_cpu_raster_profile` (ignored,
+`--features renderer-gpu`; CPU only): three 920×900 logical surfaces at scale 2
+(1840×1800 px) from the frame-cost scenes, 40 frames × 4 samples after warm-up,
+two runs on the rayon pool, per-frame ranges. "Full" repaints all three surfaces (cards scene,
+40 text lines, cards scene). "Partial" damages the 840×260 frosted panel, one
+text line and a 138×76 widget, so one surface dominates.
+
+| Frame | Serial raster | Record (UI thread) | Record + parallel replay |
+| --- | --- | --- | --- |
+| Full, 3 surfaces | 74.783–76.111 ms | 1.312–1.655 ms | 39.216–40.579 ms (1.84–1.94x) |
+| Partial, 3 surfaces | 16.789–17.287 ms | 0.276–0.426 ms | 16.458–16.871 ms |
+| One surface, frosted panel | 16.204–16.648 ms direct | — | 16.242–16.508 ms record + inline replay |
+
+Gains are bounded by the largest surface in the frame. A lone painting
+surface keeps the direct path (nothing to overlap), although recording
+measured cost-neutral there.
+
+**Rejected:** replaying on `std::thread::scope` threads spawned per frame (three
+runs) cost 1.3–1.6 ms on the partial frame (18.075–19.090 ms vs 16.687–18.625 ms serial),
+consistent with Skia's blur scratch allocations faulting in fresh threads'
+malloc arenas. The persistent rayon pool removes that penalty.
+
+**Verified.** Release: render lib 310 passed, presentation 112 passed, three
+new canvas tests (replay matches direct raster pixel for pixel, ordered
+replays over retained pixels, shift after recorded paint) and two shell tests
+(multi-surface frames defer and present replayed pixels; a lone surface
+paints in place). Shell lib: 42 failures before and after, identical names,
+diffed against a path-limited stash of this change.

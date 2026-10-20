@@ -919,8 +919,12 @@ impl Shell {
                 return VecDeque::new();
             }
         };
-        let graph = match load_authoring_snapshot_for_profile(&graph_path, &profile) {
-            Ok(graph) => graph,
+        let (graph, profile) = match load_authoring_snapshot_for_profile(&graph_path, &profile)
+            .and_then(|graph| {
+                let profile = super::discovery::resolve_profile(&profile, &graph)?;
+                Ok((graph, profile))
+            }) {
+            Ok(candidate) => candidate,
             Err(error) => {
                 abort_package_transaction(package_transaction, package_rollback, self);
                 if let Some(rollback) = rollback {

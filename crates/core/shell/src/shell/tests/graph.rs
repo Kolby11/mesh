@@ -764,3 +764,279 @@ fn live_reload_keeps_a_module_whose_manifest_is_mid_edit() {
         diagnostic.module_id == "@test/widget" && diagnostic.status == "module_manifest_retained"
     }));
 }
+
+fn composition_switch_fixture(dir: &Path) {
+    let modules = dir.join("modules");
+    let theme = modules.join("theme");
+    fs::create_dir_all(&theme).unwrap();
+    fs::write(
+        theme.join("module.json"),
+        serde_json::json!({
+            "name": "@test/theme", "version": "1.0.0",
+            "mesh": {"apiVersion": "0.1", "kind": "theme", "provides": {"themes": [{
+                "id": "fixture", "label": "Fixture", "modes": {"default": "theme.css"},
+                "default_mode": "default"
+            }]}}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        theme.join("theme.css"),
+        ":root { --color-background: #123456; }",
+    )
+    .unwrap();
+    let base = modules.join("base");
+    fs::create_dir_all(&base).unwrap();
+    fs::write(
+        base.join("module.json"),
+        serde_json::json!({
+            "name": "@test/base", "version": "1.0.0",
+            "mesh": {"apiVersion": "0.1", "kind": "composition", "compose": {
+                "resources": {"theme": "@test/theme"},
+                "settings": {"shell": {"render": {"blur": {"passes": 3}}}}
+            }}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    for name in ["first", "second"] {
+        let frontend = modules.join(name);
+        fs::create_dir_all(&frontend).unwrap();
+        fs::write(
+            frontend.join("module.json"),
+            serde_json::json!({
+                "name": format!("@test/{name}"), "version": "1.0.0",
+                "mesh": {"apiVersion": "0.1", "kind": "ui", "entry": "main.mesh",
+                    "surface": {"role": "layer", "width": 200, "height": 40}}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(
+            frontend.join("main.mesh"),
+            "<template><box><text>Shell</text></box></template>",
+        )
+        .unwrap();
+        let composition = modules.join(format!("{name}-shell"));
+        fs::create_dir_all(&composition).unwrap();
+        fs::write(
+            composition.join("module.json"),
+            serde_json::json!({
+                "name": format!("@test/{name}-shell"), "version": "1.0.0",
+                "mesh": {"apiVersion": "0.1", "kind": "composition", "extends": "@test/base", "compose": {
+                    "roots": {format!("@test/{name}#default"): {"module": format!("@test/{name}")}},
+                    "settings": {"shell": {"fonts": {"ui_family": name}}}
+                }}
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+    fs::write(
+        dir.join("module.json"),
+        serde_json::json!({"mesh": {
+            "schemaVersion": 1, "modulesDir": "modules", "modules": {
+                "@test/theme": {"kind": "theme", "path": "theme"},
+                "@test/base": {"kind": "composition", "path": "base"},
+                "@test/first": {"kind": "ui", "path": "first"},
+                "@test/second": {"kind": "ui", "path": "second"},
+                "@test/first-shell": {"kind": "composition", "path": "first-shell"},
+                "@test/second-shell": {"kind": "composition", "path": "second-shell"}
+            }
+        }})
+        .to_string(),
+    )
+    .unwrap();
+    fs::create_dir_all(dir.join("profiles")).unwrap();
+    for name in ["first", "second"] {
+        fs::write(
+            dir.join(format!("profiles/{name}.json")),
+            serde_json::json!({
+                "schemaVersion": 3, "revision": 7,
+                "from": {"module": format!("@test/{name}-shell")}
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+    fs::write(dir.join("active-profile"), "first\n").unwrap();
+}
+
+#[test]
+fn composition_startup_and_live_switch_have_identical_roots_and_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_settings, _graph, _lock) = isolated_settings_file(dir.path());
+    composition_switch_fixture(dir.path());
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    shell.discover_modules();
+    shell.resolve_modules().unwrap();
+    shell.load_frontend_components().unwrap();
+    let mut requests = shell.mount_components().unwrap();
+    shell.drain_requests(&mut requests).unwrap();
+    assert_eq!(shell.components.len(), 1);
+    assert_eq!(shell.components[0].surface_id, "@test/first#default");
+    assert_eq!(shell.settings.fonts.ui_family.as_deref(), Some("first"));
+    assert_eq!(
+        shell.settings_store.to_value()["shell"]["theme"]["active"],
+        "@test/theme"
+    );
+    assert_eq!(
+        shell.settings_store.to_value()["shell"]["render"]["blur"]["passes"],
+        3
+    );
+    let initial_settings = shell.settings_store.to_value();
+    for (generation, name, previous) in [(1, "second", "first"), (2, "first", "second")] {
+        let (sender, mut receiver) = tokio::sync::oneshot::channel();
+        let mut requests = shell.apply_switch_profile_with_ack(name, Some(sender));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            shell.drain_requests(&mut requests).unwrap();
+            if shell.pending_resource_preparation.is_none()
+                && shell.pending_profile_switch.is_none()
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "profile switch did not finish");
+            std::thread::sleep(Duration::from_millis(1));
+            requests.extend(shell.poll_pending_resource_preparation());
+        }
+        let acknowledgement = receiver.try_recv().unwrap();
+        assert!(
+            matches!(
+                acknowledgement,
+                super::super::types::IpcProfileSwitchResponse::Committed { .. }
+            ),
+            "{acknowledgement:?}"
+        );
+        assert_eq!(shell.components.len(), 1);
+        assert_eq!(
+            shell.components[0].surface_id,
+            format!("@test/{name}#default")
+        );
+        assert!(
+            shell
+                .presentation_engine
+                .testing_destroyed_surfaces()
+                .contains(&format!("@test/{previous}#default"))
+        );
+        let snapshot = shell.active_snapshot().unwrap();
+        assert_eq!(snapshot.generation(), generation);
+        assert_eq!(snapshot.profile_revision(), Some(7));
+        assert_eq!(
+            snapshot.roots().get(&format!("@test/{name}#default")),
+            Some(&format!("@test/{name}"))
+        );
+        assert_eq!(shell.settings.fonts.ui_family.as_deref(), Some(name));
+        let mut restarted = Shell::new();
+        restarted.discover_modules();
+        restarted.resolve_modules().unwrap();
+        restarted.load_frontend_components().unwrap();
+        assert_eq!(restarted.components.len(), 1);
+        assert_eq!(
+            restarted.components[0].surface_id,
+            shell.components[0].surface_id
+        );
+        assert_eq!(
+            restarted.settings_store.to_value(),
+            shell.settings_store.to_value()
+        );
+    }
+    shell.settings_watch.modified_at = None;
+    shell.next_shell_settings_reload_check = Instant::now();
+    let mut requests = shell.reload_locale_if_settings_changed().unwrap();
+    shell.drain_requests(&mut requests).unwrap();
+    assert_eq!(shell.settings_store.to_value(), initial_settings);
+    fs::write(
+        dir.path().join("profiles/broken.json"),
+        serde_json::json!({
+            "schemaVersion": 3, "from": {"module": "@test/missing"}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let (sender, mut receiver) = tokio::sync::oneshot::channel();
+    shell.apply_switch_profile_with_ack("broken", Some(sender));
+    assert!(matches!(
+        receiver.try_recv().unwrap(),
+        super::super::types::IpcProfileSwitchResponse::Rejected { .. }
+    ));
+    assert_eq!(shell.active_profile_id.as_deref(), Some("first"));
+    assert_eq!(shell.components[0].surface_id, "@test/first#default");
+    assert_eq!(shell.settings_store.to_value(), initial_settings);
+    assert_eq!(
+        fs::read_to_string(dir.path().join("active-profile"))
+            .unwrap()
+            .trim(),
+        "first"
+    );
+    let paths =
+        mesh_core_module::package::ProfilePaths::from_root_graph(&dir.path().join("module.json"))
+            .unwrap();
+    assert!(paths.load("first").unwrap().roots.is_empty());
+    assert!(paths.load("second").unwrap().settings.is_empty());
+}
+
+#[test]
+fn composition_startup_preserves_user_deltas_and_theme_precedence() {
+    let dir = tempfile::tempdir().unwrap();
+    composition_switch_fixture(dir.path());
+    let graph_path = dir.path().join("module.json");
+    let paths = mesh_core_module::package::ProfilePaths::from_root_graph(&graph_path).unwrap();
+    let profile_path = paths.profile_path("first").unwrap();
+    fs::write(
+        &profile_path,
+        serde_json::json!({
+            "schemaVersion": 3, "revision": 9,
+            "from": {"module": "@test/first-shell"},
+            "roots": {"@test/first#default": {"active": false}},
+            "settings": {"shell": {"fonts": {"ui_family": "user"}}}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let (mode, profile) = startup_composition(&graph_path);
+    assert!(matches!(
+        mode,
+        ShellCompositionMode::ConfiguredProfile { .. }
+    ));
+    let (_, mut profile) = profile.unwrap();
+    assert_eq!(profile.revision, 9);
+    assert!(!profile.roots["@test/first#default"].is_active());
+    let shared = mesh_core_config::SettingsStore::from_value(
+        dir.path().join("settings.json"),
+        serde_json::json!({"shell": {"theme": {"active": "user-theme"}}}),
+    )
+    .unwrap();
+    let effective =
+        super::super::discovery::effective_profile_settings(shared.clone(), Some(&profile))
+            .unwrap();
+    assert_eq!(effective.to_value()["shell"]["fonts"]["ui_family"], "user");
+    assert_eq!(effective.to_value()["shell"]["render"]["blur"]["passes"], 3);
+    assert_eq!(
+        effective.to_value()["shell"]["theme"]["active"],
+        "user-theme"
+    );
+    profile.settings.insert(
+        "shell".into(),
+        serde_json::json!({"theme": {"active": "pinned-theme"}}),
+    );
+    let pinned =
+        super::super::discovery::effective_profile_settings(shared, Some(&profile)).unwrap();
+    assert_eq!(
+        pinned.to_value()["shell"]["theme"]["active"],
+        "pinned-theme"
+    );
+}
+
+#[test]
+fn unavailable_startup_composition_enters_recovery() {
+    let dir = tempfile::tempdir().unwrap();
+    composition_switch_fixture(dir.path());
+    fs::remove_file(dir.path().join("modules/first-shell/module.json")).unwrap();
+    let (mode, profile) = startup_composition(&dir.path().join("module.json"));
+    assert!(matches!(mode, ShellCompositionMode::Recovery { .. }));
+    assert!(profile.is_none());
+}

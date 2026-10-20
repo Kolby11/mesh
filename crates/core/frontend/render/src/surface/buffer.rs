@@ -2,8 +2,8 @@
 use mesh_core_elements::style::Color;
 use mesh_core_resources::{ResourceByteBudget, ResourceByteReservation};
 use skia_safe::{
-    AlphaType, BlendMode, Canvas, ColorType, ImageInfo, Paint, PaintStyle, RRect, Rect, Surface,
-    surfaces,
+    AlphaType, BlendMode, Canvas, ColorType, ImageInfo, Paint, PaintStyle, PictureRecorder, RRect,
+    Rect, Surface, surfaces,
 };
 use std::sync::OnceLock;
 
@@ -325,6 +325,37 @@ enum SessionTarget<'a> {
         width: u32,
         height: u32,
     },
+    /// Records into a picture that the canvas replays later; see
+    /// [`super::canvas::RasterCanvas`].
+    Deferred {
+        raster: &'a mut super::canvas::RasterCanvas,
+        recorder: PictureRecorder,
+    },
+}
+
+impl Drop for PixelCanvasSession<'_> {
+    fn drop(&mut self) {
+        if let SessionTarget::Deferred { raster, recorder } = &mut self.target {
+            finish_deferred_recording(raster, recorder);
+        }
+    }
+}
+
+fn begin_deferred_recording(width: u32, height: u32) -> PictureRecorder {
+    let mut recorder = PictureRecorder::new();
+    recorder.begin_recording(Rect::from_wh(width as f32, height as f32), false);
+    recorder
+}
+
+fn finish_deferred_recording(
+    raster: &mut super::canvas::RasterCanvas,
+    recorder: &mut PictureRecorder,
+) {
+    if let Some(picture) = recorder.finish_recording_as_picture(None)
+        && picture.approximate_op_count() > 0
+    {
+        raster.push_recording(picture);
+    }
 }
 
 impl<'a> PixelCanvasSession<'a> {
@@ -348,6 +379,14 @@ impl<'a> PixelCanvasSession<'a> {
         }
     }
 
+    pub(crate) fn deferred(raster: &'a mut super::canvas::RasterCanvas) -> Self {
+        let recorder = begin_deferred_recording(raster.width(), raster.height());
+        Self {
+            target: SessionTarget::Deferred { raster, recorder },
+            scroll_replay: None,
+        }
+    }
+
     pub(crate) fn on_recording(canvas: &'a Canvas, width: u32, height: u32) -> Self {
         Self {
             target: SessionTarget::Recording {
@@ -362,6 +401,7 @@ impl<'a> PixelCanvasSession<'a> {
     pub fn width(&self) -> u32 {
         match &self.target {
             SessionTarget::Recording { width, .. } => *width,
+            SessionTarget::Deferred { raster, .. } => raster.width(),
             SessionTarget::Raster { buffer, .. } => buffer.width,
             SessionTarget::Surface(surface) => surface.width().max(0) as u32,
         }
@@ -370,6 +410,7 @@ impl<'a> PixelCanvasSession<'a> {
     pub fn height(&self) -> u32 {
         match &self.target {
             SessionTarget::Recording { height, .. } => *height,
+            SessionTarget::Deferred { raster, .. } => raster.height(),
             SessionTarget::Raster { buffer, .. } => buffer.height,
             SessionTarget::Surface(surface) => surface.height().max(0) as u32,
         }
@@ -389,6 +430,7 @@ impl<'a> PixelCanvasSession<'a> {
             }
             SessionTarget::Surface(surface) => Some(f(surface.canvas())),
             SessionTarget::Recording { canvas, .. } => Some(f(canvas)),
+            SessionTarget::Deferred { recorder, .. } => recorder.recording_canvas().map(f),
         }
     }
 
@@ -399,6 +441,15 @@ impl<'a> PixelCanvasSession<'a> {
         match &mut self.target {
             SessionTarget::Recording { canvas, .. } => {
                 canvas.draw_irect(device_irect(rect), &src_paint(color));
+            }
+            SessionTarget::Deferred { recorder, .. } => {
+                if let Some(canvas) = recorder.recording_canvas() {
+                    debug_assert_eq!(canvas.save_count(), 1, "clear inside an open layer");
+                    canvas.save();
+                    canvas.reset_matrix();
+                    canvas.draw_irect(device_irect(rect), &src_paint(color));
+                    canvas.restore();
+                }
             }
             SessionTarget::Raster { buffer, surface } => {
                 notify_external_write(surface.as_mut());
@@ -428,6 +479,15 @@ impl<'a> PixelCanvasSession<'a> {
         match &mut self.target {
             SessionTarget::Recording { .. } => {
                 panic!("complete scenes cannot shift retained pixels")
+            }
+            // Shifting reads retained pixels, so everything recorded so far
+            // is rasterized here, on this thread, before recording resumes.
+            SessionTarget::Deferred { raster, recorder } => {
+                finish_deferred_recording(raster, recorder);
+                raster.flush();
+                let shifted = raster.pixels_mut().shift_region_pixels(region, dx, dy);
+                *recorder = begin_deferred_recording(raster.width(), raster.height());
+                shifted
             }
             SessionTarget::Raster { buffer, surface } => {
                 notify_external_write(surface.as_mut());

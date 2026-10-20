@@ -19,7 +19,7 @@ use mesh_core_elements::NodeId;
 
 pub use backdrop::{BackdropFrame, has_backdrop_image, set_backdrop_image};
 pub use buffer::{PixelBuffer, PixelCanvasSession};
-pub use canvas::SurfaceCanvas;
+pub use canvas::{RasterCanvas, RasterReplay, SurfaceCanvas};
 pub use debug_overlay::{DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot};
 pub use glyph::GlyphAxes;
 pub use painter::{

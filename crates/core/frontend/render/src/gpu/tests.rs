@@ -978,6 +978,133 @@ mod frame_cost {
         }
     }
 
+    // cargo test -p mesh-core-render --features renderer-gpu --release -- parallel_cpu_raster_profile --ignored --nocapture
+    #[test]
+    #[ignore = "benchmark"]
+    fn parallel_cpu_raster_profile() {
+        use crate::SurfaceCanvas;
+
+        let _guard = crate::resource_state_test_lock();
+        let engine = FrontendRenderEngine::new();
+        let list_for = |root: &WidgetNode| {
+            let mut list = RetainedDisplayList::default();
+            list.set_backdrop_blur_policy(crate::display_list::BackdropBlurPolicy::InSurfaceFilter);
+            list.update(root, LOGICAL.0, LOGICAL.1, true, true);
+            list
+        };
+        let settings = list_for(&settings_scene());
+        let text = list_for(&text_scene());
+        let size = (
+            (LOGICAL.0 as f32 * SCALE) as u32,
+            (LOGICAL.1 as f32 * SCALE) as u32,
+        );
+        let full = logical(0, 0, LOGICAL.0, LOGICAL.1);
+        let frames: [(&str, [(&RetainedDisplayList, DamageRect); 3]); 2] = [
+            (
+                "full repaint",
+                [(&settings, full), (&text, full), (&settings, full)],
+            ),
+            (
+                "partial damage",
+                [
+                    (&settings, logical(40, 40, 840, 260)),
+                    (&text, logical(16, 452, 880, 20)),
+                    (&settings, logical(476, 544, 138, 76)),
+                ],
+            ),
+        ];
+        let mut canvases: Vec<SurfaceCanvas> = (0..3)
+            .map(|_| PixelBuffer::new(size.0, size.1).into())
+            .collect();
+        let replay_all = |canvases: &mut [SurfaceCanvas], parallel: bool| {
+            let replays = canvases.iter_mut().filter_map(|canvas| match canvas {
+                SurfaceCanvas::Raster(raster) => raster.replay(),
+                SurfaceCanvas::Scene(_) => None,
+            });
+            if parallel {
+                use rayon::prelude::*;
+                // The shell's pool: persistent workers, as in `render_components`.
+                replays
+                    .collect::<Vec<_>>()
+                    .into_par_iter()
+                    .for_each(|replay| {
+                        replay.run();
+                    });
+            } else {
+                replays.for_each(|replay| {
+                    replay.run();
+                });
+            }
+        };
+        eprintln!(
+            "3 surfaces {}x{} logical at scale {SCALE}, {FRAMES} frames x {SAMPLES} samples",
+            LOGICAL.0, LOGICAL.1
+        );
+        for (name, surfaces) in frames {
+            let mut direct = Vec::new();
+            let mut parallel = Vec::new();
+            let mut recording = Vec::new();
+            let mut single_direct = Vec::new();
+            let mut single_deferred = Vec::new();
+            for _ in 0..=SAMPLES {
+                let started = Instant::now();
+                for _ in 0..FRAMES {
+                    for (canvas, (list, damage)) in canvases.iter_mut().zip(surfaces) {
+                        canvas.set_deferred_raster(false);
+                        paint(&engine, list, &mut canvas.session(), damage);
+                    }
+                }
+                direct.push(started.elapsed());
+
+                let started = Instant::now();
+                let mut recorded = Duration::ZERO;
+                for _ in 0..FRAMES {
+                    let record = Instant::now();
+                    for (canvas, (list, damage)) in canvases.iter_mut().zip(surfaces) {
+                        canvas.set_deferred_raster(true);
+                        paint(&engine, list, &mut canvas.session(), damage);
+                    }
+                    recorded += record.elapsed();
+                    replay_all(&mut canvases, true);
+                }
+                parallel.push(started.elapsed());
+                recording.push(recorded);
+
+                let (list, damage) = surfaces[0];
+                let started = Instant::now();
+                for _ in 0..FRAMES {
+                    canvases[0].set_deferred_raster(false);
+                    paint(&engine, list, &mut canvases[0].session(), damage);
+                }
+                single_direct.push(started.elapsed());
+                let started = Instant::now();
+                for _ in 0..FRAMES {
+                    canvases[0].set_deferred_raster(true);
+                    paint(&engine, list, &mut canvases[0].session(), damage);
+                    replay_all(&mut canvases[..1], false);
+                }
+                single_deferred.push(started.elapsed());
+            }
+            for samples in [
+                &mut direct,
+                &mut parallel,
+                &mut recording,
+                &mut single_direct,
+                &mut single_deferred,
+            ] {
+                samples.remove(0);
+            }
+            eprintln!(
+                "{name}: serial raster {} | record {} + parallel replay = {} | one surface direct {} vs record+replay {}",
+                summary(&direct),
+                summary(&recording),
+                summary(&parallel),
+                summary(&single_direct),
+                summary(&single_deferred),
+            );
+        }
+    }
+
     #[test]
     #[ignore = "benchmark"]
     fn gpu_frame_cost_workload() {
