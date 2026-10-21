@@ -1,4 +1,5 @@
 use super::state::*;
+use crate::Prop;
 use crate::tree::NodeState;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -98,9 +99,12 @@ impl<'a> StyleNodeAttrs<'a> {
         Self {
             tag: authored.tag.as_str(),
             classes,
-            id: authored.attributes.get("id").map(|value| value.as_str()),
-            inline_style: authored.attributes.get("style").map(String::as_str),
-            parts: authored.attributes.get("part").map(String::as_str),
+            id: authored
+                .attributes
+                .get(Prop::Id)
+                .map(|value| value.as_str()),
+            inline_style: authored.attributes.get(Prop::Style).map(String::as_str),
+            parts: authored.attributes.get(Prop::Part).map(String::as_str),
             key: node.mesh_key(),
             module_id: node.module_id(),
             state: node.state,

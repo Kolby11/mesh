@@ -1,4 +1,5 @@
 //! Widget tree — the live, evaluated UI structure.
+use crate::Prop;
 use crate::accessibility::AccessibilityInfo;
 use crate::attributes::AttributeMap;
 use crate::composition::HandlerTarget;
@@ -159,7 +160,10 @@ pub fn validate_widget_tree(root: &WidgetNode) -> Result<(), WidgetTreeValidatio
             });
         }
 
-        let source_tag = node.attributes.get("data-mesh-element").map(String::as_str);
+        let source_tag = node
+            .attributes
+            .get(Prop::DataMeshElement)
+            .map(String::as_str);
         let definition_tag = source_tag.unwrap_or(node.tag.as_str());
         let Some(contract) = crate::element::element_contract_for_tag(definition_tag) else {
             return Err(WidgetTreeValidationError::UnknownElementTag {
@@ -530,11 +534,11 @@ impl WidgetNode {
     pub fn is_closed_container(&self) -> bool {
         let source = self
             .attributes
-            .get("data-mesh-element")
+            .get(Prop::DataMeshElement)
             .map(String::as_str)
             .unwrap_or(self.tag.as_str());
         matches!(source, "dialog" | "sheet" | "menu")
-            && self.attributes.get("open").is_some_and(|value| {
+            && self.attributes.get(Prop::Open).is_some_and(|value| {
                 let value = value.trim();
                 value.is_empty()
                     || value == "0"
@@ -831,7 +835,7 @@ impl WidgetNode {
     }
 
     pub fn refresh_class_tokens_cache(&mut self) {
-        let class_attr = self.attributes.get("class").cloned();
+        let class_attr = self.attributes.get(Prop::Class).cloned();
         if self.cached_class_attr != class_attr {
             self.cached_classes = class_attr
                 .as_deref()
@@ -884,11 +888,11 @@ mod tests {
     fn representative_node(index: usize, depth: usize, width: usize) -> WidgetNode {
         let mut node = WidgetNode::new(format!("component-node-{index}"));
         node.attributes.insert(
-            "content".into(),
+            Prop::Content,
             format!("node {index}: {}", "memoized component payload ".repeat(8)),
         );
         node.attributes
-            .insert("class".into(), "surface-card primary interactive".into());
+            .insert(Prop::Class, "surface-card primary interactive".into());
         node.event_handlers
             .insert("click".into(), format!("instance/{index}:activate").into());
         node.event_handler_calls.insert(
@@ -1030,11 +1034,11 @@ mod tests {
 
         cloned.children[0]
             .attributes
-            .insert("content".into(), "changed".into());
+            .insert(Prop::Content, "changed".into());
 
         assert_ne!(
-            root.children[0].attributes.get("content"),
-            cloned.children[0].attributes.get("content")
+            root.children[0].attributes.get(Prop::Content),
+            cloned.children[0].attributes.get(Prop::Content)
         );
         assert!(!root.children[0].shares_authored_payload_with(&cloned.children[0]));
         assert!(
@@ -1048,11 +1052,11 @@ mod tests {
 
         root.children[0]
             .attributes
-            .insert("content".into(), "original changed separately".into());
+            .insert(Prop::Content, "original changed separately".into());
         assert_eq!(
             cloned.children[0]
                 .attributes
-                .get("content")
+                .get(Prop::Content)
                 .map(String::as_str),
             Some("changed")
         );
@@ -1126,16 +1130,15 @@ mod tests {
         assert!(node.class_tokens().is_empty());
 
         node.attributes
-            .insert("class".into(), "primary compact".into());
+            .insert(Prop::Class, "primary compact".into());
         node.refresh_class_tokens_cache();
         assert_eq!(node.class_tokens(), ["primary", "compact"]);
 
-        node.attributes
-            .insert("class".into(), "compact active".into());
+        node.attributes.insert(Prop::Class, "compact active".into());
         node.refresh_class_tokens_cache();
         assert_eq!(node.class_tokens(), ["compact", "active"]);
 
-        node.attributes.remove("class");
+        node.attributes.remove(Prop::Class);
         node.refresh_class_tokens_cache();
         assert!(node.class_tokens().is_empty());
     }
@@ -1146,7 +1149,7 @@ mod tests {
         let mut authored_grid = WidgetNode::new("box");
         authored_grid
             .attributes
-            .insert("data-mesh-element".into(), "grid".into());
+            .insert(Prop::DataMeshElement, "grid".into());
         root.children.push(authored_grid);
 
         validate_widget_tree(&root).expect("known source and runtime tags should validate");
@@ -1191,7 +1194,7 @@ mod tests {
         let mut mismatch = WidgetNode::new("button");
         mismatch
             .attributes
-            .insert("data-mesh-element".into(), "grid".into());
+            .insert(Prop::DataMeshElement, "grid".into());
         assert!(matches!(
             validate_widget_tree(&mismatch),
             Err(WidgetTreeValidationError::ElementTagMismatch {

@@ -1,10 +1,11 @@
-//! Interned attribute keys for the widget tree.
+//! Attribute storage for the widget tree.
 //!
-//! Attribute *names* are template vocabulary, not data: the same handful of
-//! short strings is rebuilt for every node on every tree build, so owned
-//! `String` keys cost a malloc/copy/free per attribute. [`AttrKey`] keeps
-//! `String`'s ordering and lookup behavior while resolving well-known names to
-//! `&'static str` and the rest to an `Arc<str>` from a per-thread cache.
+//! Attribute *names* are template vocabulary, not data. [`AttrKey`] resolves
+//! every name in the closed [`Prop`] vocabulary to its enum value and the rest
+//! (free-form `data-*`, pass-through ARIA) to an `Arc<str>` from a per-thread
+//! cache, while keeping `String`'s ordering. Core code addresses known
+//! properties by [`Prop`]; the `*_by_name` methods are the adapter for callers
+//! that only have a runtime name (bindings, selectors, inspection).
 
 use std::borrow::Borrow;
 use std::cell::RefCell;
@@ -14,13 +15,16 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::{Arc, OnceLock};
 
+use crate::prop::{ChangeClass, Prop};
+
 /// Ordering, equality, and hashing delegate to the string contents, so this
 /// iterates exactly as the equivalent `BTreeMap<String, _>` would.
 #[derive(Clone)]
 pub enum AttrKey {
-    /// Known template/runtime vocabulary. Free to clone.
-    Static(&'static str),
-    /// Any other name, shared through the per-thread intern cache.
+    /// A name from the core vocabulary. Free to clone and compare.
+    Known(Prop),
+    /// Any other name, shared through the per-thread intern cache. Never a
+    /// [`Prop`] name when built through [`AttrKey::new`].
     Shared(Arc<str>),
 }
 
@@ -206,13 +210,69 @@ impl AttributeMap {
             .binary_search_by(|(entry, _)| entry.as_str().cmp(key))
     }
 
-    pub fn insert(&mut self, key: AttrKey, value: String) -> Option<String> {
-        self.insert_stored(key, StoredAttributeValue::String(value))
+    /// Real elements carry a handful of attributes, where comparing one-byte
+    /// discriminants beats a binary search over string comparisons.
+    #[inline]
+    fn find_prop(&self, prop: Prop) -> Option<usize> {
+        if self.entries.len() <= 8 {
+            self.entries
+                .iter()
+                .position(|(key, _)| key.prop() == Some(prop))
+        } else {
+            self.find(prop.name()).ok()
+        }
+    }
+
+    pub fn insert(&mut self, key: impl Into<AttrKey>, value: String) -> Option<String> {
+        self.insert_stored(key.into(), StoredAttributeValue::String(value))
     }
 
     /// Insert without stringifying non-string JSON values.
-    pub fn insert_value(&mut self, key: AttrKey, value: serde_json::Value) -> Option<String> {
-        self.insert_stored(key, StoredAttributeValue::from_json(value))
+    pub fn insert_value(
+        &mut self,
+        key: impl Into<AttrKey>,
+        value: serde_json::Value,
+    ) -> Option<String> {
+        self.insert_stored(key.into(), StoredAttributeValue::from_json(value))
+    }
+
+    /// Write `value` and report the stages the write reaches: empty when the
+    /// value is unchanged, the prop's [`ChangeClass`] otherwise, and
+    /// [`ChangeClass::FREE_FORM`] for a name outside the vocabulary.
+    pub fn set(&mut self, key: impl Into<AttrKey>, value: String) -> ChangeClass {
+        self.set_stored(key.into(), StoredAttributeValue::String(value))
+    }
+
+    /// [`AttributeMap::set`] for a value that keeps its JSON type.
+    pub fn set_value(&mut self, key: impl Into<AttrKey>, value: serde_json::Value) -> ChangeClass {
+        self.set_stored(key.into(), StoredAttributeValue::from_json(value))
+    }
+
+    /// Remove `key`, reporting its change class when it was present.
+    pub fn unset(&mut self, key: impl Into<AttrKey>) -> ChangeClass {
+        let key = key.into();
+        match self.find(key.as_str()) {
+            Ok(index) => {
+                self.entries.remove(index);
+                key.change_class()
+            }
+            Err(_) => ChangeClass::empty(),
+        }
+    }
+
+    fn set_stored(&mut self, key: AttrKey, value: StoredAttributeValue) -> ChangeClass {
+        match self.find(key.as_str()) {
+            Ok(index) if self.entries[index].1 == value => ChangeClass::empty(),
+            Ok(index) => {
+                self.entries[index].1 = value;
+                key.change_class()
+            }
+            Err(index) => {
+                let class = key.change_class();
+                self.entries.insert(index, (key, value));
+                class
+            }
+        }
     }
 
     fn insert_stored(&mut self, key: AttrKey, value: StoredAttributeValue) -> Option<String> {
@@ -249,37 +309,80 @@ impl AttributeMap {
         }
     }
 
-    pub fn get(&self, key: &str) -> Option<&String> {
-        self.find(key)
-            .ok()
+    pub fn get(&self, prop: Prop) -> Option<&String> {
+        self.find_prop(prop)
             .map(|index| self.entries[index].1.as_string())
     }
 
-    pub fn get_value(&self, key: &str) -> Option<ResolvedAttributeValueRef<'_>> {
-        self.find(key)
-            .ok()
+    pub fn get_value(&self, prop: Prop) -> Option<ResolvedAttributeValueRef<'_>> {
+        self.find_prop(prop)
             .map(|index| self.entries[index].1.value_ref())
     }
 
-    pub fn get_mut(&mut self, key: &str) -> Option<&mut String> {
-        match self.find(key) {
-            Ok(index) => Some(self.entries[index].1.as_string_mut()),
-            Err(_) => None,
+    pub fn get_mut(&mut self, prop: Prop) -> Option<&mut String> {
+        self.find_prop(prop)
+            .map(|index| self.entries[index].1.as_string_mut())
+    }
+
+    pub fn contains_key(&self, prop: Prop) -> bool {
+        self.find_prop(prop).is_some()
+    }
+
+    pub fn remove(&mut self, prop: Prop) -> Option<String> {
+        self.find_prop(prop)
+            .map(|index| self.entries.remove(index).1.into_string())
+    }
+
+    /// The value as text, without allocating for string-backed values.
+    pub fn text(&self, prop: Prop) -> Option<&str> {
+        self.get(prop).map(String::as_str)
+    }
+
+    /// A boolean attribute: present and empty, `true` or `1`.
+    pub fn flag(&self, prop: Prop) -> bool {
+        self.get_value(prop)
+            .is_some_and(ResolvedAttributeValueRef::legacy_bool)
+    }
+
+    pub fn number(&self, prop: Prop) -> Option<f32> {
+        self.get_value(prop)
+            .and_then(ResolvedAttributeValueRef::parse_f32)
+    }
+
+    /// Lookup for a runtime name; prefer [`AttributeMap::get`] for a [`Prop`].
+    pub fn get_by_name(&self, name: &str) -> Option<&String> {
+        match Prop::from_name(name) {
+            Some(prop) => self.get(prop),
+            None => self
+                .find(name)
+                .ok()
+                .map(|index| self.entries[index].1.as_string()),
         }
     }
 
-    pub fn contains_key(&self, key: &str) -> bool {
-        self.find(key).is_ok()
+    pub fn get_value_by_name(&self, name: &str) -> Option<ResolvedAttributeValueRef<'_>> {
+        match Prop::from_name(name) {
+            Some(prop) => self.get_value(prop),
+            None => self
+                .find(name)
+                .ok()
+                .map(|index| self.entries[index].1.value_ref()),
+        }
     }
 
-    pub fn remove(&mut self, key: &str) -> Option<String> {
-        match self.find(key) {
+    pub fn contains_name(&self, name: &str) -> bool {
+        self.find(name).is_ok()
+    }
+
+    pub fn remove_by_name(&mut self, name: &str) -> Option<String> {
+        match self.find(name) {
             Ok(index) => Some(self.entries.remove(index).1.into_string()),
             Err(_) => None,
         }
     }
 
-    pub fn entry(&mut self, key: AttrKey) -> Entry<'_> {
+    pub fn entry(&mut self, key: impl Into<AttrKey>) -> Entry<'_> {
+        let key = key.into();
         let (slot, occupied) = match self.find(key.as_str()) {
             Ok(index) => (index, true),
             Err(index) => (index, false),
@@ -515,8 +618,8 @@ impl<'de> serde::Deserialize<'de> for AttributeMap {
 impl AttrKey {
     /// Allocation-free for known vocabulary.
     pub fn new(name: &str) -> Self {
-        match well_known(name) {
-            Some(name) => AttrKey::Static(name),
+        match Prop::from_name(name) {
+            Some(prop) => AttrKey::Known(prop),
             None => AttrKey::Shared(intern(name)),
         }
     }
@@ -524,14 +627,29 @@ impl AttrKey {
     #[inline]
     pub fn as_str(&self) -> &str {
         match self {
-            AttrKey::Static(name) => name,
+            AttrKey::Known(prop) => prop.name(),
             AttrKey::Shared(name) => name,
         }
     }
 
-    /// Whether the name resolved to the static vocabulary.
-    pub fn is_static(&self) -> bool {
-        matches!(self, AttrKey::Static(_))
+    #[inline]
+    pub fn prop(&self) -> Option<Prop> {
+        match self {
+            AttrKey::Known(prop) => Some(*prop),
+            AttrKey::Shared(_) => None,
+        }
+    }
+
+    pub fn change_class(&self) -> ChangeClass {
+        self.prop()
+            .map_or(ChangeClass::FREE_FORM, Prop::change_class)
+    }
+}
+
+impl From<Prop> for AttrKey {
+    #[inline]
+    fn from(prop: Prop) -> Self {
+        AttrKey::Known(prop)
     }
 }
 
@@ -561,13 +679,8 @@ impl AsRef<str> for AttrKey {
 impl PartialEq for AttrKey {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        // Keys from `AttrKey::new` share one vocabulary literal, so the
-        // common case answers on the pointer. `Static` is public, though, so
-        // the byte comparison still has to run as a fallback.
         match (self, other) {
-            (AttrKey::Static(left), AttrKey::Static(right)) => {
-                std::ptr::eq(*left, *right) || left == right
-            }
+            (AttrKey::Known(left), AttrKey::Known(right)) => left == right,
             _ => self.as_str() == other.as_str(),
         }
     }
@@ -717,137 +830,10 @@ fn intern(name: &str) -> Arc<str> {
     })
 }
 
-/// Known attribute vocabulary: every contract-declared name (enforced by
-/// `well_known_covers_every_contract_attribute`). The `match` lowers to a length
-/// switch, so the table grows without costing lookups.
-fn well_known(name: &str) -> Option<&'static str> {
-    Some(match name {
-        "active" => "active",
-        "align" => "align",
-        "alt" => "alt",
-        "anchor" => "anchor",
-        "anchor-ref" => "anchor-ref",
-        "aria-checked" => "aria-checked",
-        "aria-description" => "aria-description",
-        "aria-disabled" => "aria-disabled",
-        "aria-expanded" => "aria-expanded",
-        "aria-haspopup" => "aria-haspopup",
-        "aria-hidden" => "aria-hidden",
-        "aria-label" => "aria-label",
-        "aria-role" => "aria-role",
-        "busy" => "busy",
-        "checked" => "checked",
-        "class" => "class",
-        "column" => "column",
-        "column-span" => "column-span",
-        "columns" => "columns",
-        "command" => "command",
-        "content" => "content",
-        "data-benchmark" => "data-benchmark",
-        "data-index" => "data-index",
-        "data-mesh-element" => "data-mesh-element",
-        "data-tooltip-disabled" => "data-tooltip-disabled",
-        "default" => "default",
-        "destructive" => "destructive",
-        "disabled" => "disabled",
-        "expanded" => "expanded",
-        "focus-scope" => "focus-scope",
-        "for" => "for",
-        "gap" => "gap",
-        "gravity" => "gravity",
-        "height" => "height",
-        "hidden" => "hidden",
-        "href" => "href",
-        "id" => "id",
-        "indeterminate" => "indeterminate",
-        "invalid" => "invalid",
-        "justify" => "justify",
-        "key" => "key",
-        "keybind" => "keybind",
-        "label" => "label",
-        "lang" => "lang",
-        "layer" => "layer",
-        "masked" => "masked",
-        "max" => "max",
-        "max-height" => "max-height",
-        "max-width" => "max-width",
-        "min" => "min",
-        "min-height" => "min-height",
-        "min-width" => "min-width",
-        "modal" => "modal",
-        "multiline" => "multiline",
-        "name" => "name",
-        "offset-x" => "offset-x",
-        "offset-y" => "offset-y",
-        "open" => "open",
-        "orient" => "orient",
-        "overflow" => "overflow",
-        "overflow-x" => "overflow-x",
-        "overflow-y" => "overflow-y",
-        "part" => "part",
-        "placeholder" => "placeholder",
-        "pressed" => "pressed",
-        "readonly" => "readonly",
-        "ref" => "ref",
-        "required" => "required",
-        "role" => "role",
-        "row" => "row",
-        "row-span" => "row-span",
-        "rows" => "rows",
-        "scroll-x" => "scroll-x",
-        "scroll-y" => "scroll-y",
-        "selectable" => "selectable",
-        "selected" => "selected",
-        "size" => "size",
-        "spacing" => "spacing",
-        "src" => "src",
-        "state" => "state",
-        "step" => "step",
-        "style" => "style",
-        "title" => "title",
-        "tooltip" => "tooltip",
-        "tooltip-anchor" => "tooltip-anchor",
-        "tooltip-for" => "tooltip-for",
-        "type" => "type",
-        "value" => "value",
-        "variant" => "variant",
-        "width" => "width",
-        _ => return None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::ELEMENT_CONTRACT_DEFS;
     use std::collections::BTreeMap;
-
-    #[test]
-    fn well_known_covers_every_contract_attribute() {
-        let mut missing: Vec<&str> = Vec::new();
-        for def in ELEMENT_CONTRACT_DEFS {
-            for attribute in def.attributes {
-                if !AttrKey::new(attribute.name).is_static() {
-                    missing.push(attribute.name);
-                }
-            }
-        }
-        missing.sort_unstable();
-        missing.dedup();
-        assert!(
-            missing.is_empty(),
-            "element contract attributes missing from the interned vocabulary: {missing:?}"
-        );
-    }
-
-    #[test]
-    fn well_known_returns_the_matching_name() {
-        for def in ELEMENT_CONTRACT_DEFS {
-            for attribute in def.attributes {
-                assert_eq!(AttrKey::new(attribute.name).as_str(), attribute.name);
-            }
-        }
-    }
 
     #[test]
     fn unknown_names_share_one_allocation() {
@@ -940,10 +926,10 @@ mod tests {
                         reference.insert(name.to_string(), value)
                     );
                 }
-                2 => assert_eq!(map.remove(name), reference.remove(name)),
+                2 => assert_eq!(map.remove_by_name(name), reference.remove(name)),
                 _ => {
-                    assert_eq!(map.get(name), reference.get(name));
-                    assert_eq!(map.contains_key(name), reference.contains_key(name));
+                    assert_eq!(map.get_by_name(name), reference.get(name));
+                    assert_eq!(map.contains_name(name), reference.contains_key(name));
                 }
             }
             assert_eq!(map.len(), reference.len());
@@ -967,20 +953,20 @@ mod tests {
         map.insert(AttrKey::new("class"), "panel".to_string());
 
         map.entry(AttrKey::new("class")).or_insert("other".into());
-        assert_eq!(map.get("class").map(String::as_str), Some("panel"));
+        assert_eq!(map.get(Prop::Class).map(String::as_str), Some("panel"));
 
         map.entry(AttrKey::new("content"))
             .or_insert_with(|| "hello".to_string());
-        assert_eq!(map.get("content").map(String::as_str), Some("hello"));
+        assert_eq!(map.get(Prop::Content).map(String::as_str), Some("hello"));
 
         map.entry(AttrKey::new("aria-label")).or_default();
-        assert_eq!(map.get("aria-label").map(String::as_str), Some(""));
+        assert_eq!(map.get(Prop::AriaLabel).map(String::as_str), Some(""));
 
         let keys: Vec<&str> = map.keys().map(AttrKey::as_str).collect();
         assert_eq!(keys, ["aria-label", "class", "content"]);
 
         map.entry(AttrKey::new("class")).or_default().push_str("-x");
-        assert_eq!(map.get("class").map(String::as_str), Some("panel-x"));
+        assert_eq!(map.get(Prop::Class).map(String::as_str), Some("panel-x"));
     }
 
     #[test]
@@ -1006,18 +992,22 @@ mod tests {
         );
         map.insert_value(AttrKey::new("data-items"), serde_json::json!([1, 2]));
 
-        assert!(map.get_value("disabled").unwrap().legacy_bool());
-        assert_eq!(map.get_value("min").unwrap().parse_f32(), Some(1.5));
+        assert!(map.get_value(Prop::Disabled).unwrap().legacy_bool());
+        assert_eq!(map.get_value(Prop::Min).unwrap().parse_f32(), Some(1.5));
         assert_eq!(
-            map.get_value("value").unwrap().to_legacy_string(),
+            map.get_value(Prop::Value).unwrap().to_legacy_string(),
             String::new()
         );
         assert_eq!(
-            map.get_value("zzz-custom").unwrap().to_legacy_string(),
+            map.get_value_by_name("zzz-custom")
+                .unwrap()
+                .to_legacy_string(),
             r#"{"enabled":true}"#
         );
         assert_eq!(
-            map.get_value("data-items").unwrap().to_legacy_string(),
+            map.get_value_by_name("data-items")
+                .unwrap()
+                .to_legacy_string(),
             "[1,2]"
         );
 
@@ -1031,7 +1021,7 @@ mod tests {
             );
         }
 
-        assert_eq!(map.get("disabled").map(String::as_str), Some("true"));
+        assert_eq!(map.get(Prop::Disabled).map(String::as_str), Some("true"));
         let disabled = &map.entries[map.find("disabled").unwrap()].1;
         let StoredAttributeValue::Typed(disabled) = disabled else {
             panic!("immutable string reads should preserve the typed value");
@@ -1039,12 +1029,12 @@ mod tests {
         assert_eq!(disabled.rendered.get().map(String::as_str), Some("true"));
 
         map.insert_value(AttrKey::new("label"), serde_json::json!("Ready"));
-        assert!(map.get_value("label").unwrap().is_string());
-        assert_eq!(map.get("label").map(String::as_str), Some("Ready"));
+        assert!(map.get_value(Prop::Label).unwrap().is_string());
+        assert_eq!(map.get(Prop::Label).map(String::as_str), Some("Ready"));
 
-        map.get_mut("min").unwrap().push('0');
-        assert!(map.get_value("min").unwrap().is_string());
-        assert_eq!(map.get("min").map(String::as_str), Some("1.50"));
+        map.get_mut(Prop::Min).unwrap().push('0');
+        assert!(map.get_value(Prop::Min).unwrap().is_string());
+        assert_eq!(map.get(Prop::Min).map(String::as_str), Some("1.50"));
     }
 
     #[test]
@@ -1071,23 +1061,47 @@ mod tests {
         );
     }
 
-    /// `Static` is public, so equality cannot assume the vocabulary table.
     #[test]
-    fn independently_constructed_static_keys_compare_by_contents() {
-        let interned = AttrKey::new("class");
-        let hand_built = AttrKey::Static(String::from("class").leak());
-        assert_eq!(interned, hand_built);
-        assert_eq!(interned.cmp(&hand_built), Ordering::Equal);
-
+    fn set_reports_the_change_class_only_for_real_changes() {
         let mut map = AttributeMap::new();
-        map.insert(hand_built, "panel".to_string());
-        assert_eq!(map.get("class").map(String::as_str), Some("panel"));
         assert_eq!(
-            map.insert(interned, "other".to_string()).as_deref(),
-            Some("panel"),
-            "the two keys must address the same slot"
+            map.set(Prop::Content, "a".into()),
+            Prop::Content.change_class()
         );
-        assert_eq!(map.len(), 1);
+        assert_eq!(map.set(Prop::Content, "a".into()), ChangeClass::empty());
+        assert_eq!(map.set(Prop::Class, "x".into()), ChangeClass::STYLE);
+        assert_eq!(
+            map.set_value(Prop::Checked, serde_json::json!(true)),
+            Prop::Checked.change_class()
+        );
+        assert_eq!(
+            map.set(Prop::Checked, "true".into()),
+            ChangeClass::empty(),
+            "equal text forms are the same value"
+        );
+        assert_eq!(map.set("data-custom", "1".into()), ChangeClass::FREE_FORM);
+        assert_eq!(map.unset(Prop::Class), ChangeClass::STYLE);
+        assert_eq!(map.unset(Prop::Class), ChangeClass::empty());
+        assert!(map.flag(Prop::Checked));
+        assert_eq!(map.text(Prop::Content), Some("a"));
+    }
+
+    #[test]
+    fn prop_and_name_lookups_agree_past_the_linear_scan_threshold() {
+        let mut map = AttributeMap::new();
+        for (index, prop) in Prop::ALL.iter().take(20).enumerate() {
+            map.insert(*prop, index.to_string());
+        }
+        map.insert("data-custom", "free".into());
+        for prop in Prop::ALL.iter().take(20) {
+            assert_eq!(map.get(*prop), map.get_by_name(prop.name()));
+            assert!(matches!(AttrKey::new(prop.name()), AttrKey::Known(known) if known == *prop));
+        }
+        assert_eq!(
+            map.get_by_name("data-custom").map(String::as_str),
+            Some("free")
+        );
+        assert_eq!(map.number(Prop::ALL[3]), Some(3.0));
     }
 
     #[test]
@@ -1095,10 +1109,13 @@ mod tests {
         let mut map: AttributeMap = AttributeMap::new();
         map.insert(AttrKey::new("class"), "panel".to_string());
         map.insert(AttrKey::new("data-custom"), "value".to_string());
-        assert_eq!(map.get("class").map(String::as_str), Some("panel"));
-        assert_eq!(map.get("data-custom").map(String::as_str), Some("value"));
-        assert!(map.contains_key("class"));
-        assert_eq!(map.remove("class").as_deref(), Some("panel"));
-        assert!(!map.contains_key("class"));
+        assert_eq!(map.get(Prop::Class).map(String::as_str), Some("panel"));
+        assert_eq!(
+            map.get_by_name("data-custom").map(String::as_str),
+            Some("value")
+        );
+        assert!(map.contains_key(Prop::Class));
+        assert_eq!(map.remove(Prop::Class).as_deref(), Some("panel"));
+        assert!(!map.contains_key(Prop::Class));
     }
 }

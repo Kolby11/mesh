@@ -1,6 +1,7 @@
 use super::super::paint_node::*;
 use super::super::*;
 use super::common::*;
+use mesh_core_elements::Prop;
 use mesh_core_elements::style::Corners;
 use std::sync::Arc;
 
@@ -9,7 +10,7 @@ fn display_text_payload_clone_shares_the_text_allocation() {
     let mut text_node = node(1, "text", 0.0, 0.0, 100.0, 20.0);
     text_node
         .attributes
-        .insert("content".into(), "shared display text".into());
+        .insert(Prop::Content, "shared display text".into());
 
     let DisplayPaintContent::Text(first) = build_paint_content(&text_node) else {
         panic!("text node must produce text paint content");
@@ -26,7 +27,7 @@ fn rebuilt_display_node_retains_unchanged_text_allocation() {
     let mut text_node = node(1, "text", 0.0, 0.0, 100.0, 20.0);
     text_node
         .attributes
-        .insert("content".into(), "retained display text".into());
+        .insert(Prop::Content, "retained display text".into());
     let first = build_paint_node(&text_node, 0.0, 0.0);
 
     text_node.computed_style.font_size += 1.0;
@@ -44,7 +45,7 @@ fn rebuilt_display_node_retains_unchanged_text_allocation() {
 #[test]
 fn input_display_payload_preserves_preedit_decoration_range() {
     let mut input = node(1, "input", 0.0, 0.0, 160.0, 32.0);
-    input.attributes.insert("value".into(), "A🙂候B".into());
+    input.attributes.insert(Prop::Value, "A🙂候B".into());
     input.input_preedit.get_or_insert_default().start = 5;
     input.input_preedit.get_or_insert_default().end = 8;
     input.input_preedit.get_or_insert_default().cursor_begin = 5;

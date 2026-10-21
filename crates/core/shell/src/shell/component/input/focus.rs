@@ -1,4 +1,5 @@
 use super::super::*;
+use mesh_core_elements::Prop;
 use mesh_core_elements::style::{Overflow, TextAlign, TextDirection, TextOverflow};
 
 impl FrontendSurfaceComponent {
@@ -319,9 +320,9 @@ impl FrontendSurfaceComponent {
 
         let text = node
             .attributes
-            .get("text")
+            .get(Prop::Text)
             .map(String::as_str)
-            .or_else(|| node.attributes.get("content").map(String::as_str))
+            .or_else(|| node.attributes.get(Prop::Content).map(String::as_str))
             .unwrap_or("");
         if text.is_empty() {
             return None;
@@ -412,7 +413,7 @@ pub(super) fn selectable_text_target_key(tree: &WidgetNode, x: f32, y: f32) -> O
             node.tag == "text"
                 && node
                     .attributes
-                    .get("selectable")
+                    .get(Prop::Selectable)
                     .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1"))
         })
     })
@@ -435,7 +436,7 @@ mod selectable_text_target_key_tests {
     #[test]
     fn finds_selectable_text_with_no_interactive_ancestors() {
         let mut text = positioned_node("root/0", "text", 0.0, 0.0, 40.0, 20.0);
-        text.attributes.insert("selectable".into(), "true".into());
+        text.attributes.insert(Prop::Selectable, "true".into());
         let mut root = positioned_node("root", "row", 0.0, 0.0, 40.0, 20.0);
         root.children.push(text);
 
@@ -448,7 +449,7 @@ mod selectable_text_target_key_tests {
     #[test]
     fn returns_none_when_an_ancestor_is_interactive() {
         let mut text = positioned_node("root/0/0", "text", 0.0, 0.0, 40.0, 20.0);
-        text.attributes.insert("selectable".into(), "true".into());
+        text.attributes.insert(Prop::Selectable, "true".into());
         let mut button = positioned_node("root/0", "button", 0.0, 0.0, 40.0, 20.0);
         button.children.push(text);
         let mut root = positioned_node("root", "row", 0.0, 0.0, 40.0, 20.0);
@@ -469,7 +470,7 @@ mod selectable_text_target_key_tests {
     fn chain_leaf(depth: usize) -> WidgetNode {
         if depth == 0 {
             let mut text = positioned_node("chain/leaf", "text", 0.0, 0.0, 40.0, 20.0);
-            text.attributes.insert("selectable".into(), "true".into());
+            text.attributes.insert(Prop::Selectable, "true".into());
             text
         } else {
             let mut node = positioned_node(&format!("chain/{depth}"), "box", 0.0, 0.0, 40.0, 20.0);
@@ -530,7 +531,7 @@ mod selectable_text_target_key_tests {
                 node.tag == "text"
                     && node
                         .attributes
-                        .get("selectable")
+                        .get(Prop::Selectable)
                         .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1"))
             })
         })

@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_elements::Prop;
 
 pub(super) fn collect_hover_changed_ids(
     previous: &[NodeId],
@@ -84,7 +85,7 @@ pub(super) fn apply_runtime_attribute_state(node: &mut WidgetNode) {
 
 pub(super) fn apply_hidden_attribute_layout(node: &mut WidgetNode) {
     let authored = node.authored_payload();
-    let hidden = authored.attributes.get("hidden").is_some_and(|value| {
+    let hidden = authored.attributes.get(Prop::Hidden).is_some_and(|value| {
         matches!(
             value.as_str(),
             "" | "true" | "1" | "hidden" | "disabled" | "checked"
@@ -230,7 +231,7 @@ pub(super) fn collect_selector_state_dependencies(
 }
 
 pub(super) fn append_class(node: &mut WidgetNode, class_name: &str) {
-    let class = node.attributes.entry("class".into()).or_default();
+    let class = node.attributes.entry(Prop::Class).or_default();
     let has_class = class
         .split_whitespace()
         .any(|candidate| candidate == class_name);
@@ -274,7 +275,7 @@ pub(super) fn annotate_selected_text_node(
     let matches_selection = node.tag == "text"
         && node
             .attributes
-            .get("selectable")
+            .get(Prop::Selectable)
             .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1"));
     if matches_selection {
         node.text_selection = Some(std::sync::Arc::new(mesh_core_elements::TextSelection {

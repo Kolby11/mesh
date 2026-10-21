@@ -1,4 +1,5 @@
 use super::super::*;
+use mesh_core_elements::Prop;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(in crate::shell::component) struct PressedTargetSnapshot {
@@ -174,7 +175,7 @@ impl FrontendSurfaceComponent {
         if let Some(node) = find_node_by_key(tree, slider_key) {
             if let Some(script_value) = node
                 .attributes
-                .get("value")
+                .get(Prop::Value)
                 .and_then(|value| value.parse::<f32>().ok())
             {
                 self.slider_script_values.insert(node.id, script_value);
@@ -197,17 +198,17 @@ impl FrontendSurfaceComponent {
         };
         let is_vertical = node
             .attributes
-            .get("orient")
+            .get(Prop::Orient)
             .map(|v| v == "vertical")
             .unwrap_or(false);
         let min = node
             .attributes
-            .get("min")
+            .get(Prop::Min)
             .and_then(|value: &String| value.parse::<f32>().ok())
             .unwrap_or(0.0);
         let max = node
             .attributes
-            .get("max")
+            .get(Prop::Max)
             .and_then(|value: &String| value.parse::<f32>().ok())
             .unwrap_or(100.0);
 
@@ -238,19 +239,19 @@ impl FrontendSurfaceComponent {
     ) {
         let is_vertical = node
             .attributes
-            .get("orient")
+            .get(Prop::Orient)
             .map(|v| v == "vertical")
             .unwrap_or(false);
         let (left, top, right, bottom) = bounds;
 
         let min = node
             .attributes
-            .get("min")
+            .get(Prop::Min)
             .and_then(|value: &String| value.parse::<f32>().ok())
             .unwrap_or(0.0);
         let max = node
             .attributes
-            .get("max")
+            .get(Prop::Max)
             .and_then(|value: &String| value.parse::<f32>().ok())
             .unwrap_or(100.0);
 
@@ -270,7 +271,7 @@ impl FrontendSurfaceComponent {
         let value = min + (max - min) * pct;
         if let Some(script_value) = node
             .attributes
-            .get("value")
+            .get(Prop::Value)
             .and_then(|value| value.parse::<f32>().ok())
         {
             self.slider_script_values.insert(node.id, script_value);
@@ -282,7 +283,7 @@ impl FrontendSurfaceComponent {
         find_node_by_key(tree, slider_key).and_then(|node| {
             self.slider_values.get(&node.id).copied().or_else(|| {
                 node.attributes
-                    .get("value")
+                    .get(Prop::Value)
                     .and_then(|value| value.parse::<f32>().ok())
             })
         })
@@ -298,7 +299,7 @@ impl FrontendSurfaceComponent {
             .copied()
             .unwrap_or_else(|| {
                 node.attributes
-                    .get("checked")
+                    .get(Prop::Checked)
                     .is_some_and(|value| matches!(value.as_str(), "true" | "1" | "checked"))
             });
         let next = !current;
@@ -313,7 +314,7 @@ impl FrontendSurfaceComponent {
             .copied()
             .unwrap_or_else(|| {
                 node.attributes
-                    .get("checked")
+                    .get(Prop::Checked)
                     .is_some_and(|value| matches!(value.as_str(), "true" | "1" | "checked"))
             });
         let next = !current;
@@ -454,9 +455,9 @@ impl FrontendSurfaceComponent {
         }
         let value = option
             .attributes
-            .get("value")
+            .get(Prop::Value)
             .cloned()
-            .or_else(|| option.attributes.get("label").cloned())
+            .or_else(|| option.attributes.get(Prop::Label).cloned())
             .unwrap_or_default();
         self.checked_values.insert(option.id, true);
 
@@ -501,7 +502,11 @@ impl FrontendSurfaceComponent {
         if !node_can_receive_activation(tree, radio_key) {
             return Ok(Vec::new());
         }
-        let value = radio.attributes.get("value").cloned().unwrap_or_default();
+        let value = radio
+            .attributes
+            .get(Prop::Value)
+            .cloned()
+            .unwrap_or_default();
         if let Some((group_key, group_id)) =
             ancestor_source_target(tree, radio_key, &["radio-group"])
         {
@@ -1542,12 +1547,12 @@ impl FrontendSurfaceComponent {
         let node = find_node_by_key(tree, slider_key)?;
         let min = node
             .attributes
-            .get("min")
+            .get(Prop::Min)
             .and_then(|value| value.parse::<f32>().ok())
             .unwrap_or(0.0);
         let max = node
             .attributes
-            .get("max")
+            .get(Prop::Max)
             .and_then(|value| value.parse::<f32>().ok())
             .unwrap_or(100.0);
         if max <= min {
@@ -1560,7 +1565,7 @@ impl FrontendSurfaceComponent {
             .clamp(min, max);
         let step = node
             .attributes
-            .get("step")
+            .get(Prop::Step)
             .and_then(|value| value.parse::<f32>().ok())
             .filter(|value| *value > 0.0)
             .unwrap_or_else(|| ((max - min) / 20.0).max(0.01));
@@ -1626,7 +1631,7 @@ fn rove_aria_menu_focus(tree: &WidgetNode, key: &str, backward: bool) -> Option<
     let menu = path.iter().rev().skip(1).find_map(|candidate| {
         find_node_by_key(tree, candidate).filter(|node| {
             node.attributes
-                .get("role")
+                .get(Prop::Role)
                 .is_some_and(|role| role == "menu")
         })
     })?;
@@ -1650,7 +1655,7 @@ fn collect_aria_menu_item_keys<'a>(
 ) {
     let is_menu_item = node
         .attributes
-        .get("role")
+        .get(Prop::Role)
         .is_some_and(|role| role.starts_with("menuitem"));
     if is_menu_item
         && node
@@ -1760,6 +1765,7 @@ pub(in crate::shell::component) fn captured_release_key(
 #[cfg(test)]
 mod navigation_performance_tests {
     use super::{ancestor_source_target, key_path, rove_aria_menu_focus, sibling_source_key};
+    use mesh_core_elements::Prop;
     use mesh_core_elements::WidgetNode;
 
     fn deep_keyed_tree(depth: usize) -> (WidgetNode, String) {
@@ -1799,20 +1805,20 @@ mod navigation_performance_tests {
         let mut select = keyed_node("input", "root/select");
         select
             .attributes
-            .insert("data-mesh-element".into(), "select".into());
+            .insert(Prop::DataMeshElement, "select".into());
         for key in ["root/select/first", "root/select/second"] {
             let mut option = keyed_node("input", key);
             option
                 .attributes
-                .insert("data-mesh-element".into(), "option".into());
+                .insert(Prop::DataMeshElement, "option".into());
             select.children.push(option);
         }
 
         let mut menu = keyed_node("column", "root/menu");
-        menu.attributes.insert("role".into(), "menu".into());
+        menu.attributes.insert(Prop::Role, "menu".into());
         for key in ["root/menu/first", "root/menu/second"] {
             let mut item = keyed_node("row", key);
-            item.attributes.insert("role".into(), "menuitem".into());
+            item.attributes.insert(Prop::Role, "menuitem".into());
             menu.children.push(item);
         }
         root.children.extend([select, menu]);

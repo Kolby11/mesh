@@ -198,7 +198,7 @@ text {
     assert_eq!(
         node_by_mesh_key(tree, "root/0/0")
             .attributes
-            .get("value")
+            .get(Prop::Value)
             .map(String::as_str),
         Some("typed-text"),
         "input value must survive focus restyle"
@@ -208,7 +208,7 @@ text {
     assert_eq!(
         node_by_mesh_key(tree, "root/0/1")
             .attributes
-            .get("value")
+            .get(Prop::Value)
             .map(String::as_str),
         Some("88.00"),
         "slider value must survive focus restyle"

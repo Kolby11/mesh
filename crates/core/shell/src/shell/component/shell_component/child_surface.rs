@@ -1,5 +1,6 @@
 use super::*;
 use crate::shell::PopoverTriggerReference;
+use mesh_core_elements::Prop;
 
 #[cfg(test)]
 pub(super) fn collect_child_surface_requests(
@@ -197,7 +198,12 @@ fn bounds_escape_container(bounds: (f32, f32, f32, f32), container: (f32, f32, f
 }
 
 fn popover_anchor_attribute_value(popover: &WidgetNode) -> Option<&str> {
-    for name in ["anchor-ref", "anchor-target", "anchor-element", "target"] {
+    for name in [
+        Prop::AnchorRef,
+        Prop::AnchorTarget,
+        Prop::AnchorElement,
+        Prop::Target,
+    ] {
         if let Some(value) = popover.attributes.get(name) {
             return Some(value.trim());
         }

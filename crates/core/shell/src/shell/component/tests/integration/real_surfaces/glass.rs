@@ -744,7 +744,7 @@ fn launcher_wrapper(component: &FrontendSurfaceComponent) -> &WidgetNode {
             && node.children.first().is_some_and(|popover| {
                 popover
                     .attributes
-                    .get("class")
+                    .get(Prop::Class)
                     .is_some_and(|class| class.contains("launcher-shell"))
             })
         {

@@ -275,7 +275,7 @@ end
                     }
                 );
                 assert_eq!(
-                    node.attributes.get(attr).unwrap(),
+                    node.attributes.get_by_name(attr).unwrap(),
                     &match &initial {
                         serde_json::Value::String(value) => value.clone(),
                         value => value.to_string(),

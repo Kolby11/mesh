@@ -3,6 +3,7 @@ use super::super::common::*;
 use crate::display_list::{DamageRect, DisplayListRepaintPolicy, RetainedDisplayList};
 use crate::{FractionalScale, RenderObjectTree};
 use mesh_core_elements::LayoutRect;
+use mesh_core_elements::Prop;
 use mesh_core_elements::style::{Overflow, Position};
 
 #[test]
@@ -134,7 +135,7 @@ fn retained_content_scope_scroll_matches_full_paint_with_text_and_damage() {
             if step == 2 {
                 root.children[1]
                     .attributes
-                    .insert("content".into(), "changed row".into());
+                    .insert(Prop::Content, "changed row".into());
             }
             if step == 4 {
                 root.children[1].computed_style.opacity = 0.5;

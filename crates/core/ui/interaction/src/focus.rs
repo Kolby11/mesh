@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_elements::Prop;
 
 #[derive(Debug, Clone)]
 struct FocusTraversalTarget {
@@ -214,7 +215,7 @@ fn compare_f32(left: f32, right: f32) -> std::cmp::Ordering {
 
 fn parse_tabindex(node: &WidgetNode) -> Option<i32> {
     node.attributes
-        .get("tabindex")
+        .get(Prop::Tabindex)
         .and_then(|value| value.parse::<i32>().ok())
 }
 

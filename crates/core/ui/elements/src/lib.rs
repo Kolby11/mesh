@@ -7,6 +7,7 @@ pub mod interaction_contract;
 pub mod layout;
 pub mod lru;
 pub mod popover;
+pub mod prop;
 pub mod pseudo_state;
 pub mod style;
 /// Element model and UI algorithms for MESH.
@@ -61,6 +62,7 @@ pub use popover::{
     PopoverPlacement, PopoverPlacementDiagnostic, PopoverPlacementDiagnosticKind,
     PopoverPlacementField,
 };
+pub use prop::{ChangeClass, Prop, PropType};
 pub use pseudo_state::{
     PSEUDO_STATE_TABLE, PseudoState, PseudoStateKind, PseudoStateSpec, authored_element_state,
     pseudo_state_mask, pseudo_state_specs,

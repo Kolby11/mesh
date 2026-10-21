@@ -1160,7 +1160,7 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
         first_node_by_tag(component.last_tree.as_ref().unwrap(), "text")
             .unwrap()
             .attributes
-            .get("content")
+            .get(Prop::Content)
             .map(String::as_str),
         Some("before")
     );
@@ -1179,7 +1179,7 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
         first_node_by_tag(component.last_tree.as_ref().unwrap(), "text")
             .unwrap()
             .attributes
-            .get("content")
+            .get(Prop::Content)
             .map(String::as_str),
         Some("after")
     );
@@ -2004,7 +2004,7 @@ fn retained_paint_path_records_phase26_cpu_attribution_stages() {
 }
 
 fn content_of(node: &WidgetNode, text: &str) -> bool {
-    node.attributes.get("content").map(String::as_str) == Some(text)
+    node.attributes.get(Prop::Content).map(String::as_str) == Some(text)
         || node.children.iter().any(|child| content_of(child, text))
 }
 
@@ -2110,9 +2110,9 @@ button.after { background: #0000ff; width: 200px; }
     let patched_button = first_node_by_tag(component.last_tree.as_ref().unwrap(), "button")
         .unwrap()
         .clone();
-    assert_eq!(patched_button.attributes.get("class").unwrap(), "after");
+    assert_eq!(patched_button.attributes.get(Prop::Class).unwrap(), "after");
     assert_eq!(
-        patched_button.attributes.get("aria-label").unwrap(),
+        patched_button.attributes.get(Prop::AriaLabel).unwrap(),
         "after"
     );
 

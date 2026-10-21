@@ -7,6 +7,7 @@
 
 #![cfg(feature = "renderer-parley")]
 
+use mesh_core_elements::Prop;
 use std::cell::RefCell;
 
 use mesh_core_elements::WidgetNode;
@@ -164,8 +165,7 @@ mod tests {
 
     fn text_node(content: &str, width: f32) -> WidgetNode {
         let mut node = WidgetNode::new("text");
-        node.attributes
-            .insert("content".to_string(), content.to_string());
+        node.attributes.insert(Prop::Content, content.to_string());
         node.layout = LayoutRect {
             x: 0.0,
             y: 0.0,

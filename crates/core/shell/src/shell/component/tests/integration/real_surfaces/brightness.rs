@@ -39,7 +39,7 @@ fn shipped_navigation_brightness_uses_one_level_icon_and_scrolls_both_input_kind
         .collect();
     assert_eq!(icons.len(), 1, "brightness button must contain one icon");
     assert_eq!(
-        icons[0].attributes.get("name").map(String::as_str),
+        icons[0].attributes.get(Prop::Name).map(String::as_str),
         Some("display-brightness-medium")
     );
     let icon_key = icons[0].mesh_key().expect("brightness icon key");

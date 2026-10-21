@@ -1,18 +1,19 @@
 use super::*;
 use mesh_core_component::style::StyleValue;
+use mesh_core_elements::Prop;
 
 #[test]
 fn attribute_fingerprint_uses_node_id_instead_of_runtime_key_string() {
     let mut node = WidgetNode::new("box");
     node.id = stable_runtime_node_id("root/0");
     node.set_mesh_key("root/0");
-    node.attributes.insert("class".into(), "card".into());
+    node.attributes.insert(Prop::Class, "card".into());
     let original = attributes_fingerprint(&node);
 
     node.set_mesh_key("different/debug/path");
     assert_eq!(attributes_fingerprint(&node), original);
 
-    node.attributes.insert("class".into(), "card active".into());
+    node.attributes.insert(Prop::Class, "card active".into());
     assert_ne!(attributes_fingerprint(&node), original);
 }
 
@@ -59,7 +60,7 @@ fn attribute_fingerprint_tracks_module_identity_for_style_diagnostics() {
 fn attribute_fingerprint_ignores_scroll_annotations_tracked_by_layout_fingerprint() {
     let mut node = WidgetNode::new("scroll-area");
     node.set_mesh_key("root/0");
-    node.attributes.insert("class".into(), "scroller".into());
+    node.attributes.insert(Prop::Class, "scroller".into());
     let original_attributes = attributes_fingerprint(&node);
     let original_layout = layout_fingerprint(&node);
 
@@ -71,7 +72,7 @@ fn attribute_fingerprint_ignores_scroll_annotations_tracked_by_layout_fingerprin
     assert_ne!(layout_fingerprint(&node), original_layout);
 
     node.attributes
-        .insert("class".into(), "scroller active".into());
+        .insert(Prop::Class, "scroller active".into());
     assert_ne!(attributes_fingerprint(&node), original_attributes);
 }
 
@@ -121,12 +122,12 @@ fn retained_snapshot_keeps_common_child_lists_inline() {
 #[test]
 fn geometry_only_snapshot_reuses_non_layout_fingerprints() {
     let mut node = WidgetNode::new("box");
-    node.attributes.insert("class".into(), "before".into());
+    node.attributes.insert(Prop::Class, "before".into());
     let previous = retained_snapshot(&node);
 
     node.layout.x = 24.0;
     node.computed_style.opacity = 0.5;
-    node.attributes.insert("class".into(), "after".into());
+    node.attributes.insert(Prop::Class, "after".into());
     node.state.set(NodeState::HOVERED, true);
 
     let geometry_only =

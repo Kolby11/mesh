@@ -2,6 +2,7 @@ use super::super::index::*;
 use super::super::state::*;
 use super::super::*;
 use super::common::*;
+use crate::Prop;
 use crate::tree::{NodeState, WidgetNode};
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use mesh_core_theme::{Theme, TokenValue};
@@ -60,7 +61,7 @@ fn cached_inline_styles_preserve_values_and_parse_diagnostics() {
     }
 
     let mut invalid = crate::tree::WidgetNode::new("box");
-    invalid.attributes.insert("style".into(), "left: {;".into());
+    invalid.attributes.insert(Prop::Style, "left: {;".into());
     let (_, first_diagnostics) = resolver.resolve_node_style_with_diagnostics_for_node_indexed(
         &rules,
         &index,
@@ -269,9 +270,9 @@ fn user_part_cascade_respects_module_and_explicit_exposure() {
     ] {
         let mut node = WidgetNode::new("icon");
         node.set_module_id(module);
-        node.attributes.insert("style".into(), "opacity: .9".into());
+        node.attributes.insert(Prop::Style, "opacity: .9".into());
         if let Some(part) = part {
-            node.attributes.insert("part".into(), part.into());
+            node.attributes.insert(Prop::Part, part.into());
         }
         node.state.set(NodeState::HOVERED, hover);
         let (style, diagnostics) = resolver.resolve_node_style_with_diagnostics_for_node_indexed(
@@ -303,7 +304,7 @@ fn user_part_memo_tracks_hover_exposure_and_replaced_stylesheets() {
     let index = StyleRuleIndex::new(&rules);
     let mut node = WidgetNode::new("icon");
     node.set_module_id("@mesh/bar");
-    node.attributes.insert("part".into(), "glyph".into());
+    node.attributes.insert(Prop::Part, "glyph".into());
     let resolver = StyleResolver::new(&theme)
         .with_incremental_matching()
         .with_finalized_memo_styles(true);
@@ -321,13 +322,13 @@ fn user_part_memo_tracks_hover_exposure_and_replaced_stylesheets() {
     node.finalized_style_valid = false;
     resolver.restyle_subtree_with_index(&mut node, &rules, &index, StyleContext::default(), None);
     assert_eq!(node.computed_style.opacity, 0.2);
-    node.attributes.remove("part");
+    node.attributes.remove(Prop::Part);
     assert!(!node.finalized_style.as_ref().unwrap().matches_node(&node));
     node.finalized_style_valid = false;
     resolver.restyle_subtree_with_index(&mut node, &rules, &index, StyleContext::default(), None);
     assert_eq!(node.computed_style.opacity, 1.0);
     drop(resolver);
-    node.attributes.insert("part".into(), "glyph".into());
+    node.attributes.insert(Prop::Part, "glyph".into());
     let revision = theme.revision();
     assert!(
         theme

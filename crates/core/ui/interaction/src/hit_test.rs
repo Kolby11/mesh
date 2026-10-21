@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_elements::Prop;
 use mesh_core_elements::style::TooltipAnchor;
 use mesh_core_elements::{HandlerTarget, NodeState};
 use std::sync::Arc;
@@ -188,7 +189,7 @@ pub fn find_node_by_key<'a>(node: &'a WidgetNode, key: &str) -> Option<&'a Widge
 
 pub fn source_element_tag(node: &WidgetNode) -> &str {
     node.attributes
-        .get("data-mesh-element")
+        .get(Prop::DataMeshElement)
         .map(String::as_str)
         .unwrap_or(node.tag.as_str())
 }
@@ -309,7 +310,7 @@ fn node_tooltip_text(node: &WidgetNode) -> Option<String> {
 fn node_tooltip_text_ref(node: &WidgetNode) -> Option<&str> {
     if node
         .attributes
-        .get("data-tooltip-disabled")
+        .get(Prop::DataTooltipDisabled)
         .is_some_and(|value| value == "true" || value == "1")
     {
         return None;
@@ -319,7 +320,7 @@ fn node_tooltip_text_ref(node: &WidgetNode) -> Option<&str> {
     // (docs/spec/09-accessibility.md: "title ... tooltip + AT description") —
     // an author who wrote one meant it to show, regardless of what else the
     // node renders.
-    for key in ["title", "tooltip"] {
+    for key in [Prop::Title, Prop::Tooltip] {
         if let Some(value) = non_empty_tooltip_text(node.attributes.get(key).map(String::as_str)) {
             return Some(value);
         }
@@ -337,7 +338,7 @@ fn node_tooltip_text_ref(node: &WidgetNode) -> Option<&str> {
         return None;
     }
 
-    for key in ["aria-label", "description", "aria-description"] {
+    for key in [Prop::AriaLabel, Prop::Description, Prop::AriaDescription] {
         if let Some(value) = non_empty_tooltip_text(node.attributes.get(key).map(String::as_str)) {
             return Some(value);
         }
@@ -355,7 +356,7 @@ fn renders_own_text(node: &WidgetNode) -> bool {
     node.tag == "text"
         && node
             .attributes
-            .get("content")
+            .get(Prop::Content)
             .is_some_and(|content| !content.trim().is_empty())
 }
 
@@ -910,7 +911,7 @@ mod tests {
         let mut root = indexed_tree(6, 8);
         root.children[2]
             .attributes
-            .insert("tooltip".into(), "Third row".into());
+            .insert(Prop::Tooltip, "Third row".into());
         root.children[2].scroll_metrics.get_or_insert_default().x = 5.0;
         root.children[4].computed_style.transform.translate_x = 7.0;
         for y in (0..120).step_by(3) {
@@ -1125,7 +1126,7 @@ mod tests {
         let mut root = indexed_tree(6, 8);
         root.children[4]
             .attributes
-            .insert("tooltip".into(), "Inherited row tooltip".into());
+            .insert(Prop::Tooltip, "Inherited row tooltip".into());
         root.children[4].computed_style.transform.translate_x = 7.0;
         root.children[4].scroll_metrics.get_or_insert_default().x = 3.0;
 
@@ -1145,7 +1146,7 @@ mod tests {
         let mut root = indexed_tree(4, 4);
         root.children[2]
             .attributes
-            .insert("tooltip".into(), "Initial tooltip".into());
+            .insert(Prop::Tooltip, "Initial tooltip".into());
         let mut cache = TooltipTargetCache::default();
 
         let initial = cache.resolve(&root, "cell-2-3", 7, None).unwrap().clone();
@@ -1154,7 +1155,7 @@ mod tests {
 
         root.children[2]
             .attributes
-            .insert("tooltip".into(), "Updated tooltip".into());
+            .insert(Prop::Tooltip, "Updated tooltip".into());
         assert_eq!(
             cache.resolve(&root, "cell-2-3", 7, None).unwrap(),
             &initial,
@@ -1187,7 +1188,7 @@ mod tests {
     fn tooltip_target_cache_preserves_anonymous_owner_fallback() {
         let fallback = Some((5.0, 6.0, 15.0, 16.0));
         let mut root = WidgetNode::new("box");
-        root.attributes.insert("tooltip".into(), "Anonymous".into());
+        root.attributes.insert(Prop::Tooltip, "Anonymous".into());
         let mut child = WidgetNode::new("text");
         child.set_mesh_key("child");
         root.children.push(child);
@@ -1360,10 +1361,8 @@ mod tests {
         disabled.set_mesh_key("disabled");
         disabled
             .attributes
-            .insert("aria-disabled".into(), "true".into());
-        disabled
-            .attributes
-            .insert("tooltip".into(), "Disabled".into());
+            .insert(Prop::AriaDisabled, "true".into());
+        disabled.attributes.insert(Prop::Tooltip, "Disabled".into());
         disabled
             .event_handlers
             .insert("click".into(), "activate".into());
@@ -1377,7 +1376,7 @@ mod tests {
 
         let mut inert = WidgetNode::new("box");
         inert.set_mesh_key("inert");
-        inert.attributes.insert("inert".into(), "true".into());
+        inert.attributes.insert(Prop::Inert, "true".into());
         inert.layout = LayoutRect {
             x: 100.0,
             y: 10.0,
@@ -1426,7 +1425,7 @@ mod tests {
         owner.set_mesh_key("owner");
         owner
             .attributes
-            .insert("tooltip".into(), "Open details".into());
+            .insert(Prop::Tooltip, "Open details".into());
 
         let mut child = WidgetNode::new("icon");
         child.set_mesh_key("child");
@@ -1446,10 +1445,10 @@ mod tests {
     fn tooltip_disabled_attribute_suppresses_title_and_accessible_label() {
         let mut node = WidgetNode::new("button");
         node.set_mesh_key("button");
-        node.attributes.insert("title".into(), "Open".into());
-        node.attributes.insert("aria-label".into(), "Open".into());
+        node.attributes.insert(Prop::Title, "Open".into());
+        node.attributes.insert(Prop::AriaLabel, "Open".into());
         node.attributes
-            .insert("data-tooltip-disabled".into(), "true".into());
+            .insert(Prop::DataTooltipDisabled, "true".into());
 
         assert_eq!(node_tooltip_text(&node), None);
         assert_eq!(find_tooltip_text_by_key(&node, "button"), None);
@@ -1466,7 +1465,7 @@ mod tests {
         button.set_mesh_key("clock-button");
         button
             .attributes
-            .insert("aria-label".into(), "10:32 AM, Monday August 24".into());
+            .insert(Prop::AriaLabel, "10:32 AM, Monday August 24".into());
 
         let time_text = WidgetNode::new("text");
         button.children.push(time_text);
@@ -1480,7 +1479,7 @@ mod tests {
         button.set_mesh_key("button");
         button
             .attributes
-            .insert("title".into(), "Open audio controls".into());
+            .insert(Prop::Title, "Open audio controls".into());
 
         let label_text = WidgetNode::new("text");
         button.children.push(label_text);
@@ -1510,7 +1509,7 @@ mod tests {
     fn a_text_leaf_does_not_shadow_its_control_tooltip_with_its_own_content() {
         let mut label = WidgetNode::new("text");
         label.set_mesh_key("label");
-        label.attributes.insert("content".into(), "Wi-Fi".into());
+        label.attributes.insert(Prop::Content, "Wi-Fi".into());
         label.accessibility.label = Some("Wi-Fi".into());
         label.layout = LayoutRect {
             x: 0.0,
@@ -1524,7 +1523,7 @@ mod tests {
         button.set_mesh_key("wifi");
         button
             .attributes
-            .insert("title".into(), "Open the Wi-Fi page".into());
+            .insert(Prop::Title, "Open the Wi-Fi page".into());
         button.layout = LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -1575,9 +1574,7 @@ mod tests {
 
         let mut placeholder = WidgetNode::new("box");
         placeholder.set_mesh_key("portal");
-        placeholder
-            .attributes
-            .insert("hidden".into(), "true".into());
+        placeholder.attributes.insert(Prop::Hidden, "true".into());
         placeholder.layout = LayoutRect {
             x: 10.0,
             y: 10.0,

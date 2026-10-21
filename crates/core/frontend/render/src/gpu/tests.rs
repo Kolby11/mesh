@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_elements::Prop;
 use skia_safe::{Canvas, Color, Color4f, Paint, Point, RRect, Rect, TileMode, gradient};
 use std::os::unix::fs::MetadataExt;
 
@@ -150,6 +151,7 @@ mod painter_parity {
     use crate::display_list::{DamageRect, DisplayListRepaintPolicy, RetainedDisplayList};
     use crate::gpu::{GpuContext, GpuTarget};
     use crate::{FrontendRenderEngine, PixelBuffer, PixelCanvasSession};
+    use mesh_core_elements::Prop;
     use mesh_core_elements::WidgetNode;
     use mesh_core_elements::layout::LayoutRect;
     use mesh_core_elements::style::{
@@ -195,7 +197,7 @@ mod painter_parity {
 
     fn text(id: u64, content: &str, layout: LayoutRect, color: Color) -> WidgetNode {
         let mut node = node(id, "text", layout, Color::TRANSPARENT);
-        node.attributes.insert("content".into(), content.into());
+        node.attributes.insert(Prop::Content, content.into());
         node.computed_style.color = color;
         node.computed_style.font_size = 13.0;
         node.computed_style.line_height = 1.3;
@@ -271,8 +273,8 @@ mod painter_parity {
                 Color::TRANSPARENT,
             );
             icon.attributes
-                .insert("name".into(), format!("mesh-parity-missing-{index}"));
-            icon.attributes.insert("size".into(), "22".into());
+                .insert(Prop::Name, format!("mesh-parity-missing-{index}"));
+            icon.attributes.insert(Prop::Size, "22".into());
             icon.computed_style.color = rgb(["#ffffff", "#80c0ff", "#ffd060"][index as usize % 3]);
             root.children.push(icon);
         }
@@ -747,7 +749,7 @@ mod frame_cost {
                 let mut label = node(id + 1, "text", (x + 12.0, y + 12.0, 110.0, 18.0));
                 label
                     .attributes
-                    .insert("content".into(), format!("Setting {row}.{column}").into());
+                    .insert(Prop::Content, format!("Setting {row}.{column}").into());
                 label.computed_style.color = color(240, 244, 248, 255);
                 label.computed_style.font_size = 13.0;
                 label.computed_style.line_height = 1.3;
@@ -776,7 +778,7 @@ mod frame_cost {
                 (16.0, 12.0 + line as f32 * 22.0, 880.0, 20.0),
             );
             label.attributes.insert(
-                "content".into(),
+                Prop::Content,
                 format!(
                     "{line:02} The quick brown fox jumps over the lazy dog — 0123456789 ABCDEFGHIJKLM"
                 )
@@ -1061,8 +1063,8 @@ mod frame_cost {
                 );
                 image
                     .attributes
-                    .insert("src".into(), path.to_string_lossy().into_owned());
-                image.attributes.insert("size".into(), "24".into());
+                    .insert(Prop::Src, path.to_string_lossy().into_owned());
+                image.attributes.insert(Prop::Size, "24".into());
                 image.computed_style.color = color(220, 240, 255, 255);
                 assert!(image.layout.x + image.layout.width <= LOGICAL.0 as f32);
                 assert!(image.layout.y + image.layout.height <= LOGICAL.1 as f32);

@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_elements::Prop;
 
 #[test]
 fn retained_generation_tracks_paint_style_fields_without_layout_changes() {
@@ -62,7 +63,7 @@ fn retained_widget_tree_reports_dirty_categories_by_stable_id() {
     tree.children[0].computed_style.background_color = Color::BLACK;
     tree.children[0]
         .attributes
-        .insert("title".into(), "changed".into());
+        .insert(Prop::Title, "changed".into());
     tree.children[0].state.set(NodeState::HOVERED, true);
 
     let dirty = retained.update(&tree);
@@ -103,7 +104,7 @@ fn retained_widget_tree_owns_render_fingerprint_diff() {
     child.layout.x = 12.0;
     child.computed_style.background_color = Color::BLACK;
     child.computed_style.box_shadow.blur_radius = 4.0;
-    child.attributes.insert("content".into(), "changed".into());
+    child.attributes.insert(Prop::Content, "changed".into());
     child.accessibility.role = AccessibilityRole::Label;
     child.accessibility.label = Some("Changed label".into());
     child.accessibility.focusable = true;
@@ -186,7 +187,7 @@ fn scoped_retained_update_matches_full_diff_and_tracks_propagated_layout() {
     let dirty_id = {
         let leaf = first_deep_leaf_mut(&mut tree);
         leaf.computed_style.background_color = Color::BLACK;
-        leaf.attributes.insert("title".into(), "changed".into());
+        leaf.attributes.insert(Prop::Title, "changed".into());
         leaf.state.set(NodeState::HOVERED, true);
         leaf.id
     };
@@ -260,7 +261,7 @@ fn narrow_script_direct_diff_finds_leaf_and_rejects_structure_changes() {
     let dirty_id = first_deep_leaf_mut(&mut fresh).id;
     first_deep_leaf_mut(&mut fresh)
         .attributes
-        .insert("content".into(), "changed".into());
+        .insert(Prop::Content, "changed".into());
     fresh.children[1].layout.x = 19.0;
 
     let dirty_roots = narrow_script_dirty_roots(&previous, &fresh)

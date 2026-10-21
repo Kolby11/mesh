@@ -1,3 +1,4 @@
+use mesh_core_elements::Prop;
 use mesh_core_elements::style::Color;
 use mesh_core_elements::{LayoutRect, WidgetNode};
 use mesh_core_icon::{
@@ -95,8 +96,8 @@ fn production_module_icon_path_renders_prepared_material_glyph() {
     icon.computed_style.icon_fill = Some(0.0);
     icon.computed_style.icon_weight = Some(400.0);
     icon.attributes
-        .insert("name".into(), "audio-volume-high".into());
-    icon.attributes.insert("size".into(), "18".into());
+        .insert(Prop::Name, "audio-volume-high".into());
+    icon.attributes.insert(Prop::Size, "18".into());
     root.children.push(icon);
 
     let mut buffer = PixelBuffer::new(32, 32);
@@ -115,7 +116,7 @@ fn production_module_icon_path_renders_prepared_material_glyph() {
     let mut missing_root = root.clone();
     missing_root.children[0]
         .attributes
-        .insert("name".into(), "definitely-missing-icon".into());
+        .insert(Prop::Name, "definitely-missing-icon".into());
     let mut missing_buffer = PixelBuffer::new(32, 32);
     paint_frontend_tree_at_for_module(
         &missing_root,

@@ -1,5 +1,6 @@
 use super::*;
 use crate::shell::PopoverTriggerReference;
+use mesh_core_elements::Prop;
 
 #[test]
 fn measured_surface_geometry_uses_root_box_margin_and_css_reservation_policy() {
@@ -150,9 +151,9 @@ fn keyed_node(tag: &str, key: &str, x: f32, y: f32, width: f32, height: f32) -> 
 fn open_popover_nodes_derive_child_surface_requests() {
     let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 40.0);
     let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 96.0, 36.0);
-    popover.attributes.insert("open".into(), "true".into());
-    popover.attributes.insert("anchor".into(), "bottom".into());
-    popover.attributes.insert("offset-y".into(), "6".into());
+    popover.attributes.insert(Prop::Open, "true".into());
+    popover.attributes.insert(Prop::Anchor, "bottom".into());
+    popover.attributes.insert(Prop::OffsetY, "6".into());
     let child = keyed_node("button", "root/menu/option", 20.0, 54.0, 96.0, 24.0);
     popover.children.push(child);
     root.children.push(popover);
@@ -201,7 +202,7 @@ fn popover_with_descendant_box_shadow_gets_buffer_padding() {
     // language-popover/theme-selector's bubble options are built.
     let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 40.0);
     let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 96.0, 36.0);
-    popover.attributes.insert("open".into(), "true".into());
+    popover.attributes.insert(Prop::Open, "true".into());
     let mut child = keyed_node("button", "root/menu/option", 20.0, 42.0, 96.0, 36.0);
     child.computed_style.box_shadow = mesh_core_elements::style::BoxShadow {
         offset_x: 0.0,
@@ -235,15 +236,13 @@ fn popover_with_descendant_box_shadow_gets_buffer_padding() {
 fn open_popover_anchor_ref_uses_trigger_bounds() {
     let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 80.0);
     let mut trigger = keyed_node("button", "root/trigger", 12.0, 8.0, 44.0, 20.0);
-    trigger
-        .attributes
-        .insert("ref".into(), "menu_button".into());
+    trigger.attributes.insert(Prop::Ref, "menu_button".into());
     let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 80.0, 10.0);
-    popover.attributes.insert("open".into(), "true".into());
+    popover.attributes.insert(Prop::Open, "true".into());
     popover
         .attributes
-        .insert("anchor-ref".into(), "menu_button".into());
-    popover.attributes.insert("gravity".into(), "bottom".into());
+        .insert(Prop::AnchorRef, "menu_button".into());
+    popover.attributes.insert(Prop::Gravity, "bottom".into());
     root.children.push(trigger);
     root.children.push(popover);
 
@@ -264,10 +263,8 @@ fn open_popover_anchor_ref_uses_trigger_bounds() {
 fn invalid_popover_placement_is_not_promoted_and_reports_typed_diagnostics() {
     let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 80.0);
     let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 80.0, 10.0);
-    popover.attributes.insert("open".into(), "true".into());
-    popover
-        .attributes
-        .insert("gravity".into(), "diagonal".into());
+    popover.attributes.insert(Prop::Open, "true".into());
+    popover.attributes.insert(Prop::Gravity, "diagonal".into());
     root.children.push(popover);
 
     let mut requests = Vec::new();
@@ -289,10 +286,10 @@ fn invalid_popover_placement_is_not_promoted_and_reports_typed_diagnostics() {
 fn missing_popover_trigger_is_not_promoted_and_reports_relationship_diagnostic() {
     let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 80.0);
     let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 80.0, 10.0);
-    popover.attributes.insert("open".into(), "true".into());
+    popover.attributes.insert(Prop::Open, "true".into());
     popover
         .attributes
-        .insert("anchor-ref".into(), "missing-trigger".into());
+        .insert(Prop::AnchorRef, "missing-trigger".into());
     root.children.push(popover);
 
     let mut requests = Vec::new();
@@ -311,7 +308,7 @@ fn missing_popover_trigger_is_not_promoted_and_reports_relationship_diagnostic()
 fn closed_popover_nodes_stay_inline() {
     let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 40.0);
     let mut popover = keyed_node("popover", "root/menu", 20.0, 42.0, 80.0, 10.0);
-    popover.attributes.insert("open".into(), "false".into());
+    popover.attributes.insert(Prop::Open, "false".into());
     root.children.push(popover);
 
     let mut requests = Vec::new();

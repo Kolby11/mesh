@@ -91,7 +91,7 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
         .expect("rendered navigation bar with open popover");
     let popover = find_node_by_key(tree, &requests[0].node_key).expect("promoted popover node");
     assert!(
-        !popover.attributes.contains_key("hidden"),
+        !popover.attributes.contains_key(Prop::Hidden),
         "promoted popover node itself must stay paintable for the child popup"
     );
     let embedded_wrapper =
@@ -99,7 +99,7 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
     assert_eq!(
         embedded_wrapper
             .attributes
-            .get("hidden")
+            .get(Prop::Hidden)
             .map(String::as_str),
         Some("true"),
         "embedded wrapper should be hidden so promoted content is not painted inline"

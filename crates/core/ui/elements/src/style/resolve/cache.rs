@@ -1,4 +1,5 @@
 use super::index::*;
+use crate::Prop;
 use crate::lru::LruCache;
 use crate::style::*;
 use mesh_core_component::style::StyleValue;
@@ -334,17 +335,17 @@ pub(crate) struct FinalizedStyle {
 
 impl FinalizedStyle {
     pub(crate) fn matches_node(&self, node: &crate::tree::WidgetNode) -> bool {
-        self.hidden.as_deref() == node.attributes.get("hidden").map(String::as_str)
+        self.hidden.as_deref() == node.attributes.get(Prop::Hidden).map(String::as_str)
             && self.promoted == (node.is_promoted_popover(), node.is_promoted_window())
             && self.tag == node.tag
             && self.module_id.as_deref() == node.module_id()
-            && self.id.as_deref() == node.attributes.get("id").map(String::as_str)
-            && self.inline_style.as_deref() == node.attributes.get("style").map(String::as_str)
-            && self.parts.as_deref() == node.attributes.get("part").map(String::as_str)
+            && self.id.as_deref() == node.attributes.get(Prop::Id).map(String::as_str)
+            && self.inline_style.as_deref() == node.attributes.get(Prop::Style).map(String::as_str)
+            && self.parts.as_deref() == node.attributes.get(Prop::Part).map(String::as_str)
             && self.state == node.state
             && self.classes.iter().map(String::as_str).eq(node
                 .attributes
-                .get("class")
+                .get(Prop::Class)
                 .into_iter()
                 .flat_map(|s| s.split_whitespace()))
     }
@@ -360,13 +361,13 @@ impl FinalizedStyle {
             tag: node.tag.clone(),
             classes: node
                 .attributes
-                .get("class")
+                .get(Prop::Class)
                 .map(|s| s.split_whitespace().map(str::to_owned).collect())
                 .unwrap_or_default(),
-            id: node.attributes.get("id").cloned(),
-            inline_style: node.attributes.get("style").cloned(),
-            parts: node.attributes.get("part").cloned(),
-            hidden: node.attributes.get("hidden").cloned(),
+            id: node.attributes.get(Prop::Id).cloned(),
+            inline_style: node.attributes.get(Prop::Style).cloned(),
+            parts: node.attributes.get(Prop::Part).cloned(),
+            hidden: node.attributes.get(Prop::Hidden).cloned(),
             promoted: (node.is_promoted_popover(), node.is_promoted_window()),
             module_id: node.module_id().map(str::to_owned),
             state: node.state,
@@ -400,7 +401,7 @@ impl FinalizedStyle {
         context: StyleContext,
         resolver: &super::StyleResolver<'_>,
     ) -> bool {
-        if self.hidden.as_deref() != node.attributes.get("hidden").map(String::as_str)
+        if self.hidden.as_deref() != node.attributes.get(Prop::Hidden).map(String::as_str)
             || self.promoted != (node.is_promoted_popover(), node.is_promoted_window())
         {
             return false;

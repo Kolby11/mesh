@@ -1,6 +1,7 @@
 use super::*;
+use mesh_core_elements::Prop;
 
-fn bool_attribute(node: &WidgetNode, name: &str, default: bool) -> bool {
+fn bool_attribute(node: &WidgetNode, name: Prop, default: bool) -> bool {
     node.attributes.get(name).map_or(default, |value| {
         let value = value.trim();
         !(value.is_empty()
@@ -17,7 +18,8 @@ pub fn open_focus_scopes(tree: &WidgetNode) -> Vec<&WidgetNode> {
         if !policy.allows(InteractionTarget::Focus) {
             return;
         }
-        if node_is_source(node, &["dialog", "sheet"]) || bool_attribute(node, "focus-scope", false)
+        if node_is_source(node, &["dialog", "sheet"])
+            || bool_attribute(node, Prop::FocusScope, false)
         {
             out.push(node);
         }
@@ -32,10 +34,13 @@ pub fn open_focus_scopes(tree: &WidgetNode) -> Vec<&WidgetNode> {
 
 /// The last visible modal scope owns keyboard traversal on this tree.
 pub fn active_modal_scope(tree: &WidgetNode) -> Option<&WidgetNode> {
-    open_focus_scopes(tree)
-        .into_iter()
-        .rev()
-        .find(|node| bool_attribute(node, "modal", node_is_source(node, &["dialog", "sheet"])))
+    open_focus_scopes(tree).into_iter().rev().find(|node| {
+        bool_attribute(
+            node,
+            Prop::Modal,
+            node_is_source(node, &["dialog", "sheet"]),
+        )
+    })
 }
 
 pub fn scope_contains(scope: &WidgetNode, key: &str) -> bool {
@@ -54,7 +59,7 @@ fn is_menu(node: &WidgetNode) -> bool {
     node_is_source(node, &["menu"])
         || node
             .attributes
-            .get("role")
+            .get(Prop::Role)
             .is_some_and(|role| role == "menu")
 }
 
@@ -77,7 +82,7 @@ pub fn menu_items<'a>(tree: &WidgetNode, menu: &'a WidgetNode) -> Vec<&'a Widget
         let item = node_is_source(node, &["menu-item", "command-item", "preference-row"])
             || node
                 .attributes
-                .get("role")
+                .get(Prop::Role)
                 .is_some_and(|role| role.starts_with("menuitem"));
         if item
             && node.mesh_key().is_some_and(|key| {
@@ -104,8 +109,8 @@ pub fn menu_items<'a>(tree: &WidgetNode, menu: &'a WidgetNode) -> Vec<&'a Widget
 pub fn menu_label(node: &WidgetNode) -> String {
     if let Some(label) = node
         .attributes
-        .get("aria-label")
-        .or_else(|| node.attributes.get("label"))
+        .get(Prop::AriaLabel)
+        .or_else(|| node.attributes.get(Prop::Label))
     {
         return label.trim().to_lowercase();
     }
@@ -116,8 +121,8 @@ pub fn menu_label(node: &WidgetNode) -> String {
         if node.tag == "text" {
             if let Some(value) = node
                 .attributes
-                .get("content")
-                .or_else(|| node.attributes.get("text"))
+                .get(Prop::Content)
+                .or_else(|| node.attributes.get(Prop::Text))
             {
                 out.push_str(value);
                 out.push(' ');
@@ -173,7 +178,7 @@ pub fn parent_menu_trigger<'a>(
             node_is_source(node, &["menu-item", "command-item", "preference-row"])
                 || node
                     .attributes
-                    .get("role")
+                    .get(Prop::Role)
                     .is_some_and(|role| role.starts_with("menuitem"))
         })?
         .mesh_key()?;
@@ -199,12 +204,12 @@ mod tests {
         let mut dialog = node("dialog", "dialog");
         dialog.children.push(node("button", "inside"));
         let mut closed = node("sheet", "closed");
-        closed.attributes.insert("open".into(), "false".into());
+        closed.attributes.insert(Prop::Open, "false".into());
         closed.children.push(node("button", "hidden"));
         dialog.children.push(closed);
         root.children.push(dialog);
         let mut disabled = node("dialog", "disabled");
-        disabled.attributes.insert("disabled".into(), "true".into());
+        disabled.attributes.insert(Prop::Disabled, "true".into());
         root.children.push(disabled);
         assert_eq!(
             active_modal_scope(&root).and_then(WidgetNode::mesh_key),
@@ -222,7 +227,7 @@ mod tests {
         let mut root = node("column", "root");
         root.children.push(node("button", "away"));
         let mut scope = node("box", "scope");
-        scope.attributes.insert("focus-scope".into(), "true".into());
+        scope.attributes.insert(Prop::FocusScope, "true".into());
         scope.children.push(node("button", "inside"));
         root.children.push(scope);
         assert!(active_modal_scope(&root).is_none());
@@ -235,12 +240,12 @@ mod tests {
         let mut menu = node("menu", "menu");
         let mut item = node("menu-item", "item");
         let mut label = node("text", "label");
-        label.attributes.insert("content".into(), "  Édit ".into());
+        label.attributes.insert(Prop::Content, "  Édit ".into());
         let mut shortcut = node("shortcut", "shortcut");
         let mut shortcut_text = node("text", "shortcut_text");
         shortcut_text
             .attributes
-            .insert("content".into(), "Ctrl+E".into());
+            .insert(Prop::Content, "Ctrl+E".into());
         shortcut.children.push(shortcut_text);
         let mut submenu = node("menu", "submenu");
         submenu.children.push(node("menu-item", "child"));

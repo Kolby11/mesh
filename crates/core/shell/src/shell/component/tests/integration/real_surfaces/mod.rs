@@ -98,7 +98,7 @@ fn i32_rect(bounds: (f32, f32, f32, f32)) -> (i32, i32, i32, i32) {
 }
 
 fn collect_class_attributes(node: &WidgetNode, classes: &mut Vec<String>) {
-    if let Some(class) = node.attributes.get("class") {
+    if let Some(class) = node.attributes.get(Prop::Class) {
         classes.push(class.clone());
     }
     for child in &node.children {
@@ -170,7 +170,7 @@ fn active_bubble_index(
     let mut cores = Vec::new();
     collect_class_token_nodes(&tree, "bubble-option-core", &mut cores);
     cores.iter().position(|node| {
-        node.attributes.get("class").is_some_and(|class| {
+        node.attributes.get(Prop::Class).is_some_and(|class| {
             class
                 .split_whitespace()
                 .any(|token| token == "bubble-option-core-active")
@@ -181,7 +181,7 @@ fn active_bubble_index(
 fn collect_class_token_nodes<'a>(node: &'a WidgetNode, token: &str, out: &mut Vec<&'a WidgetNode>) {
     if node
         .attributes
-        .get("class")
+        .get(Prop::Class)
         .is_some_and(|class| class.split_whitespace().any(|part| part == token))
     {
         out.push(node);

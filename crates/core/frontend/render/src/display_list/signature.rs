@@ -1,3 +1,4 @@
+use mesh_core_elements::Prop;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
 
@@ -165,32 +166,32 @@ pub(super) fn hash_paint_content_attributes(
 ) {
     match node.tag.as_str() {
         "text" => {
-            hash_attribute(node, "content", hasher);
-            hash_attribute(node, "text", hasher);
+            hash_attribute(node, Prop::Content, hasher);
+            hash_attribute(node, Prop::Text, hasher);
             node.text_selection.hash(hasher);
         }
         "input" => {
-            hash_attribute(node, "value", hasher);
-            hash_attribute(node, "placeholder", hasher);
-            hash_attribute(node, "type", hasher);
+            hash_attribute(node, Prop::Value, hasher);
+            hash_attribute(node, Prop::Placeholder, hasher);
+            hash_attribute(node, Prop::Type, hasher);
             node.state
                 .contains(mesh_core_elements::NodeState::FOCUSED)
                 .hash(hasher);
             node.input_preedit.hash(hasher);
         }
         "slider" => {
-            hash_attribute(node, "min", hasher);
-            hash_attribute(node, "max", hasher);
-            hash_attribute(node, "value", hasher);
-            hash_attribute(node, "orient", hasher);
+            hash_attribute(node, Prop::Min, hasher);
+            hash_attribute(node, Prop::Max, hasher);
+            hash_attribute(node, Prop::Value, hasher);
+            hash_attribute(node, Prop::Orient, hasher);
         }
         "icon" | "image" => {
-            hash_attribute(node, "src", hasher);
-            hash_attribute(node, "name", hasher);
-            hash_attribute(node, "size", hasher);
+            hash_attribute(node, Prop::Src, hasher);
+            hash_attribute(node, Prop::Name, hasher);
+            hash_attribute(node, Prop::Size, hasher);
         }
         "checkbox" | "radio" => {
-            hash_attribute(node, "checked", hasher);
+            hash_attribute(node, Prop::Checked, hasher);
         }
         _ => {}
     }
@@ -265,8 +266,8 @@ pub(super) fn hash_text_batch_material(node: &WidgetNode, hasher: &mut DisplaySi
     std::mem::discriminant(&node.computed_style.text_align).hash(hasher);
     std::mem::discriminant(&node.computed_style.text_direction).hash(hasher);
     std::mem::discriminant(&node.computed_style.white_space).hash(hasher);
-    node.attributes.get("lang").hash(hasher);
-    node.attributes.get("font-features").hash(hasher);
+    node.attributes.get(Prop::Lang).hash(hasher);
+    node.attributes.get(Prop::FontFeatures).hash(hasher);
     mesh_core_resources::resource_revision().hash(hasher);
 }
 
@@ -322,7 +323,7 @@ pub(super) fn hash_background_paint(paint: &BackgroundPaint, hasher: &mut Displa
 }
 
 #[cfg(test)]
-pub(super) fn hash_attribute(node: &WidgetNode, key: &str, hasher: &mut DisplaySignatureHasher) {
+pub(super) fn hash_attribute(node: &WidgetNode, key: Prop, hasher: &mut DisplaySignatureHasher) {
     key.hash(hasher);
     node.attributes.get(key).hash(hasher);
 }
@@ -377,7 +378,7 @@ pub(super) fn batch_barrier(
 pub(super) fn cached_icon_resource_opacity(
     node: &WidgetNode,
 ) -> crate::surface::icon::CachedResourceOpacity {
-    let Some(src) = node.attributes.get("src") else {
+    let Some(src) = node.attributes.get(Prop::Src) else {
         return crate::surface::icon::CachedResourceOpacity::Unknown;
     };
     let scale = FractionalScale::identity();

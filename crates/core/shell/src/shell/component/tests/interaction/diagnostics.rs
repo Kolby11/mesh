@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_elements::Prop;
 use std::fs;
 
 #[test]
@@ -231,7 +232,7 @@ end)
     let tree = component.last_tree.as_ref().unwrap();
     fn first_title(node: &WidgetNode) -> Option<&str> {
         node.attributes
-            .get("title")
+            .get(Prop::Title)
             .map(String::as_str)
             .or_else(|| node.children.iter().find_map(first_title))
     }
@@ -276,7 +277,7 @@ fn raw_service_state_update_schedules_repaint_without_proxy_tracking() {
     let tree = component.last_tree.as_ref().unwrap();
     fn first_title(node: &WidgetNode) -> Option<&str> {
         node.attributes
-            .get("title")
+            .get(Prop::Title)
             .map(String::as_str)
             .or_else(|| node.children.iter().find_map(first_title))
     }
@@ -391,7 +392,7 @@ end)
     let tree = component.last_tree.as_ref().unwrap();
     fn first_title(node: &WidgetNode) -> Option<&str> {
         node.attributes
-            .get("title")
+            .get(Prop::Title)
             .map(String::as_str)
             .or_else(|| node.children.iter().find_map(first_title))
     }
@@ -614,8 +615,8 @@ fn icon_reliability_core_surfaces_proof() {
     }
 
     let mut svg_node = WidgetNode::new("icon");
-    svg_node.attributes.insert("name".into(), "settings".into());
-    svg_node.attributes.insert("size".into(), "18".into());
+    svg_node.attributes.insert(Prop::Name, "settings".into());
+    svg_node.attributes.insert(Prop::Size, "18".into());
     svg_node.layout = LayoutRect {
         x: 0.0,
         y: 0.0,
@@ -632,7 +633,7 @@ fn icon_reliability_core_surfaces_proof() {
     let mut raster_node = WidgetNode::new("icon");
     raster_node
         .attributes
-        .insert("src".into(), raster_path.to_string_lossy().to_string());
+        .insert(Prop::Src, raster_path.to_string_lossy().to_string());
     raster_node.layout = LayoutRect {
         x: 1.0,
         y: 1.0,
@@ -646,8 +647,8 @@ fn icon_reliability_core_surfaces_proof() {
     let mut missing_node = WidgetNode::new("icon");
     missing_node
         .attributes
-        .insert("name".into(), "missing-proof".into());
-    missing_node.attributes.insert("size".into(), "18".into());
+        .insert(Prop::Name, "missing-proof".into());
+    missing_node.attributes.insert(Prop::Size, "18".into());
     missing_node.layout = LayoutRect {
         x: 2.0,
         y: 2.0,

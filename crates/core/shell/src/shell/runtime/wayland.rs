@@ -1,4 +1,5 @@
 use super::super::*;
+use mesh_core_elements::Prop;
 
 const MAX_WAYLAND_EVENTS_PER_FRAME: usize = 32;
 
@@ -625,9 +626,9 @@ fn inspected_element_json(
         "module_id": node.module_id().unwrap_or(""),
         "source_file": source_file,
         "source_line": 1,
-        "id": node.attributes.get("id").cloned().unwrap_or_default(),
-        "classes": node.attributes.get("class").cloned().unwrap_or_default(),
-        "content": node.attributes.get("content").cloned().unwrap_or_default(),
+        "id": node.attributes.get(Prop::Id).cloned().unwrap_or_default(),
+        "classes": node.attributes.get(Prop::Class).cloned().unwrap_or_default(),
+        "content": node.attributes.get(Prop::Content).cloned().unwrap_or_default(),
         "bounds": {
             "x": bounds.0,
             "y": bounds.1,
@@ -662,10 +663,13 @@ fn source_line_for_node(path: &str, node: &mesh_core_elements::WidgetNode) -> Op
     let lines = source.lines().collect::<Vec<_>>();
     let tag = mesh_core_interaction::source_element_tag(node);
     let opening = format!("<{tag}");
-    let id = node.attributes.get("id").filter(|value| !value.is_empty());
+    let id = node
+        .attributes
+        .get(Prop::Id)
+        .filter(|value| !value.is_empty());
     let classes = node
         .attributes
-        .get("class")
+        .get(Prop::Class)
         .map(|value| value.split_whitespace().collect::<Vec<_>>())
         .unwrap_or_default();
     let mut best: Option<(usize, u32)> = None;
@@ -1256,10 +1260,8 @@ mod tests {
         let file = tempfile::Builder::new().suffix(".mesh").tempfile().unwrap();
         std::fs::write(file.path(), source).unwrap();
         let mut node = mesh_core_elements::WidgetNode::new("row");
-        node.attributes
-            .insert("data-mesh-element".into(), "row".into());
-        node.attributes
-            .insert("class".into(), "right-cluster".into());
+        node.attributes.insert(Prop::DataMeshElement, "row".into());
+        node.attributes.insert(Prop::Class, "right-cluster".into());
 
         assert_eq!(
             source_line_for_node(file.path().to_str().unwrap(), &node),

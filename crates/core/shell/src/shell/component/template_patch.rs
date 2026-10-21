@@ -171,7 +171,7 @@ impl FrontendSurfaceComponent {
             );
             let patch = mesh_core_frontend::patch_template_bindings(node, &bound, Some(&*self));
             dependencies_changed |= patch.dependencies_changed;
-            if patch.changed {
+            if patch.changed() {
                 patched.insert(node.id);
             }
         }

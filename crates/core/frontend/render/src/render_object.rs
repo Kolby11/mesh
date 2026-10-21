@@ -671,6 +671,7 @@ fn accessibility_role_slot(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mesh_core_elements::Prop;
     use mesh_core_elements::style::Color;
     use mesh_core_elements::{NodeState, WidgetNode};
     use std::time::Instant;
@@ -836,7 +837,7 @@ mod tests {
         let mut node = retained_visual_node();
         node.tag = "text".into();
         node.attributes
-            .insert("content".into(), "retained text".into());
+            .insert(Prop::Content, "retained text".into());
         node.accessibility.label = Some("retained label".into());
         let mut tree = RenderObjectTree::default();
         tree.update(&node);
@@ -876,7 +877,7 @@ mod tests {
         root.id = 1;
         let mut child = WidgetNode::new("text");
         child.id = 2;
-        child.attributes.insert("content".into(), "hello".into());
+        child.attributes.insert(Prop::Content, "hello".into());
         root.children.push(child);
 
         let mut tree = RenderObjectTree::default();
@@ -890,7 +891,7 @@ mod tests {
 
         root.children[0]
             .attributes
-            .insert("content".into(), "goodbye".into());
+            .insert(Prop::Content, "goodbye".into());
         root.children[0].layout.width = 42.0;
         root.children[0].computed_style.opacity = 0.5;
 
@@ -999,7 +1000,7 @@ mod tests {
         root.id = 1;
         let mut child = WidgetNode::new("text");
         child.id = 2;
-        child.attributes.insert("content".into(), "hello".into());
+        child.attributes.insert(Prop::Content, "hello".into());
         root.children.push(child);
 
         let mut tree = RenderObjectTree::default();
@@ -1009,7 +1010,7 @@ mod tests {
 
         root.children[0]
             .attributes
-            .insert("content".into(), "goodbye".into());
+            .insert(Prop::Content, "goodbye".into());
         let skipped = tree.update_for_retained_generation(&root, 1);
         if cfg!(debug_assertions) {
             assert_eq!(skipped.text, 1);
@@ -1040,7 +1041,7 @@ mod tests {
             child.id = id;
             child
                 .attributes
-                .insert("content".into(), format!("child {id}"));
+                .insert(Prop::Content, format!("child {id}"));
             root.children.push(child);
         }
 
@@ -1049,7 +1050,7 @@ mod tests {
 
         root.children[2]
             .attributes
-            .insert("content".into(), "changed".into());
+            .insert(Prop::Content, "changed".into());
         let retained_dirty_ids = HashSet::from([4]);
         let dirty = tree.update_for_retained_dirty_nodes(&root, 2, &retained_dirty_ids);
 
@@ -1071,7 +1072,7 @@ mod tests {
             child.id = id;
             child
                 .attributes
-                .insert("content".into(), format!("child {id}"));
+                .insert(Prop::Content, format!("child {id}"));
             root.children.push(child);
         }
 
@@ -1082,7 +1083,7 @@ mod tests {
 
         root.children[2]
             .attributes
-            .insert("content".into(), "changed".into());
+            .insert(Prop::Content, "changed".into());
         let direct_dirty =
             direct.update_for_retained_dirty_node_refs(&root, 2, &[&root.children[2]]);
         let traversed_dirty =
@@ -1121,14 +1122,14 @@ mod tests {
     fn render_object_tree_marks_slider_value_updates_as_primitive_dirty() {
         let mut root = WidgetNode::new("slider");
         root.id = 1;
-        root.attributes.insert("min".into(), "0".into());
-        root.attributes.insert("max".into(), "1".into());
-        root.attributes.insert("value".into(), "0.25".into());
+        root.attributes.insert(Prop::Min, "0".into());
+        root.attributes.insert(Prop::Max, "1".into());
+        root.attributes.insert(Prop::Value, "0.25".into());
 
         let mut tree = RenderObjectTree::default();
         tree.update(&root);
 
-        root.attributes.insert("value".into(), "0.735".into());
+        root.attributes.insert(Prop::Value, "0.735".into());
         let dirty = tree.update(&root);
 
         assert_eq!(dirty.primitive, 1);

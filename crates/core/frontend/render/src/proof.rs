@@ -1,3 +1,4 @@
+use mesh_core_elements::Prop;
 use mesh_core_elements::{NodeId, WidgetNode};
 
 use crate::display_list::DisplayPaintContent;
@@ -177,14 +178,14 @@ fn collect_focused_nodes(node: &WidgetNode, snapshot: &mut FocusedProofSnapshot)
         accesskit_node_id: FocusedAccessibilityEvidence::accesskit_node_id_for(node.id),
         role: node
             .attributes
-            .get("role")
+            .get(Prop::Role)
             .cloned()
             .unwrap_or_else(|| "generic".to_string()),
         label: node
             .attributes
-            .get("aria-label")
+            .get(Prop::AriaLabel)
             .cloned()
-            .or_else(|| node.attributes.get("content").cloned()),
+            .or_else(|| node.attributes.get(Prop::Content).cloned()),
     });
 
     if node.layout.width == 0.0 || node.layout.height == 0.0 {
@@ -203,7 +204,7 @@ fn focused_text_evidence(
     node: &WidgetNode,
     diagnostics: &mut Vec<FocusedProofDiagnostic>,
 ) -> Option<FocusedTextEvidence> {
-    let content = node.attributes.get("content")?.clone();
+    let content = node.attributes.get(Prop::Content)?.clone();
 
     #[cfg(feature = "renderer-parley")]
     let (parley_text, selection_anchor, selection_focus) = {
@@ -466,7 +467,7 @@ mod tests {
             },
         );
         text.attributes
-            .insert("content".into(), "selected text".into());
+            .insert(Prop::Content, "selected text".into());
         std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).background =
             "#112233".into();
         std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).foreground =
@@ -547,8 +548,7 @@ mod tests {
     #[cfg(not(feature = "renderer-parley"))]
     fn focused_text_evidence_default_build_preserves_placeholder() {
         let mut node = WidgetNode::new("text");
-        node.attributes
-            .insert("content".into(), "World".to_string());
+        node.attributes.insert(Prop::Content, "World".to_string());
         node.layout = LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -568,8 +568,7 @@ mod tests {
     #[cfg(feature = "renderer-parley")]
     fn focused_text_evidence_with_parley_feature_returns_shaped_summary() {
         let mut node = WidgetNode::new("text");
-        node.attributes
-            .insert("content".to_string(), "World".to_string());
+        node.attributes.insert(Prop::Content, "World".to_string());
         node.layout = LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -596,7 +595,7 @@ mod tests {
     #[cfg(not(feature = "renderer-parley"))]
     fn focused_text_evidence_default_build_selection_is_raw_attribute() {
         let mut node = WidgetNode::new("text");
-        node.attributes.insert("content".into(), "Hi".to_string());
+        node.attributes.insert(Prop::Content, "Hi".to_string());
         std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
             .anchor
             .0 = 12.5;
@@ -619,7 +618,7 @@ mod tests {
     fn focused_text_evidence_with_parley_feature_uses_cursor_geometry() {
         let mut node = WidgetNode::new("text");
         node.attributes
-            .insert("content".to_string(), "Hello World".to_string());
+            .insert(Prop::Content, "Hello World".to_string());
         std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
             .anchor
             .0 = 20.0;
@@ -663,8 +662,7 @@ mod tests {
     #[cfg(feature = "renderer-parley")]
     fn focused_text_evidence_selection_colors_preserved() {
         let mut node = WidgetNode::new("text");
-        node.attributes
-            .insert("content".to_string(), "Hi".to_string());
+        node.attributes.insert(Prop::Content, "Hi".to_string());
         std::sync::Arc::make_mut(node.text_selection.get_or_insert_default()).background =
             "rgba(0,0,255,0.5)".into();
         std::sync::Arc::make_mut(node.text_selection.get_or_insert_default()).foreground =

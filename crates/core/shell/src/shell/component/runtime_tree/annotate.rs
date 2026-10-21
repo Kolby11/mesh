@@ -1,12 +1,13 @@
 use super::*;
 use crate::shell::component::TextPreeditState;
+use mesh_core_elements::Prop;
 
 pub(in crate::shell::component) fn input_accepts_char(node: &WidgetNode, ch: char) -> bool {
     if ch.is_control() {
         return false;
     }
 
-    match node.attributes.get("type").map(|value| value.as_str()) {
+    match node.attributes.get(Prop::Type).map(|value| value.as_str()) {
         Some("number") => ch.is_ascii_digit() || matches!(ch, '.' | '-'),
         _ => true,
     }
@@ -24,10 +25,10 @@ pub(in crate::shell::component) fn collect_element_metrics(
 ) {
     let node_key = node.mesh_key();
     let id = collect_refs
-        .then(|| node.attributes.get("id").map(String::as_str))
+        .then(|| node.attributes.get(Prop::Id).map(String::as_str))
         .flatten();
     let reference = collect_refs
-        .then(|| node.attributes.get("ref").map(String::as_str))
+        .then(|| node.attributes.get(Prop::Ref).map(String::as_str))
         .flatten();
     let binding = collect_refs.then(|| node.bind_this()).flatten();
     let publishes_element = collect_elements && node_key.is_some();
@@ -295,7 +296,7 @@ pub(super) fn annotate_runtime_tree_inner(
                 .expanded_triggers
                 .is_some_and(|ids| ids.contains(&node_id)))
         || context.input_values.contains_key(&node_id)
-        || node.attributes.contains_key("keybind")
+        || node.attributes.contains_key(Prop::Keybind)
         || context
             .promoted_windows
             .is_some_and(|keys| keys.contains(key));
@@ -314,7 +315,7 @@ pub(super) fn annotate_runtime_tree_inner(
             .promoted_windows
             .is_some_and(|keys| keys.contains(key))
         {
-            node.attributes.insert("hidden".into(), "true".into());
+            node.attributes.insert(Prop::Hidden, "true".into());
             node.mark_promoted_window();
         }
 
@@ -323,10 +324,10 @@ pub(super) fn annotate_runtime_tree_inner(
         let is_input = authored.tag == "input";
         let is_slider = authored.tag == "slider";
         let is_switch_or_checkbox = matches!(authored.tag.as_str(), "switch" | "checkbox");
-        let authored_value = authored.attributes.get("value").cloned();
+        let authored_value = authored.attributes.get(Prop::Value).cloned();
         let source_tag = authored
             .attributes
-            .get("data-mesh-element")
+            .get(Prop::DataMeshElement)
             .map(String::as_str)
             .unwrap_or(authored.tag.as_str());
         let checkable_choice = matches!(source_tag, "switch" | "checkbox" | "radio" | "option");
@@ -388,25 +389,21 @@ pub(super) fn annotate_runtime_tree_inner(
                 .then(|| context.input_preedits.get(&node_id))
                 .flatten();
             let (value, preedit) = compose_input_value(&value, preedit);
-            node.attributes.insert("value".into(), value);
+            node.attributes.insert(Prop::Value, value);
             node.input_preedit = preedit;
         } else if is_slider {
             annotate_slider_node(node, node_id, context);
         } else if is_switch_or_checkbox {
-            node.attributes.insert(
-                "checked".into(),
-                if checked { "true" } else { "false" }.into(),
-            );
+            node.attributes
+                .insert(Prop::Checked, if checked { "true" } else { "false" }.into());
         }
 
         if checkable_choice {
-            node.attributes.insert(
-                "checked".into(),
-                if checked { "true" } else { "false" }.into(),
-            );
+            node.attributes
+                .insert(Prop::Checked, if checked { "true" } else { "false" }.into());
             if selects_choice {
                 node.attributes.insert(
-                    "selected".into(),
+                    Prop::Selected,
                     if checked { "true" } else { "false" }.into(),
                 );
             }
@@ -423,7 +420,7 @@ pub(super) fn annotate_runtime_tree_inner(
                 .cloned()
                 .or(authored_value)
         {
-            node.attributes.insert("value".into(), value.clone());
+            node.attributes.insert(Prop::Value, value.clone());
             mesh_core_elements::PseudoState::Value.set_value(&mut node.state, true);
             node.accessibility.state.value = Some(value);
         }
@@ -487,14 +484,14 @@ pub(super) fn annotate_slider_node(
 ) {
     let script_value = node
         .attributes
-        .get("value")
+        .get(Prop::Value)
         .and_then(|value: &String| value.parse::<f32>().ok());
     let value = resolved_slider_value(node_id, script_value, context);
     {
         use std::fmt::Write as _;
         let entry = node
             .attributes
-            .entry("value".into())
+            .entry(Prop::Value)
             .or_insert_with(String::new);
         entry.clear();
         let _ = write!(entry, "{:.2}", value);

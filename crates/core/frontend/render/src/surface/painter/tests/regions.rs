@@ -2,6 +2,7 @@ use super::super::*;
 use super::common::*;
 use crate::PaintCommandClass;
 use crate::display_list::{DamageRect, DisplayListRepaintPolicy, RetainedDisplayList};
+use mesh_core_elements::Prop;
 use mesh_core_elements::layout::LayoutRect;
 
 #[test]
@@ -350,7 +351,7 @@ fn checked_checkbox_rasterizes_checkmark_glyph() {
 
     let mut checked = node("checkbox", layout, bg);
     checked.computed_style.color = white;
-    checked.attributes.insert("checked".into(), "true".into());
+    checked.attributes.insert(Prop::Checked, "true".into());
     assert!(
         count_light_pixels(&checked) > 0,
         "a checked checkbox must rasterize a light checkmark over its dark box"

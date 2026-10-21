@@ -20,7 +20,7 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
     assert!(
         entering_tree
             .attributes
-            .get("class")
+            .get(Prop::Class)
             .is_some_and(|class| class.contains("mesh-surface-entering")),
         "first show paint should expose mesh-surface-entering for collapsed bubble positions"
     );
@@ -63,7 +63,7 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
     assert!(
         launched_tree
             .attributes
-            .get("class")
+            .get(Prop::Class)
             .is_none_or(|class| !class.contains("mesh-surface-entering")),
         "second show paint should transition from entering state into resting bubble positions"
     );
@@ -94,7 +94,7 @@ fn shipped_theme_selector_restarts_bubble_launch_on_surface_reshow() {
     assert!(
         replay_tree
             .attributes
-            .get("class")
+            .get(Prop::Class)
             .is_some_and(|class| class.contains("mesh-surface-entering")),
         "re-show should expose a fresh entering frame"
     );
@@ -144,7 +144,7 @@ fn set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only() {
     assert!(
         popover_node
             .attributes
-            .get("class")
+            .get(Prop::Class)
             .is_some_and(|class| class.contains("mesh-surface-exiting")),
         "closing_child_keys should append mesh-surface-exiting to the popover's own subtree"
     );
@@ -169,7 +169,7 @@ fn set_closing_child_keys_scopes_exit_transition_to_popover_subtree_only() {
     assert!(
         reopened_popover
             .attributes
-            .get("class")
+            .get(Prop::Class)
             .is_none_or(|class| !class.contains("mesh-surface-exiting")),
         "clearing closing_child_keys should stop re-appending mesh-surface-exiting"
     );
@@ -204,7 +204,7 @@ fn set_entering_child_keys_scopes_entrance_to_popover_subtree_only() {
     assert!(
         popover
             .attributes
-            .get("class")
+            .get(Prop::Class)
             .is_some_and(|class| class.contains("mesh-surface-entering"))
     );
     let motion = first_node_with_class_token(popover, "bubble-options-motion").unwrap();
@@ -233,7 +233,7 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
         .expect("rendered theme selector entering frame");
     assert!(
         tree.attributes
-            .get("class")
+            .get(Prop::Class)
             .is_some_and(|class| class.contains("mesh-surface-entering")),
         "test must click during the controlled entering frame"
     );
@@ -394,7 +394,7 @@ fn shipped_language_popover_cycles_three_bubble_options_on_scroll() {
     collect_class_token_nodes(&rotating, "bubble-options-motion", &mut motions);
     let arc_variants: Vec<String> = motions
         .iter()
-        .filter_map(|node| node.attributes.get("class"))
+        .filter_map(|node| node.attributes.get(Prop::Class))
         .filter_map(|class| {
             class
                 .split_whitespace()
@@ -438,7 +438,7 @@ fn shipped_language_popover_cycles_three_bubble_options_on_scroll() {
         .iter()
         .enumerate()
         .filter(|(_, node)| {
-            node.attributes.get("class").is_some_and(|class| {
+            node.attributes.get(Prop::Class).is_some_and(|class| {
                 class
                     .split_whitespace()
                     .any(|token| token.starts_with("bubble-option-arriving-"))

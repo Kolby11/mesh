@@ -1,6 +1,7 @@
 use super::super::*;
 use super::common::*;
 use crate::RenderObjectDirtySummary;
+use mesh_core_elements::Prop;
 use mesh_core_elements::style::{Color, Overflow};
 use mesh_core_elements::{NodeId, WidgetNode};
 
@@ -536,7 +537,7 @@ fn label_resize_scroll_viewport_damage_profile() {
     root.children.push(scroll_area(3, 240.0, 480.0));
     root.children.push(scroll_area(4, 720.0, 240.0));
     let mut label = node(5, "text", 8.0, 448.0, 120.0, 24.0);
-    label.attributes.insert("content".into(), "status".into());
+    label.attributes.insert(Prop::Content, "status".into());
     root.children.push(label);
 
     let mut objects = crate::RenderObjectTree::default();

@@ -7,6 +7,7 @@ mod tree;
 
 use super::*;
 use crate::shell::component::TextPreeditState;
+use mesh_core_elements::Prop;
 use std::time::Instant;
 
 fn annotate_with_empty_context(node: &mut WidgetNode) {
@@ -68,7 +69,7 @@ fn input_preedit_is_composed_into_visual_value_only() {
     annotate_runtime_tree(&mut node, "root".to_owned(), &mut context);
 
     assert_eq!(
-        node.attributes.get("value").map(String::as_str),
+        node.attributes.get(Prop::Value).map(String::as_str),
         Some("A🙂候B")
     );
     let preedit = node

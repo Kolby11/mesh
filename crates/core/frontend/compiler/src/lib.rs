@@ -7,6 +7,7 @@ mod tags;
 
 use mesh_core_component::ComponentFile;
 use mesh_core_elements::HandlerTarget;
+use mesh_core_elements::Prop;
 use mesh_core_elements::{
     AccessibilityInfo, ComponentCompositionProps, EventHandlerCall, LayoutEngine, NodeId,
     StyleContext, StyleResolver, VariableStore, WidgetNode, validate_widget_tree,
@@ -675,7 +676,7 @@ impl CompiledFrontendModule {
         let _source_path_guard = render::ComponentSourcePathGuard::enter(Some(&self.source_path));
         let mut root = WidgetNode::new("surface");
         root.attributes
-            .insert("id".into(), self.manifest.package.id.clone());
+            .insert(Prop::Id, self.manifest.package.id.clone());
         root.computed_style = match mode {
             FrontendRenderMode::Surface => {
                 style::surface_style(theme, &self.manifest.package.id, width, height)
@@ -836,7 +837,7 @@ mod tests {
         ) -> Option<&'a WidgetNode> {
             if node
                 .attributes
-                .get("class")
+                .get(Prop::Class)
                 .is_some_and(|classes| classes.split_whitespace().any(|class| class == class_name))
             {
                 return Some(node);
@@ -921,7 +922,7 @@ mod tests {
     #[test]
     fn touch_gesture_proof_fixture_compiles_with_authoring_handlers() {
         fn gesture_pad(node: &WidgetNode) -> Option<&WidgetNode> {
-            if node.attributes.get("class").is_some_and(|classes| {
+            if node.attributes.get(Prop::Class).is_some_and(|classes| {
                 classes
                     .split_whitespace()
                     .any(|class| class == "gesture-pad")
@@ -1445,7 +1446,7 @@ mod tests {
         ) -> Option<&'a WidgetNode> {
             if node
                 .attributes
-                .get("class")
+                .get(Prop::Class)
                 .is_some_and(|classes| classes.split_whitespace().any(|class| class == class_name))
             {
                 return Some(node);
@@ -1517,7 +1518,7 @@ mod tests {
 
     fn collect_text_content(node: &mesh_core_elements::WidgetNode) -> Vec<String> {
         let mut out = Vec::new();
-        if let Some(c) = node.attributes.get("content") {
+        if let Some(c) = node.attributes.get(Prop::Content) {
             if !c.is_empty() {
                 out.push(c.clone());
             }

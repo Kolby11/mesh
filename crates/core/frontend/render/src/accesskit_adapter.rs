@@ -9,6 +9,7 @@
 use accesskit::{
     Action, Node, NodeId as AccessKitNodeId, Rect, Role, Toggled, Tree, TreeId, TreeUpdate,
 };
+use mesh_core_elements::Prop;
 use mesh_core_elements::{
     AccessibilityRole, AccessibilityTree, AccessibilityTreeNode, NodeId, WidgetNode,
 };
@@ -269,14 +270,12 @@ mod tests {
         let mut hidden = node("text", 22);
         hidden
             .attributes
-            .insert("content".into(), "Hidden name".into());
-        hidden
-            .attributes
-            .insert("aria-hidden".into(), "true".into());
+            .insert(Prop::Content, "Hidden name".into());
+        hidden.attributes.insert(Prop::AriaHidden, "true".into());
         let mut visible = node("text", 23);
         visible
             .attributes
-            .insert("content".into(), "Visible name".into());
+            .insert(Prop::Content, "Visible name".into());
         button.children.push(hidden);
         button.children.push(visible);
         root.children.push(button);

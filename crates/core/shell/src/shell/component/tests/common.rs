@@ -8,6 +8,7 @@ use crate::shell::component::catalog::{
 use mesh_core_capability::CapabilitySet;
 use mesh_core_component::parse_component;
 use mesh_core_diagnostics::Diagnostics;
+use mesh_core_elements::Prop;
 use mesh_core_elements::style::Display;
 use mesh_core_frontend::{
     CompiledFrontendModule, compile_frontend_entrypoint, compile_frontend_module,
@@ -1405,7 +1406,7 @@ pub(super) fn event_node_with_attrs(
 ) -> WidgetNode {
     let mut node = event_node(tag, key, x, y, width, height, handlers);
     for (name, value) in attrs {
-        node.attributes.insert((*name).into(), (*value).into());
+        node.attributes.insert(*name, (*value).into());
     }
     node
 }
@@ -1430,9 +1431,9 @@ pub(super) fn text_node(
     let mut node = WidgetNode::new("text");
     node.set_mesh_key(key);
     node.attributes
-        .insert("content".into(), "Selectable text".into());
+        .insert(Prop::Content, "Selectable text".into());
     if selectable {
-        node.attributes.insert("selectable".into(), "true".into());
+        node.attributes.insert(Prop::Selectable, "true".into());
     }
     node.layout.x = x;
     node.layout.y = y;
@@ -1446,7 +1447,7 @@ pub(super) fn count_selectable_text_nodes(node: &WidgetNode) -> usize {
         node.tag == "text"
             && node
                 .attributes
-                .get("selectable")
+                .get(Prop::Selectable)
                 .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1")),
     );
     here + node
@@ -1459,7 +1460,7 @@ pub(super) fn count_selectable_text_nodes(node: &WidgetNode) -> usize {
 pub(super) fn child_with_attrs(tag: &str, attrs: &[(&str, &str)]) -> WidgetNode {
     let mut node = WidgetNode::new(tag);
     for (name, value) in attrs {
-        node.attributes.insert((*name).into(), (*value).into());
+        node.attributes.insert(*name, (*value).into());
     }
     node
 }
@@ -1478,7 +1479,7 @@ pub(super) fn first_node_by_tag<'a>(node: &'a WidgetNode, tag: &str) -> Option<&
 pub(super) fn first_node_by_class<'a>(node: &'a WidgetNode, class: &str) -> Option<&'a WidgetNode> {
     if node
         .attributes
-        .get("class")
+        .get(Prop::Class)
         .is_some_and(|value| value.split_whitespace().any(|token| token == class))
     {
         return Some(node);
@@ -1491,7 +1492,7 @@ pub(super) fn first_node_by_class<'a>(node: &'a WidgetNode, class: &str) -> Opti
 pub(super) fn first_node_with_ref<'a>(node: &'a WidgetNode, name: &str) -> Option<&'a WidgetNode> {
     if node
         .attributes
-        .get("ref")
+        .get(Prop::Ref)
         .is_some_and(|value| value == name)
     {
         return Some(node);
@@ -1567,7 +1568,7 @@ pub(super) fn first_node_with_attr_prefix<'a>(
 ) -> Option<&'a WidgetNode> {
     if node
         .attributes
-        .get(attr)
+        .get_by_name(attr)
         .is_some_and(|candidate| candidate.starts_with(prefix))
     {
         return Some(node);
@@ -1584,7 +1585,7 @@ pub(super) fn first_node_with_attr<'a>(
 ) -> Option<&'a WidgetNode> {
     if node
         .attributes
-        .get(attr)
+        .get_by_name(attr)
         .is_some_and(|candidate| candidate == value)
     {
         return Some(node);
@@ -1599,7 +1600,7 @@ pub(super) fn collect_text_content(node: &WidgetNode, output: &mut Vec<String>) 
         return;
     }
     if node.tag == "text" {
-        if let Some(content) = node.attributes.get("content") {
+        if let Some(content) = node.attributes.get(Prop::Content) {
             output.push(content.clone());
         }
     }
@@ -1625,7 +1626,7 @@ pub(super) fn first_node_with_class_token<'a>(
 ) -> Option<&'a WidgetNode> {
     if node
         .attributes
-        .get("class")
+        .get(Prop::Class)
         .is_some_and(|class| class.split_whitespace().any(|part| part == token))
     {
         return Some(node);

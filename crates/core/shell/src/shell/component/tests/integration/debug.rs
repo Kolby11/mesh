@@ -948,7 +948,10 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         {
             options.push((
                 theme_id.to_string(),
-                node.attributes.get("class").cloned().unwrap_or_default(),
+                node.attributes
+                    .get(Prop::Class)
+                    .cloned()
+                    .unwrap_or_default(),
             ));
         }
         for child in &node.children {

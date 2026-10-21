@@ -2,12 +2,13 @@ use super::super::paint_node::*;
 use super::super::*;
 use super::common::*;
 use crate::{RenderObjectDirtySummary, RenderObjectFingerprint};
+use mesh_core_elements::Prop;
 use mesh_core_elements::style::{Color, FontStyle};
 
 #[test]
 fn checkbox_and_radio_emit_checkmark_content_only_when_checked() {
     let mut checkbox = node(1, "checkbox", 0.0, 0.0, 18.0, 18.0);
-    checkbox.attributes.insert("checked".into(), "true".into());
+    checkbox.attributes.insert(Prop::Checked, "true".into());
     assert_eq!(
         build_paint_content(&checkbox),
         DisplayPaintContent::Checkmark(DisplayCheckmarkPaint {
@@ -16,7 +17,7 @@ fn checkbox_and_radio_emit_checkmark_content_only_when_checked() {
     );
 
     let mut radio = node(2, "radio", 0.0, 0.0, 18.0, 18.0);
-    radio.attributes.insert("checked".into(), "checked".into());
+    radio.attributes.insert(Prop::Checked, "checked".into());
     assert_eq!(
         build_paint_content(&radio),
         DisplayPaintContent::Checkmark(DisplayCheckmarkPaint {
@@ -29,7 +30,7 @@ fn checkbox_and_radio_emit_checkmark_content_only_when_checked() {
     assert_eq!(build_paint_content(&unchecked), DisplayPaintContent::None);
 
     let mut falsey = node(4, "checkbox", 0.0, 0.0, 18.0, 18.0);
-    falsey.attributes.insert("checked".into(), "false".into());
+    falsey.attributes.insert(Prop::Checked, "false".into());
     assert_eq!(build_paint_content(&falsey), DisplayPaintContent::None);
 }
 
@@ -38,10 +39,10 @@ fn primitive_signature_ignores_irrelevant_payload_attrs_for_generic_nodes() {
     let mut base = node(1, "box", 0.0, 0.0, 20.0, 20.0);
     let original = primitive_signature(&base, DisplayPrimitiveSlot::Generic);
 
-    base.attributes.insert("content".into(), "ignored".into());
-    base.attributes.insert("text".into(), "ignored".into());
-    base.attributes.insert("value".into(), "ignored".into());
-    base.attributes.insert("src".into(), "ignored.png".into());
+    base.attributes.insert(Prop::Content, "ignored".into());
+    base.attributes.insert(Prop::Text, "ignored".into());
+    base.attributes.insert(Prop::Value, "ignored".into());
+    base.attributes.insert(Prop::Src, "ignored.png".into());
 
     assert_eq!(
         primitive_signature(&base, DisplayPrimitiveSlot::Generic),
@@ -53,7 +54,7 @@ fn primitive_signature_ignores_irrelevant_payload_attrs_for_generic_nodes() {
 fn primitive_signature_tracks_relevant_paint_payload_attrs() {
     let mut text = node(1, "text", 0.0, 0.0, 20.0, 20.0);
     let original_text = primitive_signature(&text, DisplayPrimitiveSlot::Generic);
-    text.attributes.insert("content".into(), "changed".into());
+    text.attributes.insert(Prop::Content, "changed".into());
     assert_ne!(
         primitive_signature(&text, DisplayPrimitiveSlot::Generic),
         original_text
@@ -61,7 +62,7 @@ fn primitive_signature_tracks_relevant_paint_payload_attrs() {
 
     let mut checkbox = node(2, "checkbox", 0.0, 0.0, 20.0, 20.0);
     let original_checkbox = primitive_signature(&checkbox, DisplayPrimitiveSlot::Generic);
-    checkbox.attributes.insert("checked".into(), "true".into());
+    checkbox.attributes.insert(Prop::Checked, "true".into());
     assert_ne!(
         primitive_signature(&checkbox, DisplayPrimitiveSlot::Generic),
         original_checkbox
@@ -73,7 +74,7 @@ fn retained_dirty_contract_matches_shared_paint_signature_inputs() {
     let mut checkbox = node(1, "checkbox", 0.0, 0.0, 20.0, 20.0);
     let checkbox_before = RenderObjectFingerprint::for_node(&checkbox, None);
     let checkbox_signature = primitive_signature(&checkbox, DisplayPrimitiveSlot::Generic);
-    checkbox.attributes.insert("checked".into(), "true".into());
+    checkbox.attributes.insert(Prop::Checked, "true".into());
     let checkbox_after = RenderObjectFingerprint::for_node(&checkbox, Some(&checkbox_before));
     let mut dirty = RenderObjectDirtySummary::default();
     assert!(dirty.add_fingerprint_diff(&checkbox_before, &checkbox_after));
@@ -84,10 +85,10 @@ fn retained_dirty_contract_matches_shared_paint_signature_inputs() {
     );
 
     let mut text = node(2, "text", 0.0, 0.0, 20.0, 20.0);
-    text.attributes.insert("content".into(), "before".into());
+    text.attributes.insert(Prop::Content, "before".into());
     let text_before = RenderObjectFingerprint::for_node(&text, None);
     let text_signature = primitive_signature(&text, DisplayPrimitiveSlot::Text);
-    text.attributes.insert("text".into(), "after".into());
+    text.attributes.insert(Prop::Text, "after".into());
     text.computed_style.letter_spacing = 1.5;
     let text_after = RenderObjectFingerprint::for_node(&text, Some(&text_before));
     let mut dirty = RenderObjectDirtySummary::default();
@@ -180,7 +181,7 @@ fn batch_signature_separates_text_font_styles() {
 fn display_entries_skip_batch_signature_for_barriers() {
     let mut text = node(1, "text", 0.0, 0.0, 20.0, 20.0);
     text.computed_style.background_color.a = 0;
-    text.attributes.insert("content".into(), "barrier".into());
+    text.attributes.insert(Prop::Content, "barrier".into());
     let mut out = Vec::new();
     let mut next = HashMap::new();
 
@@ -195,9 +196,9 @@ fn display_entries_skip_batch_signature_for_barriers() {
 fn display_entry_collection_can_patch_only_selected_nodes() {
     let mut root = node(1, "row", 0.0, 0.0, 100.0, 20.0);
     let mut first = node(2, "text", 0.0, 0.0, 40.0, 20.0);
-    first.attributes.insert("content".into(), "first".into());
+    first.attributes.insert(Prop::Content, "first".into());
     let mut second = node(3, "text", 40.0, 0.0, 40.0, 20.0);
-    second.attributes.insert("content".into(), "second".into());
+    second.attributes.insert(Prop::Content, "second".into());
     root.children.extend([first, second]);
 
     let mut full = HashMap::new();
@@ -231,7 +232,7 @@ fn retained_fingerprints_match_fresh_display_entries_and_reject_stale_resources(
     let mut tree = node(1, "column", 0.0, 0.0, 120.0, 80.0);
     let mut text = node(2, "text", 0.0, 0.0, 120.0, 40.0);
     text.attributes
-        .insert("content".into(), "shared paint inputs".into());
+        .insert(Prop::Content, "shared paint inputs".into());
     tree.children.push(text);
     tree.children
         .push(node(3, "checkbox", 0.0, 40.0, 20.0, 20.0));
@@ -283,7 +284,7 @@ fn shared_retained_display_fingerprint_benchmark() {
     for index in 0..1024 {
         let mut text = node(index + 2, "text", 0.0, index as f32 * 20.0, 240.0, 20.0);
         text.attributes
-            .insert("content".into(), format!("Label {index}"));
+            .insert(Prop::Content, format!("Label {index}"));
         tree.children.push(text);
     }
     let fingerprints: HashMap<_, _> = std::iter::once(&tree)

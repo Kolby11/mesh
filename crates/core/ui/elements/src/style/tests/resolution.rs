@@ -1,5 +1,6 @@
 use super::super::*;
 use super::common::*;
+use crate::Prop;
 use crate::tree::NodeState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 
@@ -468,7 +469,7 @@ fn restyling_embedded_surface_preserves_compiler_layout_style() {
     ];
 
     let mut host = crate::tree::WidgetNode::new("row");
-    host.attributes.insert("class".into(), "host".into());
+    host.attributes.insert(Prop::Class, "host".into());
     let mut wrapper = crate::tree::WidgetNode::new("surface");
     wrapper.computed_style.direction = crate::style::FlexDirection::Column;
     wrapper.computed_style.align_self = crate::style::AlignSelf::Stretch;
@@ -569,10 +570,10 @@ fn retained_restyle_preserves_explicit_transparent_and_default_inherited_values(
     ];
     let mut root = crate::tree::WidgetNode::new("row");
     root.id = 1;
-    root.attributes.insert("class".into(), "parent".into());
+    root.attributes.insert(Prop::Class, "parent".into());
     let mut child = crate::tree::WidgetNode::new("text");
     child.id = 2;
-    child.attributes.insert("class".into(), "child".into());
+    child.attributes.insert(Prop::Class, "child".into());
     root.children.push(child);
 
     resolver.restyle_subtree_cached(&mut root, &rules, StyleContext::default(), &mut None);
@@ -650,10 +651,10 @@ fn child_color_inherit_follows_parent_hover_color_instead_of_going_transparent()
     ];
     let mut root = crate::tree::WidgetNode::new("row");
     root.id = 1;
-    root.attributes.insert("class".into(), "parent".into());
+    root.attributes.insert(Prop::Class, "parent".into());
     let mut child = crate::tree::WidgetNode::new("text");
     child.id = 2;
-    child.attributes.insert("class".into(), "child".into());
+    child.attributes.insert(Prop::Class, "child".into());
     root.children.push(child);
 
     resolver.restyle_subtree_cached(&mut root, &rules, StyleContext::default(), &mut None);
@@ -742,7 +743,7 @@ fn profiled_restyle_matches_normal_style_and_attributes_matching_rules() {
 "#,
     );
     let mut normal = crate::tree::WidgetNode::new("box");
-    normal.attributes.insert("class".into(), "tracked".into());
+    normal.attributes.insert(Prop::Class, "tracked".into());
     let mut profiled = normal.clone();
     resolver.restyle_subtree_cached(&mut normal, &rules, StyleContext::default(), &mut None);
     let mut attribution = StyleRuleAttribution::new(&rules);
@@ -1015,7 +1016,7 @@ fn finalized_memo_styles_preserve_full_resolution_on_input_changes() {
         .with_incremental_matching();
     let mut root = crate::tree::WidgetNode::new("box");
     let mut child = crate::tree::WidgetNode::new("text");
-    child.attributes.insert("class".into(), "item".into());
+    child.attributes.insert(Prop::Class, "item".into());
     root.children.push(child);
     let mut index = None;
     let context = StyleContext::default();
@@ -1025,30 +1026,30 @@ fn finalized_memo_styles_preserve_full_resolution_on_input_changes() {
             0 => {
                 root.children[0]
                     .attributes
-                    .insert("class".into(), "item unrelated".into());
+                    .insert(Prop::Class, "item unrelated".into());
             }
             1 => {
                 root.children[0]
                     .attributes
-                    .insert("class".into(), "item selected".into());
+                    .insert(Prop::Class, "item selected".into());
                 root.children[0].state.set(NodeState::HOVERED, true);
             }
             2 => {
-                root.attributes.insert("class".into(), "parent".into());
+                root.attributes.insert(Prop::Class, "parent".into());
             }
             3 => {
                 root.children[0]
                     .attributes
-                    .insert("style".into(), "font-size: 31px".into());
+                    .insert(Prop::Style, "font-size: 31px".into());
             }
             4 => {
                 root.children[0].state.set(NodeState::HOVERED, false);
             }
             5 => {
-                root.attributes.remove("class");
+                root.attributes.remove(Prop::Class);
             }
             _ => {
-                root.children[0].attributes.remove("style");
+                root.children[0].attributes.remove(Prop::Style);
             }
         }
         let mut full = root.clone();
@@ -1118,7 +1119,7 @@ fn incremental_class_and_state_matching_checks_all_compound_dependencies() {
         ("first last unrelated", true, true),
         ("first last", false, false),
     ] {
-        node.attributes.insert("class".into(), classes.into());
+        node.attributes.insert(Prop::Class, classes.into());
         node.state.set(NodeState::HOVERED, hovered);
         let mut full = node.clone();
         let mut attribution = StyleRuleAttribution::new(&rules);
@@ -1168,10 +1169,8 @@ fn finalized_memo_and_selector_dependency_profile() {
         let mut child = crate::tree::WidgetNode::new("text");
         child
             .attributes
-            .insert("class".into(), format!("item{}", i % 256));
-        child
-            .attributes
-            .insert("content".into(), format!("row {i}"));
+            .insert(Prop::Class, format!("item{}", i % 256));
+        child.attributes.insert(Prop::Content, format!("row {i}"));
         raw.children.push(child);
     }
     let resolver = StyleResolver::new(&theme)
@@ -1274,7 +1273,7 @@ fn finalized_memo_environment_and_container_changes_invalidate_styles() {
         },
     ];
     let mut node = crate::tree::WidgetNode::new("text");
-    node.attributes.insert("class".into(), "wide".into());
+    node.attributes.insert(Prop::Class, "wide".into());
     let mut index = None;
     for (width, size) in [
         (100.0, "14px"),
@@ -1360,7 +1359,7 @@ fn incremental_matching_includes_module_theme_selector_dependencies() {
         ("themed", true, true),
         ("themed", false, false),
     ] {
-        node.attributes.insert("class".into(), class.into());
+        node.attributes.insert(Prop::Class, class.into());
         node.state.set(NodeState::HOVERED, hovered);
         let mut full = node.clone();
         resolver.restyle_subtree_for_ids_cached(

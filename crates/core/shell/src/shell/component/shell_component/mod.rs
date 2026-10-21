@@ -7,6 +7,7 @@ mod tests;
 
 use child_surface::*;
 use damage::*;
+use mesh_core_elements::Prop;
 
 use super::runtime_tree::RetainedTreeDirtySummary;
 use super::*;
@@ -1976,7 +1977,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // `hidden` is the parent-surface paint/input exclusion marker. The
         // same retained node is painted again as the child window, where that
         // marker must not prune the subtree.
-        subtree.attributes.remove("hidden");
+        subtree.attributes.remove(Prop::Hidden);
         offset_widget_tree_layout(
             &mut subtree,
             -bounds.0 + content_offset.0,
@@ -2013,7 +2014,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let node = find_node_by_key(tree, node_key)?;
         let bounds = promoted_child_origin(node);
         let mut child_tree = node.clone();
-        child_tree.attributes.remove("hidden");
+        child_tree.attributes.remove(Prop::Hidden);
         // Must match `paint_child_surface`'s offset exactly: that call bakes
         // `-bounds + content_offset` in as the painter's starting offset
         // rather than into `.layout`, but for a pure translation the two are
@@ -2071,7 +2072,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // The retained node is hidden in the parent display list, but the
         // promoted target owns the node's pixels and must paint its subtree.
         let mut child_root = node.clone();
-        child_root.attributes.remove("hidden");
+        child_root.attributes.remove(Prop::Hidden);
         let scale_policy = mesh_core_render::FractionalScale::new(scale);
         let logical_width = scale_policy.logical_extent(canvas.width());
         let logical_height = scale_policy.logical_extent(canvas.height());

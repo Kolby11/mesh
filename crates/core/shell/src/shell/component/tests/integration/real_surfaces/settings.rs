@@ -156,7 +156,7 @@ fn settings_scrollbar_is_conditional_on_overflow() {
 fn count_class_token(node: &WidgetNode, token: &str) -> usize {
     usize::from(
         node.attributes
-            .get("class")
+            .get(Prop::Class)
             .is_some_and(|classes| classes.split_whitespace().any(|class| class == token)),
     ) + node
         .children

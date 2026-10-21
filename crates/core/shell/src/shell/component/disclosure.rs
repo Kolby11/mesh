@@ -10,6 +10,7 @@
 //! authority over `open`; the controller never holds a second copy of it.
 
 use super::*;
+use mesh_core_elements::Prop;
 use mesh_core_elements::{HOVER_INTENT_CLOSE_DELAY, PopoverOpenOn};
 
 /// Why the controller proposed an open-state change. Passed to `openchange`
@@ -112,7 +113,7 @@ impl DisclosureRegistry {
 }
 
 pub(super) fn popover_is_open(node: &WidgetNode) -> bool {
-    node.attributes.get("open").is_some_and(|value| {
+    node.attributes.get(Prop::Open).is_some_and(|value| {
         let value = value.trim();
         !(value.is_empty()
             || value == "0"
@@ -140,15 +141,20 @@ impl FrontendSurfaceComponent {
 }
 
 pub(super) fn popover_anchor_reference(popover: &WidgetNode) -> Option<&str> {
-    ["anchor-ref", "anchor-target", "anchor-element", "target"]
-        .into_iter()
-        .find_map(|name| {
-            popover
-                .attributes
-                .get(name)
-                .map(|value| value.trim())
-                .filter(|value| !value.is_empty())
-        })
+    [
+        Prop::AnchorRef,
+        Prop::AnchorTarget,
+        Prop::AnchorElement,
+        Prop::Target,
+    ]
+    .into_iter()
+    .find_map(|name| {
+        popover
+            .attributes
+            .get(name)
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+    })
 }
 
 /// Whether `node` is the element an `anchor-ref` names: its key, `ref`, `id`,
@@ -156,7 +162,7 @@ pub(super) fn popover_anchor_reference(popover: &WidgetNode) -> Option<&str> {
 pub(super) fn node_matches_reference(node: &WidgetNode, reference: &str) -> bool {
     node.mesh_key().is_some_and(|key| key == reference)
         || node.bind_this() == Some(reference)
-        || ["ref", "id", "bind:this"].into_iter().any(|name| {
+        || [Prop::Ref, Prop::Id].into_iter().any(|name| {
             node.attributes
                 .get(name)
                 .is_some_and(|value| value == reference)

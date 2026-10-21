@@ -503,7 +503,7 @@ fn shipped_navigation_audio_popover_transition_delay_stays_bounded() {
         .expect("rendered audio popover");
     assert!(
         tree.attributes
-            .get("class")
+            .get(Prop::Class)
             .is_some_and(|class| class.contains("mesh-surface-exiting")),
         "closing transition should expose mesh-surface-exiting state to styles"
     );

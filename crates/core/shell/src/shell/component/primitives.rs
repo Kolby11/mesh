@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_elements::Prop;
 use mesh_core_interaction::{
     active_modal_scope, menu_for_key, menu_items, menu_label, nested_menu, open_focus_scopes,
     parent_menu_trigger, scope_contains, scope_focus_traversal,
@@ -140,7 +141,7 @@ impl FrontendSurfaceComponent {
                     let scopes = open_focus_scopes(tree);
                     let dismissible = scopes.iter().rev().find(|scope| {
                         node_is_source(scope, &["dialog", "sheet"])
-                            && scope.attributes.contains_key("open")
+                            && scope.attributes.contains_key(Prop::Open)
                     });
                     let mut requests = Vec::new();
                     let mut dismissed = false;
@@ -179,7 +180,7 @@ impl FrontendSurfaceComponent {
                     }
                     if let Some(scope) = open_focus_scopes(tree).into_iter().rev().find(|scope| {
                         node_is_source(scope, &["dialog", "sheet"])
-                            && scope.attributes.contains_key("open")
+                            && scope.attributes.contains_key(Prop::Open)
                     }) {
                         return self
                             .set_disclosure_open(
@@ -257,7 +258,7 @@ impl FrontendSurfaceComponent {
         if key == leave || key == "Escape" {
             if let Some((parent, trigger)) = parent_menu_trigger(tree, menu) {
                 let mut requests = self.set_focus_target(tree, Some(trigger), true)?;
-                if menu.attributes.contains_key("open") {
+                if menu.attributes.contains_key(Prop::Open) {
                     requests.extend(self.set_disclosure_open(
                         tree,
                         menu.mesh_key().unwrap(),

@@ -1,6 +1,7 @@
 use super::contracts::*;
 use super::snapshot::*;
 use super::*;
+use crate::Prop;
 use crate::{Dimension, Edges, WidgetScrollMetrics};
 use serde_json::json;
 
@@ -161,9 +162,9 @@ fn direct_f32_json_conversion_matches_serialization() {
 fn icon_snapshot_exposes_base_and_icon_fields() {
     let mut node = WidgetNode::new("icon");
     node.set_mesh_key("0:1");
-    node.attributes.insert("ref".into(), "batteryIcon".into());
-    node.attributes.insert("name".into(), "battery-full".into());
-    node.attributes.insert("size".into(), "18".into());
+    node.attributes.insert(Prop::Ref, "batteryIcon".into());
+    node.attributes.insert(Prop::Name, "battery-full".into());
+    node.attributes.insert(Prop::Size, "18".into());
     node.layout.x = 10.0;
     node.layout.y = 20.0;
     node.layout.width = 24.0;
@@ -191,10 +192,10 @@ fn element_snapshot_json_matches_serde_snapshot_shape() {
 
     let mut node = WidgetNode::new("input");
     node.set_mesh_key("root/0");
-    node.attributes.insert("id".into(), "search".into());
-    node.attributes.insert("ref".into(), "searchBox".into());
-    node.attributes.insert("type".into(), "search".into());
-    node.attributes.insert("value".into(), "mesh".into());
+    node.attributes.insert(Prop::Id, "search".into());
+    node.attributes.insert(Prop::Ref, "searchBox".into());
+    node.attributes.insert(Prop::Type, "search".into());
+    node.attributes.insert(Prop::Value, "mesh".into());
     node.layout.x = 10.0;
     node.layout.y = 20.0;
     node.layout.width = 160.0;
@@ -227,9 +228,9 @@ fn input_type_def_is_lookupable_by_tag() {
 #[test]
 fn input_snapshot_keeps_input_type_separate_from_element_type() {
     let mut node = WidgetNode::new("input");
-    node.attributes.insert("ref".into(), "searchBox".into());
-    node.attributes.insert("type".into(), "search".into());
-    node.attributes.insert("value".into(), "mesh".into());
+    node.attributes.insert(Prop::Ref, "searchBox".into());
+    node.attributes.insert(Prop::Type, "search".into());
+    node.attributes.insert(Prop::Value, "mesh".into());
 
     let value = element_snapshot_json(&node, 0.0, 0.0);
 

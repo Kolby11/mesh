@@ -1,5 +1,6 @@
 use super::super::*;
 use super::is_bare_printable_key;
+use mesh_core_elements::Prop;
 
 #[derive(Debug, Clone)]
 pub(in crate::shell::component) struct ResolvedSurfaceShortcut {
@@ -442,7 +443,7 @@ impl FrontendSurfaceComponent {
         if target
             .node
             .attributes
-            .get("aria-haspopup")
+            .get(Prop::AriaHaspopup)
             .is_some_and(|value| value == "true" || value == "menu")
         {
             self.pending_embedded_popover_focus = true;
@@ -1018,7 +1019,7 @@ fn normalize_key_name(value: &str) -> String {
 
 fn collect_keybind_subscribers(node: &WidgetNode, subscribers: &mut Vec<KeybindSubscriber>) {
     if let (Some(keybind_id), Some(node_key), Some(handler)) = (
-        node.attributes.get("keybind"),
+        node.attributes.get(Prop::Keybind),
         node.mesh_key(),
         node.event_handlers.get("keybind"),
     ) {
@@ -1049,7 +1050,7 @@ pub(in crate::shell::component) fn annotate_node_by_keybind(
     node: &mut WidgetNode,
     shortcuts_by_keybind: &HashMap<String, Vec<String>>,
 ) {
-    let (mut replace_keybind_label, shortcuts) = match node.attributes.get("keybind") {
+    let (mut replace_keybind_label, shortcuts) = match node.attributes.get(Prop::Keybind) {
         Some(keybind_id) => (
             node.accessibility.keyboard_shortcut.as_deref() == Some(keybind_id),
             shortcuts_by_keybind.get(keybind_id),
@@ -1091,7 +1092,7 @@ mod shortcut_annotation_tests {
     fn keyed_node(keybind: Option<&str>, children: Vec<WidgetNode>) -> WidgetNode {
         let mut node = WidgetNode::new("button");
         if let Some(keybind) = keybind {
-            node.attributes.insert("keybind".into(), keybind.into());
+            node.attributes.insert(Prop::Keybind, keybind.into());
         }
         node.children = children.into();
         node

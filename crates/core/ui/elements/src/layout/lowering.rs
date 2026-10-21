@@ -1,4 +1,5 @@
 use super::*;
+use crate::Prop;
 
 #[derive(Clone)]
 pub(super) struct TextMeasureData {
@@ -20,7 +21,7 @@ impl TextMeasureData {
         Self {
             content: node
                 .attributes
-                .get("content")
+                .get(Prop::Content)
                 .map(|content| Arc::<str>::from(content.as_str()))
                 .unwrap_or_default(),
             font_family: node.computed_style.font_family.clone(),
@@ -33,12 +34,12 @@ impl TextMeasureData {
             white_space: node.computed_style.white_space,
             language: node
                 .attributes
-                .get("lang")
+                .get(Prop::Lang)
                 .map(|value| Arc::<str>::from(value.as_str()))
                 .unwrap_or_default(),
             shaping_features: node
                 .attributes
-                .get("font-features")
+                .get(Prop::FontFeatures)
                 .map(|value| Arc::<str>::from(value.as_str()))
                 .unwrap_or_default(),
         }

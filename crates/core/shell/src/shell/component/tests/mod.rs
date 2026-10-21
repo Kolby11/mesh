@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_elements::Prop;
 
 mod common;
 
@@ -107,7 +108,7 @@ end
     let tree = component.build_tree(&theme, 200, 100);
     let column = &tree.children[0];
     assert_eq!(
-        column.attributes.get("title").map(String::as_str),
+        column.attributes.get(Prop::Title).map(String::as_str),
         Some("SCOPE")
     );
     let text: Vec<_> = column
@@ -120,7 +121,7 @@ end
                 child.children.iter().collect()
             }
         })
-        .filter_map(|node| node.attributes.get("content").map(String::as_str))
+        .filter_map(|node| node.attributes.get(Prop::Content).map(String::as_str))
         .collect();
     assert_eq!(text, vec!["42", "41", "42"]);
 }
@@ -157,7 +158,7 @@ fn generated_error_placeholder_is_bounded_after_restyle_constraints() {
             mesh_core_elements::style::TextOverflow::Ellipsis
         );
     }
-    assert_eq!(node.attributes.get("content"), Some(&message));
+    assert_eq!(node.attributes.get(Prop::Content), Some(&message));
 }
 
 #[test]
@@ -277,7 +278,7 @@ fn ref_metrics_keep_scroll_offsets_from_unpublished_ancestors() {
 
     let mut child = WidgetNode::new("button");
     child.set_mesh_key("root/0");
-    child.attributes.insert("ref".into(), "action".into());
+    child.attributes.insert(Prop::Ref, "action".into());
     child.layout.y = 30.0;
     child.layout.height = 10.0;
     root.children.push(child);
@@ -310,8 +311,8 @@ fn ref_metrics_keep_scroll_offsets_from_unpublished_ancestors() {
 fn element_metrics_move_last_preserves_all_publications() {
     let mut node = WidgetNode::new("box");
     node.set_mesh_key("root/0");
-    node.attributes.insert("id".into(), "by_id".into());
-    node.attributes.insert("ref".into(), "by_ref".into());
+    node.attributes.insert(Prop::Id, "by_id".into());
+    node.attributes.insert(Prop::Ref, "by_ref".into());
     node.set_bind_this("by_binding");
     node.layout.width = 120.0;
     node.layout.height = 32.0;

@@ -304,7 +304,7 @@ fn retained_render_benchmark_fixture<
             };
             if item_index % 4 == 0 {
                 item.attributes.insert(
-                    "content".into(),
+                    Prop::Content,
                     format!("item-{group_index:02}-{item_index:03}"),
                 );
             }

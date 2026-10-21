@@ -232,7 +232,7 @@ fn shipped_audio_popover_content_measured_surface_contains_volume_slider() {
     let tree = audio.last_tree.as_ref().expect("rendered audio popover");
     let slider = first_node_by_tag(tree, "slider").expect("audio popover volume slider");
     assert_eq!(
-        slider.attributes.get("orient").map(String::as_str),
+        slider.attributes.get(Prop::Orient).map(String::as_str),
         Some("vertical"),
         "audio popover slider should be vertical"
     );

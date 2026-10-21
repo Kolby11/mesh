@@ -4,6 +4,7 @@ use crate::style::{
 };
 use crate::tags::lower_source_tag;
 use crate::{FrontendCompositionResolver, LayeredStore};
+use mesh_core_elements::Prop;
 
 use mesh_core_component::template::{
     Attribute, AttributeValue, ElementNode, ForNode, TemplateNode,
@@ -498,8 +499,7 @@ fn build_widget_node_inner(
         TemplateNode::Text(text) => {
             let mut node = WidgetNode::new("text");
             attach_module_id(&mut node, &manifest.package.id);
-            node.attributes
-                .insert("content".into(), text.content.clone());
+            node.attributes.insert(Prop::Content, text.content.clone());
             node.computed_style = build_style
                 .resolver
                 .resolve_node_style_for_module_indexed_with_parent_style(
@@ -553,7 +553,7 @@ fn build_widget_node_inner(
                     ))
                 })
                 .unwrap_or_else(|| format!("{{ {} }}", expr.expression));
-            node.attributes.insert("content".into(), content);
+            node.attributes.insert(Prop::Content, content);
             node.service_field_reads = tracking_store.map(|t| t.into_reads()).unwrap_or_default();
             node.computed_style = build_style
                 .resolver
@@ -717,7 +717,7 @@ fn build_widget_node_inner(
             let mut node = WidgetNode::new(tag);
             attach_module_id(&mut node, &manifest.package.id);
             node.attributes.insert(
-                "slot".into(),
+                Prop::Slot,
                 slot.extension_point
                     .clone()
                     .unwrap_or_else(|| "default".into()),
@@ -904,15 +904,15 @@ fn build_element_node(
         })
         .flatten();
     attributes
-        .entry("data-mesh-element".into())
+        .entry(Prop::DataMeshElement)
         .or_insert_with(|| source_tag.to_string());
-    if tag == "input" && !attributes.contains_key("type") {
+    if tag == "input" && !attributes.contains_key(Prop::Type) {
         if let Some(input_type) = default_input_type(&element.tag_kind) {
-            attributes.insert("type".into(), input_type.into());
+            attributes.insert(Prop::Type, input_type.into());
         }
     }
     apply_source_tag_defaults(&element.tag_kind, &mut attributes);
-    let resolved_classes = attributes.get("class").map(|value| {
+    let resolved_classes = attributes.get(Prop::Class).map(|value| {
         value
             .split_whitespace()
             .map(str::to_string)
@@ -921,7 +921,7 @@ fn build_element_node(
     let style_classes = resolved_classes.as_deref().unwrap_or(&classes);
     let style_id = id
         .as_deref()
-        .or_else(|| attributes.get("id").map(String::as_str));
+        .or_else(|| attributes.get(Prop::Id).map(String::as_str));
     let element_state = authored_element_state(&attributes);
     let inherited_mask = inherited_style_mask(
         build_style.rules,
@@ -940,8 +940,8 @@ fn build_element_node(
             tag,
             style_classes,
             style_id,
-            attributes.get("style").map(String::as_str),
-            attributes.get("part").map(String::as_str),
+            attributes.get(Prop::Style).map(String::as_str),
+            attributes.get(Prop::Part).map(String::as_str),
             container_context,
             element_state,
             Some(&manifest.package.id),
@@ -978,10 +978,10 @@ fn build_element_node(
     node.set_accessibility_baseline(accessibility_baseline);
 
     if let Some(id) = id {
-        node.attributes.insert("id".into(), id);
+        node.attributes.insert(Prop::Id, id);
     }
-    if !classes.is_empty() && !node.attributes.contains_key("class") {
-        node.attributes.insert("class".into(), classes.join(" "));
+    if !classes.is_empty() && !node.attributes.contains_key(Prop::Class) {
+        node.attributes.insert(Prop::Class, classes.join(" "));
     }
 
     let inline_text = tag == "text"
@@ -999,7 +999,7 @@ fn build_element_node(
             .iter()
             .map(|child| resolve_inline_content(child, effective_state, instance_key, composition))
             .collect();
-        node.attributes.insert("content".into(), content);
+        node.attributes.insert(Prop::Content, content);
         node.service_field_reads = tracking_store.map(|t| t.into_reads()).unwrap_or_default();
         return node;
     }
@@ -1110,10 +1110,15 @@ fn record_template_bindings(
 /// What [`patch_template_bindings`] changed on a node.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TemplateBindingPatch {
-    pub changed: bool,
+    /// The stages the patched properties reach; empty when nothing changed.
+    pub change: mesh_core_elements::ChangeClass,
     pub dependencies_changed: bool,
-    /// Text content changed, so the node needs relayout, not only restyle.
-    pub content_changed: bool,
+}
+
+impl TemplateBindingPatch {
+    pub fn changed(&self) -> bool {
+        !self.change.is_empty()
+    }
 }
 
 /// Re-evaluate a node's recorded bindings against `state` and write the
@@ -1141,19 +1146,13 @@ pub fn patch_template_bindings(
             &bindings.instance_key,
             composition,
         );
+        let key = mesh_core_elements::AttrKey::new(name);
+        // `attributes` lives in the shared authored payload; compare before
+        // writing so an unchanged binding does not copy it.
         let mut next = mesh_core_elements::AttributeMap::new();
-        next.insert_value(mesh_core_elements::AttrKey::new(name), value);
-        let next_value = next.get(name.as_str()).cloned();
-        if node.attributes.get(name.as_str()).cloned() != next_value {
-            match next_value {
-                Some(value) => {
-                    node.attributes.insert(name.clone().into(), value);
-                }
-                None => {
-                    node.attributes.remove(name.as_str());
-                }
-            }
-            patch.changed = true;
+        next.insert_value(key.clone(), value.clone());
+        if node.attributes.get_by_name(name) != next.get_by_name(name) {
+            patch.change |= node.attributes.set_value(key, value);
         }
     }
     if let Some(parts) = bindings.inline_content.as_deref() {
@@ -1168,16 +1167,17 @@ pub fn patch_template_bindings(
                 )
             })
             .collect();
-        if node.attributes.get("content").map(String::as_str) != Some(content.as_str()) {
-            node.attributes.insert("content".into(), content);
-            patch.changed = true;
-            patch.content_changed = true;
+        if node.attributes.text(Prop::Content) != Some(content.as_str()) {
+            patch.change |= node.attributes.set(Prop::Content, content);
         }
     }
-    if patch.changed {
+    if patch
+        .change
+        .intersects(mesh_core_elements::ChangeClass::A11Y)
+    {
         let source_tag = node
             .attributes
-            .get("data-mesh-element")
+            .get(Prop::DataMeshElement)
             .cloned()
             .unwrap_or_else(|| node.tag.clone());
         let tag = node.tag.clone();

@@ -213,7 +213,7 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
         collect_class_token_nodes(&tree, "bubble-option-core", &mut cores);
         cores
             .iter()
-            .filter_map(|node| node.attributes.get("class"))
+            .filter_map(|node| node.attributes.get(Prop::Class))
             .filter_map(|class| {
                 class
                     .split_whitespace()

@@ -1,3 +1,4 @@
+use mesh_core_elements::Prop;
 use std::collections::HashSet;
 
 use mesh_core_elements::style::{Color, TextDirection};
@@ -31,7 +32,7 @@ fn perf_large_tree_retained_reuse_smoke() {
             let mut label = node(next_id, "text", x + 4.0, y + 8.0, 40.0, 16.0);
             label
                 .attributes
-                .insert("content".into(), format!("r{row}c{col}"));
+                .insert(Prop::Content, format!("r{row}c{col}"));
             next_id += 1;
             container.children.push(label);
             root.children.push(container);
@@ -110,7 +111,7 @@ fn perf_text_heavy_path_exercises_locale_script_and_direction_cases() {
             let mut label = node(2 + idx, "text", 0.0, y, 760.0, 14.0);
             label.computed_style.text_direction = direction;
             label.attributes.insert(
-                "content".into(),
+                Prop::Content,
                 format!("{locale_script}-{case_index}-{idx}: {sample}"),
             );
             root.children.push(label);
@@ -176,7 +177,7 @@ fn perf_icon_heavy_path_records_raster_cache_hits() {
         icon.computed_style.background_color = Color::TRANSPARENT;
         icon.computed_style.color = Color::WHITE;
         icon.attributes
-            .insert("src".into(), icon_path.to_string_lossy().into_owned());
+            .insert(Prop::Src, icon_path.to_string_lossy().into_owned());
         root.children.push(icon);
     }
 

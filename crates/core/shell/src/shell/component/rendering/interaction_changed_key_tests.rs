@@ -1,5 +1,6 @@
 use super::*;
 use mesh_core_component::style::StyleValue;
+use mesh_core_elements::Prop;
 
 fn keyed_node(key: &str, children: Vec<WidgetNode>) -> WidgetNode {
     let mut node = WidgetNode::new("box");
@@ -22,10 +23,8 @@ fn diagnostic_fingerprint(retained_tree_generation: u64) -> RuntimeStyleDiagnost
 #[test]
 fn runtime_style_diagnostic_generation_tracks_every_resolution_input() {
     let mut child = WidgetNode::new("button");
-    child
-        .attributes
-        .insert("class".into(), "primary wide".into());
-    child.attributes.insert("id".into(), "save".into());
+    child.attributes.insert(Prop::Class, "primary wide".into());
+    child.attributes.insert(Prop::Id, "save".into());
     child.set_mesh_key("root/save");
     child.set_module_id("@test/controls");
     let mut tree = WidgetNode::new("surface");
@@ -48,12 +47,12 @@ fn runtime_style_diagnostic_generation_tracks_every_resolution_input() {
     let mut changed = tree.clone();
     changed.children[0]
         .attributes
-        .insert("class".into(), "secondary".into());
+        .insert(Prop::Class, "secondary".into());
     assert_tree_change(changed);
     let mut changed = tree.clone();
     changed.children[0]
         .attributes
-        .insert("id".into(), "apply".into());
+        .insert(Prop::Id, "apply".into());
     assert_tree_change(changed);
     let mut changed = tree.clone();
     changed.children[0].state.set(NodeState::FOCUSED, true);
@@ -200,7 +199,7 @@ fn targeted_attribute_state_only_updates_affected_subtrees() {
                 None => &mut tree.children[branch],
                 Some(child) => &mut tree.children[branch].children[child],
             };
-            node.attributes.insert("hidden".into(), "true".into());
+            node.attributes.insert(Prop::Hidden, "true".into());
         }
     }
 
@@ -235,7 +234,7 @@ fn keyed_selection_annotation_only_marks_selectable_text_target() {
     selectable.set_mesh_key(target);
     selectable
         .attributes
-        .insert("selectable".into(), "true".into());
+        .insert(Prop::Selectable, "true".into());
     assert!(annotate_selected_text_node(
         &mut selectable,
         &selection,

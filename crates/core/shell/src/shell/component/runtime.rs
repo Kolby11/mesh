@@ -1,5 +1,6 @@
 use super::diagnostics::record_localized_miss as record_localized_miss_diagnostic;
 use super::*;
+use mesh_core_elements::Prop;
 use mesh_core_frontend_abi::{EffectScope, EffectSource, FrontendEffect};
 use mesh_core_scripting::{ScriptDiagnosticCategory, ScriptError};
 
@@ -2151,9 +2152,9 @@ pub(super) fn bounded_error_widget(message: impl Into<String>) -> WidgetNode {
     let message = message.into();
     let mut node = WidgetNode::new("box");
     let mut text = WidgetNode::new("text");
-    text.attributes.insert("content".into(), message.clone());
+    text.attributes.insert(Prop::Content, message.clone());
     text.mark_error_placeholder();
-    node.attributes.insert("content".into(), message);
+    node.attributes.insert(Prop::Content, message);
     node.mark_error_placeholder();
     node.children.push(text);
     node

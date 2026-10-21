@@ -1,3 +1,4 @@
+use mesh_core_elements::Prop;
 use std::sync::Arc;
 
 use mesh_core_elements::style::Color;
@@ -80,12 +81,12 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
             white_space: node.computed_style.white_space,
             language: node
                 .attributes
-                .get("lang")
+                .get(Prop::Lang)
                 .map(|value| Arc::from(value.as_str()))
                 .unwrap_or_default(),
             shaping_features: node
                 .attributes
-                .get("font-features")
+                .get(Prop::FontFeatures)
                 .map(|value| Arc::from(value.as_str()))
                 .unwrap_or_default(),
             opacity,
@@ -127,8 +128,8 @@ pub(super) fn build_paint_content_with_previous(
         "text" => DisplayPaintContent::Text(DisplayTextPaint {
             text: retained_display_str(
                 node.attributes
-                    .get("text")
-                    .or_else(|| node.attributes.get("content"))
+                    .get(Prop::Text)
+                    .or_else(|| node.attributes.get(Prop::Content))
                     .map_or("", String::as_str),
                 match previous {
                     Some(DisplayPaintContent::Text(text)) => Some(&text.text),
@@ -139,7 +140,7 @@ pub(super) fn build_paint_content_with_previous(
         }),
         "input" => {
             let value = retained_display_str(
-                node.attributes.get("value").map_or("", String::as_str),
+                node.attributes.get(Prop::Value).map_or("", String::as_str),
                 match previous {
                     Some(DisplayPaintContent::Input(input)) => Some(&input.value),
                     _ => None,
@@ -147,7 +148,7 @@ pub(super) fn build_paint_content_with_previous(
             );
             let placeholder = retained_display_str(
                 node.attributes
-                    .get("placeholder")
+                    .get(Prop::Placeholder)
                     .map_or("", String::as_str),
                 match previous {
                     Some(DisplayPaintContent::Input(input)) => Some(&input.placeholder),
@@ -160,30 +161,30 @@ pub(super) fn build_paint_content_with_previous(
                 placeholder,
                 mask_text: node
                     .attributes
-                    .get("type")
+                    .get(Prop::Type)
                     .is_some_and(|value| value == "password"),
                 focused: node.state.contains(mesh_core_elements::NodeState::FOCUSED),
             })
         }
         "slider" => DisplayPaintContent::Slider(DisplaySliderPaint {
-            min: attr_f32_with_default(node, "min", 0.0),
-            max: attr_f32_with_default(node, "max", 100.0),
-            value: attr_f32_with_default(node, "value", 50.0),
+            min: attr_f32_with_default(node, Prop::Min, 0.0),
+            max: attr_f32_with_default(node, Prop::Max, 100.0),
+            value: attr_f32_with_default(node, Prop::Value, 50.0),
             vertical: node
                 .attributes
-                .get("orient")
+                .get(Prop::Orient)
                 .is_some_and(|value| value == "vertical"),
         }),
         "icon" => DisplayPaintContent::Icon(DisplayIconPaint {
             src: retained_optional_display_str(
-                node.attributes.get("src").map(String::as_str),
+                node.attributes.get(Prop::Src).map(String::as_str),
                 match previous {
                     Some(DisplayPaintContent::Icon(icon)) => icon.src.as_ref(),
                     _ => None,
                 },
             ),
             name: retained_optional_display_str(
-                node.attributes.get("name").map(String::as_str),
+                node.attributes.get(Prop::Name).map(String::as_str),
                 match previous {
                     Some(DisplayPaintContent::Icon(icon)) => icon.name.as_ref(),
                     _ => None,
@@ -191,14 +192,14 @@ pub(super) fn build_paint_content_with_previous(
             ),
             size: node
                 .attributes
-                .get("size")
+                .get(Prop::Size)
                 .and_then(|value| value.parse::<u32>().ok()),
             multicolor: false,
         }),
         // An image is content, not a glyph: its file paints in its own colours.
         "image" => DisplayPaintContent::Icon(DisplayIconPaint {
             src: retained_optional_display_str(
-                node.attributes.get("src").map(String::as_str),
+                node.attributes.get(Prop::Src).map(String::as_str),
                 match previous {
                     Some(DisplayPaintContent::Icon(icon)) => icon.src.as_ref(),
                     _ => None,
@@ -260,7 +261,7 @@ pub(super) fn retained_optional_display_str(
 /// not an explicit false value (`checked`, `checked="true"`, `checked="1"`).
 pub(crate) fn node_is_checked(node: &WidgetNode) -> bool {
     node.attributes
-        .get("checked")
+        .get(Prop::Checked)
         .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1" | "checked"))
 }
 
@@ -278,11 +279,11 @@ pub(super) fn build_text_selection(node: &WidgetNode) -> Option<DisplayTextSelec
     })
 }
 
-pub(super) fn attr_f32(node: &WidgetNode, key: &str) -> f32 {
+pub(super) fn attr_f32(node: &WidgetNode, key: Prop) -> f32 {
     attr_f32_with_default(node, key, 0.0)
 }
 
-pub(super) fn attr_f32_with_default(node: &WidgetNode, key: &str, default: f32) -> f32 {
+pub(super) fn attr_f32_with_default(node: &WidgetNode, key: Prop, default: f32) -> f32 {
     node.attributes
         .get(key)
         .and_then(|value| value.parse::<f32>().ok())

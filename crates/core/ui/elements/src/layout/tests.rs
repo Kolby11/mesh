@@ -1,4 +1,5 @@
 use super::*;
+use crate::Prop;
 use crate::style::{
     AlignItems, AlignSelf, Color, Display, Edges, FlexDirection, FontStyle, JustifyContent,
     Position, TextDirection, WhiteSpace,
@@ -203,7 +204,7 @@ fn intrinsic_text_width_rounds_up_so_the_painter_does_not_wrap() {
     let mut root = make_node("row", Dimension::Px(200.0), Dimension::Px(32.0));
     let mut text = make_node("text", Dimension::Auto, Dimension::Auto);
     text.attributes
-        .insert("content".into(), "Quick Settings".into());
+        .insert(Prop::Content, "Quick Settings".into());
     root.children.push(text);
 
     LayoutEngine::compute_with_intrinsic_cache_and_measurer(
@@ -220,7 +221,7 @@ fn intrinsic_text_width_rounds_up_so_the_painter_does_not_wrap() {
 fn retained_layout_remeasures_when_measurer_revision_changes() {
     let mut root = make_node("row", Dimension::Content, Dimension::Auto);
     let mut text = make_node("text", Dimension::Auto, Dimension::Auto);
-    text.attributes.insert("content".into(), "hello".into());
+    text.attributes.insert(Prop::Content, "hello".into());
     root.children.push(text);
 
     let measurer = RevisionedMeasurer {
@@ -268,7 +269,7 @@ fn retained_layout_remeasures_when_measurer_revision_changes() {
 fn retained_layout_does_not_reuse_an_older_measurement_generation() {
     let mut root = make_node("row", Dimension::Content, Dimension::Auto);
     let mut text = make_node("text", Dimension::Auto, Dimension::Auto);
-    text.attributes.insert("content".into(), "hello".into());
+    text.attributes.insert(Prop::Content, "hello".into());
     root.children.push(text);
 
     let measurer = RevisionedMeasurer {
@@ -664,7 +665,7 @@ fn taffy_layout_text_leaf_uses_measurer() {
     root.computed_style.direction = FlexDirection::Row;
     root.computed_style.align_items = AlignItems::Start;
     let mut child = make_node("text", Dimension::Content, Dimension::Content);
-    child.attributes.insert("content".into(), "hello".into());
+    child.attributes.insert(Prop::Content, "hello".into());
     root.children = vec![child].into();
 
     let measurer = CountingMeasurer::default();
@@ -679,7 +680,7 @@ fn taffy_layout_text_leaf_uses_measurer() {
 fn retained_text_context_keeps_clean_content_and_replaces_changed_content() {
     let mut root = keyed_node("root", "row", Dimension::Content, Dimension::Auto);
     let mut text = keyed_node("root/text", "text", Dimension::Auto, Dimension::Auto);
-    text.attributes.insert("content".into(), "hello".into());
+    text.attributes.insert(Prop::Content, "hello".into());
     let text_id = text.id;
     root.children.push(text);
 
@@ -715,7 +716,7 @@ fn retained_text_context_keeps_clean_content_and_replaces_changed_content() {
 
     root.children[0]
         .attributes
-        .insert("content".into(), "hello world".into());
+        .insert(Prop::Content, "hello world".into());
     LayoutEngine::compute_incremental(
         &mut root,
         &mut state,
@@ -738,8 +739,7 @@ fn retained_text_context_keeps_clean_content_and_replaces_changed_content() {
 fn structural_layout_keeps_unkeyed_text_measurement_contexts() {
     let mut root = make_node("row", Dimension::Content, Dimension::Auto);
     let mut text = make_node("text", Dimension::Auto, Dimension::Auto);
-    text.attributes
-        .insert("content".into(), "unkeyed text".into());
+    text.attributes.insert(Prop::Content, "unkeyed text".into());
     let text_id = text.id;
     root.children.push(text);
 
@@ -807,7 +807,7 @@ fn retained_text_context_reuse_beats_rebuilding_inputs() {
                 Dimension::Auto,
                 Dimension::Auto,
             );
-            text.attributes.insert("content".into(), content.clone());
+            text.attributes.insert(Prop::Content, content.clone());
             text
         })
         .collect();
@@ -931,7 +931,7 @@ fn taffy_layout_text_content_changes_measurement_without_node_id_churn() {
     let mut root = make_node("row", Dimension::Content, Dimension::Auto);
     root.computed_style.direction = FlexDirection::Row;
     let mut child = make_node("text", Dimension::Auto, Dimension::Auto);
-    child.attributes.insert("content".into(), "hello".into());
+    child.attributes.insert(Prop::Content, "hello".into());
     let child_id = child.id;
     root.children.push(child);
 
@@ -949,7 +949,7 @@ fn taffy_layout_text_content_changes_measurement_without_node_id_churn() {
 
     root.children[0]
         .attributes
-        .insert("content".into(), "hello world".into());
+        .insert(Prop::Content, "hello world".into());
     LayoutEngine::compute_with_intrinsic_cache_and_measurer(
         &mut root,
         300.0,
@@ -1098,7 +1098,7 @@ fn phase87_layout_runtime_stack_spacer_divider_and_scroll_area_stay_compatible()
     let mut scroll_area = make_node("scroll", Dimension::Px(120.0), Dimension::Px(60.0));
     scroll_area
         .attributes
-        .insert("data-mesh-element".into(), "scroll-area".into());
+        .insert(Prop::DataMeshElement, "scroll-area".into());
     scroll_area.scroll_metrics.get_or_insert_default().y = 12.50;
     scroll_area.children = vec![make_node(
         "content",
@@ -1110,7 +1110,7 @@ fn phase87_layout_runtime_stack_spacer_divider_and_scroll_area_stay_compatible()
     assert_eq!(
         scroll_area
             .attributes
-            .get("data-mesh-element")
+            .get(Prop::DataMeshElement)
             .map(String::as_str),
         Some("scroll-area")
     );

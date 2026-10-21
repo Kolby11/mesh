@@ -577,6 +577,7 @@ impl InteractionTransaction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mesh_core_elements::Prop;
     use mesh_core_elements::{Dimension, LayoutEngine};
 
     fn tree() -> (WidgetNode, NodeId, NodeId) {
@@ -724,7 +725,7 @@ mod tests {
 
         root.children[0]
             .attributes
-            .insert("disabled".into(), "true".into());
+            .insert(Prop::Disabled, "true".into());
         let mut reconcile = state.begin();
         reconcile.reconcile(&root);
         let delta = reconcile.commit(&mut state);

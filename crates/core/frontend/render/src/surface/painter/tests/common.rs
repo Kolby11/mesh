@@ -1,5 +1,6 @@
 use super::super::*;
 use crate::display_list::RetainedDisplayList;
+use mesh_core_elements::Prop;
 use mesh_core_elements::layout::LayoutRect;
 use mesh_core_elements::style::{Dimension, Edges};
 use std::sync::{Arc, Mutex};
@@ -31,8 +32,8 @@ pub(super) fn text_node(
         },
         Color::TRANSPARENT,
     );
-    node.attributes.insert("content".into(), text.into());
-    node.attributes.insert("selectable".into(), "true".into());
+    node.attributes.insert(Prop::Content, text.into());
+    node.attributes.insert(Prop::Selectable, "true".into());
     node.computed_style.color = color;
     node.computed_style.font_size = 14.0;
     node.computed_style.line_height = 1.4;

@@ -12,6 +12,7 @@ use crate::attributes::AttributeMap;
 use crate::element::element_runtime_tag_for_tag;
 use crate::interaction_contract::NodeEligibility;
 use crate::layout::LayoutRect;
+use crate::prop::Prop;
 use crate::style::ComputedStyle;
 use crate::tree::{NodeId, NodeState, WidgetNode, WidgetTreeValidationError, validate_widget_tree};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -979,23 +980,23 @@ fn same_structure_and_references(live: &WidgetNode, old: &FrameNode) -> bool {
             .zip(old.children.iter())
             .all(|(child, identity)| StableNodeIdentity::from_node(child) == *identity)
         && [
-            "data-mesh-element",
-            "id",
-            "ref",
-            "aria-labelledby",
-            "aria-describedby",
-            "aria-controls",
-            "aria-owns",
-            "aria-details",
-            "aria-errormessage",
-            "tooltip-for",
-            "anchor-ref",
-            "anchor-target",
-            "anchor-element",
-            "target",
+            Prop::DataMeshElement,
+            Prop::Id,
+            Prop::Ref,
+            Prop::AriaLabelledby,
+            Prop::AriaDescribedby,
+            Prop::AriaControls,
+            Prop::AriaOwns,
+            Prop::AriaDetails,
+            Prop::AriaErrormessage,
+            Prop::TooltipFor,
+            Prop::AnchorRef,
+            Prop::AnchorTarget,
+            Prop::AnchorElement,
+            Prop::Target,
         ]
         .iter()
-        .all(|name| live.attributes.get(name) == old.attributes.get(name))
+        .all(|name| live.attributes.get(*name) == old.attributes.get(*name))
         && live.bind_this() == old.bind_this.as_deref()
 }
 
@@ -1304,6 +1305,7 @@ fn float_option_equal(left: Option<f32>, right: Option<f32>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Prop;
     use crate::accessibility::AccessibilityRole;
 
     #[derive(Clone, Copy)]
@@ -1346,15 +1348,15 @@ mod tests {
                 child.accessibility.focusable = true;
                 child
                     .attributes
-                    .insert("aria-label".into(), format!("item {index}"));
+                    .insert(Prop::AriaLabel, format!("item {index}"));
                 child.state.set(NodeState::FOCUSED, random.next() & 1 == 0);
             } else {
                 child
                     .attributes
-                    .insert("content".into(), format!("item {index}"));
+                    .insert(Prop::Content, format!("item {index}"));
             }
             if random.next() & 3 == 0 {
-                child.attributes.insert("aria-hidden".into(), "true".into());
+                child.attributes.insert(Prop::AriaHidden, "true".into());
             }
             root.children.push(child);
         }
@@ -1415,7 +1417,7 @@ mod tests {
 
         first.children[0]
             .attributes
-            .insert("aria-hidden".into(), "false".into());
+            .insert(Prop::AriaHidden, "false".into());
         let before = FrameSnapshot::complete(&first, 1, None).expect("first frame");
         let after = FrameSnapshot::complete(&second, 2, Some(&before)).expect("second frame");
         assert!(after.semantic_diff().added().next().is_none());
@@ -1429,10 +1431,10 @@ mod tests {
 
         first.children[0]
             .attributes
-            .insert("aria-label".into(), "new label".into());
+            .insert(Prop::AriaLabel, "new label".into());
         first.children[0]
             .attributes
-            .insert("aria-hidden".into(), "false".into());
+            .insert(Prop::AriaHidden, "false".into());
         let relabelled =
             FrameSnapshot::complete(&first, 3, Some(&before)).expect("relabelled frame");
         let change = relabelled
@@ -1527,7 +1529,7 @@ mod tests {
             if root.children.len() > 1 {
                 root.children[1]
                     .attributes
-                    .insert("aria-labelledby".into(), labeller);
+                    .insert(Prop::AriaLabelledby, labeller);
             }
             let base = FrameSnapshot::complete(&root, 1, None).expect("base snapshot");
 
@@ -1537,7 +1539,7 @@ mod tests {
                     "label" => {
                         target
                             .attributes
-                            .insert("aria-label".into(), format!("renamed {revision}"));
+                            .insert(Prop::AriaLabel, format!("renamed {revision}"));
                     }
                     "layout" => target.layout.width += 7.0,
                     _ => target.state.toggle(NodeState::HOVERED),
@@ -1579,14 +1581,14 @@ mod tests {
         }
         for seed in 1..12 {
             let mut original = generated_tree(seed);
-            original.children[0].attributes.remove("aria-label");
-            original.children[0].attributes.remove("aria-hidden");
+            original.children[0].attributes.remove(Prop::AriaLabel);
+            original.children[0].attributes.remove(Prop::AriaHidden);
             let mut label = WidgetNode::new("text");
             label.id = 500;
             label.set_mesh_key("root/item-0/label");
             label
                 .attributes
-                .insert("content".into(), "descendant name".into());
+                .insert(Prop::Content, "descendant name".into());
             original.children[0].children.push(label);
             crate::normalize_accessibility(&mut original);
             let previous = FrameSnapshot::complete(&original, 1, None).unwrap();
@@ -1609,15 +1611,13 @@ mod tests {
                     "text" => {
                         target.children[0]
                             .attributes
-                            .insert("content".into(), "replacement".into());
+                            .insert(Prop::Content, "replacement".into());
                     }
                     "hidden" => {
-                        target
-                            .attributes
-                            .insert("aria-hidden".into(), "true".into());
+                        target.attributes.insert(Prop::AriaHidden, "true".into());
                     }
                     "disabled" => {
-                        target.attributes.insert("disabled".into(), "true".into());
+                        target.attributes.insert(Prop::Disabled, "true".into());
                     }
                     "focus" => {
                         target.state.set(NodeState::FOCUSED, true);
@@ -1653,7 +1653,7 @@ mod tests {
             let mut label = WidgetNode::new("text");
             label
                 .attributes
-                .insert("content".into(), format!("label {index}"));
+                .insert(Prop::Content, format!("label {index}"));
             tree.children.push(label);
         }
         crate::normalize_accessibility(&mut tree);

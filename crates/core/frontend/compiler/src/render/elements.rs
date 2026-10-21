@@ -1,4 +1,5 @@
 use crate::FrontendCompositionResolver;
+use mesh_core_elements::Prop;
 
 use mesh_core_component::SourceSpan;
 use mesh_core_component::template::{
@@ -48,7 +49,7 @@ pub(super) fn default_input_type(source_tag: &SourceTag) -> Option<&'static str>
 pub(super) fn apply_source_tag_defaults(source_tag: &SourceTag, attributes: &mut AttributeMap) {
     for &(name, value) in element_default_attributes_for_tag(source_tag.as_str()) {
         attributes
-            .entry(name.into())
+            .entry(mesh_core_elements::AttrKey::from(name))
             .or_insert_with(|| value.into());
     }
 }
@@ -205,7 +206,7 @@ pub(super) fn build_component_ref(
         None,
     );
     node.attributes
-        .insert("component".into(), component.name.clone());
+        .insert(Prop::Component, component.name.clone());
     mesh_core_elements::normalize_accessibility_before_finalization(&mut node);
     node
 }
@@ -599,38 +600,38 @@ pub(super) fn accessibility_for_element_unguarded(
         );
     }
     info.label = attributes
-        .get("aria-label")
-        .or_else(|| attributes.get("label"))
-        .or_else(|| attributes.get("alt"))
+        .get(Prop::AriaLabel)
+        .or_else(|| attributes.get(Prop::Label))
+        .or_else(|| attributes.get(Prop::Alt))
         .cloned();
     info.description = attributes
-        .get("title")
-        .or_else(|| attributes.get("tooltip"))
+        .get(Prop::Title)
+        .or_else(|| attributes.get(Prop::Tooltip))
         .cloned();
     info.keyboard_shortcut = attributes
-        .get("key")
-        .or_else(|| attributes.get("keybind"))
-        .or_else(|| attributes.get("shortcut"))
+        .get(Prop::Key)
+        .or_else(|| attributes.get(Prop::Keybind))
+        .or_else(|| attributes.get(Prop::Shortcut))
         .cloned();
-    info.state.disabled = bool_attr(attributes, "disabled");
-    info.state.checked = attributes.get("checked").map(|value| bool_value(value));
+    info.state.disabled = bool_attr(attributes, Prop::Disabled);
+    info.state.checked = attributes.get(Prop::Checked).map(|value| bool_value(value));
     info.state.expanded = attributes
-        .get("expanded")
-        .or_else(|| attributes.get("open"))
+        .get(Prop::Expanded)
+        .or_else(|| attributes.get(Prop::Open))
         .map(|value| bool_value(value));
-    info.state.selected = bool_attr(attributes, "selected");
-    info.state.pressed = bool_attr(attributes, "pressed");
-    info.state.busy = bool_attr(attributes, "busy");
-    info.state.invalid = bool_attr(attributes, "invalid");
-    info.state.required = bool_attr(attributes, "required");
-    info.state.value = attributes.get("value").cloned();
-    info.state.value_min = number_attr(attributes, "min");
-    info.state.value_max = number_attr(attributes, "max");
+    info.state.selected = bool_attr(attributes, Prop::Selected);
+    info.state.pressed = bool_attr(attributes, Prop::Pressed);
+    info.state.busy = bool_attr(attributes, Prop::Busy);
+    info.state.invalid = bool_attr(attributes, Prop::Invalid);
+    info.state.required = bool_attr(attributes, Prop::Required);
+    info.state.value = attributes.get(Prop::Value).cloned();
+    info.state.value_min = number_attr(attributes, Prop::Min);
+    info.state.value_max = number_attr(attributes, Prop::Max);
     info
 }
 
 #[cfg(test)]
-pub(super) fn bool_attr(attributes: &AttributeMap, name: &str) -> bool {
+pub(super) fn bool_attr(attributes: &AttributeMap, name: Prop) -> bool {
     attributes.get(name).is_some_and(|value| bool_value(value))
 }
 
@@ -640,6 +641,6 @@ pub(super) fn bool_value(value: &str) -> bool {
 }
 
 #[cfg(test)]
-pub(super) fn number_attr(attributes: &AttributeMap, name: &str) -> Option<f32> {
+pub(super) fn number_attr(attributes: &AttributeMap, name: Prop) -> Option<f32> {
     attributes.get(name)?.trim().parse::<f32>().ok()
 }

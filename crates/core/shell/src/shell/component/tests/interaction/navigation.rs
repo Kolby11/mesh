@@ -114,7 +114,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     assert!(
         find_node_by_key(tree, &focused_option_key).is_some_and(|node| {
             node.attributes
-                .get("class")
+                .get(Prop::Class)
                 .is_some_and(|class| class.split_whitespace().any(|part| part == "bubble-option"))
         }),
         "keyboard activation should move focus into a theme bubble option"
@@ -262,7 +262,7 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
     assert!(
         find_node_by_key(tree, &focused_option_key).is_some_and(|node| {
             node.attributes
-                .get("class")
+                .get(Prop::Class)
                 .is_some_and(|class| class.split_whitespace().any(|part| part == "bubble-option"))
         }),
         "keyboard activation should move focus into a language bubble option"
@@ -842,7 +842,7 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
     assert!(
         settings_button
             .attributes
-            .get("title")
+            .get(Prop::Title)
             .is_some_and(|title| !title.is_empty()),
         "the resting settings trigger should carry a tooltip"
     );

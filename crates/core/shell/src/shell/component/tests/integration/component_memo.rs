@@ -58,7 +58,11 @@ fn memo_surface(parent_src: &str, locals: &[(&str, &str)]) -> FrontendSurfaceCom
 }
 
 fn node_with_content<'a>(node: &'a WidgetNode, content: &str) -> Option<&'a WidgetNode> {
-    if node.attributes.get("content").is_some_and(|c| c == content) {
+    if node
+        .attributes
+        .get(Prop::Content)
+        .is_some_and(|c| c == content)
+    {
         return Some(node);
     }
     node.children
@@ -141,7 +145,10 @@ label = ""
     let memoized_child =
         node_with_content(component.last_tree.as_ref().unwrap(), "static").unwrap();
     assert_eq!(
-        memoized_child.attributes.get("content").map(String::as_str),
+        memoized_child
+            .attributes
+            .get(Prop::Content)
+            .map(String::as_str),
         Some("static"),
         "memoized child subtree still renders its content"
     );

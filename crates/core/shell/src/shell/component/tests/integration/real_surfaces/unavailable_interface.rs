@@ -2,7 +2,7 @@ use super::*;
 
 fn contains_text(node: &WidgetNode, content: &str) -> bool {
     node.attributes
-        .get("content")
+        .get(Prop::Content)
         .is_some_and(|value| value == content)
         || node
             .children

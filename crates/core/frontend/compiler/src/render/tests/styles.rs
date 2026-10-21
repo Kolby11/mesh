@@ -2,6 +2,7 @@ use super::super::*;
 use super::common::*;
 use crate::TemplateExpressionResult;
 use mesh_core_component::template::Attribute;
+use mesh_core_elements::Prop;
 use mesh_core_elements::{ComponentCompositionProps, EventHandlerCall, HandlerTarget};
 use std::collections::BTreeMap;
 
@@ -123,11 +124,11 @@ local Child = require("./child.mesh")
     );
 
     let props = composition.props.borrow();
-    assert!(!props.values.contains_key("onprimary"));
-    assert!(!props.values.contains_key("onsecondary"));
+    assert!(!props.values.contains_name("onprimary"));
+    assert!(!props.values.contains_name("onsecondary"));
     assert_ne!(props.callbacks["onprimary"], props.callbacks["onsecondary"]);
     assert_eq!(
-        props.bindings.get("hidden").map(String::as_str),
+        props.bindings.get(Prop::Hidden).map(String::as_str),
         Some("isHidden")
     );
     assert_eq!(props.bind_this.as_deref(), Some("child"));
@@ -361,7 +362,7 @@ fn dynamic_class_participates_in_initial_style_resolution() {
 
     let active_box = tree.children.first().expect("template root");
     assert_eq!(
-        active_box.attributes.get("class"),
+        active_box.attributes.get(Prop::Class),
         Some(&"active".to_string())
     );
     assert_eq!(
@@ -450,7 +451,7 @@ fn dynamic_inline_style_overrides_stylesheet_layout() {
 
     let positioned = tree.children.first().expect("template root");
     assert_eq!(
-        positioned.attributes.get("style").map(String::as_str),
+        positioned.attributes.get(Prop::Style).map(String::as_str),
         Some("left: 38px; top: 32px;")
     );
     assert_eq!(positioned.computed_style.inset_left, Some(38.0));

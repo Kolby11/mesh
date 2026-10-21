@@ -1,4 +1,5 @@
 use crate::attributes::AttributeMap;
+use crate::prop::Prop;
 use crate::tree::NodeState;
 
 /// The typed pseudo-state vocabulary shared by style matching and runtime
@@ -206,16 +207,16 @@ impl PseudoState {
     /// Read an author-facing boolean/value attribute for states whose source
     /// is markup. Interaction and surface states deliberately return `None`.
     pub fn authored_value(self, attributes: &AttributeMap) -> Option<bool> {
-        let names: &[&str] = match self {
-            Self::Disabled => &["disabled", "aria-disabled"],
-            Self::ReadOnly => &["readonly", "aria-readonly"],
-            Self::Required => &["required", "aria-required"],
-            Self::Selected => &["selected", "aria-selected"],
-            Self::Checked => &["checked", "aria-checked"],
-            Self::Expanded => &["expanded", "open", "aria-expanded"],
-            Self::Pressed => &["pressed", "aria-pressed"],
-            Self::Invalid => &["invalid", "aria-invalid"],
-            Self::Value => &["value", "aria-valuenow"],
+        let names: &[Prop] = match self {
+            Self::Disabled => &[Prop::Disabled, Prop::AriaDisabled],
+            Self::ReadOnly => &[Prop::Readonly, Prop::AriaReadonly],
+            Self::Required => &[Prop::Required, Prop::AriaRequired],
+            Self::Selected => &[Prop::Selected, Prop::AriaSelected],
+            Self::Checked => &[Prop::Checked, Prop::AriaChecked],
+            Self::Expanded => &[Prop::Expanded, Prop::Open, Prop::AriaExpanded],
+            Self::Pressed => &[Prop::Pressed, Prop::AriaPressed],
+            Self::Invalid => &[Prop::Invalid, Prop::AriaInvalid],
+            Self::Value => &[Prop::Value, Prop::AriaValuenow],
             Self::Hovered
             | Self::Focused
             | Self::Active
@@ -228,7 +229,7 @@ impl PseudoState {
         };
 
         names.iter().find_map(|name| {
-            attributes.get_value(name).map(|value| {
+            attributes.get_value(*name).map(|value| {
                 let text = value.to_legacy_string();
                 match self {
                     Self::Value => !text.trim().is_empty(),
@@ -262,6 +263,7 @@ pub fn pseudo_state_mask(state: NodeState) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Prop;
 
     #[test]
     fn table_names_bits_and_accessors_are_exhaustive() {
@@ -284,9 +286,9 @@ mod tests {
     #[test]
     fn authored_state_aliases_are_typed_and_boolean() {
         let mut attrs = AttributeMap::default();
-        attrs.insert("aria-readonly".into(), "true".into());
-        attrs.insert("aria-expanded".into(), "true".into());
-        attrs.insert("aria-valuenow".into(), "0".into());
+        attrs.insert(Prop::AriaReadonly, "true".into());
+        attrs.insert(Prop::AriaExpanded, "true".into());
+        attrs.insert(Prop::AriaValuenow, "0".into());
         assert_eq!(PseudoState::ReadOnly.authored_value(&attrs), Some(true));
         assert_eq!(PseudoState::Expanded.authored_value(&attrs), Some(true));
         assert_eq!(PseudoState::Value.authored_value(&attrs), Some(true));

@@ -78,7 +78,7 @@ fn shipped_navigation_icon_rasterizes_pixels_on_real_surface() {
     .expect("volume button");
     let icon = first_node_by_tag(button, "icon").expect("volume icon node");
     assert!(
-        icon.attributes.get("name").is_some() || icon.attributes.get("src").is_some(),
+        icon.attributes.get(Prop::Name).is_some() || icon.attributes.get(Prop::Src).is_some(),
         "volume icon should declare a name or src to resolve"
     );
     let icon_key = icon.mesh_key().expect("icon mesh key").to_owned();

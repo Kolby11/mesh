@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_elements::Prop;
 use mesh_core_frontend_shell_adapter::ShellComponent;
 
 #[test]
@@ -117,7 +118,7 @@ end
         .as_mut()
         .expect("retained tree after pointer press")
         .attributes
-        .insert("inert".into(), "true".into());
+        .insert(Prop::Inert, "true".into());
     component
         .handle_input(
             &theme,
@@ -140,10 +141,10 @@ end
         .last_tree
         .as_mut()
         .expect("retained tree after captured release");
-    tree.attributes.remove("inert");
+    tree.attributes.remove(Prop::Inert);
     tree.children[0]
         .attributes
-        .insert("disabled".into(), "true".into());
+        .insert(Prop::Disabled, "true".into());
     component.focused_key = Some("root/0".into());
     component
         .handle_input(

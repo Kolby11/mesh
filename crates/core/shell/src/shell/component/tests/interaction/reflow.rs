@@ -1,11 +1,12 @@
 use super::*;
+use mesh_core_elements::Prop;
 
 #[test]
 fn hidden_child_surface_tracks_retained_tree_changes() {
     let mut component = test_frontend_component("<template><box /></template>");
     let mut child = event_node("box", "root/popup", 0.0, 0.0, 40.0, 30.0, &[]);
     child.mark_promoted_popover();
-    child.attributes.insert("hidden".into(), "true".into());
+    child.attributes.insert(Prop::Hidden, "true".into());
     child.computed_style.background_color = mesh_core_elements::style::Color {
         r: 255,
         g: 0,
@@ -371,7 +372,7 @@ end)
     assert_eq!(
         node_by_mesh_key(tree, "root/0/0")
             .attributes
-            .get("value")
+            .get(Prop::Value)
             .map(String::as_str),
         Some("local")
     );
@@ -469,7 +470,7 @@ end)
     assert_eq!(
         node_by_mesh_key(wide_tree, "root/0/0")
             .attributes
-            .get("value")
+            .get(Prop::Value)
             .map(String::as_str),
         Some("local")
     );
@@ -531,14 +532,14 @@ end)
     assert_eq!(
         node_by_mesh_key(narrow_tree, "root/0/0")
             .attributes
-            .get("value")
+            .get(Prop::Value)
             .map(String::as_str),
         Some("local")
     );
     assert_eq!(
         node_by_mesh_key(narrow_tree, "root/0/1")
             .attributes
-            .get("value")
+            .get(Prop::Value)
             .map(String::as_str),
         Some("73.00")
     );
@@ -586,9 +587,9 @@ end
         20.0,
         &[("change", "onSliderChange")],
     );
-    slider.attributes.insert("min".into(), "0".into());
-    slider.attributes.insert("max".into(), "1".into());
-    slider.attributes.insert("value".into(), "0".into());
+    slider.attributes.insert(Prop::Min, "0".into());
+    slider.attributes.insert(Prop::Max, "1".into());
+    slider.attributes.insert(Prop::Value, "0".into());
     component.last_tree = Some(root_with(vec![slider]));
 
     let theme = default_theme();
@@ -708,9 +709,9 @@ end
         20.0,
         &[("change", "onVolumeChange")],
     );
-    slider.attributes.insert("min".into(), "0".into());
-    slider.attributes.insert("max".into(), "1".into());
-    slider.attributes.insert("value".into(), "0.2".into());
+    slider.attributes.insert(Prop::Min, "0".into());
+    slider.attributes.insert(Prop::Max, "1".into());
+    slider.attributes.insert(Prop::Value, "0.2".into());
     component.last_tree = Some(root_with(vec![slider]));
     component.clear_runtime_dirty_states();
     component.dirty = false;
@@ -790,7 +791,7 @@ end
     let slider = first_node_by_tag(tree, "slider").expect("painted tree should contain slider");
     let rendered_value = slider
         .attributes
-        .get("value")
+        .get(Prop::Value)
         .and_then(|value| value.parse::<f64>().ok())
         .expect("painted slider value should be numeric");
     assert!(
@@ -880,7 +881,7 @@ slider {
         "each pointer move while dragging should repaint the slider immediately"
     );
     let rendered_value = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
-        .and_then(|slider| slider.attributes.get("value"))
+        .and_then(|slider| slider.attributes.get(Prop::Value))
         .and_then(|value| value.parse::<f32>().ok())
         .expect("painted slider value");
     assert!(
@@ -1319,7 +1320,7 @@ fn explicit_repaint_refreshes_child_pixels_alongside_unrelated_style_damage() {
     let mut component = test_frontend_component("<template><box /></template>");
     let mut child = event_node("box", "root/popup", 0.0, 0.0, 40.0, 30.0, &[]);
     child.mark_promoted_popover();
-    child.attributes.insert("hidden".into(), "true".into());
+    child.attributes.insert(Prop::Hidden, "true".into());
     child.computed_style.background_color = Color {
         r: 40,
         g: 80,

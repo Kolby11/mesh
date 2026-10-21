@@ -1,5 +1,6 @@
 use super::*;
 use crate::shell::component::tests::common::{test_frontend_component, themed_primary};
+use mesh_core_elements::Prop;
 
 #[test]
 fn script_narrow_flag_does_not_trigger_tree_rebuild() {
@@ -122,7 +123,7 @@ fn threshold_narrow_below_half() {
     let mut tree2 = tree1.clone();
     tree2.children[0].children[0]
         .attributes
-        .insert("content".into(), "x".into());
+        .insert(Prop::Content, "x".into());
 
     let result = component.retained_tree.narrow_script_diff(&tree2);
     assert!(

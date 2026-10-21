@@ -1,4 +1,5 @@
 /// Accessibility tree — semantic representation for AT-SPI and screen readers.
+use crate::Prop;
 use crate::attributes::ResolvedAttributeValueRef;
 use crate::interaction_contract::{InteractionTarget, NodeEligibility};
 use crate::layout::LayoutRect;
@@ -695,7 +696,7 @@ fn visible_text(node: &WidgetNode, child_text: &str, hidden: bool) -> String {
         return String::new();
     }
     let own_text = (node.tag == "text")
-        .then(|| node.attributes.get("content"))
+        .then(|| node.attributes.get(Prop::Content))
         .flatten()
         .map(String::as_str)
         .map(str::trim)
@@ -723,7 +724,7 @@ fn non_empty(value: String) -> Option<String> {
 }
 
 fn raw_relationships(node: &WidgetNode) -> RawRelationships {
-    let list = |name: &str| {
+    let list = |name: Prop| {
         node.attributes
             .get(name)
             .into_iter()
@@ -732,23 +733,28 @@ fn raw_relationships(node: &WidgetNode) -> RawRelationships {
     };
     let source_tag = node
         .attributes
-        .get("data-mesh-element")
+        .get(Prop::DataMeshElement)
         .map(String::as_str)
         .unwrap_or(node.tag.as_str());
     let popover = source_tag == "popover";
     RawRelationships {
-        labelled_by: list("aria-labelledby"),
-        described_by: list("aria-describedby"),
-        controls: list("aria-controls"),
-        owns: list("aria-owns"),
-        details: list("aria-details"),
-        error_message: list("aria-errormessage"),
-        tooltip_for: node.attributes.get("tooltip-for").cloned(),
+        labelled_by: list(Prop::AriaLabelledby),
+        described_by: list(Prop::AriaDescribedby),
+        controls: list(Prop::AriaControls),
+        owns: list(Prop::AriaOwns),
+        details: list(Prop::AriaDetails),
+        error_message: list(Prop::AriaErrormessage),
+        tooltip_for: node.attributes.get(Prop::TooltipFor).cloned(),
         popover_trigger: popover
             .then(|| {
-                ["anchor-ref", "anchor-target", "anchor-element", "target"]
-                    .iter()
-                    .find_map(|name| node.attributes.get(name).cloned())
+                [
+                    Prop::AnchorRef,
+                    Prop::AnchorTarget,
+                    Prop::AnchorElement,
+                    Prop::Target,
+                ]
+                .iter()
+                .find_map(|name| node.attributes.get(*name).cloned())
             })
             .flatten(),
     }
@@ -756,8 +762,8 @@ fn raw_relationships(node: &WidgetNode) -> RawRelationships {
 
 fn authored_reference_names(node: &WidgetNode) -> Vec<String> {
     [
-        node.attributes.get("id").map(String::as_str),
-        node.attributes.get("ref").map(String::as_str),
+        node.attributes.get(Prop::Id).map(String::as_str),
+        node.attributes.get(Prop::Ref).map(String::as_str),
         node.mesh_key(),
         node.bind_this(),
     ]
@@ -918,7 +924,8 @@ mod tests {
     use crate::style::{Display, Visibility};
 
     fn attr(node: &mut WidgetNode, name: &str, value: &str) {
-        node.attributes.insert(name.into(), value.into());
+        node.attributes
+            .insert(crate::AttrKey::from(name), value.into());
     }
 
     #[test]
@@ -1093,9 +1100,9 @@ mod tests {
         assert_eq!(button.accessibility.label.as_deref(), Some("Mute"));
         assert!(button.accessibility.state.pressed);
 
-        button.attributes.remove("aria-role");
-        button.attributes.remove("aria-label");
-        button.attributes.remove("aria-pressed");
+        button.attributes.remove(Prop::AriaRole);
+        button.attributes.remove(Prop::AriaLabel);
+        button.attributes.remove(Prop::AriaPressed);
         normalize_accessibility(&mut button);
 
         assert_eq!(button.accessibility.role, AccessibilityRole::Button);
@@ -1264,7 +1271,7 @@ mod tests {
     fn hidden_panel_id(root: &WidgetNode) -> NodeId {
         root.children
             .iter()
-            .find(|node| node.attributes.get("id").map(String::as_str) == Some("hidden-panel"))
+            .find(|node| node.attributes.get(Prop::Id).map(String::as_str) == Some("hidden-panel"))
             .expect("hidden panel")
             .id
     }
@@ -1292,7 +1299,7 @@ mod finalized_memo_tests {
     fn finalized_semantics_keep_child_text_and_inherited_eligibility_current() {
         let mut root = WidgetNode::new("button");
         let mut child = WidgetNode::new("text");
-        child.attributes.insert("content".into(), "before".into());
+        child.attributes.insert(Prop::Content, "before".into());
         root.children.push(child);
         normalize_accessibility_finalized_memo(&mut root);
         let cached = root.finalized_accessibility.clone().unwrap();
@@ -1307,24 +1314,24 @@ mod finalized_memo_tests {
                 0 => {
                     root.children[0]
                         .attributes
-                        .insert("content".into(), "after".into());
+                        .insert(Prop::Content, "after".into());
                 }
                 1 => {
-                    root.attributes.insert("disabled".into(), "true".into());
+                    root.attributes.insert(Prop::Disabled, "true".into());
                 }
                 2 => {
-                    root.attributes.insert("hidden".into(), "true".into());
+                    root.attributes.insert(Prop::Hidden, "true".into());
                 }
                 3 => {
-                    root.attributes.remove("hidden");
+                    root.attributes.remove(Prop::Hidden);
                 }
                 4 => {
                     root.children[0]
                         .attributes
-                        .insert("aria-hidden".into(), "true".into());
+                        .insert(Prop::AriaHidden, "true".into());
                 }
                 _ => {
-                    root.children[0].attributes.remove("aria-hidden");
+                    root.children[0].attributes.remove(Prop::AriaHidden);
                     root.state.set(NodeState::FOCUSED, true);
                 }
             }
@@ -1339,15 +1346,13 @@ mod finalized_memo_tests {
     #[test]
     fn memo_projection_copy_preserves_authored_runtime_override_inputs() {
         let mut authored = WidgetNode::new("input");
-        authored
-            .attributes
-            .insert("value".into(), "authored".into());
+        authored.attributes.insert(Prop::Value, "authored".into());
         let mut live = authored.clone();
-        live.attributes.insert("value".into(), "runtime".into());
+        live.attributes.insert(Prop::Value, "runtime".into());
         live.state.set(NodeState::FOCUSED, true);
         normalize_accessibility_finalized_memo(&mut live);
         authored.retain_finalization_from(&live);
-        assert_eq!(authored.attributes.get("value").unwrap(), "authored");
+        assert_eq!(authored.attributes.get(Prop::Value).unwrap(), "authored");
         assert!(!authored.state.contains(NodeState::FOCUSED));
         assert_eq!(
             authored.accessibility.state.value.as_deref(),

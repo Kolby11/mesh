@@ -2,6 +2,7 @@ use super::super::*;
 use super::common::*;
 use mesh_core_component::template::Attribute;
 use mesh_core_elements::HandlerTarget;
+use mesh_core_elements::Prop;
 
 #[test]
 fn event_handler_call_attrs_store_typed_args_not_json_handler_string() {
@@ -57,7 +58,7 @@ fn two_way_value_binding_still_resolves_attribute_value() {
 
     let (_, _, resolved, _, _) = parse_attributes(&attrs, None);
 
-    assert_eq!(resolved.get("value"), Some(&String::new()));
+    assert_eq!(resolved.get(Prop::Value), Some(&String::new()));
 }
 
 #[test]
@@ -83,11 +84,14 @@ fn bound_attributes_retain_runtime_types_through_accessibility_lowering() {
         false,
     );
 
-    assert!(resolved.get_value("disabled").unwrap().legacy_bool());
-    assert_eq!(resolved.get_value("min").unwrap().parse_f32(), Some(1.5));
+    assert!(resolved.get_value(Prop::Disabled).unwrap().legacy_bool());
+    assert_eq!(
+        resolved.get_value(Prop::Min).unwrap().parse_f32(),
+        Some(1.5)
+    );
     assert_eq!(
         resolved
-            .get_value("data-metadata")
+            .get_value_by_name("data-metadata")
             .unwrap()
             .to_legacy_string(),
         r#"{"source":"runtime"}"#
@@ -96,8 +100,11 @@ fn bound_attributes_retain_runtime_types_through_accessibility_lowering() {
     let accessibility = accessibility_for_element("input", "input", &resolved);
     assert!(accessibility.state.disabled);
     assert_eq!(accessibility.state.value_min, Some(1.5));
-    assert_eq!(resolved.get("disabled").map(String::as_str), Some("true"));
-    assert_eq!(resolved.get("min").map(String::as_str), Some("1.5"));
+    assert_eq!(
+        resolved.get(Prop::Disabled).map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(resolved.get(Prop::Min).map(String::as_str), Some("1.5"));
 }
 
 #[test]
@@ -134,7 +141,7 @@ fn phase87_layout_display_source_semantics_survive_lowering() {
     let grid = tree.children.first().expect("grid node");
     assert_eq!(grid.tag, "box");
     assert_eq!(
-        grid.attributes.get("data-mesh-element"),
+        grid.attributes.get(Prop::DataMeshElement),
         Some(&"grid".to_string())
     );
     assert_eq!(
@@ -148,7 +155,7 @@ fn phase87_layout_display_source_semantics_survive_lowering() {
         .iter()
         .find(|node| {
             node.attributes
-                .get("data-mesh-element")
+                .get(Prop::DataMeshElement)
                 .is_some_and(|value| value == "progress")
         })
         .expect("progress node");
@@ -193,7 +200,7 @@ fn phase88_button_aliases_preserve_source_semantics_without_icon_shortcuts() {
     let button = tree.children.first().expect("button alias");
     assert_eq!(button.tag, "button");
     assert_eq!(
-        button.attributes.get("data-mesh-element"),
+        button.attributes.get(Prop::DataMeshElement),
         Some(&"icon-button".to_string())
     );
     assert_eq!(button.event_handlers.get("click"), Some(&"onTap".into()));
@@ -242,15 +249,15 @@ fn phase88_input_variants_configure_single_runtime_input_path() {
     let textarea = &tree.children[0];
     assert_eq!(textarea.tag, "input");
     assert_eq!(
-        textarea.attributes.get("data-mesh-element"),
+        textarea.attributes.get(Prop::DataMeshElement),
         Some(&"textarea".to_string())
     );
     assert_eq!(
-        textarea.attributes.get("type"),
+        textarea.attributes.get(Prop::Type),
         Some(&"textarea".to_string())
     );
     assert_eq!(
-        textarea.attributes.get("multiline"),
+        textarea.attributes.get(Prop::Multiline),
         Some(&"true".to_string())
     );
     assert!(textarea.accessibility.state.required);
@@ -258,26 +265,35 @@ fn phase88_input_variants_configure_single_runtime_input_path() {
     let password = &tree.children[1];
     assert_eq!(password.tag, "input");
     assert_eq!(
-        password.attributes.get("type"),
+        password.attributes.get(Prop::Type),
         Some(&"password".to_string())
     );
-    assert_eq!(password.attributes.get("masked"), Some(&"true".to_string()));
+    assert_eq!(
+        password.attributes.get(Prop::Masked),
+        Some(&"true".to_string())
+    );
 
     let number = &tree.children[2];
     assert_eq!(number.tag, "input");
     assert_eq!(
-        number.attributes.get("data-mesh-element"),
+        number.attributes.get(Prop::DataMeshElement),
         Some(&"number-input".to_string())
     );
-    assert_eq!(number.attributes.get("type"), Some(&"number".to_string()));
+    assert_eq!(
+        number.attributes.get(Prop::Type),
+        Some(&"number".to_string())
+    );
     assert_eq!(number.accessibility.state.value.as_deref(), Some("5"));
     assert_eq!(number.accessibility.state.value_min, Some(0.0));
     assert_eq!(number.accessibility.state.value_max, Some(10.0));
 
     let stepper = &tree.children[3];
     assert_eq!(stepper.tag, "input");
-    assert_eq!(stepper.attributes.get("type"), Some(&"number".to_string()));
-    assert_eq!(stepper.attributes.get("step"), Some(&"1".to_string()));
+    assert_eq!(
+        stepper.attributes.get(Prop::Type),
+        Some(&"number".to_string())
+    );
+    assert_eq!(stepper.attributes.get(Prop::Step), Some(&"1".to_string()));
 }
 
 #[test]
@@ -314,7 +330,7 @@ fn phase89_choice_menu_source_semantics_survive_lowering() {
     let select = &tree.children[0];
     assert_eq!(select.tag, "input");
     assert_eq!(
-        select.attributes.get("data-mesh-element"),
+        select.attributes.get(Prop::DataMeshElement),
         Some(&"select".to_string())
     );
     assert_eq!(
@@ -330,14 +346,14 @@ fn phase89_choice_menu_source_semantics_survive_lowering() {
 
     let option = &select.children[1];
     assert_eq!(
-        option.attributes.get("data-mesh-element"),
+        option.attributes.get(Prop::DataMeshElement),
         Some(&"option".to_string())
     );
     assert!(option.accessibility.state.selected);
 
     let menu = &tree.children[1];
     assert_eq!(
-        menu.attributes.get("data-mesh-element"),
+        menu.attributes.get(Prop::DataMeshElement),
         Some(&"menu".into())
     );
     assert_eq!(
@@ -346,7 +362,7 @@ fn phase89_choice_menu_source_semantics_survive_lowering() {
     );
     let item = &menu.children[0];
     assert_eq!(
-        item.attributes.get("data-mesh-element"),
+        item.attributes.get(Prop::DataMeshElement),
         Some(&"menu-item".to_string())
     );
     assert_eq!(
@@ -396,11 +412,14 @@ fn phase90_container_collection_source_semantics_survive_lowering() {
 
     let tabs = &tree.children[0];
     assert_eq!(
-        tabs.attributes.get("data-mesh-element"),
+        tabs.attributes.get(Prop::DataMeshElement),
         Some(&"tabs".into())
     );
     let tab = &tabs.children[0];
-    assert_eq!(tab.attributes.get("data-mesh-element"), Some(&"tab".into()));
+    assert_eq!(
+        tab.attributes.get(Prop::DataMeshElement),
+        Some(&"tab".into())
+    );
     assert_eq!(
         tab.event_handlers.get("activate"),
         Some(&"onOverview".into())
@@ -414,7 +433,7 @@ fn phase90_container_collection_source_semantics_survive_lowering() {
     let list = &tree.children[1];
     assert_eq!(list.tag, "column");
     assert_eq!(
-        list.attributes.get("data-mesh-element"),
+        list.attributes.get(Prop::DataMeshElement),
         Some(&"list".into())
     );
     assert_eq!(
@@ -423,7 +442,7 @@ fn phase90_container_collection_source_semantics_survive_lowering() {
     );
     let item = &list.children[0];
     assert_eq!(
-        item.attributes.get("data-mesh-element"),
+        item.attributes.get(Prop::DataMeshElement),
         Some(&"list-item".to_string())
     );
     assert_eq!(
@@ -434,7 +453,7 @@ fn phase90_container_collection_source_semantics_survive_lowering() {
 
     let details = &tree.children[2];
     assert_eq!(
-        details.attributes.get("data-mesh-element"),
+        details.attributes.get(Prop::DataMeshElement),
         Some(&"details".to_string())
     );
     assert_eq!(details.accessibility.state.expanded, Some(true));
@@ -506,13 +525,13 @@ fn class_and_style_directives_follow_script_state() {
     let node = on.children.first().expect("box");
     let classes: Vec<_> = node
         .attributes
-        .get("class")
+        .get(Prop::Class)
         .expect("class")
         .split_whitespace()
         .collect();
     assert_eq!(classes, ["row", "active"]);
     assert_eq!(node.computed_style.opacity, 0.5);
-    let style = node.attributes.get("style").expect("style");
+    let style = node.attributes.get(Prop::Style).expect("style");
     assert!(style.contains("color: #ff0000;"), "{style}");
     assert!(!style.contains("opacity"), "{style}");
 
@@ -522,11 +541,11 @@ fn class_and_style_directives_follow_script_state() {
     let node = off.children.first().expect("box");
     let classes: Vec<_> = node
         .attributes
-        .get("class")
+        .get(Prop::Class)
         .expect("class")
         .split_whitespace()
         .collect();
     assert_eq!(classes, ["row", "muted"]);
     assert_eq!(node.computed_style.opacity, 0.25);
-    assert!(!node.attributes.get("style").unwrap().contains("color"));
+    assert!(!node.attributes.get(Prop::Style).unwrap().contains("color"));
 }

@@ -1,4 +1,5 @@
 use super::*;
+use mesh_core_elements::Prop;
 
 #[test]
 fn immediate_rerender_preserves_present_damage_from_first_pass() {
@@ -272,7 +273,7 @@ fn audio_popover_keeps_drag_value_visible_until_backend_catches_up() {
     // Slider value is rendered in percent (0..100). The in-flight drag (~80)
     // must stay visible instead of snapping back to the stale backend (20).
     let rendered_value = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
-        .and_then(|slider| slider.attributes.get("value"))
+        .and_then(|slider| slider.attributes.get(Prop::Value))
         .and_then(|value| value.parse::<f32>().ok())
         .expect("painted slider value");
     assert!(
@@ -411,7 +412,7 @@ fn audio_popover_drag_keeps_fractional_slider_value_visible() {
     // Slider value is rendered in percent (0..100); the drag position must stay
     // visible at the grabbed point.
     let rendered_value = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
-        .and_then(|slider| slider.attributes.get("value"))
+        .and_then(|slider| slider.attributes.get(Prop::Value))
         .and_then(|value| value.parse::<f32>().ok())
         .expect("painted slider value");
     assert!(
@@ -535,7 +536,7 @@ fn audio_popover_backend_update_moves_slider_after_preserved_value_clears() {
     }
 
     let rendered_value = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider")
-        .and_then(|slider| slider.attributes.get("value"))
+        .and_then(|slider| slider.attributes.get(Prop::Value))
         .and_then(|value| value.parse::<f32>().ok())
         .expect("painted slider value");
     assert!(
@@ -717,7 +718,7 @@ end
         24.0,
         &[("change", "onTextChange")],
     );
-    input.attributes.insert("readonly".into(), "true".into());
+    input.attributes.insert(Prop::Readonly, "true".into());
     component.last_tree = Some(root_with(vec![input]));
 
     let theme = default_theme();
@@ -996,9 +997,9 @@ end
         20.0,
         &[("release", "onSliderRelease")],
     );
-    slider.attributes.insert("min".into(), "0".into());
-    slider.attributes.insert("max".into(), "1".into());
-    slider.attributes.insert("value".into(), "0".into());
+    slider.attributes.insert(Prop::Min, "0".into());
+    slider.attributes.insert(Prop::Max, "1".into());
+    slider.attributes.insert(Prop::Value, "0".into());
     component.last_tree = Some(root_with(vec![slider]));
 
     let theme = default_theme();

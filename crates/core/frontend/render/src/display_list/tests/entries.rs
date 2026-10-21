@@ -2,6 +2,7 @@ use super::super::paint_node::*;
 use super::super::*;
 use super::common::*;
 use crate::RenderObjectDirtySummary;
+use mesh_core_elements::Prop;
 use mesh_core_elements::style::{
     BackgroundPaint, Color, Overflow, StyleImageSource, StyleLinearGradient,
 };
@@ -635,9 +636,9 @@ fn sparse_entry_patch_matches_full_collection_for_text_updates() {
     let mut unchanged = node(2, "text", 0.0, 0.0, 50.0, 20.0);
     unchanged
         .attributes
-        .insert("content".into(), "unchanged".into());
+        .insert(Prop::Content, "unchanged".into());
     let mut changed = node(3, "text", 50.0, 0.0, 50.0, 20.0);
-    changed.attributes.insert("content".into(), "before".into());
+    changed.attributes.insert(Prop::Content, "before".into());
     root.children.extend([unchanged, changed]);
 
     let mut full = RetainedDisplayList::default();
@@ -658,7 +659,7 @@ fn sparse_entry_patch_matches_full_collection_for_text_updates() {
 
     root.children[1]
         .attributes
-        .insert("content".into(), "after".into());
+        .insert(Prop::Content, "after".into());
     let full_metrics = full.update(&root, 120, 40, false, true);
     let sparse_metrics = sparse.update_with_dirty_nodes(
         &root,
@@ -695,7 +696,7 @@ fn text_only_updates_preserve_cached_blur_metadata() {
 
     root.children[5].children[4]
         .attributes
-        .insert("content".into(), "changed".into());
+        .insert(Prop::Content, "changed".into());
     retained.update_with_dirty_nodes(
         &root,
         RenderObjectDirtySummary {
@@ -729,10 +730,10 @@ fn text_update_with_visibility_change_recomputes_blur_metadata() {
 
     root.children[3].children[6]
         .attributes
-        .insert("hidden".into(), "true".into());
+        .insert(Prop::Hidden, "true".into());
     root.children[5].children[4]
         .attributes
-        .insert("content".into(), "changed".into());
+        .insert(Prop::Content, "changed".into());
     retained.update_with_dirty_nodes(
         &root,
         RenderObjectDirtySummary {
@@ -826,7 +827,7 @@ fn patched_batch_index_matches_a_full_ordered_scan() {
         root.children.push(child);
     }
     let mut text = node(100, "text", 0.0, 192.0, 60.0, 16.0);
-    text.attributes.insert("content".into(), "label".into());
+    text.attributes.insert(Prop::Content, "label".into());
     root.children.push(text);
 
     let mut list = RetainedDisplayList::default();

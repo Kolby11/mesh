@@ -4,6 +4,7 @@ use crate::display_list::{
     DamageRect, DisplayIconPaint, DisplayListRepaintPolicy, DisplayPaintCommandKind,
     DisplayPaintContent, RetainedDisplayList,
 };
+use mesh_core_elements::Prop;
 use mesh_core_elements::layout::LayoutRect;
 use mesh_core_elements::style::{BackgroundPaint, Edges, StyleImageSource, StyleLinearGradient};
 
@@ -329,7 +330,7 @@ fn compatibility_and_retained_input_paths_emit_same_classes() {
         },
         Color::from_hex("#101820").unwrap(),
     );
-    root.attributes.insert("value".into(), "mesh".into());
+    root.attributes.insert(Prop::Value, "mesh".into());
     root.state.insert(mesh_core_elements::NodeState::FOCUSED);
     root.computed_style.color = Color::from_hex("#f5f5f5").unwrap();
     root.computed_style.padding = Edges::all(4.0);
@@ -383,9 +384,9 @@ fn compatibility_and_retained_slider_paths_emit_same_classes() {
         },
         Color::TRANSPARENT,
     );
-    root.attributes.insert("min".into(), "0".into());
-    root.attributes.insert("max".into(), "100".into());
-    root.attributes.insert("value".into(), "40".into());
+    root.attributes.insert(Prop::Min, "0".into());
+    root.attributes.insert(Prop::Max, "100".into());
+    root.attributes.insert(Prop::Value, "40".into());
     root.computed_style.color = Color::from_hex("#4a90e2").unwrap();
 
     let direct_backend = RecordingPaintBackend::default();
@@ -547,8 +548,8 @@ fn compatibility_and_retained_icon_paths_preserve_image_like_boundary() {
         },
         Color::TRANSPARENT,
     );
-    root.attributes.insert("name".into(), "mesh:search".into());
-    root.attributes.insert("size".into(), "20".into());
+    root.attributes.insert(Prop::Name, "mesh:search".into());
+    root.attributes.insert(Prop::Size, "20".into());
     root.computed_style.color = Color::from_hex("#fafafa").unwrap();
     root.computed_style.icon_fill = Some(1.0);
     root.computed_style.icon_weight = Some(500.0);
@@ -596,7 +597,7 @@ fn compatibility_and_retained_icon_paths_preserve_image_like_boundary() {
     );
 
     assert_eq!(
-        root.attributes.get("name").map(String::as_str),
+        root.attributes.get(Prop::Name).map(String::as_str),
         Some("mesh:search")
     );
     assert!(painter_command_classes(&direct_recorded.recorded_commands()).is_empty());
@@ -656,7 +657,7 @@ fn display_list_primitive_mixed_tree_preserves_node_order_and_command_classes() 
         },
         Color::from_hex("#101820").unwrap(),
     );
-    input.attributes.insert("value".into(), "mesh".into());
+    input.attributes.insert(Prop::Value, "mesh".into());
     input.state.insert(mesh_core_elements::NodeState::FOCUSED);
     input.computed_style.color = Color::from_hex("#f5f5f5").unwrap();
     input.computed_style.padding = Edges::all(4.0);
@@ -671,7 +672,7 @@ fn display_list_primitive_mixed_tree_preserves_node_order_and_command_classes() 
         },
         Color::TRANSPARENT,
     );
-    slider.attributes.insert("value".into(), "60".into());
+    slider.attributes.insert(Prop::Value, "60".into());
     slider.computed_style.color = Color::from_hex("#4a90e2").unwrap();
 
     let mut icon = node(
@@ -684,8 +685,8 @@ fn display_list_primitive_mixed_tree_preserves_node_order_and_command_classes() 
         },
         Color::TRANSPARENT,
     );
-    icon.attributes.insert("name".into(), "mesh:search".into());
-    icon.attributes.insert("size".into(), "20".into());
+    icon.attributes.insert(Prop::Name, "mesh:search".into());
+    icon.attributes.insert(Prop::Size, "20".into());
 
     let expected_node_order = vec![root.id, text.id, input.id, slider.id, icon.id];
     root.children = vec![text, input, slider, icon].into();

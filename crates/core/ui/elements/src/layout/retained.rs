@@ -1,4 +1,5 @@
 use super::*;
+use crate::Prop;
 
 pub(super) fn compute_fresh_retained_layout(
     root: &mut WidgetNode,
@@ -302,7 +303,7 @@ pub(super) fn update_text_context(
     if node.tag == "text" {
         let content = node
             .attributes
-            .get("content")
+            .get(Prop::Content)
             .map(String::as_str)
             .unwrap_or_default();
         let unchanged = text_nodes.get(&node.id).is_some_and(|existing| {
@@ -318,13 +319,13 @@ pub(super) fn update_text_context(
                 && existing.language.as_ref()
                     == node
                         .attributes
-                        .get("lang")
+                        .get(Prop::Lang)
                         .map(String::as_str)
                         .unwrap_or_default()
                 && existing.shaping_features.as_ref()
                     == node
                         .attributes
-                        .get("font-features")
+                        .get(Prop::FontFeatures)
                         .map(String::as_str)
                         .unwrap_or_default()
         });
@@ -343,12 +344,12 @@ pub(super) fn update_text_context(
                     white_space: node.computed_style.white_space,
                     language: node
                         .attributes
-                        .get("lang")
+                        .get(Prop::Lang)
                         .map(|value| Arc::from(value.as_str()))
                         .unwrap_or_default(),
                     shaping_features: node
                         .attributes
-                        .get("font-features")
+                        .get(Prop::FontFeatures)
                         .map(|value| Arc::from(value.as_str()))
                         .unwrap_or_default(),
                 },

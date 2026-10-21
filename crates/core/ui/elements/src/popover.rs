@@ -11,6 +11,7 @@
 //! `<popover anchor="bottom" gravity="bottom" offset-y="4" grab="hover">`.
 //! `open-on` selects the core disclosure behavior that opens and dismisses it.
 
+use crate::Prop;
 use crate::tree::WidgetNode;
 
 /// The placement field that produced a [`PopoverPlacementDiagnostic`].
@@ -181,7 +182,7 @@ impl PopoverOpenOn {
     /// Missing `open-on` is [`PopoverOpenOn::Manual`].
     pub fn from_node(node: &WidgetNode) -> Result<Self, PopoverPlacementDiagnostic> {
         node.attributes
-            .get("open-on")
+            .get(Prop::OpenOn)
             .map_or(Ok(Self::Manual), |value| parse_open_on(value))
     }
 
@@ -217,47 +218,47 @@ impl PopoverPlacement {
         let mut placement = Self::default();
         let mut diagnostics = Vec::new();
 
-        if let Some(value) = attrs.get("anchor") {
+        if let Some(value) = attrs.get(Prop::Anchor) {
             match parse_anchor(value) {
                 Ok(anchor) => placement.anchor = anchor,
                 Err(diagnostic) => diagnostics.push(diagnostic),
             }
         }
-        if let Some(value) = attrs.get("gravity") {
+        if let Some(value) = attrs.get(Prop::Gravity) {
             match parse_gravity(value) {
                 Ok(gravity) => placement.gravity = gravity,
                 Err(diagnostic) => diagnostics.push(diagnostic),
             }
-        } else if attrs.get("gravity").is_none() && attrs.contains_key("anchor") {
+        } else if attrs.get(Prop::Gravity).is_none() && attrs.contains_key(Prop::Anchor) {
             // With only an anchor given, match gravity to it so a popover
             // "anchored left" also grows left without restating it.
             placement.gravity = gravity_for_anchor(placement.anchor);
         }
-        if let Some(value) = attrs.get("offset-x") {
+        if let Some(value) = attrs.get(Prop::OffsetX) {
             match parse_offset(value, PopoverPlacementField::OffsetX) {
                 Ok(offset) => placement.offset_x = offset,
                 Err(diagnostic) => diagnostics.push(diagnostic),
             }
         }
-        if let Some(value) = attrs.get("offset-y") {
+        if let Some(value) = attrs.get(Prop::OffsetY) {
             match parse_offset(value, PopoverPlacementField::OffsetY) {
                 Ok(offset) => placement.offset_y = offset,
                 Err(diagnostic) => diagnostics.push(diagnostic),
             }
         }
-        if let Some(value) = attrs.get("grab") {
+        if let Some(value) = attrs.get(Prop::Grab) {
             match parse_grab(value) {
                 Ok(grab) => placement.grab = grab,
                 Err(diagnostic) => diagnostics.push(diagnostic),
             }
         }
-        if let Some(value) = attrs.get("constrain") {
+        if let Some(value) = attrs.get(Prop::Constrain) {
             match parse_constraint(value) {
                 Ok(adjustment) => placement.constraint_adjustment = adjustment,
                 Err(diagnostic) => diagnostics.push(diagnostic),
             }
         }
-        if let Some(value) = attrs.get("open-on") {
+        if let Some(value) = attrs.get(Prop::OpenOn) {
             match parse_open_on(value) {
                 Ok(open_on) => placement.open_on = open_on,
                 Err(diagnostic) => diagnostics.push(diagnostic),
@@ -442,7 +443,7 @@ mod tests {
     fn node_with(attrs: &[(&str, &str)]) -> WidgetNode {
         let mut node = WidgetNode::new("popover");
         for (k, v) in attrs {
-            node.attributes.insert((*k).into(), (*v).to_string());
+            node.attributes.insert(*k, (*v).to_string());
         }
         node
     }

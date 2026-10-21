@@ -1,4 +1,5 @@
 use super::super::*;
+use mesh_core_elements::Prop;
 use mesh_core_elements::style::Color;
 use mesh_core_elements::{NodeId, WidgetNode};
 
@@ -49,7 +50,7 @@ pub(super) fn display_entry_benchmark_tree(rows: usize, cols: usize) -> WidgetNo
         for col_index in 0..cols {
             let mut cell = node(id, "text", (col_index as f32) * 12.0, 0.0, 10.0, 8.0);
             cell.attributes
-                .insert("content".into(), format!("{row_index}:{col_index}"));
+                .insert(Prop::Content, format!("{row_index}:{col_index}"));
             row.children.push(cell);
             id += 1;
         }

@@ -4,6 +4,7 @@ use super::super::matching::selector_matches_attrs;
 use super::super::state::*;
 use super::super::*;
 use super::common::*;
+use crate::Prop;
 use crate::tree::NodeState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use std::collections::HashMap;
@@ -129,7 +130,7 @@ fn node_indexed_diagnostics_match_allocating_class_path() {
     let context = StyleContext::default();
     let mut node = crate::tree::WidgetNode::new("button");
     node.attributes
-        .insert("class".into(), "primary compact".into());
+        .insert(Prop::Class, "primary compact".into());
 
     let classes = vec!["primary".to_string(), "compact".to_string()];
     let allocating = resolver.resolve_node_style_with_diagnostics_for_module_indexed(

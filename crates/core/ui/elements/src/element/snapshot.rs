@@ -1,4 +1,5 @@
 use super::*;
+use crate::Prop;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElementRect {
@@ -137,8 +138,8 @@ pub fn element_snapshot(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Elem
 
     ElementSnapshot {
         key: node.mesh_key().unwrap_or_default().to_owned(),
-        id: node.attributes.get("id").cloned(),
-        reference: node.attributes.get("ref").cloned(),
+        id: node.attributes.get(Prop::Id).cloned(),
+        reference: node.attributes.get(Prop::Ref).cloned(),
         tag: node.tag.clone(),
         element_type,
         x: left,
@@ -221,7 +222,7 @@ pub(super) fn element_snapshot_json_object(
     object.insert(
         "id".into(),
         node.attributes
-            .get("id")
+            .get(Prop::Id)
             .cloned()
             .map(Value::String)
             .unwrap_or(Value::Null),
@@ -229,7 +230,7 @@ pub(super) fn element_snapshot_json_object(
     object.insert(
         "ref".into(),
         node.attributes
-            .get("ref")
+            .get(Prop::Ref)
             .cloned()
             .map(Value::String)
             .unwrap_or(Value::Null),
@@ -323,7 +324,7 @@ pub(super) fn insert_f32(object: &mut Map<String, Value>, key: &'static str, val
 pub(super) fn expose_tag_specific_fields(object: &mut Map<String, Value>, node: &WidgetNode) {
     let def = element_type_for_tag(&node.tag);
     for field in def.fields {
-        let Some(raw) = node.attributes.get(field.name) else {
+        let Some(raw) = node.attributes.get_by_name(field.name) else {
             continue;
         };
         object.insert(

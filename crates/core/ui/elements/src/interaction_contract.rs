@@ -679,7 +679,8 @@ mod tests {
     use crate::style::{Display, Visibility};
 
     fn attr(node: &mut WidgetNode, name: &str, value: &str) {
-        node.attributes.insert(name.into(), value.into());
+        node.attributes
+            .insert(crate::AttrKey::from(name), value.into());
     }
 
     #[test]

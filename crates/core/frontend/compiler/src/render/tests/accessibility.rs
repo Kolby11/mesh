@@ -1,4 +1,5 @@
 use super::super::*;
+use mesh_core_elements::Prop;
 use mesh_core_elements::accessibility::AccessibilityInfo;
 use mesh_core_elements::{AttrKey, AttributeMap};
 
@@ -36,9 +37,9 @@ fn accessibility_for_element_empty_attributes_matches_unguarded_chain() {
 #[test]
 fn accessibility_for_element_non_empty_attributes_matches_unguarded_chain() {
     let mut attributes = AttributeMap::new();
-    attributes.insert("class".into(), "active".to_string());
-    attributes.insert("disabled".into(), "true".to_string());
-    attributes.insert("min".into(), "1".to_string());
+    attributes.insert(Prop::Class, "active".to_string());
+    attributes.insert(Prop::Disabled, "true".to_string());
+    attributes.insert(Prop::Min, "1".to_string());
     assert!(accessibility_info_eq(
         &accessibility_for_element("input", "input", &attributes),
         &accessibility_for_element_unguarded("input", "input", &attributes)

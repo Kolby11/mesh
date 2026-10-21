@@ -408,7 +408,7 @@ fn navigation_frame_cost_profile() {
 }
 
 fn collect_popover_triggers<'a>(node: &'a WidgetNode, out: &mut Vec<&'a WidgetNode>) {
-    if node.attributes.get("aria-haspopup").map(String::as_str) == Some("true") {
+    if node.attributes.get(Prop::AriaHaspopup).map(String::as_str) == Some("true") {
         out.push(node);
     }
     for child in &node.children {
@@ -667,7 +667,7 @@ fn d9_navigation_updates() {
         assert!(
             button
                 .attributes
-                .get("title")
+                .get(Prop::Title)
                 .is_some_and(|title| title.contains(&format!("{percent}%"))),
             "service update must reach the volume tooltip"
         );

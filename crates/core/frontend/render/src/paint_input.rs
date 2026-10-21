@@ -1,3 +1,4 @@
+use mesh_core_elements::Prop;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -107,7 +108,11 @@ fn hash_primitive(node: &WidgetNode) -> u64 {
     node.tag.hash(&mut hasher);
     match node.tag.as_str() {
         "input" => {
-            hash_attributes(node, &["value", "placeholder", "type"], &mut hasher);
+            hash_attributes(
+                node,
+                &[Prop::Value, Prop::Placeholder, Prop::Type],
+                &mut hasher,
+            );
             node.state
                 .contains(mesh_core_elements::NodeState::FOCUSED)
                 .hash(&mut hasher);
@@ -115,11 +120,15 @@ fn hash_primitive(node: &WidgetNode) -> u64 {
             hash_color(node.computed_style.color, &mut hasher);
         }
         "slider" => {
-            hash_attributes(node, &["min", "max", "value", "orient"], &mut hasher);
+            hash_attributes(
+                node,
+                &[Prop::Min, Prop::Max, Prop::Value, Prop::Orient],
+                &mut hasher,
+            );
             hash_color(node.computed_style.color, &mut hasher);
         }
         "checkbox" | "radio" => {
-            hash_attributes(node, &["checked"], &mut hasher);
+            hash_attributes(node, &[Prop::Checked], &mut hasher);
             hash_color(node.computed_style.color, &mut hasher);
         }
         _ => {}
@@ -131,8 +140,8 @@ fn text_input(node: &WidgetNode, previous: Option<&TextPaintInput>) -> TextPaint
     let content = if node.tag == "text" {
         retained_arc_str(
             node.attributes
-                .get("text")
-                .or_else(|| node.attributes.get("content"))
+                .get(Prop::Text)
+                .or_else(|| node.attributes.get(Prop::Content))
                 .map(String::as_str),
             previous.and_then(|input| input.content.as_ref()),
         )
@@ -141,10 +150,10 @@ fn text_input(node: &WidgetNode, previous: Option<&TextPaintInput>) -> TextPaint
     };
     let mut hasher = PaintInputHasher::default();
     if node.tag == "text" {
-        hash_attributes(node, &["content", "text"], &mut hasher);
+        hash_attributes(node, &[Prop::Content, Prop::Text], &mut hasher);
         node.text_selection.hash(&mut hasher);
     }
-    hash_attributes(node, &["lang", "font-features"], &mut hasher);
+    hash_attributes(node, &[Prop::Lang, Prop::FontFeatures], &mut hasher);
     hash_color(node.computed_style.color, &mut hasher);
     node.computed_style.font_family.hash(&mut hasher);
     node.computed_style.font_size.to_bits().hash(&mut hasher);
@@ -168,7 +177,7 @@ fn text_input(node: &WidgetNode, previous: Option<&TextPaintInput>) -> TextPaint
 fn hash_icon(node: &WidgetNode) -> u64 {
     let mut hasher = PaintInputHasher::default();
     if matches!(node.tag.as_str(), "icon" | "image") {
-        hash_attributes(node, &["src", "name", "size"], &mut hasher);
+        hash_attributes(node, &[Prop::Src, Prop::Name, Prop::Size], &mut hasher);
     }
     hash_color(node.computed_style.color, &mut hasher);
     node.computed_style.font_family.hash(&mut hasher);
@@ -194,7 +203,7 @@ fn hash_icon(node: &WidgetNode) -> u64 {
     hasher.finish()
 }
 
-fn hash_attributes(node: &WidgetNode, keys: &[&str], hasher: &mut impl Hasher) {
+fn hash_attributes(node: &WidgetNode, keys: &[Prop], hasher: &mut impl Hasher) {
     for key in keys {
         key.hash(hasher);
         node.attributes.get(*key).hash(hasher);

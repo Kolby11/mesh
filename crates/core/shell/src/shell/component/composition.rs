@@ -1,3 +1,4 @@
+use mesh_core_elements::Prop;
 use std::collections::{BTreeMap, HashMap};
 
 use mesh_core_elements::style::Dimension;
@@ -216,7 +217,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 self.has_promoted_popover_wrappers.set(true);
                 self.popover_wrapper_marks
                     .set(self.popover_wrapper_marks.get().wrapping_add(1));
-                node.attributes.insert("hidden".into(), "true".into());
+                node.attributes.insert(Prop::Hidden, "true".into());
                 node.mark_promoted_popover();
             }
             annotate_source_file(&mut node, &resolved.source_path.display().to_string());
@@ -260,12 +261,12 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         if is_surface {
             let hidden = props
                 .values
-                .get("hidden")
+                .get(Prop::Hidden)
                 .map(|v| v == "true" || v == "True")
                 .unwrap_or(false);
             if let Some(binding) = props
                 .bindings
-                .get("hidden")
+                .get(Prop::Hidden)
                 .and_then(|binding| simple_state_binding(binding))
             {
                 self.portal_hidden_bindings.borrow_mut().insert(
@@ -286,9 +287,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             let mut placeholder = WidgetNode::new("box");
             placeholder.computed_style.width = Dimension::Px(0.0);
             placeholder.computed_style.height = Dimension::Px(0.0);
-            placeholder
-                .attributes
-                .insert("hidden".into(), "true".into());
+            placeholder.attributes.insert(Prop::Hidden, "true".into());
             return Some(placeholder);
         }
 
@@ -350,7 +349,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             self.has_promoted_popover_wrappers.set(true);
             self.popover_wrapper_marks
                 .set(self.popover_wrapper_marks.get().wrapping_add(1));
-            node.attributes.insert("hidden".into(), "true".into());
+            node.attributes.insert(Prop::Hidden, "true".into());
             node.mark_promoted_popover();
         }
         self.store_component_memo(
@@ -591,7 +590,7 @@ fn normalized_runtime_props_json(
             continue;
         };
         let raw = value.to_json_value();
-        let normalized_value = if props.bindings.get(key.as_str()).is_some() {
+        let normalized_value = if props.bindings.get_by_name(key.as_str()).is_some() {
             mesh_core_component::json_to_prop_value_ref(&raw)
                 .ok()
                 .and_then(|value| mesh_core_component::normalize_prop_value(definition, value).ok())
@@ -627,7 +626,7 @@ fn apply_prop_handler_calls(
     }
     let mut calls_by_token = HashMap::with_capacity(prop_handler_calls.len());
     for (prop_name, call) in prop_handler_calls {
-        let Some(token) = props.get(prop_name.as_str()) else {
+        let Some(token) = props.get_by_name(prop_name.as_str()) else {
             continue;
         };
         calls_by_token.insert(token.as_str(), call);
@@ -865,7 +864,7 @@ mod tests {
             Some(&serde_json::Value::String("Volume".into()))
         );
         assert_eq!(
-            props.bindings.get("hidden").map(String::as_str),
+            props.bindings.get(Prop::Hidden).map(String::as_str),
             Some("isHidden")
         );
         assert_eq!(props.bind_this.as_deref(), Some("child"));
@@ -875,16 +874,16 @@ mod tests {
     fn runtime_props_json_preserves_structured_runtime_props() {
         let mut props = AttributeMap::new();
         props.insert_value(
-            "items".into(),
+            "items",
             serde_json::json!([
                 {"id": "en", "text": "EN"},
                 {"id": "sk", "text": "SK"},
             ]),
         );
-        props.insert_value("config".into(), serde_json::json!({"enabled": true}));
-        props.insert("label".into(), "Volume".into());
+        props.insert_value("config", serde_json::json!({"enabled": true}));
+        props.insert("label", "Volume".into());
         // Text that only looks table-ish remains a scalar string.
-        props.insert("weird".into(), "[not json".into());
+        props.insert("weird", "[not json".into());
 
         let props_json = runtime_props_json(&props);
 
@@ -945,10 +944,8 @@ mod tests {
         let mut dynamic_props = ComponentCompositionProps::default();
         dynamic_props
             .values
-            .insert_value("count".into(), serde_json::json!("42"));
-        dynamic_props
-            .bindings
-            .insert("count".into(), "count_value".into());
+            .insert_value("count", serde_json::json!("42"));
+        dynamic_props.bindings.insert("count", "count_value".into());
         assert!(!normalized_runtime_props_json(&dynamic_props, &component).contains_key("count"));
     }
 }

@@ -2,6 +2,7 @@ use super::super::*;
 use super::common::*;
 use crate::RenderObjectDirtySummary;
 use crate::{DeviceRect, FractionalScale};
+use mesh_core_elements::Prop;
 use mesh_core_elements::style::{Color, Overflow, Visibility};
 use mesh_core_elements::{NodeId, VisualFilter, WidgetNode};
 use std::sync::Arc;
@@ -378,7 +379,7 @@ fn display_list_records_batch_barriers() {
     let mut root = node(1, "row", 0.0, 0.0, 100.0, 20.0);
     root.children.push(node(2, "box", 0.0, 0.0, 20.0, 20.0));
     let mut text = node(3, "text", 20.0, 0.0, 20.0, 20.0);
-    text.attributes.insert("content".into(), "hello".into());
+    text.attributes.insert(Prop::Content, "hello".into());
     root.children.push(text);
     let mut clipped = node(4, "box", 40.0, 0.0, 20.0, 20.0);
     clipped.computed_style.overflow_x = Overflow::Hidden;
@@ -399,7 +400,7 @@ fn release_display_metrics_preserve_batches_and_barriers() {
     root.children.push(node(3, "box", 20.0, 0.0, 20.0, 20.0));
     let mut text = node(4, "text", 40.0, 0.0, 20.0, 20.0);
     text.computed_style.background_color.a = 0;
-    text.attributes.insert("content".into(), "release".into());
+    text.attributes.insert(Prop::Content, "release".into());
     root.children.push(text);
 
     let mut list = RetainedDisplayList::default();
@@ -477,19 +478,18 @@ fn display_list_uses_cached_icon_opacity_for_conservative_barriers() {
     opaque.computed_style.color = tint;
     opaque
         .attributes
-        .insert("src".into(), opaque_path.to_string_lossy().into_owned());
+        .insert(Prop::Src, opaque_path.to_string_lossy().into_owned());
     let mut translucent = node(3, "icon", 12.0, 0.0, 10.0, 10.0);
     translucent.computed_style.background_color = Color::TRANSPARENT;
     translucent.computed_style.color = tint;
-    translucent.attributes.insert(
-        "src".into(),
-        translucent_path.to_string_lossy().into_owned(),
-    );
+    translucent
+        .attributes
+        .insert(Prop::Src, translucent_path.to_string_lossy().into_owned());
     let mut unknown = node(4, "icon", 24.0, 0.0, 10.0, 10.0);
     unknown.computed_style.background_color = Color::TRANSPARENT;
     unknown.computed_style.color = tint;
     unknown.attributes.insert(
-        "src".into(),
+        Prop::Src,
         td.path().join("missing.png").to_string_lossy().into_owned(),
     );
     root.children.push(opaque);
@@ -511,7 +511,7 @@ fn display_list_uses_cached_icon_opacity_for_conservative_barriers() {
     transparent_icon.computed_style.opacity = 0.5;
     transparent_icon
         .attributes
-        .insert("src".into(), opaque_path.to_string_lossy().into_owned());
+        .insert(Prop::Src, opaque_path.to_string_lossy().into_owned());
     transparent_root.children.push(transparent_icon);
 
     let mut transparent_list = RetainedDisplayList::default();
@@ -524,13 +524,13 @@ fn display_list_uses_cached_icon_opacity_for_conservative_barriers() {
 #[test]
 fn display_list_rebuilds_when_slider_value_changes() {
     let mut root = node(1, "slider", 0.0, 0.0, 100.0, 20.0);
-    root.attributes.insert("min".into(), "0".into());
-    root.attributes.insert("max".into(), "100".into());
-    root.attributes.insert("value".into(), "25".into());
+    root.attributes.insert(Prop::Min, "0".into());
+    root.attributes.insert(Prop::Max, "100".into());
+    root.attributes.insert(Prop::Value, "25".into());
     let mut list = RetainedDisplayList::default();
     list.update(&root, 100, 20, false, true);
 
-    root.attributes.insert("value".into(), "75".into());
+    root.attributes.insert(Prop::Value, "75".into());
     let metrics = list.update(&root, 100, 20, false, true);
 
     assert_eq!(metrics.entries_rebuilt, 1);
@@ -562,7 +562,7 @@ fn display_list_stores_compact_paint_payloads() {
     root.scroll_metrics.get_or_insert_default().content_width = 120.0;
 
     let mut text = node(2, "text", 20.0, 30.0, 20.0, 10.0);
-    text.attributes.insert("content".into(), "hello".into());
+    text.attributes.insert(Prop::Content, "hello".into());
     std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).background =
         "#112233".into();
     std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).foreground =
@@ -660,9 +660,9 @@ fn display_list_keeps_plain_opacity_zero_nodes_paintable() {
 fn display_list_keeps_disabled_and_inert_nodes_paintable() {
     let mut root = node(1, "box", 0.0, 0.0, 100.0, 60.0);
     let mut disabled = node(2, "button", 4.0, 4.0, 30.0, 20.0);
-    disabled.attributes.insert("disabled".into(), "true".into());
+    disabled.attributes.insert(Prop::Disabled, "true".into());
     let mut inert = node(3, "box", 44.0, 4.0, 30.0, 20.0);
-    inert.attributes.insert("inert".into(), "true".into());
+    inert.attributes.insert(Prop::Inert, "true".into());
     root.children.push(disabled);
     root.children.push(inert);
 
@@ -1266,10 +1266,10 @@ fn frame_plan_derivation_and_visual_damage_profile() {
         let content = generation.to_string();
         eager_root.children[30].children[5]
             .attributes
-            .insert("content".into(), content.clone());
+            .insert(Prop::Content, content.clone());
         lazy_root.children[30].children[5]
             .attributes
-            .insert("content".into(), content);
+            .insert(Prop::Content, content);
         let started = Instant::now();
         eager.update_with_dirty_nodes(&eager_root, summary, &dirty_ids, width, height, false, true);
         let plan = eager.frame_paint_plan();

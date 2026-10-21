@@ -702,7 +702,7 @@ fn settle(settings: &mut FrontendSurfaceComponent, theme: &Theme, buffer: &mut P
 /// Text content of every `<text>`, including hidden pages.
 fn all_texts(node: &WidgetNode, output: &mut Vec<String>) {
     if node.tag == "text"
-        && let Some(content) = node.attributes.get("content")
+        && let Some(content) = node.attributes.get(Prop::Content)
     {
         output.push(content.clone());
     }

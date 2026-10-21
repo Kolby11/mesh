@@ -1,6 +1,7 @@
 use super::super::super::*;
 use super::super::common::*;
 use crate::display_list::{DamageRect, DisplayListRepaintPolicy, RetainedDisplayList};
+use mesh_core_elements::Prop;
 use mesh_core_elements::layout::LayoutRect;
 use mesh_core_elements::style::Edges;
 
@@ -50,7 +51,7 @@ fn painter_places_preedit_caret_inside_decorated_composition() {
     input.computed_style.font_size = 14.0;
     input.computed_style.line_height = 1.4;
     input.computed_style.padding = Edges::zero();
-    input.attributes.insert("value".into(), "A🙂候選B".into());
+    input.attributes.insert(Prop::Value, "A🙂候選B".into());
     input.input_preedit.get_or_insert_default().start = 5;
     input.input_preedit.get_or_insert_default().end = 11;
     input.input_preedit.get_or_insert_default().cursor_begin = 5;
@@ -355,7 +356,7 @@ fn compatibility_tree_painter_omits_explicitly_hidden_descendants() {
         },
         Color::from_hex("#00ff00").unwrap(),
     );
-    hidden.attributes.insert("hidden".into(), "true".into());
+    hidden.attributes.insert(Prop::Hidden, "true".into());
     root.children.push(hidden);
 
     let mut buffer = PixelBuffer::new(24, 24);
