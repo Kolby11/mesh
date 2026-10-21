@@ -25,10 +25,11 @@ measurements live in [`log/`](log/README.md).
 
 ## Next
 
-- **Change-proportional frame pipeline (P0–P4)** is the next implementation
-  priority: live benchmark and visited-node counters, typed node properties
-  and state flags, one dirty set driving every pass, bindings as typed
-  setters, then GPU-first pipelining.
+- **Change-proportional frame pipeline (P0–P4)** is the implementation
+  priority. P1 (typed node state, typed runtime fields, `Prop` vocabulary with
+  change classes) landed 2026-10-21: ~7% dashboard, ~18% steady dock hover.
+  Next: P0 live benchmark and visited-node counters, then P2's one dirty set
+  fed by those change classes, bindings as typed setters, GPU-first pipelining.
   [Design](todos/pending/2026-10-21-change-proportional-pipeline.md); backlog
   lines at the top of `docs/BACKLOG.md`. Single-pass scoping buys 3–10% and is
   deprioritized.

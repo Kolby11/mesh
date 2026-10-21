@@ -29,9 +29,6 @@ criteria and the items folded in here:
 - [ ] **P0:** Live-shell benchmark under the glass profile (dashboard open,
       dock hover, Settings scroll, clock tick) plus per-pass "nodes visited"
       counters with a structural gate; the D9 CPU gates miss the live gap.
-- [ ] **P1:** Typed node properties for the core element set and a `NodeState`
-      bitflag field replacing the `_mesh_*` state attributes; setters report
-      their change class (style/layout/paint/a11y/hit/structure).
 - [ ] **P2:** One per-frame dirty set, fed by typed setters, state flags,
       animation samples and layout results, drives every pass; retire
       fingerprint/diff discovery to a test-only verifier. Prototype on the

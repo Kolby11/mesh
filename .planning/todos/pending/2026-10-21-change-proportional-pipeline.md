@@ -77,6 +77,12 @@ step over already-known dirty widgets.
 
 ### P1. Typed node properties and state flags
 
+**Shipped 2026-10-21** ([log](../../log/2026-10.md)): `NodeState` flags, typed
+runtime fields for every former `_mesh_*` attribute, and the closed `Prop`
+vocabulary with per-prop `ChangeClass` returned by `AttributeMap::set`.
+Properties stay in the sorted attribute vector rather than per-element structs;
+the plan below is kept as the design record.
+
 - Core elements are a closed set (`element/contracts.rs`). Give the
   layout/paint/state-relevant properties typed fields on the node, and keep a
   small map only for genuinely free-form attributes (`data-*`, pass-through

@@ -6834,3 +6834,22 @@ low payoff.
 
 Verified: animation crate 46 passed; release shell lib 903 passed / 42 failed,
 with the same failure names as the stashed baseline.
+
+## 2026-10-21 — P1 typed node state and property vocabulary
+
+Release, `cargo test -p mesh-core-shell --release --lib -- --ignored --exact
+…glass_dashboard_spectrum_profile …glass_dock_hover_animation_profile`, three
+invocations per tree (each prints three runs), same machine, before = `3e441284`,
+after = `8b7053c6`.
+
+| Workload | Before | After |
+| --- | --- | --- |
+| `glass_dashboard_spectrum_profile` (151 nodes, 1920×1080, 120 frames) mean | 3.17–3.29 ms | 2.94–3.04 ms |
+| same, p90 | 3.29–3.62 ms | 3.03–3.40 ms |
+| `glass_dock_hover_animation_profile` (2880×180, 60 frames) run 1 p50 / p90 | 0.645–0.649 / 0.877–0.882 ms | 0.501–0.506 / 0.715–0.720 ms |
+| same, run 0 (first hover) mean | 3.56–3.60 ms | 3.43–3.52 ms |
+
+About 7% on the dashboard and 18% on steady dock hover, in line with the
+design note's ~1.2× estimate for removing string attribute handling. Frame cost
+still scales with tree size × passes; the payoff the note expects comes from P2
+(one dirty set fed by these change classes), not from this step.
