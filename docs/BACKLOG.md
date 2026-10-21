@@ -29,9 +29,9 @@ criteria and the items folded in here:
 - [ ] **P0:** Add a reproducible live glass replay/gate (dashboard, dock hover,
       Settings scroll, clock tick) using the per-pass visit counters; CPU fixtures
       and the animation structural gate do not cover the live compositor gap.
-- [ ] **P2:** Complete the shared dirty-set pipeline beyond the animation prototype:
-      selector dependents, layout propagation, semantics, validation and child surfaces
-      still need authoritative scopes. The large-factor glass exit bar remains unmet.
+- [ ] **P2:** Complete the shared dirty-set pipeline beyond the animation and
+      interaction-frame scopes: layout propagation, display-list ancestors (entrance
+      frames), previous-style capture, validation and child surfaces still walk the tree.
 - [ ] **P3:** Bindings compile to typed setters, and list/compound sources
       become keyed stores so an item change patches its properties instead of
       rebuilding the component (finishes D1; with D4 typed patches).

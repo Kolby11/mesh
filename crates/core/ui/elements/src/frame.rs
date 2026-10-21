@@ -968,6 +968,33 @@ impl FrameSnapshot {
             .map(|&index| self.0.paths[index].as_ref())
     }
 
+    /// Paths of `targets` in `root`, checked against the live tree. Targets
+    /// absent from this snapshot are skipped; `None` when any path no longer
+    /// leads to its target. `visit` runs once per node stepped through.
+    pub fn live_paths<'a, 's>(
+        &'s self,
+        root: &WidgetNode,
+        targets: impl IntoIterator<Item = &'a NodeId>,
+        mut visit: impl FnMut(),
+    ) -> Option<Vec<&'s [usize]>> {
+        let mut paths = Vec::new();
+        for &id in targets {
+            let Some(path) = self.node_path(id) else {
+                continue;
+            };
+            let mut node = root;
+            for &index in path {
+                visit();
+                node = node.children.get(index)?;
+            }
+            if node.id != id {
+                return None;
+            }
+            paths.push(path);
+        }
+        Some(paths)
+    }
+
     pub fn semantic_nodes(&self) -> impl Iterator<Item = &FrameNode> {
         self.nodes()
             .into_iter()

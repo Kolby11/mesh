@@ -1637,9 +1637,8 @@ fn scroll_by(component: &mut FrontendSurfaceComponent, theme: &Theme, dy: f32) {
         .unwrap();
 }
 
-/// Consecutive scroll frames change nothing but a scroll offset, so after the
-/// first paint-only frame they skip the full annotation walk — and must paint
-/// exactly what the full walk paints.
+/// Consecutive scroll frames change nothing but a scroll offset, so they skip
+/// the full annotation walk — and must paint exactly what the full walk paints.
 #[test]
 fn consecutive_scroll_frames_annotate_only_scroll_offsets() {
     let theme = default_theme();
@@ -1651,6 +1650,7 @@ fn consecutive_scroll_frames_annotate_only_scroll_offsets() {
     for component in [&mut fast, &mut full] {
         component.motion_policy.reduced_motion = true;
     }
+    full.force_full_interaction_frames = true;
     for _ in 0..2 {
         fast.paint_raster(&theme, extent, &mut fast_buffer, 1.0)
             .unwrap();
@@ -1661,16 +1661,14 @@ fn consecutive_scroll_frames_annotate_only_scroll_offsets() {
     for _ in 0..6 {
         scroll_by(&mut fast, &theme, -9.0);
         scroll_by(&mut full, &theme, -9.0);
-        // No stored inputs forces the full walk.
-        full.paint_only_annotation_inputs = None;
         fast.paint_raster(&theme, extent, &mut fast_buffer, 1.0)
             .unwrap();
         full.paint_raster(&theme, extent, &mut full_buffer, 1.0)
             .unwrap();
         assert_eq!(fast_buffer.data(), full_buffer.data());
     }
-    assert!(fast.scroll_only_annotation_frames >= 4);
-    assert_eq!(full.scroll_only_annotation_frames, 0);
+    assert!(fast.scoped_annotation_frames >= 4);
+    assert_eq!(full.scoped_annotation_frames, 0);
     let viewport = runtime_node_id_for_key("root/0");
     let offset = fast.scroll_offsets[&viewport];
     assert!(offset.y > 40.0);
@@ -1681,9 +1679,9 @@ fn consecutive_scroll_frames_annotate_only_scroll_offsets() {
 }
 
 /// A paint-only frame can still change interaction state (e.g. a text
-/// selection clears the pressed node). Changed inputs take the full walk.
+/// selection clears the pressed node). The changed node is projected.
 #[test]
-fn paint_only_frame_with_changed_interaction_state_takes_the_full_annotation() {
+fn paint_only_frame_with_changed_interaction_state_projects_the_changed_node() {
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(120, 120);
     let mut component = test_frontend_component(SCROLL_LIST_SOURCE);
@@ -1698,18 +1696,18 @@ fn paint_only_frame_with_changed_interaction_state_takes_the_full_annotation() {
     component
         .paint_raster(&theme, extent, &mut buffer, 1.0)
         .unwrap();
-    assert!(component.paint_only_annotation_inputs.is_some());
+    assert!(component.scoped_annotation_inputs.is_some());
 
     let row = first_node_with_class_token(component.last_tree.as_ref().unwrap(), "row")
         .unwrap()
         .id;
     component.pointer_down_id = Some(row);
     component.invalidate_paint();
-    let before = component.scroll_only_annotation_frames;
+    let before = component.scoped_annotation_frames;
     component
         .paint_raster(&theme, extent, &mut buffer, 1.0)
         .unwrap();
-    assert_eq!(component.scroll_only_annotation_frames, before);
+    assert_eq!(component.scoped_annotation_frames, before + 1);
     let active = first_node_with_class_token(component.last_tree.as_ref().unwrap(), "row").unwrap();
     assert!(
         active.state.contains(NodeState::ACTIVE),
@@ -2177,6 +2175,8 @@ fn animation_frame_visits_registered_nodes_and_full_diff_finds_no_omissions() {
         paint_keyframe_frame_at(&mut component, Duration::from_millis(elapsed));
         let counts = component.take_invalidation_snapshot().unwrap().node_visits;
         assert_eq!(counts["animation_sample"], 1);
+        assert_eq!(counts["annotation"], 0);
+        assert_eq!(counts["restyle_scan"], 0);
         assert_eq!(counts["animation_previous_style"], 1);
         assert_eq!(counts["retained_discovery"], 0);
         assert_eq!(counts["validation"], 0);
@@ -2189,4 +2189,134 @@ fn animation_frame_visits_registered_nodes_and_full_diff_finds_no_omissions() {
         assert!(!missed.any(), "sparse animation missed {missed:?}");
         assert!(component.retained_tree.render_dirty_node_ids().is_empty());
     }
+}
+
+fn hover_scope_source(clean_siblings: usize) -> String {
+    let mut source = String::from(
+        r#"<template><row class="strip"><box class="tile"><text class="label">a</text></box><box class="tile"><text class="label">b</text></box>"#,
+    );
+    for _ in 0..clean_siblings {
+        source.push_str(r#"<box class="clean" />"#);
+    }
+    source.push_str(
+        r#"</row></template><style>
+.strip { width: 120px; height: 40px; }
+.tile { width: 20px; height: 20px; color: #000000; }
+.tile:hover { background-color: #ff0000; color: #0000ff; }
+.clean { width: 0px; height: 0px; }
+</style>"#,
+    );
+    source
+}
+
+fn hover_tile(component: &mut FrontendSurfaceComponent, theme: &Theme, index: usize) {
+    let tree = component.last_tree.as_ref().unwrap();
+    let key = first_node_by_tag(tree, "row").unwrap().children[index]
+        .mesh_key()
+        .unwrap()
+        .to_owned();
+    let (left, top, right, bottom) = find_node_bounds_by_key(tree, &key, 0.0, 0.0).unwrap();
+    component
+        .handle_input(
+            theme,
+            120,
+            40,
+            ComponentInput::PointerMove {
+                x: (left + right) / 2.0,
+                y: (top + bottom) / 2.0,
+            },
+        )
+        .unwrap();
+}
+
+fn computed_styles(
+    node: &WidgetNode,
+    styles: &mut Vec<(NodeId, mesh_core_elements::ComputedStyle)>,
+) {
+    styles.push((node.id, node.computed_style.clone()));
+    for child in &node.children {
+        computed_styles(child, styles);
+    }
+}
+
+/// Hover frames visit the hovered item's nodes, not the tree: annotation,
+/// restyle, semantic and retained work stay flat as clean siblings grow. A
+/// full diff finds nothing missed, a twin on the full walks paints and styles
+/// identically, and a rebuild reproduces the twin's styles.
+#[test]
+fn hover_frame_visits_scale_with_the_hovered_item_not_the_tree() {
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(120, 40);
+    let mut per_size = Vec::new();
+    for clean_siblings in [16, 1024] {
+        let source = hover_scope_source(clean_siblings);
+        let mut scoped = test_frontend_component(&source);
+        let mut full = test_frontend_component(&source);
+        full.force_full_interaction_frames = true;
+        let mut scoped_pixels = PixelBuffer::new(120, 40);
+        let mut full_pixels = PixelBuffer::new(120, 40);
+        for component in [&mut scoped, &mut full] {
+            component.motion_policy.reduced_motion = true;
+        }
+        for _ in 0..3 {
+            scoped
+                .paint_raster(&theme, extent, &mut scoped_pixels, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut full_pixels, 1.0)
+                .unwrap();
+        }
+        scoped.set_profiling_enabled(true);
+        let _ = scoped.take_invalidation_snapshot();
+        let mut visits = Vec::new();
+        for tile in [0, 1, 0] {
+            hover_tile(&mut scoped, &theme, tile);
+            hover_tile(&mut full, &theme, tile);
+            scoped
+                .paint_raster(&theme, extent, &mut scoped_pixels, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut full_pixels, 1.0)
+                .unwrap();
+            let counts = scoped.take_invalidation_snapshot().unwrap().node_visits;
+            assert_eq!(counts["retained_discovery"], 0, "{counts:?}");
+            visits.push([
+                counts["annotation"],
+                counts["restyle_scan"],
+                counts["retained_lookup"],
+                counts["retained_sync"],
+                counts["accessibility_project"],
+            ]);
+
+            let tree = scoped.last_tree.clone().unwrap();
+            let missed = scoped.retained_tree.update(&tree);
+            assert!(!missed.any(), "scoped hover missed {missed:?}");
+            assert_eq!(scoped_pixels.data(), full_pixels.data());
+            let (mut scoped_styles, mut full_styles) = (Vec::new(), Vec::new());
+            computed_styles(&tree, &mut scoped_styles);
+            computed_styles(full.last_tree.as_ref().unwrap(), &mut full_styles);
+            assert!(scoped_styles == full_styles, "computed styles diverged");
+        }
+        let hovered = first_node_by_tag(scoped.last_tree.as_ref().unwrap(), "row")
+            .unwrap()
+            .children[0]
+            .clone();
+        assert!(hovered.state.contains(NodeState::HOVERED));
+        assert!(scoped.scoped_annotation_frames >= 3);
+        // Targeted restyles keep the surface root's inherited text values.
+        let mut retained_styles = Vec::new();
+        computed_styles(full.last_tree.as_ref().unwrap(), &mut retained_styles);
+        full.invalidate(ComponentDirtyFlags::TREE_REBUILD);
+        full.paint_raster(&theme, extent, &mut full_pixels, 1.0)
+            .unwrap();
+        let mut rebuilt_styles = Vec::new();
+        computed_styles(full.last_tree.as_ref().unwrap(), &mut rebuilt_styles);
+        assert!(
+            retained_styles == rebuilt_styles,
+            "targeted restyle drifted from a rebuild"
+        );
+        per_size.push(visits);
+    }
+    assert_eq!(
+        per_size[0], per_size[1],
+        "hover visits grew with clean siblings"
+    );
 }

@@ -277,154 +277,11 @@ pub(super) fn annotate_runtime_tree_inner(
     annotate_overflow: bool,
 ) -> Option<mesh_core_interaction::ContentBounds> {
     mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::Annotation);
-    // A retained node already has its stable key and authored projection.
-    // Only interaction transitions and widgets with mutable values need the
-    // string-attribute projection again; overflow remains a geometry pass.
-    let needs_projection = !context.retained
-        || node.state.contains(NodeState::FOCUSED) != (context.focused_id == Some(node_id))
-        || node.state.contains(NodeState::FOCUS_VISIBLE)
-            != (context.focus_visible_id == Some(node_id)
-                || (context.focus_visible_id.is_none()
-                    && context.focused_id == Some(node_id)
-                    && node.tag == "input"))
-        || node.state.contains(NodeState::HOVERED) != context.hovered_ids.contains(&node_id)
-        || node.state.contains(NodeState::ACTIVE) != (context.active_id == Some(node_id))
-        || node.state.window() != context.window
-        || matches!(node.tag.as_str(), "input" | "slider")
-        || context.checked_values.contains_key(&node_id)
-        || (node.state.contains(NodeState::EXPANDED)
-            || context
-                .expanded_triggers
-                .is_some_and(|ids| ids.contains(&node_id)))
-        || context.input_values.contains_key(&node_id)
-        || node.attributes.contains_key(Prop::Keybind)
-        || context
-            .promoted_windows
-            .is_some_and(|keys| keys.contains(key));
-    if needs_projection {
+    if needs_projection(node, key, node_id, context) {
         if context.retained {
             context.changed.insert(node_id);
         }
-        node.id = node_id;
-        if node.mesh_key() != Some(key.as_str()) {
-            node.set_mesh_key(key.clone());
-        }
-        if let Some(shortcuts) = context.shortcuts {
-            super::super::input::annotate_node_by_keybind(node, shortcuts);
-        }
-        if context
-            .promoted_windows
-            .is_some_and(|keys| keys.contains(key))
-        {
-            node.attributes.insert(Prop::Hidden, "true".into());
-            node.mark_promoted_window();
-        }
-
-        let authored = node.authored_payload();
-        let authored_state = mesh_core_elements::authored_element_state(&authored.attributes);
-        let is_input = authored.tag == "input";
-        let is_slider = authored.tag == "slider";
-        let is_switch_or_checkbox = matches!(authored.tag.as_str(), "switch" | "checkbox");
-        let authored_value = authored.attributes.get(Prop::Value).cloned();
-        let source_tag = authored
-            .attributes
-            .get(Prop::DataMeshElement)
-            .map(String::as_str)
-            .unwrap_or(authored.tag.as_str());
-        let checkable_choice = matches!(source_tag, "switch" | "checkbox" | "radio" | "option");
-        let selects_choice = matches!(source_tag, "radio" | "option");
-        let selectable_group = matches!(source_tag, "select" | "radio-group");
-        let trace_tag = context
-            .hovered_ids
-            .contains(&node_id)
-            .then(|| authored.tag.clone());
-        let checked = context
-            .checked_values
-            .get(&node_id)
-            .copied()
-            .or(Some(
-                mesh_core_elements::PseudoState::Checked.value(authored_state),
-            ))
-            .unwrap_or(false);
-
-        let mut state = authored_state;
-        state.set(NodeState::FOCUSED, context.focused_id == Some(node_id));
-        state.set(
-            NodeState::FOCUS_VISIBLE,
-            context.focus_visible_id == Some(node_id)
-                || (context.focus_visible_id.is_none()
-                    && context.focused_id == Some(node_id)
-                    && is_input),
-        );
-        state.set(NodeState::HOVERED, context.hovered_ids.contains(&node_id));
-        state.set(NodeState::ACTIVE, context.active_id == Some(node_id));
-        state.set_window(context.window);
-        node.state = state;
-        // Runtime widget state is authoritative over the authored fallback.
-        mesh_core_elements::PseudoState::Checked.set_value(&mut node.state, checked);
-        if context
-            .expanded_triggers
-            .is_some_and(|ids| ids.contains(&node_id))
-        {
-            node.state.set(NodeState::EXPANDED, true);
-        }
-        if node.state.contains(NodeState::HOVERED) {
-            tracing::trace!(
-                "[hover] annotate: key={key} tag={} set hovered=true",
-                trace_tag.as_deref().unwrap_or_default()
-            );
-        }
-
-        // Compatibility projection for callers inspecting the live node. Semantic
-        // snapshots derive focus from `node.state`, so this is not authoritative.
-        node.accessibility.focused = node.state.contains(NodeState::FOCUSED);
-
-        if is_input {
-            let value = context
-                .input_values
-                .get(&node_id)
-                .cloned()
-                .or(authored_value.clone())
-                .unwrap_or_default();
-            let preedit = (context.focused_id == Some(node_id))
-                .then(|| context.input_preedits.get(&node_id))
-                .flatten();
-            let (value, preedit) = compose_input_value(&value, preedit);
-            node.attributes.insert(Prop::Value, value);
-            node.input_preedit = preedit;
-        } else if is_slider {
-            annotate_slider_node(node, node_id, context);
-        } else if is_switch_or_checkbox {
-            node.attributes
-                .insert(Prop::Checked, if checked { "true" } else { "false" }.into());
-        }
-
-        if checkable_choice {
-            node.attributes
-                .insert(Prop::Checked, if checked { "true" } else { "false" }.into());
-            if selects_choice {
-                node.attributes.insert(
-                    Prop::Selected,
-                    if checked { "true" } else { "false" }.into(),
-                );
-            }
-            mesh_core_elements::PseudoState::Checked.set_value(&mut node.state, checked);
-            mesh_core_elements::PseudoState::Selected.set_value(&mut node.state, checked);
-            node.accessibility.state.checked = Some(checked);
-            node.accessibility.state.selected = checked;
-        }
-
-        if selectable_group
-            && let Some(value) = context
-                .input_values
-                .get(&node_id)
-                .cloned()
-                .or(authored_value)
-        {
-            node.attributes.insert(Prop::Value, value.clone());
-            mesh_core_elements::PseudoState::Value.set_value(&mut node.state, true);
-            node.accessibility.state.value = Some(value);
-        }
+        project_runtime_node(node, key, node_id, context);
     }
 
     let offset = context
@@ -476,6 +333,166 @@ pub(super) fn annotate_runtime_tree_inner(
         node.validate_finalized_subtree();
     }
     bounds
+}
+
+/// A retained node already has its stable key and authored projection. Only
+/// interaction transitions and widgets with mutable values need the projection
+/// again; overflow remains a geometry pass.
+fn needs_projection(
+    node: &WidgetNode,
+    key: &str,
+    node_id: NodeId,
+    context: &RuntimeAnnotationContext<'_>,
+) -> bool {
+    !context.retained
+        || node.state.contains(NodeState::FOCUSED) != (context.focused_id == Some(node_id))
+        || node.state.contains(NodeState::FOCUS_VISIBLE)
+            != (context.focus_visible_id == Some(node_id)
+                || (context.focus_visible_id.is_none()
+                    && context.focused_id == Some(node_id)
+                    && node.tag == "input"))
+        || node.state.contains(NodeState::HOVERED) != context.hovered_ids.contains(&node_id)
+        || node.state.contains(NodeState::ACTIVE) != (context.active_id == Some(node_id))
+        || node.state.window() != context.window
+        || matches!(node.tag.as_str(), "input" | "slider")
+        || context.checked_values.contains_key(&node_id)
+        || (node.state.contains(NodeState::EXPANDED)
+            || context
+                .expanded_triggers
+                .is_some_and(|ids| ids.contains(&node_id)))
+        || context.input_values.contains_key(&node_id)
+        || node.attributes.contains_key(Prop::Keybind)
+        || context
+            .promoted_windows
+            .is_some_and(|keys| keys.contains(key))
+}
+
+fn project_runtime_node(
+    node: &mut WidgetNode,
+    key: &str,
+    node_id: NodeId,
+    context: &mut RuntimeAnnotationContext<'_>,
+) {
+    node.id = node_id;
+    if node.mesh_key() != Some(key) {
+        node.set_mesh_key(key.to_owned());
+    }
+    if let Some(shortcuts) = context.shortcuts {
+        super::super::input::annotate_node_by_keybind(node, shortcuts);
+    }
+    if context
+        .promoted_windows
+        .is_some_and(|keys| keys.contains(key))
+    {
+        node.attributes.insert(Prop::Hidden, "true".into());
+        node.mark_promoted_window();
+    }
+
+    let authored = node.authored_payload();
+    let authored_state = mesh_core_elements::authored_element_state(&authored.attributes);
+    let is_input = authored.tag == "input";
+    let is_slider = authored.tag == "slider";
+    let is_switch_or_checkbox = matches!(authored.tag.as_str(), "switch" | "checkbox");
+    let authored_value = authored.attributes.get(Prop::Value).cloned();
+    let source_tag = authored
+        .attributes
+        .get(Prop::DataMeshElement)
+        .map(String::as_str)
+        .unwrap_or(authored.tag.as_str());
+    let checkable_choice = matches!(source_tag, "switch" | "checkbox" | "radio" | "option");
+    let selects_choice = matches!(source_tag, "radio" | "option");
+    let selectable_group = matches!(source_tag, "select" | "radio-group");
+    let trace_tag = context
+        .hovered_ids
+        .contains(&node_id)
+        .then(|| authored.tag.clone());
+    let checked = context
+        .checked_values
+        .get(&node_id)
+        .copied()
+        .or(Some(
+            mesh_core_elements::PseudoState::Checked.value(authored_state),
+        ))
+        .unwrap_or(false);
+
+    let mut state = authored_state;
+    state.set(NodeState::FOCUSED, context.focused_id == Some(node_id));
+    state.set(
+        NodeState::FOCUS_VISIBLE,
+        context.focus_visible_id == Some(node_id)
+            || (context.focus_visible_id.is_none()
+                && context.focused_id == Some(node_id)
+                && is_input),
+    );
+    state.set(NodeState::HOVERED, context.hovered_ids.contains(&node_id));
+    state.set(NodeState::ACTIVE, context.active_id == Some(node_id));
+    state.set_window(context.window);
+    node.state = state;
+    // Runtime widget state is authoritative over the authored fallback.
+    mesh_core_elements::PseudoState::Checked.set_value(&mut node.state, checked);
+    if context
+        .expanded_triggers
+        .is_some_and(|ids| ids.contains(&node_id))
+    {
+        node.state.set(NodeState::EXPANDED, true);
+    }
+    if node.state.contains(NodeState::HOVERED) {
+        tracing::trace!(
+            "[hover] annotate: key={key} tag={} set hovered=true",
+            trace_tag.as_deref().unwrap_or_default()
+        );
+    }
+
+    // Compatibility projection for callers inspecting the live node. Semantic
+    // snapshots derive focus from `node.state`, so this is not authoritative.
+    node.accessibility.focused = node.state.contains(NodeState::FOCUSED);
+
+    if is_input {
+        let value = context
+            .input_values
+            .get(&node_id)
+            .cloned()
+            .or(authored_value.clone())
+            .unwrap_or_default();
+        let preedit = (context.focused_id == Some(node_id))
+            .then(|| context.input_preedits.get(&node_id))
+            .flatten();
+        let (value, preedit) = compose_input_value(&value, preedit);
+        node.attributes.insert(Prop::Value, value);
+        node.input_preedit = preedit;
+    } else if is_slider {
+        annotate_slider_node(node, node_id, context);
+    } else if is_switch_or_checkbox {
+        node.attributes
+            .insert(Prop::Checked, if checked { "true" } else { "false" }.into());
+    }
+
+    if checkable_choice {
+        node.attributes
+            .insert(Prop::Checked, if checked { "true" } else { "false" }.into());
+        if selects_choice {
+            node.attributes.insert(
+                Prop::Selected,
+                if checked { "true" } else { "false" }.into(),
+            );
+        }
+        mesh_core_elements::PseudoState::Checked.set_value(&mut node.state, checked);
+        mesh_core_elements::PseudoState::Selected.set_value(&mut node.state, checked);
+        node.accessibility.state.checked = Some(checked);
+        node.accessibility.state.selected = checked;
+    }
+
+    if selectable_group
+        && let Some(value) = context
+            .input_values
+            .get(&node_id)
+            .cloned()
+            .or(authored_value)
+    {
+        node.attributes.insert(Prop::Value, value.clone());
+        mesh_core_elements::PseudoState::Value.set_value(&mut node.state, true);
+        node.accessibility.state.value = Some(value);
+    }
 }
 
 pub(super) fn annotate_slider_node(
@@ -535,15 +552,11 @@ pub(super) fn float_eq(left: f32, right: f32) -> bool {
 }
 
 /// Every input of [`annotate_runtime_and_overflow_tree`] except scroll offsets,
-/// captured after a paint-only retained frame's annotation (slider values
-/// included, which annotation itself settles).
-///
-/// When the next frame is paint-only too and its inputs still equal this
-/// snapshot, the retained tree already carries this exact projection and the
-/// layout its overflow extents were measured against, so only scroll offsets
-/// can differ: see [`annotate_scroll_offsets_only`]. A frame that ran layout
-/// never stores a snapshot — annotation runs before layout, so the first
-/// paint-only frame after one must re-measure overflow in full.
+/// captured after an annotation (slider values included, which annotation
+/// itself settles). Stored only while the retained tree's overflow extents
+/// are current; a frame that ran layout after annotating stores none. The next
+/// retained frame projects only the nodes whose inputs differ; see
+/// [`annotate_runtime_nodes`].
 #[derive(Debug, PartialEq)]
 pub(in crate::shell::component) struct RuntimeAnnotationInputs {
     pub(in crate::shell::component) focused_id: Option<NodeId>,
@@ -562,29 +575,56 @@ pub(in crate::shell::component) struct RuntimeAnnotationInputs {
     pub(in crate::shell::component) shortcuts_generation: Option<u64>,
 }
 
-/// Scroll-only annotation for a paint-only frame whose other annotation inputs
-/// match [`RuntimeAnnotationInputs`]: write each scroll container's clamped
-/// offset into its retained metrics. The extents are unchanged because layout
-/// was reused, so this is what the full walk would produce, without building a
-/// key string and re-deriving the projection for every node.
-pub(in crate::shell::component) fn annotate_scroll_offsets_only(
-    node: &mut WidgetNode,
-    scroll_offsets: &mut HashMap<NodeId, ScrollOffsetState>,
-) {
-    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::Annotation);
-    if (node.computed_style.overflow_x.is_scrollable()
-        || node.computed_style.overflow_y.is_scrollable())
-        && let Some(metrics) = node.scroll_metrics.as_mut()
-    {
-        let offset = scroll_offsets.entry(node.id).or_default();
-        offset.x = offset.x.clamp(0.0, metrics.max_x);
-        offset.y = offset.y.clamp(0.0, metrics.max_y);
-        metrics.x = offset.x;
-        metrics.y = offset.y;
+/// Projects only `ids`, then writes every scroll container's clamped offset,
+/// locating nodes through `snapshot`'s paths. The tree must retain the
+/// snapshot's structure and the layout its overflow extents were measured
+/// against, so this is what the full walk would produce for these inputs.
+/// Returns `false` without mutating the tree when a path no longer matches.
+pub(in crate::shell::component) fn annotate_runtime_nodes(
+    tree: &mut WidgetNode,
+    snapshot: &mesh_core_elements::FrameSnapshot,
+    ids: &HashSet<NodeId>,
+    context: &mut RuntimeAnnotationContext<'_>,
+) -> bool {
+    let visit =
+        || mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::Annotation);
+    let Some(projected) = snapshot.live_paths(tree, ids, visit) else {
+        return false;
+    };
+    let scroll_ids: Vec<NodeId> = context.scroll_offsets.keys().copied().collect();
+    let Some(scrolled) = snapshot.live_paths(tree, &scroll_ids, visit) else {
+        return false;
+    };
+    for path in projected {
+        let node = node_at_path_mut(tree, path);
+        let Some(key) = node.mesh_key().map(str::to_owned) else {
+            continue;
+        };
+        let node_id = node.id;
+        context.changed.insert(node_id);
+        project_runtime_node(node, &key, node_id, context);
     }
-    for child in &mut node.children {
-        annotate_scroll_offsets_only(child, scroll_offsets);
+    for path in scrolled {
+        let node = node_at_path_mut(tree, path);
+        if (node.computed_style.overflow_x.is_scrollable()
+            || node.computed_style.overflow_y.is_scrollable())
+            && let Some(metrics) = node.scroll_metrics.as_mut()
+        {
+            let offset = context.scroll_offsets.entry(node.id).or_default();
+            offset.x = offset.x.clamp(0.0, metrics.max_x);
+            offset.y = offset.y.clamp(0.0, metrics.max_y);
+            metrics.x = offset.x;
+            metrics.y = offset.y;
+        }
     }
+    true
+}
+
+fn node_at_path_mut<'a>(mut node: &'a mut WidgetNode, path: &[usize]) -> &'a mut WidgetNode {
+    for &index in path {
+        node = &mut node.children[index];
+    }
+    node
 }
 
 /// Loop identities embed their own `/` (`"key"/child/fragment`) and authored

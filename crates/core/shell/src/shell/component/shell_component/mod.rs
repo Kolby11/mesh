@@ -1147,7 +1147,8 @@ impl ShellComponent for FrontendSurfaceComponent {
                     | mesh_core_elements::ChangeClass::HIT,
             );
         }
-        let sparse_animation_update = animation_scope.is_some()
+        let sparse_retained_update = (animation_scope.is_some()
+            || std::mem::take(&mut self.sparse_retained_frame))
             && !self.frame_dirty.contains(
                 mesh_core_elements::ChangeClass::LAYOUT
                     | mesh_core_elements::ChangeClass::STRUCTURE,
@@ -1155,7 +1156,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             && retained_update_dirty_roots
                 .as_ref()
                 .is_some_and(HashSet::is_empty);
-        let retained_dirty = if sparse_animation_update {
+        let retained_dirty = if sparse_retained_update {
             self.retained_tree.update_for_frame_dirty(
                 &tree,
                 self.last_frame_snapshot.as_ref().expect("retained frame"),

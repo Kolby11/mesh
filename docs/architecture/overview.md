@@ -58,9 +58,12 @@ the display-list diff selects damage. Paint-only hover rules reuse layout, while
 layout declarations and custom variables conservatively request geometry work.
 Geometry-preserving animation-only frames sample registered nodes through the
 immutable frame snapshot's child paths. Their coalesced change classes select
-retained updates without a clean-tree geometry scan. Layout, interaction
-restyle and rebuild paths still use conservative discovery; the P2 prototype
-has not replaced those passes.
+retained updates without a clean-tree geometry scan. Interaction frames over
+reused geometry project only the nodes whose annotation inputs changed and
+restyle their state-changed nodes through the same paths; with no selector
+combinators, only inherited values reach other nodes. The exact restyled set
+drives semantics and retained updates. Layout and rebuild paths still use
+conservative discovery.
 Asynchronous icon, glyph and image jobs track their requesting component instances,
 including promoted child targets, and repaint only those consumers on completion.
 The event loop includes input-repeat, temporary focus-grab and pending-frame

@@ -7,16 +7,15 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
-- **P0 visit counters landed:** per-pass node-visit counters are exported in
-  profiling snapshots, session logs and `profile-report`; the animation
-  structural gate consumes them. First glass profile: steady dock hover still
-  annotates all 1,879 nodes per paint; dashboard spectrum touches every node in
-  every pass (validation ~11×, extents ~5× node count). Live replay gate open.
-
-- **P2 animation prototype measured:** indexed sampling and retained updates
-  pass sparse/full parity. Dock steady p50 improves, but p90 and dashboard
-  ranges overlap; the large-factor exit bar is unmet. Expansion remains open;
-  see the 2026-10-21 P2 entry in the performance log.
+- **P2 interaction-frame scope landed:** steady dock hover annotates 8–14
+  nodes per paint (was 1,879) and restyles 12 (was 1,878), with no retained
+  discovery. Hover-change and animation-only frames are ~2.5× faster. No
+  selector-dependents index was needed (no combinators). Also fixed targeted
+  restyles dropping a surface root's inherited text values. New structural
+  gate in `tools/check-performance`. See the P2 step 1 performance-log entry.
+- **P0 visit counters landed** (live replay gate still open). The dashboard
+  still touches every node in every pass: Player rebuilds per spectrum
+  update, which needs P3's keyed lists.
 
 - **GPU residency and workload gates implemented:** small image/icon/font-mask
   bitmaps share immutable pages; the worker retains bounded image identities
@@ -39,9 +38,9 @@ measurements live in [`log/`](log/README.md).
 - **Change-proportional frame pipeline (P0–P4)** is the implementation
   priority. P1 (typed node state, typed runtime fields, `Prop` vocabulary with
   change classes) landed 2026-10-21: ~7% dashboard, ~18% steady dock hover.
-  Next: P0 live benchmark and per-pass counters; finish P2's authoritative
-  write/layout scopes beyond the measured animation prototype, then typed
-  bindings and GPU-first pipelining.
+  Next: P3 keyed list for the dashboard spectrum (P2 scoping cannot help a
+  component that rebuilds), then P2 layout propagation, display-list
+  ancestors, semantics and child-surface scopes; P0 live replay gate.
   [Design](todos/pending/2026-10-21-change-proportional-pipeline.md); backlog
   lines at the top of `docs/BACKLOG.md`. Single-pass scoping buys 3–10% and is
   deprioritized.

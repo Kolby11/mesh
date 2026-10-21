@@ -74,10 +74,7 @@ pub(super) fn runtime_style_diagnostic_props_fingerprint(props: &SurfaceCssProps
 }
 
 pub(super) fn apply_runtime_attribute_state(node: &mut WidgetNode) {
-    apply_hidden_attribute_layout(node);
-    collapse_promoted_popover_node(node);
-    collapse_promoted_window_node(node);
-    constrain_error_placeholder_node(node);
+    apply_runtime_node_state(node);
     for child in &mut node.children {
         apply_runtime_attribute_state(child);
     }
@@ -110,6 +107,32 @@ pub(super) fn apply_runtime_attribute_state_for_ids(
         descendant_affected |= apply_runtime_attribute_state_for_ids(child, affected_ids);
     }
     descendant_affected
+}
+
+fn apply_runtime_node_state(node: &mut WidgetNode) {
+    apply_hidden_attribute_layout(node);
+    collapse_promoted_popover_node(node);
+    collapse_promoted_window_node(node);
+    constrain_error_placeholder_node(node);
+}
+
+/// Reapplies runtime constraints to `restyled` nodes only, located through
+/// `snapshot`'s paths; nodes whose style was not re-resolved keep theirs.
+pub(super) fn apply_runtime_node_state_by_path(
+    tree: &mut WidgetNode,
+    snapshot: &mesh_core_elements::FrameSnapshot,
+    restyled: &HashSet<NodeId>,
+) {
+    for &id in restyled {
+        let Some(path) = snapshot.node_path(id) else {
+            continue;
+        };
+        let mut node = &mut *tree;
+        for &index in path {
+            node = &mut node.children[index];
+        }
+        apply_runtime_node_state(node);
+    }
 }
 
 /// Collapses promoted `<popover>` wrappers to a zero-size, overflow-visible box so

@@ -120,11 +120,67 @@ geometry-preserving animation-only frames currently use it as an authoritative
 retained-update scope; snapshot paths also limit sampling to registered nodes.
 The sparse/full-diff verifier and visit-count regression pass. Dock steady p50
 improves, but dock p90 and dashboard frame ranges overlap. The dashboard still
-rebuilds Player on every spectrum update; layout propagation, selector
-closures, remaining semantic work and child-surface requests still need
-explicit scopes. See the P2 prototype entry in the
+rebuilds Player on every spectrum update. Step 1 below then scoped
+interaction frames. Layout propagation, display-list ancestors, validation
+and child-surface requests still need explicit scopes. See the P2 prototype entry in the
 [performance log](../../log/performance-log.md). The bullets below remain the
 full direction, not a shipped claim.
+
+#### Step 1: interaction-frame scope (design 2026-10-21)
+
+**Implemented 2026-10-21** as designed below. Steady dock hover now annotates
+8–14 nodes per paint and restyles 12, with no retained discovery. Hover-change
+and animation-only frames are about 2.5× faster. It also fixed a latent
+surface-root inheritance bug in the targeted restyle. Measurements and what
+remains: the P2 step 1 entry in the
+[performance log](../../log/performance-log.md).
+
+Measured shape, glass dock steady hover, visits per paint. A hover-change
+paint (one step in six) visits annotation 1,879, restyle scan 1,878 and
+retained discovery 1,879. Animation-only paints visit annotation 1,879 and
+otherwise only sampled nodes. The 376-per-paint means in the P0 profile are
+1,879 / 5, not a 20% scan.
+
+**No selector-dependents index is needed.** The selector subset
+([04](../../../docs/spec/04-styling.md), "Component `<style>` blocks") rejects
+combinators and `:has()`, so whether a rule matches depends only on the node's
+own tag, classes, id and state. A state change reaches other nodes only
+through inherited text fields and custom properties, which the targeted
+restyle already detects by comparing `ParentInheritedStyle`. Ambient window
+states change every node and keep the full path. The restyle targets are
+exactly the state-changed nodes. Their dependents are the descendants whose
+inherited values changed. If combinators are ever admitted, this is where a
+dependents index goes.
+
+1. **Scoped annotation.** Every retained or rebuild annotation whose overflow
+   extents are current stores its `RuntimeAnnotationInputs`. The next retained
+   frame diffs its inputs against them: hover tails, focus, focus-visible,
+   active, active slider, checked, expanded, input value, preedit and slider
+   diffs, plus patched binding nodes. It finds those nodes, and every scroll
+   container, through the last frame snapshot's paths and projects only them.
+   The full walk remains for rebuilds; window, promotion or shortcut changes;
+   frames after layout ran (annotation measures overflow before layout); a
+   missing snapshot; and a path that no longer matches. This subsumes the
+   scroll-only annotation fast path.
+2. **Path-directed restyle.** Targets are sorted by snapshot path and reached
+   directly. A target's parent style comes from its parent's retained computed
+   style. The target is re-resolved, and descent continues only while
+   inherited values changed. Paths are validated before any mutation, so a
+   fallback never restyles a node twice. Finalized-style validity is cleared
+   on target ancestors only; clean siblings keep it, since rebuild frames
+   revalidate bottom-up anyway. The pass reports the exact re-resolved set.
+3. **Retained update from that set.** When layout was reused and `FrameDirty`
+   holds no LAYOUT or STRUCTURE, the retained update consumes restyled,
+   annotated, semantic and animation IDs through snapshot paths
+   (`update_for_frame_dirty`), not the fingerprint walk.
+
+Exit check: a structural test hovers one item beside many clean siblings.
+Annotation, restyle-scan and retained-discovery visits must not grow with the
+sibling count. A full retained diff afterwards must find nothing, and a twin
+component forced onto the full paths must paint identical pixels and computed
+styles. Dock p50/p90 before and after on the release glass fixture.
+
+#### Full direction
 
 - One per-frame `FrameDirty` holds per-node change classes, fed by typed
   setters, interaction flag flips, animation samples (with their bucket), and

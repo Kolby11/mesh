@@ -120,12 +120,12 @@ Taffy's internal solver, raster workers and backend work are excluded.
 
 | Counter | What it counts |
 | --- | --- |
-| `restyle_scan`, `style_resolve` | Restyle traversal entries versus actual style resolutions, including diagnostics |
+| `restyle_scan`, `style_resolve` | Restyle traversal entries and snapshot-path steps versus actual style resolutions, including diagnostics |
 | `layout_build`, `layout_sync`, `layout_write` | Taffy construction/reconciliation, retained input synchronization, and geometry write visits |
 | `layout_fit`, `layout_extents`, `layout_discovery` | Fit-size correction, descendant extent traversal, and fingerprint discovery for layout inputs |
 | `animation_sample`, `animation_previous_style`, `animation_lookup` | Sampling visits, previous-style capture visits, and child-path steps |
 | `accessibility_normalize`, `accessibility_project` | Full/memo normalization traversal and local/snapshot semantic projections |
-| `validation`, `annotation` | Tree validation and runtime/scroll annotation visits |
+| `validation`, `annotation` | Tree validation and runtime/scroll annotation visits, including snapshot-path steps |
 | `retained_discovery`, `retained_sync`, `retained_lookup` | Candidate discovery, selected-node fingerprint refresh, and child-path steps |
 | `display_entries`, `display_ancestors`, `display_build` | Display-entry traversal, dirty-ancestor discovery, and paint-subtree visits |
 | `child_surface_requests` | Child-surface discovery visits; emitted as separate call samples after paint |
@@ -142,6 +142,12 @@ a structural gate: one animated leaf plus 1,024 clean siblings must sample one
 node, read one previous style, perform no retained discovery, and synchronize
 at most three retained records. The full-diff verifier checks the result.
 This gate covers the animation prototype, not all-pass proportionality.
+`hover_frame_visits_scale_with_the_hovered_item_not_the_tree` gates
+interaction frames the same way: hovering between two tiles beside 16 or
+1,024 clean siblings must give identical annotation, restyle-scan,
+retained-lookup, retained-sync and semantic-projection counts, with no
+retained discovery. A twin forced onto the full walks must paint identical
+pixels and computed styles, and a rebuild must reproduce them.
 The glass dock and spectrum profile tests print visits per measured paint
 alongside their timings. Use profiling-disabled runs for timing claims about
 instrumentation overhead.

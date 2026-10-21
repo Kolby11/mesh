@@ -9,6 +9,23 @@ pub(in crate::shell::component) use annotate::*;
 
 use super::*;
 
+fn changed_map_keys<V: PartialEq>(
+    previous: &HashMap<NodeId, V>,
+    current: &HashMap<NodeId, V>,
+    changed: &mut HashSet<NodeId>,
+) {
+    for (id, value) in previous {
+        if current.get(id) != Some(value) {
+            changed.insert(*id);
+        }
+    }
+    for (id, value) in current {
+        if previous.get(id) != Some(value) {
+            changed.insert(*id);
+        }
+    }
+}
+
 fn state_rule_requires_layout<'a>(
     selector: &mesh_core_component::style::Selector,
     mut properties: impl Iterator<Item = &'a str>,
@@ -637,28 +654,19 @@ impl FrontendSurfaceComponent {
             && !self.surface_entering
             && self.closing_child_keys.is_empty()
             && self.entering_child_keys.is_empty();
-        // A paint-only frame on the retained tree whose annotation inputs are
-        // unchanged since the previous paint-only frame can only have moved a
-        // scroll offset; see `RuntimeAnnotationInputs`.
-        let paint_only_annotation = trigger_kind == "restyle"
-            && scoped_finalize
-            && !dirty_types.is_empty()
-            && dirty_types
-                .difference(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS)
-                .is_empty();
-        let scroll_only_annotation = paint_only_annotation
-            && self
-                .paint_only_annotation_inputs
-                .as_ref()
-                .is_some_and(|inputs| self.annotation_inputs_match(inputs));
-        let mut annotation_dirty = if scroll_only_annotation {
-            #[cfg(test)]
-            {
-                self.scroll_only_annotation_frames += 1;
-            }
-            annotate_scroll_offsets_only(tree, &mut self.scroll_offsets);
-            HashSet::new()
-        } else {
+        let scoped_interaction_frame = scoped_finalize;
+        #[cfg(test)]
+        let scoped_interaction_frame =
+            scoped_interaction_frame && !self.force_full_interaction_frames;
+        // Inputs stored by the previous annotation describe a projection whose
+        // overflow extents are still current; only the nodes whose inputs
+        // changed, and scroll containers, need projecting again.
+        let scoped_annotation_ids = self
+            .scoped_annotation_inputs
+            .take()
+            .filter(|_| scoped_interaction_frame && self.last_frame_snapshot.is_some())
+            .and_then(|inputs| self.annotation_input_changes(&inputs));
+        let mut annotation_dirty = {
             let shortcut_cache = self.resolved_surface_shortcuts_cache.borrow();
             let mut annotation_context = RuntimeAnnotationContext::new(
                 self.focused_id
@@ -687,13 +695,25 @@ impl FrontendSurfaceComponent {
                     .as_ref()
                     .map(|cache| &cache.shortcuts_by_keybind),
             );
-            if trigger_kind == "rebuild" {
+            let scoped = scoped_annotation_ids.as_ref().is_some_and(|ids| {
+                annotate_runtime_nodes(
+                    tree,
+                    self.last_frame_snapshot.as_ref().expect("checked above"),
+                    ids,
+                    &mut annotation_context,
+                )
+            });
+            #[cfg(test)]
+            {
+                self.scoped_annotation_frames += u64::from(scoped);
+            }
+            if !scoped && trigger_kind == "rebuild" {
                 super::runtime_tree::annotate_runtime_tree(
                     tree,
                     "root".to_string(),
                     &mut annotation_context,
                 );
-            } else {
+            } else if !scoped {
                 annotate_runtime_and_overflow_tree(
                     tree,
                     "root".to_string(),
@@ -705,13 +725,11 @@ impl FrontendSurfaceComponent {
             drop(shortcut_cache);
             changed
         };
-        self.paint_only_annotation_inputs = if !paint_only_annotation {
-            None
-        } else if scroll_only_annotation {
-            self.paint_only_annotation_inputs.take()
-        } else {
-            Some(self.capture_annotation_inputs())
-        };
+        let annotation_inputs = (!self.surface_exiting
+            && !self.surface_entering
+            && self.closing_child_keys.is_empty()
+            && self.entering_child_keys.is_empty())
+        .then(|| self.capture_annotation_inputs());
         if self.surface_exiting {
             append_class_recursive(tree, "mesh-surface-exiting");
             tree.state.insert(NodeState::SURFACE_EXITING);
@@ -788,6 +806,7 @@ impl FrontendSurfaceComponent {
         let index_cache = &mut self.cached_style_rule_index;
         let mut reused_retained_layout = false;
         let mut empty_restyle_avoided = false;
+        let mut scoped_restyled = None;
         let preserve_surface_root = tree.tag == "surface";
         if paint_only_restyle {
             // Scroll, tooltip, and other paint-only invalidations do not alter
@@ -840,33 +859,43 @@ impl FrontendSurfaceComponent {
                 } else {
                     empty_restyle_avoided = true;
                 }
+            } else if let Some(restyled) = scoped_interaction_frame
+                .then_some(())
+                .and(self.last_frame_snapshot.as_ref())
+                .filter(|_| style_attribution.is_none())
+                .and_then(|snapshot| {
+                    let mut restyled = HashSet::new();
+                    resolver
+                        .restyle_targets_by_path(
+                            tree,
+                            restyle_rules,
+                            context,
+                            index_cache,
+                            snapshot,
+                            &affected_keys.affected,
+                            preserve_surface_root,
+                            &mut restyled,
+                        )
+                        .then(|| {
+                            apply_runtime_node_state_by_path(tree, snapshot, &restyled);
+                            restyled
+                        })
+                })
+            {
+                scoped_restyled = Some(restyled);
             } else {
                 // Narrow restyle: only restyle state-changed nodes and their
                 // descendants. Siblings, cousins, and unrelated subtrees are
                 // left untouched.
                 if preserve_surface_root {
-                    // For surface root, restyle only children that are in
-                    // the affected set. Use targeted restyle on each child.
-                    for child in &mut tree.children {
-                        if let Some(attribution) = style_attribution.as_mut() {
-                            resolver.restyle_subtree_for_ids_cached_profiled(
-                                child,
-                                restyle_rules,
-                                context,
-                                index_cache,
-                                &affected_keys.affected,
-                                attribution,
-                            );
-                        } else {
-                            resolver.restyle_subtree_for_ids_cached(
-                                child,
-                                restyle_rules,
-                                context,
-                                index_cache,
-                                &affected_keys.affected,
-                            );
-                        }
-                    }
+                    resolver.restyle_subtree_children_for_ids_cached(
+                        tree,
+                        restyle_rules,
+                        context,
+                        index_cache,
+                        &affected_keys.affected,
+                        style_attribution.as_mut(),
+                    );
                 } else {
                     // For non-surface trees, restyle the entire tree but only
                     // nodes in affected_keys will be touched.
@@ -970,6 +999,9 @@ impl FrontendSurfaceComponent {
         // subtrees that were not restyled already carry those constraints.
 
         let layout_work_required = !reused_retained_layout || !self.layout_state.valid;
+        // Annotation measures overflow before layout, except on rebuilds.
+        self.scoped_annotation_inputs =
+            annotation_inputs.filter(|_| trigger_kind == "rebuild" || !layout_work_required);
         // Enter the retained layout path on every finalized tree. On
         // VISUAL_REPAINT-only frames `compute_incremental` updates retained
         // styles and intentionally skips Taffy `compute_layout`; on invalid,
@@ -1013,11 +1045,16 @@ impl FrontendSurfaceComponent {
         // immutable capture, so all consumers see the sampled frame.
         if scoped_finalize {
             if let Some(previous) = &self.last_frame_snapshot {
-                match previous.normalize_accessibility_dirty(
-                    tree,
-                    &annotation_dirty,
-                    &affected_keys.affected,
-                ) {
+                // A scoped restyle reports inherited descendants itself.
+                let scoped_nodes = scoped_restyled
+                    .as_ref()
+                    .map(|restyled| annotation_dirty.union(restyled).copied().collect());
+                let no_subtrees = HashSet::new();
+                let (dirty_nodes, dirty_subtrees) = match &scoped_nodes {
+                    Some(nodes) => (nodes, &no_subtrees),
+                    None => (&annotation_dirty, &affected_keys.affected),
+                };
+                match previous.normalize_accessibility_dirty(tree, dirty_nodes, dirty_subtrees) {
                     Some(normalized) => annotation_dirty.extend(normalized),
                     None => scoped_finalize = false,
                 }
@@ -1077,7 +1114,21 @@ impl FrontendSurfaceComponent {
                 .mark(id, mesh_core_elements::ChangeClass::STYLE);
         }
         self.retained_update_dirty_nodes = annotation_dirty;
-        if scoped_finalize
+        self.sparse_retained_frame = false;
+        if let Some(restyled) = scoped_restyled.filter(|_| scoped_finalize && !layout_work_required)
+        {
+            // Geometry is unchanged and the restyle reported every node it
+            // re-resolved, so no subtree needs rediscovery.
+            for &id in &restyled {
+                self.frame_dirty.mark(
+                    id,
+                    mesh_core_elements::ChangeClass::STYLE | mesh_core_elements::ChangeClass::PAINT,
+                );
+            }
+            self.retained_update_dirty_nodes.extend(restyled);
+            self.retained_update_dirty_roots = Some(HashSet::new());
+            self.sparse_retained_frame = true;
+        } else if scoped_finalize
             && ((targeted_interaction_restyle && interaction_snapshot_valid)
                 || animation_only_frame
                 || paint_only_restyle)
@@ -1170,23 +1221,59 @@ impl FrontendSurfaceComponent {
         }
     }
 
-    /// `capture_annotation_inputs() == *inputs`, without cloning.
-    fn annotation_inputs_match(&self, inputs: &RuntimeAnnotationInputs) -> bool {
+    /// Nodes whose annotation inputs differ from `previous`, or `None` when an
+    /// ambient input changed and every node needs projecting again.
+    fn annotation_input_changes(
+        &self,
+        previous: &RuntimeAnnotationInputs,
+    ) -> Option<HashSet<NodeId>> {
+        if previous.window != self.window_states
+            || previous.promoted_windows != self.promoted_window_keys
+            || previous.shortcuts_generation != self.shortcuts_generation()
+        {
+            return None;
+        }
         let (focused_id, focus_visible_id) = self.resolved_annotation_focus();
-        inputs.focused_id == focused_id
-            && inputs.focus_visible_id == focus_visible_id
-            && inputs.hovered_path == self.hovered_path
-            && inputs.active_id == self.pointer_down_id
-            && inputs.active_slider_id == self.active_slider_id
-            && inputs.window == self.window_states
-            && inputs.promoted_windows == self.promoted_window_keys
-            && inputs.input_values == self.input_values
-            && inputs.input_preedits == self.input_preedits
-            && inputs.checked_values == self.checked_values
-            && inputs.expanded_triggers == self.expanded_triggers
-            && inputs.slider_values == self.slider_values
-            && inputs.slider_script_values == self.slider_script_values
-            && inputs.shortcuts_generation == self.shortcuts_generation()
+        let mut changed = HashSet::new();
+        collect_hover_changed_ids(&previous.hovered_path, &self.hovered_path, &mut changed);
+        // Focus-visible falls back to logical focus on inputs.
+        if previous.focused_id != focused_id || previous.focus_visible_id != focus_visible_id {
+            changed.extend(
+                [
+                    previous.focused_id,
+                    focused_id,
+                    previous.focus_visible_id,
+                    focus_visible_id,
+                ]
+                .into_iter()
+                .flatten(),
+            );
+        }
+        for (before, now) in [
+            (previous.active_id, self.pointer_down_id),
+            (previous.active_slider_id, self.active_slider_id),
+        ] {
+            if before != now {
+                changed.extend(before.into_iter().chain(now));
+            }
+        }
+        changed_map_keys(&previous.input_values, &self.input_values, &mut changed);
+        changed_map_keys(&previous.input_preedits, &self.input_preedits, &mut changed);
+        changed_map_keys(&previous.checked_values, &self.checked_values, &mut changed);
+        changed_map_keys(&previous.slider_values, &self.slider_values, &mut changed);
+        changed_map_keys(
+            &previous.slider_script_values,
+            &self.slider_script_values,
+            &mut changed,
+        );
+        changed.extend(
+            previous
+                .expanded_triggers
+                .symmetric_difference(&self.expanded_triggers)
+                .copied(),
+        );
+        changed.extend(self.patched_binding_nodes.iter().copied());
+        Some(changed)
     }
 
     pub(super) fn collect_interaction_changed_node_ids(&self) -> InteractionChangedNodeIds {
@@ -1251,16 +1338,11 @@ impl FrontendSurfaceComponent {
             mesh_core_elements::PseudoState::Checked,
             mesh_core_elements::PseudoState::Selected,
         ]) {
-            for (node_id, value) in &self.previous_checked_values {
-                if self.checked_values.get(node_id) != Some(value) {
-                    changed_ids.insert(*node_id);
-                }
-            }
-            for (node_id, value) in &self.checked_values {
-                if self.previous_checked_values.get(node_id) != Some(value) {
-                    changed_ids.insert(*node_id);
-                }
-            }
+            changed_map_keys(
+                &self.previous_checked_values,
+                &self.checked_values,
+                &mut changed_ids,
+            );
         }
 
         if dependencies.contains(mesh_core_elements::PseudoState::Expanded) {
@@ -1273,16 +1355,11 @@ impl FrontendSurfaceComponent {
 
         // A moved slider knob repaints even when no pseudo-state changed, so
         // this diff is unconditional — see `previous_slider_values`.
-        for (node_id, value) in &self.previous_slider_values {
-            if self.slider_values.get(node_id) != Some(value) {
-                changed_ids.insert(*node_id);
-            }
-        }
-        for (node_id, value) in &self.slider_values {
-            if self.previous_slider_values.get(node_id) != Some(value) {
-                changed_ids.insert(*node_id);
-            }
-        }
+        changed_map_keys(
+            &self.previous_slider_values,
+            &self.slider_values,
+            &mut changed_ids,
+        );
 
         // Nodes whose bound properties a script write patched in place.
         changed_ids.extend(self.patched_binding_nodes.iter().copied());

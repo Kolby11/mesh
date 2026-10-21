@@ -6958,3 +6958,75 @@ Release serial filter `profiling`: 44 passed / 2 failed. Both failures exist at
 `ef0f45d8`: `phase26_real_surface_baseline_emits_canonical_proof_measurements`
 (known) and `profiling_snapshot_groups_backend_stage_proof_under_expected_provider_identity`
 (missing `PollUpdate` stage; fails deterministically on baseline and working tree).
+
+## 2026-10-21 — P2 step 1: interaction frames scoped by snapshot paths
+
+`working tree` (baseline `df98fcc9`) · area: annotation, interaction restyle, retained update
+
+**Measured shape first.** The P0 dock means hid the frame classes. Per painted
+frame, a hover change (one step in six) visited annotation 1,879, restyle scan
+1,878 and retained discovery 1,879. Animation-only frames visited annotation
+1,879 and otherwise only sampled nodes. The "376 per paint" means were
+1,879 / 5.
+
+**Change.** No selector-dependents index was built. The selector subset rejects
+combinators and `:has()`, so only inherited values propagate a state change
+(design: P2 step 1 in the
+[pipeline note](../todos/pending/2026-10-21-change-proportional-pipeline.md)).
+Retained frames whose overflow extents are current diff the stored
+`RuntimeAnnotationInputs`. They project only changed nodes and scroll
+containers through the last frame snapshot's paths; this replaces the
+scroll-only walk. Restyle reaches its targets by path and descends only while
+inherited values change. Semantic normalization and the retained update
+consume the exact restyled set; a frame that ran layout keeps the conservative
+discovery.
+
+**Latent bug fixed.** The targeted restyle resolved a synthetic surface root's
+children with no parent context, while the full restyle passes the root's
+style. After any hover, descendants lost the root's inherited color and fonts
+(the hover gate saw color 255 → 192) until the next full restyle. Both
+targeted paths now pass the root context. The gate checks rebuild parity.
+
+**Visits** (release glass dock, 1,879 nodes, steady hover, per painted frame):
+
+| Pass | Hover change before → after | Animation-only before → after |
+| --- | --- | --- |
+| `annotation` | 1,879 → 14 | 1,879 → 8 |
+| `restyle_scan` | 1,878 → 12 | 0 → 0 |
+| `retained_discovery` | 1,879 → 0 | 0 → 0 |
+| `retained_lookup` / `retained_sync` | 0 / 19 → 9 / 5 | 36 / 9 → 3 / 3 |
+
+**Timing.** AMD Ryzen 7 7840HS, release (thin LTO, one codegen unit), CPU Skia
+raster, `taskset -c 2`; three alternating before/after invocations of
+`glass_dock_hover_animation_profile` (10 pinned / 150 installed apps,
+2880×180, 60 steps per run). Whole-run percentiles are not comparable: the
+shelf's 560 ms wall-clock `dock-in` entrance spans more steps when frames are
+faster. After-build run 1 has 1–9 entrance frames at 2.1–2.6 ms
+(`display_ancestors` 1,834, unscoped), and the baseline's slower frames finish
+the entrance within run 0. The whole-run run-1 p90 therefore rose from
+0.725–0.769 to 2.105–2.269 ms. Painted frames in runs 1–2, classified by
+visit signature with the same test-side instrumentation in both binaries:
+
+| Frame class | Before p50 / p90 | After p50 / p90 |
+| --- | --- | --- |
+| Hover change | 0.724–0.740 / 0.762–0.817 ms | 0.256–0.297 / 0.285–0.524 ms |
+| Animation only | 0.385–0.388 / 0.404–0.427 ms | 0.159–0.164 / 0.176–0.205 ms |
+
+About 2.5× on both steady classes. The dashboard does not take this path
+(Player rebuilds every update). Its mean across the same alternation was
+2.973–3.090 ms before and 3.005–3.036 ms after, which overlap.
+
+**Verified.** New gate `hover_frame_visits_scale_with_the_hovered_item_not_the_tree`
+(added to `tools/check-performance`) uses 16 and 1,024 clean siblings. Equal
+counts at both sizes, zero discovery, full-diff, twin pixel/style parity and
+rebuild parity all pass. The animation gate now also asserts zero annotation
+and restyle-scan visits. Elements: 300 passed / 7 ignored. Debug serial
+`mesh-core-shell --lib`: baseline 905 passed / 40 failed / 30 ignored; working
+tree 906 / 40 / 30, with identical failure names. The scroll-annotation tests
+now use a forced-full twin.
+
+**Remaining for the P2 exit.** Entrance and lifecycle frames still walk display
+ancestors. Hover-change frames still capture previous styles for all 63
+registered transition nodes. Every frame clones the annotation inputs (small
+maps; not measured separately). Layout propagation, validation, child-surface
+requests and the dashboard's P3 list path are unchanged.

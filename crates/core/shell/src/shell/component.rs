@@ -52,7 +52,7 @@ pub(in crate::shell) use mesh_core_interaction::ScrollOffsetState;
 use runtime_tree::stable_runtime_node_id;
 use runtime_tree::{
     NodeServiceFieldDependencies, RetainedWidgetTree, RuntimeAnnotationContext,
-    RuntimeAnnotationInputs, annotate_runtime_and_overflow_tree, annotate_scroll_offsets_only,
+    RuntimeAnnotationInputs, annotate_runtime_and_overflow_tree, annotate_runtime_nodes,
     collect_element_metrics, input_accepts_char, runtime_node_id_for_key,
 };
 
@@ -1214,11 +1214,18 @@ pub(super) struct FrontendSurfaceComponent {
     /// declarations, checks overrides, and localizes triggers, so avoid doing
     /// that again for every key event when neither input changed.
     resolved_surface_shortcuts_cache: RefCell<Option<ResolvedSurfaceShortcutsCache>>,
-    /// Annotation inputs of the last paint-only retained frame; see
-    /// [`RuntimeAnnotationInputs`].
-    paint_only_annotation_inputs: Option<RuntimeAnnotationInputs>,
+    /// Annotation inputs whose projection and overflow extents the retained
+    /// tree still carries; see [`RuntimeAnnotationInputs`].
+    scoped_annotation_inputs: Option<RuntimeAnnotationInputs>,
+    /// The last finalize reported its exact restyled set over reused geometry,
+    /// so the retained update can skip subtree discovery.
+    sparse_retained_frame: bool,
     #[cfg(test)]
-    scroll_only_annotation_frames: u64,
+    scoped_annotation_frames: u64,
+    /// Forces interaction frames onto the full annotation, restyle and
+    /// retained-discovery walks, as the reference for scoped-frame tests.
+    #[cfg(test)]
+    force_full_interaction_frames: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -1531,9 +1538,12 @@ impl FrontendSurfaceComponent {
             runtime_style_diagnostic_fingerprint: None,
             element_metric_usage,
             resolved_surface_shortcuts_cache: RefCell::new(None),
-            paint_only_annotation_inputs: None,
+            scoped_annotation_inputs: None,
+            sparse_retained_frame: false,
             #[cfg(test)]
-            scroll_only_annotation_frames: 0,
+            scoped_annotation_frames: 0,
+            #[cfg(test)]
+            force_full_interaction_frames: false,
         }
     }
 
