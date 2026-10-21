@@ -11,7 +11,9 @@ measurements live in [`log/`](log/README.md).
   path-directed, and paint-only patches now keep geometry. Dashboard frames are
   bound by layout-class patches, so W2 (layout propagation) is the dashboard
   lever. W6 landed: presentation no longer waits for the GPU worker (1–2 ms of
-  UI time back per GPU frame). W4 (live replay gate) is running in a worktree. Plan and waves are in the
+  UI time back per GPU frame). W4 landed: `tools/check-performance --live`
+  shows the live dock repainting continuously while idle and hover frames walking the
+  whole tree. That is the next lever. Wave 2 (W2, W5) is not started. Plan and waves are in the
   [pipeline note](todos/pending/2026-10-21-change-proportional-pipeline.md).
 
 - **Dock flares and dock tooltips fixed:** new `corner-shape: scoop` gives the

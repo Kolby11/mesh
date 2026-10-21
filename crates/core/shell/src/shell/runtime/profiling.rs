@@ -231,8 +231,29 @@ struct BackendAccumulator {
     stages: BTreeMap<ProfilingBackendStage, BackendStageAccumulator>,
 }
 
+/// One profiler record kept in order for replay harnesses, which need
+/// per-frame samples rather than the bounded recent-sample rings.
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub(crate) enum CapturedRecord {
+    Stage {
+        at: Instant,
+        surface_id: String,
+        stage: ProfilingStage,
+        micros: u64,
+        trigger: Option<String>,
+    },
+    Invalidation {
+        at: Instant,
+        surface_id: String,
+        node_visits: BTreeMap<String, u64>,
+    },
+}
+
 #[derive(Debug)]
 pub(crate) struct ProfilingRuntimeState {
+    #[cfg(test)]
+    pub(crate) capture: Option<Vec<CapturedRecord>>,
     session_id: u64,
     session_started: Instant,
     next_sample_order: u64,
@@ -245,6 +266,8 @@ pub(crate) struct ProfilingRuntimeState {
 impl Default for ProfilingRuntimeState {
     fn default() -> Self {
         Self {
+            #[cfg(test)]
+            capture: None,
             session_id: 0,
             session_started: Instant::now(),
             next_sample_order: 0,
@@ -425,6 +448,16 @@ impl ProfilingRuntimeState {
         trigger_kind: Option<&str>,
     ) {
         let module_id = module_id.filter(|id| !id.is_empty());
+        #[cfg(test)]
+        if let Some(capture) = self.capture.as_mut() {
+            capture.push(CapturedRecord::Stage {
+                at: Instant::now(),
+                surface_id: surface_id.to_owned(),
+                stage,
+                micros: duration.as_micros().min(u128::from(u64::MAX)) as u64,
+                trigger: trigger_kind.map(str::to_owned),
+            });
+        }
         let sample = self.make_sample(
             stage,
             duration,
@@ -505,6 +538,14 @@ impl ProfilingRuntimeState {
         invalidation: ProfilingInvalidationSnapshot,
     ) {
         let module_id = module_id.filter(|id| !id.is_empty());
+        #[cfg(test)]
+        if let Some(capture) = self.capture.as_mut() {
+            capture.push(CapturedRecord::Invalidation {
+                at: Instant::now(),
+                surface_id: surface_id.to_owned(),
+                node_visits: invalidation.node_visits.clone(),
+            });
+        }
         let surface = self
             .surfaces
             .entry(surface_id.to_string())

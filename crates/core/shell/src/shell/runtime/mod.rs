@@ -484,7 +484,13 @@ impl Shell {
             tx: tx.clone(),
             wake: wake.clone(),
         });
-        self.spawn_backend_modules(runtime.handle(), tx.clone(), wake.clone());
+        #[cfg(test)]
+        let spawn_backends = !self.replay.as_ref().is_some_and(|replay| replay.suppress_backends);
+        #[cfg(not(test))]
+        let spawn_backends = true;
+        if spawn_backends {
+            self.spawn_backend_modules(runtime.handle(), tx.clone(), wake.clone());
+        }
         let ipc_socket_path = default_ipc_socket_path();
         let run_result = (|| -> Result<(), ShellRunError> {
             self.ipc_server = Some(
@@ -530,6 +536,8 @@ impl Shell {
                 pending.extend(self.reload_locale_if_settings_changed()?);
                 self.reload_frontend_components_if_changed()?;
                 self.dispatch_wayland_inner()?;
+                #[cfg(test)]
+                self.run_replay_driver();
 
                 let mut shell_messages = CoalescedShellMessages::default();
                 let mut drained_shell_message_count = 0;
@@ -559,6 +567,8 @@ impl Shell {
                 self.flush_wayland()?;
 
                 let deadline = self.next_runtime_sleep(shell_message_backlog_likely);
+                #[cfg(test)]
+                let deadline = self.clamp_to_replay_wake(deadline);
                 if self.presentation_engine.supports_blocking_dispatch() {
                     let wait_started = self.profiling_enabled().then(std::time::Instant::now);
                     let eventfd_borrowed = self

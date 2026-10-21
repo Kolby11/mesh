@@ -24,10 +24,10 @@ run_benchmark() {
   printf '%s\n' "$output" | awk 'match($0, /MESH_PERF metric=/) { print substr($0, RSTART) }' >> "$RESULTS"
 }
 
-run_d9_workloads() {
-  local artifacts test_binary output test_name
+shell_test_binary() {
+  local artifacts
   artifacts="$(cargo test -p mesh-core-shell --release --lib --no-run --message-format=json)"
-  test_binary="$(printf '%s\n' "$artifacts" | python3 -c '
+  printf '%s\n' "$artifacts" | python3 -c '
 import json
 import sys
 artifacts = [json.loads(line) for line in sys.stdin if line.strip()]
@@ -39,7 +39,34 @@ executables = [item["executable"] for item in artifacts
 if len(executables) != 1:
     sys.exit("expected exactly one shell test executable")
 print(executables[0])
-')"
+'
+}
+
+# Opt-in: replays the glass workloads on the live compositor in WAYLAND_DISPLAY.
+# Each run is a fresh process, so first-open costs are cold. The metrics are
+# printed, not gated against the baseline: only the structural assertion inside
+# the test can fail the run. Without a compositor the test skips and passes.
+run_live_replay() {
+  local binary run output
+  local runs="${MESH_LIVE_RUNS:-3}"
+  local -a pin=()
+  if [[ -n "${MESH_LIVE_CPU:-}" ]]; then
+    pin=(taskset -c "$MESH_LIVE_CPU")
+  fi
+  binary="$(shell_test_binary)"
+  for ((run = 1; run <= runs; run++)); do
+    printf 'live glass replay: run %d of %d\n' "$run" "$runs"
+    if ! output="$("${pin[@]}" "$binary" live_glass_replay --ignored --nocapture --test-threads=1 2>&1)"; then
+      printf '%s\n' "$output"
+      return 1
+    fi
+    printf '%s\n' "$output" | grep -E '^(MESH_PERF|raster path|skipping|cpu envelope|live dock frames|dock outlier)' || true
+  done
+}
+
+run_d9_workloads() {
+  local test_binary output test_name
+  test_binary="$(shell_test_binary)"
   for test_name in d9_navigation_updates d9_popover_open d9_theme_switch \
       d9_settings_scroll_frame_gate d9_coalesced_reload_wakeup_profile \
       d9_glass_dashboard_open d9_glass_dock_animation d9_glass_bar_clock_tick; do
@@ -56,7 +83,8 @@ cd "$ROOT"
 case "${1:-}" in
   "") workloads_only=false ;;
   --workloads-only) workloads_only=true ;;
-  *) printf 'usage: %s [--workloads-only]\n' "$0" >&2; exit 2 ;;
+  --live) run_live_replay; exit 0 ;;
+  *) printf 'usage: %s [--workloads-only | --live]\n' "$0" >&2; exit 2 ;;
 esac
 
 if ! "$workloads_only"; then

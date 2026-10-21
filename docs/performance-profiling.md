@@ -160,6 +160,31 @@ patching/selective template builds in the spectrum profile for comparison.
 Use profiling-disabled runs for timing claims about
 instrumentation overhead.
 
+## Live glass replay
+
+```bash
+MESH_LIVE_CPU=6 nix develop -c ./tools/check-performance --live
+```
+
+Opt-in; it is not part of the default run and has no baseline entries. It runs
+the ignored test `live_glass_replay` (3 fresh processes, `MESH_LIVE_RUNS`
+overrides) in the release `mesh-core-shell` test binary. The test starts the
+real `Shell` with a private copy of `config/` (the `glass` profile), a private
+IPC socket and state directory, on the compositor named by `WAYLAND_DISPLAY`.
+It skips, passing, without a reachable compositor. Backends are not spawned;
+fixed service payloads are injected, and input enters as synthetic window
+events. The workloads run in order: bar clock ticks (8 s idle window), dock
+hover sweep, dashboard open, 120 spectrum updates, Settings open, Settings
+Appearance scroll. Each prints `MESH_PERF metric=live_<workload>_<surface>_...`
+lines: render mean/p50/p90 of `total_surface_render`, frame counts, per-pass
+visit means, first present/render after each open request, and boot first
+present. Raster is CPU unless the test binary is built with `--features gpu`.
+Timings are for visibility; the only failure is structural: every live dock
+hover frame must stay within the per-pass maxima of the same frame class
+(hover change or animation only) in the CPU fixture `glass_dock_hover_animation_profile`.
+Replay surfaces appear on the compositor for about a minute under the shipped
+module ids as layer namespaces (not unique, so stop a running desktop shell first); the shell then shuts down and its private files are removed.
+
 ## Repeatable captures
 
 Profile one workload at a time: idle, pointer movement, scrolling, text update,

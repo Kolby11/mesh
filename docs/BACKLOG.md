@@ -26,9 +26,17 @@ other performance work. Evidence, the Qt Quick / GTK4 comparison, exit
 criteria and the items folded in here:
 [design](../.planning/todos/pending/2026-10-21-change-proportional-pipeline.md).
 
-- [ ] **P0:** Add a reproducible live glass replay/gate (dashboard, dock hover,
-      Settings scroll, clock tick) using the per-pass visit counters; CPU fixtures
-      and the animation structural gate do not cover the live compositor gap.
+- [ ] **P0/live:** The live glass dock repaints continuously with no input (296–439 frames per
+      8 s, 17–21 ms each, ~1,600–1,877 retained-discovery visits); find what keeps it rendering.
+      `tools/check-performance --live` reproduces it.
+- [ ] **P0/live:** Live dock hover frames walk the whole tree (about 40 ms vs 0.85 ms p90 in the CPU
+      fixture); the scoped interaction path is not reached live. The `--live` structural assertion
+      fails until this is fixed.
+- [ ] Live `total_surface_render` reads ~100 ms on every surface during dashboard spectrum
+      updates; check cross-surface attribution before optimizing the dashboard from live numbers.
+- [ ] The live replay reports CPU raster even in a `gpu` build; use the render-path diagnostic to
+      find why. Its first `mesh.apps` injection before the dock's first paint is lost.
+- [ ] Give the live replay its own layer-namespace suffix so it can run beside a desktop shell.
 - [ ] **P2:** Complete the shared dirty-set pipeline beyond the animation, interaction and
       paint-only patch scopes. Patch frames that change layout (dashboard `style:height`) still
       run annotation, layout discovery, retained discovery, validation and animation sampling over

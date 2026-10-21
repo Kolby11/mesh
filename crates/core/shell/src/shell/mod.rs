@@ -140,6 +140,8 @@ mod ipc;
 mod module_config;
 mod package;
 mod profile;
+#[cfg(test)]
+mod replay_hooks;
 mod runtime;
 mod service;
 mod signals;
@@ -789,6 +791,8 @@ pub struct Shell {
     pending_service_call_routes: HashMap<u64, ServiceCallRoute>,
     pending_popover_hides: HashMap<SurfaceId, std::time::Instant>,
     profiling: runtime::profiling::ProfilingRuntimeState,
+    #[cfg(test)]
+    replay: Option<replay_hooks::ReplayHarness>,
     wake_handle: Option<WakeHandle>,
     /// Kept after every lifecycle guard so the shared wake handle is released
     /// only after workers have been stopped or joined, including `Drop`.

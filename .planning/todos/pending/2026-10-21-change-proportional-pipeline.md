@@ -231,7 +231,7 @@ styles. Dock p50/p90 before and after on the release glass fixture.
 
 ## Execution plan (2026-10-21)
 
-**Status:** wave 1 running. W1 landed 2026-10-21 (`06d5750f`): the patched-frame restyle was already path-directed, with 336 visits = about 24 targets × path depth. Paint-only patches now keep geometry. Dashboard frames are bound by layout-class patches, which makes W2 the dashboard lever. W6 parts (b) and (c) landed 2026-10-21: pipelined presentation and the render-path diagnostic; part (a) follows W3. W4 is running. Baseline commit `55800ed5`. Implementation
+**Status:** wave 1 running. W1 landed 2026-10-21 (`06d5750f`): the patched-frame restyle was already path-directed, with 336 visits = about 24 targets × path depth. Paint-only patches now keep geometry. Dashboard frames are bound by layout-class patches, which makes W2 the dashboard lever. W6 parts (b) and (c) landed 2026-10-21: pipelined presentation and the render-path diagnostic; part (a) follows W3. W4 landed 2026-10-21: the live replay gate; its structural assertion fails because the live dock never idles and live hover frames walk the whole tree. Wave 1 is complete. Baseline commit `55800ed5`. Implementation
 agents work in worktrees and do not edit this note, the backlog, STATUS or the
 log. The orchestrator integrates one commit per workstream.
 

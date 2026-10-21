@@ -7210,3 +7210,71 @@ failures and the candidate 42; the difference is the flaky
 `resource_preparation_job_cancels_and_polls_without_blocking_the_caller`, and the
 candidate has no new name. Scene preparation narrowed by retained revision
 (W6 part a) is deferred until after W3.
+
+## 2026-10-21 — P0 W4: live glass replay gate; the live dock never idles
+
+On main after `d50b6c41` (agent baseline `55800ed5`) · area: profiling, live replay
+
+**Change.** `live_glass_replay` (ignored, release only) runs the real `Shell`
+event loop against the compositor in `WAYLAND_DISPLAY` under the `glass`
+profile. It copies `config/` into a temp sandbox with private settings, module
+graph, IPC socket, `MESH_HOME` and `XDG_STATE_HOME`, injects fixed service
+payloads, and starts no host backends. It drives synthetic input through
+`pending_wayland_events` and replays:
+1. bar clock ticks for 8 s;
+2. a dock hover sweep of 120 moves across the 10 pinned tiles;
+3. dashboard open plus 120 spectrum updates at 33 ms;
+4. Settings open and an Appearance two-finger scroll.
+
+A test-only capture buffer records every `TotalSurfaceRender`/`PresentCommit`
+sample and each frame's `node_visits`. The production seams (the
+`replay_hooks` driver call, sleep clamp and backend suppression) exist only under
+`#[cfg(test)]`. `tools/check-performance --live` runs it `MESH_LIVE_RUNS`
+times (default 3), pinned to `MESH_LIVE_CPU`. With no compositor the test
+skips and passes. Its structural assertion requires every live dock hover frame
+to stay within the per-pass maxima of its frame class in the CPU fixture
+`glass_dock_hover_animation_profile`. That assertion **fails today**, which is
+the finding below. Layer namespaces are not unique, so stop a desktop shell
+before running it.
+
+**Live results.** Agent-measured, three runs, CPU raster (the GPU build also
+reported CPU; not investigated, and the agent's tree predates W6's render-path
+diagnostic), `taskset -c 6`, live Hyprland 120 Hz.
+
+| Workload / surface | Frames | Mean | p50 | p90 |
+| --- | --- | --- | --- | --- |
+| Clock tick, `glass-bar` | 8 | 5.6–7.7 ms | 6.0–6.1 ms | 7.8–8.0 ms |
+| Clock window, dock (no input) | 430–439 | 16.7–17.0 ms | 16.5–16.8 ms | 17.8–18.2 ms |
+| Dock hover sweep, dock | 120 | 39.7–40.2 ms | 38.9–39.4 ms | 45.6–46.9 ms |
+| Dashboard spectrum, dashboard | 119 | 100.9–103.1 ms | 99.4–101.6 ms | 103.3–107.2 ms |
+| Settings Appearance scroll | 53–64 | 22.9–30.5 ms | 19.9–31.6 ms | 33.0–34.4 ms |
+
+First present after an open request: dashboard 63.6–72.1 ms, Settings 85–92 ms.
+The dashboard figure is suspect. During the spectrum window every surface
+reports about 100 ms (dock 102, widgets 101, bar 99), so `total_surface_render`
+probably includes cross-surface serial work. Check that attribution before
+optimizing from it.
+
+Orchestrator spot-check on main (W1 and W6 included), one run, `taskset -c 2`,
+CPU raster. The clock window's dock painted 296 frames in 8 s with no input:
+21.2 ms mean, 37.0 ms p90, `retained_discovery` 1,623, annotation 229 and
+`restyle_scan` 117 visits per frame. Dashboard open first present 75.8 ms,
+Settings 101.8 ms.
+
+**Finding.**
+- **Idle dock.** The live glass dock repaints continuously at about 37–54 fps
+  with no input, rediscovering most of its 1,877-node tree each frame. The CPU
+  fixture's `wants_render` gate never shows this.
+- **Live hover.** 80–100 of 119 live hover frames walk the whole tree, outside
+  the fixture's HoverChange and AnimationOnly classes: annotation 1,877, restyle
+  about 1,876, validation 3,754–11,262, `accessibility_normalize` up to 3,754,
+  `display_ancestors` about 1,840. The scoped interaction path of P2 step 1 is not
+  reached on a live surface.
+
+**Verified.** Agent release `mesh-core-shell --lib`: 43 failures at baseline and
+42 after, with no new name. The difference is the flaky
+`signal_requests_ordinary_shutdown_and_wakes_the_loop`, which passed. Tried and
+reverted: a symlinked modules dir (fails profile resolution), an IPC socket at
+the sandbox root (refused as unsafe), a single apps injection before the dock's
+first paint (the list stayed empty; a later `available:false` then the full
+payload populated it, cause unknown).

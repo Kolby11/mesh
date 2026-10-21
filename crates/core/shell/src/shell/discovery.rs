@@ -2110,6 +2110,8 @@ impl Shell {
             surfaces: HashMap::new(),
             clipboard: Box::new(WaylandClipboard::default()),
             presentation_engine: PresentationEngine::select(),
+            #[cfg(test)]
+            replay: None,
             wake_handle: None,
             eventfd_fd: None,
             ipc_server: None,
