@@ -134,6 +134,7 @@ impl<'a> StyleResolver<'a> {
         context: StyleContext,
         parent_style: Option<&ParentInheritedStyle>,
     ) {
+        crate::frame_work::visit(crate::frame_work::Pass::RestyleScan);
         let (reuse_node, reuse_subtree) =
             self.finalized_style_reuse(node, rules, index, context, parent_style);
         if reuse_subtree {
@@ -174,6 +175,7 @@ impl<'a> StyleResolver<'a> {
         parent_style: Option<&ParentInheritedStyle>,
         attribution: &mut StyleRuleAttribution,
     ) {
+        crate::frame_work::visit(crate::frame_work::Pass::RestyleScan);
         let (reuse_node, reuse_subtree) =
             self.finalized_style_reuse(node, rules, index, context, parent_style);
         if reuse_subtree {
@@ -279,6 +281,7 @@ impl<'a> StyleResolver<'a> {
         parent_style: Option<&ParentInheritedStyle>,
         inherited_dirty: bool,
     ) {
+        crate::frame_work::visit(crate::frame_work::Pass::RestyleScan);
         node.finalized_style_valid = false;
         let is_target = target_ids.contains(&node.id);
         // A node should have its style recomputed if it is a direct target or
@@ -371,6 +374,7 @@ impl<'a> StyleResolver<'a> {
         inherited_dirty: bool,
         attribution: &mut StyleRuleAttribution,
     ) {
+        crate::frame_work::visit(crate::frame_work::Pass::RestyleScan);
         node.finalized_style_valid = false;
         let should_restyle = target_ids.contains(&node.id) || inherited_dirty;
         let was_pristine = node.finalized_style_pristine;

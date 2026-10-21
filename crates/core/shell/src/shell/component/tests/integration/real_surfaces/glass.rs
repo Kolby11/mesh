@@ -552,6 +552,8 @@ fn glass_dock_hover_animation_profile() {
         component.set_profiling_enabled(true);
         let _ = component.take_profiling_records();
         let mut times = Vec::new();
+        let mut visits = std::collections::BTreeMap::<String, u64>::new();
+        let mut measured_frames = 0u64;
         for step in 0..FRAMES {
             // Cross to the next tile every six frames. The first run also
             // covers the shelf's 560ms `dock-in` entrance animation.
@@ -572,6 +574,14 @@ fn glass_dock_hover_animation_profile() {
             }
             paint_frame(&mut component);
             times.push(begun.elapsed());
+            if let Some(snapshot) = component.take_invalidation_snapshot() {
+                if !snapshot.node_visits.is_empty() {
+                    measured_frames += 1;
+                    for (pass, count) in snapshot.node_visits {
+                        *visits.entry(pass).or_default() += count;
+                    }
+                }
+            }
         }
         times.sort();
         let total: Duration = times.iter().sum();
@@ -586,6 +596,12 @@ fn glass_dock_hover_animation_profile() {
             component.take_profiling_records(),
             FRAMES,
         );
+        for (pass, count) in visits {
+            eprintln!(
+                "node-visits {pass}: total={count} frames={measured_frames} mean={:.1}",
+                count as f64 / measured_frames.max(1) as f64
+            );
+        }
         component.set_profiling_enabled(false);
     }
 }
@@ -835,10 +851,20 @@ fn glass_dashboard_spectrum_profile() {
         component.set_profiling_enabled(true);
         let _ = component.take_profiling_records();
         let mut times = Vec::new();
+        let mut visits = std::collections::BTreeMap::<String, u64>::new();
+        let mut measured_frames = 0u64;
         for index in 0..FRAMES {
             let begun = std::time::Instant::now();
             frame(&mut component, 30 + run * FRAMES + index);
             times.push(begun.elapsed());
+            if let Some(snapshot) = component.take_invalidation_snapshot() {
+                if !snapshot.node_visits.is_empty() {
+                    measured_frames += 1;
+                    for (pass, count) in snapshot.node_visits {
+                        *visits.entry(pass).or_default() += count;
+                    }
+                }
+            }
         }
         times.sort();
         let total: Duration = times.iter().sum();
@@ -853,6 +879,12 @@ fn glass_dashboard_spectrum_profile() {
             component.take_profiling_records(),
             FRAMES,
         );
+        for (pass, count) in visits {
+            eprintln!(
+                "node-visits {pass}: total={count} frames={measured_frames} mean={:.1}",
+                count as f64 / measured_frames.max(1) as f64
+            );
+        }
         component.set_profiling_enabled(false);
     }
 }

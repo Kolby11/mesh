@@ -1064,6 +1064,18 @@ impl FrontendSurfaceComponent {
         // selects on it.
         self.previous_slider_values.clone_from(&self.slider_values);
         self.interaction_snapshot_valid = true;
+        for &id in &annotation_dirty {
+            self.frame_dirty.mark(
+                id,
+                mesh_core_elements::ChangeClass::A11Y
+                    | mesh_core_elements::ChangeClass::HIT
+                    | mesh_core_elements::ChangeClass::PAINT,
+            );
+        }
+        for &id in &affected_keys.affected {
+            self.frame_dirty
+                .mark(id, mesh_core_elements::ChangeClass::STYLE);
+        }
         self.retained_update_dirty_nodes = annotation_dirty;
         if scoped_finalize
             && ((targeted_interaction_restyle && interaction_snapshot_valid)

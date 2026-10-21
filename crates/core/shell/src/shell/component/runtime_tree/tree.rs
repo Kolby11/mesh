@@ -93,6 +93,8 @@ pub(in crate::shell::component) struct RetainedWidgetTree {
     pub(super) next_render_dirty_node_ids_scratch: HashSet<NodeId>,
     #[cfg(test)]
     pub(super) last_update_was_scoped: bool,
+    #[cfg(test)]
+    pub(in crate::shell::component) last_selected_node_count: usize,
 }
 
 impl RetainedWidgetTree {
@@ -290,6 +292,54 @@ impl RetainedWidgetTree {
             return (self.update(root), None);
         }
 
+        self.update_selected_nodes(update_nodes)
+    }
+
+    /// Refresh only explicit nodes when neither structure nor geometry changed.
+    /// The snapshot's paths avoid scanning clean siblings to locate a change.
+    pub(in crate::shell::component) fn update_for_frame_dirty(
+        &mut self,
+        root: &WidgetNode,
+        snapshot: &mesh_core_elements::FrameSnapshot,
+        dirty: &mesh_core_elements::FrameDirty,
+    ) -> RetainedTreeDirtySummary {
+        assert!(!dirty.contains(
+            mesh_core_elements::ChangeClass::STRUCTURE | mesh_core_elements::ChangeClass::LAYOUT
+        ));
+        let mut selected = Vec::new();
+        for (id, _) in dirty.iter() {
+            let Some(path) = snapshot.node_path(id) else {
+                return self.update(root);
+            };
+            let mut node = root;
+            for &index in path {
+                mesh_core_elements::frame_work::visit(
+                    mesh_core_elements::frame_work::Pass::RetainedLookup,
+                );
+                let Some(child) = node.children.get(index) else {
+                    return self.update(root);
+                };
+                node = child;
+            }
+            if node.id != id {
+                return self.update(root);
+            }
+            selected.push((node, false));
+        }
+        self.update_selected_nodes(selected).0
+    }
+
+    fn update_selected_nodes<'a>(
+        &mut self,
+        update_nodes: Vec<(&'a WidgetNode, bool)>,
+    ) -> (
+        RetainedTreeDirtySummary,
+        Option<SmallVec<[&'a WidgetNode; 8]>>,
+    ) {
+        #[cfg(test)]
+        {
+            self.last_selected_node_count = update_nodes.len();
+        }
         let mut dirty = RetainedTreeDirtySummary::default();
         let mut next_dirty = std::mem::take(&mut self.next_dirty_scratch);
         next_dirty.clear();
@@ -406,6 +456,9 @@ impl RetainedWidgetTree {
             dirty_nodes: &mut Vec<WidgetNode>,
             total: &mut usize,
         ) -> bool {
+            mesh_core_elements::frame_work::visit(
+                mesh_core_elements::frame_work::Pass::LayoutDiscovery,
+            );
             let Some(key) = retained.node_keys.get(&node.id).copied() else {
                 return false;
             };
@@ -641,6 +694,7 @@ pub(super) fn update_retained_node(
     synchronize_render_fingerprints: bool,
     geometry_only: bool,
 ) -> bool {
+    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::RetainedSync);
     match node_keys.get(&node.id).copied() {
         Some(previous_key) => match nodes.get_mut(previous_key) {
             Some(previous) => {
@@ -725,6 +779,7 @@ pub(super) fn collect_scoped_update_nodes<'a>(
     node_keys: &HashMap<NodeId, RetainedNodeKey>,
     update_nodes: &mut Vec<(&'a WidgetNode, bool)>,
 ) -> bool {
+    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::RetainedDiscovery);
     let Some(previous) = node_keys.get(&node.id).and_then(|key| nodes.get(*key)) else {
         return false;
     };

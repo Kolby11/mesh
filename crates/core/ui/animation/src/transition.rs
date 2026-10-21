@@ -634,6 +634,11 @@ impl TransitionAnimator {
             .filter(move |instance| !instance.finished(now))
     }
 
+    /// Nodes needing a sample, including endpoints not yet applied.
+    pub fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.active.keys().copied()
+    }
+
     /// Drop transitions whose key left the live set or that have finished.
     pub fn retain_live(&mut self, live: &HashSet<NodeId>, now: Instant) {
         self.active.retain(|key, instances| {

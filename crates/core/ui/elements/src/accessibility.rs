@@ -324,6 +324,7 @@ pub fn normalize_accessibility_finalized_memo(root: &mut WidgetNode) {
 }
 
 fn normalize_memo_node(node: &mut WidgetNode, parent: NodeEligibility) -> String {
+    crate::frame_work::visit(crate::frame_work::Pass::AccessibilityNormalize);
     let policy = parent.child(node);
     if node.finalized_accessibility_valid
         && let Some(cached) = &node.finalized_accessibility
@@ -362,6 +363,7 @@ fn normalize_node(
     parent_policy: NodeEligibility,
     preserve_memo: bool,
 ) -> String {
+    crate::frame_work::visit(crate::frame_work::Pass::AccessibilityNormalize);
     if preserve_memo
         && node.memo_instance().is_some()
         && let Some(cached) = &node.finalized_accessibility
@@ -400,6 +402,7 @@ fn normalize_node(
 }
 
 fn build_snapshot_node(node: &WidgetNode, parent_policy: NodeEligibility) -> Option<SnapshotNode> {
+    crate::frame_work::visit(crate::frame_work::Pass::AccessibilityProject);
     let policy = parent_policy.child(node);
     if !policy.allows(InteractionTarget::Semantics) {
         return None;
@@ -440,6 +443,7 @@ pub(crate) fn frame_local_info(
     child_text: &str,
     policy: NodeEligibility,
 ) -> (AccessibilityInfo, String) {
+    crate::frame_work::visit(crate::frame_work::Pass::AccessibilityProject);
     let authored = node.accessibility_baseline().unwrap_or(&node.accessibility);
     let hidden = !policy.allows(InteractionTarget::Semantics);
     let mut info = normalized_info(node, hidden, child_text, authored);

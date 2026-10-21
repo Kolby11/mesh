@@ -250,6 +250,8 @@ pub struct ProfilingWasteSummary {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ProfilingInvalidationSnapshot {
+    /// Actual synchronous node examinations by pass; empty when profiling is off.
+    pub node_visits: std::collections::BTreeMap<String, u64>,
     pub full_rebuild: bool,
     pub retained_path: bool,
     pub retained_generation: u64,

@@ -276,6 +276,7 @@ pub(super) fn annotate_runtime_tree_inner(
     context: &mut RuntimeAnnotationContext<'_>,
     annotate_overflow: bool,
 ) -> Option<mesh_core_interaction::ContentBounds> {
+    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::Annotation);
     // A retained node already has its stable key and authored projection.
     // Only interaction transitions and widgets with mutable values need the
     // string-attribute projection again; overflow remains a geometry pass.
@@ -570,6 +571,7 @@ pub(in crate::shell::component) fn annotate_scroll_offsets_only(
     node: &mut WidgetNode,
     scroll_offsets: &mut HashMap<NodeId, ScrollOffsetState>,
 ) {
+    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::Annotation);
     if (node.computed_style.overflow_x.is_scrollable()
         || node.computed_style.overflow_y.is_scrollable())
         && let Some(metrics) = node.scroll_metrics.as_mut()

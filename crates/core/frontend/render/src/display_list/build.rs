@@ -255,6 +255,7 @@ fn collect_display_entries_with_transform(
     fingerprints: Option<&super::RetainedFingerprintLookup<'_>>,
     scroll_viewport: Option<DamageRect>,
 ) {
+    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::DisplayEntries);
     if node_is_explicitly_hidden(node) {
         return;
     }
@@ -343,6 +344,7 @@ pub(super) fn collect_dirty_ancestor_ids_inner(
     path: &mut Vec<NodeId>,
     ancestors: &mut HashSet<NodeId>,
 ) -> usize {
+    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::DisplayAncestors);
     if remaining_dirty == 0 {
         return 0;
     }
@@ -428,6 +430,7 @@ fn build_paint_subtree_with_transform(
     in_scroll_content: bool,
     scroll_only: bool,
 ) -> Arc<RetainedPaintSubtree> {
+    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::DisplayBuild);
     let node_is_dirty = dirty_node_ids.contains(&node.id);
     let node_is_ancestor = dirty_ancestors.contains(&node.id);
     if !force_rebuild

@@ -7,6 +7,17 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **P0 visit counters landed:** per-pass node-visit counters are exported in
+  profiling snapshots, session logs and `profile-report`; the animation
+  structural gate consumes them. First glass profile: steady dock hover still
+  annotates all 1,879 nodes per paint; dashboard spectrum touches every node in
+  every pass (validation ~11×, extents ~5× node count). Live replay gate open.
+
+- **P2 animation prototype measured:** indexed sampling and retained updates
+  pass sparse/full parity. Dock steady p50 improves, but p90 and dashboard
+  ranges overlap; the large-factor exit bar is unmet. Expansion remains open;
+  see the 2026-10-21 P2 entry in the performance log.
+
 - **GPU residency and workload gates implemented:** small image/icon/font-mask
   bitmaps share immutable pages; the worker retains bounded image identities
   and GPU cache headroom beside retained targets. Hardware gates check exported
@@ -28,8 +39,9 @@ measurements live in [`log/`](log/README.md).
 - **Change-proportional frame pipeline (P0–P4)** is the implementation
   priority. P1 (typed node state, typed runtime fields, `Prop` vocabulary with
   change classes) landed 2026-10-21: ~7% dashboard, ~18% steady dock hover.
-  Next: P0 live benchmark and visited-node counters, then P2's one dirty set
-  fed by those change classes, bindings as typed setters, GPU-first pipelining.
+  Next: P0 live benchmark and per-pass counters; finish P2's authoritative
+  write/layout scopes beyond the measured animation prototype, then typed
+  bindings and GPU-first pipelining.
   [Design](todos/pending/2026-10-21-change-proportional-pipeline.md); backlog
   lines at the top of `docs/BACKLOG.md`. Single-pass scoping buys 3–10% and is
   deprioritized.

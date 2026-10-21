@@ -2143,3 +2143,50 @@ fn continuous_animation_keeps_requesting_frames() {
     assert!(component.animation_hold.is_none());
     assert!(component.wants_render());
 }
+
+#[test]
+fn animation_frame_visits_registered_nodes_and_full_diff_finds_no_omissions() {
+    let mut source = String::from(r#"<template><row><box class="animated" />"#);
+    for _ in 0..1024 {
+        source.push_str("<box />");
+    }
+    source.push_str(
+        r#"</row></template><style>
+.animated { width: 10px; height: 10px; animation: pulse 1000ms linear infinite; }
+@keyframes pulse { 0% { opacity: 0; } 100% { opacity: 1; } }
+</style>"#,
+    );
+    let mut component = test_frontend_component(&source);
+    let theme = default_theme();
+    let mut pixels = PixelBuffer::new(120, 40);
+    for _ in 0..3 {
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut pixels, 1.0)
+            .unwrap();
+    }
+    assert!(
+        component
+            .take_invalidation_snapshot()
+            .unwrap()
+            .node_visits
+            .is_empty()
+    );
+    component.set_profiling_enabled(true);
+    for elapsed in [100, 250, 500, 750] {
+        component.invalidate_animation_style_path(ComponentDirtyFlags::VISUAL_REPAINT);
+        paint_keyframe_frame_at(&mut component, Duration::from_millis(elapsed));
+        let counts = component.take_invalidation_snapshot().unwrap().node_visits;
+        assert_eq!(counts["animation_sample"], 1);
+        assert_eq!(counts["animation_previous_style"], 1);
+        assert_eq!(counts["retained_discovery"], 0);
+        assert_eq!(counts["validation"], 0);
+        assert!(counts["retained_sync"] <= 3);
+        assert!(counts["animation_lookup"] <= 8);
+        assert_eq!(component.animation_nodes_visited, 1);
+        assert!(component.retained_tree.last_selected_node_count <= 3);
+        let tree = component.last_tree.clone().unwrap();
+        let missed = component.retained_tree.update(&tree);
+        assert!(!missed.any(), "sparse animation missed {missed:?}");
+        assert!(component.retained_tree.render_dirty_node_ids().is_empty());
+    }
+}

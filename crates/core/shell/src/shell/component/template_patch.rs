@@ -131,6 +131,7 @@ impl FrontendSurfaceComponent {
         let original = tree.clone();
         let mut states: HashMap<String, Arc<mesh_core_scripting::ScriptState>> = HashMap::new();
         let mut patched = HashSet::new();
+        let mut changes = mesh_core_elements::FrameDirty::default();
         let mut dependencies_changed = false;
         let mut evaluated_instances = HashSet::new();
         for path in &targets {
@@ -173,6 +174,7 @@ impl FrontendSurfaceComponent {
             dependencies_changed |= patch.dependencies_changed;
             if patch.changed() {
                 patched.insert(node.id);
+                changes.mark(node.id, patch.change);
             }
         }
         // A failing expression must not publish a partially evaluated tree;
@@ -200,6 +202,9 @@ impl FrontendSurfaceComponent {
         drop(runtimes);
 
         if !patched.is_empty() {
+            for (id, change) in changes.iter() {
+                self.frame_dirty.mark(id, change);
+            }
             self.patched_binding_nodes.extend(patched);
             // Like the narrow script path, leave the pixels valid: the retained
             // display list diffs the patched nodes' fingerprints and damages

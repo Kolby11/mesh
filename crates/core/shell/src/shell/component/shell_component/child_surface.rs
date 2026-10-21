@@ -18,6 +18,9 @@ pub(super) fn collect_child_surface_requests_with_diagnostics(
     requests: &mut Vec<ChildSurfaceRequest>,
     diagnostics: &mut Vec<ChildSurfaceDiagnostic>,
 ) {
+    mesh_core_elements::frame_work::visit(
+        mesh_core_elements::frame_work::Pass::ChildSurfaceRequests,
+    );
     if node.is_promoted_window()
         && let Some(node_key) = node.mesh_key()
     {

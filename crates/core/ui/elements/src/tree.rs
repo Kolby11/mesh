@@ -148,6 +148,7 @@ pub fn validate_widget_tree(root: &WidgetNode) -> Result<(), WidgetTreeValidatio
         node_ids: &mut HashSet<NodeId>,
         mesh_keys: &mut HashSet<String>,
     ) -> Result<(), WidgetTreeValidationError> {
+        crate::frame_work::visit(crate::frame_work::Pass::Validation);
         if !node_ids.insert(node.id) {
             return Err(WidgetTreeValidationError::DuplicateNodeId { id: node.id });
         }

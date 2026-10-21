@@ -3,6 +3,8 @@ pub mod attributes;
 pub mod composition;
 pub mod element;
 pub mod frame;
+pub mod frame_dirty;
+pub mod frame_work;
 pub mod interaction_contract;
 pub mod layout;
 pub mod lru;
@@ -47,6 +49,7 @@ pub use frame::{
     FrameSnapshot, FrameSnapshotError, PhaseStamp, SemanticChange, SemanticChangeKind,
     SemanticDiff, SemanticField, StableNodeIdentity,
 };
+pub use frame_dirty::FrameDirty;
 pub use interaction_contract::{
     AffineClip, AffineClipStack, AffineTransform, HOVER_INTENT_CLOSE_DELAY, InteractionTarget,
     NodeEligibility, child_eligibility, child_transform, local_transform, node_can_receive_target,

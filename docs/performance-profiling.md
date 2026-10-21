@@ -108,6 +108,44 @@ render being observed. The counting allocator is absent from normal builds and
 is intentionally separate from `perf-tracy`; choose `alloc` for pass-level
 counts or `live` for Tracy call stacks.
 
+## Node-visit accounting
+
+With built-in profiling enabled, each surface's latest invalidation snapshot
+includes `node_visits`. `profile-shell session` also logs one count per pass per
+paint; `profile-report` reports per-surface totals, means and maxima separately
+from timings. Counts include repeated examinations, not unique dirty IDs.
+Zero means that an instrumented pass did no work. An empty map means profiling
+was disabled. Counts cover synchronous frame preparation on the calling thread;
+Taffy's internal solver, raster workers and backend work are excluded.
+
+| Counter | What it counts |
+| --- | --- |
+| `restyle_scan`, `style_resolve` | Restyle traversal entries versus actual style resolutions, including diagnostics |
+| `layout_build`, `layout_sync`, `layout_write` | Taffy construction/reconciliation, retained input synchronization, and geometry write visits |
+| `layout_fit`, `layout_extents`, `layout_discovery` | Fit-size correction, descendant extent traversal, and fingerprint discovery for layout inputs |
+| `animation_sample`, `animation_previous_style`, `animation_lookup` | Sampling visits, previous-style capture visits, and child-path steps |
+| `accessibility_normalize`, `accessibility_project` | Full/memo normalization traversal and local/snapshot semantic projections |
+| `validation`, `annotation` | Tree validation and runtime/scroll annotation visits |
+| `retained_discovery`, `retained_sync`, `retained_lookup` | Candidate discovery, selected-node fingerprint refresh, and child-path steps |
+| `display_entries`, `display_ancestors`, `display_build` | Display-entry traversal, dirty-ancestor discovery, and paint-subtree visits |
+| `child_surface_requests` | Child-surface discovery visits; emitted as separate call samples after paint |
+
+These counters measure the named functions, not every operation in their
+subsystems. For example, semantic child-text aggregation and reference lookup
+are not counted as normalization visits. Pruned/cache-hit nodes still count
+when a traversal examines them. Child requests run outside the paint scope,
+so their paint-snapshot count is zero; use their separate session-log samples.
+
+`tools/check-performance` runs
+`animation_frame_visits_registered_nodes_and_full_diff_finds_no_omissions` as
+a structural gate: one animated leaf plus 1,024 clean siblings must sample one
+node, read one previous style, perform no retained discovery, and synchronize
+at most three retained records. The full-diff verifier checks the result.
+This gate covers the animation prototype, not all-pass proportionality.
+The glass dock and spectrum profile tests print visits per measured paint
+alongside their timings. Use profiling-disabled runs for timing claims about
+instrumentation overhead.
+
 ## Repeatable captures
 
 Profile one workload at a time: idle, pointer movement, scrolling, text update,

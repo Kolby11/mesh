@@ -67,6 +67,15 @@ step over already-known dirty widgets.
 
 ### P0. Measure proportionality first
 
+**Visit accounting implemented 2026-10-21.** Opt-in frame counters cover the
+named traversal/synchronization functions across style, layout, animation,
+semantics, validation, annotation, retained updates and display lists. Child
+requests report separately after paint. The profiler snapshot, session logs,
+report tool and glass fixtures expose those counts. The animation structural
+gate consumes the exported counts. This is not an all-pass proportionality gate;
+see [counter definitions](../../../docs/performance-profiling.md#node-visit-accounting).
+The reproducible live workload replay and compositor timing gates remain open.
+
 - A live-shell benchmark: drive the real shell under the glass profile
   (dashboard open, dock hover, Settings scroll, clock tick) and record
   per-surface `total_surface_render` and first-open time. Add it beside the D9
@@ -104,6 +113,18 @@ the plan below is kept as the design record.
   real value is P2: typed writes classify the change.
 
 ### P2. One frame dirty set drives every pass
+
+**Prototype measured 2026-10-21; exit not met.** `FrameDirty` coalesces typed
+binding writes, interaction annotation changes and animation buckets. Only
+geometry-preserving animation-only frames currently use it as an authoritative
+retained-update scope; snapshot paths also limit sampling to registered nodes.
+The sparse/full-diff verifier and visit-count regression pass. Dock steady p50
+improves, but dock p90 and dashboard frame ranges overlap. The dashboard still
+rebuilds Player on every spectrum update; layout propagation, selector
+closures, remaining semantic work and child-surface requests still need
+explicit scopes. See the P2 prototype entry in the
+[performance log](../../log/performance-log.md). The bullets below remain the
+full direction, not a shipped claim.
 
 - One per-frame `FrameDirty` holds per-node change classes, fed by typed
   setters, interaction flag flips, animation samples (with their bucket), and

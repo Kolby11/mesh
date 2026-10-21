@@ -924,6 +924,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         scale: f32,
     ) -> Result<(), ComponentError> {
         let _span = tracing::debug_span!("paint", surface = %self.id()).entered();
+        let frame_work = mesh_core_elements::frame_work::Scope::new(self.profiling_enabled);
         self.prepare_interaction_frame();
         // Capture and clear dirty flags up front. paint is the work-doer; if
         // anything during paint (measured_size change, active animation) needs
@@ -1010,7 +1011,18 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .difference(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS)
                 .is_empty();
         let run_style_animation_pass = self.should_run_style_animation_pass(styles_unchanged);
-        let previous_visual_styles = if run_style_animation_pass && self.last_tree.is_some() {
+        let animation_scope = (animation_only_frame
+            && use_retained_style_path
+            && !dirty_types.contains(ComponentDirtyFlags::LAYOUT)
+            && self.last_frame_snapshot.is_some()
+            && !self.surface_entering
+            && !self.surface_exiting
+            && self.entering_child_keys.is_empty()
+            && self.closing_child_keys.is_empty())
+        .then(|| self.animation_sample_nodes());
+        let previous_visual_styles = if let Some(scope) = &animation_scope {
+            self.scoped_visual_styles(scope)
+        } else if run_style_animation_pass && self.last_tree.is_some() {
             self.take_previous_visual_styles()
         } else {
             Default::default()
@@ -1070,10 +1082,11 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.style_animation_passes += u64::from(run_style_animation_pass);
         }
         let mut animation_dirty_roots = if run_style_animation_pass {
-            self.apply_style_animations_with_previous(
+            self.apply_style_animations_scoped(
                 &mut tree,
                 &previous_visual_styles,
                 &surface_css_props,
+                animation_scope.as_ref(),
             )
         } else {
             HashSet::new()
@@ -1115,10 +1128,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         let retained_update_dirty_roots =
             retained_update_dirty_roots.filter(|_| !self.force_full_retained_update);
         // Animation-sampled nodes are already single dirty nodes above. The
-        // sampling pass reports every node whose own sample changed, and the
-        // scoped update re-checks every descendant's layout, so an animated
-        // ancestor does not re-fingerprint its whole subtree (a dock's closed
-        // launcher is ~1,700 nodes under one animated root).
+        // sampling pass reports every node whose own sample changed. Geometry
+        // propagation still requires the conservative scoped walk on layout
+        // frames; geometry-preserving samples use snapshot paths below.
         animation_dirty_roots.clear();
         self.animation_dirty_node_ids_scratch = animation_dirty_roots;
         self.advance_interaction_frame(
@@ -1127,7 +1139,29 @@ impl ShellComponent for FrontendSurfaceComponent {
         // Render fingerprints are synchronized inside the authoritative
         // retained-tree pass, so this stage now covers that consolidated work.
         let render_object_started = std::time::Instant::now();
-        let retained_dirty = if let Some(dirty_roots) = retained_update_dirty_roots.as_ref() {
+        for &id in &self.retained_update_dirty_nodes {
+            self.frame_dirty.mark(
+                id,
+                mesh_core_elements::ChangeClass::PAINT
+                    | mesh_core_elements::ChangeClass::A11Y
+                    | mesh_core_elements::ChangeClass::HIT,
+            );
+        }
+        let sparse_animation_update = animation_scope.is_some()
+            && !self.frame_dirty.contains(
+                mesh_core_elements::ChangeClass::LAYOUT
+                    | mesh_core_elements::ChangeClass::STRUCTURE,
+            )
+            && retained_update_dirty_roots
+                .as_ref()
+                .is_some_and(HashSet::is_empty);
+        let retained_dirty = if sparse_animation_update {
+            self.retained_tree.update_for_frame_dirty(
+                &tree,
+                self.last_frame_snapshot.as_ref().expect("retained frame"),
+                &self.frame_dirty,
+            )
+        } else if let Some(dirty_roots) = retained_update_dirty_roots.as_ref() {
             self.retained_tree
                 .update_for_dirty_roots_and_nodes_collect(
                     &tree,
@@ -1391,6 +1425,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.narrow_path_active = false;
         self.affected_node_count = 0;
         self.invalidation_snapshot = Some(mesh_core_debug::ProfilingInvalidationSnapshot {
+            node_visits: Default::default(),
             full_rebuild: requires_tree_rebuild,
             retained_path: use_retained_style_path,
             retained_generation: self.retained_tree.generation(),
@@ -1533,7 +1568,19 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.dirty_node_visual_damage_scratch = dirty_node_visual_damage_rects;
         self.visual_damage_scratch = visual_damage_rects;
         self.effective_damage_scratch = std::mem::take(&mut effective_damage.rects);
+        let visit_surface_id = self.profiling_enabled.then(|| self.id().to_owned());
+        if let Some(snapshot) = self.invalidation_snapshot.as_mut() {
+            snapshot.node_visits = frame_work.snapshot();
+            for (pass, visits) in &snapshot.node_visits {
+                if pass == "child_surface_requests" {
+                    continue;
+                }
+                tracing::debug!(target: "mesh_profiling", surface = visit_surface_id.as_deref().unwrap_or(""),
+                    pass = pass.as_str(), node_visits = visits, "frame node visits");
+            }
+        }
         self.last_tree = Some(tree);
+        self.frame_dirty.clear();
         self.advance_interaction_frame(
             mesh_core_interaction::InteractionFramePhase::SemanticsReady,
         );
@@ -2029,6 +2076,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn child_surface_requests(&self) -> Vec<ChildSurfaceRequest> {
+        let work = mesh_core_elements::frame_work::Scope::new(self.profiling_enabled);
         let Some(tree) = self.last_tree.as_ref() else {
             return Vec::new();
         };
@@ -2043,6 +2091,11 @@ impl ShellComponent for FrontendSurfaceComponent {
         );
         for diagnostic in diagnostics {
             self.record_child_surface_diagnostic(&diagnostic);
+        }
+        if self.profiling_enabled {
+            let visits = work.snapshot()["child_surface_requests"];
+            tracing::debug!(target: "mesh_profiling", surface = self.id(),
+                pass = "child_surface_requests", node_visits = visits, "frame node visits");
         }
         requests
     }

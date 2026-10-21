@@ -186,6 +186,7 @@ pub(super) fn reconcile_retained_taffy_node(
     state: &mut PerSurfaceLayoutState,
     report: &mut TaffyLayoutReport,
 ) -> Result<TaffyNodeId, taffy::TaffyError> {
+    crate::frame_work::visit(crate::frame_work::Pass::LayoutBuild);
     let style = taffy_style_for_node(node, report);
     let retained = node.has_mesh_key();
     let taffy_id = if retained {
@@ -226,6 +227,7 @@ pub(super) fn update_retained_node_styles(
     dirty_node_ids: Option<&HashSet<NodeId>>,
     report: &mut TaffyLayoutReport,
 ) -> Result<(), taffy::TaffyError> {
+    crate::frame_work::visit(crate::frame_work::Pass::LayoutSync);
     if let Some(taffy_id) = retained_taffy_id(node, state) {
         let node_dirty = dirty_node_ids.is_none_or(|ids| ids.contains(&node.id));
         if node_dirty {
@@ -269,6 +271,7 @@ pub(super) fn update_retained_node_snapshots(
     report: &mut TaffyLayoutReport,
 ) -> Result<(), taffy::TaffyError> {
     for node in dirty_nodes {
+        crate::frame_work::visit(crate::frame_work::Pass::LayoutSync);
         let Some(taffy_id) = retained_taffy_id(node, state) else {
             continue;
         };

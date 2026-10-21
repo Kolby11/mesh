@@ -186,6 +186,17 @@ def report_segment(segs, samples, stages, freq, top, out, title):
         for comm, n in threads.most_common(6):
             out.append(f"| {comm} | {100.0 * n / (freq * dur):.1f} |")
         out.append("")
+    visits = collections.defaultdict(list)
+    for row in stage_rows:
+        if "node_visits" in row:
+            visits[(row.get("surface", "?"), row.get("pass", "?"))].append(int(row["node_visits"]))
+    stage_rows = [row for row in stage_rows if "node_visits" not in row]
+    if visits:
+        out.append("Node examinations (repeated visits count; child requests are separate calls):\n")
+        out.append("| Surface | Pass | Samples | Total | Mean | Max |\n| --- | --- | ---: | ---: | ---: | ---: |")
+        for (surface, name), counts in sorted(visits.items()):
+            out.append(f"| {surface} | {name} | {len(counts)} | {sum(counts)} | {sum(counts) / len(counts):.1f} | {max(counts)} |")
+        out.append("")
     # Attribution samples re-report time already inside their stage sample.
     attributed = [d for d in stage_rows if d.get("trigger", "").startswith("attribution:")]
     stage_rows = [d for d in stage_rows if not d.get("trigger", "").startswith("attribution:")]

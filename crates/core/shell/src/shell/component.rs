@@ -993,12 +993,15 @@ pub(super) struct FrontendSurfaceComponent {
     /// Local annotation changes and semantic ancestors. Unlike dirty roots,
     /// these IDs do not invalidate every descendant's fingerprint.
     retained_update_dirty_nodes: HashSet<NodeId>,
+    frame_dirty: mesh_core_elements::FrameDirty,
     /// Last selection projection, including layout origin and theme colors.
     selection_annotation: Option<(TextSelectionState, [u32; 4], String, String)>,
     #[cfg(test)]
     force_full_retained_update: bool,
     #[cfg(test)]
     style_animation_passes: u64,
+    #[cfg(test)]
+    animation_nodes_visited: usize,
     /// `mesh.events.publish` calls drained from every runtime on this surface.
     #[cfg(test)]
     drained_script_events: u64,
@@ -1437,11 +1440,14 @@ impl FrontendSurfaceComponent {
             retained_tree: RetainedWidgetTree::default(),
             retained_update_dirty_roots: None,
             retained_update_dirty_nodes: HashSet::new(),
+            frame_dirty: mesh_core_elements::FrameDirty::default(),
             selection_annotation: None,
             #[cfg(test)]
             force_full_retained_update: false,
             #[cfg(test)]
             style_animation_passes: 0,
+            #[cfg(test)]
+            animation_nodes_visited: 0,
             #[cfg(test)]
             drained_script_events: 0,
             animation_only_dirty: false,

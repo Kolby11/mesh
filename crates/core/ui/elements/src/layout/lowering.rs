@@ -262,6 +262,7 @@ pub(super) fn build_taffy_tree(
     text_nodes: &mut HashMap<NodeId, TextMeasureData>,
     report: &mut TaffyLayoutReport,
 ) -> Result<TaffyNodeId, taffy::TaffyError> {
+    crate::frame_work::visit(crate::frame_work::Pass::LayoutBuild);
     let style = taffy_style_for_node(node, report);
     let taffy_node = if node.children.is_empty() {
         if node.tag == "text" {
@@ -429,6 +430,7 @@ pub(super) fn write_taffy_layout(
 /// position and its flex siblings' positions are unaffected: this corrects
 /// the node's own box in place, it does not reflow its container.
 pub(super) fn resolve_fit_sizing(node: &mut WidgetNode) {
+    crate::frame_work::visit(crate::frame_work::Pass::LayoutFit);
     for child in &mut node.children {
         resolve_fit_sizing(child);
     }
@@ -461,6 +463,7 @@ pub(super) fn accumulate_descendant_extents(
     max_right: &mut f32,
     max_bottom: &mut f32,
 ) {
+    crate::frame_work::visit(crate::frame_work::Pass::LayoutExtents);
     for child in &node.children {
         // Promoted popovers are retained below a zero-size wrapper so the
         // child surface can paint and interact with them. Their visual bounds
@@ -489,6 +492,7 @@ pub(super) fn write_taffy_layout_with_parent(
     viewport_w: f32,
     viewport_h: f32,
 ) {
+    crate::frame_work::visit(crate::frame_work::Pass::LayoutWrite);
     if node.computed_style.display == Display::None || node.is_closed_container() {
         zero_layout_subtree(node);
         return;
@@ -573,6 +577,7 @@ pub(super) fn write_taffy_layout_with_parent(
 }
 
 pub(super) fn zero_layout_subtree(node: &mut WidgetNode) {
+    crate::frame_work::visit(crate::frame_work::Pass::LayoutWrite);
     node.layout = LayoutRect::default();
     for child in &mut node.children {
         zero_layout_subtree(child);

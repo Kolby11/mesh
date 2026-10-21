@@ -56,6 +56,11 @@ See [renderer ownership](../renderer-ownership.md).
 Interaction restyles and animation ticks preserve the surface's retained pixels;
 the display-list diff selects damage. Paint-only hover rules reuse layout, while
 layout declarations and custom variables conservatively request geometry work.
+Geometry-preserving animation-only frames sample registered nodes through the
+immutable frame snapshot's child paths. Their coalesced change classes select
+retained updates without a clean-tree geometry scan. Layout, interaction
+restyle and rebuild paths still use conservative discovery; the P2 prototype
+has not replaced those passes.
 Asynchronous icon, glyph and image jobs track their requesting component instances,
 including promoted child targets, and repaint only those consumers on completion.
 The event loop includes input-repeat, temporary focus-grab and pending-frame

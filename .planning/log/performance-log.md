@@ -6853,3 +6853,108 @@ About 7% on the dashboard and 18% on steady dock hover, in line with the
 design note's ~1.2× estimate for removing string attribute handling. Frame cost
 still scales with tree size × passes; the payoff the note expects comes from P2
 (one dirty set fed by these change classes), not from this step.
+
+## 2026-10-21 — P2 animation dirty-set prototype; large-factor exit not met
+
+`working tree` (baseline `ef0f45d8`) · area: frame invalidation and animation sampling
+
+`FrameDirty` coalesces typed binding writes, interaction annotation changes and
+animation property buckets by NodeId. Geometry-preserving animation-only frames
+sample registered transition/keyframe nodes via the immutable frame snapshot's
+child paths, capture previous styles only for those nodes, and update retained
+snapshots through the same indexed paths. Layout, structural, entrance/exit and
+interaction-restyle frames retain their conservative paths. Per-node render
+fingerprints still select damage; full-tree discovery has **not** been retired
+from the rest of the pipeline. Existing semantic capture and display-list
+consumers receive the retained dirty IDs as before.
+
+**Measured.** AMD Ryzen 7 7840HS, release with thin LTO and one codegen unit,
+CPU Skia raster, pinned to CPU 2. Three alternating before/after invocations of
+each exact ignored test, each printing three runs. Commands: build with
+`cargo test -p mesh-core-shell --release --lib`; run the resulting test binary
+under `taskset -c 2` with `--ignored --exact --nocapture --test-threads=1` and
+`shell::component::tests::integration::real_surfaces::glass::` followed by
+`glass_dock_hover_animation_profile` or `glass_dashboard_spectrum_profile`.
+
+| Workload / statistic | Before | Prototype |
+| --- | --- | --- |
+| Dock: 10 pinned / 150 installed apps, 1,879 nodes, 2880×180, 60 steps; first-hover run 0 mean | 3.674–3.974 ms | 3.695–3.854 ms |
+| Same, steady-hover run 1 p50 | 0.502–0.557 ms | 0.380–0.404 ms |
+| Same, steady-hover run 1 p90 | 0.727–1.891 ms | 0.753–0.883 ms |
+| Dashboard: 151 nodes, 32 spectrum values per update, 1920×1080, 120 frames/run; mean across all nine runs | 3.751–4.283 ms | 3.762–4.479 ms |
+| Same, p90 | 5.282–6.749 ms | 5.563–7.034 ms |
+
+Dock run 2 contains mostly steps that do not request a paint, so it is not used
+as the steady-frame result. No large-factor timing improvement is established:
+dock p90 and dashboard ranges overlap, and dashboard's upper range increases.
+These are CPU fixtures, not a substitute for P0's live compositor gate.
+
+**Why the exit failed / expansion withheld.** Spectrum updates still rebuild
+Player and therefore never use the animation-only scope. Dashboard tree-build
+cost is 1.228–1.416 ms/frame before versus 1.229–1.457 ms after; display-list
+update is 0.313–0.392 versus 0.307–0.421 ms. Explicit layout propagation,
+selector-dependent restyle scopes, remaining annotation/semantic work and
+child-surface requests are still missing from the shared invalidation model.
+Even sparse semantic ancestors aggregate clean child text. Indexed sampling
+and retained lookup alone cannot remove those costs. Retain the tested
+prototype as groundwork; P2 remains open and no broader pass conversion is
+claimed. Reassess the dashboard's structural list path alongside P3 before
+expecting the full exit result.
+
+**Verified.** `animation_frame_visits_registered_nodes_and_full_diff_finds_no_omissions`
+uses one animated leaf beside 1,024 clean siblings: each sampled frame visits
+one animation node and selects at most three retained nodes (including semantic
+ancestors). A subsequent full fingerprint/diff finds no missed changes. This
+is a structural count for these two stages, not an all-pass proportionality
+claim. Typed-write coalescing/no-op coverage passes (elements: 1 passed).
+All six ignored glass workloads pass. Release serial shell filter `animation`:
+baseline 50 passed / 3 failed / 5 ignored; prototype 51 passed / the same 3
+failed / 5 ignored. Filter `invalidation`: both 70 passed / the same 3 failed /
+1 ignored, including the animated-ancestor full-diff check and binding rollback
+coverage. Existing failure names across those filters are
+`animation_only_tick_uses_scoped_retained_fingerprinting`,
+`external_invalidation_cancels_animation_only_retained_scope`,
+`smooth_scroll_animation_uses_scoped_retained_fingerprinting`,
+`paint_only_scroll_uses_scoped_retained_fingerprinting`, and
+`phase26_real_surface_baseline_emits_canonical_proof_measurements`.
+
+## 2026-10-21 — P0 per-pass node-visit counters; first glass visit profile
+
+`working tree` (baseline `ef0f45d8`) · area: profiling instrumentation
+
+Opt-in thread-local frame counters (`mesh_core_elements::frame_work`) count
+visits in the named traversal functions of style, layout (including fit sizing
+and descendant extents), animation, semantics, validation, annotation, retained
+updates and display lists; child-surface requests report as separate samples.
+Counts reach `ProfilingInvalidationSnapshot::node_visits`, session logs and
+`profile-report`. Definitions and limits:
+[performance profiling](../../docs/performance-profiling.md#node-visit-accounting).
+Counter isolation tests (unwinding, worker threads) pass: 3 passed.
+`tools/check-performance` runs the animation structural gate on the exported
+counts (release: 1 passed). The live replay gate is still open (P0 backlog line).
+
+**First visit profile** (release, glass fixtures, profiling enabled; counts are
+deterministic, so one run each). Means per measured paint:
+
+| Pass | Dock first hover (1,879 nodes, 60 paints) | Dock steady hover (50 paints) | Dashboard spectrum (151 nodes, 120 paints) |
+| --- | --- | --- | --- |
+| `annotation` | 1,879 | 1,879 | 151 |
+| `validation` | 374 | 0 | 1,657 |
+| `restyle_scan` / `style_resolve` | 313 / 64 | 376 / 0 | 59 / 137 |
+| `retained_discovery` | 282 | 376 | 151 |
+| `display_ancestors` | 1,437 | 0.1 | 57 |
+| `layout_extents` / `layout_fit` | 131 / 31 | 0 / 0 | 763 / 151 |
+| `accessibility_normalize` | 68 | 0 | 567 |
+| `animation_sample` | 13.5 | 14.2 | 151 |
+
+Findings: steady dock hover still annotates the whole tree every paint and
+scans ~20% of it for restyle and retained discovery while sampling ~14 nodes.
+Dashboard spectrum frames touch every node in every pass because Player
+rebuilds; validation visits ~11× and descendant extents ~5× the node count per
+paint, and semantic normalization ~3.8×. These are the next P2 scope targets
+(annotation, validation, extents) and confirm the P3 keyed-list need.
+
+Release serial filter `profiling`: 44 passed / 2 failed. Both failures exist at
+`ef0f45d8`: `phase26_real_surface_baseline_emits_canonical_proof_measurements`
+(known) and `profiling_snapshot_groups_backend_stage_proof_under_expected_provider_identity`
+(missing `PollUpdate` stage; fails deterministically on baseline and working tree).

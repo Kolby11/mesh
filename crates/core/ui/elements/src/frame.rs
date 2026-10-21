@@ -959,6 +959,15 @@ impl FrameSnapshot {
             .map(|index| self.0.nodes.get(*index))
     }
 
+    /// Child-index path for a node in this snapshot. Valid only while the live
+    /// tree retains this snapshot's structure; callers must check the target ID.
+    pub fn node_path(&self, id: NodeId) -> Option<&[usize]> {
+        self.0
+            .id_index
+            .get(&id)
+            .map(|&index| self.0.paths[index].as_ref())
+    }
+
     pub fn semantic_nodes(&self) -> impl Iterator<Item = &FrameNode> {
         self.nodes()
             .into_iter()

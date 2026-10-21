@@ -352,6 +352,7 @@ impl<'a> StyleResolver<'a> {
         mut attribution: Option<&mut StyleRuleAttribution>,
         inherited_variables: Option<&CustomProperties>,
     ) -> ComputedStyle {
+        crate::frame_work::visit(crate::frame_work::Pass::StyleResolve);
         // `shared` holds the defaults by reference when they came from the
         // no-diagnostics cache; the diagnostics path still builds its own copy
         // because it also carries per-resolution diagnostics.

@@ -130,6 +130,19 @@ fn declared_properties(declarations: &[component_style::Declaration]) -> Transit
         })
 }
 
+fn animation_child_container(node: &WidgetNode) -> (f32, f32) {
+    (
+        (node.layout.width
+            - node.computed_style.padding.horizontal()
+            - node.computed_style.border_width.horizontal())
+        .max(0.0),
+        (node.layout.height
+            - node.computed_style.padding.vertical()
+            - node.computed_style.border_width.vertical())
+        .max(0.0),
+    )
+}
+
 impl FrontendSurfaceComponent {
     /// Whether this frame must sample style animations. A live transition or
     /// keyframe animation always needs sampling. Otherwise the pass exists to
@@ -159,6 +172,45 @@ impl FrontendSurfaceComponent {
             .unwrap_or_default()
     }
 
+    pub(super) fn animation_sample_nodes(&self) -> HashSet<NodeId> {
+        self.transitions
+            .node_ids()
+            .chain(self.keyframe_animation_slots.keys().map(|(id, _)| *id))
+            .collect()
+    }
+
+    pub(super) fn scoped_visual_styles(
+        &self,
+        ids: &HashSet<NodeId>,
+    ) -> HashMap<NodeId, AnimatableStyle> {
+        let tree = self.last_tree.as_ref().expect("retained animation tree");
+        let snapshot = self
+            .last_frame_snapshot
+            .as_ref()
+            .expect("retained animation snapshot");
+        ids.iter()
+            .map(|&id| {
+                mesh_core_elements::frame_work::visit(
+                    mesh_core_elements::frame_work::Pass::AnimationPreviousStyle,
+                );
+                let mut node = tree;
+                let mut container = (tree.layout.width, tree.layout.height);
+                for &index in snapshot.node_path(id).expect("retained animation path") {
+                    mesh_core_elements::frame_work::visit(
+                        mesh_core_elements::frame_work::Pass::AnimationLookup,
+                    );
+                    container = animation_child_container(node);
+                    node = &node.children[index];
+                }
+                assert_eq!(node.id, id);
+                (
+                    id,
+                    AnimatableStyle::from_node_in_containing_block(node, container),
+                )
+            })
+            .collect()
+    }
+
     pub(super) fn take_previous_visual_styles(&mut self) -> HashMap<NodeId, AnimatableStyle> {
         let mut styles = std::mem::take(&mut self.previous_visual_styles_scratch);
         styles.clear();
@@ -180,12 +232,27 @@ impl FrontendSurfaceComponent {
         self.previous_visual_styles_scratch = styles;
     }
 
+    #[cfg(test)]
     pub(super) fn apply_style_animations_with_previous(
         &mut self,
         tree: &mut WidgetNode,
         previous_styles: &HashMap<NodeId, AnimatableStyle>,
         surface_css_props: &SurfaceCssProps,
     ) -> HashSet<NodeId> {
+        self.apply_style_animations_scoped(tree, previous_styles, surface_css_props, None)
+    }
+
+    pub(super) fn apply_style_animations_scoped(
+        &mut self,
+        tree: &mut WidgetNode,
+        previous_styles: &HashMap<NodeId, AnimatableStyle>,
+        surface_css_props: &SurfaceCssProps,
+        scope: Option<&HashSet<NodeId>>,
+    ) -> HashSet<NodeId> {
+        #[cfg(test)]
+        {
+            self.animation_nodes_visited = 0;
+        }
         let now = Instant::now();
         let mut live_keys = std::mem::take(&mut self.animation_live_keys_scratch);
         live_keys.clear();
@@ -201,23 +268,65 @@ impl FrontendSurfaceComponent {
         let theme = self.active_theme.borrow().clone();
         let resolver = StyleResolver::new(&theme).with_borrowed_props(surface_css_props);
 
-        let containing_block = (tree.layout.width, tree.layout.height);
-        self.apply_style_animations_to_node(
-            tree,
-            containing_block,
-            previous_styles,
-            &resolver,
-            &theme,
-            now,
-            false,
-            &mut live_keys,
-            &mut live_keyframe_keys,
-            &mut has_active_animation,
-            &mut active_animation_bucket,
-            &mut has_active_keyframe_animation,
-            &mut active_keyframe_bucket,
-            &mut dirty_node_ids,
-        );
+        if let Some(scope) = scope {
+            let snapshot = self
+                .last_frame_snapshot
+                .clone()
+                .expect("scoped animation snapshot");
+            for &id in scope {
+                let path = snapshot.node_path(id).expect("scoped animation path");
+                let mut container = (tree.layout.width, tree.layout.height);
+                let mut entering = false;
+                let mut node = &mut *tree;
+                for &index in path {
+                    mesh_core_elements::frame_work::visit(
+                        mesh_core_elements::frame_work::Pass::AnimationLookup,
+                    );
+                    entering |= node
+                        .state
+                        .contains(mesh_core_elements::NodeState::SURFACE_ENTERING);
+                    container = animation_child_container(node);
+                    node = &mut node.children[index];
+                }
+                assert_eq!(node.id, id, "animation scope requires unchanged structure");
+                self.apply_style_animations_to_node(
+                    node,
+                    container,
+                    previous_styles,
+                    &resolver,
+                    &theme,
+                    now,
+                    entering,
+                    &mut live_keys,
+                    &mut live_keyframe_keys,
+                    &mut has_active_animation,
+                    &mut active_animation_bucket,
+                    &mut has_active_keyframe_animation,
+                    &mut active_keyframe_bucket,
+                    &mut dirty_node_ids,
+                    false,
+                );
+            }
+        } else {
+            let containing_block = (tree.layout.width, tree.layout.height);
+            self.apply_style_animations_to_node(
+                tree,
+                containing_block,
+                previous_styles,
+                &resolver,
+                &theme,
+                now,
+                false,
+                &mut live_keys,
+                &mut live_keyframe_keys,
+                &mut has_active_animation,
+                &mut active_animation_bucket,
+                &mut has_active_keyframe_animation,
+                &mut active_keyframe_bucket,
+                &mut dirty_node_ids,
+                true,
+            );
+        }
 
         self.transitions.retain_live(&live_keys, now);
         // Any instance absent from this frame's declarations is cancelled.
@@ -311,9 +420,17 @@ impl FrontendSurfaceComponent {
         has_active_keyframe_animation: &mut bool,
         active_keyframe_bucket: &mut AnimationPropertyBucket,
         dirty_node_ids: &mut HashSet<NodeId>,
+        recurse: bool,
     ) {
+        mesh_core_elements::frame_work::visit(
+            mesh_core_elements::frame_work::Pass::AnimationSample,
+        );
         if self.is_dormant_popover_wrapper(node) {
             return;
+        }
+        #[cfg(test)]
+        {
+            self.animation_nodes_visited += 1;
         }
         let entering = ancestor_entering
             || node
@@ -395,19 +512,29 @@ impl FrontendSurfaceComponent {
                     .is_some_and(|previous| previous != sampled)
             {
                 dirty_node_ids.insert(node.id);
+                let previous = previous_styles
+                    .get(&node_id)
+                    .copied()
+                    .unwrap_or(before_sampling);
+                let bucket = previous
+                    .differing(&sampled, TransitionProperties::all())
+                    .animation_bucket();
+                let mut change = mesh_core_elements::ChangeClass::PAINT;
+                if bucket == AnimationPropertyBucket::LayoutAffecting {
+                    change |= mesh_core_elements::ChangeClass::LAYOUT
+                        | mesh_core_elements::ChangeClass::A11Y
+                        | mesh_core_elements::ChangeClass::HIT;
+                } else if bucket == AnimationPropertyBucket::LayerEffect {
+                    change |= mesh_core_elements::ChangeClass::HIT;
+                }
+                self.frame_dirty.mark(node.id, change);
             }
         }
 
-        let child_container = (
-            (node.layout.width
-                - node.computed_style.padding.horizontal()
-                - node.computed_style.border_width.horizontal())
-            .max(0.0),
-            (node.layout.height
-                - node.computed_style.padding.vertical()
-                - node.computed_style.border_width.vertical())
-            .max(0.0),
-        );
+        if !recurse {
+            return;
+        }
+        let child_container = animation_child_container(node);
         for child in &mut node.children {
             self.apply_style_animations_to_node(
                 child,
@@ -424,6 +551,7 @@ impl FrontendSurfaceComponent {
                 has_active_keyframe_animation,
                 active_keyframe_bucket,
                 dirty_node_ids,
+                true,
             );
         }
     }
@@ -806,6 +934,9 @@ fn collect_visual_styles_with_container(
     styles: &mut HashMap<NodeId, AnimatableStyle>,
     skip: &dyn Fn(&WidgetNode) -> bool,
 ) {
+    mesh_core_elements::frame_work::visit(
+        mesh_core_elements::frame_work::Pass::AnimationPreviousStyle,
+    );
     if skip(node) {
         return;
     }

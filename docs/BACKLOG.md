@@ -26,13 +26,12 @@ other performance work. Evidence, the Qt Quick / GTK4 comparison, exit
 criteria and the items folded in here:
 [design](../.planning/todos/pending/2026-10-21-change-proportional-pipeline.md).
 
-- [ ] **P0:** Live-shell benchmark under the glass profile (dashboard open,
-      dock hover, Settings scroll, clock tick) plus per-pass "nodes visited"
-      counters with a structural gate; the D9 CPU gates miss the live gap.
-- [ ] **P2:** One per-frame dirty set, fed by typed setters, state flags,
-      animation samples and layout results, drives every pass; retire
-      fingerprint/diff discovery to a test-only verifier. Prototype on the
-      glass dock and dashboard first.
+- [ ] **P0:** Add a reproducible live glass replay/gate (dashboard, dock hover,
+      Settings scroll, clock tick) using the per-pass visit counters; CPU fixtures
+      and the animation structural gate do not cover the live compositor gap.
+- [ ] **P2:** Complete the shared dirty-set pipeline beyond the animation prototype:
+      selector dependents, layout propagation, semantics, validation and child surfaces
+      still need authoritative scopes. The large-factor glass exit bar remains unmet.
 - [ ] **P3:** Bindings compile to typed setters, and list/compound sources
       become keyed stores so an item change patches its properties instead of
       rebuilding the component (finishes D1; with D4 typed patches).

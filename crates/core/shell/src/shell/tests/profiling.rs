@@ -100,6 +100,7 @@ fn profiling_snapshot_exposes_typed_surface_invalidation_counts() {
         "@mesh/navigation-bar",
         Some("@mesh/navigation-bar"),
         ProfilingInvalidationSnapshot {
+            node_visits: [("animation_sample".to_string(), 2)].into_iter().collect(),
             full_rebuild: false,
             retained_path: true,
             narrow_path: false,
@@ -181,6 +182,10 @@ fn profiling_snapshot_exposes_typed_surface_invalidation_counts() {
         .iter()
         .find(|surface| surface.surface_id == "@mesh/navigation-bar")
         .expect("surface snapshot should be recorded when invalidation occurs");
+    assert_eq!(
+        surface.invalidation.as_ref().unwrap().node_visits["animation_sample"],
+        2
+    );
     let invalidation = surface
         .invalidation
         .as_ref()
