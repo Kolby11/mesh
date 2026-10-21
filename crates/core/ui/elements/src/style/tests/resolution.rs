@@ -413,14 +413,12 @@ fn targeted_restyle_recomputes_only_named_stateful_nodes() {
     let mut root = crate::tree::WidgetNode::new("row");
     let mut previous = crate::tree::WidgetNode::new("button");
     previous.id = 1;
-    previous
-        .attributes
-        .insert("_mesh_key".into(), "prev".into());
+    previous.set_mesh_key("prev");
     previous.state.set(NodeState::HOVERED, false);
     previous.computed_style.background_color = Color::from_hex("#ff0000").unwrap();
     let mut current = crate::tree::WidgetNode::new("button");
     current.id = 2;
-    current.attributes.insert("_mesh_key".into(), "next".into());
+    current.set_mesh_key("next");
     current.state.set(NodeState::HOVERED, true);
     root.children.push(previous);
     root.children.push(current);

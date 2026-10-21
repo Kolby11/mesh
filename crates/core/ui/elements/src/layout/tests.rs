@@ -17,7 +17,7 @@ fn make_node(tag: &str, width: Dimension, height: Dimension) -> WidgetNode {
 
 fn keyed_node(key: &str, tag: &str, width: Dimension, height: Dimension) -> WidgetNode {
     let mut node = make_node(tag, width, height);
-    node.attributes.insert("_mesh_key".into(), key.into());
+    node.set_mesh_key(key);
     node
 }
 
@@ -1099,9 +1099,7 @@ fn phase87_layout_runtime_stack_spacer_divider_and_scroll_area_stay_compatible()
     scroll_area
         .attributes
         .insert("data-mesh-element".into(), "scroll-area".into());
-    scroll_area
-        .attributes
-        .insert("_mesh_scroll_y".into(), "12.50".into());
+    scroll_area.scroll_metrics.get_or_insert_default().y = 12.50;
     scroll_area.children = vec![make_node(
         "content",
         Dimension::Px(120.0),

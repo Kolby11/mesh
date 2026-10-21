@@ -74,9 +74,9 @@ pub use style::{
 };
 pub use tree::EventHandlerCall;
 pub use tree::{
-    NodeId, NodeState, PaintOrderChildren, TemplateBindings, WidgetNode, WidgetScrollMetrics,
-    WidgetTreeValidationError, WindowSurfaceState, children_in_paint_order,
-    paint_order_child_indices, validate_widget_tree,
+    InputPreedit, NodeId, NodeState, OpenBinding, PaintOrderChildren, TemplateBindings,
+    TextSelection, WidgetNode, WidgetScrollMetrics, WidgetTreeValidationError, WindowSurfaceState,
+    children_in_paint_order, paint_order_child_indices, validate_widget_tree,
 };
 
 /// Abstraction over the source of variable values for template evaluation.

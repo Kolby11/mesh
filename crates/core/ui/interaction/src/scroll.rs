@@ -563,7 +563,7 @@ mod scroll_into_view_tests {
 
     fn node(key: &str, tag: &str, x: f32, y: f32, w: f32, h: f32) -> WidgetNode {
         let mut n = WidgetNode::new(tag);
-        n.attributes.insert("_mesh_key".into(), key.into());
+        n.set_mesh_key(key);
         n.layout.x = x;
         n.layout.y = y;
         n.layout.width = w;
@@ -572,10 +572,8 @@ mod scroll_into_view_tests {
     }
 
     fn scrollable(mut n: WidgetNode, max_x: f32, max_y: f32) -> WidgetNode {
-        n.attributes
-            .insert("_mesh_scroll_max_x".into(), max_x.to_string());
-        n.attributes
-            .insert("_mesh_scroll_max_y".into(), max_y.to_string());
+        n.scroll_metrics.get_or_insert_default().max_x = max_x;
+        n.scroll_metrics.get_or_insert_default().max_y = max_y;
         n
     }
 
@@ -709,7 +707,7 @@ mod scrollbar_tests {
 
     fn node(key: &str, tag: &str, x: f32, y: f32, width: f32, height: f32) -> WidgetNode {
         let mut node = WidgetNode::new(tag);
-        node.attributes.insert("_mesh_key".into(), key.into());
+        node.set_mesh_key(key);
         node.layout.x = x;
         node.layout.y = y;
         node.layout.width = width;

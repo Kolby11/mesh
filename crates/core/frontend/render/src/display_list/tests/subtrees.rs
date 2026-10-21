@@ -285,7 +285,7 @@ fn display_list_reuses_unrelated_subtrees_for_scroll_updates() {
     let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
     let mut left = node(2, "box", 0.0, 0.0, 40.0, 40.0);
     left.computed_style.overflow_x = Overflow::Hidden;
-    left.attributes.insert("_mesh_scroll_x".into(), "0".into());
+    left.scroll_metrics.get_or_insert_default().x = 0.0;
     left.children.push(node(3, "text", 30.0, 4.0, 20.0, 12.0));
     let mut right = node(4, "box", 60.0, 0.0, 40.0, 40.0);
     right.children.push(node(5, "text", 4.0, 4.0, 20.0, 12.0));
@@ -296,9 +296,7 @@ fn display_list_reuses_unrelated_subtrees_for_scroll_updates() {
     list.update(&root, 120, 40, false, true);
     let before = list.paint_commands().to_vec();
 
-    root.children[0]
-        .attributes
-        .insert("_mesh_scroll_x".into(), "18".into());
+    root.children[0].scroll_metrics.get_or_insert_default().x = 18.0;
     let metrics = list.update_with_dirty_nodes(
         &root,
         RenderObjectDirtySummary {

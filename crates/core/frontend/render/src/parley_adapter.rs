@@ -127,16 +127,17 @@ pub fn shape_text_with_selection_evidence(
         )
     };
 
-    let attr_f32 = |key: &str| -> Option<f32> { node.attributes.get(key)?.parse::<f32>().ok() };
+    let selection = node.text_selection.as_deref();
+    let (origin_x, origin_y) = selection.map_or(
+        (
+            node.layout.x + node.computed_style.padding.left,
+            node.layout.y + node.computed_style.padding.top,
+        ),
+        |selection| selection.text_origin,
+    );
 
-    let origin_x = attr_f32("_mesh_selection_text_x")
-        .unwrap_or(node.layout.x + node.computed_style.padding.left);
-    let origin_y = attr_f32("_mesh_selection_text_y")
-        .unwrap_or(node.layout.y + node.computed_style.padding.top);
-
-    let cursor_point = |x_key: &str, y_key: &str| -> Option<(f32, f32)> {
-        let x = attr_f32(x_key)?;
-        let y = attr_f32(y_key)?;
+    let cursor_point = |point: Option<(f32, f32)>| -> Option<(f32, f32)> {
+        let (x, y) = point?;
         let local_x = x - origin_x;
         let local_y = y - origin_y;
         let cursor = Cursor::from_point(&layout, local_x, local_y);
@@ -147,8 +148,8 @@ pub fn shape_text_with_selection_evidence(
 
     let (anchor, focus) = if layout.len() > 0 {
         (
-            cursor_point("_mesh_selection_anchor_x", "_mesh_selection_anchor_y"),
-            cursor_point("_mesh_selection_focus_x", "_mesh_selection_focus_y"),
+            cursor_point(selection.map(|selection| selection.anchor)),
+            cursor_point(selection.map(|selection| selection.focus)),
         )
     } else {
         (None, None)
@@ -243,14 +244,18 @@ mod tests {
         };
         node.computed_style.padding.left = 4.0;
         node.computed_style.padding.top = 2.0;
-        node.attributes
-            .insert("_mesh_selection_anchor_x".to_string(), "20".to_string());
-        node.attributes
-            .insert("_mesh_selection_anchor_y".to_string(), "8".to_string());
-        node.attributes
-            .insert("_mesh_selection_focus_x".to_string(), "60".to_string());
-        node.attributes
-            .insert("_mesh_selection_focus_y".to_string(), "8".to_string());
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .anchor
+            .0 = 20.0;
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .anchor
+            .1 = 8.0;
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .focus
+            .0 = 60.0;
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .focus
+            .1 = 8.0;
 
         let mut diagnostics = Vec::new();
         let (parley_text, anchor, focus) =
@@ -284,18 +289,24 @@ mod tests {
     #[test]
     fn parley_selection_evidence_uses_text_origin_attribute_when_present() {
         let mut node = text_node("Hi", 100.0);
-        node.attributes
-            .insert("_mesh_selection_text_x".to_string(), "10".to_string());
-        node.attributes
-            .insert("_mesh_selection_text_y".to_string(), "5".to_string());
-        node.attributes
-            .insert("_mesh_selection_anchor_x".to_string(), "20".to_string());
-        node.attributes
-            .insert("_mesh_selection_anchor_y".to_string(), "8".to_string());
-        node.attributes
-            .insert("_mesh_selection_focus_x".to_string(), "30".to_string());
-        node.attributes
-            .insert("_mesh_selection_focus_y".to_string(), "8".to_string());
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .text_origin
+            .0 = 10.0;
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .text_origin
+            .1 = 5.0;
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .anchor
+            .0 = 20.0;
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .anchor
+            .1 = 8.0;
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .focus
+            .0 = 30.0;
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .focus
+            .1 = 8.0;
         let mut diagnostics = Vec::new();
         let (_parley_text, anchor, focus) =
             shape_text_with_selection_evidence(&node, "Hi", &mut diagnostics);

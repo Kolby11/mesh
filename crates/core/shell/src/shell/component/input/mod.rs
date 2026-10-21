@@ -1153,7 +1153,7 @@ mod press_target_tests {
 
     fn positioned_node(key: &str, tag: &str, x: f32, y: f32, w: f32, h: f32) -> WidgetNode {
         let mut node = WidgetNode::new(tag);
-        node.attributes.insert("_mesh_key".into(), key.into());
+        node.set_mesh_key(key);
         node.layout.x = x;
         node.layout.y = y;
         node.layout.width = w;

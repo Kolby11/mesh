@@ -15,6 +15,4 @@ fn annotate_runtime_tree_assigns_stable_ids_from_runtime_keys() {
     assert_ne!(first.id, first.children[0].id);
     assert_eq!(first.mesh_key(), Some("root"));
     assert_eq!(first.children[0].mesh_key(), Some("root/0"));
-    assert!(!first.attributes.contains_key("_mesh_key"));
-    assert!(!first.children[0].attributes.contains_key("_mesh_key"));
 }

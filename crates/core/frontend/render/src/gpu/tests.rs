@@ -318,8 +318,7 @@ mod painter_parity {
             rgb("#304050"),
         );
         area.computed_style.overflow_y = Overflow::Hidden;
-        area.attributes
-            .insert("_mesh_scroll_y".into(), scroll_y.to_string());
+        area.scroll_metrics.get_or_insert_default().y = scroll_y;
         for index in 0..8u64 {
             let y = 14.0 + index as f32 * 28.0;
             let mut row = node(

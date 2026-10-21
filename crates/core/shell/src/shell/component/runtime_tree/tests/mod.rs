@@ -71,18 +71,11 @@ fn input_preedit_is_composed_into_visual_value_only() {
         node.attributes.get("value").map(String::as_str),
         Some("A🙂候B")
     );
-    assert_eq!(
-        node.attributes
-            .get("_mesh_preedit_start")
-            .map(String::as_str),
-        Some("5")
-    );
-    assert_eq!(
-        node.attributes
-            .get("_mesh_preedit_cursor_end")
-            .map(String::as_str),
-        Some("8")
-    );
+    let preedit = node
+        .input_preedit
+        .expect("composed input carries its preedit");
+    assert_eq!(preedit.start, 5);
+    assert_eq!(preedit.cursor_end, 8);
     assert_eq!(input_values.get(&node_id).map(String::as_str), Some("A🙂B"));
 }
 

@@ -759,7 +759,7 @@ fn authored_reference_names(node: &WidgetNode) -> Vec<String> {
         node.attributes.get("id").map(String::as_str),
         node.attributes.get("ref").map(String::as_str),
         node.mesh_key(),
-        node.attributes.get("_mesh_bind_this").map(String::as_str),
+        node.bind_this(),
     ]
     .into_iter()
     .flatten()

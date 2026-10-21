@@ -729,22 +729,28 @@ fn skia_text_highlight_selection_background_uses_theme_color() {
         60.0,
         Color::from_hex("#111111").unwrap(),
     );
-    text.attributes
-        .insert("_mesh_selection_background".into(), "#00ff00".into());
-    text.attributes
-        .insert("_mesh_selection_foreground".into(), "#ff00ff".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_x".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_y".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_focus_x".into(), "1000.00".into());
-    text.attributes
-        .insert("_mesh_selection_focus_y".into(), "1000.00".into());
-    text.attributes
-        .insert("_mesh_selection_text_x".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_text_y".into(), "0.00".into());
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).background =
+        "#00ff00".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).foreground =
+        "#ff00ff".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .0 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .1 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .0 = 1000.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .1 = 1000.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .0 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .1 = 0.00;
     root.children = vec![text].into();
 
     let mut buffer = PixelBuffer::new(180, 80);
@@ -781,22 +787,28 @@ fn skia_text_highlight_does_not_change_glyph_handoff() {
         60.0,
         Color::from_hex("#111111").unwrap(),
     );
-    text.attributes
-        .insert("_mesh_selection_background".into(), "#00ff00".into());
-    text.attributes
-        .insert("_mesh_selection_foreground".into(), "#ff00ff".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_x".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_y".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_focus_x".into(), "1000.00".into());
-    text.attributes
-        .insert("_mesh_selection_focus_y".into(), "1000.00".into());
-    text.attributes
-        .insert("_mesh_selection_text_x".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_text_y".into(), "0.00".into());
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).background =
+        "#00ff00".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).foreground =
+        "#ff00ff".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .0 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .1 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .0 = 1000.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .1 = 1000.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .0 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .1 = 0.00;
     root.children = vec![text].into();
 
     let backend = RecordingPaintBackend::default();

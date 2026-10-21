@@ -162,10 +162,7 @@ pub(super) fn build_paint_content_with_previous(
                     .attributes
                     .get("type")
                     .is_some_and(|value| value == "password"),
-                focused: node
-                    .attributes
-                    .get("_mesh_focused")
-                    .is_some_and(|value| value == "true"),
+                focused: node.state.contains(mesh_core_elements::NodeState::FOCUSED),
             })
         }
         "slider" => DisplayPaintContent::Slider(DisplaySliderPaint {
@@ -224,12 +221,12 @@ pub(super) fn build_paint_content_with_previous(
 }
 
 fn build_input_preedit(node: &WidgetNode, value: &str) -> Option<DisplayInputPreedit> {
-    let parse = |attribute| node.attributes.get(attribute)?.parse::<usize>().ok();
+    let projected = node.input_preedit?;
     let preedit = DisplayInputPreedit {
-        start: parse("_mesh_preedit_start")?,
-        end: parse("_mesh_preedit_end")?,
-        cursor_begin: parse("_mesh_preedit_cursor_begin")?,
-        cursor_end: parse("_mesh_preedit_cursor_end")?,
+        start: projected.start,
+        end: projected.end,
+        cursor_begin: projected.cursor_begin,
+        cursor_end: projected.cursor_end,
     };
     let valid_boundary = |offset| offset <= value.len() && value.is_char_boundary(offset);
     (preedit.start < preedit.end
@@ -268,31 +265,16 @@ pub(crate) fn node_is_checked(node: &WidgetNode) -> bool {
 }
 
 pub(super) fn build_text_selection(node: &WidgetNode) -> Option<DisplayTextSelectionPaint> {
+    let selection = node.text_selection.as_deref()?;
     Some(DisplayTextSelectionPaint {
-        background: Color::from_hex(node.attributes.get("_mesh_selection_background")?)?,
-        foreground: Color::from_hex(node.attributes.get("_mesh_selection_foreground")?)?,
-        anchor_x: node
-            .attributes
-            .get("_mesh_selection_anchor_x")?
-            .parse::<f32>()
-            .ok()?,
-        anchor_y: node
-            .attributes
-            .get("_mesh_selection_anchor_y")?
-            .parse::<f32>()
-            .ok()?,
-        focus_x: node
-            .attributes
-            .get("_mesh_selection_focus_x")?
-            .parse::<f32>()
-            .ok()?,
-        focus_y: node
-            .attributes
-            .get("_mesh_selection_focus_y")?
-            .parse::<f32>()
-            .ok()?,
-        text_x: attr_f32(node, "_mesh_selection_text_x"),
-        text_y: attr_f32(node, "_mesh_selection_text_y"),
+        background: Color::from_hex(&selection.background)?,
+        foreground: Color::from_hex(&selection.foreground)?,
+        anchor_x: selection.anchor.0,
+        anchor_y: selection.anchor.1,
+        focus_x: selection.focus.0,
+        focus_y: selection.focus.1,
+        text_x: selection.text_origin.0,
+        text_y: selection.text_origin.1,
     })
 }
 

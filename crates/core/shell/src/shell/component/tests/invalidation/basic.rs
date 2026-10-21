@@ -524,11 +524,7 @@ fn finalized_dirty_frames_match_full_capture_without_state_selectors() {
         );
         if step == 5 {
             let selected = find_node_by_key(tree, "root/0/2").unwrap();
-            assert!(
-                !selected
-                    .attributes
-                    .contains_key("_mesh_selection_background")
-            );
+            assert!(selected.text_selection.is_none());
         }
     }
 }

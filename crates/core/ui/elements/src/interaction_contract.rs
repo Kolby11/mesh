@@ -688,8 +688,8 @@ mod tests {
             let mut node = WidgetNode::new("box");
             node.layout.width = 10.0;
             node.layout.height = 10.0;
+            node.set_mesh_key("root/0");
             for (name, value) in [
-                ("_mesh_key", "root/0"),
                 ("aria-label", "x"),
                 ("class", "a"),
                 ("id", "n"),

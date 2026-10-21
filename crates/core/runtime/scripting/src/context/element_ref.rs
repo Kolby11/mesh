@@ -125,11 +125,7 @@ pub(super) fn install_bound_element_proxies(
     };
 
     for (name, metrics) in entries {
-        let binding = metrics
-            .get("attributes")
-            .and_then(Value::as_object)
-            .and_then(|attributes| attributes.get("_mesh_bind_this"))
-            .and_then(Value::as_str);
+        let binding = metrics.get("bind_this").and_then(Value::as_str);
         if binding != Some(name.as_str()) {
             continue;
         }

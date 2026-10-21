@@ -317,9 +317,8 @@ impl FrontendSurfaceComponent {
         }
         let entering = ancestor_entering
             || node
-                .attributes
-                .get("_mesh_surface_entering")
-                .is_some_and(|value| value == "true");
+                .state
+                .contains(mesh_core_elements::NodeState::SURFACE_ENTERING);
         if node.mesh_key().is_some() {
             let node_id = node.id;
             let before_sampling =

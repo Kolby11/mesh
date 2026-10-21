@@ -1765,12 +1765,10 @@ mod navigation_performance_tests {
     fn deep_keyed_tree(depth: usize) -> (WidgetNode, String) {
         let mut leaf = WidgetNode::new("menu-item");
         let leaf_key = format!("root/{}", depth - 1);
-        leaf.attributes.insert("_mesh_key".into(), leaf_key.clone());
+        leaf.set_mesh_key(leaf_key.clone());
         for index in (0..depth - 1).rev() {
             let mut parent = WidgetNode::new("column");
-            parent
-                .attributes
-                .insert("_mesh_key".into(), format!("root/{index}"));
+            parent.set_mesh_key(format!("root/{index}"));
             parent.children.push(leaf);
             leaf = parent;
         }
@@ -1791,7 +1789,7 @@ mod navigation_performance_tests {
     fn borrowed_navigation_keys_preserve_ancestor_sibling_and_menu_results() {
         fn keyed_node(tag: &str, key: &str) -> WidgetNode {
             let mut node = WidgetNode::new(tag);
-            node.attributes.insert("_mesh_key".into(), key.into());
+            node.set_mesh_key(key);
             node.layout.width = 100.0;
             node.layout.height = 20.0;
             node

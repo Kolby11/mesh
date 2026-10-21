@@ -236,22 +236,28 @@ fn painter_primitive_text_selection_highlight_uses_draw_rect_command() {
         60.0,
         Color::from_hex("#111111").unwrap(),
     );
-    text.attributes
-        .insert("_mesh_selection_background".into(), "#00ff00".into());
-    text.attributes
-        .insert("_mesh_selection_foreground".into(), "#ff00ff".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_x".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_y".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_focus_x".into(), "1000.00".into());
-    text.attributes
-        .insert("_mesh_selection_focus_y".into(), "1000.00".into());
-    text.attributes
-        .insert("_mesh_selection_text_x".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_text_y".into(), "0.00".into());
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).background =
+        "#00ff00".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).foreground =
+        "#ff00ff".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .0 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .1 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .0 = 1000.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .1 = 1000.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .0 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .1 = 0.00;
     root.children = vec![text].into();
 
     let backend = RecordingPaintBackend::default();
@@ -324,8 +330,7 @@ fn compatibility_and_retained_input_paths_emit_same_classes() {
         Color::from_hex("#101820").unwrap(),
     );
     root.attributes.insert("value".into(), "mesh".into());
-    root.attributes
-        .insert("_mesh_focused".into(), "true".into());
+    root.state.insert(mesh_core_elements::NodeState::FOCUSED);
     root.computed_style.color = Color::from_hex("#f5f5f5").unwrap();
     root.computed_style.padding = Edges::all(4.0);
 
@@ -618,22 +623,28 @@ fn display_list_primitive_mixed_tree_preserves_node_order_and_command_classes() 
         28.0,
         Color::from_hex("#f0f0f0").unwrap(),
     );
-    text.attributes
-        .insert("_mesh_selection_background".into(), "#3366ff".into());
-    text.attributes
-        .insert("_mesh_selection_foreground".into(), "#ffffff".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_x".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_y".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_focus_x".into(), "1000.00".into());
-    text.attributes
-        .insert("_mesh_selection_focus_y".into(), "1000.00".into());
-    text.attributes
-        .insert("_mesh_selection_text_x".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_text_y".into(), "0.00".into());
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).background =
+        "#3366ff".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).foreground =
+        "#ffffff".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .0 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .1 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .0 = 1000.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .1 = 1000.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .0 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .1 = 0.00;
 
     let mut input = node(
         "input",
@@ -646,9 +657,7 @@ fn display_list_primitive_mixed_tree_preserves_node_order_and_command_classes() 
         Color::from_hex("#101820").unwrap(),
     );
     input.attributes.insert("value".into(), "mesh".into());
-    input
-        .attributes
-        .insert("_mesh_focused".into(), "true".into());
+    input.state.insert(mesh_core_elements::NodeState::FOCUSED);
     input.computed_style.color = Color::from_hex("#f5f5f5").unwrap();
     input.computed_style.padding = Edges::all(4.0);
 

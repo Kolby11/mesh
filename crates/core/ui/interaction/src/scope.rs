@@ -186,7 +186,7 @@ mod tests {
 
     fn node(tag: &str, key: &str) -> WidgetNode {
         let mut node = WidgetNode::new(tag);
-        node.attributes.insert("_mesh_key".into(), key.into());
+        node.set_mesh_key(key);
         node.layout.width = 100.0;
         node.layout.height = 50.0;
         node

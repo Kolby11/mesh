@@ -90,6 +90,9 @@ pub struct ElementSnapshot {
     pub invalid: bool,
     pub value: bool,
     pub attributes: crate::attributes::AttributeMap,
+    /// The `bind:this` variable this element is published as.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bind_this: Option<String>,
 }
 
 pub fn element_snapshot(node: &WidgetNode, offset_x: f32, offset_y: f32) -> ElementSnapshot {
@@ -174,6 +177,7 @@ pub fn element_snapshot(node: &WidgetNode, offset_x: f32, offset_y: f32) -> Elem
         invalid: state.invalid,
         value: state.value,
         attributes: node.attributes.clone(),
+        bind_this: node.bind_this().map(str::to_owned),
     }
 }
 
@@ -287,6 +291,9 @@ pub(super) fn element_snapshot_json_object(
         attributes.insert(key.as_str().to_string(), Value::String(value.clone()));
     }
     object.insert("attributes".into(), Value::Object(attributes));
+    if let Some(bind_this) = node.bind_this() {
+        object.insert("bind_this".into(), Value::String(bind_this.to_owned()));
+    }
 
     object
 }

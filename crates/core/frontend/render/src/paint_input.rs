@@ -107,20 +107,11 @@ fn hash_primitive(node: &WidgetNode) -> u64 {
     node.tag.hash(&mut hasher);
     match node.tag.as_str() {
         "input" => {
-            hash_attributes(
-                node,
-                &[
-                    "value",
-                    "placeholder",
-                    "type",
-                    "_mesh_focused",
-                    "_mesh_preedit_start",
-                    "_mesh_preedit_end",
-                    "_mesh_preedit_cursor_begin",
-                    "_mesh_preedit_cursor_end",
-                ],
-                &mut hasher,
-            );
+            hash_attributes(node, &["value", "placeholder", "type"], &mut hasher);
+            node.state
+                .contains(mesh_core_elements::NodeState::FOCUSED)
+                .hash(&mut hasher);
+            node.input_preedit.hash(&mut hasher);
             hash_color(node.computed_style.color, &mut hasher);
         }
         "slider" => {
@@ -150,20 +141,8 @@ fn text_input(node: &WidgetNode, previous: Option<&TextPaintInput>) -> TextPaint
     };
     let mut hasher = PaintInputHasher::default();
     if node.tag == "text" {
-        hash_attributes(
-            node,
-            &[
-                "content",
-                "text",
-                "_mesh_selection_anchor_x",
-                "_mesh_selection_anchor_y",
-                "_mesh_selection_focus_x",
-                "_mesh_selection_focus_y",
-                "_mesh_selection_text_x",
-                "_mesh_selection_text_y",
-            ],
-            &mut hasher,
-        );
+        hash_attributes(node, &["content", "text"], &mut hasher);
+        node.text_selection.hash(&mut hasher);
     }
     hash_attributes(node, &["lang", "font-features"], &mut hasher);
     hash_color(node.computed_style.color, &mut hasher);

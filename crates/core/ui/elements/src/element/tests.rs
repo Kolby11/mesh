@@ -160,7 +160,7 @@ fn direct_f32_json_conversion_matches_serialization() {
 #[test]
 fn icon_snapshot_exposes_base_and_icon_fields() {
     let mut node = WidgetNode::new("icon");
-    node.attributes.insert("_mesh_key".into(), "0:1".into());
+    node.set_mesh_key("0:1");
     node.attributes.insert("ref".into(), "batteryIcon".into());
     node.attributes.insert("name".into(), "battery-full".into());
     node.attributes.insert("size".into(), "18".into());
@@ -243,12 +243,10 @@ fn element_snapshot_reads_typed_scroll_metrics_before_legacy_attributes() {
     let mut node = WidgetNode::new("scroll-area");
     node.layout.width = 120.0;
     node.layout.height = 80.0;
-    node.attributes.insert("_mesh_scroll_x".into(), "1".into());
-    node.attributes.insert("_mesh_scroll_y".into(), "2".into());
-    node.attributes
-        .insert("_mesh_scroll_max_x".into(), "3".into());
-    node.attributes
-        .insert("_mesh_scroll_max_y".into(), "4".into());
+    node.scroll_metrics.get_or_insert_default().x = 1.0;
+    node.scroll_metrics.get_or_insert_default().y = 2.0;
+    node.scroll_metrics.get_or_insert_default().max_x = 3.0;
+    node.scroll_metrics.get_or_insert_default().max_y = 4.0;
     node.scroll_metrics = Some(WidgetScrollMetrics {
         x: 11.0,
         y: 22.0,

@@ -167,22 +167,16 @@ pub(super) fn hash_paint_content_attributes(
         "text" => {
             hash_attribute(node, "content", hasher);
             hash_attribute(node, "text", hasher);
-            hash_attribute(node, "_mesh_selection_anchor_x", hasher);
-            hash_attribute(node, "_mesh_selection_anchor_y", hasher);
-            hash_attribute(node, "_mesh_selection_focus_x", hasher);
-            hash_attribute(node, "_mesh_selection_focus_y", hasher);
-            hash_attribute(node, "_mesh_selection_text_x", hasher);
-            hash_attribute(node, "_mesh_selection_text_y", hasher);
+            node.text_selection.hash(hasher);
         }
         "input" => {
             hash_attribute(node, "value", hasher);
             hash_attribute(node, "placeholder", hasher);
             hash_attribute(node, "type", hasher);
-            hash_attribute(node, "_mesh_focused", hasher);
-            hash_attribute(node, "_mesh_preedit_start", hasher);
-            hash_attribute(node, "_mesh_preedit_end", hasher);
-            hash_attribute(node, "_mesh_preedit_cursor_begin", hasher);
-            hash_attribute(node, "_mesh_preedit_cursor_end", hasher);
+            node.state
+                .contains(mesh_core_elements::NodeState::FOCUSED)
+                .hash(hasher);
+            node.input_preedit.hash(hasher);
         }
         "slider" => {
             hash_attribute(node, "min", hasher);

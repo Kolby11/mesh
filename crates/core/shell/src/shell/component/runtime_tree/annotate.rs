@@ -23,11 +23,13 @@ pub(in crate::shell::component) fn collect_element_metrics(
     ref_keys: &mut HashMap<String, String>,
 ) {
     let node_key = node.mesh_key();
-    let id = collect_refs.then(|| node.attributes.get("id")).flatten();
-    let reference = collect_refs.then(|| node.attributes.get("ref")).flatten();
-    let binding = collect_refs
-        .then(|| node.attributes.get("_mesh_bind_this"))
+    let id = collect_refs
+        .then(|| node.attributes.get("id").map(String::as_str))
         .flatten();
+    let reference = collect_refs
+        .then(|| node.attributes.get("ref").map(String::as_str))
+        .flatten();
+    let binding = collect_refs.then(|| node.bind_this()).flatten();
     let publishes_element = collect_elements && node_key.is_some();
     let publishes_ref = id.is_some() || reference.is_some() || binding.is_some();
 
@@ -49,29 +51,29 @@ pub(in crate::shell::component) fn collect_element_metrics(
     if collect_refs && metrics.is_some() {
         if let Some(id) = id {
             refs.insert(
-                id.clone(),
+                id.to_owned(),
                 clone_or_take_last_metric(&mut metrics, &mut remaining_publications),
             );
             if let Some(key) = node_key {
-                ref_keys.insert(id.clone(), key.to_owned());
+                ref_keys.insert(id.to_owned(), key.to_owned());
             }
         }
         if let Some(reference) = reference {
             refs.insert(
-                reference.clone(),
+                reference.to_owned(),
                 clone_or_take_last_metric(&mut metrics, &mut remaining_publications),
             );
             if let Some(key) = node_key {
-                ref_keys.insert(reference.clone(), key.to_owned());
+                ref_keys.insert(reference.to_owned(), key.to_owned());
             }
         }
         if let Some(binding) = binding {
             refs.insert(
-                binding.clone(),
+                binding.to_owned(),
                 clone_or_take_last_metric(&mut metrics, &mut remaining_publications),
             );
             if let Some(key) = node_key {
-                ref_keys.insert(binding.clone(), key.to_owned());
+                ref_keys.insert(binding.to_owned(), key.to_owned());
             }
         }
     }
@@ -208,14 +210,6 @@ impl<'a> RuntimeAnnotationContext<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-struct InputPreeditProjection {
-    start: usize,
-    end: usize,
-    cursor_begin: usize,
-    cursor_end: usize,
-}
-
 fn clamp_preedit_cursor(text: &str, cursor: i32) -> usize {
     let cursor = usize::try_from(cursor).unwrap_or(0).min(text.len());
     (0..=cursor)
@@ -227,7 +221,7 @@ fn clamp_preedit_cursor(text: &str, cursor: i32) -> usize {
 fn compose_input_value(
     value: &str,
     preedit: Option<&TextPreeditState>,
-) -> (String, Option<InputPreeditProjection>) {
+) -> (String, Option<mesh_core_elements::InputPreedit>) {
     let Some(preedit) = preedit.filter(|preedit| !preedit.text.is_empty()) else {
         return (value.to_owned(), None);
     };
@@ -245,7 +239,7 @@ fn compose_input_value(
     let cursor_end = insert_at + clamp_preedit_cursor(&preedit.text, preedit.cursor_end);
     (
         composed,
-        Some(InputPreeditProjection {
+        Some(mesh_core_elements::InputPreedit {
             start: insert_at,
             end: preedit_end,
             cursor_begin,
@@ -379,18 +373,6 @@ pub(super) fn annotate_runtime_tree_inner(
             );
         }
 
-        // `node.attributes` is inside the shared authored payload, so every write
-        // here — including a remove of a key that was never present — forces a
-        // copy-on-write clone and breaks memo payload sharing for the whole
-        // subtree. Both branches must check before they write.
-        if node.state.contains(NodeState::FOCUSED) {
-            if node.attributes.get("_mesh_focused").map(String::as_str) != Some("true") {
-                node.attributes
-                    .insert("_mesh_focused".into(), "true".into());
-            }
-        } else if node.attributes.get("_mesh_focused").is_some() {
-            node.attributes.remove("_mesh_focused");
-        }
         // Compatibility projection for callers inspecting the live node. Semantic
         // snapshots derive focus from `node.state`, so this is not authoritative.
         node.accessibility.focused = node.state.contains(NodeState::FOCUSED);
@@ -405,30 +387,9 @@ pub(super) fn annotate_runtime_tree_inner(
             let preedit = (context.focused_id == Some(node_id))
                 .then(|| context.input_preedits.get(&node_id))
                 .flatten();
-            let (value, preedit_projection) = compose_input_value(&value, preedit);
+            let (value, preedit) = compose_input_value(&value, preedit);
             node.attributes.insert("value".into(), value);
-            for attribute in [
-                "_mesh_preedit_start",
-                "_mesh_preedit_end",
-                "_mesh_preedit_cursor_begin",
-                "_mesh_preedit_cursor_end",
-            ] {
-                node.attributes.remove(attribute);
-            }
-            if let Some(projection) = preedit_projection {
-                node.attributes
-                    .insert("_mesh_preedit_start".into(), projection.start.to_string());
-                node.attributes
-                    .insert("_mesh_preedit_end".into(), projection.end.to_string());
-                node.attributes.insert(
-                    "_mesh_preedit_cursor_begin".into(),
-                    projection.cursor_begin.to_string(),
-                );
-                node.attributes.insert(
-                    "_mesh_preedit_cursor_end".into(),
-                    projection.cursor_end.to_string(),
-                );
-            }
+            node.input_preedit = preedit;
         } else if is_slider {
             annotate_slider_node(node, node_id, context);
         } else if is_switch_or_checkbox {

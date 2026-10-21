@@ -521,10 +521,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 );
                 node
             };
-            node.attributes.insert(
-                "_mesh_slot_source".into(),
-                contribution.source_module_id.clone(),
-            );
+            node.set_slot_source(contribution.source_module_id.as_str());
             nodes.push(node);
         }
 
@@ -533,11 +530,13 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
 }
 
 pub(super) fn annotate_source_file(node: &mut WidgetNode, source_path: &str) {
-    node.attributes
-        .insert("_mesh_source_file".into(), source_path.into());
-    for child in &mut node.children {
-        annotate_source_file(child, source_path);
+    fn annotate(node: &mut WidgetNode, source_path: &std::sync::Arc<str>) {
+        node.set_source_file(source_path.clone());
+        for child in &mut node.children {
+            annotate(child, source_path);
+        }
     }
+    annotate(node, &std::sync::Arc::from(source_path));
 }
 
 /// Returns true when an embedded component's rendered tree has a `<popover>` as its

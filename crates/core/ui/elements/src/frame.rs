@@ -260,6 +260,7 @@ pub struct FrameNode {
     tag: Arc<str>,
     runtime_tag: Option<Arc<str>>,
     attributes: Arc<AttributeMap>,
+    bind_this: Option<Arc<str>>,
     style: Arc<ComputedStyle>,
     layout: LayoutRect,
     state: NodeState,
@@ -981,7 +982,6 @@ fn same_structure_and_references(live: &WidgetNode, old: &FrameNode) -> bool {
             "data-mesh-element",
             "id",
             "ref",
-            "_mesh_bind_this",
             "aria-labelledby",
             "aria-describedby",
             "aria-controls",
@@ -996,6 +996,7 @@ fn same_structure_and_references(live: &WidgetNode, old: &FrameNode) -> bool {
         ]
         .iter()
         .all(|name| live.attributes.get(name) == old.attributes.get(name))
+        && live.bind_this() == old.bind_this.as_deref()
 }
 
 fn apply_frame_reference_text(
@@ -1100,6 +1101,7 @@ fn append_node(
         tag: Arc::from(node.tag.as_str()),
         runtime_tag: element_runtime_tag_for_tag(&node.tag).map(Arc::from),
         attributes: Arc::new(node.attributes.clone()),
+        bind_this: node.bind_this().map(Arc::from),
         style: Arc::new(node.computed_style.clone()),
         layout: node.layout,
         state: node.state,

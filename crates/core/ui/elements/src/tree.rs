@@ -317,6 +317,58 @@ pub struct WidgetNodeAuthored {
     template_bindings: Option<Arc<TemplateBindings>>,
     /// Shell-owned composition flags that must survive memoized subtree reuse.
     composition: WidgetCompositionMetadata,
+    /// The script variable a `bind:this={name}` binding publishes this node as.
+    bind_this: Option<Arc<str>>,
+    /// The script variable a disclosure's `open` is two-way bound to.
+    open_binding: Option<OpenBinding>,
+    /// The `.mesh` source file that authored this node, for inspection.
+    source_file: Option<Arc<str>>,
+    /// The module that contributed this node into a slot.
+    slot_source: Option<Arc<str>>,
+}
+
+/// A disclosure's `open={variable}` binding, written back when the shell
+/// opens or closes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenBinding {
+    pub variable: Arc<str>,
+    /// The component instance whose script owns `variable`; `None` for the
+    /// surface root's script.
+    pub owner: Option<Arc<str>>,
+}
+
+/// The IME preedit spliced into an input's displayed value, as byte offsets
+/// into that value.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct InputPreedit {
+    pub start: usize,
+    pub end: usize,
+    pub cursor_begin: usize,
+    pub cursor_end: usize,
+}
+
+/// A text selection projected onto the selectable `<text>` that owns its
+/// anchor. Points are surface coordinates.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TextSelection {
+    /// Theme colour values, parsed by the painter.
+    pub background: Arc<str>,
+    pub foreground: Arc<str>,
+    pub anchor: (f32, f32),
+    pub focus: (f32, f32),
+    /// The text origin the points were measured against.
+    pub text_origin: (f32, f32),
+}
+
+impl std::hash::Hash for TextSelection {
+    fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+        self.background.hash(hasher);
+        self.foreground.hash(hasher);
+        for (x, y) in [self.anchor, self.focus, self.text_origin] {
+            x.to_bits().hash(hasher);
+            y.to_bits().hash(hasher);
+        }
+    }
 }
 
 /// The template sources of an element's bound properties, recorded at build
@@ -360,6 +412,8 @@ impl TemplateBindings {
 pub struct WidgetCompositionMetadata {
     pub promoted_popover: bool,
     pub promoted_window: bool,
+    /// Generated component-error content; the shell constrains its layout.
+    pub error_placeholder: bool,
 }
 
 /// A node produced by evaluating a template against script state.
@@ -373,6 +427,10 @@ pub struct WidgetNode {
     pub state: NodeState,
     /// Typed runtime scroll state, kept out of the string attribute map.
     pub scroll_metrics: Option<WidgetScrollMetrics>,
+    /// Set by the shell on the focused input while an IME composes.
+    pub input_preedit: Option<InputPreedit>,
+    /// Set by the shell on the selectable text holding the selection anchor.
+    pub text_selection: Option<Arc<TextSelection>>,
     /// Stable runtime identity for this node, kept out of the string attribute map.
     mesh_key: Option<String>,
     /// Consumed while assigning shell runtime keys; never exposed to styles.
@@ -494,6 +552,8 @@ impl WidgetNode {
             accessibility: AccessibilityInfo::default(),
             state: NodeState::default(),
             scroll_metrics: None,
+            input_preedit: None,
+            text_selection: None,
             mesh_key: None,
             loop_identity: None,
             cached_class_attr: None,
@@ -515,6 +575,10 @@ impl WidgetNode {
                 service_field_reads: Vec::new(),
                 template_bindings: None,
                 composition: WidgetCompositionMetadata::default(),
+                bind_this: None,
+                open_binding: None,
+                source_file: None,
+                slot_source: None,
             }),
         }
     }
@@ -674,9 +738,7 @@ impl WidgetNode {
     }
 
     pub fn mesh_key(&self) -> Option<&str> {
-        self.mesh_key
-            .as_deref()
-            .or_else(|| self.attributes.get("_mesh_key").map(String::as_str))
+        self.mesh_key.as_deref()
     }
 
     pub fn has_mesh_key(&self) -> bool {
@@ -721,29 +783,51 @@ impl WidgetNode {
     }
 
     pub fn module_id(&self) -> Option<&str> {
-        self.module_id
-            .as_deref()
-            .or_else(|| self.attributes.get("_mesh_module_id").map(String::as_str))
+        self.module_id.as_deref()
     }
 
     pub fn resolved_scroll_metrics(&self) -> WidgetScrollMetrics {
-        if let Some(scroll_metrics) = self.scroll_metrics {
-            return scroll_metrics;
-        }
-        let value = |key: &str| {
-            self.attributes
-                .get(key)
-                .and_then(|value| value.parse::<f32>().ok())
-                .unwrap_or(0.0)
-        };
-        WidgetScrollMetrics {
-            x: value("_mesh_scroll_x"),
-            y: value("_mesh_scroll_y"),
-            max_x: value("_mesh_scroll_max_x"),
-            max_y: value("_mesh_scroll_max_y"),
-            content_width: value("_mesh_content_width"),
-            content_height: value("_mesh_content_height"),
-        }
+        self.scroll_metrics.unwrap_or_default()
+    }
+
+    pub fn mark_error_placeholder(&mut self) {
+        self.composition.error_placeholder = true;
+    }
+
+    pub fn is_error_placeholder(&self) -> bool {
+        self.composition.error_placeholder
+    }
+
+    pub fn set_bind_this(&mut self, name: impl Into<Arc<str>>) {
+        self.bind_this = Some(name.into());
+    }
+
+    pub fn bind_this(&self) -> Option<&str> {
+        self.bind_this.as_deref()
+    }
+
+    pub fn set_open_binding(&mut self, binding: OpenBinding) {
+        self.open_binding = Some(binding);
+    }
+
+    pub fn open_binding(&self) -> Option<&OpenBinding> {
+        self.open_binding.as_ref()
+    }
+
+    pub fn set_source_file(&mut self, path: impl Into<Arc<str>>) {
+        self.source_file = Some(path.into());
+    }
+
+    pub fn source_file(&self) -> Option<&str> {
+        self.source_file.as_deref()
+    }
+
+    pub fn set_slot_source(&mut self, module_id: impl Into<Arc<str>>) {
+        self.slot_source = Some(module_id.into());
+    }
+
+    pub fn slot_source(&self) -> Option<&str> {
+        self.slot_source.as_deref()
     }
 
     pub fn refresh_class_tokens_cache(&mut self) {
@@ -833,6 +917,8 @@ mod tests {
             accessibility: node.accessibility.clone(),
             state: node.state,
             scroll_metrics: node.scroll_metrics,
+            input_preedit: node.input_preedit,
+            text_selection: node.text_selection.clone(),
             mesh_key: node.mesh_key.clone(),
             loop_identity: node.loop_identity.clone(),
             cached_class_attr: node.cached_class_attr.clone(),
@@ -1055,22 +1141,6 @@ mod tests {
     }
 
     #[test]
-    fn mesh_key_uses_typed_field_before_legacy_attribute() {
-        let mut node = WidgetNode::new("button");
-        assert_eq!(node.mesh_key(), None);
-
-        node.attributes
-            .insert("_mesh_key".into(), "legacy/path".into());
-        assert_eq!(node.mesh_key(), Some("legacy/path"));
-
-        node.set_mesh_key("typed/path");
-        assert_eq!(node.mesh_key(), Some("typed/path"));
-
-        node.clear_mesh_key();
-        assert_eq!(node.mesh_key(), Some("legacy/path"));
-    }
-
-    #[test]
     fn widget_tree_validation_accepts_unique_runtime_and_source_identity() {
         let mut root = WidgetNode::new("box");
         let mut authored_grid = WidgetNode::new("box");
@@ -1133,21 +1203,5 @@ mod tests {
                 && runtime_tag == "button"
                 && expected_runtime_tag == "box"
         ));
-    }
-
-    #[test]
-    fn module_id_uses_typed_field_before_legacy_attribute() {
-        let mut node = WidgetNode::new("button");
-        assert_eq!(node.module_id(), None);
-
-        node.attributes
-            .insert("_mesh_module_id".into(), "@legacy/module".into());
-        assert_eq!(node.module_id(), Some("@legacy/module"));
-
-        node.set_module_id("@typed/module");
-        assert_eq!(node.module_id(), Some("@typed/module"));
-
-        node.clear_module_id();
-        assert_eq!(node.module_id(), Some("@legacy/module"));
     }
 }

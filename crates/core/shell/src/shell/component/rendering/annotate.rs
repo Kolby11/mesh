@@ -169,11 +169,7 @@ pub(in crate::shell::component) fn constrain_error_placeholders(node: &mut Widge
 }
 
 fn constrain_error_placeholder_node(node: &mut WidgetNode) {
-    if node
-        .authored_payload()
-        .attributes
-        .contains_key(ERROR_PLACEHOLDER_MARKER)
-    {
+    if node.is_error_placeholder() {
         node.computed_style.min_width = mesh_core_elements::Dimension::Px(0.0);
         node.computed_style.max_width =
             mesh_core_elements::Dimension::Px(ERROR_PLACEHOLDER_MAX_WIDTH);
@@ -281,36 +277,16 @@ pub(super) fn annotate_selected_text_node(
             .get("selectable")
             .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1"));
     if matches_selection {
-        node.attributes.insert(
-            "_mesh_selection_background".into(),
-            selection_background.to_string(),
-        );
-        node.attributes.insert(
-            "_mesh_selection_foreground".into(),
-            selection_foreground.to_string(),
-        );
-        node.attributes.insert(
-            "_mesh_selection_anchor_x".into(),
-            format!("{:.2}", selection.anchor.x),
-        );
-        node.attributes.insert(
-            "_mesh_selection_anchor_y".into(),
-            format!("{:.2}", selection.anchor.y),
-        );
-        node.attributes.insert(
-            "_mesh_selection_focus_x".into(),
-            format!("{:.2}", selection.focus.x),
-        );
-        node.attributes.insert(
-            "_mesh_selection_focus_y".into(),
-            format!("{:.2}", selection.focus.y),
-        );
-        let text_x = node.layout.x + node.computed_style.padding.left;
-        let text_y = node.layout.y + node.computed_style.padding.top;
-        node.attributes
-            .insert("_mesh_selection_text_x".into(), format!("{text_x:.2}"));
-        node.attributes
-            .insert("_mesh_selection_text_y".into(), format!("{text_y:.2}"));
+        node.text_selection = Some(std::sync::Arc::new(mesh_core_elements::TextSelection {
+            background: selection_background.into(),
+            foreground: selection_foreground.into(),
+            anchor: (selection.anchor.x, selection.anchor.y),
+            focus: (selection.focus.x, selection.focus.y),
+            text_origin: (
+                node.layout.x + node.computed_style.padding.left,
+                node.layout.y + node.computed_style.padding.top,
+            ),
+        }));
         return true;
     }
 

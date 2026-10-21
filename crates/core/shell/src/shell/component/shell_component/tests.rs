@@ -138,7 +138,7 @@ fn metrics(surface_area: u64) -> DisplayListMetrics {
 
 fn keyed_node(tag: &str, key: &str, x: f32, y: f32, width: f32, height: f32) -> WidgetNode {
     let mut node = WidgetNode::new(tag);
-    node.attributes.insert("_mesh_key".into(), key.into());
+    node.set_mesh_key(key);
     node.layout.x = x;
     node.layout.y = y;
     node.layout.width = width;

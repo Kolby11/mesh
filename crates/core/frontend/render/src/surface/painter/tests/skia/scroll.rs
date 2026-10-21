@@ -296,7 +296,7 @@ fn retained_scroll_reveals_content_and_matches_fresh_full_paint() {
         );
         outer.id = 2;
         outer.computed_style.overflow_y = Overflow::Hidden;
-        outer.attributes.insert("_mesh_scroll_y".into(), "0".into());
+        outer.scroll_metrics.get_or_insert_default().y = 0.0;
         for (index, y) in [12.0, 44.0, 82.0, 120.0].into_iter().enumerate() {
             let mut child = node(
                 "box",
@@ -328,9 +328,7 @@ fn retained_scroll_reveals_content_and_matches_fresh_full_paint() {
         );
         nested.id = 7;
         nested.computed_style.overflow_y = Overflow::Hidden;
-        nested
-            .attributes
-            .insert("_mesh_scroll_y".into(), "0".into());
+        nested.scroll_metrics.get_or_insert_default().y = 0.0;
         let mut inner = node(
             "box",
             LayoutRect {
@@ -397,12 +395,11 @@ fn retained_scroll_reveals_content_and_matches_fresh_full_paint() {
         .into_iter()
         .enumerate()
         {
-            root.children[0]
-                .attributes
-                .insert("_mesh_scroll_y".into(), outer_offset.to_string());
+            root.children[0].scroll_metrics.get_or_insert_default().y = outer_offset;
             root.children[0].children[4]
-                .attributes
-                .insert("_mesh_scroll_y".into(), inner_offset.to_string());
+                .scroll_metrics
+                .get_or_insert_default()
+                .y = inner_offset;
             if step == 1 {
                 root.children[0].children[2].computed_style.background_color =
                     Color::from_hex("#20d060").unwrap();

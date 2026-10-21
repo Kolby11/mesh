@@ -829,12 +829,11 @@ where
 /// core disclosure controller can write its open/close decisions back to the
 /// owning instance. Only a bare identifier is writable; any other expression
 /// leaves `openchange` as the only channel.
-fn record_open_binding(
+fn open_binding(
     source: &[Attribute],
     owner_instance: Option<&str>,
-    attributes: &mut mesh_core_elements::AttributeMap,
-) {
-    let Some(variable) = source.iter().find_map(|attribute| match &attribute.value {
+) -> Option<mesh_core_elements::OpenBinding> {
+    let variable = source.iter().find_map(|attribute| match &attribute.value {
         AttributeValue::Binding(binding) | AttributeValue::TwoWayBinding(binding)
             if attribute.name == "open" =>
         {
@@ -847,13 +846,11 @@ fn record_open_binding(
             identifier.then_some(binding)
         }
         _ => None,
-    }) else {
-        return;
-    };
-    attributes.insert("_mesh_open_binding".into(), variable.to_string());
-    if let Some(owner) = owner_instance {
-        attributes.insert("_mesh_open_owner".into(), owner.to_string());
-    }
+    })?;
+    Some(mesh_core_elements::OpenBinding {
+        variable: variable.into(),
+        owner: owner_instance.map(Into::into),
+    })
 }
 
 fn build_element_node(
@@ -891,22 +888,21 @@ fn build_element_node(
             composition,
             build_style.namespace_handlers,
         );
-    if let Some(binding) = element.attributes.iter().find_map(|attribute| {
+    let bind_this = element.attributes.iter().find_map(|attribute| {
         if let AttributeValue::InstanceBinding(binding) = &attribute.value {
             Some(binding.as_str())
         } else {
             None
         }
-    }) {
-        attributes.insert("_mesh_bind_this".into(), binding.to_string());
-    }
-    if matches!(source_tag, "popover" | "dialog" | "sheet" | "menu") {
-        record_open_binding(
-            &element.attributes,
-            build_style.namespace_handlers.then_some(instance_key),
-            &mut attributes,
-        );
-    }
+    });
+    let open_binding = matches!(source_tag, "popover" | "dialog" | "sheet" | "menu")
+        .then(|| {
+            open_binding(
+                &element.attributes,
+                build_style.namespace_handlers.then_some(instance_key),
+            )
+        })
+        .flatten();
     attributes
         .entry("data-mesh-element".into())
         .or_insert_with(|| source_tag.to_string());
@@ -955,6 +951,12 @@ fn build_element_node(
     let mut node = WidgetNode::new(tag);
     attach_module_id(&mut node, &manifest.package.id);
     node.attributes = attributes;
+    if let Some(bind_this) = bind_this {
+        node.set_bind_this(bind_this);
+    }
+    if let Some(open_binding) = open_binding {
+        node.set_open_binding(open_binding);
+    }
     node.event_handlers = event_handlers;
     node.event_handler_calls = event_handler_calls;
     node.computed_style = computed_style;

@@ -45,18 +45,10 @@ fn rebuilt_display_node_retains_unchanged_text_allocation() {
 fn input_display_payload_preserves_preedit_decoration_range() {
     let mut input = node(1, "input", 0.0, 0.0, 160.0, 32.0);
     input.attributes.insert("value".into(), "A🙂候B".into());
-    input
-        .attributes
-        .insert("_mesh_preedit_start".into(), "5".into());
-    input
-        .attributes
-        .insert("_mesh_preedit_end".into(), "8".into());
-    input
-        .attributes
-        .insert("_mesh_preedit_cursor_begin".into(), "5".into());
-    input
-        .attributes
-        .insert("_mesh_preedit_cursor_end".into(), "8".into());
+    input.input_preedit.get_or_insert_default().start = 5;
+    input.input_preedit.get_or_insert_default().end = 8;
+    input.input_preedit.get_or_insert_default().cursor_begin = 5;
+    input.input_preedit.get_or_insert_default().cursor_end = 8;
 
     let DisplayPaintContent::Input(payload) = build_paint_content(&input) else {
         panic!("input node must produce input paint content");

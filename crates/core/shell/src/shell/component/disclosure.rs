@@ -155,13 +155,12 @@ pub(super) fn popover_anchor_reference(popover: &WidgetNode) -> Option<&str> {
 /// or `bind:this` binding.
 pub(super) fn node_matches_reference(node: &WidgetNode, reference: &str) -> bool {
     node.mesh_key().is_some_and(|key| key == reference)
-        || ["ref", "id", "bind:this", "_mesh_bind_this"]
-            .into_iter()
-            .any(|name| {
-                node.attributes
-                    .get(name)
-                    .is_some_and(|value| value == reference)
-            })
+        || node.bind_this() == Some(reference)
+        || ["ref", "id", "bind:this"].into_iter().any(|name| {
+            node.attributes
+                .get(name)
+                .is_some_and(|value| value == reference)
+        })
 }
 
 fn find_key_by_reference<'a>(node: &'a WidgetNode, reference: &str) -> Option<&'a str> {
@@ -520,11 +519,9 @@ impl FrontendSurfaceComponent {
         }
         self.sync_expanded_triggers();
         let mut requests = Vec::new();
-        if let Some(variable) = popover.attributes.get("_mesh_open_binding") {
-            let owner = popover
-                .attributes
-                .get("_mesh_open_owner")
-                .map(String::as_str);
+        if let Some(binding) = popover.open_binding() {
+            let variable = binding.variable.as_ref();
+            let owner = binding.owner.as_deref();
             requests.extend(self.run_script_call(owner, "openchange", |script_ctx| {
                 script_ctx
                     .assign_global(variable, &serde_json::json!(open))

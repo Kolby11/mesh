@@ -1097,7 +1097,7 @@ mod tests {
     fn render_object_tree_distinguishes_scroll_offsets_from_geometry() {
         let mut root = WidgetNode::new("scroll");
         root.id = 1;
-        root.attributes.insert("_mesh_scroll_x".into(), "0".into());
+        root.scroll_metrics.get_or_insert_default().x = 0.0;
         let mut child = WidgetNode::new("text");
         child.id = 2;
         root.children.push(child);
@@ -1105,7 +1105,7 @@ mod tests {
         let mut tree = RenderObjectTree::default();
         tree.update(&root);
 
-        root.attributes.insert("_mesh_scroll_x".into(), "24".into());
+        root.scroll_metrics.get_or_insert_default().x = 24.0;
         let dirty = tree.update(&root);
 
         assert_eq!(dirty.geometry, 0);

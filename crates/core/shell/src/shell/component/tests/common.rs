@@ -1381,7 +1381,7 @@ pub(super) fn event_node(
     handlers: &[(&str, &str)],
 ) -> WidgetNode {
     let mut node = WidgetNode::new(tag);
-    node.attributes.insert("_mesh_key".into(), key.into());
+    node.set_mesh_key(key);
     node.layout.x = x;
     node.layout.y = y;
     node.layout.width = width;
@@ -1412,7 +1412,7 @@ pub(super) fn event_node_with_attrs(
 
 pub(super) fn root_with(children: Vec<WidgetNode>) -> WidgetNode {
     let mut root = WidgetNode::new("box");
-    root.attributes.insert("_mesh_key".into(), "root".into());
+    root.set_mesh_key("root");
     root.layout.width = 240.0;
     root.layout.height = 160.0;
     root.children = children.into();
@@ -1428,7 +1428,7 @@ pub(super) fn text_node(
     selectable: bool,
 ) -> WidgetNode {
     let mut node = WidgetNode::new("text");
-    node.attributes.insert("_mesh_key".into(), key.into());
+    node.set_mesh_key(key);
     node.attributes
         .insert("content".into(), "Selectable text".into());
     if selectable {

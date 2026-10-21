@@ -558,29 +558,33 @@ fn display_list_stores_compact_paint_payloads() {
     root.computed_style.transform.translate_x = 5.0;
     root.computed_style.transform.translate_y = 7.0;
     root.computed_style.overflow_x = Overflow::Scroll;
-    root.attributes
-        .insert("_mesh_scroll_max_x".into(), "40".into());
-    root.attributes
-        .insert("_mesh_content_width".into(), "120".into());
+    root.scroll_metrics.get_or_insert_default().max_x = 40.0;
+    root.scroll_metrics.get_or_insert_default().content_width = 120.0;
 
     let mut text = node(2, "text", 20.0, 30.0, 20.0, 10.0);
     text.attributes.insert("content".into(), "hello".into());
-    text.attributes
-        .insert("_mesh_selection_background".into(), "#112233".into());
-    text.attributes
-        .insert("_mesh_selection_foreground".into(), "#ddeeff".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_x".into(), "2".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_y".into(), "3".into());
-    text.attributes
-        .insert("_mesh_selection_focus_x".into(), "8".into());
-    text.attributes
-        .insert("_mesh_selection_focus_y".into(), "9".into());
-    text.attributes
-        .insert("_mesh_selection_text_x".into(), "1".into());
-    text.attributes
-        .insert("_mesh_selection_text_y".into(), "1".into());
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).background =
+        "#112233".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).foreground =
+        "#ddeeff".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .0 = 2.0;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .1 = 3.0;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .0 = 8.0;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .1 = 9.0;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .0 = 1.0;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .1 = 1.0;
     root.children.push(text);
 
     let mut list = RetainedDisplayList::default();

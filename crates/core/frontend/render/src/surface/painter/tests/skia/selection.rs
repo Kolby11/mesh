@@ -30,22 +30,28 @@ fn selection_paint_uses_selection_colors() {
         60.0,
         Color::from_hex("#111111").unwrap(),
     );
-    text.attributes
-        .insert("_mesh_selection_background".into(), "#00ff00".into());
-    text.attributes
-        .insert("_mesh_selection_foreground".into(), "#ff00ff".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_x".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_y".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_focus_x".into(), "1000.00".into());
-    text.attributes
-        .insert("_mesh_selection_focus_y".into(), "1000.00".into());
-    text.attributes
-        .insert("_mesh_selection_text_x".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_text_y".into(), "0.00".into());
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).background =
+        "#00ff00".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).foreground =
+        "#ff00ff".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .0 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .1 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .0 = 1000.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .1 = 1000.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .0 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .1 = 0.00;
     root.children = vec![text].into();
 
     let mut buffer = PixelBuffer::new(180, 80);
@@ -89,22 +95,28 @@ fn phase44_selection_paint_and_proof_use_theme_colors() {
         60.0,
         Color::from_hex("#111111").unwrap(),
     );
-    text.attributes
-        .insert("_mesh_selection_background".into(), "#00ff00".into());
-    text.attributes
-        .insert("_mesh_selection_foreground".into(), "#ff00ff".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_x".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_anchor_y".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_focus_x".into(), "1000.00".into());
-    text.attributes
-        .insert("_mesh_selection_focus_y".into(), "1000.00".into());
-    text.attributes
-        .insert("_mesh_selection_text_x".into(), "0.00".into());
-    text.attributes
-        .insert("_mesh_selection_text_y".into(), "0.00".into());
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).background =
+        "#00ff00".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).foreground =
+        "#ff00ff".into();
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .0 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .anchor
+        .1 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .0 = 1000.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .focus
+        .1 = 1000.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .0 = 0.00;
+    std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+        .text_origin
+        .1 = 0.00;
     root.children = vec![text].into();
 
     let mut list = RetainedDisplayList::default();
@@ -180,30 +192,28 @@ fn selection_paint_does_not_bleed_into_neighbors() {
         40.0,
         Color::from_hex("#111111").unwrap(),
     );
-    selected
-        .attributes
-        .insert("_mesh_selection_background".into(), "#00ff00".into());
-    selected
-        .attributes
-        .insert("_mesh_selection_foreground".into(), "#ff00ff".into());
-    selected
-        .attributes
-        .insert("_mesh_selection_anchor_x".into(), "0.00".into());
-    selected
-        .attributes
-        .insert("_mesh_selection_anchor_y".into(), "0.00".into());
-    selected
-        .attributes
-        .insert("_mesh_selection_focus_x".into(), "1000.00".into());
-    selected
-        .attributes
-        .insert("_mesh_selection_focus_y".into(), "1000.00".into());
-    selected
-        .attributes
-        .insert("_mesh_selection_text_x".into(), "0.00".into());
-    selected
-        .attributes
-        .insert("_mesh_selection_text_y".into(), "0.00".into());
+    std::sync::Arc::make_mut(selected.text_selection.get_or_insert_default()).background =
+        "#00ff00".into();
+    std::sync::Arc::make_mut(selected.text_selection.get_or_insert_default()).foreground =
+        "#ff00ff".into();
+    std::sync::Arc::make_mut(selected.text_selection.get_or_insert_default())
+        .anchor
+        .0 = 0.00;
+    std::sync::Arc::make_mut(selected.text_selection.get_or_insert_default())
+        .anchor
+        .1 = 0.00;
+    std::sync::Arc::make_mut(selected.text_selection.get_or_insert_default())
+        .focus
+        .0 = 1000.00;
+    std::sync::Arc::make_mut(selected.text_selection.get_or_insert_default())
+        .focus
+        .1 = 1000.00;
+    std::sync::Arc::make_mut(selected.text_selection.get_or_insert_default())
+        .text_origin
+        .0 = 0.00;
+    std::sync::Arc::make_mut(selected.text_selection.get_or_insert_default())
+        .text_origin
+        .1 = 0.00;
 
     let neighbor = text_node(
         "neighbor",

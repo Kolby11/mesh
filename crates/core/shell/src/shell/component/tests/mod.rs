@@ -273,10 +273,10 @@ fn last_service_trace_is_retained_only_for_debug_logging() {
 #[test]
 fn ref_metrics_keep_scroll_offsets_from_unpublished_ancestors() {
     let mut root = WidgetNode::new("box");
-    root.attributes.insert("_mesh_scroll_y".into(), "12".into());
+    root.scroll_metrics.get_or_insert_default().y = 12.0;
 
     let mut child = WidgetNode::new("button");
-    child.attributes.insert("_mesh_key".into(), "root/0".into());
+    child.set_mesh_key("root/0");
     child.attributes.insert("ref".into(), "action".into());
     child.layout.y = 30.0;
     child.layout.height = 10.0;
@@ -312,8 +312,7 @@ fn element_metrics_move_last_preserves_all_publications() {
     node.set_mesh_key("root/0");
     node.attributes.insert("id".into(), "by_id".into());
     node.attributes.insert("ref".into(), "by_ref".into());
-    node.attributes
-        .insert("_mesh_bind_this".into(), "by_binding".into());
+    node.set_bind_this("by_binding");
     node.layout.width = 120.0;
     node.layout.height = 32.0;
 

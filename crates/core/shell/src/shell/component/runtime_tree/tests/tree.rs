@@ -310,13 +310,10 @@ fn direct_snapshot_analysis_preserves_layout_dirty_detection() {
 fn direct_retained_update_panics_on_duplicate_node_ids() {
     let mut root = WidgetNode::new("row");
     root.id = 42;
-    root.attributes
-        .insert("_mesh_key".into(), "root".to_string());
+    root.set_mesh_key("root".to_string());
     let mut child = WidgetNode::new("button");
     child.id = 42;
-    child
-        .attributes
-        .insert("_mesh_key".into(), "root/0".to_string());
+    child.set_mesh_key("root/0".to_string());
     root.children.push(child);
 
     RetainedWidgetTree::default().update(&root);

@@ -718,8 +718,7 @@ fn intern(name: &str) -> Arc<str> {
 }
 
 /// Known attribute vocabulary: every contract-declared name (enforced by
-/// `well_known_covers_every_contract_attribute`), the runtime-internal
-/// `_mesh_*` keys, and the shell's annotations. The `match` lowers to a length
+/// `well_known_covers_every_contract_attribute`). The `match` lowers to a length
 /// switch, so the table grows without costing lookups.
 fn well_known(name: &str) -> Option<&'static str> {
     Some(match name {
@@ -813,29 +812,6 @@ fn well_known(name: &str) -> Option<&'static str> {
         "value" => "value",
         "variant" => "variant",
         "width" => "width",
-        "_mesh_bind_this" => "_mesh_bind_this",
-        "_mesh_content_height" => "_mesh_content_height",
-        "_mesh_content_width" => "_mesh_content_width",
-        "_mesh_error_placeholder" => "_mesh_error_placeholder",
-        "_mesh_focused" => "_mesh_focused",
-        "_mesh_key" => "_mesh_key",
-        "_mesh_module_id" => "_mesh_module_id",
-        "_mesh_scroll_max_x" => "_mesh_scroll_max_x",
-        "_mesh_scroll_max_y" => "_mesh_scroll_max_y",
-        "_mesh_scroll_x" => "_mesh_scroll_x",
-        "_mesh_scroll_y" => "_mesh_scroll_y",
-        "_mesh_selection_anchor_x" => "_mesh_selection_anchor_x",
-        "_mesh_selection_anchor_y" => "_mesh_selection_anchor_y",
-        "_mesh_selection_background" => "_mesh_selection_background",
-        "_mesh_selection_focus_x" => "_mesh_selection_focus_x",
-        "_mesh_selection_focus_y" => "_mesh_selection_focus_y",
-        "_mesh_selection_foreground" => "_mesh_selection_foreground",
-        "_mesh_selection_text_x" => "_mesh_selection_text_x",
-        "_mesh_selection_text_y" => "_mesh_selection_text_y",
-        "_mesh_slot_source" => "_mesh_slot_source",
-        "_mesh_source_file" => "_mesh_source_file",
-        "_mesh_surface_entering" => "_mesh_surface_entering",
-        "_mesh_surface_exiting" => "_mesh_surface_exiting",
         _ => return None,
     })
 }
@@ -904,7 +880,6 @@ mod tests {
         let names = [
             "class",
             "id",
-            "_mesh_key",
             "data-mesh-element",
             "aria-label",
             "zzz-unknown",
@@ -946,7 +921,6 @@ mod tests {
             "id",
             "style",
             "content",
-            "_mesh_key",
             "data-mesh-element",
             "aria-label",
             "value",

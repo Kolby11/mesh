@@ -215,12 +215,8 @@ fn focused_text_evidence(
         // Parley-derived anchor/focus take precedence when the feature is on;
         // fall back to the raw attribute values only when Parley returned None
         // (e.g. attrs absent — semantics identical to default build).
-        let anchor = anchor.or_else(|| {
-            selection_point(node, "_mesh_selection_anchor_x", "_mesh_selection_anchor_y")
-        });
-        let focus = focus.or_else(|| {
-            selection_point(node, "_mesh_selection_focus_x", "_mesh_selection_focus_y")
-        });
+        let anchor = anchor.or_else(|| selection_anchor(node));
+        let focus = focus.or_else(|| selection_focus(node));
         (shaped, anchor, focus)
     };
 
@@ -229,25 +225,37 @@ fn focused_text_evidence(
         let _ = &diagnostics; // unused without feature
         (
             format!("parley_text::{content}::shape=line_break_bidi_align"),
-            selection_point(node, "_mesh_selection_anchor_x", "_mesh_selection_anchor_y"),
-            selection_point(node, "_mesh_selection_focus_x", "_mesh_selection_focus_y"),
+            selection_anchor(node),
+            selection_focus(node),
         )
     };
 
     Some(FocusedTextEvidence {
         parley_text,
         content,
-        selection_background: node.attributes.get("_mesh_selection_background").cloned(),
-        selection_foreground: node.attributes.get("_mesh_selection_foreground").cloned(),
+        selection_background: node
+            .text_selection
+            .as_ref()
+            .map(|selection| selection.background.to_string()),
+        selection_foreground: node
+            .text_selection
+            .as_ref()
+            .map(|selection| selection.foreground.to_string()),
         selection_anchor,
         selection_focus,
     })
 }
 
-fn selection_point(node: &WidgetNode, x_key: &str, y_key: &str) -> Option<(f32, f32)> {
-    let x = node.attributes.get(x_key)?.parse::<f32>().ok()?;
-    let y = node.attributes.get(y_key)?.parse::<f32>().ok()?;
-    Some((x, y))
+fn selection_anchor(node: &WidgetNode) -> Option<(f32, f32)> {
+    node.text_selection
+        .as_ref()
+        .map(|selection| selection.anchor)
+}
+
+fn selection_focus(node: &WidgetNode) -> Option<(f32, f32)> {
+    node.text_selection
+        .as_ref()
+        .map(|selection| selection.focus)
 }
 
 fn focused_paint_evidence(
@@ -459,18 +467,22 @@ mod tests {
         );
         text.attributes
             .insert("content".into(), "selected text".into());
-        text.attributes
-            .insert("_mesh_selection_background".into(), "#112233".into());
-        text.attributes
-            .insert("_mesh_selection_foreground".into(), "#ddeeff".into());
-        text.attributes
-            .insert("_mesh_selection_anchor_x".into(), "2.0".into());
-        text.attributes
-            .insert("_mesh_selection_anchor_y".into(), "3.0".into());
-        text.attributes
-            .insert("_mesh_selection_focus_x".into(), "8.0".into());
-        text.attributes
-            .insert("_mesh_selection_focus_y".into(), "9.0".into());
+        std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).background =
+            "#112233".into();
+        std::sync::Arc::make_mut(text.text_selection.get_or_insert_default()).foreground =
+            "#ddeeff".into();
+        std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+            .anchor
+            .0 = 2.0;
+        std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+            .anchor
+            .1 = 3.0;
+        std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+            .focus
+            .0 = 8.0;
+        std::sync::Arc::make_mut(text.text_selection.get_or_insert_default())
+            .focus
+            .1 = 9.0;
         let snapshot = proof_snapshot(&text, RenderObjectDirtySummary::default());
         let proof_text = snapshot.nodes[0]
             .parley_text
@@ -585,10 +597,12 @@ mod tests {
     fn focused_text_evidence_default_build_selection_is_raw_attribute() {
         let mut node = WidgetNode::new("text");
         node.attributes.insert("content".into(), "Hi".to_string());
-        node.attributes
-            .insert("_mesh_selection_anchor_x".into(), "12.5".to_string());
-        node.attributes
-            .insert("_mesh_selection_anchor_y".into(), "3.0".to_string());
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .anchor
+            .0 = 12.5;
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .anchor
+            .1 = 3.0;
         node.layout = LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -606,14 +620,18 @@ mod tests {
         let mut node = WidgetNode::new("text");
         node.attributes
             .insert("content".to_string(), "Hello World".to_string());
-        node.attributes
-            .insert("_mesh_selection_anchor_x".to_string(), "20".to_string());
-        node.attributes
-            .insert("_mesh_selection_anchor_y".to_string(), "8".to_string());
-        node.attributes
-            .insert("_mesh_selection_focus_x".to_string(), "60".to_string());
-        node.attributes
-            .insert("_mesh_selection_focus_y".to_string(), "8".to_string());
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .anchor
+            .0 = 20.0;
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .anchor
+            .1 = 8.0;
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .focus
+            .0 = 60.0;
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default())
+            .focus
+            .1 = 8.0;
         node.layout = LayoutRect {
             x: 10.0,
             y: 5.0,
@@ -647,14 +665,10 @@ mod tests {
         let mut node = WidgetNode::new("text");
         node.attributes
             .insert("content".to_string(), "Hi".to_string());
-        node.attributes.insert(
-            "_mesh_selection_background".to_string(),
-            "rgba(0,0,255,0.5)".to_string(),
-        );
-        node.attributes.insert(
-            "_mesh_selection_foreground".to_string(),
-            "white".to_string(),
-        );
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default()).background =
+            "rgba(0,0,255,0.5)".into();
+        std::sync::Arc::make_mut(node.text_selection.get_or_insert_default()).foreground =
+            "white".into();
         node.layout = LayoutRect {
             x: 0.0,
             y: 0.0,

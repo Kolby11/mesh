@@ -823,7 +823,7 @@ mod tests {
 
     fn indexed_tree(rows: usize, columns: usize) -> WidgetNode {
         let mut root = WidgetNode::new("surface");
-        root.attributes.insert("_mesh_key".into(), "root".into());
+        root.set_mesh_key("root");
         root.layout = LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -832,8 +832,7 @@ mod tests {
         };
         for row_index in 0..rows {
             let mut row = WidgetNode::new("row");
-            row.attributes
-                .insert("_mesh_key".into(), format!("row-{row_index}"));
+            row.set_mesh_key(format!("row-{row_index}"));
             row.layout = LayoutRect {
                 x: 0.0,
                 y: row_index as f32 * 20.0,
@@ -842,10 +841,7 @@ mod tests {
             };
             for column_index in 0..columns {
                 let mut cell = WidgetNode::new("button");
-                cell.attributes.insert(
-                    "_mesh_key".into(),
-                    format!("cell-{row_index}-{column_index}"),
-                );
+                cell.set_mesh_key(format!("cell-{row_index}-{column_index}"));
                 cell.layout = LayoutRect {
                     x: column_index as f32 * 20.0,
                     y: row_index as f32 * 20.0,
@@ -915,9 +911,7 @@ mod tests {
         root.children[2]
             .attributes
             .insert("tooltip".into(), "Third row".into());
-        root.children[2]
-            .attributes
-            .insert("_mesh_scroll_x".into(), "5".into());
+        root.children[2].scroll_metrics.get_or_insert_default().x = 5.0;
         root.children[4].computed_style.transform.translate_x = 7.0;
         for y in (0..120).step_by(3) {
             for x in (0..160).step_by(3) {
@@ -943,7 +937,7 @@ mod tests {
     #[test]
     fn pointer_press_hit_matches_focusable_target_and_bounds() {
         let mut root = WidgetNode::new("surface");
-        root.attributes.insert("_mesh_key".into(), "root".into());
+        root.set_mesh_key("root");
         root.layout = LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -951,9 +945,7 @@ mod tests {
             height: 80.0,
         };
         let mut button = WidgetNode::new("button");
-        button
-            .attributes
-            .insert("_mesh_key".into(), "button".into());
+        button.set_mesh_key("button");
         button.layout = LayoutRect {
             x: 24.0,
             y: 20.0,
@@ -981,7 +973,7 @@ mod tests {
     #[test]
     fn pointer_hits_the_sibling_painted_on_top_by_z_index() {
         let mut root = WidgetNode::new("surface");
-        root.attributes.insert("_mesh_key".into(), "root".into());
+        root.set_mesh_key("root");
         root.layout = LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -990,7 +982,7 @@ mod tests {
         };
         for (key, z_index) in [("raised", 1), ("authored-last", 0)] {
             let mut button = WidgetNode::new("button");
-            button.attributes.insert("_mesh_key".into(), key.into());
+            button.set_mesh_key(key);
             button.computed_style.z_index = z_index;
             button.layout = LayoutRect {
                 x: 10.0,
@@ -1013,7 +1005,7 @@ mod tests {
     #[test]
     fn pointer_press_hit_uses_clickable_ancestor_when_no_focusable_node_matches() {
         let mut root = WidgetNode::new("surface");
-        root.attributes.insert("_mesh_key".into(), "root".into());
+        root.set_mesh_key("root");
         root.layout = LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -1021,9 +1013,7 @@ mod tests {
             height: 40.0,
         };
         let mut clickable = WidgetNode::new("box");
-        clickable
-            .attributes
-            .insert("_mesh_key".into(), "clickable".into());
+        clickable.set_mesh_key("clickable");
         clickable
             .event_handlers
             .insert("click".into(), "onClick".into());
@@ -1034,7 +1024,7 @@ mod tests {
             height: 25.0,
         };
         let mut label = WidgetNode::new("label");
-        label.attributes.insert("_mesh_key".into(), "label".into());
+        label.set_mesh_key("label");
         label.layout = LayoutRect {
             x: 12.0,
             y: 7.0,
@@ -1058,7 +1048,7 @@ mod tests {
     #[test]
     fn pointer_event_handler_hit_matches_nearest_handler_ancestor() {
         let mut root = WidgetNode::new("surface");
-        root.attributes.insert("_mesh_key".into(), "root".into());
+        root.set_mesh_key("root");
         root.layout = LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -1066,9 +1056,7 @@ mod tests {
             height: 80.0,
         };
         let mut scroll_owner = WidgetNode::new("box");
-        scroll_owner
-            .attributes
-            .insert("_mesh_key".into(), "scroll-owner".into());
+        scroll_owner.set_mesh_key("scroll-owner");
         scroll_owner
             .event_handlers
             .insert("scroll".into(), "onScroll".into());
@@ -1079,7 +1067,7 @@ mod tests {
             height: 40.0,
         };
         let mut label = WidgetNode::new("label");
-        label.attributes.insert("_mesh_key".into(), "label".into());
+        label.set_mesh_key("label");
         label.layout = LayoutRect {
             x: 20.0,
             y: 20.0,
@@ -1139,9 +1127,7 @@ mod tests {
             .attributes
             .insert("tooltip".into(), "Inherited row tooltip".into());
         root.children[4].computed_style.transform.translate_x = 7.0;
-        root.children[4]
-            .attributes
-            .insert("_mesh_scroll_x".into(), "3".into());
+        root.children[4].scroll_metrics.get_or_insert_default().x = 3.0;
 
         let (owner_key, text) = find_tooltip_by_key(&root, "cell-4-3").unwrap();
         let expected_owner = find_node_by_key(&root, &owner_key).unwrap();
@@ -1203,7 +1189,7 @@ mod tests {
         let mut root = WidgetNode::new("box");
         root.attributes.insert("tooltip".into(), "Anonymous".into());
         let mut child = WidgetNode::new("text");
-        child.attributes.insert("_mesh_key".into(), "child".into());
+        child.set_mesh_key("child");
         root.children.push(child);
 
         let mut cache = TooltipTargetCache::default();
@@ -1262,9 +1248,7 @@ mod tests {
             height: 100.0,
         };
         let mut button = WidgetNode::new("button");
-        button
-            .attributes
-            .insert("_mesh_key".into(), "button".into());
+        button.set_mesh_key("button");
         button.layout = LayoutRect {
             x: 50.0,
             y: 20.0,
@@ -1296,9 +1280,7 @@ mod tests {
             height: 80.0,
         };
         let mut button = WidgetNode::new("button");
-        button
-            .attributes
-            .insert("_mesh_key".into(), "collapsed".into());
+        button.set_mesh_key("collapsed");
         button.layout = LayoutRect {
             x: 20.0,
             y: 20.0,
@@ -1338,7 +1320,7 @@ mod tests {
         parent.computed_style.overflow_y = mesh_core_elements::style::Overflow::Hidden;
 
         let mut child = WidgetNode::new("button");
-        child.attributes.insert("_mesh_key".into(), "child".into());
+        child.set_mesh_key("child");
         child.layout = LayoutRect {
             x: 80.0,
             y: 80.0,
@@ -1375,9 +1357,7 @@ mod tests {
         };
 
         let mut disabled = WidgetNode::new("button");
-        disabled
-            .attributes
-            .insert("_mesh_key".into(), "disabled".into());
+        disabled.set_mesh_key("disabled");
         disabled
             .attributes
             .insert("aria-disabled".into(), "true".into());
@@ -1396,7 +1376,7 @@ mod tests {
         root.children.push(disabled);
 
         let mut inert = WidgetNode::new("box");
-        inert.attributes.insert("_mesh_key".into(), "inert".into());
+        inert.set_mesh_key("inert");
         inert.attributes.insert("inert".into(), "true".into());
         inert.layout = LayoutRect {
             x: 100.0,
@@ -1411,9 +1391,7 @@ mod tests {
             ..Default::default()
         });
         let mut descendant = WidgetNode::new("button");
-        descendant
-            .attributes
-            .insert("_mesh_key".into(), "inert-descendant".into());
+        descendant.set_mesh_key("inert-descendant");
         descendant
             .event_handlers
             .insert("click".into(), "activate".into());
@@ -1445,13 +1423,13 @@ mod tests {
     #[test]
     fn phase87_tooltip_attribute_participates_in_inherited_tooltip_lookup() {
         let mut owner = WidgetNode::new("box");
-        owner.attributes.insert("_mesh_key".into(), "owner".into());
+        owner.set_mesh_key("owner");
         owner
             .attributes
             .insert("tooltip".into(), "Open details".into());
 
         let mut child = WidgetNode::new("icon");
-        child.attributes.insert("_mesh_key".into(), "child".into());
+        child.set_mesh_key("child");
         owner.children.push(child);
 
         assert_eq!(
@@ -1467,7 +1445,7 @@ mod tests {
     #[test]
     fn tooltip_disabled_attribute_suppresses_title_and_accessible_label() {
         let mut node = WidgetNode::new("button");
-        node.attributes.insert("_mesh_key".into(), "button".into());
+        node.set_mesh_key("button");
         node.attributes.insert("title".into(), "Open".into());
         node.attributes.insert("aria-label".into(), "Open".into());
         node.attributes
@@ -1485,9 +1463,7 @@ mod tests {
         // AT-only accessible name, per docs/spec/09-accessibility.md) must
         // not also surface as a hover tooltip repeating it.
         let mut button = WidgetNode::new("button");
-        button
-            .attributes
-            .insert("_mesh_key".into(), "clock-button".into());
+        button.set_mesh_key("clock-button");
         button
             .attributes
             .insert("aria-label".into(), "10:32 AM, Monday August 24".into());
@@ -1501,9 +1477,7 @@ mod tests {
     #[test]
     fn title_attribute_still_wins_even_with_visible_text_children() {
         let mut button = WidgetNode::new("button");
-        button
-            .attributes
-            .insert("_mesh_key".into(), "button".into());
+        button.set_mesh_key("button");
         button
             .attributes
             .insert("title".into(), "Open audio controls".into());
@@ -1520,9 +1494,7 @@ mod tests {
     #[test]
     fn container_without_own_tooltip_does_not_fall_back_to_aggregated_children_label() {
         let mut container = WidgetNode::new("row");
-        container
-            .attributes
-            .insert("_mesh_key".into(), "container".into());
+        container.set_mesh_key("container");
         // Simulates the ARIA-style accessible name a wrapper gets once its
         // accessibility snapshot concatenates every descendant's visible
         // text — meaningful for assistive tech, not for a hover tooltip.
@@ -1537,7 +1509,7 @@ mod tests {
     #[test]
     fn a_text_leaf_does_not_shadow_its_control_tooltip_with_its_own_content() {
         let mut label = WidgetNode::new("text");
-        label.attributes.insert("_mesh_key".into(), "label".into());
+        label.set_mesh_key("label");
         label.attributes.insert("content".into(), "Wi-Fi".into());
         label.accessibility.label = Some("Wi-Fi".into());
         label.layout = LayoutRect {
@@ -1549,7 +1521,7 @@ mod tests {
         assert_eq!(node_tooltip_text(&label), None);
 
         let mut button = WidgetNode::new("button");
-        button.attributes.insert("_mesh_key".into(), "wifi".into());
+        button.set_mesh_key("wifi");
         button
             .attributes
             .insert("title".into(), "Open the Wi-Fi page".into());
@@ -1572,7 +1544,7 @@ mod tests {
     #[test]
     fn leaf_node_still_falls_back_to_accessible_label_for_tooltip() {
         let mut leaf = WidgetNode::new("button");
-        leaf.attributes.insert("_mesh_key".into(), "leaf".into());
+        leaf.set_mesh_key("leaf");
         leaf.accessibility.label = Some("Mute".into());
 
         assert_eq!(node_tooltip_text(&leaf).as_deref(), Some("Mute"));
@@ -1581,7 +1553,7 @@ mod tests {
     #[test]
     fn hidden_portal_placeholder_does_not_block_previous_sibling_hit_target() {
         let mut root = WidgetNode::new("stack");
-        root.attributes.insert("_mesh_key".into(), "root".into());
+        root.set_mesh_key("root");
         root.layout = LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -1590,9 +1562,7 @@ mod tests {
         };
 
         let mut button = WidgetNode::new("button");
-        button
-            .attributes
-            .insert("_mesh_key".into(), "button".into());
+        button.set_mesh_key("button");
         button
             .event_handlers
             .insert("click".into(), "onClick".into());
@@ -1604,9 +1574,7 @@ mod tests {
         };
 
         let mut placeholder = WidgetNode::new("box");
-        placeholder
-            .attributes
-            .insert("_mesh_key".into(), "portal".into());
+        placeholder.set_mesh_key("portal");
         placeholder
             .attributes
             .insert("hidden".into(), "true".into());

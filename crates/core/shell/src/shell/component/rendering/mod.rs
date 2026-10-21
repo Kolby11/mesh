@@ -714,26 +714,22 @@ impl FrontendSurfaceComponent {
         };
         if self.surface_exiting {
             append_class_recursive(tree, "mesh-surface-exiting");
-            tree.attributes
-                .insert("_mesh_surface_exiting".into(), "true".into());
+            tree.state.insert(NodeState::SURFACE_EXITING);
         }
         if self.surface_entering {
             append_class_recursive(tree, "mesh-surface-entering");
-            tree.attributes
-                .insert("_mesh_surface_entering".into(), "true".into());
+            tree.state.insert(NodeState::SURFACE_ENTERING);
         }
         for node_key in &self.closing_child_keys {
             if let Some(node) = find_node_by_key_mut(tree, node_key) {
                 append_class_recursive(node, "mesh-surface-exiting");
-                node.attributes
-                    .insert("_mesh_surface_exiting".into(), "true".into());
+                node.state.insert(NodeState::SURFACE_EXITING);
             }
         }
         for node_key in &self.entering_child_keys {
             if let Some(node) = find_node_by_key_mut(tree, node_key) {
                 append_class_recursive(node, "mesh-surface-entering");
-                node.attributes
-                    .insert("_mesh_surface_entering".into(), "true".into());
+                node.state.insert(NodeState::SURFACE_ENTERING);
             }
         }
         if trigger_kind == "rebuild" {
@@ -1351,8 +1347,7 @@ impl FrontendSurfaceComponent {
                 .is_none_or(|selection| selection.anchor.node_key != previous.anchor.node_key)
             {
                 if let Some(node) = find_node_by_key_mut(tree, &previous.anchor.node_key) {
-                    node.attributes
-                        .retain(|key, _| !key.starts_with("_mesh_selection_"));
+                    node.text_selection = None;
                     dirty.insert(node.id);
                 }
             }

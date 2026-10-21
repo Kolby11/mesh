@@ -615,11 +615,7 @@ fn inspected_element_json(
     fallback_source: &str,
 ) -> serde_json::Value {
     let style = &node.computed_style;
-    let source_file = node
-        .attributes
-        .get("_mesh_source_file")
-        .map(String::as_str)
-        .unwrap_or(fallback_source);
+    let source_file = node.source_file().unwrap_or(fallback_source);
     let source_tag = mesh_core_interaction::source_element_tag(node);
     serde_json::json!({
         "surface_id": surface_id,

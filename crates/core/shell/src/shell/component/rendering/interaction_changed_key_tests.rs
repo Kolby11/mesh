@@ -4,7 +4,7 @@ use mesh_core_component::style::StyleValue;
 fn keyed_node(key: &str, children: Vec<WidgetNode>) -> WidgetNode {
     let mut node = WidgetNode::new("box");
     node.id = crate::shell::component::runtime_tree::stable_runtime_node_id(key);
-    node.attributes.insert("_mesh_key".into(), key.into());
+    node.set_mesh_key(key);
     node.children = children.into();
     node
 }
@@ -232,7 +232,7 @@ fn keyed_selection_annotation_only_marks_selectable_text_target() {
     let target = "root/0".to_string();
     let selection = benchmark_selection(target.clone());
     let mut selectable = WidgetNode::new("text");
-    selectable.attributes.insert("_mesh_key".into(), target);
+    selectable.set_mesh_key(target);
     selectable
         .attributes
         .insert("selectable".into(), "true".into());
@@ -242,25 +242,15 @@ fn keyed_selection_annotation_only_marks_selectable_text_target() {
         "#112233",
         "#ffffff"
     ));
-    assert!(
-        selectable
-            .attributes
-            .contains_key("_mesh_selection_background")
-    );
+    assert!(selectable.text_selection.is_some());
 
     let mut non_selectable = WidgetNode::new("text");
-    non_selectable
-        .attributes
-        .insert("_mesh_key".into(), "root/0".into());
+    non_selectable.set_mesh_key("root/0");
     assert!(!annotate_selected_text_node(
         &mut non_selectable,
         &selection,
         "#112233",
         "#ffffff"
     ));
-    assert!(
-        !non_selectable
-            .attributes
-            .contains_key("_mesh_selection_background")
-    );
+    assert!(!non_selectable.text_selection.is_some());
 }

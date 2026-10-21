@@ -93,10 +93,7 @@ end
         .unwrap();
 
     let tree = component.last_tree.as_ref().expect("placeholder tree");
-    assert_eq!(
-        tree.attributes.get(ERROR_PLACEHOLDER_MARKER),
-        Some(&"true".to_string())
-    );
+    assert!(tree.is_error_placeholder());
     assert!(
         rendered_text(&component)
             .iter()
@@ -133,12 +130,7 @@ end
         .unwrap();
 
     let tree = component.last_tree.as_ref().expect("placeholder tree");
-    assert_eq!(
-        tree.attributes
-            .get(ERROR_PLACEHOLDER_MARKER)
-            .map(String::as_str),
-        Some("true")
-    );
+    assert!(tree.is_error_placeholder());
     let diagnostics = component.diagnostics.as_ref().expect("diagnostics handle");
     assert!(diagnostics.active_issues().iter().any(|issue| {
         issue.category == mesh_core_diagnostics::DiagnosticCategory::Runtime

@@ -259,15 +259,22 @@ pub(super) fn attributes_fingerprint(node: &WidgetNode) -> u64 {
     node.tag.hash(&mut hasher);
     node.module_id().hash(&mut hasher);
     for (key, value) in &node.attributes {
-        if is_typed_runtime_annotation_attribute(key) {
-            continue;
-        }
         if key == "content" && !node.children.is_empty() {
             continue;
         }
         key.hash(&mut hasher);
         value.hash(&mut hasher);
     }
+    node.bind_this().hash(&mut hasher);
+    node.open_binding()
+        .map(|binding| (&binding.variable, &binding.owner))
+        .hash(&mut hasher);
+    node.source_file().hash(&mut hasher);
+    node.slot_source().hash(&mut hasher);
+    node.is_error_placeholder().hash(&mut hasher);
+    node.input_preedit.hash(&mut hasher);
+    node.text_selection.hash(&mut hasher);
+    (node.state & (NodeState::SURFACE_ENTERING | NodeState::SURFACE_EXITING)).hash(&mut hasher);
     for (event, handler) in &node.event_handlers {
         event.hash(&mut hasher);
         handler.hash(&mut hasher);
@@ -338,20 +345,6 @@ pub(super) fn hash_accessibility_role(role: &AccessibilityRole, hasher: &mut imp
             value.hash(hasher);
         }
     }
-}
-
-pub(super) fn is_typed_runtime_annotation_attribute(key: &str) -> bool {
-    matches!(
-        key,
-        "_mesh_key"
-            | "_mesh_focused"
-            | "_mesh_scroll_x"
-            | "_mesh_scroll_y"
-            | "_mesh_scroll_max_x"
-            | "_mesh_scroll_max_y"
-            | "_mesh_content_width"
-            | "_mesh_content_height"
-    )
 }
 
 pub(super) fn hash_json_value(value: &serde_json::Value, hasher: &mut impl Hasher) {

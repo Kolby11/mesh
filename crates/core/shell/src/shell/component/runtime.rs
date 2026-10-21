@@ -2152,11 +2152,9 @@ pub(super) fn bounded_error_widget(message: impl Into<String>) -> WidgetNode {
     let mut node = WidgetNode::new("box");
     let mut text = WidgetNode::new("text");
     text.attributes.insert("content".into(), message.clone());
-    text.attributes
-        .insert(ERROR_PLACEHOLDER_MARKER.into(), "true".into());
+    text.mark_error_placeholder();
     node.attributes.insert("content".into(), message);
-    node.attributes
-        .insert(ERROR_PLACEHOLDER_MARKER.into(), "true".into());
+    node.mark_error_placeholder();
     node.children.push(text);
     node
 }

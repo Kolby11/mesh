@@ -403,7 +403,6 @@ pub(in crate::shell) fn tooltip_overlay_extra_for_content(width: u32, height: u3
     (extra_w, extra_h)
 }
 
-pub(super) const ERROR_PLACEHOLDER_MARKER: &str = "_mesh_error_placeholder";
 pub(super) const ERROR_PLACEHOLDER_MAX_WIDTH: f32 = 320.0;
 
 bitflags::bitflags! {
