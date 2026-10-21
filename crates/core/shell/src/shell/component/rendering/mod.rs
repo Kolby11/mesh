@@ -632,6 +632,7 @@ impl FrontendSurfaceComponent {
     ) {
         let _span =
             tracing::debug_span!("finalize_tree", surface = %self.id(), trigger_kind).entered();
+        let mut dirty_types = dirty_types;
         self.retained_update_dirty_roots = None;
         self.retained_update_dirty_nodes.clear();
         // Advance smooth-scroll animations before annotation reads scroll_offsets,
@@ -802,7 +803,10 @@ impl FrontendSurfaceComponent {
             } else {
                 InteractionChangedNodeIds::default()
             };
+        let patched_frame = !self.patched_binding_nodes.is_empty();
+        let patched_layout_class = std::mem::take(&mut self.patched_binding_layout);
         self.patched_binding_nodes.clear();
+        let mut scoped_layout_changed = false;
         let interaction_snapshot_valid = self.interaction_snapshot_valid;
         let index_cache = &mut self.cached_style_rule_index;
         let mut reused_retained_layout = false;
@@ -876,6 +880,7 @@ impl FrontendSurfaceComponent {
                             &affected_keys.affected,
                             preserve_surface_root,
                             &mut restyled,
+                            &mut scoped_layout_changed,
                         )
                         .then(|| {
                             apply_runtime_node_state_by_path(tree, snapshot, &restyled);
@@ -954,6 +959,18 @@ impl FrontendSurfaceComponent {
                 }
             }
             apply_runtime_attribute_state(tree);
+        }
+        // A patch invalidates layout conservatively; when the bound property
+        // is not layout-class and no re-resolved style changed a layout input,
+        // geometry is current and the sparse retained update applies.
+        if patched_frame
+            && scoped_restyled.is_some()
+            && !scoped_layout_changed
+            && !patched_layout_class
+            && dirty_types.contains(ComponentDirtyFlags::LAYOUT)
+        {
+            dirty_types.remove(ComponentDirtyFlags::LAYOUT);
+            reused_retained_layout = true;
         }
         let restyle_elapsed = restyle_started.elapsed();
         self.record_profiling_stage_with_elapsed(

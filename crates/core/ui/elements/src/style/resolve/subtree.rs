@@ -265,7 +265,8 @@ impl<'a> StyleResolver<'a> {
     ///
     /// Returns `false` without mutating the tree when a target's path no
     /// longer leads to it. Targets absent from the snapshot are not in the
-    /// tree and are ignored. With `surface_root`, the root keeps its style,
+    /// tree and are ignored. `layout_changed` is raised when a re-resolved
+    /// style differs in a layout input. With `surface_root`, the root keeps its style,
     /// matching [`Self::restyle_subtree_children_cached`].
     #[allow(clippy::too_many_arguments)]
     pub fn restyle_targets_by_path(
@@ -278,6 +279,7 @@ impl<'a> StyleResolver<'a> {
         targets: &std::collections::HashSet<crate::tree::NodeId>,
         surface_root: bool,
         restyled: &mut std::collections::HashSet<crate::tree::NodeId>,
+        layout_changed: &mut bool,
     ) -> bool {
         let Some(mut paths) = snapshot.live_paths(root, targets, || {
             crate::frame_work::visit(crate::frame_work::Pass::RestyleScan)
@@ -316,6 +318,7 @@ impl<'a> StyleResolver<'a> {
                 parent_style.as_ref(),
                 false,
                 restyled,
+                layout_changed,
             );
         }
         true
@@ -331,6 +334,7 @@ impl<'a> StyleResolver<'a> {
         parent_style: Option<&ParentInheritedStyle>,
         inherited_dirty: bool,
         restyled: &mut std::collections::HashSet<crate::tree::NodeId>,
+        layout_changed: &mut bool,
     ) {
         crate::frame_work::visit(crate::frame_work::Pass::RestyleScan);
         node.finalized_style_valid = false;
@@ -345,6 +349,7 @@ impl<'a> StyleResolver<'a> {
         if !reuse_node {
             node.finalized_accessibility_valid = false;
             let previous_inherited = ParentInheritedStyle::from(&node.computed_style);
+            let previous_style = (!*layout_changed).then(|| node.computed_style.clone());
             if !preserve_synthetic_surface_style(node, parent_style) {
                 let attrs = StyleNodeAttrs::from_node(node);
                 node.computed_style = self.resolve_node_style_with_attrs_indexed_inner(
@@ -360,6 +365,9 @@ impl<'a> StyleResolver<'a> {
                     inherit_retained_text_style(&mut node.computed_style, parent);
                 }
             }
+            if let Some(previous) = previous_style {
+                *layout_changed |= !previous.same_layout_inputs(&node.computed_style);
+            }
             let child_parent = ParentInheritedStyle::from(&node.computed_style);
             if previous_inherited != child_parent {
                 for child in &mut node.children {
@@ -371,6 +379,7 @@ impl<'a> StyleResolver<'a> {
                         Some(&child_parent),
                         true,
                         restyled,
+                        layout_changed,
                     );
                 }
             }

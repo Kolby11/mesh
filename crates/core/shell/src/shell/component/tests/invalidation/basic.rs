@@ -2382,6 +2382,102 @@ function mutate() items[3].color = "#00ff00" end
     }
 }
 
+fn patched_scope_source(clean_siblings: usize) -> String {
+    format!(
+        r##"
+<script lang="luau">
+items = {{}}
+for i = 1, {clean_siblings} do items[i] = {{id = i, color = "#ff0000"}} end
+tint = "#101010"
+flips = 0
+function mutate()
+    flips = flips + 1
+    items[3].color = flips % 2 == 0 and "#00ff00" or "#0000ff"
+end
+function retint()
+    flips = flips + 1
+    tint = flips % 2 == 0 and "#00ff00" or "#ff00ff"
+end
+</script>
+<template><row style="width: 320px; height: 100px">
+<box class="group" style="width: 40px; height: 20px" style:color={{tint}}><text>a</text><box><text>b</text></box></box>
+{{#for item in items key={{item.id}}}}<box style="width: 1px; height: 10px" style:background={{item.color}} />{{/for}}
+</row></template>
+"##
+    )
+}
+
+/// Patched-binding frames visit the patched nodes, plus the descendants whose
+/// inherited values changed, not the tree. A full diff finds nothing missed
+/// and a twin on the full paths paints and styles identically.
+#[test]
+fn patched_frame_restyle_visits_scale_with_the_patch_not_the_tree() {
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(320, 100);
+    let mut per_size = Vec::new();
+    for clean_siblings in [16, 1024] {
+        let source = patched_scope_source(clean_siblings);
+        let mut scoped = test_frontend_component(&source);
+        let mut full = test_frontend_component(&source);
+        full.force_full_interaction_frames = true;
+        let mut scoped_pixels = PixelBuffer::new(320, 100);
+        let mut full_pixels = PixelBuffer::new(320, 100);
+        for _ in 0..3 {
+            scoped
+                .paint_raster(&theme, extent, &mut scoped_pixels, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut full_pixels, 1.0)
+                .unwrap();
+        }
+        scoped.set_profiling_enabled(true);
+        let _ = scoped.take_invalidation_snapshot();
+        let mut visits = Vec::new();
+        for handler in ["mutate", "mutate", "retint", "retint", "mutate"] {
+            scoped.call_namespaced_handler(handler, &[]).unwrap();
+            full.call_namespaced_handler(handler, &[]).unwrap();
+            scoped
+                .paint_raster(&theme, extent, &mut scoped_pixels, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut full_pixels, 1.0)
+                .unwrap();
+            let snapshot = scoped.take_invalidation_snapshot().unwrap();
+            assert!(!snapshot.full_rebuild, "{handler}: {snapshot:?}");
+            let counts = snapshot.node_visits;
+            assert_eq!(counts["retained_discovery"], 0, "{handler}: {counts:?}");
+            visits.push([
+                counts["restyle_scan"],
+                counts["style_resolve"],
+                counts["retained_discovery"],
+            ]);
+
+            let tree = scoped.last_tree.clone().unwrap();
+            let missed = scoped.retained_tree.update(&tree);
+            assert!(!missed.any(), "{handler}: patched frame missed {missed:?}");
+            assert_eq!(scoped_pixels.data(), full_pixels.data(), "{handler}");
+            let (mut scoped_styles, mut full_styles) = (Vec::new(), Vec::new());
+            computed_styles(&tree, &mut scoped_styles);
+            computed_styles(full.last_tree.as_ref().unwrap(), &mut full_styles);
+            assert!(scoped_styles == full_styles, "{handler}: styles diverged");
+        }
+        // The container's color reaches its text descendants.
+        let group = first_node_by_tag(scoped.last_tree.as_ref().unwrap(), "row")
+            .unwrap()
+            .children[0]
+            .clone();
+        let text = first_node_by_tag(&group, "text").unwrap();
+        assert_eq!(text.computed_style.color, group.computed_style.color);
+        assert_ne!(
+            text.computed_style.color,
+            mesh_core_elements::Color::from_hex("#101010").unwrap()
+        );
+        per_size.push(visits);
+    }
+    assert_eq!(
+        per_size[0], per_size[1],
+        "patched-frame visits grew with clean siblings"
+    );
+}
+
 #[test]
 fn keyed_list_structural_body_and_duplicate_keys_keep_rebuild() {
     for body in [

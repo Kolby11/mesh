@@ -1022,6 +1022,8 @@ pub(super) struct FrontendSurfaceComponent {
     /// Nodes whose bound properties `try_patch_template_writes` updated since
     /// the last restyle; the targeted restyle treats them as changed.
     patched_binding_nodes: HashSet<NodeId>,
+    /// A patched binding reached the layout stage, whatever its style says.
+    patched_binding_layout: bool,
     /// Template nodes whose tracked service fields changed since the last
     /// paint. `None` means a narrow invalidation without an authoritative
     /// service-node scope and therefore requires normal template evaluation.
@@ -1469,6 +1471,7 @@ impl FrontendSurfaceComponent {
             next_frame_only_dirty: false,
             node_service_field_deps: NodeServiceFieldDependencies::default(),
             patched_binding_nodes: HashSet::new(),
+            patched_binding_layout: false,
             pending_service_template_nodes: None,
             pending_service_binding_readers: HashMap::new(),
             template_patch_recovery_pending: Cell::new(false),

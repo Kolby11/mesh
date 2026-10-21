@@ -1465,6 +1465,16 @@ pub(super) fn child_with_attrs(tag: &str, attrs: &[(&str, &str)]) -> WidgetNode 
     node
 }
 
+pub(super) fn computed_styles(
+    node: &WidgetNode,
+    styles: &mut Vec<(NodeId, mesh_core_elements::ComputedStyle)>,
+) {
+    styles.push((node.id, node.computed_style.clone()));
+    for child in &node.children {
+        computed_styles(child, styles);
+    }
+}
+
 pub(super) fn first_node_by_tag<'a>(node: &'a WidgetNode, tag: &str) -> Option<&'a WidgetNode> {
     if node.tag == tag {
         return Some(node);

@@ -2229,16 +2229,6 @@ fn hover_tile(component: &mut FrontendSurfaceComponent, theme: &Theme, index: us
         .unwrap();
 }
 
-fn computed_styles(
-    node: &WidgetNode,
-    styles: &mut Vec<(NodeId, mesh_core_elements::ComputedStyle)>,
-) {
-    styles.push((node.id, node.computed_style.clone()));
-    for child in &node.children {
-        computed_styles(child, styles);
-    }
-}
-
 /// Hover frames visit the hovered item's nodes, not the tree: annotation,
 /// restyle, semantic and retained work stay flat as clean siblings grow. A
 /// full diff finds nothing missed, a twin on the full walks paints and styles

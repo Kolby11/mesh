@@ -267,6 +267,7 @@ impl FrontendSurfaceComponent {
         if !patched.is_empty() {
             for (id, change) in changes.iter() {
                 self.frame_dirty.mark(id, change);
+                self.patched_binding_layout |= change.contains(mesh_core_elements::ChangeClass::LAYOUT);
             }
             self.patched_binding_nodes.extend(patched);
             // Like the narrow script path, leave the pixels valid: the retained

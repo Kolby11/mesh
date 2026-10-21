@@ -68,6 +68,7 @@ if ! "$workloads_only"; then
   cargo test -p mesh-core-shell --release --lib legacy_render_is_not_automatically_scheduled
   cargo test -p mesh-core-shell --release --lib animation_frame_visits_registered_nodes_and_full_diff_finds_no_omissions
   cargo test -p mesh-core-shell --release --lib hover_frame_visits_scale_with_the_hovered_item_not_the_tree
+  cargo test -p mesh-core-shell --release --lib patched_frame_restyle_visits_scale_with_the_patch_not_the_tree
   cargo test -p mesh-core-shell --release --lib template_patching
   cargo test -p mesh-core-shell --release --lib service_field_update_patches
   cargo test -p mesh-core-shell --release --lib service_fields_patch_keyed

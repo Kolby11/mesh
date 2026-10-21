@@ -908,6 +908,42 @@ pub struct ComputedStyle {
     pub animated_sample: bool,
 }
 
+impl ComputedStyle {
+    /// Whether `other` feeds layout the same inputs as `self`. Fields that
+    /// only change painting, animation setup or inheritance bookkeeping are
+    /// ignored; any other field counts, so a newly added field is layout
+    /// relevant until listed here.
+    pub fn same_layout_inputs(&self, other: &Self) -> bool {
+        let mut probe = other.clone();
+        probe.custom_properties = self.custom_properties.clone();
+        probe.explicit_properties = self.explicit_properties;
+        probe.inherited_properties = self.inherited_properties;
+        probe.background_color = self.background_color;
+        probe.background_paint = self.background_paint.clone();
+        probe.border_color = self.border_color;
+        probe.border_radius = self.border_radius;
+        probe.corner_shape = self.corner_shape;
+        probe.opacity = self.opacity;
+        probe.transform = self.transform;
+        probe.transform_origin = self.transform_origin;
+        probe.box_shadow = self.box_shadow;
+        probe.additional_box_shadows = self.additional_box_shadows.clone();
+        probe.filter = self.filter.clone();
+        probe.backdrop_filter = self.backdrop_filter.clone();
+        probe.mix_blend_mode = self.mix_blend_mode;
+        probe.transitions = self.transitions.clone();
+        probe.transition_longhands = self.transition_longhands.clone();
+        probe.animations = self.animations.clone();
+        probe.color = self.color;
+        probe.z_index = self.z_index;
+        probe.visibility = self.visibility;
+        probe.tooltip_anchor = self.tooltip_anchor;
+        probe.tooltip_offset = self.tooltip_offset;
+        probe.animated_sample = self.animated_sample;
+        self == &probe
+    }
+}
+
 impl Default for ComputedStyle {
     fn default() -> Self {
         Self {
