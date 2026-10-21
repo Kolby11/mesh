@@ -1111,8 +1111,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
         let retained_update_dirty_roots = self.retained_update_dirty_roots.take();
         #[cfg(test)]
-        let retained_update_dirty_roots = retained_update_dirty_roots
-            .filter(|_| !self.force_full_retained_update);
+        let retained_update_dirty_roots =
+            retained_update_dirty_roots.filter(|_| !self.force_full_retained_update);
         // Animation-sampled nodes are already single dirty nodes above. The
         // sampling pass reports every node whose own sample changed, and the
         // scoped update re-checks every descendant's layout, so an animated

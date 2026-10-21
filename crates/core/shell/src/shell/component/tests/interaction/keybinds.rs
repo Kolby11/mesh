@@ -1406,5 +1406,4 @@ mod keyboard_settings {
     }
 }
 
-mod resolved_surface_shortcuts_cache {
-}
+mod resolved_surface_shortcuts_cache {}

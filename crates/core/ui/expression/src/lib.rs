@@ -370,7 +370,10 @@ mod tests {
         for index in 0..MAX_CACHED_EXPRESSIONS * 2 {
             compile_expression(&format!("bounded_{index} + 1")).unwrap();
             if index % 64 == 0 {
-                assert!(Arc::ptr_eq(&hot, &compile_expression("hot_value + 1").unwrap()));
+                assert!(Arc::ptr_eq(
+                    &hot,
+                    &compile_expression("hot_value + 1").unwrap()
+                ));
             }
         }
         assert!(expression_cache().len() <= MAX_CACHED_EXPRESSIONS);

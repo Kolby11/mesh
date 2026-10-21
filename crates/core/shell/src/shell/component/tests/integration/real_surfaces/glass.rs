@@ -700,7 +700,11 @@ fn d9_glass_dock_animation() {
             samples.push(started.elapsed());
         }
     }
-    assert!(samples.len() >= 30, "hover must animate: {} frames", samples.len());
+    assert!(
+        samples.len() >= 30,
+        "hover must animate: {} frames",
+        samples.len()
+    );
     d9_report("d9_glass_dock_frame_p90_ms", samples);
 }
 

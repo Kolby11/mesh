@@ -686,7 +686,11 @@ impl ScriptContext {
         self.clear_subscribed_interface_events();
         self.clear_tracked_storage_keys();
         self.install_interface_imports(imports)?;
-        self.template_expression_cache.lock().unwrap().handles.clear();
+        self.template_expression_cache
+            .lock()
+            .unwrap()
+            .handles
+            .clear();
         let callbacks = self.initial_callback_props.clone();
         self.set_callback_props(&callbacks)?;
         let _budget = self.realm_policy.begin_callback();
@@ -753,7 +757,11 @@ impl ScriptContext {
         let _budget = self.realm_policy.begin_callback();
         install_template_expressions(self.lua(), self.env(), template_expressions)
             .map_err(map_lua_error)?;
-        self.template_expression_cache.lock().unwrap().handles.clear();
+        self.template_expression_cache
+            .lock()
+            .unwrap()
+            .handles
+            .clear();
         Ok(())
     }
 }

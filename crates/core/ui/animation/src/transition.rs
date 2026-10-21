@@ -1687,9 +1687,18 @@ mod tests {
             0,
             start,
         );
-        assert_eq!(stepped.next_change(start + ms(10)), NextChange::At(start + ms(250)));
-        assert_eq!(stepped.next_change(start + ms(600)), NextChange::At(start + ms(750)));
-        assert_eq!(stepped.next_change(start + ms(800)), NextChange::At(start + ms(1000)));
+        assert_eq!(
+            stepped.next_change(start + ms(10)),
+            NextChange::At(start + ms(250))
+        );
+        assert_eq!(
+            stepped.next_change(start + ms(600)),
+            NextChange::At(start + ms(750))
+        );
+        assert_eq!(
+            stepped.next_change(start + ms(800)),
+            NextChange::At(start + ms(1000))
+        );
         assert_eq!(stepped.next_change(start + ms(1000)), NextChange::Never);
     }
 }

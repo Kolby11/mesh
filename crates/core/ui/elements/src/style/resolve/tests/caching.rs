@@ -174,10 +174,7 @@ fn typed_static_declarations_match_string_lowering() {
         };
         resolver.apply_declaration_no_diagnostics(&mut old_style, &declaration, &mut old_variables);
         let indexed = IndexedDeclaration::from_declaration(&declaration);
-        assert!(
-            indexed.literal.is_static(),
-            "{property} should lower once"
-        );
+        assert!(indexed.literal.is_static(), "{property} should lower once");
         resolver.apply_indexed_declaration(&mut typed_style, &indexed, None, &mut typed_variables);
     }
 

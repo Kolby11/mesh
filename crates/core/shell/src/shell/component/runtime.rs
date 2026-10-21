@@ -1663,7 +1663,6 @@ mod handler_call_tests {
         assert_eq!(embedded.handler(), "open");
         assert_eq!(embedded.instance_key(), Some("@mesh/panel/local:Clock"));
     }
-
 }
 
 /// Publish each declared prop's precedence-resolved value under `props.<name>`

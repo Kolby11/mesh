@@ -789,9 +789,18 @@ mod tests {
         animation.easing = Easing::Steps(1, mesh_core_elements::StepPosition::JumpEnd);
         animation.iteration_count = AnimationIterationCount::Infinite;
         let rule = blink();
-        assert_eq!(animation.next_change(&rule, start + ms(100)), NextChange::At(start + ms(500)));
-        assert_eq!(animation.next_change(&rule, start + ms(700)), NextChange::At(start + ms(1000)));
-        assert_eq!(animation.next_change(&rule, start + ms(2100)), NextChange::At(start + ms(2500)));
+        assert_eq!(
+            animation.next_change(&rule, start + ms(100)),
+            NextChange::At(start + ms(500))
+        );
+        assert_eq!(
+            animation.next_change(&rule, start + ms(700)),
+            NextChange::At(start + ms(1000))
+        );
+        assert_eq!(
+            animation.next_change(&rule, start + ms(2100)),
+            NextChange::At(start + ms(2500))
+        );
         // Every value change lands on a reported boundary.
         let mut at = start;
         while at < start + ms(3000) {
@@ -802,7 +811,9 @@ mod tests {
             let mut probe = at;
             while probe < next {
                 assert_eq!(
-                    animation.current_with_rule(&rule, style(1.0, 0.0), probe).map(|s| s.opacity),
+                    animation
+                        .current_with_rule(&rule, style(1.0, 0.0), probe)
+                        .map(|s| s.opacity),
                     held.map(|s| s.opacity)
                 );
                 probe += ms(7);
@@ -812,9 +823,18 @@ mod tests {
 
         animation.delay = ms(200);
         animation.easing = Easing::Linear;
-        assert_eq!(animation.next_change(&rule, start + ms(50)), NextChange::At(start + ms(200)));
-        assert_eq!(animation.next_change(&rule, start + ms(300)), NextChange::EveryFrame);
+        assert_eq!(
+            animation.next_change(&rule, start + ms(50)),
+            NextChange::At(start + ms(200))
+        );
+        assert_eq!(
+            animation.next_change(&rule, start + ms(300)),
+            NextChange::EveryFrame
+        );
         animation.set_play_state(AnimationPlayState::Paused, start + ms(300));
-        assert_eq!(animation.next_change(&rule, start + ms(400)), NextChange::Never);
+        assert_eq!(
+            animation.next_change(&rule, start + ms(400)),
+            NextChange::Never
+        );
     }
 }

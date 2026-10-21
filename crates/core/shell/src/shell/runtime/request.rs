@@ -3752,7 +3752,9 @@ mod tests {
             }
         }
         for bytes in [2 * 1024, 50 * 1024] {
-            let requests = (0..1_000).map(|value| slider_command(bytes, value)).collect::<Vec<_>>();
+            let requests = (0..1_000)
+                .map(|value| slider_command(bytes, value))
+                .collect::<Vec<_>>();
             let mut sink = 0u64;
             let mut double = std::time::Duration::ZERO;
             let mut single = std::time::Duration::ZERO;
@@ -3762,7 +3764,9 @@ mod tests {
                     let mut hasher = std::collections::hash_map::DefaultHasher::new();
                     format!("{request:?}").hash(&mut hasher);
                     let weight = 64usize.saturating_add(format!("{request:?}").len());
-                    sink = sink.wrapping_add(hasher.finish()).wrapping_add(weight as u64);
+                    sink = sink
+                        .wrapping_add(hasher.finish())
+                        .wrapping_add(weight as u64);
                 }
                 double += started.elapsed();
                 let started = std::time::Instant::now();

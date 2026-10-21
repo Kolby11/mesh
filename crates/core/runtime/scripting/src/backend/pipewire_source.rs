@@ -180,5 +180,4 @@ fn run(state: Arc<StreamState>, stream: StreamHandle, stop: UnixStream) -> Resul
 }
 
 #[cfg(test)]
-mod tests {
-}
+mod tests {}

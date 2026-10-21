@@ -1284,5 +1284,4 @@ mod press_target_tests {
     }
 }
 
-
 pub(in crate::shell::component) use keyboard::annotate_node_by_keybind;

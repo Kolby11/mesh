@@ -1027,10 +1027,15 @@ pub fn plural_category(locale: &str, value: &str) -> &'static str {
     let Ok(value) = value.parse::<Decimal>() else {
         return "other";
     };
-    let category = with_cached_formatter(&PLURAL_RULES, locale, |locale| {
-        let locale = IcuLocale::try_from_str(locale).ok()?;
-        PluralRules::try_new_cardinal(locale.into()).ok()
-    }, |rules| rules.category_for(&value));
+    let category = with_cached_formatter(
+        &PLURAL_RULES,
+        locale,
+        |locale| {
+            let locale = IcuLocale::try_from_str(locale).ok()?;
+            PluralRules::try_new_cardinal(locale.into()).ok()
+        },
+        |rules| rules.category_for(&value),
+    );
     match category {
         Some(PluralCategory::Zero) => "zero",
         Some(PluralCategory::One) => "one",
@@ -2213,7 +2218,6 @@ fn interpolate(template: &str, args: &HashMap<String, String>) -> Option<String>
 mod tests {
     use super::*;
 
-
     // cargo test -p mesh-core-locale --release --lib -- cached_icu_formatter_profile --ignored --nocapture
     #[test]
     #[ignore = "release-only ICU formatter cache profile"]
@@ -2229,7 +2233,8 @@ mod tests {
                 let rules = PluralRules::try_new_cardinal(locale.into()).unwrap();
                 uncached += rules.category_for(&count.parse::<Decimal>().unwrap()) as usize;
                 let locale = normalized_icu_locale("sk").unwrap();
-                let formatter = DecimalFormatter::try_new(locale.into(), Default::default()).unwrap();
+                let formatter =
+                    DecimalFormatter::try_new(locale.into(), Default::default()).unwrap();
                 uncached += formatter
                     .format_to_string(&count.parse::<Decimal>().unwrap())
                     .len();
@@ -2252,9 +2257,11 @@ mod tests {
             frames * counts.len()
         );
         println!("MESH_PERF metric=cached_icu_formatter_speedup value={speedup:.6}");
-        assert!(speedup >= 2.0, "cached ICU formatters should be at least 2x");
+        assert!(
+            speedup >= 2.0,
+            "cached ICU formatters should be at least 2x"
+        );
     }
-
 
     #[test]
     fn basic_translation() {

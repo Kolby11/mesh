@@ -54,7 +54,10 @@ impl ScriptContext {
             std::mem::take(&mut *tracked)
         };
         let _budget = self.realm_policy.begin_callback();
-        let evaluated = handle.closure.call::<LuaValue>(locals).map_err(map_lua_error);
+        let evaluated = handle
+            .closure
+            .call::<LuaValue>(locals)
+            .map_err(map_lua_error);
         let expression_reads = {
             let mut tracked = self.tracked_service_fields.lock().unwrap();
             let expression_reads = std::mem::take(&mut *tracked);

@@ -514,9 +514,7 @@ impl FrontendSurfaceComponent {
                 }
             };
             let Some(source) = source else {
-                self.record_runtime_animation_diagnostic(format!(
-                    "unresolved animation '{name}'"
-                ));
+                self.record_runtime_animation_diagnostic(format!("unresolved animation '{name}'"));
                 continue;
             };
             animations.push(NodeKeyframeAnimation {

@@ -307,5 +307,8 @@ fn typed_keyword_declaration_profile() {
         rounds * declarations.len()
     );
     println!("MESH_PERF metric=typed_keyword_declaration_speedup value={speedup:.6}");
-    assert!(speedup >= 1.2, "typed keyword declarations should be at least 1.2x");
+    assert!(
+        speedup >= 1.2,
+        "typed keyword declarations should be at least 1.2x"
+    );
 }

@@ -1759,10 +1759,7 @@ pub(in crate::shell::component) fn captured_release_key(
 
 #[cfg(test)]
 mod navigation_performance_tests {
-    use super::{
-        ancestor_source_target, key_path, rove_aria_menu_focus,
-        sibling_source_key,
-    };
+    use super::{ancestor_source_target, key_path, rove_aria_menu_focus, sibling_source_key};
     use mesh_core_elements::WidgetNode;
 
     fn deep_keyed_tree(depth: usize) -> (WidgetNode, String) {

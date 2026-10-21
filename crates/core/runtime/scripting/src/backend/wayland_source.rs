@@ -239,5 +239,4 @@ fn io_error(error: wayland_client::backend::WaylandError) -> std::io::Error {
 }
 
 #[cfg(test)]
-mod tests {
-}
+mod tests {}
