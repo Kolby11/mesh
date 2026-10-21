@@ -37,9 +37,12 @@ criteria and the items folded in here:
       using its GPU open latency as time to visible content.
 - [ ] Give the live replay its own layer-namespace suffix so it can run beside a desktop shell.
 - [ ] **P2:** Complete the shared dirty-set pipeline beyond the animation, interaction and
-      paint-only patch scopes. Patch frames that change layout (dashboard `style:height`) still
-      run annotation, layout discovery, retained discovery, validation and animation sampling over
-      the whole tree; display-list ancestors, previous-style capture and child surfaces also walk it.
+      paint-only patch scopes. Layout-class patch frames now lay out only the patched branch, but
+      still annotate, rediscover retained changes and sample animations over the whole tree;
+      nothing consumes `PerSurfaceLayoutState::changed_nodes` yet.
+- [ ] **P2:** Stable-tree layout resolves each dirty node's path from the root (`layout_sync`
+      grows as dirty nodes × depth); share path prefixes. Full passes also pay a
+      `seed_projection` walk that could fold into the write.
 - [ ] **P3:** Bindings compile to typed setters (finishes D1; with D4 typed patches).
       Fixed-shape native keyed lists already patch items; key validation and binding-target
       discovery still scan. Free-form `style:*` bindings are classed STYLE|A11Y, so only a style

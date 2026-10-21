@@ -7477,3 +7477,61 @@ production path. CPU raster explains most of the live/fixture gap; further
 pipeline work addresses the remaining ~5 ms of preparation rather than that
 ~20 ms raster cost. Restore measurement parity for the GPU structural gate and
 CPU raster fixture; W2/W5 remain the next planned pipeline work.
+
+## 2026-10-22 — P2 W2: layout-class patch frames lay out the patched branch
+
+On main after `f49ef59b` · area: layout, template patching
+
+**Change.** `LayoutEngine::compute_incremental_for_stable_tree` lays out a
+structurally unchanged tree from an explicit dirty set. Every full pass seeds a
+per-node projection (`layout/sparse.rs`): the Taffy rect, fit extents and
+visibility. A stable-tree pass syncs only the dirty nodes into Taffy, rewrites
+their ancestor branches, and skips any subtree whose projected rect and
+visibility are unchanged. Siblings the patch moved are still checked. It
+reports the nodes whose final geometry changed in
+`PerSurfaceLayoutState::changed_nodes`. In the shell, `finalize_tree` takes this
+path on patch frames whose restyle was path-scoped, with the dirty set made of
+the restyled nodes, the patched nodes and the surface root. Whole-tree
+`layout_dirty_node_snapshots` discovery and `validate_widget_tree` are skipped
+there. Other frames keep the old path. Gate:
+`patched_frame_layout_visits_scale_with_the_patch` (visits equal at 16 and
+1,024 clean siblings; rects and pixels equal a forced-full twin). The elements
+test `stable_tree_layout_matches_full_layout_and_reports_moved_siblings`
+compares against a full layout in six modes.
+
+**Bugs found by existing tests during installation.**
+- The subtree skip ignored `hidden_ancestor`. A closed sheet inside a dialog
+  that had just opened kept a stale "hidden ancestor" entry, so opening the
+  sheet hit the stays-hidden early return and laid it out 0×0
+  (`nested_modal_escape_closes_only_sheet_and_returns_to_its_opener`).
+- The shell writes the surface root's width and height just before layout,
+  outside the restyle, so Taffy kept the stale root style. A navigation-bar
+  audio patch then laid the bar out against 80 px instead of its 40 px content
+  (`phase98_pixel_equivalence_backend_update`). The root now always joins the
+  dirty set.
+
+**Measurements.** `glass_dashboard_spectrum_profile`, release, 120 spectrum
+updates, three runs each.
+
+| Per frame | `f49ef59b` | After |
+| --- | --- | --- |
+| `layout_discovery` | 151 | 0 |
+| `validation` | 151 | 0 |
+| `layout_write` | 154 | 43 |
+| `layout_extents` / `layout_fit` | 151 / 151 | 32 / 32 |
+| `layout_sync` | 25 | 193 |
+| Mean | 2.21–2.41 ms | 2.02–2.22 ms |
+| p50 | 2.16–2.27 ms | 1.98–2.18 ms |
+
+The timing gain is small and the ranges nearly overlap; the structural change
+is the result. `layout_sync` grows because each dirty node's path is resolved
+from the root (backlog). Still unchanged per frame: annotation 151, retained
+discovery 151, animation previous-style and sample 151, restyle scan 336. The
+dashboard tree is 151 nodes. `tools/check-performance --workloads-only` passes
+every gate.
+
+**Verified.** Release suites against a worktree of `f49ef59b`: shell lib
+919/42 vs 918/42 with identical failure names (the new gate is the extra
+pass). Elements 302/1 and frontend 89/2 have identical failure names on both
+sides. Mutation check: with the stable-tree call disabled, the gate fails on
+`layout_discovery` 25.

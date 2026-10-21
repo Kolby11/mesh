@@ -803,9 +803,9 @@ impl FrontendSurfaceComponent {
             } else {
                 InteractionChangedNodeIds::default()
             };
-        let patched_frame = !self.patched_binding_nodes.is_empty();
+        let patched_nodes = std::mem::take(&mut self.patched_binding_nodes);
+        let patched_frame = !patched_nodes.is_empty();
         let patched_layout_class = std::mem::take(&mut self.patched_binding_layout);
-        self.patched_binding_nodes.clear();
         let mut scoped_layout_changed = false;
         let interaction_snapshot_valid = self.interaction_snapshot_valid;
         let index_cache = &mut self.cached_style_rule_index;
@@ -1029,22 +1029,46 @@ impl FrontendSurfaceComponent {
         let dirty_structural =
             dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
         let dirty_layout = dirty_types.contains(ComponentDirtyFlags::LAYOUT);
-        let layout_dirty_node_snapshots = if dirty_layout && !dirty_structural {
-            self.retained_tree.layout_dirty_node_snapshots(tree)
+        // A patch frame's path-scoped restyle names every node whose layout
+        // inputs can have changed, so layout needs no tree-wide discovery. The
+        // root joins it because the surface sizing above rewrites its style.
+        let stable_layout_nodes = scoped_restyled
+            .as_ref()
+            .filter(|_| patched_frame && dirty_layout && !dirty_structural)
+            .map(|restyled| {
+                let mut nodes: HashSet<NodeId> = restyled.union(&patched_nodes).copied().collect();
+                nodes.insert(tree.id);
+                nodes
+            });
+        if let (Some(nodes), Some(snapshot)) = (&stable_layout_nodes, &self.last_frame_snapshot) {
+            LayoutEngine::compute_incremental_for_stable_tree(
+                tree,
+                &mut self.layout_state,
+                snapshot,
+                nodes,
+                width as f32,
+                height as f32,
+                &mut self.intrinsic_layout_cache,
+                Some(&measurer),
+            );
         } else {
-            None
-        };
-        LayoutEngine::compute_incremental_with_dirty_node_snapshots(
-            tree,
-            &mut self.layout_state,
-            width as f32,
-            height as f32,
-            dirty_layout,
-            dirty_structural,
-            layout_dirty_node_snapshots.as_deref(),
-            &mut self.intrinsic_layout_cache,
-            Some(&measurer),
-        );
+            let layout_dirty_node_snapshots = if dirty_layout && !dirty_structural {
+                self.retained_tree.layout_dirty_node_snapshots(tree)
+            } else {
+                None
+            };
+            LayoutEngine::compute_incremental_with_dirty_node_snapshots(
+                tree,
+                &mut self.layout_state,
+                width as f32,
+                height as f32,
+                dirty_layout,
+                dirty_structural,
+                layout_dirty_node_snapshots.as_deref(),
+                &mut self.intrinsic_layout_cache,
+                Some(&measurer),
+            );
+        }
         self.advance_interaction_frame(mesh_core_interaction::InteractionFramePhase::LayoutReady);
         if layout_work_required {
             self.record_profiling_stage(

@@ -56,6 +56,7 @@ pub(super) fn compute_fresh_retained_layout(
                     available_height,
                 );
                 state.last_available = (available_width, available_height);
+                sparse::seed_projection(root, state);
                 state.text_measure_revisions = measurer
                     .map(|measurer| measurer.revisions())
                     .unwrap_or_default();
@@ -162,6 +163,7 @@ pub(super) fn compute_structural_retained_layout(
                     available_height,
                 );
                 state.last_available = (available_width, available_height);
+                sparse::seed_projection(root, state);
                 state.text_measure_revisions = measurer
                     .map(|measurer| measurer.revisions())
                     .unwrap_or_default();

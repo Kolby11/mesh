@@ -2550,6 +2550,86 @@ fn patched_frame_restyle_visits_scale_with_the_patch_not_the_tree() {
     );
 }
 
+/// Layout-class patches lay out the patched branch and the siblings it moves,
+/// not the tree: visits stay constant as an unrelated column grows, and every
+/// rect matches a twin on the full path.
+#[test]
+fn patched_frame_layout_visits_scale_with_the_patch() {
+    fn layouts(node: &WidgetNode, out: &mut Vec<(String, mesh_core_elements::LayoutRect)>) {
+        out.push((node.mesh_key().unwrap_or_default().to_string(), node.layout));
+        node.children.iter().for_each(|child| layouts(child, out));
+    }
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(320, 100);
+    let mut per_size = Vec::new();
+    for clean_siblings in [16, 1024] {
+        let source = format!(
+            r##"
+<script lang="luau">
+items = {{}}
+for i = 1, 4 do items[i] = {{id = i, height = "10px"}} end
+clean = {{}}
+for i = 1, {clean_siblings} do clean[i] = i end
+tall = false
+function mutate()
+    tall = not tall
+    items[2].height = tall and "20px" or "10px"
+end
+</script>
+<template><row style="width: 320px; height: 100px">
+<column style="width: 40px">{{#for item in items key={{item.id}}}}<box style="width: 10px; background: #ff0000" style:height={{item.height}} />{{/for}}<box style="width: 10px; height: 5px; background: #00ff00" /></column>
+<column style="width: 40px">{{#for c in clean key={{c}}}}<box style="width: 1px; height: 1px" />{{/for}}</column>
+</row></template>
+"##
+        );
+        let mut scoped = test_frontend_component(&source);
+        let mut full = test_frontend_component(&source);
+        full.force_full_interaction_frames = true;
+        let mut scoped_pixels = PixelBuffer::new(320, 100);
+        let mut full_pixels = PixelBuffer::new(320, 100);
+        for _ in 0..3 {
+            scoped
+                .paint_raster(&theme, extent, &mut scoped_pixels, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut full_pixels, 1.0)
+                .unwrap();
+        }
+        scoped.set_profiling_enabled(true);
+        let _ = scoped.take_invalidation_snapshot();
+        let mut visits = Vec::new();
+        for turn in 0..4 {
+            scoped.call_namespaced_handler("mutate", &[]).unwrap();
+            full.call_namespaced_handler("mutate", &[]).unwrap();
+            scoped
+                .paint_raster(&theme, extent, &mut scoped_pixels, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut full_pixels, 1.0)
+                .unwrap();
+            let snapshot = scoped.take_invalidation_snapshot().unwrap();
+            assert!(snapshot.patched_node_count >= 1, "{turn}: {snapshot:?}");
+            let counts = snapshot.node_visits;
+            assert_eq!(counts["layout_discovery"], 0, "{turn}: {counts:?}");
+            assert_eq!(counts["validation"], 0, "{turn}: {counts:?}");
+            visits.push([
+                counts["layout_sync"],
+                counts["layout_write"],
+                counts["layout_extents"],
+                counts["layout_fit"],
+            ]);
+            let (mut scoped_layouts, mut full_layouts) = (Vec::new(), Vec::new());
+            layouts(scoped.last_tree.as_ref().unwrap(), &mut scoped_layouts);
+            layouts(full.last_tree.as_ref().unwrap(), &mut full_layouts);
+            assert_eq!(scoped_layouts, full_layouts, "{turn}: layouts diverged");
+            assert_eq!(scoped_pixels.data(), full_pixels.data(), "{turn}");
+        }
+        per_size.push(visits);
+    }
+    assert_eq!(
+        per_size[0], per_size[1],
+        "patched-frame layout visits grew with clean siblings"
+    );
+}
+
 #[test]
 fn keyed_list_structural_body_and_duplicate_keys_keep_rebuild() {
     for body in [

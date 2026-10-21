@@ -1807,3 +1807,92 @@ fn nested_fit_extents_visit_once_and_respect_surface_boundaries() {
     assert_eq!(scope.snapshot()["layout_extents"], 5);
     assert_eq!(scope.snapshot()["layout_fit"], 5);
 }
+
+#[test]
+fn stable_tree_layout_matches_full_layout_and_reports_moved_siblings() {
+    for mode in ["flex", "fit", "absolute", "hidden", "fixed", "text"] {
+        let mut root = retained_fixture();
+        root.children[0].children.push(keyed_node(
+            "root/0/text",
+            "text",
+            Dimension::Auto,
+            Dimension::Auto,
+        ));
+        root.children[0].children[0]
+            .attributes
+            .insert(Prop::Content, "before".into());
+        match mode {
+            "fit" => root.children[0].computed_style.width = Dimension::Fit,
+            "absolute" => {
+                root.children[0].computed_style.position = Position::Absolute;
+                root.children[0].computed_style.inset_left = Some(5.0);
+                root.computed_style.padding.left = 7.0;
+            }
+            "hidden" => root.children[0].computed_style.display = Display::None,
+            "fixed" => {
+                root.children[0].computed_style.position = Position::Fixed;
+                root.children[0].computed_style.inset_right = Some(5.0);
+            }
+            _ => {}
+        }
+        let mut state = PerSurfaceLayoutState::new();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 200.0, 100.0, true, true, &mut cache, None,
+        );
+        for turn in 0..4 {
+            let previous = crate::FrameSnapshot::complete(&root, turn, None).unwrap();
+            let target = if mode == "text" {
+                &mut root.children[0].children[0]
+            } else if mode == "hidden" && turn < 2 {
+                &mut root.children[0].children[0]
+            } else {
+                &mut root.children[0]
+            };
+            let id = target.id;
+            if mode == "text" {
+                target.attributes.insert(
+                    Prop::Content,
+                    if turn % 2 == 0 {
+                        "longer text"
+                    } else {
+                        "short"
+                    }
+                    .into(),
+                );
+            } else if mode == "hidden" && turn == 2 {
+                target.computed_style.display = Display::Flex;
+            } else {
+                target.computed_style.width =
+                    Dimension::Px(if turn % 2 == 0 { 85.0 } else { 35.0 });
+            }
+            let mut full = root.clone();
+            LayoutEngine::compute(&mut full, 200.0, 100.0);
+            let before = keyed_layouts(&root);
+            LayoutEngine::compute_incremental_for_stable_tree(
+                &mut root,
+                &mut state,
+                &previous,
+                &HashSet::from([id]),
+                200.0,
+                100.0,
+                &mut cache,
+                None,
+            );
+            assert_layout_maps_eq(&keyed_layouts(&root), &keyed_layouts(&full));
+            fn verify(
+                node: &WidgetNode,
+                before: &HashMap<String, LayoutRect>,
+                changed: &HashSet<NodeId>,
+            ) {
+                if before[node.mesh_key().unwrap()] != node.layout {
+                    assert!(changed.contains(&node.id));
+                }
+                for child in &node.children {
+                    verify(child, before, changed);
+                }
+            }
+            verify(&root, &before, state.changed_nodes.as_ref().unwrap());
+        }
+    }
+}

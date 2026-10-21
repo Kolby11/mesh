@@ -27,7 +27,9 @@ measurements live in [`log/`](log/README.md).
   passes. The idle dock repaint was a missing-icon resolution loop. Live hover
   rebuilds came from handler writes during input dispatch and from keyed loops
   with handlers being unpatchable; both are fixed (live hover mean 40 → 25 ms).
-  Wave 2 (W2, W5) is not started. Plan and waves are in the
+  W2 landed 2026-10-22: dashboard layout-class patches lay out only the
+  patched branch (layout discovery and validation 151 → 0 per frame). W5 is next
+  in wave 2. Plan and waves are in the
   [pipeline note](todos/pending/2026-10-21-change-proportional-pipeline.md).
 
 - **Dock flares and dock tooltips fixed:** new `corner-shape: scoop` gives the

@@ -21,6 +21,7 @@ use taffy::style as taffy_style;
 /// shell render stack) and injected so the layout engine can shrink-wrap text
 mod lowering;
 mod retained;
+mod sparse;
 
 use lowering::*;
 use retained::*;
@@ -103,7 +104,7 @@ pub trait TextMeasurer {
 }
 
 /// Computed layout rectangle for a node.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct LayoutRect {
     pub x: f32,
     pub y: f32,
@@ -254,6 +255,9 @@ pub struct PerSurfaceLayoutState {
     /// `false` after theme/locale/source-reload resets; forces a
     /// full fresh-build on the next pass, which then sets `valid = true`.
     pub valid: bool,
+    projection: HashMap<NodeId, sparse::LayoutProjection>,
+    /// Exact geometry changes from a stable-tree layout, or `None` after a full pass.
+    pub changed_nodes: Option<HashSet<NodeId>>,
     #[cfg(test)]
     fail_next_layout: bool,
 }
@@ -275,6 +279,8 @@ impl PerSurfaceLayoutState {
             text_measure_revisions: TextMeasureRevisions::default(),
             last_available: (0.0, 0.0),
             valid: false,
+            projection: HashMap::new(),
+            changed_nodes: None,
             #[cfg(test)]
             fail_next_layout: false,
         }
@@ -470,6 +476,7 @@ impl LayoutEngine {
             None,
             intrinsic_cache,
             measurer,
+            false,
         );
     }
 
@@ -500,6 +507,52 @@ impl LayoutEngine {
             dirty_node_snapshots,
             intrinsic_cache,
             measurer,
+            false,
+        );
+    }
+
+    /// Lay out explicit changes in an otherwise structurally unchanged tree.
+    /// Paths are checked against the previous finalized frame before mutation.
+    /// Resize, text-resource changes and invalid retained state use the full path.
+    pub fn compute_incremental_for_stable_tree(
+        root: &mut WidgetNode,
+        state: &mut PerSurfaceLayoutState,
+        snapshot: &crate::FrameSnapshot,
+        dirty_nodes: &HashSet<NodeId>,
+        available_width: f32,
+        available_height: f32,
+        intrinsic_cache: &mut IntrinsicLayoutCache,
+        measurer: Option<&dyn TextMeasurer>,
+    ) {
+        let snapshots = snapshot
+            .live_paths(root, dirty_nodes, || {
+                crate::frame_work::visit(crate::frame_work::Pass::LayoutSync);
+            })
+            .filter(|paths| paths.len() == dirty_nodes.len())
+            .map(|paths| {
+                paths
+                    .into_iter()
+                    .map(|path| {
+                        let mut node = &*root;
+                        for &index in path {
+                            node = &node.children[index];
+                        }
+                        node.clone()
+                    })
+                    .collect::<Vec<_>>()
+            });
+        Self::compute_incremental_with_dirty_sources(
+            root,
+            state,
+            available_width,
+            available_height,
+            true,
+            false,
+            None,
+            snapshots.as_deref(),
+            intrinsic_cache,
+            measurer,
+            snapshots.is_some(),
         );
     }
 
@@ -514,7 +567,9 @@ impl LayoutEngine {
         dirty_node_snapshots: Option<&[WidgetNode]>,
         intrinsic_cache: &mut IntrinsicLayoutCache,
         measurer: Option<&dyn TextMeasurer>,
+        stable_tree: bool,
     ) {
+        state.changed_nodes = None;
         let text_measure_revisions = measurer
             .map(|measurer| measurer.revisions())
             .unwrap_or_default();
@@ -533,7 +588,9 @@ impl LayoutEngine {
             intrinsic_cache.invalidate_text_measurements_if_needed(text_measure_revisions);
             return;
         }
-        if let Err(error) = validate_widget_tree(root) {
+        if (!stable_tree || !state.valid || dirty_structural)
+            && let Err(error) = validate_widget_tree(root)
+        {
             tracing::error!(
                 target: "mesh::layout",
                 error = %error,
@@ -626,6 +683,25 @@ impl LayoutEngine {
             return;
         }
 
+        // A dirty node that was hidden and stays hidden cannot move anything.
+        let sparse_layout = stable_tree
+            && !available_changed
+            && !measurement_changed
+            && !state.projection.is_empty();
+        if sparse_layout
+            && dirty_node_snapshots.is_some_and(|nodes| {
+                nodes.iter().all(|node| {
+                    state.projection.get(&node.id).is_some_and(|old| {
+                        old.hidden
+                            && (node.computed_style.display == Display::None || old.hidden_ancestor)
+                    })
+                })
+            })
+        {
+            state.changed_nodes = Some(HashSet::new());
+            return;
+        }
+
         if available_changed || dirty_layout || measurement_changed {
             let available_space = taffy_available_space(available_width, available_height);
             let (tree, text_nodes) = (&mut state.tree, &state.text_nodes);
@@ -650,13 +726,25 @@ impl LayoutEngine {
                 );
                 state.valid = false;
             } else {
-                write_taffy_layout(
-                    root,
-                    &state.tree,
-                    &state.node_map,
-                    available_width,
-                    available_height,
-                );
+                if let Some(dirty) = dirty_node_snapshots.filter(|_| sparse_layout) {
+                    state.changed_nodes = Some(sparse::write_sparse_layout(
+                        root,
+                        state,
+                        dirty,
+                        available_width,
+                        available_height,
+                    ));
+                } else {
+                    write_taffy_layout(
+                        root,
+                        &state.tree,
+                        &state.node_map,
+                        available_width,
+                        available_height,
+                    );
+                    state.last_available = (available_width, available_height);
+                    sparse::seed_projection(root, state);
+                }
                 state.last_available = (available_width, available_height);
                 state.text_measure_revisions = text_measure_revisions;
             }

@@ -471,61 +471,16 @@ pub(super) fn write_taffy_layout_with_parent(
         return;
     }
 
-    if let Some(taffy_node) = node_map.get(&node.id)
-        && let Ok(layout) = tree.layout(*taffy_node)
-    {
-        node.layout = LayoutRect {
-            x: parent_x + layout.location.x,
-            y: parent_y + layout.location.y,
-            width: layout.size.width,
-            height: layout.size.height,
-        };
-
-        if node.computed_style.position == Position::Absolute
-            && let Some(padding) = parent_padding
-        {
-            if node.computed_style.inset_left.is_some() {
-                node.layout.x += padding.left;
-            }
-            if node.computed_style.inset_top.is_some() {
-                node.layout.y += padding.top;
-            }
-            if node.computed_style.inset_left.is_some() && node.computed_style.inset_right.is_some()
-            {
-                node.layout.width = (node.layout.width - padding.horizontal()).max(0.0);
-            }
-            if node.computed_style.inset_top.is_some() && node.computed_style.inset_bottom.is_some()
-            {
-                node.layout.height = (node.layout.height - padding.vertical()).max(0.0);
-            }
-        }
-
-        // Fixed: positioned relative to the viewport, ignoring scroll and transforms.
-        // Override x/y (and size when both edges constrain it) using viewport dimensions.
-        if node.computed_style.position == Position::Fixed {
-            let w = node.layout.width;
-            let h = node.layout.height;
-            let s = &node.computed_style;
-            match (s.inset_left, s.inset_right) {
-                (Some(l), Some(r)) => {
-                    node.layout.x = l;
-                    node.layout.width = (viewport_w - l - r).max(0.0);
-                }
-                (Some(l), None) => node.layout.x = l,
-                (None, Some(r)) => node.layout.x = (viewport_w - w - r).max(0.0),
-                (None, None) => node.layout.x = 0.0,
-            }
-            match (s.inset_top, s.inset_bottom) {
-                (Some(t), Some(b)) => {
-                    node.layout.y = t;
-                    node.layout.height = (viewport_h - t - b).max(0.0);
-                }
-                (Some(t), None) => node.layout.y = t,
-                (None, Some(b)) => node.layout.y = (viewport_h - h - b).max(0.0),
-                (None, None) => node.layout.y = 0.0,
-            }
-        }
-    }
+    node.layout = projected_taffy_rect(
+        node,
+        tree,
+        node_map,
+        parent_padding,
+        parent_x,
+        parent_y,
+        viewport_w,
+        viewport_h,
+    );
 
     let padding = node.computed_style.padding;
     for child in &mut node.children {
@@ -547,6 +502,76 @@ pub(super) fn write_taffy_layout_with_parent(
             viewport_h,
         );
     }
+}
+
+pub(super) fn projected_taffy_rect(
+    node: &WidgetNode,
+    tree: &TaffyTree<NodeId>,
+    node_map: &HashMap<NodeId, TaffyNodeId>,
+    parent_padding: Option<Edges>,
+    parent_x: f32,
+    parent_y: f32,
+    viewport_w: f32,
+    viewport_h: f32,
+) -> LayoutRect {
+    let mut rect = node.layout;
+    if let Some(taffy_node) = node_map.get(&node.id)
+        && let Ok(layout) = tree.layout(*taffy_node)
+    {
+        rect = LayoutRect {
+            x: parent_x + layout.location.x,
+            y: parent_y + layout.location.y,
+            width: layout.size.width,
+            height: layout.size.height,
+        };
+
+        if node.computed_style.position == Position::Absolute
+            && let Some(padding) = parent_padding
+        {
+            if node.computed_style.inset_left.is_some() {
+                rect.x += padding.left;
+            }
+            if node.computed_style.inset_top.is_some() {
+                rect.y += padding.top;
+            }
+            if node.computed_style.inset_left.is_some() && node.computed_style.inset_right.is_some()
+            {
+                rect.width = (rect.width - padding.horizontal()).max(0.0);
+            }
+            if node.computed_style.inset_top.is_some() && node.computed_style.inset_bottom.is_some()
+            {
+                rect.height = (rect.height - padding.vertical()).max(0.0);
+            }
+        }
+
+        // Fixed: positioned relative to the viewport, ignoring scroll and transforms.
+        // Override x/y (and size when both edges constrain it) using viewport dimensions.
+        if node.computed_style.position == Position::Fixed {
+            let w = rect.width;
+            let h = rect.height;
+            let s = &node.computed_style;
+            match (s.inset_left, s.inset_right) {
+                (Some(l), Some(r)) => {
+                    rect.x = l;
+                    rect.width = (viewport_w - l - r).max(0.0);
+                }
+                (Some(l), None) => rect.x = l,
+                (None, Some(r)) => rect.x = (viewport_w - w - r).max(0.0),
+                (None, None) => rect.x = 0.0,
+            }
+            match (s.inset_top, s.inset_bottom) {
+                (Some(t), Some(b)) => {
+                    rect.y = t;
+                    rect.height = (viewport_h - t - b).max(0.0);
+                }
+                (Some(t), None) => rect.y = t,
+                (None, Some(b)) => rect.y = (viewport_h - h - b).max(0.0),
+                (None, None) => rect.y = 0.0,
+            }
+        }
+    }
+
+    rect
 }
 
 pub(super) fn zero_layout_subtree(node: &mut WidgetNode) {
