@@ -229,6 +229,59 @@ styles. Dock p50/p90 before and after on the release glass fixture.
    attributes and fingerprint discovery.
 4. **P3** on top of typed setters; **P4** in parallel on the renderer lane.
 
+## Execution plan (2026-10-21)
+
+**Status:** wave 1 running. W1 landed 2026-10-21 (`06d5750f`): the patched-frame restyle was already path-directed, with 336 visits = about 24 targets × path depth. Paint-only patches now keep geometry. Dashboard frames are bound by layout-class patches, which makes W2 the dashboard lever. W4 and W6 (parts b and c) are running. Baseline commit `55800ed5`. Implementation
+agents work in worktrees and do not edit this note, the backlog, STATUS or the
+log. The orchestrator integrates one commit per workstream.
+
+### Workstreams
+
+Shared hub: `ShellComponent::paint` (`shell_component/mod.rs`) and
+`finalize_tree` (`rendering/mod.rs`). Every P2/P3 workstream edits them, so
+those workstreams are serialized.
+
+| ID | Scope | Main files | Structural gate (16 vs 1,024 clean siblings, plus forced-full twin parity) | Timing profile |
+| --- | --- | --- | --- | --- |
+| W1 | P2: keyed/binding-patch frames restyle only patched nodes plus inherited-value descendants (path-directed, as in step 1); dashboard `restyle_scan` 336 → about the patched count | `rendering/mod.rs` (`finalize_tree` restyle selection), `elements/style/resolve/subtree.rs`, `template_patch.rs` (patched-node set only) | `patched_frame_restyle_visits_scale_with_the_patch_not_the_tree` | dashboard spectrum |
+| W2 | P2: layout from the dirty set. Taffy dirty-marking for LAYOUT-class nodes; delete `layout_dirty_node_snapshots` discovery on patch frames; `display: none` patches skip layout | `runtime_tree/tree.rs` (`layout_dirty_node_snapshots`), `elements/layout/retained.rs`, `lowering.rs`, layout part of `finalize_tree` | `patched_frame_layout_visits_scale_with_the_patch` (`layout_discovery` 0, `layout_sync` ∝ patched) | dashboard spectrum, dock hover |
+| W3 | P2: remaining walks. Display ancestors on entrance/lifecycle frames; previous-style capture only for restyled transition nodes; `validate_widget_tree` only on STRUCTURE; child-surface requests from the dirty set | `animation.rs`, `render/display_list/build.rs`, `elements/tree.rs`, `shell_component/child_surface.rs` | one gate per pass; entrance-frame `display_ancestors` ∝ entering subtree | dock hover (entrance frames), navigation hover |
+| W4 | P0: reproducible live glass replay (dashboard, dock hover, Settings scroll, clock tick) through the real shell and compositor, reporting `total_surface_render`, first-open time and per-pass visits; skips cleanly without a compositor | `presentation/tests/live_compositor_matrix.rs` or a new shell harness, `tools/`, `docs/performance-profiling.md` | replay emits `MESH_PERF` metrics; visit counts are checked against fixture counts | live replay |
+| W5 | P3: the compiler resolves binding targets to `Prop`; a patch is a typed setter raising its `ChangeClass`; remove key-validation and binding-target-discovery scans; fix the sibling keyed-loop NodeId collision (loop discriminator) | `frontend/compiler/src/render/*`, `template_patch.rs`, `elements/prop.rs` | `keyed_list_*` gates plus `binding_patch_visits_no_target_discovery`; collision regression | dashboard spectrum |
+| W6 | P4: GPU raster default where the hardware gates pass; overlap frame N GPU work with frame N+1 script and layout (no presentation wait); scene preparation narrowed by retained revision | `render/src/surface/painter/*`, scene thread / GPU worker, `presentation/src/wayland_surface/backend/*` | `gpu_frame_cost_workload`; scene-prep recorded commands ∝ damage; existing hardware gates | `gpu_frame_cost_workload`, `appearance_frame_cost_profile` |
+| W7 | Retire fingerprint discovery (`retained_tree.update`, `RetainedDiscovery`) from the frame path; keep it as a `#[cfg(test)]` completeness verifier run after every gate frame | `runtime_tree/tree.rs`, `fingerprint.rs`, `paint` | every gate asserts `retained_discovery` 0 outside rebuild/theme/resize; verifier finds no misses across the integration suite | all of the above |
+
+### Waves
+
+1. **W1, W4, W6** in parallel. W1 is the shell restyle hub. W4 is test harness
+   and tooling. W6 is the render crate and presentation (not `display_list/build.rs`).
+2. **W2, W5** in parallel after W1. W2 owns layout and `layout_dirty_node_snapshots`.
+   W5 owns the compiler and `template_patch.rs`. Both touch `paint` only at
+   call sites; the orchestrator resolves that seam when merging.
+3. **W3** after W2 (shared `paint`/`tree.rs`) and W6 (`display_list/build.rs`).
+4. **W7** last, once every pass has a dirty-set consumer.
+
+W6 part (a), scene preparation narrowed by retained revision, moved to after W3. The retained revision naturally comes from `display_list/build.rs`, which W3 owns. Its design inputs: scene prep repaints the full selection per frame (`complete_scene` forces `full_selection`). A per-node picture cache would key on `Arc<DisplayPaintNode>` identity, and it must leave out layer scopes, damage-clipped `paint_clip`, backdrop regions, scroll and tooltip state, and in-flight async resources.
+
+### Measurement protocol (every agent)
+
+- Build and test inside `nix develop`. Timing uses the release profile (thin
+  LTO, one codegen unit) and CPU Skia raster unless the work is renderer work.
+  Parallel agents pin to distinct cores (`taskset -c 2`, `-c 6`, `-c 10`) and
+  build with `CARGO_BUILD_JOBS=4`. The orchestrator re-times every merge
+  serially on `main` on core 2. Those are the numbers recorded in the log.
+- Save the baseline test binary before editing. Alternate baseline and
+  candidate at least three times. Report mean/p50/p90 as ranges.
+- Each structural change gets a visit-count gate that is equal at two tree
+  sizes, a full-diff completeness check and forced-full twin pixel/style
+  parity. Add it to `tools/check-performance`.
+- Compare failure-name sets against the baseline binary, never counts.
+  Known: about 40–42 failures in `mesh-core-shell --lib`; frontend
+  `phase87_layout_display_source_semantics_survive_lowering` and
+  `shipped_settings_surface_compiles_with_local_pages`.
+- If the exit criterion is not met, or the win is a few percent, stop and
+  report rather than adding more scoping.
+
 ## Backlog items folded in here
 
 These lines were removed from the backlog on 2026-10-21 because P1/P2 replace

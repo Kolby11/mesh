@@ -7103,3 +7103,55 @@ fallback test, two sibling keyed loops with overlapping keys under one parent
 panicked on a NodeId collision. The collision predates this work, and the
 loop identity has no loop discriminator. Filed in the backlog; the test gives
 each loop its own parent.
+
+## 2026-10-21 — P2 W1: patched-frame restyle was already scoped; paint-only patches keep geometry
+
+`06d5750f` (baseline `55800ed5`) · area: patched-binding restyle and layout decision
+
+**The workstream's premise was wrong.** At the baseline, dashboard spectrum
+frames already took the path-directed `restyle_targets_by_path`. A trace of
+`finalize_tree` showed scoped restyle with 23–25 patched nodes and no SCRIPT or
+TEXT dirty. The 336 `restyle_scan` visits per frame are about 24 targets × a
+path depth of about 14: each target re-walks its ancestors. They are not a tree
+scan. The full-tree cost on these frames is elsewhere. Every patch frame
+carries LAYOUT, and the dashboard's patched property (`style:height`) really
+is layout. So annotation, layout sync and discovery, retained discovery,
+validation and animation sampling each still visit all 151 nodes. That is W2's
+work.
+
+**Change.** `ComputedStyle::same_layout_inputs` compares two styles with
+paint-only, animation-setup and inheritance-bookkeeping fields ignored. Any
+field not listed counts as layout. The scoped restyle raises `layout_changed`
+when a re-resolved style differs in a layout input. A patched frame drops
+LAYOUT and reuses retained geometry when no patched prop was LAYOUT-class and
+no layout input changed. Typed props such as `text`, content, `name` and `src`
+are LAYOUT-class, so they keep the full path. Free-form `style:*` bindings are
+caught by the style comparison.
+
+**Visits.** Paint-only patch (gate fixture, 16 siblings): retained discovery
+22 → 0, `restyle_scan` 4 and `style_resolve` 2, equal at 16 and 1,024
+siblings. Dashboard and dock per-pass visits are unchanged (`restyle_scan`
+336.4, `retained_discovery` 151, `layout_discovery` 151 on the dashboard).
+
+**Timing.** Release (thin LTO, one codegen unit), CPU raster, `taskset -c 2`,
+three alternating base/candidate invocations of three 120-frame runs each.
+Agent-measured; another agent was building on other cores at the time.
+
+| Fixture | Base mean / p50 / p90 | Candidate mean / p50 / p90 |
+| --- | --- | --- |
+| `glass_dashboard_spectrum_profile` | 2.31–2.60 / 2.31–2.57 / 2.47–2.83 ms | 2.36–2.57 / 2.35–2.56 / 2.51–2.80 ms |
+| `glass_dock_hover_animation_profile` run 0 | 3.72–3.85 / 2.89–3.09 / 3.21–3.29 ms | 3.67–3.78 / 2.92–2.96 / 3.21–3.40 ms |
+
+No change within noise. None was expected for these fixtures; the win is for
+bound paint-only properties (colour, background, opacity).
+
+**Verified.** New gate `patched_frame_restyle_visits_scale_with_the_patch_not_the_tree`
+(in `tools/check-performance`). It patches a keyed item's `style:background`
+and an inherited `style:color` on a container, checking that descendant text
+changes. Visits are equal at 16 and 1,024 siblings, retained discovery is 0, a
+full retained diff finds nothing, and a forced-full twin has identical pixels
+and computed styles. Release `mesh-core-shell --lib`: 42 failures before and
+after, with identical names. Elements: `style_profile_matrix_matches_supported_css_properties`
+fails both with and without the change. Not attempted: walking sorted targets
+with a shared prefix, which would cut `restyle_scan` 336 → about the union of
+the paths. It is negligible in time.

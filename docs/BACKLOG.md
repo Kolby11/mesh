@@ -29,12 +29,14 @@ criteria and the items folded in here:
 - [ ] **P0:** Add a reproducible live glass replay/gate (dashboard, dock hover,
       Settings scroll, clock tick) using the per-pass visit counters; CPU fixtures
       and the animation structural gate do not cover the live compositor gap.
-- [ ] **P2:** Complete the shared dirty-set pipeline beyond the animation and
-      interaction-frame scopes: layout propagation, display-list ancestors (entrance
-      frames), previous-style capture, validation and child surfaces still walk the tree.
+- [ ] **P2:** Complete the shared dirty-set pipeline beyond the animation, interaction and
+      paint-only patch scopes. Patch frames that change layout (dashboard `style:height`) still
+      run annotation, layout discovery, retained discovery, validation and animation sampling over
+      the whole tree; display-list ancestors, previous-style capture and child surfaces also walk it.
 - [ ] **P3:** Bindings compile to typed setters (finishes D1; with D4 typed patches).
       Fixed-shape native keyed lists already patch items; key validation and binding-target
-      discovery still scan, and keyed-patch frames restyle-scan ~2× the dashboard's nodes.
+      discovery still scan. Free-form `style:*` bindings are classed STYLE|A11Y, so only a style
+      diff can tell whether they reach layout; typed setters should classify them.
 - [ ] **P4:** GPU-first pipelined rendering: GPU raster by default where
       hardware gates pass, frame N's GPU work overlapping frame N+1's script
       and layout, and scene preparation narrowed by retained revision (D6).

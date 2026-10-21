@@ -7,6 +7,13 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Pipeline execution, wave 1:** W1 landed. Patched-frame restyle was already
+  path-directed, and paint-only patches now keep geometry. Dashboard frames are
+  bound by layout-class patches, so W2 (layout propagation) is the dashboard
+  lever. W4 (live replay gate) and W6 (GPU pipelining and the GPU-default
+  diagnostic) are running in worktrees. Plan and waves are in the
+  [pipeline note](todos/pending/2026-10-21-change-proportional-pipeline.md).
+
 - **Dock flares and dock tooltips fixed:** new `corner-shape: scoop` gives the
   flares real concave transparency; tooltips that leave their surface are
   `xdg_popup`s. Settings theme-switch repaint still unreproduced.
