@@ -2364,6 +2364,7 @@ dependencies = [
  "mesh-core-wayland",
  "minifb",
  "rustix 0.38.44",
+ "skia-safe",
  "smallvec",
  "smithay-client-toolkit",
  "thiserror 2.0.18",

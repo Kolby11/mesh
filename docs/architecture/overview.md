@@ -47,7 +47,8 @@ inputs; previews continue to produce a complete laid-out tree.
 GPU frames prepare a complete immutable Skia scene on the UI thread with pinned
 raster resources and explicit frame paint settings. A bounded worker owns EGL,
 retained targets and fenced dmabuf exports; Wayland receives only descriptors
-and release leases. Presentation currently waits for scene completion, while
+and release leases. Presentation submits the scene and commits it when the worker
+publishes, so scripts and layout overlap GPU raster; the surface is gated until then, while
 partial damage, compositor backpressure and SHM fallback remain authoritative.
 CPU frames with several painting surfaces record their paint serially and
 rasterize the recordings in parallel before presenting.

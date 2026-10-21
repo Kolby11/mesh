@@ -91,6 +91,7 @@ impl Shell {
             }
         }
         self.drain_surface_lifecycle_events()?;
+        self.reconcile_scene_completions();
         self.drain_window_close_requests()?;
         self.sync_text_input_state()?;
 
@@ -1031,6 +1032,24 @@ impl Shell {
         Ok(())
     }
 
+    /// A frame handed to the scene worker was accepted when it was submitted.
+    /// One that never reached the compositor (superseded, resized away,
+    /// buffers busy, GPU failure) leaves the surface showing stale pixels, so
+    /// repaint the whole surface.
+    fn reconcile_scene_completions(&mut self) {
+        for completion in self.presentation_engine.take_scene_completions() {
+            if completion.presented {
+                continue;
+            }
+            let Some((index, target)) = self.component_target_for_surface(&completion.surface_id)
+            else {
+                continue;
+            };
+            self.components[index].target_mut(target).force_full_present = true;
+            self.components[index].component.request_paint();
+        }
+    }
+
     pub(in crate::shell) fn drain_surface_lifecycle_events(&mut self) -> Result<(), ShellRunError> {
         for event in self.presentation_engine.take_surface_lifecycle_events() {
             match event {
@@ -1397,7 +1416,7 @@ impl Shell {
                 }
             }
             match present_result {
-                Ok(PresentStatus::Presented) => presented = true,
+                Ok(PresentStatus::Presented | PresentStatus::Submitted) => presented = true,
                 Ok(PresentStatus::NotReady) => {
                     self.components[index]
                         .target_mut(target)

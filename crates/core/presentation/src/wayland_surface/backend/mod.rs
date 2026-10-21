@@ -38,4 +38,8 @@ pub struct WaylandSurfaceBackend {
     state: State,
     #[cfg(feature = "gpu")]
     gpu: GpuPresenter,
+    #[cfg(feature = "gpu")]
+    scene_pending: Vec<gpu::PendingScene>,
+    #[cfg(feature = "gpu")]
+    scene_results: Vec<crate::SceneCompletion>,
 }

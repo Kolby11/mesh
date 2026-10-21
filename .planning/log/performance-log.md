@@ -7155,3 +7155,58 @@ after, with identical names. Elements: `style_profile_matrix_matches_supported_c
 fails both with and without the change. Not attempted: walking sorted targets
 with a shared prefix, which would cut `restyle_scan` 336 → about the union of
 the paths. It is negligible in time.
+
+## 2026-10-21 — P4 W6: pipelined GPU presentation and render-path diagnostic
+
+On main after `f121a52e` (agent baseline `55800ed5`) · area: presentation, scene worker, shell present seam
+
+**Change.** `present_with_damage` no longer waits for the scene worker. A scene
+canvas is submitted and returns `PresentStatus::Submitted`. The worker signals
+an eventfd after publishing, `wait_for_events` polls it (`WaitReason::SceneComplete`),
+and the backend imports, attaches and commits on that wake. Frames commit in
+submission order, and a popup never commits before a still-pending parent. A
+frame commits only if the worker still holds it as current and the compositor
+object is the one it was painted for. A frame older than 2 s disables GPU
+presentation. While a frame is in flight the surface is gated by the existing
+buffer-release wait, so other surfaces and the next frame's script and layout
+run. Hiding a surface cancels its frame. The shell treats `Submitted` as
+presented. A completion that did not present (superseded, resized away,
+buffers busy, GPU error) forces a full repaint of its target. The fence,
+release-lease and SHM fallback rules are unchanged. `GpuPresenter` logs one
+`render path: GPU (…)` / `CPU/SHM (reason)` line and exposes
+`PresentationEngine::render_path()`. GPU was already the CLI default.
+
+**Timing.** Agent-measured. Live Hyprland at 120 Hz, AMD 780M as the
+compositor main device, release (thin LTO, one codegen unit), `taskset -c 10`.
+The new ignored `scene_pipelining_profile` alternates serialized (old wait) and
+overlapped modes in one binary. Each frame paints 160 blurred rounded rects at
+full surface plus synthetic next-frame CPU work. Three invocations (two with
+4 ms of work, one with 1 ms), 6 rounds × 120 frames each.
+
+| Metric | Serialized | Overlapped |
+| --- | --- | --- |
+| Frame N+1 work start after frame N submit, p50 (4 ms work) | 1.02–1.64 ms | 0.00 ms |
+| Same, p90 (4 ms work) | 1.45–2.12 ms | 0.00 ms |
+| Same, p50 (1 ms work) | 1.67–2.32 ms | 0.00 ms |
+| Frame interval p50 | 8.33–8.43 ms | 8.32–8.37 ms |
+| Frame interval p90 | 8.57–8.95 ms | 8.56–8.87 ms |
+
+The UI thread gets back the whole GPU wait (1–2 ms per GPU frame). The frame
+interval does not change because this load is bound by 120 Hz frame callbacks.
+An unpinned run on a busier system (not vsync-bound, about 13 ms intervals)
+showed 10.8–13.1 vs 12.7–13.8 ms p50; it was not repeated under controlled
+conditions. No shell-level end-to-end measurement exists: shell tests build
+without the `gpu` feature. `gpu_frame_cost_workload` is unchanged (render
+crate untouched). For reference, the 780M full surface is 1.97–2.04 ms against
+35.0–36.4 ms for CPU raster plus SHM copy.
+
+**Verified.** New live tests `scene_frame_in_flight_survives_hide_resize_and_destroy`,
+plus `scene_worker_exports_and_presents_frames_on_a_live_compositor` updated for
+`Submitted` and retrying on busy buffers. Both pass on the live session; re-run on main: presentation release with `gpu` 112 passed, live matrix 5 passed / 1 ignored.
+Agent-run release suites through `nix develop -c`, against a clean
+`git archive 55800ed5` baseline: render 332 passed / 18 ignored and presentation
+lib 112 passed on both sides, with identical names. Shell lib baseline has 43
+failures and the candidate 42; the difference is the flaky
+`resource_preparation_job_cancels_and_polls_without_blocking_the_caller`, and the
+candidate has no new name. Scene preparation narrowed by retained revision
+(W6 part a) is deferred until after W3.

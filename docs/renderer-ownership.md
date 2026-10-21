@@ -81,10 +81,31 @@ Any pixel read — scroll shifts, debug overlays, the SHM copy — replays pendi
 pictures first. Child popup surfaces still paint and present inside reconcile,
 and the SHM copy stays on the shell thread.
 
-The initial production integration waits for worker completion at the
-presentation boundary. GPU execution has moved threads; scripts for frame N+1
-are not yet overlapped with frame N raster. The worker sleeps when idle.
-Scroll layer caching and blur caches remain measured follow-ups in the backlog.
+Presentation does not wait for the worker. `present_with_damage` submits the
+immutable scene and returns `PresentStatus::Submitted`; the surface then reports
+`surface_waiting_for_buffer_release`, so the shell skips it while its frame is
+in flight but keeps running scripts, layout and other surfaces. The worker
+signals an eventfd that `wait_for_events` polls beside the Wayland connection
+and the shell wake. On that wake the backend takes the published output (whose
+fence the worker already waited on), imports the descriptors, attaches and
+commits, and only then acknowledges the scene. Frames commit in submission
+order, and a popup never commits before a parent whose frame is still pending.
+A frame that does not reach the compositor (superseded or removed canvas,
+recreated compositor object, hidden surface, busy buffers, GPU error) is
+reported through `take_scene_completions`; the shell repaints the whole surface.
+A worker silent for two seconds disables GPU presentation. The worker sleeps
+when idle. Scroll layer caching, blur caches and narrowing scene preparation by
+retained revision remain follow-ups in the backlog.
+
+## Render path selection
+
+The first canvas request resolves the render path once and logs one `render path:`
+line at info level naming the active path and why. GPU needs a compositor with
+`zwp_linux_dmabuf_v1` v4 feedback naming a main device, an EGL/Ganesh context and
+dmabuf export on that device, and a format/modifier the compositor imports; any
+failed gate selects CPU/SHM with the reason (also `MESH_RENDER_GPU=0`). A GPU
+error at runtime disables the path and logs the cause; surfaces then paint on the
+CPU. `PresentationEngine::render_path` returns the same text.
 
 ## Adapter boundaries
 

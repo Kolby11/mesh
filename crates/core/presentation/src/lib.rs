@@ -91,6 +91,8 @@ pub enum WaitReason {
     WaylandEvent,
     /// The IPC/backend eventfd was signaled.
     IpcEvent,
+    /// The scene worker published a frame.
+    SceneComplete,
     /// The deadline expired before any fd became ready.
     DeadlineExpired,
 }
@@ -101,6 +103,7 @@ impl WaitReason {
         match self {
             Self::WaylandEvent => "wayland_event",
             Self::IpcEvent => "ipc_event",
+            Self::SceneComplete => "scene_complete",
             Self::DeadlineExpired => "deadline_expired",
         }
     }
@@ -128,9 +131,22 @@ pub enum PresentStatus {
     /// The compositor has not configured the surface yet. The caller must keep
     /// the frame and retry after presentation events are dispatched.
     NotReady,
+    /// The frame was handed to the scene worker. The backend commits it when
+    /// the worker publishes; the outcome arrives through
+    /// [`PresentationEngine::take_scene_completions`].
+    Submitted,
     /// The compositor surface is no longer present. The caller must retain the
     /// frame and retry configuration before treating a later frame as delivered.
     SurfaceMissing,
+}
+
+/// What became of a frame returned as [`PresentStatus::Submitted`]. When
+/// `presented` is false the pixels never reached the compositor and the caller
+/// must repaint the whole surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SceneCompletion {
+    pub surface_id: String,
+    pub presented: bool,
 }
 
 /// Outcome of committing compositor state that does not require a new pixel
@@ -1270,6 +1286,25 @@ impl PresentationEngine {
         }
         let _ = allow_gpu;
         PixelBuffer::try_new(width, height).map(SurfaceCanvas::from)
+    }
+
+    /// Commit frames the scene worker has published and report the outcome of
+    /// every submitted frame since the last call.
+    pub fn take_scene_completions(&mut self) -> Vec<SceneCompletion> {
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.take_scene_completions(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Which render path is active and why, for example
+    /// `GPU (device 0xe280, ...)` or `CPU/SHM (MESH_RENDER_GPU=0)`.
+    pub fn render_path(&mut self) -> String {
+        #[cfg(feature = "gpu")]
+        if let Backend::WaylandSurface(bridge) = &mut self.backend {
+            return bridge.render_path();
+        }
+        "CPU/SHM (GPU presentation not available in this backend or build)".into()
     }
 
     /// Whether [`Self::allocate_canvas`] returns GPU targets when allowed.

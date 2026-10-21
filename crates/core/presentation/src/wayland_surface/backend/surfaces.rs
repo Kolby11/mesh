@@ -105,6 +105,10 @@ impl WaylandSurfaceBackend {
             state,
             #[cfg(feature = "gpu")]
             gpu: GpuPresenter::Untried,
+            #[cfg(feature = "gpu")]
+            scene_pending: Vec::new(),
+            #[cfg(feature = "gpu")]
+            scene_results: Vec::new(),
         };
         // Dmabuf feedback names the device to render on; it must have
         // arrived before the first canvas is allocated.

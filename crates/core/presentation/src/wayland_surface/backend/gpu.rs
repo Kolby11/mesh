@@ -113,13 +113,22 @@ impl DmabufHandler for State {
 
 smithay_client_toolkit::delegate_dmabuf!(State);
 
+/// A started scene worker plus the eventfd it signals after publishing a
+/// frame, so the shell's blocking wait wakes for completion.
+pub(in crate::wayland_surface) struct GpuRuntime {
+    worker: Arc<SceneRenderThread<GpuSceneRenderer>>,
+    wake: Arc<std::os::fd::OwnedFd>,
+    description: String,
+}
+
 /// Whether this backend renders on the GPU. Resolved once, on the first
 /// canvas request, so the shell never mixes the two within a session unless
-/// a surface is explicitly asked to paint on the CPU.
+/// a surface is explicitly asked to paint on the CPU. Every outcome carries
+/// the reason, readable through [`WaylandSurfaceBackend::render_path`].
 pub(in crate::wayland_surface) enum GpuPresenter {
     Untried,
-    Ready(Arc<SceneRenderThread<GpuSceneRenderer>>),
-    Unavailable,
+    Ready(GpuRuntime),
+    Unavailable(String),
 }
 
 impl GpuPresenter {
@@ -127,30 +136,50 @@ impl GpuPresenter {
         &mut self,
         dmabuf: &DmabufProtocol,
     ) -> Option<&Arc<SceneRenderThread<GpuSceneRenderer>>> {
-        if matches!(self, Self::Untried) {
-            *self = match Self::start(dmabuf) {
-                Ok(worker) => {
-                    tracing::info!("gpu present: scene worker enabled");
-                    Self::Ready(Arc::new(worker))
-                }
-                Err(reason) => {
-                    tracing::info!("gpu present: disabled, painting on the CPU: {reason}");
-                    Self::Unavailable
-                }
-            };
-        }
+        self.resolve(dmabuf);
         match self {
-            Self::Ready(worker) => Some(worker),
+            Self::Ready(runtime) => Some(&runtime.worker),
             _ => None,
         }
     }
 
-    pub(in crate::wayland_surface) fn disable(&mut self, reason: &PresentationError) {
-        tracing::warn!("gpu present: disabled, painting on the CPU: {reason}");
-        *self = Self::Unavailable;
+    pub(in crate::wayland_surface) fn wake_fd(&self) -> Option<&std::os::fd::OwnedFd> {
+        match self {
+            Self::Ready(runtime) => Some(&runtime.wake),
+            _ => None,
+        }
     }
 
-    fn start(dmabuf: &DmabufProtocol) -> Result<SceneRenderThread<GpuSceneRenderer>, String> {
+    fn resolve(&mut self, dmabuf: &DmabufProtocol) {
+        if matches!(self, Self::Untried) {
+            *self = match Self::start(dmabuf) {
+                Ok(runtime) => {
+                    tracing::info!("render path: GPU ({})", runtime.description);
+                    Self::Ready(runtime)
+                }
+                Err(reason) => {
+                    tracing::info!("render path: CPU/SHM ({reason})");
+                    Self::Unavailable(reason)
+                }
+            };
+        }
+    }
+
+    pub(in crate::wayland_surface) fn render_path(&mut self, dmabuf: &DmabufProtocol) -> String {
+        self.resolve(dmabuf);
+        match self {
+            Self::Ready(runtime) => format!("GPU ({})", runtime.description),
+            Self::Unavailable(reason) => format!("CPU/SHM ({reason})"),
+            Self::Untried => unreachable!("resolved above"),
+        }
+    }
+
+    pub(in crate::wayland_surface) fn disable(&mut self, reason: &PresentationError) {
+        tracing::warn!("render path: CPU/SHM, GPU disabled at runtime ({reason})");
+        *self = Self::Unavailable(format!("disabled after GPU error: {reason}"));
+    }
+
+    fn start(dmabuf: &DmabufProtocol) -> Result<GpuRuntime, String> {
         if std::env::var("MESH_RENDER_GPU").is_ok_and(|value| value == "0") {
             return Err("MESH_RENDER_GPU=0".into());
         }
@@ -160,6 +189,14 @@ impl GpuPresenter {
         let device = dmabuf
             .main_device()
             .ok_or("compositor reported no dmabuf main device")?;
+        let wake = Arc::new(
+            rustix::event::eventfd(
+                0,
+                rustix::event::EventfdFlags::CLOEXEC | rustix::event::EventfdFlags::NONBLOCK,
+            )
+            .map_err(|error| format!("scene wake eventfd: {error}"))?,
+        );
+        let signal = Arc::clone(&wake);
         let (send_probe, probe) = std::sync::mpsc::sync_channel(1);
         let worker = SceneRenderThread::spawn(
             64,
@@ -169,9 +206,15 @@ impl GpuPresenter {
                 let _ = send_probe.send(planes);
                 Ok(renderer)
             },
-            || {},
+            move || {
+                let _ = rustix::io::write(&*signal, &1u64.to_ne_bytes());
+            },
         )
-        .map_err(|error| format!("scene worker: {error:?}"))?;
+        .map_err(|error| {
+            format!(
+                "EGL/Ganesh context or dmabuf export unavailable on the compositor device: {error:?}"
+            )
+        })?;
         let planes = probe.recv().map_err(|error| error.to_string())?;
         if planes.fourcc != DRM_FORMAT_ABGR8888 || !dmabuf.accepts(planes.fourcc, planes.modifier) {
             return Err(format!(
@@ -179,7 +222,14 @@ impl GpuPresenter {
                 planes.fourcc, planes.modifier
             ));
         }
-        Ok(worker)
+        Ok(GpuRuntime {
+            worker: Arc::new(worker),
+            wake,
+            description: format!(
+                "device {device:#x}, format {:#x}, modifier {:#x}",
+                planes.fourcc, planes.modifier
+            ),
+        })
     }
 }
 
@@ -324,6 +374,11 @@ impl WaylandSurfaceBackend {
         self.gpu.worker(&self.state.dmabuf).is_some()
     }
 
+    /// Which render path is active and why, for diagnostics.
+    pub fn render_path(&mut self) -> String {
+        self.gpu.render_path(&self.state.dmabuf)
+    }
+
     pub fn allocate_scene_canvas(&mut self, width: u32, height: u32) -> Option<SceneCanvas> {
         let worker = Arc::clone(self.gpu.worker(&self.state.dmabuf)?);
         let mut canvas = SceneCanvas::new(width.max(1), height.max(1))?;
@@ -331,5 +386,234 @@ impl WaylandSurfaceBackend {
             worker.remove_surface(surface);
         });
         Some(canvas)
+    }
+}
+
+/// A frame handed to the scene worker and not yet imported by the compositor.
+pub(in crate::wayland_surface) struct PendingScene {
+    surface_id: String,
+    scene: mesh_core_render::scene_thread::SceneSurface,
+    commit: u64,
+    /// Compositor object the frame was painted for; a recreated role must
+    /// not receive pixels recorded for its predecessor.
+    object: u64,
+    damage: Vec<DamageRect>,
+    submitted: Instant,
+}
+
+/// How long a submitted frame may stay unpublished before the worker is
+/// considered wedged and the backend falls back to SHM.
+const SCENE_COMPLETION_DEADLINE: Duration = Duration::from_secs(2);
+
+impl WaylandSurfaceBackend {
+    /// Hand the finished recording to the worker. The commit, import and
+    /// attach happen in [`Self::poll_scene_completions`] once the worker
+    /// publishes the fenced output, so the caller can start its next frame.
+    pub(super) fn submit_scene(
+        &mut self,
+        surface_id: &str,
+        scene: &mut SceneCanvas,
+        damage: &[DamageRect],
+    ) -> PresentStatus {
+        if self.scene_in_flight(surface_id) {
+            return PresentStatus::NotReady;
+        }
+        let Some(worker) = self.gpu.worker(&self.state.dmabuf).cloned() else {
+            return PresentStatus::NotReady;
+        };
+        let Some(entry) = self.state.surfaces.get(surface_id) else {
+            return PresentStatus::SurfaceMissing;
+        };
+        let (scale, object) = (entry.scale, entry.surface_generation().object);
+        let Some(snapshot) = scene.snapshot(mesh_core_render::FractionalScale::new(scale)) else {
+            self.gpu.disable(&PresentationError::BufferAlloc(
+                "scene recording is incomplete".into(),
+            ));
+            return PresentStatus::NotReady;
+        };
+        match worker.submit(snapshot) {
+            Ok(commit) => {
+                self.scene_pending.push(PendingScene {
+                    surface_id: surface_id.to_string(),
+                    scene: scene.surface,
+                    commit,
+                    object,
+                    damage: damage.to_vec(),
+                    submitted: Instant::now(),
+                });
+                PresentStatus::Submitted
+            }
+            Err(error) => {
+                self.gpu.disable(&PresentationError::BufferAlloc(format!(
+                    "scene submit: {error:?}"
+                )));
+                PresentStatus::NotReady
+            }
+        }
+    }
+
+    pub(super) fn scene_in_flight(&self, surface_id: &str) -> bool {
+        self.scene_pending
+            .iter()
+            .any(|pending| pending.surface_id == surface_id)
+    }
+
+    /// The instant the oldest unpublished frame becomes a worker fault.
+    pub(super) fn scene_deadline(&self) -> Option<Instant> {
+        self.scene_pending
+            .first()
+            .map(|pending| pending.submitted + SCENE_COMPLETION_DEADLINE)
+    }
+
+    /// Forget in-flight frames of a hidden or destroyed surface. The worker
+    /// output is dropped unseen, which returns its buffer lease.
+    pub(super) fn cancel_scene(&mut self, surface_id: &str) {
+        self.scene_pending
+            .retain(|pending| pending.surface_id != surface_id);
+    }
+
+    /// Import and commit every frame the worker has published. Frames commit
+    /// in submission order, and a popup never commits before a still-pending
+    /// parent. Outcomes accumulate for the shell to drain.
+    pub(super) fn poll_scene_completions(&mut self) {
+        if let Some(fd) = self.gpu.wake_fd() {
+            let mut counter = [0u8; 8];
+            let _ = rustix::io::read(fd, &mut counter);
+        }
+        if self.scene_pending.is_empty() {
+            return;
+        }
+        let Some(worker) = self.gpu.worker(&self.state.dmabuf).cloned() else {
+            for pending in std::mem::take(&mut self.scene_pending) {
+                self.scene_results.push(crate::SceneCompletion {
+                    surface_id: pending.surface_id,
+                    presented: false,
+                });
+            }
+            return;
+        };
+        let pending = std::mem::take(&mut self.scene_pending);
+        let mut waiting: Vec<PendingScene> = Vec::new();
+        for pending in pending {
+            let parent_waiting = match self.state.surfaces.get(&pending.surface_id) {
+                Some(SurfaceEntry {
+                    role: WaylandRole::Popup(role),
+                    ..
+                }) => waiting
+                    .iter()
+                    .any(|earlier| earlier.surface_id == role.parent_id),
+                _ => false,
+            };
+            if parent_waiting {
+                waiting.push(pending);
+                continue;
+            }
+            if !worker.is_current(pending.scene, pending.commit) {
+                self.scene_results.push(crate::SceneCompletion {
+                    surface_id: pending.surface_id,
+                    presented: false,
+                });
+                continue;
+            }
+            let Some(done) = worker.take_completed(pending.scene) else {
+                if pending.submitted.elapsed() > SCENE_COMPLETION_DEADLINE {
+                    self.gpu.disable(&PresentationError::BufferAlloc(
+                        "scene worker did not complete the frame".into(),
+                    ));
+                    self.scene_results.push(crate::SceneCompletion {
+                        surface_id: pending.surface_id,
+                        presented: false,
+                    });
+                } else {
+                    waiting.push(pending);
+                }
+                continue;
+            };
+            let presented = done.commit == pending.commit
+                && self.import_scene_output(&worker, &pending, done.output);
+            self.scene_results.push(crate::SceneCompletion {
+                surface_id: pending.surface_id,
+                presented,
+            });
+        }
+        waiting.append(&mut self.scene_pending);
+        self.scene_pending = waiting;
+    }
+
+    fn import_scene_output(
+        &mut self,
+        worker: &SceneRenderThread<GpuSceneRenderer>,
+        pending: &PendingScene,
+        output: Result<GpuSceneOutput, mesh_core_render::gpu::scene::GpuSceneError>,
+    ) -> bool {
+        use mesh_core_render::gpu::scene::GpuSceneError;
+        let surface_id = pending.surface_id.as_str();
+        let output = match output {
+            Ok(output) => output,
+            Err(GpuSceneError::BuffersBusy) => {
+                if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
+                    entry.mark_buffer_backpressured();
+                }
+                return false;
+            }
+            Err(error) => {
+                self.gpu
+                    .disable(&PresentationError::BufferAlloc(error.to_string()));
+                return false;
+            }
+        };
+        let output_size = self.output_logical_size_for_surface(surface_id);
+        let qh = self.state.qh.clone();
+        let state = &mut self.state;
+        let Some(entry) = state.surfaces.get_mut(surface_id) else {
+            return false;
+        };
+        if !entry.configured || entry.surface_generation().object != pending.object {
+            return false;
+        }
+        let (logical_w, logical_h) = entry.resolved_extent(output_size);
+        let scale = entry.scale;
+        let (physical_w, physical_h) = (output.width, output.height);
+        let mut device_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]> =
+            mesh_core_render::DeviceDamage::from_logical(
+                &pending.damage,
+                scale,
+                physical_w,
+                physical_h,
+            )
+            .rects()
+            .iter()
+            .copied()
+            .collect();
+        if device_damage.is_empty() {
+            device_damage.push(full_damage(physical_w, physical_h));
+        }
+        let prepared = match entry.copy_into_dmabuf_buffer(&mut state.dmabuf, &qh, output) {
+            Ok(Some((index, copied))) => (BufferSlot::Dmabuf(index), copied),
+            Ok(None) => return false,
+            Err(error) => {
+                self.gpu.disable(&error);
+                return false;
+            }
+        };
+        match self.commit_prepared(
+            surface_id,
+            prepared.0,
+            &prepared.1,
+            (logical_w, logical_h),
+            (physical_w, physical_h),
+            scale,
+            &device_damage,
+        ) {
+            Ok(PresentStatus::Presented) => {
+                worker.acknowledge_presented(pending.scene, pending.commit);
+                true
+            }
+            Ok(_) => false,
+            Err(error) => {
+                tracing::warn!("gpu present: committing surface '{surface_id}' failed: {error}");
+                false
+            }
+        }
     }
 }

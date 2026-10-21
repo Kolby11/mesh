@@ -34,6 +34,8 @@ impl WaylandSurfaceBackend {
             return Err(error);
         }
         if !visible {
+            #[cfg(feature = "gpu")]
+            self.cancel_scene(surface_id);
             self.state.release_surface_focus_grab(surface_id);
             // A hidden window is *destroyed*, not detached. Detaching a buffer
             // unmaps an `xdg_toplevel`, and remapping it requires a fresh
@@ -83,7 +85,6 @@ impl WaylandSurfaceBackend {
             return Ok(PresentStatus::NotReady);
         }
 
-        let qh = self.state.qh.clone();
         // A spanning layer surface may receive a zero configure dimension.
         // Resolve it against the output selected for this surface before any
         // buffer validation or protocol state is prepared. The same extent is
@@ -91,66 +92,9 @@ impl WaylandSurfaceBackend {
         // cannot disagree about the logical destination.
         let output_size = self.output_logical_size_for_surface(surface_id);
         #[cfg(feature = "gpu")]
-        let mut rendered_scene = None;
-        #[cfg(feature = "gpu")]
         if let SurfaceCanvas::Scene(scene) = canvas {
-            let worker = self.gpu.worker(&self.state.dmabuf).cloned();
-            let result = (|| {
-                let worker = worker.as_ref().ok_or_else(|| {
-                    PresentationError::BufferAlloc("GPU presentation is disabled".into())
-                })?;
-                let scale = self
-                    .state
-                    .surfaces
-                    .get(surface_id)
-                    .map(|entry| entry.scale)
-                    .unwrap_or(1.0);
-                let snapshot = scene
-                    .snapshot(mesh_core_render::FractionalScale::new(scale))
-                    .ok_or_else(|| {
-                        PresentationError::BufferAlloc("scene recording is incomplete".into())
-                    })?;
-                let commit = worker.submit(snapshot).map_err(|error| {
-                    PresentationError::BufferAlloc(format!("scene submit: {error:?}"))
-                })?;
-                let completed = worker
-                    .wait_completed(scene.surface, std::time::Duration::from_secs(2))
-                    .ok_or_else(|| {
-                        PresentationError::BufferAlloc(
-                            "scene worker did not complete the frame".into(),
-                        )
-                    })?;
-                if !worker.is_current(scene.surface, completed.commit) || completed.commit != commit
-                {
-                    return Err(PresentationError::BufferAlloc(
-                        "scene output was superseded".into(),
-                    ));
-                }
-                Ok((commit, completed.output))
-            })();
-            match result {
-                Ok((commit, Ok(output))) => rendered_scene = Some((scene.surface, commit, output)),
-                Ok((_, Err(mesh_core_render::gpu::scene::GpuSceneError::BuffersBusy))) => {
-                    if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
-                        entry.mark_buffer_backpressured();
-                    }
-                    return Ok(PresentStatus::NotReady);
-                }
-                Ok((_, Err(error))) => {
-                    self.gpu
-                        .disable(&PresentationError::BufferAlloc(error.to_string()));
-                    return Ok(PresentStatus::NotReady);
-                }
-                Err(error) => {
-                    self.gpu.disable(&error);
-                    return Ok(PresentStatus::NotReady);
-                }
-            }
+            return Ok(self.submit_scene(surface_id, scene, damage_rects));
         }
-        #[cfg(feature = "gpu")]
-        let mut gpu_failure = None;
-        #[cfg(feature = "gpu")]
-        let mut scene_commit = None;
         let (
             slot,
             copy_damage,
@@ -215,22 +159,7 @@ impl WaylandSurfaceBackend {
                         .map(|(index, copied)| (BufferSlot::Shm(index), copied))
                 }
                 #[cfg(feature = "gpu")]
-                SurfaceCanvas::Scene(_) => {
-                    let (surface, commit, output) = rendered_scene
-                        .take()
-                        .expect("scene was rendered before importing descriptors");
-                    let copied = entry.copy_into_dmabuf_buffer(&mut state.dmabuf, &qh, output);
-                    match copied {
-                        Ok(prepared) => {
-                            scene_commit = Some((surface, commit));
-                            prepared.map(|(index, copied)| (BufferSlot::Dmabuf(index), copied))
-                        }
-                        Err(error) => {
-                            gpu_failure = Some(error);
-                            None
-                        }
-                    }
-                }
+                SurfaceCanvas::Scene(_) => unreachable!("scene canvases submit above"),
                 #[cfg(not(feature = "gpu"))]
                 SurfaceCanvas::Scene(_) => {
                     return Err(PresentationError::BufferAlloc(
@@ -239,10 +168,6 @@ impl WaylandSurfaceBackend {
                 }
             };
             let Some((slot, copy_damage)) = prepared else {
-                #[cfg(feature = "gpu")]
-                if let Some(error) = gpu_failure {
-                    self.gpu.disable(&error);
-                }
                 return Ok(PresentStatus::NotReady);
             };
             (
@@ -256,6 +181,29 @@ impl WaylandSurfaceBackend {
                 device_damage,
             )
         };
+        self.commit_prepared(
+            surface_id,
+            slot,
+            &copy_damage,
+            (logical_w, logical_h),
+            (physical_w, physical_h),
+            scale,
+            &physical_damage,
+        )
+    }
+
+    /// Attach and commit a buffer whose pixels and damage are ready.
+    pub(super) fn commit_prepared(
+        &mut self,
+        surface_id: &str,
+        slot: BufferSlot,
+        copy_damage: &[DamageRect],
+        (logical_w, logical_h): (u32, u32),
+        (physical_w, physical_h): (u32, u32),
+        scale: f32,
+        physical_damage: &[DamageRect],
+    ) -> Result<PresentStatus, PresentationError> {
+        let qh = self.state.qh.clone();
         // Stage compositor state only after a reusable buffer has been
         // prepared. A buffer backpressure/allocation failure must not consume
         // a region update that still needs a successful wl_surface commit.
@@ -275,15 +223,15 @@ impl WaylandSurfaceBackend {
             logical_h,
             physical_w,
             physical_h,
-            &physical_damage,
-            &copy_damage,
+            physical_damage,
+            copy_damage,
             scale,
         ) {
             // Preparing the buffer consumed the slot's accumulated damage
             // before copying it. Put it back when activation/attach fails,
             // otherwise a retry would publish a partially refreshed buffer
             // as if the frame had been delivered.
-            entry.restore_copied_damage(slot, &copy_damage, full_damage(physical_w, physical_h));
+            entry.restore_copied_damage(slot, copy_damage, full_damage(physical_w, physical_h));
             return Err(error);
         }
         #[cfg(feature = "gpu")]
@@ -292,13 +240,6 @@ impl WaylandSurfaceBackend {
             state.dmabuf.busy.insert(entry.dmabuf_buffer_id(index));
         }
         Self::mark_surface_state_committed(entry, prepared_state);
-        #[cfg(feature = "gpu")]
-        if let Some((surface, commit)) = scene_commit {
-            if let Some(worker) = self.gpu.worker(&self.state.dmabuf) {
-                worker.acknowledge_presented(surface, commit);
-            }
-        }
-
         Ok(PresentStatus::Presented)
     }
 
@@ -459,6 +400,33 @@ impl WaylandSurfaceBackend {
             .surfaces
             .get(surface_id)
             .is_some_and(SurfaceEntry::waiting_for_buffer_release)
+            || self.scene_waiting(surface_id)
+    }
+
+    fn scene_waiting(&self, surface_id: &str) -> bool {
+        #[cfg(feature = "gpu")]
+        {
+            self.scene_in_flight(surface_id)
+        }
+        #[cfg(not(feature = "gpu"))]
+        {
+            let _ = surface_id;
+            false
+        }
+    }
+
+    /// Outcomes of frames submitted to the scene worker since the last call.
+    /// A frame that did not present must be repainted by the caller.
+    pub fn take_scene_completions(&mut self) -> Vec<crate::SceneCompletion> {
+        #[cfg(feature = "gpu")]
+        {
+            self.poll_scene_completions();
+            std::mem::take(&mut self.scene_results)
+        }
+        #[cfg(not(feature = "gpu"))]
+        {
+            Vec::new()
+        }
     }
 
     pub fn surface_generation(&self, surface_id: &str) -> Option<SurfaceGeneration> {

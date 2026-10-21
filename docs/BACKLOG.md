@@ -37,9 +37,13 @@ criteria and the items folded in here:
       Fixed-shape native keyed lists already patch items; key validation and binding-target
       discovery still scan. Free-form `style:*` bindings are classed STYLE|A11Y, so only a style
       diff can tell whether they reach layout; typed setters should classify them.
-- [ ] **P4:** GPU-first pipelined rendering: GPU raster by default where
-      hardware gates pass, frame N's GPU work overlapping frame N+1's script
-      and layout, and scene preparation narrowed by retained revision (D6).
+- [ ] **P4:** Narrow GPU scene preparation by retained revision (each frame records the full
+      selection; design inputs are in the pipeline note), after W3. Presentation no longer waits
+      for the worker, but a surface is gated while its frame is in flight.
+- [ ] Shell tests build without the `gpu` feature, so nothing in the shell suite exercises
+      `PresentStatus::Submitted` or `reconcile_scene_completions`; add a GPU-feature shell gate.
+- [ ] A scene frame that completes unpresented because the compositor holds every dmabuf slot
+      is repainted in full; retry on buffer release, keeping damage, instead.
 
 ## 2026-09-30 block review and module-architecture direction
 

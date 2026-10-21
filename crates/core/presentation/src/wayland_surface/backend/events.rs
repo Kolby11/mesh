@@ -154,6 +154,8 @@ impl WaylandSurfaceBackend {
         use crate::{WaitReason, WaitResult};
         use rustix::io::read as eventfd_read;
 
+        #[cfg(feature = "gpu")]
+        self.poll_scene_completions();
         match self.event_queue.flush() {
             Ok(()) => {}
             Err(error) => return Err(self.map_wayland_error("flush", error)),
@@ -176,25 +178,35 @@ impl WaylandSurfaceBackend {
         // must be able to interrupt long idle waits once the shell is no
         // longer clamped to a fixed 16ms loop cadence.
         let wayland_fd = read_guard.connection_fd();
-        let mut fds = [
-            PollFd::new(&wayland_fd, PollFlags::IN | PollFlags::ERR | PollFlags::HUP),
-            PollFd::new(&eventfd_fd, PollFlags::IN | PollFlags::ERR | PollFlags::HUP),
+        let ready_flags = PollFlags::IN | PollFlags::ERR | PollFlags::HUP;
+        let mut fds = vec![
+            PollFd::new(&wayland_fd, ready_flags),
+            PollFd::new(&eventfd_fd, ready_flags),
         ];
+        #[cfg(feature = "gpu")]
+        if let Some(scene_fd) = self.gpu.wake_fd() {
+            fds.push(PollFd::new(scene_fd, ready_flags));
+        }
+        #[cfg(feature = "gpu")]
+        let timeout = match self.scene_deadline() {
+            Some(deadline) => timeout.min(deadline.saturating_duration_since(Instant::now())),
+            None => timeout,
+        };
         let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
 
-        let (wayland_ready, ipc_ready) = match poll(&mut fds, timeout_ms) {
+        let (wayland_ready, ipc_ready, scene_ready) = match poll(&mut fds, timeout_ms) {
             Ok(0) => {
                 drop(read_guard);
+                #[cfg(feature = "gpu")]
+                self.poll_scene_completions();
                 return Ok(WaitResult::deadline_expired());
             }
-            Err(rustix::io::Errno::INTR) => (false, false),
+            Err(rustix::io::Errno::INTR) => (false, false, false),
             Ok(_) => (
-                fds[0]
-                    .revents()
-                    .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP),
-                fds[1]
-                    .revents()
-                    .intersects(PollFlags::IN | PollFlags::ERR | PollFlags::HUP),
+                fds[0].revents().intersects(ready_flags),
+                fds[1].revents().intersects(ready_flags),
+                fds.get(2)
+                    .is_some_and(|fd| fd.revents().intersects(ready_flags)),
             ),
             Err(err) => {
                 drop(read_guard);
@@ -229,6 +241,9 @@ impl WaylandSurfaceBackend {
         }
 
         // If eventfd fired, that takes priority as the reported reason.
+        if scene_ready {
+            wake_reason = WaitReason::SceneComplete;
+        }
         if ipc_ready {
             wake_reason = WaitReason::IpcEvent;
         }
@@ -238,6 +253,12 @@ impl WaylandSurfaceBackend {
             Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
         }
         self.state.refresh_buffer_backpressure();
+        // Buffer releases dispatched above may free a slot a completed frame
+        // is waiting for, so commit published frames after them.
+        #[cfg(feature = "gpu")]
+        self.poll_scene_completions();
+        #[cfg(not(feature = "gpu"))]
+        let _ = scene_ready;
         self.release_expired_surface_focus_grab()?;
 
         Ok(WaitResult {
