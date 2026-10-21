@@ -747,9 +747,12 @@ changed member are recorded bindings. Direct service-field reads and function
 calls in element bindings also patch in place. Keyed loop bodies preserve
 iteration locals for patches. Fixed-shape native keyed lists patch changed
 items after checking that the ordered unique string/numeric keys are unchanged;
-key, order or length changes reconcile the template. Nested control flow, child
-components, two-way bindings and captured handlers still rebuild. Structural conditions, unkeyed loops, component props, and pre-bound
-handler arguments use template evaluation and retained diffing. Calls
+key, order or length changes reconcile the template. Event handlers in the body
+are re-bound to the patched item, so `onclick={pick(item.id)}` acts on its
+current value. Nested control flow, child components and two-way bindings
+still rebuild. Writes made by input handlers patch the same way once the event
+has been dispatched. Structural conditions, unkeyed loops and component props
+use template evaluation and retained diffing. Calls
 conservatively invalidate on public writes because a helper can capture state.
 `local` variables and functions stay private to the script.
 

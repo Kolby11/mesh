@@ -15,6 +15,46 @@ use mesh_core_scripting::LocaleBoundState;
 type NodePath = Vec<usize>;
 
 impl FrontendSurfaceComponent {
+    /// Start a dispatch that moves the retained tree out of `last_tree`.
+    /// Handler writes during it cannot be patched against a missing tree, so
+    /// they wait for [`Self::end_held_tree_dispatch`]. Returns whether this
+    /// call owns the deferral; a nested dispatch leaves it to the outer one,
+    /// whose tree is the real one.
+    pub(super) fn begin_held_tree_dispatch(&mut self) -> bool {
+        if self.held_tree_template_writes.is_some() {
+            return false;
+        }
+        self.held_tree_template_writes = Some(Vec::new());
+        true
+    }
+
+    /// Finish the dispatch begun by [`Self::begin_held_tree_dispatch`] once
+    /// the retained tree is back: patch the deferred writes, or fall back to
+    /// the narrow rebuild they would have taken.
+    pub(super) fn end_held_tree_dispatch(&mut self, owner: bool) {
+        if !owner {
+            return;
+        }
+        let Some(instance_keys) = self.held_tree_template_writes.take() else {
+            return;
+        };
+        if !instance_keys.is_empty() && !self.try_patch_template_writes(&instance_keys) {
+            self.invalidate_script_state_narrow();
+        }
+    }
+
+    /// Queue `instance_key`'s template writes for the end of the current
+    /// held-tree dispatch. Returns `false` when no dispatch holds the tree.
+    pub(super) fn defer_template_patch_while_tree_held(&mut self, instance_key: &str) -> bool {
+        let Some(pending) = self.held_tree_template_writes.as_mut() else {
+            return false;
+        };
+        if !pending.iter().any(|key| key == instance_key) {
+            pending.push(instance_key.to_string());
+        }
+        true
+    }
+
     /// Apply pending service fields and public-member writes of `instance_keys` by patching
     /// the bindings that read them. Returns `false`, changing nothing, when
     /// any write needs the template rebuild.

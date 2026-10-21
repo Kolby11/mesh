@@ -81,8 +81,8 @@ pub use style::{
 pub use tree::EventHandlerCall;
 pub use tree::{
     InputPreedit, KeyedTemplateItem, KeyedTemplateList, NodeId, NodeState, OpenBinding,
-    PaintOrderChildren, TemplateBindings, TextSelection, WidgetNode, WidgetScrollMetrics,
-    WidgetTreeValidationError, WindowSurfaceState, children_in_paint_order,
+    PaintOrderChildren, TemplateBindings, TemplateHandlerBinding, TextSelection, WidgetNode,
+    WidgetScrollMetrics, WidgetTreeValidationError, WindowSurfaceState, children_in_paint_order,
     paint_order_child_indices, validate_widget_tree,
 };
 

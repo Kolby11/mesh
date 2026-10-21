@@ -69,8 +69,10 @@ Patched nodes still receive style, layout, accessibility, and damage updates.
 Keyed native loops with fixed-shape bodies retain their ordered unique string
 or numeric keys and captured item locals. Replacing a collection or mutating an
 item in place patches only changed items when those keys stay unchanged. Key,
-order or length changes reconcile the template; nested control flow, component
-instances, two-way bindings and captured handlers keep the rebuild path.
+order or length changes reconcile the template. Event handlers in the body are
+re-bound to the patched item's locals; nested control flow, component instances
+and two-way bindings keep the rebuild path. Writes made by handlers during input
+dispatch patch once the dispatch returns.
 Collection/key validation still scans the list; write-time indexed collection
 tracking remains a target. Template function calls can patch
 element properties, with conservative invalidation for captured public state.

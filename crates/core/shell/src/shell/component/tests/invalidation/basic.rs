@@ -2382,6 +2382,78 @@ function mutate() items[3].color = "#00ff00" end
     }
 }
 
+/// A pointer-enter handler runs while input dispatch holds the retained tree.
+/// Its write to a keyed list still patches the items once the tree is back,
+/// and the patched items' handlers capture the refreshed item.
+#[test]
+fn keyed_list_handler_write_during_input_patches_and_rebinds_item_handlers() {
+    let source = r#"
+<script lang="luau">
+hovered = 0
+picked = ""
+items = {}
+effect(function()
+    local list = {}
+    for index, id in {"a", "b", "c"} do
+        list[#list + 1] = {
+            id = id,
+            index = index,
+            hot = hovered == index,
+            label = if hovered == index then id .. "*" else id,
+        }
+    end
+    items = list
+end)
+function onHover(index) hovered = index end
+function pick(label) picked = label end
+</script>
+<template><row style="width: 300px; height: 100px">
+{#for item in items key={item.id}}<button style="width: 100px; height: 100px" class:hot={item.hot} onpointerenter={onHover(item.index)} onclick={pick(item.label)} />{/for}
+</row></template>
+"#;
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(300, 100);
+    let mut pixels = PixelBuffer::new(300, 100);
+    let mut component = test_frontend_component(source);
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    let _ = component.take_invalidation_snapshot();
+    let (x, y) = (150.0, 50.0);
+    component
+        .handle_input(&theme, 300, 100, ComponentInput::PointerMove { x, y })
+        .unwrap();
+    assert_eq!(runtime_number(&component, "hovered"), 2.0);
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    let snapshot = component.take_invalidation_snapshot().unwrap();
+    assert!(snapshot.patched_node_count >= 1, "{snapshot:?}");
+    assert_eq!(snapshot.component.script_narrow, 0, "{snapshot:?}");
+    assert!(!snapshot.full_rebuild, "{snapshot:?}");
+    let tree = component.last_tree.clone().unwrap();
+    assert!(!component.retained_tree.update(&tree).any());
+    for pressed in [true, false] {
+        component
+            .handle_input(
+                &theme,
+                300,
+                100,
+                ComponentInput::PointerButton {
+                    x,
+                    y,
+                    button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+                    pressed,
+                },
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        runtime_value(&component, "picked"),
+        Some(serde_json::json!("b*"))
+    );
+}
+
 fn patched_scope_source(clean_siblings: usize) -> String {
     format!(
         r##"

@@ -182,6 +182,10 @@ present. Raster is CPU unless the test binary is built with `--features gpu`.
 Timings are for visibility; the only failure is structural: every live dock
 hover frame must stay within the per-pass maxima of the same frame class
 (hover change or animation only) in the CPU fixture `glass_dock_hover_animation_profile`.
+Like the live sweep, the fixture takes tile bounds after the shelf's entrance
+animation, enters the dock from outside on each run and paints at 16 ms pacing,
+so its envelope includes hover script patches and the dock's own `:hover`
+transition.
 Replay surfaces appear on the compositor for about a minute under the shipped
 module ids as layer namespaces (not unique, so stop a running desktop shell first); the shell then shuts down and its private files are removed.
 

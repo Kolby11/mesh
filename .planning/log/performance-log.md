@@ -7278,3 +7278,83 @@ reverted: a symlinked modules dir (fails profile resolution), an IPC socket at
 the sandbox root (refused as unsafe), a single apps injection before the dock's
 first paint (the list stayed empty; a later `available:false` then the full
 payload populated it, cause unknown).
+
+## 2026-10-21 — P0 live: the idle dock repaint loop and live hover rebuilds
+
+On main after `634af104` · area: resources, template patching, live replay
+
+**Idle dock.** `resolve_icon_for_render` (production path, not `cfg(test)`)
+cached no negative result. A missing icon queued a resolution job on every
+paint. The job also found nothing, notified the component's
+`ResourcePaintConsumer`, and the shell's `request_paint` cleared the child
+display lists and invalidated the pixels: a full repaint that queued the job
+again. The glass dock's fallback `application-x-executable` (size 64) is
+missing, so one 8 s idle window queued 5,939 jobs. The CPU fixture never shows
+this because its paints run outside a consumer scope. Fix: a job that settles
+`Missing` is remembered per resource revision and wakes no consumer. Test:
+`production_icon::missing_icon_resolution_does_not_request_repaints` fails
+before the fix.
+
+**Live hover.** Every tile crossing fully rebuilt the 1,877-node template, for
+three reasons:
+1. `onpointerenter` runs inside `handle_component_input`, which holds
+   `last_tree` outside the component. The handler's effect rewrote `apps`, and
+   `try_patch_template_writes` refused with no tree, so the frame took
+   `SCRIPT_NARROW`. Writes made while a dispatch holds the tree (input, child
+   surface input, due disclosures, long presses, element actions) now patch
+   when the tree returns. Nested dispatches defer to the outer one.
+2. `patchable_keyed_loop` rejected any loop body with an `on*` attribute, so
+   `apps` stayed unpatchable. Handler expressions that capture loop locals are
+   now recorded in `TemplateBindings` and re-bound to the patched item's
+   locals. A stale binding would act on the old item.
+3. The CPU fixture never measured this. Its tile bounds came from the first
+   paint, mid `dock-in` entrance, so every move after the first hit the slot
+   below the button and `onHover` ran once per process. The fixture now takes
+   the bounds after the entrance settles, starts each run from outside the dock
+   and paints at 16 ms pacing, in both `glass_dock_hover_animation_profile` and
+   the replay's envelope copy.
+
+Test: `keyed_list_handler_write_during_input_patches_and_rebinds_item_handlers`.
+Without the deferral it fails on the patch assertion; without the re-bind it
+clicks with the stale item (`"b"`, not `"b*"`).
+
+**Live results.** `MESH_LIVE_CPU=2 nix develop -c ./tools/check-performance
+--live`, release, CPU raster, live Hyprland 120 Hz, 3 runs. Before figures are
+the W4 entry's agent runs.
+
+| Measure | Before | After |
+| --- | --- | --- |
+| Dock frames in the 8 s idle window | 430–439 (spot check 296; 406 this session) | 0, 0, 0 |
+| Dock hover mean | 39.7–40.2 ms | 24.8–25.9 ms |
+| Dock hover p50 | 38.9–39.4 ms | 21.9–22.8 ms |
+| Dock hover p90 | 45.6–46.9 ms | 33.8–37.4 ms |
+| Hover frames on the full path | 80–100 of 119 | 0 (20 hover change, 99 animation only) |
+| `live_dock_visit_outliers` | fails | 0, 0, 0 (gate passes) |
+
+The dashboard spectrum mean also read 85.8–92.9 ms (was 100.9–103.1). That is
+consistent with the dock no longer burning CPU beside it, but cross-surface
+attribution is still unchecked (backlog), so this is not claimed as a win. Of
+nine runs with all the fixes (six during the investigation, three in the gate),
+one showed 19 dock frames in the idle window (restyle-scan frames, about 30 ms
+each) and eight showed none.
+The likely cause is boot settling spilling into the window; this is
+unconfirmed.
+
+**CPU fixture.** `glass_dock_hover_animation_profile`, release, settled tiles,
+unpaced, steady runs 1–2. The fixture's shape changed in this entry, so these
+figures are not comparable with earlier entries. Before the handler fixes: mean
+7.1–7.4 ms, p90 26.0–28.1 ms; tile-change frames annotated, laid out and
+validated the whole tree (1,877 / 1,877 / 11,262). After: mean 4.7–5.1 ms, p90
+15.3–15.5 ms, annotation 13 per frame, no layout build or validation. Patched
+hover frames still resolve style for about 1,880 nodes (backlog).
+
+**Tried and reverted.** Re-evaluating `EventHandlerCall` arguments: the parser
+never produces that variant (handlers are `EventHandlerExpression`). Pacing the
+fixture alone: live frames still exceeded the fixture's `display_build` (61 vs
+37). Those frames are the dock row's own `:hover` transition at sweep entry,
+which the fixture reaches only by entering from outside.
+
+**Verified.** Release suites against a `git worktree` of `634af104`: shell lib
+917/42 vs 916/42 baseline, with the same 42 failure names (the extra pass is
+the new test). Frontend 89/2 and elements 301/1 have identical failure names
+on both sides. Render 334 passed, 0 failed.

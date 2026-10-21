@@ -534,6 +534,7 @@ fn build_widget_node_inner(
                             .then(|| std::sync::Arc::new(state.template_locals())),
                         attributes: Vec::new(),
                         inline_content: Some(vec![TemplateNode::Expr(expr.clone())].into()),
+                        handlers: Vec::new(),
                     },
                 ));
             }
@@ -1029,7 +1030,14 @@ fn build_element_node(
     if let Some(state) = state
         && (!state.in_loop() || state.loop_identity().is_some())
     {
-        record_template_bindings(&mut node, element, inline_text, instance_key, state);
+        record_template_bindings(
+            &mut node,
+            element,
+            inline_text,
+            instance_key,
+            state,
+            build_style.namespace_handlers,
+        );
     }
 
     if inline_text {
@@ -1114,6 +1122,7 @@ fn record_template_bindings(
     inline_text: bool,
     instance_key: &str,
     state: &dyn VariableStore,
+    namespace_handlers: bool,
 ) {
     let attributes: Vec<(String, String)> = element
         .attributes
@@ -1127,6 +1136,35 @@ fn record_template_bindings(
             _ => None,
         })
         .collect();
+    let handlers: Vec<mesh_core_elements::TemplateHandlerBinding> = if state.in_loop() {
+        let locals = state.template_locals();
+        element
+            .attributes
+            .iter()
+            .filter_map(|attribute| match &attribute.value {
+                AttributeValue::EventHandlerExpression {
+                    source,
+                    expression,
+                    call_binding,
+                } if expression
+                    .referenced_identifiers()
+                    .iter()
+                    .any(|name| locals.contains_key(name.as_str())) =>
+                {
+                    Some(mesh_core_elements::TemplateHandlerBinding {
+                        event: elements::normalize_event_handler_name(&attribute.name),
+                        source: source.clone(),
+                        expression: expression.clone(),
+                        call_binding: *call_binding,
+                        namespaced: namespace_handlers,
+                    })
+                }
+                _ => None,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let inline_content = (inline_text
         && element
             .children
@@ -1144,7 +1182,41 @@ fn record_template_bindings(
             .then(|| std::sync::Arc::new(state.template_locals())),
         attributes,
         inline_content,
+        handlers,
     }));
+}
+
+/// Bind the node's loop-local handlers to its current locals, as a rebuild
+/// would; a handler bound to stale locals would act on the old item.
+fn rebind_template_handlers(
+    node: &mut WidgetNode,
+    bindings: &mesh_core_elements::TemplateBindings,
+    composition: &dyn FrontendCompositionResolver,
+) {
+    for handler in &bindings.handlers {
+        let mut locals = bindings.locals.as_deref().cloned().unwrap_or_default();
+        locals.retain(|name, _| handler.expression.referenced_identifiers().contains(name));
+        let Some(mut target) = composition.bind_handler_expression(
+            &bindings.instance_key,
+            &handler.expression,
+            &locals,
+            &handler.source,
+            handler.call_binding,
+        ) else {
+            continue;
+        };
+        if handler.namespaced {
+            target.namespace(&bindings.instance_key);
+        }
+        node.event_handlers.insert(handler.event.clone(), target.clone());
+        node.event_handler_calls.insert(
+            handler.event.clone(),
+            mesh_core_elements::EventHandlerCall {
+                handler: target,
+                args: Vec::new(),
+            },
+        );
+    }
 }
 
 /// Resolve a retained native list through the normal expression runtime.
@@ -1247,6 +1319,9 @@ pub fn patch_template_bindings(
         if node.attributes.text(Prop::Content) != Some(content.as_str()) {
             patch.change |= node.attributes.set(Prop::Content, content);
         }
+    }
+    if let Some(composition) = composition {
+        rebind_template_handlers(node, &bindings, composition);
     }
     if patch
         .change

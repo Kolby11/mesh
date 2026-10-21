@@ -26,12 +26,10 @@ other performance work. Evidence, the Qt Quick / GTK4 comparison, exit
 criteria and the items folded in here:
 [design](../.planning/todos/pending/2026-10-21-change-proportional-pipeline.md).
 
-- [ ] **P0/live:** The live glass dock repaints continuously with no input (296–439 frames per
-      8 s, 17–21 ms each, ~1,600–1,877 retained-discovery visits); find what keeps it rendering.
-      `tools/check-performance --live` reproduces it.
-- [ ] **P0/live:** Live dock hover frames walk the whole tree (about 40 ms vs 0.85 ms p90 in the CPU
-      fixture); the scoped interaction path is not reached live. The `--live` structural assertion
-      fails until this is fixed.
+- [ ] **P0/live:** Live dock hover frames still cost several times the CPU fixture's work for the
+      same visit counts; attribute raster and presentation versus pipeline before optimizing.
+- [ ] **P2:** Frames that patch a keyed list from a hover handler (the dock's `hovered_index`)
+      re-resolve style for the whole tree instead of the patched items.
 - [ ] Live `total_surface_render` reads ~100 ms on every surface during dashboard spectrum
       updates; check cross-surface attribution before optimizing the dashboard from live numbers.
 - [ ] The live replay reports CPU raster even in a `gpu` build; use the render-path diagnostic to

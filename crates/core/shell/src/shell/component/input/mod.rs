@@ -178,12 +178,14 @@ impl FrontendSurfaceComponent {
             .last_tree
             .take()
             .unwrap_or_else(|| self.build_tree(theme, width, height));
+        let held = self.begin_held_tree_dispatch();
         let result = self.handle_component_input_with_tree(&tree, input);
         debug_assert!(
             self.last_tree.is_none(),
             "input dispatch must not replace the retained tree"
         );
         self.last_tree = Some(tree);
+        self.end_held_tree_dispatch(held);
         result
     }
 

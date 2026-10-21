@@ -24,7 +24,7 @@ use skia_safe::{
     AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions, images,
 };
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
@@ -215,6 +215,10 @@ struct IconResolutionQueue {
     receiver: Receiver<IconResolutionJobResult>,
     pending: PendingResourceConsumers<IconResolutionKey>,
     ready: HashMap<IconResolutionKey, (IconResolution, ResourceByteReservation)>,
+    /// Keys whose job also found nothing at this resource revision. Without
+    /// it every paint of a missing icon resubmits the job, and each settled
+    /// job repaints its consumers, so the surface never idles.
+    missing: HashSet<IconResolutionKey>,
 }
 
 static ICON_RESOLUTION_QUEUE: OnceLock<Mutex<IconResolutionQueue>> = OnceLock::new();
@@ -257,6 +261,7 @@ fn icon_resolution_queue() -> &'static Mutex<IconResolutionQueue> {
             receiver: result_receiver,
             pending: PendingResourceConsumers::default(),
             ready: HashMap::new(),
+            missing: HashSet::new(),
         })
     })
 }
@@ -281,6 +286,9 @@ fn drain_icon_resolution_jobs() -> bool {
         queue
             .ready
             .retain(|key, _| key.resource_revision == current_generation);
+        queue
+            .missing
+            .retain(|key| key.resource_revision == current_generation);
         let mut results = Vec::new();
         while let Ok(result) = queue.receiver.try_recv() {
             let waiters = queue.pending.remove(&result.key);
@@ -297,10 +305,17 @@ fn drain_icon_resolution_jobs() -> bool {
             if result.cancelled || !resource_generation_is_current(result.key.resource_revision) {
                 continue;
             }
-            if let Some(resolution) = result.resolution {
-                waiters.notify();
-                queue.ready.insert(result.key, (resolution, result._budget));
-                completed = true;
+            match result.resolution {
+                // Consumers already painted the missing marker.
+                Some(IconResolution::Missing { .. }) => {
+                    queue.missing.insert(result.key);
+                }
+                Some(resolution) => {
+                    waiters.notify();
+                    queue.ready.insert(result.key, (resolution, result._budget));
+                    completed = true;
+                }
+                None => {}
             }
         }
     }
@@ -359,7 +374,7 @@ fn resolve_icon_for_render(module_id: &str, name: &str, size: u32) -> IconResolu
     let Ok(mut queue) = icon_resolution_queue().lock() else {
         return missing_icon_resolution(name);
     };
-    if !queue.pending.insert(key.clone()) {
+    if queue.missing.contains(&key) || !queue.pending.insert(key.clone()) {
         return missing_icon_resolution(name);
     }
     let result_sender = queue.result_sender.clone();

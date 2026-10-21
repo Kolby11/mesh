@@ -764,18 +764,15 @@ fn cpu_dock_fixture_visits() -> Vec<BTreeMap<String, u64>> {
     component
         .paint_raster(&theme, extent, &mut pixels, 1.0)
         .unwrap();
-    let tiles: Vec<_> = (0..10)
-        .map(|index| {
-            let key = reference(&component, &format!("app-{index}"));
-            find_node_bounds_by_key(component.last_tree.as_ref().unwrap(), &key, 0.0, 0.0).unwrap()
-        })
-        .collect();
+    let tiles = settled_dock_tiles(&mut component, &theme, extent, &mut pixels);
     let mut steady = Vec::new();
     for run in 0..2 {
+        leave_dock(&mut component, &theme, extent, &mut pixels);
         component.set_profiling_enabled(true);
         let _ = component.take_profiling_records();
         steady.clear();
         for step in 0..FRAMES {
+            std::thread::sleep(MOVE_INTERVAL);
             let (left, top, right, bottom) = tiles[(step as usize / 6) % tiles.len()];
             if step % 6 == 0 {
                 component

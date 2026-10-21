@@ -1377,9 +1377,13 @@ impl FrontendSurfaceComponent {
                 }
             }
         };
-        let patched = state_affects_template
+        let deferred = state_affects_template
             && !neighbors_dirty
-            && self.try_patch_template_writes(std::slice::from_ref(&runtime_key));
+            && self.defer_template_patch_while_tree_held(&runtime_key);
+        let patched = deferred
+            || (state_affects_template
+                && !neighbors_dirty
+                && self.try_patch_template_writes(std::slice::from_ref(&runtime_key)));
         if (state_affects_template || neighbors_dirty) && !patched {
             // The retained-tree/display-list diff is authoritative for both
             // structural fallback and pixel damage. Handler writes therefore

@@ -1031,6 +1031,10 @@ pub(super) struct FrontendSurfaceComponent {
     pending_service_binding_readers: HashMap<String, HashSet<String>>,
     template_patch_recovery_pending: Cell<bool>,
     reactive_binding_pending: Cell<bool>,
+    /// Instances whose handler writes await a template patch, collected while
+    /// a dispatch holds the retained tree outside `last_tree`. `None` when no
+    /// dispatch holds it.
+    held_tree_template_writes: Option<Vec<String>>,
     selective_service_build_supported: bool,
     #[cfg(test)]
     last_template_build_reused_nodes: usize,
@@ -1476,6 +1480,7 @@ impl FrontendSurfaceComponent {
             pending_service_binding_readers: HashMap::new(),
             template_patch_recovery_pending: Cell::new(false),
             reactive_binding_pending: Cell::new(false),
+            held_tree_template_writes: None,
             selective_service_build_supported,
             #[cfg(test)]
             last_template_build_reused_nodes: 0,

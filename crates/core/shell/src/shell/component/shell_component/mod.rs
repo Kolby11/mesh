@@ -735,8 +735,10 @@ impl ShellComponent for FrontendSurfaceComponent {
             .is_some_and(|deadline| deadline <= now)
             && let Some(tree) = self.last_tree.take()
         {
+            let held = self.begin_held_tree_dispatch();
             let result = self.run_due_disclosures(&tree, now);
             self.last_tree = Some(tree);
+            self.end_held_tree_dispatch(held);
             requests.extend(result?);
         }
 
@@ -744,8 +746,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         if !due_long_presses.is_empty()
             && let Some(tree) = self.last_tree.take()
         {
+            let held = self.begin_held_tree_dispatch();
             let result = self.dispatch_due_long_presses(&tree, due_long_presses);
             self.last_tree = Some(tree);
+            self.end_held_tree_dispatch(held);
             requests.extend(result?);
         }
 
@@ -2031,9 +2035,12 @@ impl ShellComponent for FrontendSurfaceComponent {
             -bounds.0 + content_offset.0,
             -bounds.1 + content_offset.1,
         );
+        // Handler writes must patch the real tree, not this offset copy.
+        let held = self.begin_held_tree_dispatch();
         let saved_tree = self.last_tree.replace(subtree);
         let result = self.handle_component_input(theme, width, height, input);
         self.last_tree = saved_tree;
+        self.end_held_tree_dispatch(held);
         result.map(|requests| self.record_frontend_host_effects(requests))
     }
 

@@ -391,6 +391,21 @@ pub struct TemplateBindings {
     pub attributes: Vec<(String, String)>,
     /// The inline children of a `<text>` whose `content` they produce.
     pub inline_content: Option<Arc<[mesh_core_component::TemplateNode]>>,
+    /// Handler expressions that capture loop locals, re-bound when a patch
+    /// changes those locals.
+    pub handlers: Vec<TemplateHandlerBinding>,
+}
+
+/// An `onevent={expression}` bound with the loop locals it references.
+#[derive(Debug, Clone)]
+#[doc(hidden)]
+pub struct TemplateHandlerBinding {
+    /// The normalized event name, as in `WidgetNode::event_handlers`.
+    pub event: String,
+    pub source: String,
+    pub expression: mesh_core_component::SharedCompiledExpression,
+    pub call_binding: bool,
+    pub namespaced: bool,
 }
 
 impl TemplateBindings {

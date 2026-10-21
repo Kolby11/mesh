@@ -505,6 +505,53 @@ fn glass_apps_payload(pinned: usize, installed: usize) -> serde_json::Value {
     })
 }
 
+fn settle_dock(
+    component: &mut FrontendSurfaceComponent,
+    theme: &Theme,
+    extent: SurfaceExtent,
+    pixels: &mut PixelBuffer,
+) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while component.wants_render() {
+        assert!(std::time::Instant::now() < deadline, "the dock never settled");
+        component.paint_raster(theme, extent, pixels, 1.0).unwrap();
+        std::thread::sleep(Duration::from_millis(8));
+    }
+}
+
+/// Move the pointer off the dock and let its `:hover` transitions finish, so
+/// the next sweep enters from outside like a real pointer.
+fn leave_dock(
+    component: &mut FrontendSurfaceComponent,
+    theme: &Theme,
+    extent: SurfaceExtent,
+    pixels: &mut PixelBuffer,
+) {
+    let (width, height) = (pixels.width(), pixels.height());
+    component
+        .handle_input(theme, width, height, ComponentInput::PointerLeave)
+        .unwrap();
+    settle_dock(component, theme, extent, pixels);
+}
+
+/// Bounds of the ten pinned dock tiles once the shelf's `dock-in` entrance has
+/// finished. Mid-entrance the tiles sit lower, so their centers would land on
+/// the slot below each button and a hover would never reach its handler.
+fn settled_dock_tiles(
+    component: &mut FrontendSurfaceComponent,
+    theme: &Theme,
+    extent: SurfaceExtent,
+    pixels: &mut PixelBuffer,
+) -> Vec<(f32, f32, f32, f32)> {
+    settle_dock(component, theme, extent, pixels);
+    (0..10)
+        .map(|index| {
+            let key = reference(component, &format!("app-{index}"));
+            find_node_bounds_by_key(component.last_tree.as_ref().unwrap(), &key, 0.0, 0.0).unwrap()
+        })
+        .collect()
+}
+
 fn count_nodes(node: &WidgetNode) -> usize {
     1 + node.children.iter().map(count_nodes).sum::<usize>()
 }
@@ -517,6 +564,7 @@ fn glass_dock_hover_animation_profile() {
     const WIDTH: u32 = 2880;
     const HEIGHT: u32 = 180;
     const FRAMES: u32 = 60;
+    const FRAME_INTERVAL: Duration = Duration::from_millis(16);
     let installed = std::env::var("MESH_BENCH_APPS")
         .ok()
         .and_then(|value| value.parse().ok())
@@ -530,34 +578,30 @@ fn glass_dock_hover_animation_profile() {
     );
     let extent = SurfaceExtent::unpadded(WIDTH, HEIGHT);
     let mut pixels = PixelBuffer::new(WIDTH, HEIGHT);
+    let tiles = settled_dock_tiles(&mut component, &theme, extent, &mut pixels);
+    let nodes = count_nodes(component.last_tree.as_ref().unwrap());
     // Transitions run on the wall clock; back-to-back paints sample them
     // mid-flight, which is the per-frame work an animation pays.
     // Like the shell, paint only frames the component asks for.
-    let mut paint_frame = |component: &mut FrontendSurfaceComponent| {
+    let paint_frame = |component: &mut FrontendSurfaceComponent, pixels: &mut PixelBuffer| {
         if component.wants_render() {
             component
-                .paint_raster(&theme, extent, &mut pixels, 1.0)
+                .paint_raster(&theme, extent, pixels, 1.0)
                 .unwrap();
         }
     };
-    paint_frame(&mut component);
-    let nodes = count_nodes(component.last_tree.as_ref().unwrap());
-    let tiles: Vec<_> = (0..10)
-        .map(|index| {
-            let key = reference(&component, &format!("app-{index}"));
-            find_node_bounds_by_key(component.last_tree.as_ref().unwrap(), &key, 0.0, 0.0).unwrap()
-        })
-        .collect();
     eprintln!("glass-dock: {installed} installed apps, {nodes} nodes");
     for run in 0..3 {
+        leave_dock(&mut component, &theme, extent, &mut pixels);
         component.set_profiling_enabled(true);
         let _ = component.take_profiling_records();
         let mut times = Vec::new();
         let mut visits = std::collections::BTreeMap::<String, u64>::new();
         let mut measured_frames = 0u64;
         for step in 0..FRAMES {
-            // Cross to the next tile every six frames. The first run also
-            // covers the shelf's 560ms `dock-in` entrance animation.
+            // Cross to the next tile every six frames, at display pacing so
+            // neighboring tiles' transitions overlap as they do on screen.
+            std::thread::sleep(FRAME_INTERVAL);
             let (left, top, right, bottom) = tiles[(step as usize / 6) % tiles.len()];
             let begun = std::time::Instant::now();
             if step % 6 == 0 {
@@ -573,7 +617,7 @@ fn glass_dock_hover_animation_profile() {
                     )
                     .unwrap();
             }
-            paint_frame(&mut component);
+            paint_frame(&mut component, &mut pixels);
             times.push(begun.elapsed());
             if let Some(snapshot) = component.take_invalidation_snapshot() {
                 if !snapshot.node_visits.is_empty() {

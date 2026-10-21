@@ -133,3 +133,48 @@ fn production_module_icon_path_renders_prepared_material_glyph() {
         "a resolved Material glyph must not paint the same crossed-box fallback as a missing icon"
     );
 }
+
+fn paint_missing_icon(consumer: &mesh_core_render::ResourcePaintConsumer) {
+    let mut icon = WidgetNode::new("icon");
+    icon.set_module_id("@mesh/never-bound");
+    icon.layout = LayoutRect {
+        x: 0.0,
+        y: 0.0,
+        width: 16.0,
+        height: 16.0,
+    };
+    icon.computed_style.background_color = Color::TRANSPARENT;
+    icon.attributes
+        .insert(Prop::Name, "missing-repaint-loop-icon".into());
+    icon.attributes.insert(Prop::Size, "16".into());
+    let _scope = consumer.enter();
+    let mut buffer = PixelBuffer::new(16, 16);
+    paint_frontend_tree_at_for_module(&icon, &mut buffer, 1.0, 0.0, 0.0, None, None);
+}
+
+fn settle_icon_resolution_jobs() {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while mesh_core_render::icon_resolution_jobs_pending() {
+        mesh_core_render::poll_icon_resolution_jobs();
+        assert!(
+            std::time::Instant::now() < deadline,
+            "icon resolution job never settled"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+/// A missing icon must settle: its resolution job finding nothing changes no
+/// pixels, so it neither wakes the consumer nor is resubmitted by the repaint.
+#[test]
+fn missing_icon_resolution_does_not_request_repaints() {
+    let consumer = mesh_core_render::ResourcePaintConsumer::default();
+    for _ in 0..3 {
+        paint_missing_icon(&consumer);
+        settle_icon_resolution_jobs();
+        assert!(
+            !consumer.take_ready(),
+            "a missing icon's resolution job requested a repaint"
+        );
+    }
+}

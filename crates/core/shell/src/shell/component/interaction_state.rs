@@ -327,6 +327,7 @@ impl FrontendSurfaceComponent {
             std::mem::take(&mut *ref_node_keys)
         };
 
+        let held = self.begin_held_tree_dispatch();
         let result = self.apply_element_actions_with_tree(&tree, &ref_keys, actions);
         debug_assert!(
             self.last_tree.is_none(),
@@ -334,6 +335,7 @@ impl FrontendSurfaceComponent {
         );
         *self.ref_node_keys.borrow_mut() = ref_keys;
         self.last_tree = Some(tree);
+        self.end_held_tree_dispatch(held);
         result
     }
 

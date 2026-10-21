@@ -204,6 +204,10 @@ fn patchable_keyed_loop(repetition: &mesh_core_component::template::ForNode) -> 
         nodes.iter().all(|node| match node {
             TemplateNode::Element(element) => {
                 element.attributes.iter().all(|attribute| {
+                    // The patch re-binds handler expressions to refreshed locals.
+                    if matches!(attribute.value, AttributeValue::EventHandlerExpression { .. }) {
+                        return true;
+                    }
                     !attribute.name.starts_with("on")
                         && !matches!(
                             attribute.value,
