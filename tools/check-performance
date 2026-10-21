@@ -26,7 +26,11 @@ run_benchmark() {
 
 shell_test_binary() {
   local artifacts
-  artifacts="$(cargo test -p mesh-core-shell --release --lib --no-run --message-format=json)"
+  local -a feature_args=()
+  if [[ -n "${1:-}" ]]; then
+    feature_args=(--features "$1")
+  fi
+  artifacts="$(cargo test -p mesh-core-shell "${feature_args[@]}" --release --lib --no-run --message-format=json)"
   printf '%s\n' "$artifacts" | python3 -c '
 import json
 import sys
@@ -53,7 +57,7 @@ run_live_replay() {
   if [[ -n "${MESH_LIVE_CPU:-}" ]]; then
     pin=(taskset -c "$MESH_LIVE_CPU")
   fi
-  binary="$(shell_test_binary)"
+  binary="$(shell_test_binary "${MESH_LIVE_FEATURES:-}")"
   for ((run = 1; run <= runs; run++)); do
     printf 'live glass replay: run %d of %d\n' "$run" "$runs"
     if ! output="$("${pin[@]}" "$binary" live_glass_replay --ignored --nocapture --test-threads=1 2>&1)"; then

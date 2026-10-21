@@ -692,6 +692,39 @@ fn report_window(records: &[CapturedRecord], workload: &str, from: Instant, to: 
         metric(&format!("{name}_render_mean_ms"), mean);
         metric(&format!("{name}_render_p50_ms"), percentile(&sorted, 0.5));
         metric(&format!("{name}_render_p90_ms"), percentile(&sorted, 0.9));
+        let mut stages = BTreeMap::<&str, u64>::new();
+        for record in records {
+            if let CapturedRecord::Stage {
+                at,
+                surface_id,
+                stage,
+                micros,
+                trigger,
+            } = record
+                && surface_id == surface
+                && (from..to).contains(at)
+                && !trigger.as_deref().is_some_and(|trigger| {
+                    trigger.starts_with("attribution:") || trigger.starts_with("waste:")
+                })
+            {
+                *stages.entry(stage.label()).or_default() += micros;
+                if *stage == ProfilingStage::Paint {
+                    let label = if trigger.as_deref() == Some("deferred_raster") {
+                        "cpu_raster"
+                    } else {
+                        "paint_record_or_immediate"
+                    };
+                    *stages.entry(label).or_default() += micros;
+                }
+            }
+        }
+        for (stage, micros) in stages {
+            metric(
+                &format!("{name}_stage_{stage}_mean_ms"),
+                micros as f64 / 1000.0 / sorted.len() as f64,
+            );
+        }
+
         if !frames.visits.is_empty() {
             metric(&format!("{name}_visit_frames"), frames.visits.len() as f64);
             for (pass, mean) in mean_visits(&frames.visits) {
@@ -861,10 +894,7 @@ fn live_glass_replay() {
     }
     let records = shell.profiling.capture.clone().unwrap_or_default();
     let started = outcome.started.expect("the replay never started");
-    eprintln!(
-        "raster path: {}",
-        if outcome.gpu { "gpu" } else { "cpu" }
-    );
+    eprintln!("raster path: {}", shell.presentation_engine.render_path());
     metric("live_gpu_raster", f64::from(u8::from(outcome.gpu)));
 
     let mut boot_surfaces: Vec<&str> = records

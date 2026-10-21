@@ -7,10 +7,17 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
-- **Surface timing attribution:** confirmed shared frame work leaked into every
-  parent timer and parent work into child timers. Totals now sum each surface's
-  own preparation, CPU replay and presentation. Regression checks use isolated
-  test surfaces; corrected live glass measurements still need a replay.
+- **Live hover attributed:** forced-CPU dock frames spend 19.3–20.6 ms in
+  raster replay out of 25.0–26.9 ms total. Presentation is 0.11–0.14 ms.
+  Explicit GPU builds use the compositor's AMD device and spend 6.0–6.7 ms
+  on UI-thread preparation/recording/submission; worker/display latency is
+  excluded. The replay tool now accepts `MESH_LIVE_FEATURES=gpu` and prints
+  the render-path reason. CPU live gates pass all three runs; GPU runs exceed
+  the CPU fixture's animation envelope (15, 7, 16 frames). Fixture parity and
+  actual GPU first-commit measurement remain in the backlog.
+- **Surface timing attribution confirmed live:** dashboard CPU work is
+  86.1–87.4 ms while unrelated surfaces report their own costs, rather than
+  every surface inheriting the shared frame duration. See the performance log.
 
 - **Pipeline execution, wave 1:** W1 landed. Patched-frame restyle was already
   path-directed, and paint-only patches now keep geometry. Dashboard frames are
@@ -39,7 +46,7 @@ measurements live in [`log/`](log/README.md).
   selector-dependents index was needed (no combinators). Also fixed targeted
   restyles dropping a surface root's inherited text values. New structural
   gate in `tools/check-performance`. See the P2 step 1 performance-log entry.
-- **P0 visit counters landed** (live replay gate still open).
+- **P0 visit counters landed** (CPU live gate passes; GPU envelope remains open).
 
 - **GPU residency and workload gates implemented:** small image/icon/font-mask
   bitmaps share immutable pages; the worker retains bounded image identities

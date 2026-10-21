@@ -26,12 +26,15 @@ other performance work. Evidence, the Qt Quick / GTK4 comparison, exit
 criteria and the items folded in here:
 [design](../.planning/todos/pending/2026-10-21-change-proportional-pipeline.md).
 
-- [ ] **P0/live:** Live dock hover frames still cost several times the CPU fixture's work for the
-      same visit counts; attribute raster and presentation versus pipeline before optimizing.
 - [ ] **P2:** Frames that patch a keyed list from a hover handler (the dock's `hovered_index`)
       re-resolve style for the whole tree instead of the patched items.
-- [ ] The live replay reports CPU raster even in a `gpu` build; use the render-path diagnostic to
-      find why. Its first `mesh.apps` injection before the dock's first paint is lost.
+- [ ] Add a CPU glass timing fixture with the live backdrop/refraction context and deferred
+      replay; the current visit-count fixture does not reproduce the live raster workload.
+- [ ] The live replay's first `mesh.apps` injection before the dock's first paint is lost.
+- [ ] GPU-enabled live replay exceeds the CPU fixture's animation visit envelope; align the
+      workloads' animation timing before treating that envelope as a GPU structural gate.
+- [ ] Live replay counts GPU submission as first present; record completion/commit before
+      using its GPU open latency as time to visible content.
 - [ ] Give the live replay its own layer-namespace suffix so it can run beside a desktop shell.
 - [ ] **P2:** Complete the shared dirty-set pipeline beyond the animation, interaction and
       paint-only patch scopes. Patch frames that change layout (dashboard `style:height`) still

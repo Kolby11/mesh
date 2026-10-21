@@ -7391,3 +7391,89 @@ profiling tests 14 passed / 1 failed. The failure is the previously recorded
 `profiling_snapshot_groups_backend_stage_proof_under_expected_provider_identity`
 (missing `PollUpdate`; see the 2026-10-21 dashboard pass audit entry). No live
 replay was run for this change.
+
+
+## 2026-10-21 — live dock gap is CPU raster; explicit GPU replay works
+
+After `e04e6cb9` · area: live measurement, render-path diagnostics
+
+**Reporting.** The live replay now prints non-attribution stage means per
+rendered frame, separate deferred CPU replay and recording/immediate paint
+means, and `PresentationEngine::render_path()` including fallback reasons.
+`tools/check-performance --live` accepts `MESH_LIVE_FEATURES`; its default
+remains CPU-only, while `MESH_LIVE_FEATURES=gpu` matches the CLI's default
+feature. No renderer optimization or routing change was made.
+
+**Measured.** Release (`opt-level=3`, thin LTO), `--features gpu`, same test
+binary, Hyprland 120 Hz on 2880×1800 at scale 1, process pinned to CPU 2.
+Three fresh processes per mode, interleaved CPU/GPU after compilation ended;
+CPU uses `MESH_RENDER_GPU=0`, GPU uses `MESH_RENDER_GPU=1`. Each process runs
+the full replay: 8 s clock window, 20 tile crossings with 6 synthetic moves per
+tile, dashboard open/120 spectrum updates, and Settings Appearance scrolling.
+The dock has ten pinned apps plus 150 installed entries. Compositor layer
+snapshots in all six runs show a **2880×114 live dock**, whereas the CPU visit
+fixture paints **2880×180**. The dock produces 119–120 CPU frames and 203–214
+GPU frames over the hover window; these are per-rendered-frame work comparisons,
+not identical frame sequences or end-to-end latency comparisons.
+
+Ranges of per-run dock means, milliseconds:
+
+| Work | Forced CPU | GPU enabled |
+| --- | --- | --- |
+| Preparation excluding paint and presentation (total − paint − present) | 5.152–5.673 | 5.000–5.444 |
+| Recording/immediate paint | 0.428–0.472 | 0.525–0.636 |
+| Deferred CPU raster replay | 19.330–20.643 | none; raster runs asynchronously on GPU |
+| Presentation call/submission | 0.108–0.135 | 0.487–0.650 |
+| Total attributed synchronous work | 25.045–26.924 | 6.012–6.668 |
+| Per-run p90 of total work | 34.009–36.664 | 7.437–10.297 |
+
+The raster replay accounts for about 77% of the CPU total. Presentation does not
+explain the gap. GPU diagnostic: `GPU (device 0xe281, format 0x34324241,
+modifier 0xffffffffffffff)`; sysfs identifies the compositor device as AMD
+`1002:15bf` at `/dev/dri/renderD129`. Forced-CPU diagnostic explicitly says
+`CPU/SHM (MESH_RENDER_GPU=0)`. Current GPU replay initializes successfully;
+the default replay command previously omitted the GPU feature. This does not
+reconstruct every historical invocation described as a GPU build.
+
+**Fixture limits.** The visit fixture executes before `Shell::new()` initializes
+the wallpaper backdrop and uses a default paint context with zero output size.
+`draw_refraction` skips missing backdrop sources or zero output dimensions.
+The fixture also rasterizes directly while the measured live CPU frames replay
+recorded paint. Similar node counts therefore do not establish equal raster
+workloads. The relative contributions of backdrop content versus replay mode
+were not isolated here; a timing fixture with live raster parity is in the
+backlog. Do not compare the older ~5 ms fixture number as though it paints the
+same pixels as the live shell.
+
+**Corrected dashboard attribution.** Its spectrum window now charges the
+dashboard 86.084–87.445 ms in CPU mode versus 4.592–5.305 ms synchronous work
+in GPU mode. In CPU run 1 the bar reads 4.499 ms and widgets 11.235 ms, rather
+than all inheriting ~100 ms. GPU worker execution, queued waits and compositor
+display latency are excluded. Existing GPU `first_present` also marks accepted
+submission, not actual compositor commit; that measurement issue remains open.
+
+**Gates.** Final CPU replays pass 3/3 with zero visit outliers. Final GPU replays
+fail 3/3 with 15, 7 and 16 outlier frames. The sampled differences include seven
+animated nodes against the CPU envelope's six (`animation_lookup` 50 versus
+42), accessibility projection 30 versus 26, and retained lookup/sync 45/15
+versus 38/13; hover-change projection also differs. No full-tree rebuilds are
+reported. Faster GPU pacing and overlapping animations are a likely reason,
+but that is not yet a proven complete explanation. The envelope was not
+relaxed or bypassed in the checked-in tool. GPU timings were emitted before
+the assertion failed and are retained as measurements, not passing gate proof.
+
+Raw final logs, compositor geometry snapshots and `summary.json` are under
+ignored `profiles/live-attribution/` (`final-cpu-{1,2,3}.log` and
+`final-gpu-{1,2,3}.log`). Earlier exploratory captures are separate. Reproduce a
+single fresh process with `MESH_LIVE_FEATURES=gpu MESH_LIVE_CPU=2
+MESH_LIVE_RUNS=1 nix develop -c ./tools/check-performance --live`, setting
+`MESH_RENDER_GPU=0` or `1`; repeat three times per mode. The GPU assertion
+currently returns a failure, as recorded above. `bash -n tools/check-performance`
+and `git diff --check` pass. All replay processes exited and removed their
+private state; no desktop shell was stopped.
+
+**Decision.** There is no demonstrated GPU routing defect in the current
+production path. CPU raster explains most of the live/fixture gap; further
+pipeline work addresses the remaining ~5 ms of preparation rather than that
+~20 ms raster cost. Restore measurement parity for the GPU structural gate and
+CPU raster fixture; W2/W5 remain the next planned pipeline work.

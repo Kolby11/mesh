@@ -189,7 +189,18 @@ hover sweep, dashboard open, 120 spectrum updates, Settings open, Settings
 Appearance scroll. Each prints `MESH_PERF metric=live_<workload>_<surface>_...`
 lines: render mean/p50/p90 of `total_surface_render`, frame counts, per-pass
 visit means, first present/render after each open request, and boot first
-present. Raster is CPU unless the test binary is built with `--features gpu`.
+present. Stage means exclude nested `attribution:` and `waste:` samples to
+avoid double counting. `stage_cpu_raster_mean_ms` isolates deferred CPU replay;
+`stage_paint_record_or_immediate_mean_ms` is recording, or immediate raster on
+frames without deferred replay. Both are included in `stage_paint_mean_ms`.
+
+The command builds a CPU-only binary by default. Set `MESH_LIVE_FEATURES=gpu`
+to match the CLI's default feature; the report prints the presentation engine's
+render-path reason. Set `MESH_RENDER_GPU=0` with that same GPU-enabled binary
+for a forced-CPU comparison. GPU paint and presentation timings measure scene
+recording and submission on the calling thread; they exclude asynchronous GPU
+work and compositor display latency. In GPU runs, `first_present` currently
+marks accepted submission rather than the later compositor commit.
 Timings are for visibility; the only failure is structural: every live dock
 hover frame must stay within the per-pass maxima of the same frame class
 (hover change or animation only) in the CPU fixture `glass_dock_hover_animation_profile`.
