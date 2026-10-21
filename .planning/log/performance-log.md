@@ -7358,3 +7358,36 @@ which the fixture reaches only by entering from outside.
 917/42 vs 916/42 baseline, with the same 42 failure names (the extra pass is
 the new test). Frontend 89/2 and elements 301/1 have identical failure names
 on both sides. Render 334 passed, 0 failed.
+
+
+## 2026-10-21 — surface render totals exclude work on other surfaces
+
+After `8fe3781a` · area: profiling attribution
+
+**Finding.** Parallel CPU raster split parent rendering into preparation,
+shared raster replay and presentation, but `total_surface_render` kept an
+`Instant` from the start of preparation until presentation finished. Every
+surface therefore included later surfaces' preparation, the entire raster
+batch wait and earlier surfaces' presentations. Child popups inherited the
+parent's start time, including work for unrelated parents and sibling popups.
+This confirms the attribution defect suspected in the W4 dashboard results;
+those live totals cannot be treated as per-surface work costs.
+
+**Change.** Parent totals sum their own preparation duration, their individual
+CPU replay duration (already measured by the raster worker), and their own
+presentation tail. Child timers start at child subtree painting. Shared raster
+queueing/wait time is excluded, as are asynchronous GPU execution and compositor
+display latency. The profiling guide defines these boundaries. Allocation
+counters retain their existing scope; this change only corrects timing.
+
+**Validation.** The two-surface regression uses CPU canvases at 64×24 and
+injects 100 ms into each paint of the second surface. It requires that surface
+to retain its own delay while the first surface reports less than half its
+cost, and checks that total timing includes CPU paint. Corrected live glass
+numbers still require a replay; no runtime speedup is claimed.
+
+Debug serial validation: render tests 9 passed; child-surface tests 25 passed;
+profiling tests 14 passed / 1 failed. The failure is the previously recorded
+`profiling_snapshot_groups_backend_stage_proof_under_expected_provider_identity`
+(missing `PollUpdate`; see the 2026-10-21 dashboard pass audit entry). No live
+replay was run for this change.

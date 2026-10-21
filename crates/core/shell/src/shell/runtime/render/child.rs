@@ -8,7 +8,6 @@ impl Shell {
         component_id: &str,
         parent_surface_id: &str,
         parent_scale: f32,
-        total_render_started: Option<std::time::Instant>,
     ) -> Result<bool, ShellRunError> {
         let requests = self.components[index].component.child_surface_requests();
         if requests.is_empty() && self.components[index].children.is_empty() {
@@ -456,7 +455,6 @@ impl Shell {
                 width,
                 height,
                 parent_scale,
-                total_render_started,
                 false,
             )?;
             any_presented |= presented;
@@ -499,7 +497,6 @@ impl Shell {
                 width,
                 height,
                 parent_scale,
-                total_render_started,
                 true,
             )?;
             any_presented |= presented;
@@ -521,9 +518,9 @@ impl Shell {
         width: u32,
         height: u32,
         parent_scale: f32,
-        total_render_started: Option<std::time::Instant>,
         exiting: bool,
     ) -> Result<bool, ShellRunError> {
+        let render_started = self.profiling_enabled().then(std::time::Instant::now);
         let allocation_started = (self.profiling_enabled()
             && mesh_core_debug::allocation::profiling_available())
         .then(mesh_core_debug::allocation::snapshot);
@@ -682,7 +679,7 @@ impl Shell {
             width,
             height,
             scale,
-            total_render_started,
+            render_started.map(|started| started.elapsed()),
             allocation_started,
         ) {
             Ok(presented) => Ok(presented),

@@ -52,6 +52,17 @@ rule match adds a `clock_gettime` pair per rule and inflates the restyle being
 measured. Set `MESH_PROFILE_STYLE_RULES=1` for a capture that needs the
 per-rule breakdown, and do not compare its restyle times with other captures.
 
+## Surface render timing
+
+`total_surface_render` sums a surface's own synchronous preparation, CPU raster
+replay and presentation work. Other surfaces' preparation and presentation,
+raster-worker queueing and the wait for the shared raster batch are excluded.
+Child surfaces start their own timers at subtree painting; parent preparation
+and child-request reconciliation are not charged to them. GPU worker execution
+and compositor display latency are asynchronous and excluded from this total.
+The `paint` samples tagged `deferred_raster` report individual CPU replays;
+`present_commit` reports the presentation call.
+
 ## Live CPU and memory
 
 ```bash

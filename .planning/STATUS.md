@@ -7,6 +7,11 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Surface timing attribution:** confirmed shared frame work leaked into every
+  parent timer and parent work into child timers. Totals now sum each surface's
+  own preparation, CPU replay and presentation. Regression checks use isolated
+  test surfaces; corrected live glass measurements still need a replay.
+
 - **Pipeline execution, wave 1:** W1 landed. Patched-frame restyle was already
   path-directed, and paint-only patches now keep geometry. Dashboard frames are
   bound by layout-class patches, so W2 (layout propagation) is the dashboard

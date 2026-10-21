@@ -34,7 +34,8 @@ struct PaintedSurface {
     surface_id: String,
     paint_size: (u32, u32),
     scale: f32,
-    total_render_started: Option<std::time::Instant>,
+    // Sum only this surface's phases; other surfaces run between them.
+    render_duration: Option<std::time::Duration>,
     allocation_started: Option<mesh_core_debug::allocation::AllocationCounters>,
 }
 
@@ -898,12 +899,12 @@ impl Shell {
                 surface_id,
                 paint_size: (paint_width, paint_height),
                 scale,
-                total_render_started,
+                render_duration: total_render_started.map(|started| started.elapsed()),
                 allocation_started,
             });
         }
 
-        self.replay_deferred_raster(&painted);
+        self.replay_deferred_raster(&mut painted);
 
         for (position, surface) in painted.iter().enumerate() {
             match self.present_painted_surface(surface) {
@@ -925,7 +926,7 @@ impl Shell {
     /// Phase 2 of a frame: rasterize the pictures recorded by phase 1, one
     /// surface per worker. Canvases are disjoint and the pictures own every
     /// resource they draw, so no shell or painter state crosses threads.
-    fn replay_deferred_raster(&mut self, painted: &[PaintedSurface]) {
+    fn replay_deferred_raster(&mut self, painted: &mut [PaintedSurface]) {
         use rayon::prelude::*;
 
         let mut targets = painted.iter().map(|surface| surface.index).peekable();
@@ -939,22 +940,29 @@ impl Shell {
                 runtime.parent.paint_buffer.as_mut()
                 && let Some(replay) = raster.replay()
             {
-                jobs.push((runtime.surface_id.as_str(), replay));
+                jobs.push((index, replay));
             }
         }
         let timings: Vec<_> = if jobs.len() > 1 {
             jobs.into_par_iter()
-                .map(|(surface_id, replay)| (surface_id.to_owned(), replay.run()))
+                .map(|(index, replay)| (index, replay.run()))
                 .collect()
         } else {
             jobs.into_iter()
-                .map(|(surface_id, replay)| (surface_id.to_owned(), replay.run()))
+                .map(|(index, replay)| (index, replay.run()))
                 .collect()
         };
         if self.profiling_enabled() {
-            for (surface_id, elapsed) in timings {
+            for (index, elapsed) in timings {
+                let surface = painted
+                    .iter_mut()
+                    .find(|surface| surface.index == index)
+                    .unwrap();
+                if let Some(duration) = &mut surface.render_duration {
+                    *duration += elapsed;
+                }
                 self.record_surface_profiling_stage(
-                    &surface_id,
+                    &surface.surface_id,
                     None,
                     mesh_core_debug::ProfilingStage::Paint,
                     elapsed,
@@ -976,7 +984,7 @@ impl Shell {
             surface.paint_size.0,
             surface.paint_size.1,
             surface.scale,
-            surface.total_render_started,
+            surface.render_duration,
             surface.allocation_started,
         )?;
         match self.reconcile_child_surface_requests(
@@ -984,7 +992,6 @@ impl Shell {
             component_id,
             &surface.surface_id,
             surface.scale,
-            surface.total_render_started,
         ) {
             Ok(child_presented) => Ok(presented | child_presented),
             Err(ShellRunError::Component(error)) => {
@@ -1199,9 +1206,10 @@ impl Shell {
         width: u32,
         height: u32,
         scale: f32,
-        total_render_started: Option<std::time::Instant>,
+        render_duration: Option<std::time::Duration>,
         allocation_started: Option<mesh_core_debug::allocation::AllocationCounters>,
     ) -> Result<bool, ShellRunError> {
+        let target_started = render_duration.map(|_| std::time::Instant::now());
         let surface_id = self.components[index].target(target).surface_id.clone();
         let visible = self.surface_is_effectively_visible(&surface_id);
         let is_parent = matches!(target, TargetRef::Parent);
@@ -1492,12 +1500,12 @@ impl Shell {
                 Some("present"),
             );
         }
-        if let Some(started) = total_render_started {
+        if let Some((duration, started)) = render_duration.zip(target_started) {
             self.record_surface_profiling_stage(
                 &surface_id,
                 Some(component_id),
                 mesh_core_debug::ProfilingStage::TotalSurfaceRender,
-                started.elapsed(),
+                duration + started.elapsed(),
                 Some("rebuild"),
             );
         }

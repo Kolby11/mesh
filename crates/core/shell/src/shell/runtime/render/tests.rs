@@ -217,6 +217,7 @@ fn spanning_and_docked_surfaces_keep_their_deliberate_zero_dimension() {
 struct SolidSurface {
     surface_id: String,
     color: Color,
+    paint_delay: std::time::Duration,
     dirty: bool,
     deferred_paints: Arc<std::sync::Mutex<Vec<bool>>>,
 }
@@ -286,6 +287,7 @@ impl crate::shell::types::ShellComponent for SolidSurface {
         canvas: &mut mesh_core_render::SurfaceCanvas,
         _scale: f32,
     ) -> Result<(), crate::shell::types::ComponentError> {
+        std::thread::sleep(self.paint_delay);
         let (width, height) = (canvas.width(), canvas.height());
         canvas.session().clear_rect(
             DamageRect {
@@ -320,6 +322,7 @@ fn solid_surface_shell(colors: &[Color]) -> (Shell, Vec<Arc<std::sync::Mutex<Vec
         shell.register_component(Box::new(SolidSurface {
             surface_id: format!("@test/solid-{index}"),
             color,
+            paint_delay: std::time::Duration::ZERO,
             dirty: true,
             deferred_paints: deferred_paints.clone(),
         }));
@@ -407,4 +410,62 @@ fn a_lone_painting_surface_rasterizes_in_place() {
     assert_eq!(lone.last(), Some(&false));
     drop(lone);
     assert_presented_color(&mut shell, 1, color);
+}
+
+#[test]
+fn surface_totals_exclude_other_surfaces_preparation() {
+    use mesh_core_debug::ProfilingStage;
+    use std::time::Duration;
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    for (index, paint_delay) in [Duration::ZERO, Duration::from_millis(100)]
+        .into_iter()
+        .enumerate()
+    {
+        shell.register_component(Box::new(SolidSurface {
+            surface_id: format!("@test/solid-{index}"),
+            color: Color {
+                r: 40,
+                g: 80,
+                b: 120,
+                a: 255,
+            },
+            paint_delay,
+            dirty: true,
+            deferred_paints: Arc::new(std::sync::Mutex::new(Vec::new())),
+        }));
+    }
+    shell
+        .apply_request(CoreRequest::ToggleDebugProfiling)
+        .unwrap();
+    shell.render_components().unwrap();
+
+    let snapshot = shell.build_debug_snapshot();
+    let profiling = snapshot.profiling.unwrap();
+    let totals: Vec<_> = (0..2)
+        .map(|index| {
+            let surface = profiling
+                .surfaces
+                .iter()
+                .find(|surface| surface.surface_id == format!("@test/solid-{index}"))
+                .unwrap();
+            let raster = surface
+                .stages
+                .iter()
+                .find(|stage| stage.stage == ProfilingStage::Paint)
+                .unwrap();
+            assert!(surface.total_surface_render_time_micros >= raster.total_micros);
+            surface.total_surface_render_time_micros
+        })
+        .collect();
+    assert!(
+        totals[1] >= 100_000,
+        "slow surface must include its own preparation: {totals:?}"
+    );
+    assert!(
+        totals[0] < totals[1] / 2,
+        "fast surface must exclude the slow surface's preparation: {totals:?}"
+    );
 }

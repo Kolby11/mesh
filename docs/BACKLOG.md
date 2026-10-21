@@ -30,8 +30,6 @@ criteria and the items folded in here:
       same visit counts; attribute raster and presentation versus pipeline before optimizing.
 - [ ] **P2:** Frames that patch a keyed list from a hover handler (the dock's `hovered_index`)
       re-resolve style for the whole tree instead of the patched items.
-- [ ] Live `total_surface_render` reads ~100 ms on every surface during dashboard spectrum
-      updates; check cross-surface attribution before optimizing the dashboard from live numbers.
 - [ ] The live replay reports CPU raster even in a `gpu` build; use the render-path diagnostic to
       find why. Its first `mesh.apps` injection before the dock's first paint is lost.
 - [ ] Give the live replay its own layer-namespace suffix so it can run beside a desktop shell.
