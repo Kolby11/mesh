@@ -74,7 +74,7 @@ pub use style::{
 };
 pub use tree::EventHandlerCall;
 pub use tree::{
-    ElementState, NodeId, PaintOrderChildren, TemplateBindings, WidgetNode, WidgetScrollMetrics,
+    NodeId, NodeState, PaintOrderChildren, TemplateBindings, WidgetNode, WidgetScrollMetrics,
     WidgetTreeValidationError, WindowSurfaceState, children_in_paint_order,
     paint_order_child_indices, validate_widget_tree,
 };

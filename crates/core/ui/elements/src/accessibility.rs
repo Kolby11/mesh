@@ -2,7 +2,7 @@
 use crate::attributes::ResolvedAttributeValueRef;
 use crate::interaction_contract::{InteractionTarget, NodeEligibility};
 use crate::layout::LayoutRect;
-use crate::tree::{NodeId, WidgetNode, WidgetTreeValidationError, validate_widget_tree};
+use crate::tree::{NodeId, NodeState, WidgetNode, WidgetTreeValidationError, validate_widget_tree};
 use serde::{Deserialize, Serialize};
 
 /// Accessibility roles for semantic tree construction.
@@ -108,14 +108,14 @@ impl Default for AccessibilityInfo {
 
 /// Return the focus state to expose in a semantic snapshot.
 ///
-/// `ElementState::focused` is the live interaction state and therefore the
+/// `NodeState::focused` is the live interaction state and therefore the
 /// canonical source for accessibility focus. `AccessibilityInfo::focused` is
 /// retained as a compatibility projection for callers that inspect the live
 /// node, but it must not be used to build a snapshot because it can lag behind
 /// input dispatch.
 #[inline]
 pub fn live_accessibility_focus(node: &WidgetNode) -> bool {
-    node.state.focused
+    node.state.contains(NodeState::FOCUSED)
 }
 
 /// Dynamic state for accessibility.
@@ -293,7 +293,7 @@ struct SnapshotReferenceText {
 pub(crate) struct FinalizedAccessibility {
     attributes: crate::attributes::AttributeMap,
     tag: String,
-    state: crate::tree::ElementState,
+    state: crate::tree::NodeState,
     baseline: Option<AccessibilityInfo>,
     info: AccessibilityInfo,
     policy: NodeEligibility,
@@ -636,8 +636,8 @@ fn normalized_info(
         .cloned()
         .or_else(|| info.keyboard_shortcut.clone());
 
-    info.state.disabled =
-        node.state.disabled || any_true(&[attributes.disabled, attributes.aria_disabled]);
+    info.state.disabled = node.state.contains(NodeState::DISABLED)
+        || any_true(&[attributes.disabled, attributes.aria_disabled]);
     info.state.checked =
         first_bool(&[attributes.checked, attributes.aria_checked]).or(info.state.checked);
     info.state.selected =
@@ -656,12 +656,18 @@ fn normalized_info(
         first_bool(&[attributes.invalid, attributes.aria_invalid]).unwrap_or(info.state.invalid);
     info.state.required =
         first_bool(&[attributes.required, attributes.aria_required]).unwrap_or(info.state.required);
-    info.state.checked = info.state.checked.or(node.state.checked.then_some(true));
-    info.state.selected |= node.state.selected;
-    info.state.pressed |= node.state.pressed;
-    info.state.invalid |= node.state.invalid;
-    info.state.required |= node.state.required;
-    info.state.expanded = info.state.expanded.or(node.state.expanded.then_some(true));
+    info.state.checked = info
+        .state
+        .checked
+        .or(node.state.contains(NodeState::CHECKED).then_some(true));
+    info.state.selected |= node.state.contains(NodeState::SELECTED);
+    info.state.pressed |= node.state.contains(NodeState::PRESSED);
+    info.state.invalid |= node.state.contains(NodeState::INVALID);
+    info.state.required |= node.state.contains(NodeState::REQUIRED);
+    info.state.expanded = info
+        .state
+        .expanded
+        .or(node.state.contains(NodeState::EXPANDED).then_some(true));
     info.state.value = attributes
         .aria_valuenow
         .or(attributes.value)
@@ -921,7 +927,7 @@ mod tests {
         let mut button = WidgetNode::new("button");
         button.accessibility.role = AccessibilityRole::Button;
         button.accessibility.focusable = true;
-        button.state.focused = true;
+        button.state.set(NodeState::FOCUSED, true);
         attr(&mut button, "aria-role", "switch");
         attr(&mut button, "aria-description", "Toggles the panel");
         attr(&mut button, "aria-pressed", "true");
@@ -1009,7 +1015,7 @@ mod tests {
         // The projection may be stale between input dispatch and shell
         // annotation. Snapshot generation must still report the live state.
         button.accessibility.focused = true;
-        button.state.focused = false;
+        button.state.set(NodeState::FOCUSED, false);
         let button_id = button.id;
         root.children.push(button);
 
@@ -1023,7 +1029,7 @@ mod tests {
             Some(false)
         );
 
-        root.children[0].state.focused = true;
+        root.children[0].state.set(NodeState::FOCUSED, true);
         root.children[0].accessibility.focused = false;
         let snapshot = AccessibilityTree::from_widget_tree(&root);
         assert_eq!(
@@ -1319,7 +1325,7 @@ mod finalized_memo_tests {
                 }
                 _ => {
                     root.children[0].attributes.remove("aria-hidden");
-                    root.state.focused = true;
+                    root.state.set(NodeState::FOCUSED, true);
                 }
             }
             let mut full = root.clone();
@@ -1338,11 +1344,11 @@ mod finalized_memo_tests {
             .insert("value".into(), "authored".into());
         let mut live = authored.clone();
         live.attributes.insert("value".into(), "runtime".into());
-        live.state.focused = true;
+        live.state.set(NodeState::FOCUSED, true);
         normalize_accessibility_finalized_memo(&mut live);
         authored.retain_finalization_from(&live);
         assert_eq!(authored.attributes.get("value").unwrap(), "authored");
-        assert!(!authored.state.focused);
+        assert!(!authored.state.contains(NodeState::FOCUSED));
         assert_eq!(
             authored.accessibility.state.value.as_deref(),
             Some("runtime")

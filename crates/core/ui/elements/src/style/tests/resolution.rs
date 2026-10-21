@@ -1,6 +1,6 @@
 use super::super::*;
 use super::common::*;
-use crate::tree::ElementState;
+use crate::tree::NodeState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 
 #[test]
@@ -24,7 +24,7 @@ fn aspect_ratio_resolves_from_a_number_a_fraction_and_auto() {
                 &[],
                 None,
                 StyleContext::default(),
-                ElementState::default(),
+                NodeState::default(),
             )
             .aspect_ratio
     };
@@ -64,7 +64,7 @@ fn resolve_node_style_from_rules() {
         &[],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
     assert_eq!(style.font_size, 20.0);
     assert_eq!(
@@ -108,7 +108,7 @@ fn resolve_paint_effects_from_rules() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.box_shadow.offset_x, 2.0);
@@ -142,7 +142,7 @@ fn style_background_image_url_resolves_backend_neutral_source() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -173,7 +173,7 @@ fn style_background_linear_gradient_resolves_two_colors() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -205,7 +205,7 @@ fn style_background_image_unsupported_value_records_diagnostic() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.background_paint, BackgroundPaint::None);
@@ -282,7 +282,7 @@ fn module_component_defaults_are_subtree_scoped() {
         &[],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
         None,
     );
     assert_eq!(outside.color, Color::from_hex("#112233").unwrap());
@@ -295,7 +295,7 @@ fn module_component_defaults_are_subtree_scoped() {
         &[],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
         Some("@mesh/weather"),
     );
     assert_eq!(inside.color, Color::from_hex("#112233").unwrap());
@@ -329,7 +329,7 @@ pub(super) fn container_query_rules_apply_against_context() {
             container_width: 320.0,
             container_height: 240.0,
         },
-        ElementState::default(),
+        NodeState::default(),
     );
     assert_eq!(narrow.overflow_y, Overflow::Visible);
 
@@ -342,14 +342,14 @@ pub(super) fn container_query_rules_apply_against_context() {
             container_width: 640.0,
             container_height: 240.0,
         },
-        ElementState::default(),
+        NodeState::default(),
     );
     assert_eq!(wide.overflow_y, Overflow::Auto);
 }
 
 #[test]
 pub(super) fn pseudo_state_rules_apply_when_state_matches() {
-    use crate::tree::ElementState;
+    use crate::tree::NodeState;
     use mesh_core_component::style::{Declaration, Selector};
 
     let theme = mesh_core_theme::default_theme();
@@ -380,7 +380,7 @@ pub(super) fn pseudo_state_rules_apply_when_state_matches() {
         &[],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
     assert_eq!(idle.background_color, Color::from_hex("#333333").unwrap());
 
@@ -390,10 +390,7 @@ pub(super) fn pseudo_state_rules_apply_when_state_matches() {
         &[],
         None,
         StyleContext::default(),
-        ElementState {
-            hovered: true,
-            ..Default::default()
-        },
+        NodeState::HOVERED,
     );
     assert_eq!(
         hovered.background_color,
@@ -419,12 +416,12 @@ fn targeted_restyle_recomputes_only_named_stateful_nodes() {
     previous
         .attributes
         .insert("_mesh_key".into(), "prev".into());
-    previous.state.hovered = false;
+    previous.state.set(NodeState::HOVERED, false);
     previous.computed_style.background_color = Color::from_hex("#ff0000").unwrap();
     let mut current = crate::tree::WidgetNode::new("button");
     current.id = 2;
     current.attributes.insert("_mesh_key".into(), "next".into());
-    current.state.hovered = true;
+    current.state.set(NodeState::HOVERED, true);
     root.children.push(previous);
     root.children.push(current);
 
@@ -437,7 +434,7 @@ fn targeted_restyle_recomputes_only_named_stateful_nodes() {
         &[],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
     assert_eq!(
         root.children[0].computed_style.background_color,
@@ -599,7 +596,7 @@ fn retained_restyle_preserves_explicit_transparent_and_default_inherited_values(
     );
     let initial_explicit = initial_child.explicit_properties;
 
-    root.state.hovered = true;
+    root.state.set(NodeState::HOVERED, true);
     let root_id = root.id;
     resolver.restyle_subtree_for_ids(
         &mut root,
@@ -677,7 +674,7 @@ fn child_color_inherit_follows_parent_hover_color_instead_of_going_transparent()
         "color: inherit must not be treated as an explicit override"
     );
 
-    root.state.hovered = true;
+    root.state.set(NodeState::HOVERED, true);
     let root_id = root.id;
     resolver.restyle_subtree_for_ids(
         &mut root,
@@ -718,7 +715,7 @@ fn targeted_restyle_skips_descendant_rule_resolution_for_non_inherited_change() 
     root.children.push(child);
     resolver.restyle_subtree_cached(&mut root, &rules, StyleContext::default(), &mut None);
     root.children[0].computed_style.background_color = Color::from_hex("#123456").unwrap();
-    root.state.hovered = true;
+    root.state.set(NodeState::HOVERED, true);
 
     resolver.restyle_subtree_for_ids(
         &mut root,
@@ -796,8 +793,8 @@ fn targeted_restyle_propagates_changed_inherited_fields() {
     let mut full_tree = root.clone();
     full_tree.children[0].computed_style.background_color = Color::from_hex("#123456").unwrap();
     root.children[0].computed_style.background_color = Color::from_hex("#123456").unwrap();
-    full_tree.state.hovered = true;
-    root.state.hovered = true;
+    full_tree.state.set(NodeState::HOVERED, true);
+    root.state.set(NodeState::HOVERED, true);
 
     resolver.restyle_subtree_cached(&mut full_tree, &rules, StyleContext::default(), &mut None);
 
@@ -884,10 +881,7 @@ fn style_rule_index_matches_full_scan_for_selector_mix() {
         &["primary".to_string()],
         Some("submit"),
         StyleContext::default(),
-        ElementState {
-            hovered: true,
-            ..Default::default()
-        },
+        NodeState::HOVERED,
     );
 
     assert_eq!(style.color, Color::from_hex("#111111").unwrap());
@@ -898,7 +892,7 @@ fn style_rule_index_matches_full_scan_for_selector_mix() {
 
 #[test]
 fn focus_visible_requires_focus_visible_state() {
-    use crate::tree::ElementState;
+    use crate::tree::NodeState;
     use mesh_core_component::style::{Declaration, Selector};
 
     let theme = mesh_core_theme::default_theme();
@@ -918,10 +912,7 @@ fn focus_visible_requires_focus_visible_state() {
         &[],
         None,
         StyleContext::default(),
-        ElementState {
-            focused: true,
-            ..Default::default()
-        },
+        NodeState::FOCUSED,
     );
     assert_ne!(
         focused_only.color,
@@ -935,11 +926,7 @@ fn focus_visible_requires_focus_visible_state() {
         &[],
         None,
         StyleContext::default(),
-        ElementState {
-            focused: true,
-            focus_visible: true,
-            ..Default::default()
-        },
+        NodeState::FOCUSED | NodeState::FOCUS_VISIBLE,
     );
     assert_eq!(focus_visible.color, Color::from_hex("#abcdef").unwrap());
 }
@@ -980,9 +967,10 @@ fn a_later_rules_custom_property_applies_to_the_same_nodes_var() {
                 &[],
                 None,
                 StyleContext::default(),
-                ElementState {
-                    hovered,
-                    ..ElementState::default()
+                if hovered {
+                    NodeState::HOVERED
+                } else {
+                    NodeState::empty()
                 },
             )
             .background_color
@@ -1045,7 +1033,7 @@ fn finalized_memo_styles_preserve_full_resolution_on_input_changes() {
                 root.children[0]
                     .attributes
                     .insert("class".into(), "item selected".into());
-                root.children[0].state.hovered = true;
+                root.children[0].state.set(NodeState::HOVERED, true);
             }
             2 => {
                 root.attributes.insert("class".into(), "parent".into());
@@ -1056,7 +1044,7 @@ fn finalized_memo_styles_preserve_full_resolution_on_input_changes() {
                     .insert("style".into(), "font-size: 31px".into());
             }
             4 => {
-                root.children[0].state.hovered = false;
+                root.children[0].state.set(NodeState::HOVERED, false);
             }
             5 => {
                 root.attributes.remove("class");
@@ -1133,7 +1121,7 @@ fn incremental_class_and_state_matching_checks_all_compound_dependencies() {
         ("first last", false, false),
     ] {
         node.attributes.insert("class".into(), classes.into());
-        node.state.hovered = hovered;
+        node.state.set(NodeState::HOVERED, hovered);
         let mut full = node.clone();
         let mut attribution = StyleRuleAttribution::new(&rules);
         resolver.restyle_subtree_for_ids_cached_profiled(
@@ -1229,8 +1217,8 @@ fn finalized_memo_and_selector_dependency_profile() {
 
     let old_classes = vec!["unrelated".to_string()];
     let new_classes = vec!["unrelated".to_string(), "item128".to_string()];
-    let old = StyleNodeAttrs::new("button", &old_classes, None, ElementState::default());
-    let new = StyleNodeAttrs::new("button", &new_classes, None, ElementState::default());
+    let old = StyleNodeAttrs::new("button", &old_classes, None, NodeState::default());
+    let new = StyleNodeAttrs::new("button", &new_classes, None, NodeState::default());
     let index = index.unwrap();
     let iterations = 100_000;
     let scan_started = Instant::now();
@@ -1375,7 +1363,7 @@ fn incremental_matching_includes_module_theme_selector_dependencies() {
         ("themed", false, false),
     ] {
         node.attributes.insert("class".into(), class.into());
-        node.state.hovered = hovered;
+        node.state.set(NodeState::HOVERED, hovered);
         let mut full = node.clone();
         resolver.restyle_subtree_for_ids_cached(
             &mut node,
@@ -1416,7 +1404,7 @@ fn css_profile_gradients_shorthand_and_shadow_lists() {
             &[],
             None,
             StyleContext::default(),
-            ElementState::default(),
+            NodeState::default(),
         )
     };
     let gradient =

@@ -26,21 +26,21 @@ pub struct ElementStateSnapshot {
     pub value: bool,
 }
 
-impl From<ElementState> for ElementStateSnapshot {
-    fn from(state: ElementState) -> Self {
+impl From<NodeState> for ElementStateSnapshot {
+    fn from(state: NodeState) -> Self {
         Self {
-            hovered: state.hovered,
-            active: state.active,
-            focused: state.focused,
-            disabled: state.disabled,
-            read_only: state.read_only,
-            required: state.required,
-            selected: state.selected,
-            checked: state.checked,
-            expanded: state.expanded,
-            pressed: state.pressed,
-            invalid: state.invalid,
-            value: state.value,
+            hovered: state.contains(NodeState::HOVERED),
+            active: state.contains(NodeState::ACTIVE),
+            focused: state.contains(NodeState::FOCUSED),
+            disabled: state.contains(NodeState::DISABLED),
+            read_only: state.contains(NodeState::READ_ONLY),
+            required: state.contains(NodeState::REQUIRED),
+            selected: state.contains(NodeState::SELECTED),
+            checked: state.contains(NodeState::CHECKED),
+            expanded: state.contains(NodeState::EXPANDED),
+            pressed: state.contains(NodeState::PRESSED),
+            invalid: state.contains(NodeState::INVALID),
+            value: state.contains(NodeState::VALUE),
         }
     }
 }

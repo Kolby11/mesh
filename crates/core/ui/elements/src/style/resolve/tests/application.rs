@@ -2,7 +2,7 @@ use super::super::index::*;
 use super::super::state::*;
 use super::super::*;
 use super::common::*;
-use crate::tree::{ElementState, WidgetNode};
+use crate::tree::{NodeState, WidgetNode};
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use mesh_core_theme::{Theme, TokenValue};
 use std::collections::HashMap;
@@ -53,7 +53,7 @@ fn cached_inline_styles_preserve_values_and_parse_diagnostics() {
             None,
             Some(source),
             StyleContext::default(),
-            ElementState::default(),
+            NodeState::default(),
             Some("@test/inline-style-cache"),
         );
         assert_eq!(style.inset_left, Some(expected_left));
@@ -119,7 +119,7 @@ fn custom_properties_inherit_through_initial_style_resolution() {
         &parent_classes,
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
         None,
         None,
     );
@@ -130,7 +130,7 @@ fn custom_properties_inherit_through_initial_style_resolution() {
         &[],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
         None,
         Some(&parent),
     );
@@ -273,7 +273,7 @@ fn user_part_cascade_respects_module_and_explicit_exposure() {
         if let Some(part) = part {
             node.attributes.insert("part".into(), part.into());
         }
-        node.state.hovered = hover;
+        node.state.set(NodeState::HOVERED, hover);
         let (style, diagnostics) = resolver.resolve_node_style_with_diagnostics_for_node_indexed(
             &rules,
             &index,
@@ -310,7 +310,7 @@ fn user_part_memo_tracks_hover_exposure_and_replaced_stylesheets() {
     resolver.restyle_subtree_with_index(&mut node, &rules, &index, StyleContext::default(), None);
     assert_eq!(node.computed_style.opacity, 0.6);
     let cached = node.finalized_style.clone().unwrap();
-    node.state.hovered = true;
+    node.state.set(NodeState::HOVERED, true);
     assert!(!cached.same_matching_rules(
         &mut node,
         &rules,

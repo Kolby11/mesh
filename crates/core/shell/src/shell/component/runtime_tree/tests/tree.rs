@@ -63,7 +63,7 @@ fn retained_widget_tree_reports_dirty_categories_by_stable_id() {
     tree.children[0]
         .attributes
         .insert("title".into(), "changed".into());
-    tree.children[0].state.hovered = true;
+    tree.children[0].state.set(NodeState::HOVERED, true);
 
     let dirty = retained.update(&tree);
     assert_eq!(dirty.layout, 1);
@@ -187,7 +187,7 @@ fn scoped_retained_update_matches_full_diff_and_tracks_propagated_layout() {
         let leaf = first_deep_leaf_mut(&mut tree);
         leaf.computed_style.background_color = Color::BLACK;
         leaf.attributes.insert("title".into(), "changed".into());
-        leaf.state.hovered = true;
+        leaf.state.set(NodeState::HOVERED, true);
         leaf.id
     };
     let propagated_layout_id = tree.children[1].id;
@@ -333,7 +333,7 @@ fn exact_root_state_does_not_promote_unrelated_descendants_to_full_fingerprintin
     let mut full = RetainedWidgetTree::default();
     scoped.update(&tree);
     full.update(&tree);
-    tree.state.hovered = true;
+    tree.state.set(NodeState::HOVERED, true);
     tree.children[60].layout.x = 42.0;
     let expected = full.update(&tree);
     let (actual, changed) = scoped.update_for_dirty_roots_and_nodes_collect(

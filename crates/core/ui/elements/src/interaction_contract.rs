@@ -6,7 +6,7 @@
 
 use crate::layout::LayoutRect;
 use crate::style::{Corners, Display, Transform2D, Visibility};
-use crate::tree::WidgetNode;
+use crate::tree::{NodeState, WidgetNode};
 
 /// How long hover intent keeps a popover open after the pointer leaves its
 /// trigger or its popup, so crossing the gap between them (or returning to
@@ -358,7 +358,9 @@ impl NodeEligibility {
             visual_visible,
             semantic_visible: visual_visible && !attributes.aria_hidden && !attributes.inert,
             has_geometry: node_has_geometry(node),
-            disabled: node.state.disabled || attributes.disabled || attributes.aria_disabled,
+            disabled: node.state.contains(NodeState::DISABLED)
+                || attributes.disabled
+                || attributes.aria_disabled,
             inert: attributes.inert,
         }
     }
@@ -447,7 +449,7 @@ impl NodeEligibility {
                 && !attributes.inert,
             has_geometry: parent.has_geometry,
             disabled: parent.disabled
-                || node.state.disabled
+                || node.state.contains(NodeState::DISABLED)
                 || attributes.disabled
                 || attributes.aria_disabled,
             inert: parent.inert || attributes.inert,
@@ -737,7 +739,7 @@ mod tests {
         let mut child = WidgetNode::new("button");
         child.layout.width = 10.0;
         child.layout.height = 10.0;
-        child.state.disabled = true;
+        child.state.set(NodeState::DISABLED, true);
         parent.children.push(child);
         root.children.push(parent);
 

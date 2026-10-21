@@ -51,12 +51,12 @@ fn pseudo_state_annotation_uses_stable_keys_after_rebuild() {
     );
 
     let button = node_by_mesh_key(&rebuilt_tree, "root/0");
-    assert!(button.state.hovered);
-    assert!(button.state.focused);
-    assert!(button.state.active);
+    assert!(button.state.contains(NodeState::HOVERED));
+    assert!(button.state.contains(NodeState::FOCUSED));
+    assert!(button.state.contains(NodeState::ACTIVE));
 
     let checkbox = node_by_mesh_key(&rebuilt_tree, "root/1");
-    assert!(checkbox.state.checked);
+    assert!(checkbox.state.contains(NodeState::CHECKED));
 }
 
 #[test]
@@ -84,13 +84,27 @@ fn pseudo_state_annotation_sets_disabled_and_checked_deterministically() {
         &mut HashMap::new(),
     );
 
-    assert!(node_by_mesh_key(&tree, "root/0").state.disabled);
-    assert!(node_by_mesh_key(&tree, "root/1").state.disabled);
     assert!(
-        !node_by_mesh_key(&tree, "root/2").state.checked,
+        node_by_mesh_key(&tree, "root/0")
+            .state
+            .contains(NodeState::DISABLED)
+    );
+    assert!(
+        node_by_mesh_key(&tree, "root/1")
+            .state
+            .contains(NodeState::DISABLED)
+    );
+    assert!(
+        !node_by_mesh_key(&tree, "root/2")
+            .state
+            .contains(NodeState::CHECKED),
         "runtime checked state should override static checked attributes"
     );
-    assert!(node_by_mesh_key(&tree, "root/3").state.checked);
+    assert!(
+        node_by_mesh_key(&tree, "root/3")
+            .state
+            .contains(NodeState::CHECKED)
+    );
 }
 
 #[test]
@@ -126,13 +140,25 @@ fn pseudo_state_annotation_projects_authored_states_through_the_typed_table() {
     );
 
     let input = node_by_mesh_key(&tree, "root/0");
-    assert!(input.state.read_only);
-    assert!(input.state.required);
-    assert!(input.state.invalid);
-    assert!(input.state.value);
-    assert!(node_by_mesh_key(&tree, "root/1").state.selected);
-    assert!(node_by_mesh_key(&tree, "root/2").state.expanded);
-    assert!(node_by_mesh_key(&tree, "root/3").state.pressed);
+    assert!(input.state.contains(NodeState::READ_ONLY));
+    assert!(input.state.contains(NodeState::REQUIRED));
+    assert!(input.state.contains(NodeState::INVALID));
+    assert!(input.state.contains(NodeState::VALUE));
+    assert!(
+        node_by_mesh_key(&tree, "root/1")
+            .state
+            .contains(NodeState::SELECTED)
+    );
+    assert!(
+        node_by_mesh_key(&tree, "root/2")
+            .state
+            .contains(NodeState::EXPANDED)
+    );
+    assert!(
+        node_by_mesh_key(&tree, "root/3")
+            .state
+            .contains(NodeState::PRESSED)
+    );
 }
 
 #[test]
@@ -197,11 +223,11 @@ input:checked {
     let tree = component.last_tree.as_ref().unwrap();
 
     let disabled_button = node_by_mesh_key(tree, "root/0/0");
-    assert!(disabled_button.state.disabled);
+    assert!(disabled_button.state.contains(NodeState::DISABLED));
     assert!((disabled_button.computed_style.opacity - 0.4).abs() < f32::EPSILON);
 
     let focused_input = node_by_mesh_key(tree, "root/0/1");
-    assert!(focused_input.state.focused);
+    assert!(focused_input.state.contains(NodeState::FOCUSED));
     assert_eq!(
         focused_input.computed_style.background_color,
         Color::from_hex("#404040").unwrap()
@@ -210,11 +236,11 @@ input:checked {
         focused_input.computed_style.color,
         Color::from_hex("#505050").unwrap()
     );
-    assert!(focused_input.state.focus_visible);
+    assert!(focused_input.state.contains(NodeState::FOCUS_VISIBLE));
 
     let active_button = node_by_mesh_key(tree, "root/0/2");
-    assert!(active_button.state.hovered);
-    assert!(active_button.state.active);
+    assert!(active_button.state.contains(NodeState::HOVERED));
+    assert!(active_button.state.contains(NodeState::ACTIVE));
     assert_eq!(
         active_button.computed_style.background_color,
         Color::from_hex("#202020").unwrap()
@@ -225,7 +251,7 @@ input:checked {
     );
 
     let checked_box = node_by_mesh_key(tree, "root/0/3");
-    assert!(checked_box.state.checked);
+    assert!(checked_box.state.contains(NodeState::CHECKED));
     assert_eq!(
         checked_box.computed_style.background_color,
         Color::from_hex("#606060").unwrap()
@@ -309,9 +335,17 @@ fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
     let tree = component.last_tree.as_ref().unwrap();
     let active_node = node_by_mesh_key(tree, "root/0/0");
     assert_eq!(active_node.id, runtime_node_id_for_key("root/0/0"));
-    assert!(active_node.state.active);
-    assert!(node_by_mesh_key(tree, "root/0/1").state.checked);
-    assert!(node_by_mesh_key(tree, "root/0/2").state.focus_visible);
+    assert!(active_node.state.contains(NodeState::ACTIVE));
+    assert!(
+        node_by_mesh_key(tree, "root/0/1")
+            .state
+            .contains(NodeState::CHECKED)
+    );
+    assert!(
+        node_by_mesh_key(tree, "root/0/2")
+            .state
+            .contains(NodeState::FOCUS_VISIBLE)
+    );
     assert_eq!(
         node_by_mesh_key(tree, "root/0/0")
             .computed_style
@@ -1135,7 +1169,7 @@ fn window_states_project_onto_the_tree_as_css_state() {
         .unwrap();
 
     let floating = node_by_mesh_key(component.last_tree.as_ref().unwrap(), "root/0");
-    assert!(!floating.state.window.fullscreen);
+    assert!(!floating.state.window().fullscreen);
     assert_eq!(
         floating.computed_style.background_color,
         Color::from_hex("#222222").unwrap()
@@ -1156,8 +1190,8 @@ fn window_states_project_onto_the_tree_as_css_state() {
         .unwrap();
 
     let filling = node_by_mesh_key(component.last_tree.as_ref().unwrap(), "root/0");
-    assert!(filling.state.window.fullscreen);
-    assert!(filling.state.window.activated);
+    assert!(filling.state.window().fullscreen);
+    assert!(filling.state.window().activated);
     assert_eq!(
         filling.computed_style.background_color,
         Color::from_hex("#eeeeee").unwrap()

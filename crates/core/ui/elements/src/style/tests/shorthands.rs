@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::tree::ElementState;
+use crate::tree::NodeState;
 use mesh_core_component::style::{Selector, StyleRule, StyleValue};
 
 #[test]
@@ -27,7 +27,7 @@ padding-block: var(--spacing-sm);
         &["panel".to_owned()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     // spacing.lg = 24, spacing.sm = 8
@@ -62,7 +62,7 @@ padding-top: 4px;
         &["card".to_owned()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.padding.top, 4.0, "padding-top override");
@@ -96,7 +96,7 @@ fn padding_margin_four_value_shorthands_expand_to_edges() {
         &["card".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.padding.top, 1.0);
@@ -128,7 +128,7 @@ fn border_shorthand_sets_width_and_color() {
         &[],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.border_width, Edges::all(2.0));
@@ -154,7 +154,7 @@ fn overflow_two_value_shorthand_sets_axes() {
         &[],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.overflow_x, Overflow::Hidden);
@@ -180,7 +180,7 @@ fn flex_triple_shorthand_sets_grow_shrink_basis() {
         &[],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.flex_grow, 1.0);
@@ -207,7 +207,7 @@ fn font_shorthand_sets_text_fields() {
         &[],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.font_style, FontStyle::Italic);
@@ -242,7 +242,7 @@ fn css_variable_resolves_local_literal_value() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.background_color, Color::WHITE);
@@ -273,7 +273,7 @@ fn css_variable_resolves_theme_variable_before_computed_style() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.background_color, Color::from_hex("#E0AF68").unwrap());
@@ -304,7 +304,7 @@ fn css_variable_local_value_wins_over_theme_variable() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.background_color, Color::WHITE);
@@ -329,7 +329,7 @@ fn missing_css_variable_produces_style_diagnostic() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(diagnostics.len(), 1);

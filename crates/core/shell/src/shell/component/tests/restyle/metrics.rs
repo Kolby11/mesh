@@ -57,7 +57,7 @@ end
     let tree = component.last_tree.as_ref().unwrap();
     let button = node_by_mesh_key(tree, "root/0");
     assert!(
-        button.state.hovered,
+        button.state.contains(NodeState::HOVERED),
         "button should be annotated as hovered"
     );
     assert!(
@@ -257,8 +257,8 @@ button:focus {
     // (separate from AccessibilityInfo which is populated statically from tag).
     let focused_button = node_by_mesh_key(&tree_focused, "root/0");
     assert!(
-        focused_button.state.focused,
-        "WidgetNode.state.focused must be true for the focused button"
+        focused_button.state.contains(NodeState::FOCUSED),
+        "WidgetNode.state.contains(NodeState::FOCUSED) must be true for the focused button"
     );
 }
 

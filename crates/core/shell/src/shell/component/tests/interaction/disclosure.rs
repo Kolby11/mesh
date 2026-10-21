@@ -338,7 +338,10 @@ fn an_open_popover_expands_its_trigger_and_hides_its_tooltip() {
     hover(&mut component, "trigger");
 
     let trigger = first_node_by_class(tree(&component), "trigger").expect("trigger");
-    assert!(trigger.state.expanded, "trigger matches :expanded");
+    assert!(
+        trigger.state.contains(NodeState::EXPANDED),
+        "trigger matches :expanded"
+    );
     assert_ne!(trigger.computed_style.border_width, closed_border);
     assert_eq!(
         component.hovered_tooltip, None,
@@ -356,7 +359,7 @@ fn an_open_popover_expands_its_trigger_and_hides_its_tooltip() {
     hover(&mut component, "spacer");
     expire_hover_intent(&mut component);
     let trigger = first_node_by_class(tree(&component), "trigger").expect("trigger");
-    assert!(!trigger.state.expanded);
+    assert!(!trigger.state.contains(NodeState::EXPANDED));
     assert_eq!(trigger.computed_style.border_width, closed_border);
 }
 
@@ -389,7 +392,7 @@ fn a_script_write_to_open_is_observed_without_a_second_copy() {
         !first_node_by_class(tree(&component), "trigger")
             .expect("trigger")
             .state
-            .expanded,
+            .contains(NodeState::EXPANDED),
         "the trigger follows a script close"
     );
 }

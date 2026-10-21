@@ -32,7 +32,9 @@ fn restyle_state_cleanup_focus_cleared_when_node_removed() {
     // The existing button must not gain accidental focus.
     let tree = component.last_tree.as_ref().unwrap();
     assert!(
-        !node_by_mesh_key(tree, "root/0/0").state.focused,
+        !node_by_mesh_key(tree, "root/0/0")
+            .state
+            .contains(NodeState::FOCUSED),
         "existing button must not inherit stale focused_key"
     );
 }
@@ -71,7 +73,9 @@ fn restyle_state_cleanup_active_cleared_when_node_removed() {
     // Existing button must not show stale active styling.
     let tree = component.last_tree.as_ref().unwrap();
     assert!(
-        !node_by_mesh_key(tree, "root/0/0").state.active,
+        !node_by_mesh_key(tree, "root/0/0")
+            .state
+            .contains(NodeState::ACTIVE),
         "existing button must not inherit stale active (pointer-down) state"
     );
 }
@@ -138,9 +142,21 @@ button:hover {
 
     // State flags must be applied correctly.
     let tree = component.last_tree.as_ref().unwrap();
-    assert!(node_by_mesh_key(tree, "root/0/0").state.focused);
-    assert!(node_by_mesh_key(tree, "root/0/1").state.hovered);
-    assert!(node_by_mesh_key(tree, "root/0/0").state.active);
+    assert!(
+        node_by_mesh_key(tree, "root/0/0")
+            .state
+            .contains(NodeState::FOCUSED)
+    );
+    assert!(
+        node_by_mesh_key(tree, "root/0/1")
+            .state
+            .contains(NodeState::HOVERED)
+    );
+    assert!(
+        node_by_mesh_key(tree, "root/0/0")
+            .state
+            .contains(NodeState::ACTIVE)
+    );
 }
 
 #[test]

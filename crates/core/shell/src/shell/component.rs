@@ -62,8 +62,8 @@ use mesh_core_config::TooltipSettings;
 use mesh_core_diagnostics::{DiagnosticSourceSpan, Diagnostics};
 use mesh_core_elements::{
     FramePhaseStamps, FrameSnapshot, HandlerTarget, InteractionTarget, IntrinsicLayoutCache,
-    LayoutEngine, NodeId, PerSurfaceLayoutState, PopoverPlacement, StyleContext, StyleResolver,
-    VariableStore, WidgetNode, WindowSurfaceState, element_snapshot_json,
+    LayoutEngine, NodeId, NodeState, PerSurfaceLayoutState, PopoverPlacement, StyleContext,
+    StyleResolver, VariableStore, WidgetNode, WindowSurfaceState, element_snapshot_json,
 };
 use mesh_core_frontend::{CompiledFrontendModule, FrontendRenderMode, root_accessibility_role};
 use mesh_core_locale::{LocaleEngine, LocaleSnapshot};

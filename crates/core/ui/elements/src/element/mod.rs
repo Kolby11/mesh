@@ -3,7 +3,7 @@
 //! Elements are MESH-owned primitives (`button`, `icon`, `input`, etc.).
 //! Components compose these primitives; modules package complete features.
 
-use crate::{AccessibilityRole, ElementState, WidgetNode};
+use crate::{AccessibilityRole, NodeState, WidgetNode};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 

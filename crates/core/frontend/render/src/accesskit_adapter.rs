@@ -236,7 +236,7 @@ mod tests {
         slider.accessibility.focusable = true;
         // The compatibility projection may lag; the live state owns focus.
         slider.accessibility.focused = false;
-        slider.state.focused = true;
+        slider.state.set(NodeState::FOCUSED, true);
         slider.accessibility.state.value = Some("42".to_string());
         slider.accessibility.state.value_min = Some(0.0);
         slider.accessibility.state.value_max = Some(100.0);
@@ -264,7 +264,7 @@ mod tests {
         let mut button = node("button", 21);
         button.accessibility.role = AccessibilityRole::Button;
         button.accessibility.focusable = true;
-        button.state.focused = true;
+        button.state.set(NodeState::FOCUSED, true);
 
         let mut hidden = node("text", 22);
         hidden

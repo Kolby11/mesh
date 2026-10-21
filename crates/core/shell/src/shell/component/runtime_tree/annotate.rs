@@ -285,18 +285,18 @@ pub(super) fn annotate_runtime_tree_inner(
     // Only interaction transitions and widgets with mutable values need the
     // string-attribute projection again; overflow remains a geometry pass.
     let needs_projection = !context.retained
-        || node.state.focused != (context.focused_id == Some(node_id))
-        || node.state.focus_visible
+        || node.state.contains(NodeState::FOCUSED) != (context.focused_id == Some(node_id))
+        || node.state.contains(NodeState::FOCUS_VISIBLE)
             != (context.focus_visible_id == Some(node_id)
                 || (context.focus_visible_id.is_none()
                     && context.focused_id == Some(node_id)
                     && node.tag == "input"))
-        || node.state.hovered != context.hovered_ids.contains(&node_id)
-        || node.state.active != (context.active_id == Some(node_id))
-        || node.state.window != context.window
+        || node.state.contains(NodeState::HOVERED) != context.hovered_ids.contains(&node_id)
+        || node.state.contains(NodeState::ACTIVE) != (context.active_id == Some(node_id))
+        || node.state.window() != context.window
         || matches!(node.tag.as_str(), "input" | "slider")
         || context.checked_values.contains_key(&node_id)
-        || (node.state.expanded
+        || (node.state.contains(NodeState::EXPANDED)
             || context
                 .expanded_triggers
                 .is_some_and(|ids| ids.contains(&node_id)))
@@ -351,26 +351,28 @@ pub(super) fn annotate_runtime_tree_inner(
             ))
             .unwrap_or(false);
 
-        node.state = ElementState {
-            focused: context.focused_id == Some(node_id),
-            focus_visible: context.focus_visible_id == Some(node_id)
+        let mut state = authored_state;
+        state.set(NodeState::FOCUSED, context.focused_id == Some(node_id));
+        state.set(
+            NodeState::FOCUS_VISIBLE,
+            context.focus_visible_id == Some(node_id)
                 || (context.focus_visible_id.is_none()
                     && context.focused_id == Some(node_id)
                     && is_input),
-            hovered: context.hovered_ids.contains(&node_id),
-            active: context.active_id == Some(node_id),
-            window: context.window,
-            ..authored_state
-        };
+        );
+        state.set(NodeState::HOVERED, context.hovered_ids.contains(&node_id));
+        state.set(NodeState::ACTIVE, context.active_id == Some(node_id));
+        state.set_window(context.window);
+        node.state = state;
         // Runtime widget state is authoritative over the authored fallback.
         mesh_core_elements::PseudoState::Checked.set_value(&mut node.state, checked);
         if context
             .expanded_triggers
             .is_some_and(|ids| ids.contains(&node_id))
         {
-            node.state.expanded = true;
+            node.state.set(NodeState::EXPANDED, true);
         }
-        if node.state.hovered {
+        if node.state.contains(NodeState::HOVERED) {
             tracing::trace!(
                 "[hover] annotate: key={key} tag={} set hovered=true",
                 trace_tag.as_deref().unwrap_or_default()
@@ -381,7 +383,7 @@ pub(super) fn annotate_runtime_tree_inner(
         // here — including a remove of a key that was never present — forces a
         // copy-on-write clone and breaks memo payload sharing for the whole
         // subtree. Both branches must check before they write.
-        if node.state.focused {
+        if node.state.contains(NodeState::FOCUSED) {
             if node.attributes.get("_mesh_focused").map(String::as_str) != Some("true") {
                 node.attributes
                     .insert("_mesh_focused".into(), "true".into());
@@ -391,7 +393,7 @@ pub(super) fn annotate_runtime_tree_inner(
         }
         // Compatibility projection for callers inspecting the live node. Semantic
         // snapshots derive focus from `node.state`, so this is not authoritative.
-        node.accessibility.focused = node.state.focused;
+        node.accessibility.focused = node.state.contains(NodeState::FOCUSED);
 
         if is_input {
             let value = context

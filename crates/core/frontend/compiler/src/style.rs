@@ -3,7 +3,7 @@ use mesh_core_elements::style::{
     AlignSelf, FlexDirection, JustifyContent, StyleNodeAttrs, StylePropertyMask,
     selector_matches_attrs,
 };
-use mesh_core_elements::{ComputedStyle, Dimension, ElementState, StyleContext};
+use mesh_core_elements::{ComputedStyle, Dimension, NodeState, StyleContext};
 use mesh_core_theme::{Theme, TokenValue};
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -187,7 +187,7 @@ pub(crate) fn inherited_style_mask(
     tag: &str,
     classes: &[String],
     id: Option<&str>,
-    state: ElementState,
+    state: NodeState,
     context: StyleContext,
 ) -> StylePropertyMask {
     INHERITED_STYLE_RULE_INDEX.with(|cache| {
@@ -258,7 +258,7 @@ pub(crate) fn inherited_style_mask_scan(
     tag: &str,
     classes: &[String],
     id: Option<&str>,
-    state: ElementState,
+    state: NodeState,
     context: StyleContext,
 ) -> StylePropertyMask {
     FLAT_INHERITED_STYLE_RULE_INDEX.with(|cache| {
@@ -508,7 +508,7 @@ mod inherited_mask_tests {
     #[test]
     fn bucketed_inherited_mask_matches_full_scan() {
         let rules = representative_rules();
-        let state = ElementState::default();
+        let state = NodeState::default();
         for context in [
             StyleContext {
                 container_width: 320.0,
@@ -537,7 +537,7 @@ mod inherited_mask_tests {
         let first = vec![rule(Selector::Tag("row".to_string()), "color")];
         let second = vec![rule(Selector::Tag("row".to_string()), "font-size")];
         let context = StyleContext::default();
-        let state = ElementState::default();
+        let state = NodeState::default();
         let first_mask = inherited_style_mask(&first, "row", &[], None, state, context);
         assert!(first_mask.color && !first_mask.font_size);
         let second_mask = inherited_style_mask(&second, "row", &[], None, state, context);
@@ -560,12 +560,8 @@ mod inherited_mask_tests {
             ),
         ];
         let context = StyleContext::default();
-        let inactive = ElementState::default();
-        let active = ElementState {
-            hovered: true,
-            disabled: true,
-            ..ElementState::default()
-        };
+        let inactive = NodeState::default();
+        let active = NodeState::HOVERED | NodeState::DISABLED;
 
         let inactive_mask = inherited_style_mask(&rules, "button", &[], None, inactive, context);
         assert!(!inactive_mask.color && !inactive_mask.font_size);

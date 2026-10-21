@@ -1,6 +1,6 @@
 use super::super::*;
 use super::common::*;
-use crate::tree::ElementState;
+use crate::tree::NodeState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 
 fn resolve_cycle_rules(declarations: Vec<Declaration>) -> (ComputedStyle, Vec<StyleDiagnostic>) {
@@ -16,7 +16,7 @@ fn resolve_cycle_rules(declarations: Vec<Declaration>) -> (ComputedStyle, Vec<St
         &["cycle".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     )
 }
 
@@ -113,7 +113,7 @@ fn style_diagnostics_unsupported_property_produces_style_diagnostic() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(diagnostics.len(), 1);
@@ -278,7 +278,7 @@ fn animation_variable_duration_resolves_from_theme() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -317,7 +317,7 @@ fn transition_hyphenated_animation_curve_resolves_from_theme() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -347,7 +347,7 @@ fn invalid_animation_variable_produces_diagnostic_and_skips_declaration() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.animations[0].duration_ms, 0);

@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::tree::ElementState;
+use crate::tree::NodeState;
 use mesh_core_component::{
     parser::parse_component,
     style::{Selector, StyleRule},
@@ -37,6 +37,6 @@ pub(super) fn resolve_class(
         &[class.to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     )
 }

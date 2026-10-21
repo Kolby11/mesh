@@ -200,7 +200,7 @@ fn element_snapshot_json_matches_serde_snapshot_shape() {
     node.layout.width = 160.0;
     node.layout.height = 32.0;
     node.computed_style.padding = Edges::all(4.0);
-    node.state.focused = true;
+    node.state.set(NodeState::FOCUSED, true);
     node.scroll_metrics = Some(WidgetScrollMetrics {
         x: 1.0,
         y: 2.0,
@@ -341,22 +341,7 @@ fn element_contract_covers_v1_16_taxonomy() {
 
 #[test]
 fn element_state_snapshot_exposes_shared_control_state() {
-    let state = ElementState {
-        hovered: true,
-        active: true,
-        focused: true,
-        focus_visible: true,
-        disabled: true,
-        read_only: true,
-        required: true,
-        selected: true,
-        checked: true,
-        expanded: true,
-        pressed: true,
-        invalid: true,
-        value: true,
-        window: crate::WindowSurfaceState::default(),
-    };
+    let state = NodeState::CSS - NodeState::WINDOW;
 
     let snapshot = ElementStateSnapshot::from(state);
 

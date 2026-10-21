@@ -877,7 +877,7 @@ fn navigation_settings_button_drops_its_tooltip_while_quick_settings_is_open() {
             .map(|diagnostics| diagnostics.health())
     );
     assert!(
-        settings_button.state.expanded,
+        settings_button.state.contains(NodeState::EXPANDED),
         "the open popover expands its trigger"
     );
     assert_eq!(
@@ -1070,7 +1070,8 @@ fn navigation_bar_pointer_click_opens_settings_and_updates_focus_diagnostic() {
                 tree,
                 "__mesh_embed__::@mesh/navigation-bar/slot:end/default-5::onOpenSettings",
             ))
-            .is_some_and(|button| button.state.active || button.state.focused),
+            .is_some_and(|button| button.state.contains(NodeState::ACTIVE)
+                || button.state.contains(NodeState::FOCUSED)),
         "opening Settings must clear the launcher's active and focused state"
     );
 }

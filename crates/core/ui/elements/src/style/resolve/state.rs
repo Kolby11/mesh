@@ -1,5 +1,5 @@
 use crate::pseudo_state::{PseudoState, pseudo_state_mask};
-use crate::tree::ElementState;
+use crate::tree::NodeState;
 
 // Kept private for the existing resolver tests; the values come from the
 // canonical table rather than maintaining a second bit assignment.
@@ -20,7 +20,7 @@ pub(super) const STATE_TILED: u32 = crate::pseudo_state::PSEUDO_STATE_TABLE[16].
 #[cfg(test)]
 pub(super) const STATE_WINDOWED: u32 = crate::pseudo_state::PSEUDO_STATE_TABLE[17].bit;
 
-pub(super) fn active_state_mask(state: ElementState) -> u32 {
+pub(super) fn active_state_mask(state: NodeState) -> u32 {
     pseudo_state_mask(state)
 }
 

@@ -491,7 +491,7 @@ fn shipped_glass_material_resolves_and_paints_under_every_theme_mode() {
                     &[],
                     None,
                     StyleContext::default(),
-                    mesh_core_elements::tree::ElementState::default(),
+                    mesh_core_elements::tree::NodeState::default(),
                     Some("@mesh/glass-bar"),
                 );
                 let BackgroundPaint::LinearGradient(gradient) = style.background_paint else {

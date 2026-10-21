@@ -1,6 +1,6 @@
 use super::super::*;
 use super::common::*;
-use crate::tree::ElementState;
+use crate::tree::NodeState;
 use mesh_core_component::style::StyleValue;
 
 #[test]
@@ -92,7 +92,7 @@ box.card { padding: 3px; }
         &classes,
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
         Some("@mesh/test"),
     );
     let actual = resolver.resolve_node_style_for_module_indexed(
@@ -102,7 +102,7 @@ box.card { padding: 3px; }
         &classes,
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
         Some("@mesh/test"),
     );
 
@@ -370,10 +370,16 @@ fn backdrop_filter_parses_blur_refraction_and_dispersion() {
     let filter = parse::parse_backdrop_filter("blur(12px) refract(24px 18px) dispersion(2px)");
     assert_eq!(filter.blur_radius, 12.0);
     assert!(filter.has_refraction());
-    assert_eq!((filter.refract_depth, filter.refract_edge, filter.dispersion), (24.0, 18.0, 2.0));
+    assert_eq!(
+        (filter.refract_depth, filter.refract_edge, filter.dispersion),
+        (24.0, 18.0, 2.0)
+    );
 
     let plain = parse::parse_backdrop_filter("refract(0px 0px)");
-    assert!(plain.has_refraction(), "refract(0 0) still samples the backdrop source");
+    assert!(
+        plain.has_refraction(),
+        "refract(0 0) still samples the backdrop source"
+    );
     assert!(!plain.is_none());
 
     assert!(!parse::parse_backdrop_filter("blur(8px)").has_refraction());

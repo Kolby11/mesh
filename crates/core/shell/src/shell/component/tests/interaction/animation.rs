@@ -1712,7 +1712,7 @@ fn paint_only_frame_with_changed_interaction_state_takes_the_full_annotation() {
     assert_eq!(component.scroll_only_annotation_frames, before);
     let active = first_node_with_class_token(component.last_tree.as_ref().unwrap(), "row").unwrap();
     assert!(
-        active.state.active,
+        active.state.contains(NodeState::ACTIVE),
         "the pressed node is projected as :active"
     );
 }
@@ -2099,7 +2099,10 @@ fn stepped_animation_sleeps_through_its_plateaus() {
     while std::time::Instant::now() < until {
         std::thread::sleep(until - std::time::Instant::now());
     }
-    assert!(component.wants_render(), "the step boundary requests a frame");
+    assert!(
+        component.wants_render(),
+        "the step boundary requests a frame"
+    );
     component.tick().unwrap();
     let opacity_before = component.last_tree.as_ref().unwrap().children[0]
         .computed_style
@@ -2110,8 +2113,15 @@ fn stepped_animation_sleeps_through_its_plateaus() {
     let opacity_after = component.last_tree.as_ref().unwrap().children[0]
         .computed_style
         .opacity;
-    assert_ne!(opacity_before, opacity_after, "the woken frame shows the step");
-    assert!(component.animation_hold.is_some_and(|(next, _)| next > until));
+    assert_ne!(
+        opacity_before, opacity_after,
+        "the woken frame shows the step"
+    );
+    assert!(
+        component
+            .animation_hold
+            .is_some_and(|(next, _)| next > until)
+    );
 }
 
 #[test]

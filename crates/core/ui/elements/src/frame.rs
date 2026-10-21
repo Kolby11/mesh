@@ -13,9 +13,7 @@ use crate::element::element_runtime_tag_for_tag;
 use crate::interaction_contract::NodeEligibility;
 use crate::layout::LayoutRect;
 use crate::style::ComputedStyle;
-use crate::tree::{
-    ElementState, NodeId, WidgetNode, WidgetTreeValidationError, validate_widget_tree,
-};
+use crate::tree::{NodeId, NodeState, WidgetNode, WidgetTreeValidationError, validate_widget_tree};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
@@ -264,7 +262,7 @@ pub struct FrameNode {
     attributes: Arc<AttributeMap>,
     style: Arc<ComputedStyle>,
     layout: LayoutRect,
-    state: ElementState,
+    state: NodeState,
     semantic: Option<Arc<FrameSemanticNode>>,
     local_info: Arc<AccessibilityInfo>,
     semantic_text: Arc<str>,
@@ -308,7 +306,7 @@ impl FrameNode {
         self.layout
     }
 
-    pub fn state(&self) -> ElementState {
+    pub fn state(&self) -> NodeState {
         self.state
     }
 
@@ -1347,7 +1345,7 @@ mod tests {
                 child
                     .attributes
                     .insert("aria-label".into(), format!("item {index}"));
-                child.state.focused = random.next() & 1 == 0;
+                child.state.set(NodeState::FOCUSED, random.next() & 1 == 0);
             } else {
                 child
                     .attributes
@@ -1540,7 +1538,7 @@ mod tests {
                             .insert("aria-label".into(), format!("renamed {revision}"));
                     }
                     "layout" => target.layout.width += 7.0,
-                    _ => target.state.hovered = !target.state.hovered,
+                    _ => target.state.toggle(NodeState::HOVERED),
                 }
                 let changed = HashSet::from([target.id]);
 
@@ -1620,7 +1618,7 @@ mod tests {
                         target.attributes.insert("disabled".into(), "true".into());
                     }
                     "focus" => {
-                        target.state.focused = true;
+                        target.state.set(NodeState::FOCUSED, true);
                     }
                     "restyle" => {
                         target.children[0].computed_style.display = crate::style::Display::None;
@@ -1663,7 +1661,9 @@ mod tests {
         let mut full_tree = tree.clone();
         let start = std::time::Instant::now();
         for revision in 2..102 {
-            full_tree.children[512].state.focused = revision % 2 == 0;
+            full_tree.children[512]
+                .state
+                .set(NodeState::FOCUSED, revision % 2 == 0);
             crate::normalize_accessibility(&mut full_tree);
             std::hint::black_box(
                 FrameSnapshot::complete(&full_tree, revision, Some(&base)).unwrap(),
@@ -1672,7 +1672,9 @@ mod tests {
         let full = start.elapsed();
         let start = std::time::Instant::now();
         for revision in 2..102 {
-            tree.children[512].state.focused = revision % 2 == 0;
+            tree.children[512]
+                .state
+                .set(NodeState::FOCUSED, revision % 2 == 0);
             base.normalize_accessibility_dirty(&mut tree, &dirty, &HashSet::new());
             std::hint::black_box(
                 FrameSnapshot::capture_dirty(

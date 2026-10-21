@@ -2221,6 +2221,7 @@ dependencies = [
 name = "mesh-core-elements"
 version = "0.1.0"
 dependencies = [
+ "bitflags 2.11.1",
  "mesh-core-component",
  "mesh-core-theme",
  "serde",

@@ -1,6 +1,6 @@
 use super::super::*;
 use super::common::*;
-use crate::tree::ElementState;
+use crate::tree::NodeState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue, prop_variable_key};
 
 #[test]
@@ -173,10 +173,7 @@ fn shipped_navigation_style_expected_diagnostics_do_not_block_tokens() {
             &["nav-button".to_string()],
             None,
             StyleContext::default(),
-            ElementState {
-                hovered: true,
-                ..ElementState::default()
-            },
+            NodeState::HOVERED,
         );
     assert!(
         hovered_button_diagnostics

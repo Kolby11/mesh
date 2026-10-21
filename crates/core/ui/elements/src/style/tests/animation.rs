@@ -1,6 +1,6 @@
 use super::super::parse::parse_transition_properties;
 use super::super::*;
-use crate::tree::ElementState;
+use crate::tree::NodeState;
 use mesh_core_component::style::{Selector, StyleRule, StyleValue};
 
 #[test]
@@ -24,7 +24,7 @@ fn transition_shorthand_parses_comma_separated_items() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.transitions[0].duration_ms, 150);
@@ -51,7 +51,7 @@ fn resolve_single_decl(property: &str, value: &str) -> ComputedStyle {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     )
 }
 
@@ -70,7 +70,7 @@ fn resolve_transition_declarations(
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     )
 }
 
@@ -376,7 +376,7 @@ fn animation_longhands_store_metadata_only() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.animations[0].name.as_deref(), Some("pulse"));
@@ -413,7 +413,7 @@ fn animation_shorthand_stores_metadata_only() {
         &["panel".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.animations[0].name.as_deref(), Some("pulse"));
@@ -461,7 +461,7 @@ mix-blend-mode: multiply;
         &["shell-card".to_string()],
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(style.padding, Edges::all(16.0));

@@ -324,7 +324,7 @@ pub(crate) struct FinalizedStyle {
     hidden: Option<String>,
     promoted: (bool, bool),
     module_id: Option<String>,
-    state: crate::tree::ElementState,
+    state: crate::tree::NodeState,
     parent: Option<ParentInheritedStyle>,
     theme_revision: u64,
     index_revision: u64,

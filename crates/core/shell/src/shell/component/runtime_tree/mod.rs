@@ -21,7 +21,7 @@ use mesh_core_elements::style::{
     BackgroundPaint, Color, ComputedStyle, Corners, Dimension, Edges, Transform2D,
 };
 use mesh_core_elements::{
-    AccessibilityRole, ElementState, NodeId, WidgetNode, WindowSurfaceState, element_snapshot_json,
+    AccessibilityRole, NodeId, NodeState, WidgetNode, WindowSurfaceState, element_snapshot_json,
 };
 use mesh_core_interaction::ScrollOffsetState;
 

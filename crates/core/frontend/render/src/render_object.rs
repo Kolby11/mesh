@@ -671,8 +671,8 @@ fn accessibility_role_slot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mesh_core_elements::WidgetNode;
     use mesh_core_elements::style::Color;
+    use mesh_core_elements::{NodeState, WidgetNode};
     use std::time::Instant;
 
     fn retained_visual_node() -> WidgetNode {
@@ -741,7 +741,7 @@ mod tests {
         let mut node = retained_visual_node();
         node.accessibility.focusable = true;
         node.accessibility.focused = true;
-        node.state.focused = false;
+        node.state.set(NodeState::FOCUSED, false);
 
         let mut tree = RenderObjectTree::default();
         tree.update(&node);
@@ -755,7 +755,7 @@ mod tests {
                 .3
         );
 
-        node.state.focused = true;
+        node.state.set(NodeState::FOCUSED, true);
         let dirty = tree.update(&node);
         assert_eq!(dirty.accessibility, 1);
         assert!(

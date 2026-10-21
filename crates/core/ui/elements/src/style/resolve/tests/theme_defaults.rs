@@ -1,5 +1,5 @@
 use super::super::*;
-use crate::tree::ElementState;
+use crate::tree::NodeState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue, prop_variable_key};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -201,7 +201,7 @@ fn shared_theme_defaults_are_not_mutated_by_node_resolution() {
         &[],
         None,
         Default::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
     let big = resolver.resolve_node_style(
         &rules,
@@ -209,7 +209,7 @@ fn shared_theme_defaults_are_not_mutated_by_node_resolution() {
         &["big".to_string()],
         None,
         Default::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
     let plain_again = resolver.resolve_node_style(
         &rules,
@@ -217,7 +217,7 @@ fn shared_theme_defaults_are_not_mutated_by_node_resolution() {
         &[],
         None,
         Default::default(),
-        ElementState::default(),
+        NodeState::default(),
     );
 
     assert_eq!(plain.font_size, 13.0);

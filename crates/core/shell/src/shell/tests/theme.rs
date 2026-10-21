@@ -1189,7 +1189,7 @@ fn selected_ui_font_reaches_component_text_defaults() {
         &[],
         None,
         mesh_core_elements::StyleContext::default(),
-        mesh_core_elements::ElementState::default(),
+        mesh_core_elements::NodeState::default(),
     );
 
     assert_eq!(style.font_family.as_ref(), "DejaVu Serif");

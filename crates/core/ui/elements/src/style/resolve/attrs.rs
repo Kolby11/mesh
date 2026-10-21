@@ -1,5 +1,5 @@
 use super::state::*;
-use crate::tree::ElementState;
+use crate::tree::NodeState;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StyleNodeAttrs<'a> {
@@ -10,7 +10,7 @@ pub struct StyleNodeAttrs<'a> {
     pub(super) parts: Option<&'a str>,
     pub(super) key: Option<&'a str>,
     pub(super) module_id: Option<&'a str>,
-    pub(super) state: ElementState,
+    pub(super) state: NodeState,
     pub(super) state_mask: u32,
 }
 
@@ -77,12 +77,7 @@ pub(super) fn split_class_values<'a>(values: impl Iterator<Item = &'a str>) -> V
 }
 
 impl<'a> StyleNodeAttrs<'a> {
-    pub fn new(
-        tag: &'a str,
-        classes: &'a [String],
-        id: Option<&'a str>,
-        state: ElementState,
-    ) -> Self {
+    pub fn new(tag: &'a str, classes: &'a [String], id: Option<&'a str>, state: NodeState) -> Self {
         Self {
             tag,
             classes: ClassList::from_class_slice(classes),

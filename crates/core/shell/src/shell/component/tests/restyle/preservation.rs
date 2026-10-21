@@ -68,7 +68,9 @@ end)
     // The hovered button should show :hover state in the tree.
     let tree = component.last_tree.as_ref().unwrap();
     assert!(
-        node_by_mesh_key(tree, "root/0").state.hovered,
+        node_by_mesh_key(tree, "root/0")
+            .state
+            .contains(NodeState::HOVERED),
         "button must be marked hovered after restyle"
     );
 }
@@ -214,7 +216,9 @@ text {
 
     // Checked state must survive.
     assert!(
-        node_by_mesh_key(tree, "root/0/2").state.checked,
+        node_by_mesh_key(tree, "root/0/2")
+            .state
+            .contains(NodeState::CHECKED),
         "checked state must survive focus restyle"
     );
 
@@ -270,7 +274,9 @@ fn restyle_state_cleanup_hover_cleared_when_node_removed() {
 
     let tree = component.last_tree.as_ref().unwrap();
     assert!(
-        node_by_mesh_key(tree, "root/0/1").state.hovered,
+        node_by_mesh_key(tree, "root/0/1")
+            .state
+            .contains(NodeState::HOVERED),
         "second button must be hovered before removal"
     );
     assert!(
@@ -321,7 +327,9 @@ fn restyle_state_cleanup_hover_cleared_when_node_removed() {
     // The remaining sibling must not be affected.
     let tree = component.last_tree.as_ref().unwrap();
     assert!(
-        !node_by_mesh_key(tree, "root/0/0").state.hovered,
+        !node_by_mesh_key(tree, "root/0/0")
+            .state
+            .contains(NodeState::HOVERED),
         "remaining sibling must not inherit stale hover state"
     );
 }

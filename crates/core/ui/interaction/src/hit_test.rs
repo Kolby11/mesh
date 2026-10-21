@@ -1,6 +1,6 @@
 use super::*;
-use mesh_core_elements::HandlerTarget;
 use mesh_core_elements::style::TooltipAnchor;
+use mesh_core_elements::{HandlerTarget, NodeState};
 use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq)]
 pub struct PointerHit {
@@ -429,7 +429,7 @@ pub fn is_input_key(tree: &WidgetNode, key: &str) -> bool {
 pub fn is_editable_input_key(tree: &WidgetNode, key: &str) -> bool {
     is_input_key(tree, key)
         && find_node_by_key(tree, key).is_some_and(|node| {
-            !node.state.read_only
+            !node.state.contains(NodeState::READ_ONLY)
                 && !mesh_core_elements::PseudoState::ReadOnly
                     .authored_value(&node.attributes)
                     .unwrap_or(false)

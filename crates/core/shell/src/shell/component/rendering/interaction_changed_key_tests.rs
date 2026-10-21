@@ -56,7 +56,7 @@ fn runtime_style_diagnostic_generation_tracks_every_resolution_input() {
         .insert("id".into(), "apply".into());
     assert_tree_change(changed);
     let mut changed = tree.clone();
-    changed.children[0].state.focused = true;
+    changed.children[0].state.set(NodeState::FOCUSED, true);
     assert_tree_change(changed);
     let mut changed = tree.clone();
     changed.children[0].set_module_id("@test/alternate");

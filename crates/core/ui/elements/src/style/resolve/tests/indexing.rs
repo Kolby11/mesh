@@ -4,7 +4,7 @@ use super::super::matching::selector_matches_attrs;
 use super::super::state::*;
 use super::super::*;
 use super::common::*;
-use crate::tree::ElementState;
+use crate::tree::NodeState;
 use mesh_core_component::style::{Declaration, Selector, StyleRule, StyleValue};
 use std::collections::HashMap;
 
@@ -42,20 +42,18 @@ fn window_states_index_and_match_like_any_other_pseudo_state() {
     assert_eq!(index.rules_for_state_bit(STATE_TILED), &[3]);
     assert_eq!(index.rules_for_state_bit(STATE_WINDOWED), &[4]);
 
-    let fullscreen = ElementState {
-        window: crate::WindowSurfaceState {
-            windowed: true,
-            fullscreen: true,
-            activated: true,
-            ..crate::WindowSurfaceState::default()
-        },
-        ..ElementState::default()
-    };
+    let fullscreen = crate::WindowSurfaceState {
+        windowed: true,
+        fullscreen: true,
+        activated: true,
+        ..crate::WindowSurfaceState::default()
+    }
+    .flags();
     assert_eq!(
         active_state_mask(fullscreen),
         STATE_WINDOWED | STATE_FULLSCREEN | STATE_ACTIVATED
     );
-    assert_eq!(active_state_mask(ElementState::default()), 0);
+    assert_eq!(active_state_mask(NodeState::default()), 0);
 }
 
 #[test]
@@ -65,13 +63,11 @@ fn windowed_state_is_independent_of_the_compositor_states() {
     // merely floating matches `:windowed` and nothing else, which is what
     // lets a component draw a "dock back" control without also having to be
     // fullscreen or tiled.
-    let floating_window = ElementState {
-        window: crate::WindowSurfaceState {
-            windowed: true,
-            ..crate::WindowSurfaceState::default()
-        },
-        ..ElementState::default()
-    };
+    let floating_window = crate::WindowSurfaceState {
+        windowed: true,
+        ..crate::WindowSurfaceState::default()
+    }
+    .flags();
     assert_eq!(active_state_mask(floating_window), STATE_WINDOWED);
     assert_eq!(state_name_bit("windowed"), Some(STATE_WINDOWED));
 
@@ -105,7 +101,7 @@ fn every_typed_pseudo_state_indexes_and_matches_from_the_same_table() {
         let index = StyleRuleIndex::new(&rules);
         assert_eq!(index.rules_for_state_bit(spec.bit), &[0], "{}", spec.name);
 
-        let mut state = ElementState::default();
+        let mut state = NodeState::default();
         spec.state.set_value(&mut state, true);
         let attrs = StyleNodeAttrs::new("box", &[], None, state);
         let selector = Selector::State("*".into(), spec.name.into());
@@ -143,7 +139,7 @@ fn node_indexed_diagnostics_match_allocating_class_path() {
         &classes,
         None,
         context,
-        ElementState::default(),
+        NodeState::default(),
         None,
     );
     let cached = resolver
@@ -190,7 +186,7 @@ fn indexed_static_diagnostic_prototypes_match_uncached_resolution() {
             &classes,
             None,
             StyleContext::default(),
-            ElementState::default(),
+            NodeState::default(),
         )
         .1;
     let indexed = resolver
@@ -201,7 +197,7 @@ fn indexed_static_diagnostic_prototypes_match_uncached_resolution() {
             &classes,
             None,
             StyleContext::default(),
-            ElementState::default(),
+            NodeState::default(),
             None,
         )
         .1;
@@ -232,7 +228,7 @@ fn rebuilding_rule_index_invalidates_static_diagnostic_prototypes() {
                 &["proof".into()],
                 None,
                 StyleContext::default(),
-                ElementState::default(),
+                NodeState::default(),
                 None,
             )
             .1
@@ -351,7 +347,7 @@ fn indexed_diagnostics_match_uncached_diagnostics() {
         &classes,
         None,
         StyleContext::default(),
-        ElementState::default(),
+        NodeState::default(),
         Some("@test/module"),
     );
     let (_indexed_style, indexed) = resolver
@@ -362,7 +358,7 @@ fn indexed_diagnostics_match_uncached_diagnostics() {
             &classes,
             None,
             StyleContext::default(),
-            ElementState::default(),
+            NodeState::default(),
             Some("@test/module"),
         );
 
@@ -378,8 +374,7 @@ fn candidate_rule_fast_path_preserves_source_order_and_multi_bucket_deduplicatio
     ];
     let index = StyleRuleIndex::new(&rules);
     let classes = vec!["primary".to_string()];
-    let mut state = ElementState::default();
-    state.hovered = true;
+    let state = NodeState::HOVERED;
     let attrs = StyleNodeAttrs::new("button", &classes, None, state);
     let mut candidates = Vec::new();
 
@@ -416,9 +411,10 @@ fn compound_state_dependencies_do_not_widen_candidate_buckets() {
     assert_eq!(index.rules_for_state_bit(STATE_FOCUSED), &[1]);
     for hovered in [false, true] {
         for classes in [vec![], vec!["target".to_string()]] {
-            let state = ElementState {
-                hovered,
-                ..ElementState::default()
+            let state = if hovered {
+                NodeState::HOVERED
+            } else {
+                NodeState::empty()
             };
             let attrs = StyleNodeAttrs::new("box", &classes, None, state);
             let mut candidates = vec![];

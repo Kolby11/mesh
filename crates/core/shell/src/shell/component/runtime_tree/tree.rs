@@ -550,7 +550,7 @@ pub(super) struct RetainedNodeSnapshot {
     pub(super) style_hash: u64,
     pub(super) attributes_hash: u64,
     pub(super) child_ids: SmallVec<[NodeId; 8]>,
-    pub(super) state: ElementState,
+    pub(super) state: NodeState,
     pub(super) render: RenderObjectFingerprint,
     pub(super) last_seen_epoch: u64,
 }

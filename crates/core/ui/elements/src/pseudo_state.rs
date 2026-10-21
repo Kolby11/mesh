@@ -1,5 +1,5 @@
 use crate::attributes::AttributeMap;
-use crate::tree::ElementState;
+use crate::tree::NodeState;
 
 /// The typed pseudo-state vocabulary shared by style matching and runtime
 /// state publication.
@@ -190,50 +190,17 @@ impl PseudoState {
             .map(|spec| spec.state)
     }
 
-    pub fn value(self, state: ElementState) -> bool {
-        match self {
-            Self::Hovered => state.hovered,
-            Self::Focused => state.focused,
-            Self::Active => state.active,
-            Self::Disabled => state.disabled,
-            Self::ReadOnly => state.read_only,
-            Self::Required => state.required,
-            Self::Selected => state.selected,
-            Self::Checked => state.checked,
-            Self::Expanded => state.expanded,
-            Self::Pressed => state.pressed,
-            Self::Invalid => state.invalid,
-            Self::Value => state.value,
-            Self::FocusVisible => state.focus_visible,
-            Self::Windowed => state.window.windowed,
-            Self::Fullscreen => state.window.fullscreen,
-            Self::Maximized => state.window.maximized,
-            Self::Activated => state.window.activated,
-            Self::Tiled => state.window.tiled,
-        }
+    /// The node-state flag this pseudo-state reads; equal to its table bit.
+    pub fn flag(self) -> NodeState {
+        NodeState::from_bits_retain(self.spec().bit)
     }
 
-    pub fn set_value(self, state: &mut ElementState, value: bool) {
-        match self {
-            Self::Hovered => state.hovered = value,
-            Self::Focused => state.focused = value,
-            Self::Active => state.active = value,
-            Self::Disabled => state.disabled = value,
-            Self::ReadOnly => state.read_only = value,
-            Self::Required => state.required = value,
-            Self::Selected => state.selected = value,
-            Self::Checked => state.checked = value,
-            Self::Expanded => state.expanded = value,
-            Self::Pressed => state.pressed = value,
-            Self::Invalid => state.invalid = value,
-            Self::Value => state.value = value,
-            Self::FocusVisible => state.focus_visible = value,
-            Self::Windowed => state.window.windowed = value,
-            Self::Fullscreen => state.window.fullscreen = value,
-            Self::Maximized => state.window.maximized = value,
-            Self::Activated => state.window.activated = value,
-            Self::Tiled => state.window.tiled = value,
-        }
+    pub fn value(self, state: NodeState) -> bool {
+        state.intersects(self.flag())
+    }
+
+    pub fn set_value(self, state: &mut NodeState, value: bool) {
+        state.set(self.flag(), value);
     }
 
     /// Read an author-facing boolean/value attribute for states whose source
@@ -274,8 +241,8 @@ impl PseudoState {
 
 /// Resolve the state that markup attributes author before live interaction
 /// state is applied by the shell.
-pub fn authored_element_state(attributes: &AttributeMap) -> ElementState {
-    let mut state = ElementState::default();
+pub fn authored_element_state(attributes: &AttributeMap) -> NodeState {
+    let mut state = NodeState::empty();
     for spec in PSEUDO_STATE_TABLE {
         if let Some(value) = spec.state.authored_value(attributes) {
             spec.state.set_value(&mut state, value);
@@ -288,11 +255,8 @@ pub fn pseudo_state_specs() -> &'static [PseudoStateSpec] {
     PSEUDO_STATE_TABLE
 }
 
-pub fn pseudo_state_mask(state: ElementState) -> u32 {
-    PSEUDO_STATE_TABLE
-        .iter()
-        .filter(|spec| spec.state.value(state))
-        .fold(0, |mask, spec| mask | spec.bit)
+pub fn pseudo_state_mask(state: NodeState) -> u32 {
+    (state & NodeState::CSS).bits()
 }
 
 #[cfg(test)]
@@ -302,8 +266,9 @@ mod tests {
     #[test]
     fn table_names_bits_and_accessors_are_exhaustive() {
         assert_eq!(PSEUDO_STATE_TABLE.len(), 18);
-        let mut state = ElementState::default();
+        let mut state = NodeState::empty();
         for spec in PSEUDO_STATE_TABLE {
+            assert!(NodeState::CSS.contains(spec.state.flag()), "{}", spec.name);
             assert_eq!(PseudoState::from_name(spec.name), Some(spec.state));
             assert_eq!(spec.state.spec(), spec);
             assert!(!spec.state.value(state));

@@ -9,33 +9,72 @@ use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Live interaction state, written by the interaction runtime and read by
-/// `selector_matches` for pseudo-class selectors like `:hover`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ElementState {
-    pub hovered: bool,
-    pub active: bool,
-    pub focused: bool,
-    pub focus_visible: bool,
-    pub disabled: bool,
-    pub read_only: bool,
-    pub required: bool,
-    pub selected: bool,
-    pub checked: bool,
-    pub expanded: bool,
-    pub pressed: bool,
-    pub invalid: bool,
-    pub value: bool,
-    /// Surface state, not node state: the compositor's `xdg_toplevel` states
-    /// projected onto every node. This engine has no descendant combinators, so
-    /// carrying them only on the root would put them out of reach — a sidebar
-    /// cannot write `.window:fullscreen .sidebar`, but can write
-    /// `.sidebar:fullscreen`. Always false on layer surfaces and popups.
-    pub window: WindowSurfaceState,
+bitflags::bitflags! {
+    /// Live node state flags, written by markup, the interaction runtime and
+    /// the shell, and read by pseudo-class selectors like `:hover`.
+    ///
+    /// The CSS-visible bits equal the `bit` of their row in
+    /// [`PSEUDO_STATE_TABLE`](crate::PSEUDO_STATE_TABLE), so a node's selector
+    /// state mask is `state & NodeState::CSS`. The surface bits are the
+    /// compositor's `xdg_toplevel` states projected onto every node: this
+    /// engine has no descendant combinators, so a sidebar cannot write
+    /// `.window:fullscreen .sidebar` but can write `.sidebar:fullscreen`. They
+    /// are always clear on layer surfaces and popups.
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+    pub struct NodeState: u32 {
+        const HOVERED = 1 << 0;
+        const FOCUSED = 1 << 1;
+        const ACTIVE = 1 << 2;
+        const DISABLED = 1 << 3;
+        const READ_ONLY = 1 << 4;
+        const REQUIRED = 1 << 5;
+        const SELECTED = 1 << 6;
+        const CHECKED = 1 << 7;
+        const EXPANDED = 1 << 8;
+        const PRESSED = 1 << 9;
+        const INVALID = 1 << 10;
+        const VALUE = 1 << 11;
+        const FOCUS_VISIBLE = 1 << 12;
+        const FULLSCREEN = 1 << 13;
+        const MAXIMIZED = 1 << 14;
+        const ACTIVATED = 1 << 15;
+        const TILED = 1 << 16;
+        const WINDOWED = 1 << 17;
+        /// The node's surface or promoted child is mapping this paint; its
+        /// first buffer snaps to the authored entrance styles. Not CSS state.
+        const SURFACE_ENTERING = 1 << 24;
+        /// The node's surface or promoted child is closing. Not CSS state.
+        const SURFACE_EXITING = 1 << 25;
+
+        /// Every pseudo-class bit selectors can match.
+        const CSS = (1 << 18) - 1;
+        const WINDOW = Self::FULLSCREEN.bits()
+            | Self::MAXIMIZED.bits()
+            | Self::ACTIVATED.bits()
+            | Self::TILED.bits()
+            | Self::WINDOWED.bits();
+    }
+}
+
+impl NodeState {
+    pub fn window(self) -> WindowSurfaceState {
+        WindowSurfaceState {
+            windowed: self.contains(Self::WINDOWED),
+            fullscreen: self.contains(Self::FULLSCREEN),
+            maximized: self.contains(Self::MAXIMIZED),
+            activated: self.contains(Self::ACTIVATED),
+            tiled: self.contains(Self::TILED),
+        }
+    }
+
+    pub fn set_window(&mut self, window: WindowSurfaceState) {
+        self.remove(Self::WINDOW);
+        self.insert(window.flags());
+    }
 }
 
 /// The compositor's view of the containing toplevel, as CSS state on every
-/// node of the surface's tree. See [`ElementState::window`].
+/// node of the surface's tree. See [`NodeState`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WindowSurfaceState {
     /// `:windowed` — realized as an `xdg_toplevel` rather than shell chrome.
@@ -51,6 +90,18 @@ pub struct WindowSurfaceState {
     pub activated: bool,
     /// `:tiled` — some edge abuts a neighbour or screen edge.
     pub tiled: bool,
+}
+
+impl WindowSurfaceState {
+    pub fn flags(self) -> NodeState {
+        let mut flags = NodeState::empty();
+        flags.set(NodeState::WINDOWED, self.windowed);
+        flags.set(NodeState::FULLSCREEN, self.fullscreen);
+        flags.set(NodeState::MAXIMIZED, self.maximized);
+        flags.set(NodeState::ACTIVATED, self.activated);
+        flags.set(NodeState::TILED, self.tiled);
+        flags
+    }
 }
 
 pub type NodeId = u64;
@@ -319,7 +370,7 @@ pub struct WidgetNode {
     pub layout: LayoutRect,
     pub children: SharedWidgetChildren,
     pub accessibility: AccessibilityInfo,
-    pub state: ElementState,
+    pub state: NodeState,
     /// Typed runtime scroll state, kept out of the string attribute map.
     pub scroll_metrics: Option<WidgetScrollMetrics>,
     /// Stable runtime identity for this node, kept out of the string attribute map.
@@ -425,13 +476,13 @@ impl WidgetNode {
             .map(String::as_str)
             .unwrap_or(self.tag.as_str());
         matches!(source, "dialog" | "sheet" | "menu")
-            && self
-                .attributes
-                .get("open")
-                .is_some_and(|value| {
-                    let value = value.trim();
-                    value.is_empty() || value == "0" || value.eq_ignore_ascii_case("false") || value.eq_ignore_ascii_case("none")
-                })
+            && self.attributes.get("open").is_some_and(|value| {
+                let value = value.trim();
+                value.is_empty()
+                    || value == "0"
+                    || value.eq_ignore_ascii_case("false")
+                    || value.eq_ignore_ascii_case("none")
+            })
     }
 
     pub fn new(tag: impl Into<String>) -> Self {
@@ -441,7 +492,7 @@ impl WidgetNode {
             layout: LayoutRect::default(),
             children: SharedWidgetChildren::new(),
             accessibility: AccessibilityInfo::default(),
-            state: ElementState::default(),
+            state: NodeState::default(),
             scroll_metrics: None,
             mesh_key: None,
             loop_identity: None,

@@ -146,7 +146,7 @@ fn geometry_only_snapshot_reuses_non_layout_fingerprints() {
     node.layout.x = 24.0;
     node.computed_style.opacity = 0.5;
     node.attributes.insert("class".into(), "after".into());
-    node.state.hovered = true;
+    node.state.set(NodeState::HOVERED, true);
 
     let geometry_only =
         retained_snapshot_with_render(&node, previous.render.clone(), Some(&previous));

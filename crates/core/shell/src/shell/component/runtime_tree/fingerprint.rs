@@ -285,7 +285,7 @@ pub(super) fn attributes_fingerprint(node: &WidgetNode) -> u64 {
     node.accessibility.focusable.hash(&mut hasher);
     // Accessibility snapshots derive focus from the live interaction state;
     // the accessibility field is only a shell compatibility projection.
-    node.state.focused.hash(&mut hasher);
+    node.state.contains(NodeState::FOCUSED).hash(&mut hasher);
     node.accessibility.hidden.hash(&mut hasher);
     node.accessibility.visible.hash(&mut hasher);
     node.accessibility.keyboard_shortcut.hash(&mut hasher);
@@ -399,9 +399,9 @@ pub(super) fn hash_json_value(value: &serde_json::Value, hasher: &mut impl Hashe
     }
 }
 
-/// Converts ElementState to the canonical pseudo-state dependency mask used
+/// Converts NodeState to the canonical pseudo-state dependency mask used
 /// by style indexing and retained-tree invalidation.
-pub(super) fn state_bitmask(state: ElementState) -> u32 {
+pub(super) fn state_bitmask(state: NodeState) -> u32 {
     mesh_core_elements::pseudo_state_mask(state)
 }
 

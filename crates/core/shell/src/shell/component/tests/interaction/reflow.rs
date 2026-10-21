@@ -375,7 +375,11 @@ end)
             .map(String::as_str),
         Some("local")
     );
-    assert!(node_by_mesh_key(tree, "root/0/1").state.checked);
+    assert!(
+        node_by_mesh_key(tree, "root/0/1")
+            .state
+            .contains(NodeState::CHECKED)
+    );
 }
 
 #[test]
@@ -538,7 +542,11 @@ end)
             .map(String::as_str),
         Some("73.00")
     );
-    assert!(node_by_mesh_key(narrow_tree, "root/0/2").state.checked);
+    assert!(
+        node_by_mesh_key(narrow_tree, "root/0/2")
+            .state
+            .contains(NodeState::CHECKED)
+    );
     let retained_scroll = component
         .scroll_offsets
         .get(&runtime_node_id_for_key("root/0/3"))

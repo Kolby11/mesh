@@ -5,7 +5,7 @@ use super::declaration::DeclarationPass;
 use super::index::*;
 use super::matching::*;
 use crate::style::*;
-use crate::tree::ElementState;
+use crate::tree::NodeState;
 use mesh_core_component::style::StyleRule;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -18,7 +18,7 @@ impl<'a> StyleResolver<'a> {
         classes: &[String],
         id: Option<&str>,
         context: StyleContext,
-        state: ElementState,
+        state: NodeState,
     ) -> ComputedStyle {
         let attrs = StyleNodeAttrs::new(tag, classes, id, state);
         self.resolve_node_style_with_attrs_no_diagnostics(rules, &attrs, context)
@@ -32,7 +32,7 @@ impl<'a> StyleResolver<'a> {
         classes: &[String],
         id: Option<&str>,
         context: StyleContext,
-        state: ElementState,
+        state: NodeState,
         module_id: Option<&str>,
     ) -> ComputedStyle {
         let mut attrs = StyleNodeAttrs::new(tag, classes, id, state);
@@ -49,7 +49,7 @@ impl<'a> StyleResolver<'a> {
         classes: &[String],
         id: Option<&str>,
         context: StyleContext,
-        state: ElementState,
+        state: NodeState,
         module_id: Option<&str>,
     ) -> ComputedStyle {
         debug_assert!(index.is_for(rules));
@@ -67,7 +67,7 @@ impl<'a> StyleResolver<'a> {
         classes: &[String],
         id: Option<&str>,
         context: StyleContext,
-        state: ElementState,
+        state: NodeState,
         module_id: Option<&str>,
         parent_style: Option<&ComputedStyle>,
     ) -> ComputedStyle {
@@ -95,7 +95,7 @@ impl<'a> StyleResolver<'a> {
         id: Option<&str>,
         inline_style: Option<&str>,
         context: StyleContext,
-        state: ElementState,
+        state: NodeState,
         module_id: Option<&str>,
     ) -> ComputedStyle {
         debug_assert!(index.is_for(rules));
@@ -116,7 +116,7 @@ impl<'a> StyleResolver<'a> {
         inline_style: Option<&str>,
         parts: Option<&str>,
         context: StyleContext,
-        state: ElementState,
+        state: NodeState,
         module_id: Option<&str>,
         parent_style: Option<&ComputedStyle>,
     ) -> ComputedStyle {
@@ -143,7 +143,7 @@ impl<'a> StyleResolver<'a> {
         classes: &[String],
         id: Option<&str>,
         context: StyleContext,
-        state: ElementState,
+        state: NodeState,
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
         self.resolve_node_style_with_diagnostics_for_module(
             rules, tag, classes, id, context, state, None,
@@ -158,7 +158,7 @@ impl<'a> StyleResolver<'a> {
         classes: &[String],
         id: Option<&str>,
         context: StyleContext,
-        state: ElementState,
+        state: NodeState,
         module_id: Option<&str>,
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
         let mut attrs = StyleNodeAttrs::new(tag, classes, id, state);
@@ -175,7 +175,7 @@ impl<'a> StyleResolver<'a> {
         classes: &[String],
         id: Option<&str>,
         context: StyleContext,
-        state: ElementState,
+        state: NodeState,
         module_id: Option<&str>,
     ) -> (ComputedStyle, Vec<StyleDiagnostic>) {
         debug_assert!(index.is_for(rules));
