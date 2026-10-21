@@ -1,7 +1,9 @@
 use mesh_core_animation::{Easing, apply_easing};
 use mesh_core_config::TooltipSettings;
-use mesh_core_elements::style::{TooltipAnchor, parse_animation_shorthand, parse_transform};
+use mesh_core_elements::style::{Color, TooltipAnchor, parse_animation_shorthand, parse_transform};
+use mesh_core_render::TooltipPaintStyle;
 use mesh_core_theme::Theme;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// A tooltip enter animation lowered from theme CSS.
@@ -99,6 +101,118 @@ pub(super) fn tooltip_animation_from_theme(theme: &Theme) -> Option<TooltipAnima
         easing: Easing::from(style.easing),
         stops,
     })
+}
+
+/// Upper bounds for themed tooltip metrics. The overlay reserve a surface
+/// adds for tooltips (`TOOLTIP_OVERLAY_*`) is sized for a 320px wrap width and
+/// modest padding, so larger values would paint outside the buffer.
+const TOOLTIP_MAX_WRAP_WIDTH: f32 = 320.0;
+const TOOLTIP_MAX_PADDING: f32 = 12.0;
+const TOOLTIP_MAX_BORDER_WIDTH: f32 = 4.0;
+
+/// Lower the theme's `tooltip {}` rule into tooltip chrome. Colours missing
+/// from the rule follow the surface-container roles, so themes that only set
+/// timing still get tooltips in their palette.
+pub(super) fn tooltip_paint_style_from_theme(theme: &Theme) -> TooltipPaintStyle {
+    let fallback = TooltipPaintStyle::DEFAULT_DARK;
+    let token_color = |name: &str, default: Color| {
+        theme
+            .resolve_token_value(name)
+            .ok()
+            .flatten()
+            .and_then(|value| match value {
+                mesh_core_theme::TokenValue::String(value) => Color::from_css(&value),
+                _ => None,
+            })
+            .unwrap_or(default)
+    };
+    let mut style = TooltipPaintStyle {
+        background: token_color("color.surface-container", fallback.background),
+        border: token_color("color.surface-container-high", fallback.border),
+        foreground: token_color("color.on-surface", fallback.foreground),
+        ..fallback
+    };
+    let Some(rule) = theme.component_defaults("tooltip") else {
+        return style;
+    };
+    let value = |property: &str| {
+        rule.get(property)
+            .map(|raw| resolve_theme_value_tokens(theme, raw))
+    };
+    let color = |property: &str| value(property).and_then(|value| Color::from_css(&value));
+    let length = |property: &str| value(property).and_then(|value| parse_length(&value));
+
+    if let Some(border) = value("border") {
+        for token in border.split_whitespace() {
+            if let Some(width) = parse_length(token) {
+                style.border_width = width;
+            } else if let Some(color) = Color::from_css(token) {
+                style.border = color;
+            }
+        }
+    }
+    if let Some(background) = color("background").or_else(|| color("background-color")) {
+        style.background = background;
+    }
+    if let Some(border) = color("border-color") {
+        style.border = border;
+    }
+    if let Some(foreground) = color("color") {
+        style.foreground = foreground;
+    }
+    if let Some(width) = length("border-width") {
+        style.border_width = width;
+    }
+    if let Some(radius) = length("border-radius") {
+        style.radius = radius;
+    }
+    if let Some(padding) = value("padding") {
+        let values = padding
+            .split_whitespace()
+            .filter_map(parse_length)
+            .collect::<Vec<_>>();
+        match values.as_slice() {
+            [all] => (style.padding_y, style.padding_x) = (*all, *all),
+            [vertical, horizontal, ..] => {
+                (style.padding_y, style.padding_x) = (*vertical, *horizontal)
+            }
+            [] => {}
+        }
+    }
+    if let Some(size) = length("font-size") {
+        style.font_size = size;
+    }
+    if let Some(weight) = value("font-weight") {
+        style.font_weight = match weight.trim() {
+            "normal" => 400,
+            "bold" => 700,
+            other => other.parse::<f32>().map_or(style.font_weight, |w| w as u16),
+        };
+    }
+    if let Some(width) = length("max-width") {
+        style.max_width = width;
+    }
+
+    style.border_width = style.border_width.clamp(0.0, TOOLTIP_MAX_BORDER_WIDTH);
+    style.radius = style.radius.max(0.0);
+    style.padding_x = style.padding_x.clamp(0.0, TOOLTIP_MAX_PADDING);
+    style.padding_y = style.padding_y.clamp(0.0, TOOLTIP_MAX_PADDING);
+    style.font_size = style.font_size.clamp(8.0, 32.0);
+    style.font_weight = style.font_weight.clamp(100, 900);
+    style.max_width = style.max_width.clamp(40.0, TOOLTIP_MAX_WRAP_WIDTH);
+    style
+}
+
+/// A bare number or a `px` length; theme size tokens are unitless pixels.
+fn parse_length(value: &str) -> Option<f32> {
+    let value = value.trim();
+    value
+        .strip_suffix("px")
+        .unwrap_or(value)
+        .trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite())
 }
 
 impl TooltipAnimation {
@@ -221,6 +335,117 @@ fn find_matching_parenthesis(value: &str) -> Option<usize> {
         }
     }
     None
+}
+
+/// Key of the child surface a tooltip is promoted to. It cannot collide with
+/// an authored `_mesh_key`, which never starts with `::`.
+pub(super) const TOOLTIP_CHILD_KEY: &str = "::mesh-tooltip";
+
+/// Transparent ring around a promoted tooltip box: the painter keeps the box
+/// 4px from the buffer's leading edges and 6px from its trailing ones, and
+/// draws the themed border (at most `TOOLTIP_MAX_BORDER_WIDTH`) outside it.
+const TOOLTIP_POPUP_PADDING: u32 = 8;
+
+/// A tooltip that does not fit inside its surface, presented as an
+/// `xdg_popup` anchored to the element instead of painted in place. Bottom-
+/// and right-anchored layer surfaces and windows have no tooltip reserve on
+/// those sides, so their tooltips need this to show at all.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct TooltipPopup {
+    pub text: Arc<str>,
+    /// The element, `(left, top, right, bottom)` in surface coordinates.
+    pub element: (f32, f32, f32, f32),
+    pub side: PlacedSide,
+    /// The tooltip box, excluding its outside border.
+    pub size: (f32, f32),
+    pub gap: f32,
+    pub style: TooltipPaintStyle,
+    pub font_family: String,
+    pub opacity: f32,
+    pub scale: f32,
+}
+
+impl TooltipPopup {
+    /// Whether a box of `size` at the painter's position for `placement`
+    /// leaves the `surface`, including the painter's 4px/6px edge clamps.
+    pub fn overflows(placement: &TooltipPlacement, size: (f32, f32), surface: (f32, f32)) -> bool {
+        let left = match placement.side {
+            PlacedSide::Top | PlacedSide::Bottom => placement.paint_x - size.0 / 2.0,
+            _ => placement.paint_x,
+        };
+        left < 4.0
+            || placement.paint_y < 4.0
+            || left + size.0 > surface.0 - 6.0
+            || placement.paint_y + size.1 > surface.1 - 6.0
+    }
+
+    /// The popup request: anchored to the element's side, grown away from it,
+    /// flipped across it when the output edge is in the way. The gap is part
+    /// of the anchor rectangle because `xdg_positioner` does not flip offsets.
+    pub fn request(&self) -> mesh_core_frontend_shell_adapter::ChildSurfaceRequest {
+        use mesh_core_elements::{
+            PopoverAnchor, PopoverConstraintAdjustment, PopoverGravity, PopoverPlacement,
+        };
+        let (left, top, right, bottom) = self.element;
+        let vertical = !matches!(self.side, PlacedSide::Left | PlacedSide::Right);
+        let (left, top, right, bottom) = if vertical {
+            (left, top - self.gap, right, bottom + self.gap)
+        } else {
+            (left - self.gap, top, right + self.gap, bottom)
+        };
+        let (anchor, gravity) = match self.side {
+            PlacedSide::Top => (PopoverAnchor::Top, PopoverGravity::Top),
+            PlacedSide::Left => (PopoverAnchor::Left, PopoverGravity::Left),
+            PlacedSide::Right => (PopoverAnchor::Right, PopoverGravity::Right),
+            PlacedSide::Bottom | PlacedSide::Cursor => (PopoverAnchor::Bottom, PopoverGravity::Bottom),
+        };
+        let x = left.floor() as i32;
+        let y = top.floor() as i32;
+        mesh_core_frontend_shell_adapter::ChildSurfaceRequest {
+            node_key: TOOLTIP_CHILD_KEY.to_string(),
+            kind: mesh_core_frontend_shell_adapter::ChildSurfaceKind::Tooltip,
+            anchor_rect: (
+                x,
+                y,
+                (right.ceil() as i32 - x).max(1),
+                (bottom.ceil() as i32 - y).max(1),
+            ),
+            content_size: (
+                self.size.0.ceil().max(1.0) as u32,
+                self.size.1.ceil().max(1.0) as u32,
+            ),
+            content_padding: (TOOLTIP_POPUP_PADDING, TOOLTIP_POPUP_PADDING, TOOLTIP_POPUP_PADDING, TOOLTIP_POPUP_PADDING),
+            placement: PopoverPlacement {
+                anchor,
+                gravity,
+                offset_x: 0,
+                offset_y: 0,
+                constraint_adjustment: PopoverConstraintAdjustment {
+                    flip_x: !vertical,
+                    flip_y: vertical,
+                    slide_x: vertical,
+                    slide_y: !vertical,
+                    resize_x: false,
+                    resize_y: false,
+                },
+                ..PopoverPlacement::default()
+            },
+            popover_trigger: None,
+        }
+    }
+
+    /// A value that changes whenever the popup's pixels would.
+    pub fn paint_generation(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.text.hash(&mut hasher);
+        self.font_family.hash(&mut hasher);
+        for value in [self.size.0, self.size.1, self.opacity, self.scale] {
+            value.to_bits().hash(&mut hasher);
+        }
+        format!("{:?}", self.style).hash(&mut hasher);
+        hasher.finish()
+    }
 }
 
 /// Result of tooltip placement computation.
@@ -415,6 +640,83 @@ mod tests {
 
     const TOOLTIP: (f32, f32) = (120.0, 26.0);
     const SURFACE: (f32, f32) = (240.0, 160.0);
+
+    fn dock_popup(side: PlacedSide) -> TooltipPopup {
+        TooltipPopup {
+            text: Arc::from("Firefox"),
+            element: (100.0, 30.0, 164.0, 94.0),
+            side,
+            size: TOOLTIP,
+            gap: 8.0,
+            style: TooltipPaintStyle::DEFAULT_DARK,
+            font_family: "Inter".into(),
+            opacity: 1.0,
+            scale: 1.0,
+        }
+    }
+
+    #[test]
+    fn a_tooltip_without_room_in_its_surface_is_promoted() {
+        // A dock-like strip: 120px tall, element near the top, no reserve.
+        let strip = (400.0, 120.0);
+        let settings = TooltipSettings::default();
+        let placement = compute_tooltip_placement(
+            ResolvedAnchor::Top,
+            Some((100.0, 30.0, 164.0, 94.0)),
+            None,
+            (0.0, 0.0),
+            TOOLTIP,
+            strip,
+            1.0,
+            &settings,
+        );
+        assert!(TooltipPopup::overflows(&placement, TOOLTIP, strip));
+
+        // A bar with the overlay reserve below it keeps painting in place.
+        let bar = (400.0, 248.0);
+        let placement = compute_tooltip_placement(
+            ResolvedAnchor::Bottom,
+            Some((100.0, 4.0, 164.0, 40.0)),
+            None,
+            (0.0, 0.0),
+            TOOLTIP,
+            bar,
+            1.0,
+            &settings,
+        );
+        assert!(!TooltipPopup::overflows(&placement, TOOLTIP, bar));
+    }
+
+    #[test]
+    fn promoted_tooltip_anchors_past_the_gap_and_flips_across_the_element() {
+        let request = dock_popup(PlacedSide::Top).request();
+        assert_eq!(request.kind, mesh_core_frontend_shell_adapter::ChildSurfaceKind::Tooltip);
+        assert_eq!(request.node_key, TOOLTIP_CHILD_KEY);
+        // The gap widens the anchor on the flip axis, since xdg_positioner
+        // keeps the offset when it flips.
+        assert_eq!(request.anchor_rect, (100, 22, 64, 80));
+        assert_eq!(request.placement.offset_y, 0);
+        assert_eq!(request.content_size, (120, 26));
+        let adjust = request.placement.constraint_adjustment;
+        assert!(adjust.flip_y && adjust.slide_x && !adjust.flip_x && !adjust.slide_y);
+        assert_eq!(request.placement.anchor, mesh_core_elements::PopoverAnchor::Top);
+        assert_eq!(request.placement.gravity, mesh_core_elements::PopoverGravity::Top);
+
+        let side = dock_popup(PlacedSide::Right).request();
+        assert_eq!(side.anchor_rect, (92, 30, 80, 64));
+        assert!(side.placement.constraint_adjustment.flip_x);
+    }
+
+    #[test]
+    fn promoted_tooltip_repaints_when_its_pixels_change() {
+        let resting = dock_popup(PlacedSide::Top);
+        let fading = TooltipPopup {
+            opacity: 0.5,
+            ..resting.clone()
+        };
+        assert_ne!(resting.paint_generation(), fading.paint_generation());
+        assert_eq!(resting.paint_generation(), resting.clone().paint_generation());
+    }
 
     #[test]
     fn default_settings_place_tooltip_below_element() {
@@ -757,5 +1059,79 @@ mod tests {
         assert_eq!(placement.paint_y, 37.0);
         assert_eq!(placement.opacity, 0.5);
         assert_eq!(placement.side, PlacedSide::Cursor);
+    }
+
+    fn theme_with_tooltip_rule(declarations: &[(&str, &str)]) -> Theme {
+        let mut theme = mesh_core_theme::default_theme();
+        let rule = theme
+            .defaults_mut()
+            .components
+            .entry("tooltip".into())
+            .or_default();
+        for (property, value) in declarations {
+            rule.insert((*property).into(), (*value).into());
+        }
+        theme
+    }
+
+    #[test]
+    fn tooltip_rule_styles_the_tooltip_chrome() {
+        let mut theme = theme_with_tooltip_rule(&[
+            ("background", "var(--tip-bg)"),
+            ("color", "#112233"),
+            ("border", "2px solid #445566"),
+            ("border-radius", "10px"),
+            ("padding", "6px 11px"),
+            ("font-size", "14px"),
+            ("font-weight", "bold"),
+            ("max-width", "200px"),
+        ]);
+        theme.set_token(
+            "tip.bg",
+            mesh_core_theme::TokenValue::String("#ff000080".into()),
+            mesh_core_theme::ThemeProvenance::BaseRecovery,
+        );
+
+        let style = tooltip_paint_style_from_theme(&theme);
+
+        assert_eq!(style.background, Color::from_hex("#ff000080").unwrap());
+        assert_eq!(style.foreground, Color::from_hex("#112233").unwrap());
+        assert_eq!(style.border, Color::from_hex("#445566").unwrap());
+        assert_eq!(style.border_width, 2.0);
+        assert_eq!(style.radius, 10.0);
+        assert_eq!((style.padding_y, style.padding_x), (6.0, 11.0));
+        assert_eq!(style.font_size, 14.0);
+        assert_eq!(style.font_weight, 700);
+        assert_eq!(style.max_width, 200.0);
+        assert_eq!(style.box_size(150.0, 18.0), (150.0 + 22.0, 18.0 + 12.0));
+    }
+
+    #[test]
+    fn tooltip_metrics_stay_inside_the_overlay_reserve() {
+        let theme = theme_with_tooltip_rule(&[
+            ("padding", "40px"),
+            ("border-width", "20px"),
+            ("max-width", "900px"),
+        ]);
+
+        let style = tooltip_paint_style_from_theme(&theme);
+        let widest = style.max_width + 2.0 * (style.padding_x + style.border_width);
+
+        assert!(widest <= super::super::TOOLTIP_OVERLAY_WIDTH as f32);
+    }
+
+    #[test]
+    fn tooltip_without_a_rule_uses_the_surface_container_roles() {
+        let mut theme = mesh_core_theme::default_theme();
+        theme.set_token(
+            "color.surface-container",
+            mesh_core_theme::TokenValue::String("#010203".into()),
+            mesh_core_theme::ThemeProvenance::BaseRecovery,
+        );
+
+        let style = tooltip_paint_style_from_theme(&theme);
+
+        assert_eq!(style.background, Color::from_hex("#010203").unwrap());
+        assert_eq!(style.radius, TooltipPaintStyle::DEFAULT_DARK.radius);
     }
 }

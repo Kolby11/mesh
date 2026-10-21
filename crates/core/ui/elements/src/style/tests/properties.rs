@@ -412,3 +412,50 @@ fn transform_functions_resolve_nested_motion_tokens() {
     let (lift, _) = resolve_class(&resolver, &rules, "lift");
     assert_eq!(lift.transform.translate_y, -3.0);
 }
+
+#[test]
+fn corner_shape_shorthand_and_longhands_resolve_per_corner() {
+    let source = r#"
+<template><box /></template>
+<style>
+.foot { corner-shape: scoop round; }
+.foot.left { corner-bottom-right-shape: scoop; corner-top-right-shape: bevel; }
+</style>
+"#;
+    let rules = mesh_core_component::parse_component(source)
+        .unwrap()
+        .style
+        .unwrap()
+        .rules;
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let style = resolver.resolve_node_style(
+        &rules,
+        "box",
+        &["foot".to_string(), "left".to_string()],
+        None,
+        StyleContext::default(),
+        NodeState::default(),
+    );
+
+    assert_eq!(
+        style.corner_shape,
+        CornerShapes {
+            top_left: CornerShape::Scoop,
+            top_right: CornerShape::Round,
+            bottom_right: CornerShape::Scoop,
+            bottom_left: CornerShape::Round,
+        },
+        "two values expand like border-radius; unsupported keywords are round"
+    );
+    assert!(!style.corner_shape.scoops(Corners::zero()));
+    assert_eq!(
+        style.corner_shape.round_radii(Corners::all(8.0)),
+        Corners {
+            top_left: 0.0,
+            top_right: 8.0,
+            bottom_right: 0.0,
+            bottom_left: 8.0,
+        }
+    );
+}

@@ -52,7 +52,7 @@ pub use surface::{
     PaintCommandClassMetrics, PaintProfilingMetrics, PainterBackendSnapshot,
     PainterCapabilitySnapshot, PainterDiagnosticSnapshot, PixelBuffer, PixelCanvasSession,
     RasterCanvas, RasterMetrics, RasterReplay, ResourcePaintConsumer, ResourcePaintScope,
-    SharedTextMeasurer, SurfaceCanvas, TextCacheMetrics, TextRenderer, TooltipPaintColors,
+    SharedTextMeasurer, SurfaceCanvas, TextCacheMetrics, TextRenderer, TooltipPaintStyle,
     backdrop_blur_policy, blur_quality, glyph_raster_jobs_pending, has_backdrop_image,
     icon_raster_jobs_pending, icon_resolution_jobs_pending, image_decode_jobs_pending,
     paint_backend_supports_backdrop_blur, paint_display_list_for_module_with_profiling_metrics,
@@ -68,8 +68,8 @@ pub use surface::{
     poll_glyph_raster_jobs, poll_icon_raster_jobs, poll_icon_resolution_jobs,
     poll_image_decode_jobs, resource_completion_waker_installed, set_backdrop_blur_policy,
     set_backdrop_frame, set_backdrop_image, set_blur_quality, set_font_aliases, set_font_database,
-    set_resource_completion_waker, set_tooltip_center_x, set_tooltip_paint_colors,
-    set_tooltip_paint_font_family, set_tooltip_paint_opacity, set_tooltip_paint_scale,
+    set_resource_completion_waker, set_tooltip_center_x, set_tooltip_paint_font_family,
+    set_tooltip_paint_opacity, set_tooltip_paint_scale, set_tooltip_paint_style,
 };
 
 /// Serializes tests that touch process-wide resource state: the global

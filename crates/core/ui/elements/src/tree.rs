@@ -386,6 +386,7 @@ pub struct TemplateBindings {
     /// The component instance whose script state the expressions read.
     pub instance_key: Arc<str>,
     pub locals: Option<Arc<serde_json::Map<String, serde_json::Value>>>,
+    pub keyed_item: Option<KeyedTemplateItem>,
     /// `(attribute, expression)` for every non-handler `name={expression}`.
     pub attributes: Vec<(String, String)>,
     /// The inline children of a `<text>` whose `content` they produce.
@@ -410,6 +411,24 @@ impl TemplateBindings {
                     }),
             )
     }
+}
+
+/// A fixed-shape native loop's source and last published ordered keys.
+#[derive(Debug, Clone)]
+#[doc(hidden)]
+pub struct KeyedTemplateList {
+    pub source: String,
+    pub item_name: String,
+    pub key: String,
+    pub valid_keys: bool,
+    pub keys: Arc<[serde_json::Value]>,
+}
+
+#[derive(Debug, Clone)]
+#[doc(hidden)]
+pub struct KeyedTemplateItem {
+    pub list: Arc<KeyedTemplateList>,
+    pub index: usize,
 }
 
 /// Typed metadata added while component trees are composed.

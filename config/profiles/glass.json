@@ -1,13 +1,30 @@
 {
   "schemaVersion": 3,
+  "revision": 19,
   "from": {
     "module": "@mesh/glass"
   },
+  "roots": {},
+  "backgroundServices": [],
+  "providers": {},
+  "resources": {},
+  "nodeSlots": {},
   "settings": {
     "shell": {
+      "fonts": {
+        "ui_family": "CaskaydiaCove Nerd Font"
+      },
+      "i18n": {
+        "fallback_locale": "en",
+        "locale": "en",
+        "policy": "manual"
+      },
+      "icons": {
+        "default_pack": "gnome"
+      },
       "render": {
         "backdrop": {
-          "image": "/home/kolby/Pictures/Wallpapers/forest.jpg"
+          "image": "/home/kolby/Pictures/Wallpapers/red-horizon.jpg"
         }
       }
     }

@@ -430,56 +430,29 @@ pub(super) fn write_taffy_layout(
 /// position and its flex siblings' positions are unaffected: this corrects
 /// the node's own box in place, it does not reflow its container.
 pub(super) fn resolve_fit_sizing(node: &mut WidgetNode) {
-    crate::frame_work::visit(crate::frame_work::Pass::LayoutFit);
-    for child in &mut node.children {
-        resolve_fit_sizing(child);
-    }
-
-    let fit_width = matches!(node.computed_style.width, Dimension::Fit);
-    let fit_height = matches!(node.computed_style.height, Dimension::Fit);
-    if !fit_width && !fit_height {
-        return;
-    }
-
-    let mut max_right = node.layout.x + node.layout.width;
-    let mut max_bottom = node.layout.y + node.layout.height;
-    accumulate_descendant_extents(node, &mut max_right, &mut max_bottom);
-
-    if fit_width {
-        node.layout.width = (max_right - node.layout.x).max(0.0);
-    }
-    if fit_height {
-        node.layout.height = (max_bottom - node.layout.y).max(0.0);
-    }
+    resolve_fit_extents(node);
 }
 
-/// Accumulate the furthest right/bottom screen-space edge across all
-/// descendants of `node` (any depth). `position: fixed` subtrees are
-/// skipped: `write_taffy_layout_with_parent` positions those relative to the
-/// viewport origin, not to `node`, so their coordinates aren't comparable to
-/// `node`'s own box and would otherwise blow the bounding box out arbitrarily.
-pub(super) fn accumulate_descendant_extents(
-    node: &WidgetNode,
-    max_right: &mut f32,
-    max_bottom: &mut f32,
-) {
+fn resolve_fit_extents(node: &mut WidgetNode) -> (f32, f32) {
+    crate::frame_work::visit(crate::frame_work::Pass::LayoutFit);
     crate::frame_work::visit(crate::frame_work::Pass::LayoutExtents);
-    for child in &node.children {
-        // Promoted popovers are retained below a zero-size wrapper so the
-        // child surface can paint and interact with them. Their visual bounds
-        // are intentionally out of the parent's layout contract, however;
-        // including them here makes a fit-sized control row grow to the
-        // popup's right edge and can push ordinary controls off-screen.
-        if child.is_promoted_popover() {
-            continue;
+    let mut max_right = node.layout.x + node.layout.width;
+    let mut max_bottom = node.layout.y + node.layout.height;
+    for child in &mut node.children {
+        let (right, bottom) = resolve_fit_extents(child);
+        // Fixed and promoted subtrees own a different coordinate/layout boundary.
+        if !child.is_promoted_popover() && child.computed_style.position != Position::Fixed {
+            max_right = max_right.max(right);
+            max_bottom = max_bottom.max(bottom);
         }
-        if child.computed_style.position == Position::Fixed {
-            continue;
-        }
-        *max_right = max_right.max(child.layout.x + child.layout.width);
-        *max_bottom = max_bottom.max(child.layout.y + child.layout.height);
-        accumulate_descendant_extents(child, max_right, max_bottom);
     }
+    if matches!(node.computed_style.width, Dimension::Fit) {
+        node.layout.width = (max_right - node.layout.x).max(0.0);
+    }
+    if matches!(node.computed_style.height, Dimension::Fit) {
+        node.layout.height = (max_bottom - node.layout.y).max(0.0);
+    }
+    (max_right, max_bottom)
 }
 
 pub(super) fn write_taffy_layout_with_parent(

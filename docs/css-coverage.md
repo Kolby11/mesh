@@ -22,7 +22,7 @@ Unsupported properties produce style diagnostics or parser errors instead of hid
 | spacing | implemented | `padding`, `padding-*`, `padding-x`, `padding-y`, `padding-inline`, `padding-block`, `margin`, `margin-*`, `margin-x`, `margin-y`, `margin-inline`, and `margin-block` resolve into edge values. |
 | border | implemented | `border`, `border-color`, `border-width`, and `border-*-width` resolve into backend-neutral border color and width fields. |
 | border | diagnostic-only | Browser-specific `border-style` is not part of the executable supported-property list; practical shell border shorthands accept solid-style syntax as a compatibility parse detail. |
-| radius | implemented | `border-radius` and corner-specific radius properties resolve into `Corners`. |
+| radius | implemented | `border-radius` and corner-specific radius properties resolve into `Corners`; `corner-shape` (`round`, `scoop`) and its per-corner longhands resolve into `CornerShapes` ([04 §12.1](spec/04-styling.md#121-corner-shapes-corner-shape)). |
 | opacity | implemented | `opacity` resolves into a numeric style field and remains backend-neutral. |
 | transform | implemented | `transform` parses the supported MESH transform subset. Translation is the current reliable visual/hit-test path; broader transform painting remains bounded by later painter work. |
 | transform | deferred | `transform-origin` is tracked in the matrix because it is accepted by the current support list, but full origin-aware painting is not a Phase 52 promise. |

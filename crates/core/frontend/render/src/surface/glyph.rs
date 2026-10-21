@@ -602,7 +602,8 @@ pub fn draw_font_glyph_on_canvas(
     tint: Color,
 ) -> bool {
     drain_glyph_raster_jobs();
-    let px = dest_w.max(dest_h).max(1) as u32;
+    let raster_scale = super::icon::canvas_raster_scale(canvas);
+    let px = (dest_w.max(dest_h).max(1) as f32 * raster_scale).ceil() as u32;
     let fingerprint = font_fingerprint;
     let key = glyph_cache_key_with_fingerprint(
         font_path,
@@ -707,17 +708,30 @@ pub fn draw_font_glyph_on_canvas(
         return false;
     };
 
-    let pad_x = ((dest_w - glyph.width as i32).max(0)) / 2;
-    let pad_y = ((dest_h - glyph.height as i32).max(0)) / 2;
-    let origin_x = dest_x + pad_x + glyph.placement_left.min(0).abs();
-    let origin_y = dest_y + pad_y;
-
-    let dest_rect = Rect::from_xywh(
-        origin_x as f32,
-        origin_y as f32,
-        glyph.width as f32,
-        glyph.height as f32,
-    );
+    let dest_rect = if raster_scale == 1.0 {
+        let pad_x = ((dest_w - glyph.width as i32).max(0)) / 2;
+        let pad_y = ((dest_h - glyph.height as i32).max(0)) / 2;
+        let origin_x = dest_x + pad_x + glyph.placement_left.min(0).abs();
+        let origin_y = dest_y + pad_y;
+        Rect::from_xywh(
+            origin_x as f32,
+            origin_y as f32,
+            glyph.width as f32,
+            glyph.height as f32,
+        )
+    } else {
+        let width = glyph.width as f32 / raster_scale;
+        let height = glyph.height as f32 / raster_scale;
+        let pad_x = ((dest_w as f32 - width).max(0.0) / 2.0).floor();
+        let pad_y = ((dest_h as f32 - height).max(0.0) / 2.0).floor();
+        let left = glyph.placement_left.min(0).abs() as f32 / raster_scale;
+        Rect::from_xywh(dest_x as f32 + pad_x + left, dest_y as f32 + pad_y, width, height)
+    };
+    let sampling = if raster_scale == 1.0 {
+        SamplingOptions::default()
+    } else {
+        super::icon::resampled_sampling()
+    };
     let mut paint = Paint::default();
     paint.set_anti_alias(false);
     paint.set_argb(tint.a, tint.r, tint.g, tint.b);
@@ -729,7 +743,7 @@ pub fn draw_font_glyph_on_canvas(
             .as_ref()
             .map(|rect| (rect, skia_safe::canvas::SrcRectConstraint::Strict)),
         dest_rect,
-        SamplingOptions::default(),
+        sampling,
         &paint,
     );
     true

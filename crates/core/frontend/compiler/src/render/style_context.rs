@@ -252,6 +252,9 @@ impl VariableStore for TrackingVariableStore<'_> {
     fn loop_identity(&self) -> Option<&str> {
         self.inner.loop_identity()
     }
+    fn keyed_template_item(&self) -> Option<mesh_core_elements::KeyedTemplateItem> {
+        self.inner.keyed_template_item()
+    }
     fn in_loop(&self) -> bool {
         self.inner.in_loop()
     }

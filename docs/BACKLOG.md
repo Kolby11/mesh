@@ -32,9 +32,9 @@ criteria and the items folded in here:
 - [ ] **P2:** Complete the shared dirty-set pipeline beyond the animation and
       interaction-frame scopes: layout propagation, display-list ancestors (entrance
       frames), previous-style capture, validation and child surfaces still walk the tree.
-- [ ] **P3:** Bindings compile to typed setters, and list/compound sources
-      become keyed stores so an item change patches its properties instead of
-      rebuilding the component (finishes D1; with D4 typed patches).
+- [ ] **P3:** Bindings compile to typed setters (finishes D1; with D4 typed patches).
+      Fixed-shape native keyed lists already patch items; key validation and binding-target
+      discovery still scan, and keyed-patch frames restyle-scan ~2× the dashboard's nodes.
 - [ ] **P4:** GPU-first pipelined rendering: GPU raster by default where
       hardware gates pass, frame N's GPU work overlapping frame N+1's script
       and layout, and scene preparation narrowed by retained revision (D6).
@@ -72,8 +72,21 @@ unless an item says otherwise. IDs point into the
 
 - [ ] **Paint-time effects cannot reach the shell:** `mesh.shell.*` and published events
       from effects that settle during paint are lowered only by the next handler call.
+- [ ] **Sibling keyed loops collide:** two `{#for}` blocks under one parent with overlapping key
+      values get the same `@loop:` NodeId; the retained update asserts and panics. Add a per-loop discriminator.
 - [ ] **`contributes.keybinds` reads as undeclared:** `config doctor` reports subscribed
       actions of the glass overlays as undeclared; check that runtime Escape bindings resolve.
+- [ ] **`corner-shape: scoop` gaps:** borders are not stroked along a scoop's curve, and
+      `overflow: hidden` clips descendants to the rounded shape, not the scooped one ([04 §12.1](spec/04-styling.md#121-corner-shapes-corner-shape)).
+- [ ] **Retire the tooltip overlay reserve:** tooltips that leave their surface are now
+      `xdg_popup`s, so the 352×200 reserve every layer surface paints could go; measure buffer/damage savings first.
+- [ ] **Component styles leak across a surface:** every component's `<style>` joins one
+      source-ordered cascade, so a parent's or sibling's `.pill` overrode `status.mesh`'s
+      `.pill.battery`. Decide per-component scoping (and migrate modules) or document the global model.
+- [ ] **`border-radius` shorthand with `var()`:** `var(--radius-lg) 0 0 var(--radius-lg)` left the
+      settings sidebar square live, while the longhands work; find where the mixed shorthand drops.
+- [ ] **Settings theme switch may not repaint:** reported 2026-10-21 as needing a tab change; not
+      reproduced on `1d50170a` (layer and window roles, file and click paths). Capture a repro.
 
 ## Glass shell core gaps (found 2026-10-17)
 
@@ -82,12 +95,12 @@ unless an item says otherwise. IDs point into the
 - [ ] **Host APIs:** `net.http` and `exec.launch-app` are catalogued but unimplemented
       (providers shell out to `curl` / `hyprctl dispatch`). A StatusNotifier tray still needs
       a watcher/host provider; `mesh.dbus_serve` now owns names and exports one object each.
-- [ ] **Tooltips on bottom/right-anchored surfaces:** those surfaces get no tooltip reserve on
-      their anchored axis, so tooltips cannot overflow toward the screen; promote tooltips to `xdg_popup`.
 - [ ] **Icon chains during live switch:** newly mounted modules briefly resolve with an empty pack
       chain (`effective_chain=[]`), logging missing-icon warnings until the chain is rebuilt.
 - [ ] **Backdrop placement beyond MESH:** refraction predicts surface origins from MESH's own
       surfaces; another client's exclusive zone (e.g. a quickshell bar) misaligns it. Multi-output backdrops are untested.
+      A foreign wallpaper layer above MESH's (`quickshell:background`) makes glass refract a different
+      image than the one on screen.
 
 ## Authoring model
 

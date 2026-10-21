@@ -80,6 +80,7 @@ fn hash_material(style: &ComputedStyle) -> u64 {
     hash_edges(style.border_width, &mut hasher);
     hash_edges(style.padding, &mut hasher);
     hash_corners(style.border_radius, &mut hasher);
+    style.corner_shape.hash(&mut hasher);
     style.display.hash(&mut hasher);
     hash_visibility(style.visibility, &mut hasher);
     style.overflow_x.hash(&mut hasher);

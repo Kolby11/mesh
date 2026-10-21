@@ -65,6 +65,7 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
             border_color: node.computed_style.border_color,
             border_width: node.computed_style.border_width,
             border_radius: node.computed_style.border_radius,
+            corner_shape: node.computed_style.corner_shape,
             color: node.computed_style.color,
             padding: node.computed_style.padding,
             overflow_x: node.computed_style.overflow_x,

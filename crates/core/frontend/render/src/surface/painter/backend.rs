@@ -1,6 +1,6 @@
 use super::*;
 use crate::surface::icon;
-use mesh_core_elements::style::{Color, Corners, Edges};
+use mesh_core_elements::style::{Color, CornerShapes, Corners, Edges};
 use mesh_core_elements::{AffineClip, AffineTransform, BoxShadow, VisualFilter};
 use skia_safe::{
     BlurStyle, Canvas, Color4f, Data, ImageInfo, MaskFilter, Matrix, PaintStyle, Path as SkiaPath,
@@ -341,6 +341,27 @@ pub(crate) enum PainterCommand {
 pub(crate) struct PainterClip {
     pub rect: ClipRect,
     pub radii: Corners,
+    pub shapes: CornerShapes,
+    pub mode: PainterClipMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PainterClipMode {
+    /// Keep only the shape.
+    Inside,
+    /// Keep everything except the shape's scooped corners.
+    OutsideScoops,
+}
+
+impl PainterClip {
+    pub(crate) fn shape(rect: ClipRect, radii: Corners, shapes: CornerShapes) -> Self {
+        Self {
+            rect,
+            radii,
+            shapes,
+            mode: PainterClipMode::Inside,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -635,6 +656,7 @@ impl PaintBackend for SkiaPaintBackend {
                             bottom_right: clip.radii.bottom_right * scale,
                             bottom_left: clip.radii.bottom_left * scale,
                         },
+                        CornerShapes::default(),
                     );
                     canvas.set_matrix(&matrix);
                 } else {
@@ -713,6 +735,18 @@ impl SkiaPaintBackend {
         let mut clip_saves: SmallVec<[usize; 8]> = SmallVec::new();
         for command in commands {
             match command {
+                PainterCommand::PushClip(clip) if clip.mode == PainterClipMode::OutsideScoops => {
+                    // The rectangular stack is unchanged; an unbounded entry
+                    // keeps it balanced with the PopClip.
+                    clip_stack.push(clip_stack.last().copied().unwrap_or(ClipRect {
+                        x: -(1 << 28),
+                        y: -(1 << 28),
+                        width: 1 << 29,
+                        height: 1 << 29,
+                    }));
+                    clip_saves.push(canvas.save());
+                    rounded::clip_out_scoops(canvas, clip.rect, clip.radii, clip.shapes);
+                }
                 PainterCommand::PushClip(clip) => {
                     let effective = clip_stack
                         .last()
@@ -722,7 +756,7 @@ impl SkiaPaintBackend {
                     clip_stack.push(effective);
                     clip_saves.push(canvas.save());
                     if corners_have_radius(clip.radii) {
-                        rounded::clip(canvas, clip.rect, clip.radii);
+                        rounded::clip(canvas, clip.rect, clip.radii, clip.shapes);
                     } else {
                         canvas.clip_irect(
                             skia_safe::IRect::from_xywh(
@@ -1480,6 +1514,7 @@ impl SkiaPaintBackend {
                     height: rect.height() as i32,
                 },
                 radii,
+                CornerShapes::default(),
             );
         } else {
             canvas.clip_rect(rect, None, false);
@@ -1688,7 +1723,7 @@ impl SkiaPaintBackend {
                 );
                 let mut surface = skia_safe::surfaces::raster(&info, None, None)?;
                 let local = ClipRect { x: 0, y: 0, ..rect };
-                rounded::clip(surface.canvas(), local, radii);
+                rounded::clip(surface.canvas(), local, radii, CornerShapes::default());
                 // Gradient span evaluation and coverage multiplication must
                 // both happen before the destination damage clip is applied.
                 self.draw_linear_gradient_command(
@@ -1792,6 +1827,7 @@ impl SkiaPaintBackend {
                     height: rect.height() as i32,
                 },
                 radii,
+                CornerShapes::default(),
             );
         }
         canvas.draw_rect(rect, &paint);

@@ -66,10 +66,15 @@ Component rules (shipped):
 template readers are all recorded element bindings patch those attributes and
 text in place by default.
 Patched nodes still receive style, layout, accessibility, and damage updates.
-Keyed loop bodies capture iteration locals for binding patches; collection and
-key changes still reconcile the template. Template function calls can patch
+Keyed native loops with fixed-shape bodies retain their ordered unique string
+or numeric keys and captured item locals. Replacing a collection or mutating an
+item in place patches only changed items when those keys stay unchanged. Key,
+order or length changes reconcile the template; nested control flow, component
+instances, two-way bindings and captured handlers keep the rebuild path.
+Collection/key validation still scans the list; write-time indexed collection
+tracking remains a target. Template function calls can patch
 element properties, with conservative invalidation for captured public state.
-Readers in structural conditions, loop sources or keys, unkeyed loop bodies,
+Readers in structural conditions, unsupported loop sources or keys, unkeyed loop bodies,
 component props, or handler bindings use template evaluation and
 retained diffing instead. Service updates and reactive-effect writes patch together;
 failed expressions retain the last good tree and use normal failure reporting.

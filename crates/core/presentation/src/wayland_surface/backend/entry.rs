@@ -274,6 +274,9 @@ pub(in crate::wayland_surface) struct SurfaceEntry {
     /// config/popup-config that sized the surface, and the *only* input the
     /// input region is derived from — see [`SurfacePadding`].
     pub(in crate::wayland_surface) padding: SurfacePadding,
+    /// Accept no pointer input anywhere on the surface; see
+    /// [`PopupConfig::input_passthrough`](crate::wayland_surface::PopupConfig).
+    pub(in crate::wayland_surface) input_passthrough: bool,
     /// The input region last committed to the compositor, in surface-local
     /// logical coordinates. `Some(None)` means "whole-surface input has been
     /// committed"; the outer `None` means nothing has been committed yet, which
@@ -299,6 +302,7 @@ impl SurfaceEntry {
             height: cfg.surface_size().1,
             configured_axes: (false, false),
             padding: cfg.padding(),
+            input_passthrough: false,
             cfg,
             applied_keyboard_mode,
             configured: false,
@@ -442,6 +446,14 @@ impl SurfaceEntry {
         &self,
         extent: (u32, u32),
     ) -> Option<DamageRect> {
+        if self.input_passthrough {
+            return Some(DamageRect {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0,
+            });
+        }
         let mut rect = self
             .padding
             .content_rect(extent.0.max(1), extent.1.max(1))?;

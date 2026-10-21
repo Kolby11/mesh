@@ -59,7 +59,7 @@ fn effect_commands(case: usize, clip: ClipRect, image: &str) -> Vec<PainterComma
             clip,
         }),
         1 => {
-            commands.push(PainterCommand::PushClip(PainterClip { rect, radii }));
+            commands.push(PainterCommand::PushClip(PainterClip::shape(rect, radii, Default::default())));
             commands.push(PainterCommand::PushClip(PainterClip {
                 rect: ClipRect {
                     x: 12,
@@ -68,6 +68,8 @@ fn effect_commands(case: usize, clip: ClipRect, image: &str) -> Vec<PainterComma
                     height: 44,
                 },
                 radii: Corners::all(16.0),
+                shapes: Default::default(),
+                mode: crate::surface::painter::PainterClipMode::Inside,
             }));
             commands.push(PainterCommand::DrawImage {
                 image: PainterImage {

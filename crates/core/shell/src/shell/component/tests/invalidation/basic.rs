@@ -2269,3 +2269,156 @@ fn animated_ancestor_scoped_update_leaves_nothing_for_a_full_update() {
         }
     }
 }
+
+#[test]
+fn keyed_list_item_patches_preserve_pixels_and_structural_fallbacks() {
+    let source = r#"
+<script lang="luau">
+items = {{id = "a", height = "10px"}, {id = "b", height = "20px"}}
+function mutate() items[1].height = "30px" end
+function replace() items = {{id = "a", height = "40px"}, {id = "b", height = "20px"}} end
+function reorder() items = {items[2], items[1]} end
+function append() table.insert(items, {id = "c", height = "15px"}) end
+function remove() table.remove(items, 1) end
+function duplicate() items[2].id = items[1].id end
+function empty() items = {} end
+</script>
+<template><row style="width: 320px; height: 100px">
+{#for item in items key={item.id}}<box style="width: 20px; background: #ff0000" style:height={item.height} />{/for}
+</row></template>
+"#;
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(320, 100);
+    let mut patched = test_frontend_component(source);
+    let mut rebuilt = test_frontend_component(source);
+    rebuilt.force_full_template_build = true;
+    let mut actual = PixelBuffer::new(320, 100);
+    let mut expected = PixelBuffer::new(320, 100);
+    patched
+        .paint_raster(&theme, extent, &mut actual, 1.0)
+        .unwrap();
+    rebuilt
+        .paint_raster(&theme, extent, &mut expected, 1.0)
+        .unwrap();
+    for handler in [
+        "mutate",
+        "replace",
+        "reorder",
+        "append",
+        "remove",
+        "duplicate",
+        "empty",
+    ] {
+        patched.call_namespaced_handler(handler, &[]).unwrap();
+        rebuilt.call_namespaced_handler(handler, &[]).unwrap();
+        patched
+            .paint_raster(&theme, extent, &mut actual, 1.0)
+            .unwrap();
+        rebuilt.invalidate_script_state();
+        rebuilt
+            .paint_raster(&theme, extent, &mut expected, 1.0)
+            .unwrap();
+        assert_eq!(actual.data(), expected.data(), "{handler}");
+        let snapshot = patched.take_invalidation_snapshot().unwrap();
+        if matches!(handler, "mutate" | "replace") {
+            assert_eq!(snapshot.patched_node_count, 1, "{handler}: {snapshot:?}");
+            assert_eq!(
+                snapshot.component.script_narrow, 0,
+                "{handler}: {snapshot:?}"
+            );
+        } else {
+            assert_eq!(snapshot.patched_node_count, 0, "{handler}: {snapshot:?}");
+            assert_eq!(
+                snapshot.component.script_narrow, 1,
+                "{handler}: {snapshot:?}"
+            );
+        }
+        let tree = patched.last_tree.clone().unwrap();
+        assert!(
+            !patched.retained_tree.update(&tree).any(),
+            "{handler}: missed retained changes"
+        );
+    }
+}
+
+#[test]
+fn keyed_list_one_item_write_does_not_patch_clean_siblings() {
+    for count in [8, 256] {
+        let source = format!(
+            r##"
+<script lang="luau">
+items = {{}}
+for i = 1, {count} do items[i] = {{id = i, color = "#ff0000"}} end
+function mutate() items[3].color = "#00ff00" end
+</script>
+<template><row style="width: 320px; height: 100px">
+{{#for item in items key={{item.id}}}}<box style="width: 1px; height: 10px" style:background={{item.color}} />{{/for}}
+</row></template>
+"##
+        );
+        let mut component = test_frontend_component(&source);
+        let theme = default_theme();
+        let extent = SurfaceExtent::unpadded(320, 100);
+        let mut pixels = PixelBuffer::new(320, 100);
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+        component.set_profiling_enabled(true);
+        let _ = component.take_profiling_records();
+        component.call_namespaced_handler("mutate", &[]).unwrap();
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+        let snapshot = component.take_invalidation_snapshot().unwrap();
+        assert_eq!(snapshot.patched_node_count, 1, "{count}: {snapshot:?}");
+        assert_eq!(snapshot.component.script_narrow, 0);
+        assert!(!snapshot.full_rebuild);
+        assert!(
+            component
+                .take_profiling_records()
+                .iter()
+                .all(|record| record.stage != mesh_core_debug::ProfilingStage::TreeBuild)
+        );
+    }
+}
+
+#[test]
+fn keyed_list_structural_body_and_duplicate_keys_keep_rebuild() {
+    for body in [
+        "{#for item in items key={item.id}}{#if item.show}<text>{item.label}</text>{/if}{/for}",
+        "{#for item in items key={item.group}}<text>{item.label}</text>{/for}",
+    ] {
+        let source = format!(
+            r#"
+<script lang="luau">
+items = {{{{id = "a", group = "same", show = true, label = "before"}}, {{id = "b", group = "same", show = true, label = "two"}}}}
+function mutate() items[1].label = "after" items[1].show = false end
+</script>
+<template><column style="width: 320px; height: 100px">
+<column>{{#for item in items key={{item.id}}}}<text>{{item.label}}</text>{{/for}}</column>
+<column>{body}</column>
+</column></template>
+"#
+        );
+        let mut component = test_frontend_component(&source);
+        let theme = default_theme();
+        let extent = SurfaceExtent::unpadded(320, 100);
+        let mut pixels = PixelBuffer::new(320, 100);
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+        component.call_namespaced_handler("mutate", &[]).unwrap();
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+        let snapshot = component.take_invalidation_snapshot().unwrap();
+        assert_eq!(snapshot.patched_node_count, 0, "{body}: {snapshot:?}");
+        assert_eq!(snapshot.component.script_narrow, 1);
+        let mut expected = PixelBuffer::new(320, 100);
+        component.invalidate_script_state();
+        component
+            .paint_raster(&theme, extent, &mut expected, 1.0)
+            .unwrap();
+        assert_eq!(pixels.data(), expected.data());
+    }
+}

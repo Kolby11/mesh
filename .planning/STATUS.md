@@ -7,15 +7,23 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Dock flares and dock tooltips fixed:** new `corner-shape: scoop` gives the
+  flares real concave transparency; tooltips that leave their surface are
+  `xdg_popup`s. Settings theme-switch repaint still unreproduced.
+
+- **Dashboard pass audit and P3 keyed native lists landed:** spectrum frames no
+  longer rebuild Player (tree build 1.0 ms → 0); validation 1,657 → 151 and
+  extents 763 → 151 visits per frame; p50 2.92–3.00 → 2.11–2.17 ms. Remaining:
+  typed setters, restyle scan on patched frames (~336 visits), layout
+  sync/discovery. See the performance log.
+
 - **P2 interaction-frame scope landed:** steady dock hover annotates 8–14
   nodes per paint (was 1,879) and restyles 12 (was 1,878), with no retained
   discovery. Hover-change and animation-only frames are ~2.5× faster. No
   selector-dependents index was needed (no combinators). Also fixed targeted
   restyles dropping a surface root's inherited text values. New structural
   gate in `tools/check-performance`. See the P2 step 1 performance-log entry.
-- **P0 visit counters landed** (live replay gate still open). The dashboard
-  still touches every node in every pass: Player rebuilds per spectrum
-  update, which needs P3's keyed lists.
+- **P0 visit counters landed** (live replay gate still open).
 
 - **GPU residency and workload gates implemented:** small image/icon/font-mask
   bitmaps share immutable pages; the worker retains bounded image identities
@@ -38,8 +46,7 @@ measurements live in [`log/`](log/README.md).
 - **Change-proportional frame pipeline (P0–P4)** is the implementation
   priority. P1 (typed node state, typed runtime fields, `Prop` vocabulary with
   change classes) landed 2026-10-21: ~7% dashboard, ~18% steady dock hover.
-  Next: P3 keyed list for the dashboard spectrum (P2 scoping cannot help a
-  component that rebuilds), then P2 layout propagation, display-list
+  Next: P2 layout propagation and the patched-frame restyle scan, display-list
   ancestors, semantics and child-surface scopes; P0 live replay gate.
   [Design](todos/pending/2026-10-21-change-proportional-pipeline.md); backlog
   lines at the top of `docs/BACKLOG.md`. Single-pass scoping buys 3–10% and is

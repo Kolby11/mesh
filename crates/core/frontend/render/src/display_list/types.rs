@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use mesh_core_elements::style::{
-    BackgroundPaint, BlendMode, Color, Corners, Edges, FontStyle, Overflow, TextAlign,
+    BackgroundPaint, BlendMode, Color, CornerShapes, Corners, Edges, FontStyle, Overflow, TextAlign,
     TextDirection, TextOverflow, WhiteSpace,
 };
 use mesh_core_elements::{AffineClip, AffineTransform, BoxShadow, VisualFilter};
@@ -604,6 +604,7 @@ pub struct DisplayPaintStyle {
     pub border_color: Color,
     pub border_width: Edges,
     pub border_radius: Corners,
+    pub corner_shape: CornerShapes,
     pub color: Color,
     pub padding: Edges,
     pub overflow_x: Overflow,

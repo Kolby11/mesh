@@ -62,8 +62,10 @@ retained updates without a clean-tree geometry scan. Interaction frames over
 reused geometry project only the nodes whose annotation inputs changed and
 restyle their state-changed nodes through the same paths; with no selector
 combinators, only inherited values reach other nodes. The exact restyled set
-drives semantics and retained updates. Layout and rebuild paths still use
-conservative discovery.
+drives semantics and retained updates. Fixed-shape keyed native lists validate ordered keys and refresh only changed
+items' captured binding locals. Their property writes feed the same frame dirty
+set; structural list changes retain the rebuild path. Layout and rebuild paths
+still use conservative discovery.
 Asynchronous icon, glyph and image jobs track their requesting component instances,
 including promoted child targets, and repaint only those consumers on completion.
 The event loop includes input-repeat, temporary focus-grab and pending-frame

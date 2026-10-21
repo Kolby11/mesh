@@ -214,6 +214,7 @@ mod tests {
             border_color: Color::TRANSPARENT,
             border_width: Edges::zero(),
             border_radius: mesh_core_elements::style::Corners::zero(),
+            corner_shape: mesh_core_elements::style::CornerShapes::default(),
             color: Color::BLACK,
             padding: Edges::zero(),
             overflow_x: Overflow::Visible,

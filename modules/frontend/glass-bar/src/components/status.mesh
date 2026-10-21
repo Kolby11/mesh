@@ -1,28 +1,28 @@
 <template>
     <row class="status">
-        <row class="pill chip" title="Input language" aria-label={"Language " .. language}>
-            <icon class="glyph" name="input-keyboard" size="13" />
-            <text class="label">{language}</text>
+        <row class="status-pill status-chip" title="Input language" aria-label={"Language " .. language}>
+            <icon class="status-glyph" name="input-keyboard" size="13" />
+            <text class="status-label">{language}</text>
         </row>
-        <row class="pill round" title={network_label} aria-label={network_label}>
-            <icon class="glyph" name={network_glyph} size="14" />
+        <row class="status-pill status-round" title={network_label} aria-label={network_label}>
+            <icon class="status-glyph" name={network_glyph} size="14" />
         </row>
         <button
-            class="pill chip chip-btn"
+            class="status-pill status-chip status-chip-btn"
             onclick={onToggleMute}
             onscroll={onVolumeScroll}
             title={volume_label}
             aria-label={volume_label}
         >
-            <icon class="glyph" name={volume_glyph} size="14" />
-            <text class="label">{volume_text}</text>
+            <icon class="status-glyph" name={volume_glyph} size="14" />
+            <text class="status-label">{volume_text}</text>
         </button>
-        <row class="pill chip battery" class:battery-low={battery_low} title={battery_label} aria-label={battery_label}>
-            <icon class="glyph glyph-dark" name={battery_glyph} size="13" />
-            <text class="label label-dark">{battery_text}</text>
+        <row class="status-pill status-chip status-battery" class:status-battery-low={battery_low} title={battery_label} aria-label={battery_label}>
+            <icon class="status-glyph status-glyph-dark" name={battery_glyph} size="13" />
+            <text class="status-label status-label-dark">{battery_text}</text>
         </row>
-        <button class="pill round control-trigger" ref="glassControls" title={t("controls.title")} aria-label={t("controls.title")} aria-haspopup="true">
-            <icon class="glyph" name="settings" size="16" />
+        <button class="status-pill status-round control-trigger" ref="glassControls" title={t("controls.title")} aria-label={t("controls.title")} aria-haspopup="true">
+            <icon class="status-glyph" name="settings" size="16" />
             <ControlCenter />
         </button>
     </row>
@@ -117,7 +117,7 @@ end
         gap: 8px;
     }
 
-    .pill {
+    .status-pill {
         height: 36px;
         align-items: center;
         border-radius: 999px;
@@ -127,12 +127,12 @@ end
         backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
     }
 
-    .chip {
+    .status-chip {
         gap: 6px;
         padding: 0 13px 0 10px;
     }
 
-    .round {
+    .status-round {
         width: 36px;
         justify-content: center;
     }
@@ -145,37 +145,37 @@ end
 
     /* The battery is the one solid accent pill on the right, as in the
     reference; its colours follow the material accent roles. */
-    .pill.battery {
+    .status-pill.status-battery {
         border: 1px solid var(--glass-rim-accent);
         background-image: var(--glass-surface-battery);
         --battery-foreground: var(--glass-text-on-accent);
     }
 
-    .pill.battery-low {
+    .status-pill.status-battery-low {
         background-image: var(--glass-surface-battery-low);
         --battery-foreground: var(--glass-text-on-error);
     }
 
-    .glyph {
+    .status-glyph {
         width: 20px;
         height: 20px;
         color: var(--glass-text);
     }
 
-    .glyph-dark {
+    .status-glyph-dark {
         width: 18px;
         height: 18px;
         color: var(--battery-foreground);
     }
 
-    .label {
+    .status-label {
         height: 20px;
         font-size: 13px;
         font-weight: 600;
         color: var(--glass-text);
     }
 
-    .label-dark {
+    .status-label-dark {
         color: var(--battery-foreground);
     }
 
@@ -183,36 +183,36 @@ end
     Containers lift by --animation-lift-hover and brighten their rim; controls
     scale by --animation-scale-hover/-press and ring with the focus token. */
 
-    .pill {
+    .status-pill {
         transform: translateY(0px);
         transition-property: transform, border-color, opacity;
         transition-duration: var(--animation-duration-medium);
         transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
     }
 
-    .pill:hover {
+    .status-pill:hover {
         transform: translateY(var(--animation-lift-hover));
         border-color: var(--glass-rim-hover);
     }
 
-    .chip-btn {
+    .status-chip-btn {
         transform: scale(1);
         transition-property: transform, background-color, border-color, opacity;
         transition-duration: var(--animation-duration-short);
         transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
     }
 
-    .chip-btn:hover {
+    .status-chip-btn:hover {
         border-color: var(--glass-rim-hover);
         transform: scale(var(--animation-scale-hover));
     }
 
-    .chip-btn:focus-visible {
+    .status-chip-btn:focus-visible {
         border-color: var(--color-focus-ring);
         transform: scale(var(--animation-scale-hover));
     }
 
-    .chip-btn:active {
+    .status-chip-btn:active {
         transform: scale(var(--animation-scale-press));
         transition-duration: var(--animation-duration-fast);
     }

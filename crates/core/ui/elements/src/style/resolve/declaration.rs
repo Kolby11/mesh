@@ -901,6 +901,26 @@ fn apply_declaration_with_context(
             style.border_radius = resolver
                 .with_resolved_str(value, variables, |resolved| parse_corners_shorthand(resolved))
         }
+        "corner-shape" => {
+            style.corner_shape =
+                resolver.with_resolved_str(value, variables, CornerShapes::from_css)
+        }
+        "corner-top-left-shape" => {
+            style.corner_shape.top_left =
+                resolver.with_resolved_str(value, variables, CornerShape::from_css)
+        }
+        "corner-top-right-shape" => {
+            style.corner_shape.top_right =
+                resolver.with_resolved_str(value, variables, CornerShape::from_css)
+        }
+        "corner-bottom-right-shape" => {
+            style.corner_shape.bottom_right =
+                resolver.with_resolved_str(value, variables, CornerShape::from_css)
+        }
+        "corner-bottom-left-shape" => {
+            style.corner_shape.bottom_left =
+                resolver.with_resolved_str(value, variables, CornerShape::from_css)
+        }
         "border-top-left-radius" => {
             style.border_radius.top_left = resolver.resolve_number_with_variables(value, variables)
         }

@@ -142,6 +142,14 @@ impl Shell {
             if self.component_is_quarantined(index) {
                 continue;
             }
+            // A tooltip popup commits an empty input region; anything a
+            // compositor still routes to it belongs to nothing.
+            if let TargetRef::Child(child_index) = target
+                && self.components[index].children[child_index].kind
+                    == crate::shell::types::ChildSurfaceKind::Tooltip
+            {
+                continue;
+            }
 
             let target_surface_id = route_surface_id;
             let target_is_popover = match target {

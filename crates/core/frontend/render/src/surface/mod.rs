@@ -25,7 +25,7 @@ pub use debug_overlay::{DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot}
 pub use glyph::GlyphAxes;
 pub use painter::{
     BlurQuality, FrontendRenderEngine, MAX_BLUR_PASSES, PainterBackendSnapshot,
-    PainterCapabilitySnapshot, PainterDiagnosticSnapshot, TooltipPaintColors,
+    PainterCapabilitySnapshot, PainterDiagnosticSnapshot, TooltipPaintStyle,
 };
 pub use profiling::RasterMetrics;
 pub use resource_broker::{
@@ -253,12 +253,12 @@ pub fn set_font_aliases(aliases: BTreeMap<String, String>) {
     SharedTextMeasurer.set_font_aliases(aliases.into_iter().collect());
 }
 
-/// Set the colors used by the next tooltip paint on this thread's renderer.
-/// The shell calls this from its paint path so tooltip surfaces reflect the
-/// active theme tokens instead of hardcoded defaults.
-pub fn set_tooltip_paint_colors(colors: TooltipPaintColors) {
+/// Set the chrome used by the next tooltip paint on this thread's renderer.
+/// The shell calls this from its paint path so tooltips follow the active
+/// theme's `tooltip {}` rule.
+pub fn set_tooltip_paint_style(style: TooltipPaintStyle) {
     FRONTEND_RENDERER.with(|engine| {
-        engine.borrow().set_tooltip_colors(colors);
+        engine.borrow().set_tooltip_style(style);
     });
 }
 

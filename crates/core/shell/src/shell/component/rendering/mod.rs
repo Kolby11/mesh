@@ -46,6 +46,7 @@ fn state_rule_requires_layout<'a>(
                     | "border-top-right-radius"
                     | "border-bottom-left-radius"
                     | "border-bottom-right-radius"
+                    | "corner-shape"
                     | "opacity"
                     | "transform"
                     | "transform-origin"

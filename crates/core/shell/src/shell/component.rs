@@ -938,6 +938,12 @@ pub(super) struct FrontendSurfaceComponent {
     /// Timestamp when the current tooltip became visible (for fade-in animation timing).
     tooltip_appeared_at: Option<std::time::Instant>,
     last_tooltip_damage: Option<DamageRect>,
+    /// The hovered tooltip while it is promoted to a popup rather than painted
+    /// into this surface.
+    tooltip_popup: Option<tooltip::TooltipPopup>,
+    /// An empty display list for the tooltip popup's frame: its paint pass
+    /// clears the buffer and overlays the tooltip on that frame plan.
+    tooltip_popup_display_list: RefCell<RetainedDisplayList>,
     runtimes: Arc<Mutex<HashMap<Arc<str>, EmbeddedFrontendRuntime>>>,
     instance_keys: RefCell<InstanceKeyInterner>,
     composition_occurrences: RefCell<HashMap<(Arc<str>, usize, Option<Arc<str>>), usize>>,
@@ -1416,6 +1422,8 @@ impl FrontendSurfaceComponent {
             tooltip_target_cache: mesh_core_interaction::TooltipTargetCache::default(),
             tooltip_appeared_at: None,
             last_tooltip_damage: None,
+            tooltip_popup: None,
+            tooltip_popup_display_list: RefCell::new(RetainedDisplayList::default()),
             runtimes: Arc::new(Mutex::new(HashMap::new())),
             instance_keys: RefCell::new(InstanceKeyInterner::default()),
             composition_occurrences: RefCell::new(HashMap::new()),

@@ -2082,7 +2082,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             return Vec::new();
         };
 
-        let mut requests = Vec::new();
+        let mut requests: Vec<_> = self.tooltip_popup.iter().map(|popup| popup.request()).collect();
         let mut diagnostics = Vec::new();
         collect_child_surface_requests_with_diagnostics(
             tree,
@@ -2109,6 +2109,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         content_offset: (u32, u32),
         exiting: bool,
     ) -> Result<bool, ComponentError> {
+        if node_key == tooltip::TOOLTIP_CHILD_KEY {
+            return Ok(self.paint_tooltip_popup(canvas, scale, content_offset));
+        }
         let Some(tree) = self.last_tree.as_ref() else {
             return Ok(false);
         };
@@ -2212,6 +2215,9 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn child_surface_present_damage(&self, node_key: &str) -> Option<Vec<DamageRect>> {
+        if node_key == tooltip::TOOLTIP_CHILD_KEY {
+            return None;
+        }
         let node = find_node_by_key(self.last_tree.as_ref()?, node_key)?;
         let child_display_lists = self.child_display_lists.borrow();
         let display_list = child_display_lists.get(node.id)?;
@@ -2533,6 +2539,12 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn child_surface_paint_generation(&self, node_key: &str) -> Option<u64> {
+        if node_key == tooltip::TOOLTIP_CHILD_KEY {
+            return self
+                .tooltip_popup
+                .as_ref()
+                .map(tooltip::TooltipPopup::paint_generation);
+        }
         find_node_by_key(self.last_tree.as_ref()?, node_key)?;
         Some(self.retained_tree.generation())
     }

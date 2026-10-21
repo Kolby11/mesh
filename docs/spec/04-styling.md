@@ -649,3 +649,86 @@ CPU painting preserves the existing two-stop and single-shadow raster behavior.
 All stops and shadows participate in retained paint signatures; all outer shadow
 extents participate in damage bounds. Rounded gradients preserve exact pixels
 between full and partial repainting.
+
+## 12.1 Corner shapes (`corner-shape`)
+
+**Status: shipped (subset).** `corner-shape` selects the curve drawn for each
+`border-radius`: `round` (the default) or `scoop`, which curves the corner
+inward around the box's corner point and removes that quarter disc from the
+box. The shorthand takes one to four keywords in `border-radius` order;
+`corner-top-left-shape` and the other three longhands set one corner. Other
+CSS keywords (`bevel`, `notch`, `squircle`, `superellipse()`) resolve to
+`round`.
+
+A scooped corner clips the element's own painting: background, gradient,
+border and `backdrop-filter`. Outer `box-shadow`s are kept out of the scoop,
+and compositor blur regions leave it out. Borders are not stroked along the
+scoop's curve, and descendants are not clipped by it.
+
+```css
+/* A concave foot: the shelf's glass sweeps out into the screen edge. */
+.flare-left {
+  width: 30px;
+  height: 30px;
+  border-top-left-radius: 30px;
+  corner-shape: scoop;
+}
+```
+
+Radii follow CSS overlap scaling: only adjacent radii that together exceed
+their side scale down, so one corner may span the whole side.
+
+## 13. Tooltips
+
+**Status: shipped.** Tooltips are shell-painted overlay chrome, not elements,
+so a theme styles them with one `tooltip {}` rule instead of component CSS.
+Values may use `var(--…)` tokens.
+
+```css
+tooltip {
+  /* chrome */
+  background: var(--color-surface-container-high);
+  color: var(--color-on-surface);
+  border: 1px solid var(--color-outline-variant);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;            /* one value, or vertical horizontal */
+  font-size: 12px;
+  font-weight: 500;
+  max-width: 320px;            /* text wrap width */
+  /* placement and timing */
+  position: bottom;            /* top | bottom | left | right | cursor | auto */
+  gap: 6;
+  delay: 300;
+  cursor-offset-x: 14;
+  cursor-offset-y: 18;
+  animation: tooltip-enter var(--animation-duration-short) ease-out;
+}
+```
+
+`background-color`, `border-color` and `border-width` are accepted as
+longhands. Colours the rule omits follow `--color-surface-container`
+(background), `--color-surface-container-high` (border) and
+`--color-on-surface` (text). The text uses the active UI font family at line
+height 1.3; the border is drawn outside the box. Metrics are clamped to the
+surface's tooltip overlay reserve: `max-width` to 320px, `padding` to 12px and
+`border-width` to 4px. The `animation` names a theme `@keyframes` rule whose
+stops may declare `opacity` and `transform` (`scale()`, `translate*()`).
+
+Placement resolves in three steps: the theme's `position` (the
+`shell.tooltip.position` setting when the theme sets none), then the hovered
+element's own `tooltip-anchor` property, then a flip to the opposite side when
+the chosen side would overflow the element's clipping container:
+
+```css
+.dock-tile { tooltip-anchor: top; }
+```
+
+A layer surface reserves tooltip space only below and to the right of its
+content, and drops that reserve on the axis of a bottom or right anchor; a
+window reserves none. When the placed tooltip does not fit inside its surface,
+the shell presents it as an `xdg_popup` anchored to the element instead of
+painting it in place. The popup takes the placed side as its anchor and
+gravity, keeps `gap` from the element, flips across the element when the
+output edge is in the way, slides along it, and accepts no pointer input. A
+bottom dock's tooltip therefore shows above its icons with either anchor.
+Cursor placement always paints in place.

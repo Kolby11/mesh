@@ -13,29 +13,6 @@ pub(super) fn scale_damage_rect_to_buffer(
         .unwrap_or_default()
 }
 
-pub(super) fn resolve_tooltip_colors(theme: &Theme) -> mesh_core_render::TooltipPaintColors {
-    let fallback = mesh_core_render::TooltipPaintColors::DEFAULT_DARK;
-    mesh_core_render::TooltipPaintColors {
-        background: token_color(theme, "color.surface-container", fallback.background),
-        border: token_color(theme, "color.surface-container-high", fallback.border),
-        foreground: token_color(theme, "color.on-surface", fallback.foreground),
-    }
-}
-
-pub(super) fn token_color(
-    theme: &Theme,
-    key: &str,
-    fallback: mesh_core_elements::style::Color,
-) -> mesh_core_elements::style::Color {
-    theme
-        .token(key)
-        .and_then(|value| match value {
-            mesh_core_theme::TokenValue::String(s) => mesh_core_elements::style::Color::from_hex(s),
-            _ => None,
-        })
-        .unwrap_or(fallback)
-}
-
 #[cfg(test)]
 pub(super) fn select_effective_damage(
     metrics: DisplayListMetrics,
@@ -165,26 +142,31 @@ pub(super) fn tooltip_damage_rect(
     surface_width: u32,
     surface_height: u32,
 ) -> Option<DamageRect> {
+    // `paint_x` is the box's left edge for side placements but its center for
+    // top/bottom ones, and the themed border is drawn outside the box; cover
+    // every box the painter could produce from this anchor.
+    const BORDER: f32 = 4.0;
     let (_, paint_x, paint_y) = tooltip?;
-    let width = TOOLTIP_OVERLAY_WIDTH.min(surface_width.max(1));
-    let height = TOOLTIP_OVERLAY_HEIGHT.min(surface_height.max(1));
-    let max_x = surface_width.saturating_sub(width).saturating_sub(6);
-    let max_y = surface_height.saturating_sub(height).saturating_sub(6);
+    let left = (paint_x - TOOLTIP_OVERLAY_WIDTH as f32 / 2.0 - BORDER).max(0.0);
+    let top = (paint_y - BORDER).max(0.0);
+    let right = (paint_x + TOOLTIP_OVERLAY_WIDTH as f32 + BORDER).min(surface_width as f32);
+    let bottom = (paint_y + TOOLTIP_OVERLAY_HEIGHT as f32 + BORDER).min(surface_height as f32);
+    if right <= left || bottom <= top {
+        return None;
+    }
     let device = mesh_core_render::FractionalScale::identity().device_layout_rect(
         mesh_core_elements::LayoutRect {
-            x: *paint_x,
-            y: *paint_y,
-            width: width as f32,
-            height: height as f32,
+            x: left,
+            y: top,
+            width: right - left,
+            height: bottom - top,
         },
     );
-    let x = (device.x.max(0) as u32).min(max_x).max(4);
-    let y = (device.y.max(0) as u32).min(max_y).max(4);
     Some(DamageRect {
-        x,
-        y,
-        width,
-        height,
+        x: device.x.max(0) as u32,
+        y: device.y.max(0) as u32,
+        width: device.width.max(0) as u32,
+        height: device.height.max(0) as u32,
     })
 }
 

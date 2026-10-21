@@ -52,6 +52,7 @@ fn make_cmd(x: f32, y: f32, width: f32, height: f32, blur_radius: f32) -> Displa
                 },
                 border_width: Edges::zero(),
                 border_radius: Corners::zero(),
+                corner_shape: Default::default(),
                 color: Color {
                     r: 0,
                     g: 0,

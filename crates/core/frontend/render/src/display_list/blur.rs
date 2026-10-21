@@ -1,5 +1,5 @@
 use super::sequence::PaintSequence;
-use mesh_core_elements::style::{BackgroundPaint, Corners};
+use mesh_core_elements::style::{BackgroundPaint, CornerShape, CornerShapes, Corners};
 use mesh_core_elements::{
     AffineTransform, LayoutRect, WidgetNode, child_transform, node_layout_bounds, node_transform,
     root_transform,
@@ -59,7 +59,12 @@ fn collect_backdrop_blur_regions_with_transform(
     {
         let layout = node_layout_bounds(node, world_transform);
         if let Some(bounds) = blur_bounds_from_layout(layout) {
-            for rect in rounded_region_bands(bounds, node.computed_style.border_radius, surface) {
+            for rect in rounded_region_bands(
+                bounds,
+                node.computed_style.border_radius,
+                node.computed_style.corner_shape,
+                surface,
+            ) {
                 if !regions.contains(&rect) {
                     regions.push(rect);
                 }
@@ -119,13 +124,19 @@ pub(super) fn rounded_blur_regions(command: &DisplayPaintCommand) -> Vec<DamageR
         width: command.clip.width.max(0) as u32,
         height: command.clip.height.max(0) as u32,
     };
-    rounded_region_bands(bounds, command.node.style.border_radius, clip)
+    rounded_region_bands(
+        bounds,
+        command.node.style.border_radius,
+        command.node.style.corner_shape,
+        clip,
+    )
 }
 
 /// Decompose a rounded rectangle into `clip`-bounded horizontal bands.
 pub(super) fn rounded_region_bands(
     bounds: DamageRect,
     corners: Corners,
+    shapes: CornerShapes,
     clip: DamageRect,
 ) -> Vec<DamageRect> {
     let corners = normalize_corners(bounds.width as f32, bounds.height as f32, corners);
@@ -139,16 +150,16 @@ pub(super) fn rounded_region_bands(
         let top_distance = center_y;
         let bottom_distance = bounds.height as f32 - center_y;
         let left_radius = if top_distance < corners.top_left {
-            corner_inset(corners.top_left, top_distance)
+            corner_inset(corners.top_left, shapes.top_left, top_distance)
         } else if bottom_distance < corners.bottom_left {
-            corner_inset(corners.bottom_left, bottom_distance)
+            corner_inset(corners.bottom_left, shapes.bottom_left, bottom_distance)
         } else {
             0.0
         };
         let right_radius = if top_distance < corners.top_right {
-            corner_inset(corners.top_right, top_distance)
+            corner_inset(corners.top_right, shapes.top_right, top_distance)
         } else if bottom_distance < corners.bottom_right {
-            corner_inset(corners.bottom_right, bottom_distance)
+            corner_inset(corners.bottom_right, shapes.bottom_right, bottom_distance)
         } else {
             0.0
         };
@@ -179,13 +190,19 @@ pub(super) fn rounded_region_bands(
     bands
 }
 
-fn corner_inset(radius: f32, distance: f32) -> f32 {
+fn corner_inset(radius: f32, shape: CornerShape, distance: f32) -> f32 {
     let radius = radius.max(0.0);
     if radius <= 0.0 || distance >= radius {
         return 0.0;
     }
-    let offset = radius - distance;
-    radius - (radius * radius - offset * offset).max(0.0).sqrt()
+    match shape {
+        CornerShape::Round => {
+            let offset = radius - distance;
+            radius - (radius * radius - offset * offset).max(0.0).sqrt()
+        }
+        // The scoop's arc is centred on the corner point itself.
+        CornerShape::Scoop => (radius * radius - distance * distance).max(0.0).sqrt(),
+    }
 }
 
 fn normalize_corners(width: f32, height: f32, corners: Corners) -> Corners {

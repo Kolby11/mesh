@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use crate::display_list::{
     BackdropRegion, CheckmarkKind, DisplayCheckmarkPaint, DisplayListClip, DisplayPaintCommand,
-    DisplayPaintCommandKind, DisplayPaintContent, DisplayPaintNode, RetainedDisplayList,
+    DisplayPaintCommandKind, DisplayPaintContent, DisplayPaintNode, DisplayPaintStyle,
+    RetainedDisplayList,
     SelectedDisplayListPaint,
 };
 use mesh_core_elements::AffineTransform;
@@ -818,18 +819,18 @@ impl FrontendRenderEngine {
                 }
                 let bounds = scaled_display_node_bounds(&command.node, scale);
                 let clip = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
-                self.execute_painter_commands_in_session(
-                    session,
-                    &[PainterCommand::ApplyFilter {
+                let commands = scooped_backdrop_commands(&command.node, scale, bounds, |radii| {
+                    PainterCommand::ApplyFilter {
                         rect: bounds,
-                        radii: scale_corners(command.node.style.border_radius, scale),
+                        radii,
                         filter: PainterFilter::Backdrop(scaled_visual_filter(
                             command.node.style.backdrop_filter,
                             scale,
                         )),
                         clip,
-                    }],
-                );
+                    }
+                });
+                self.execute_painter_commands_in_session(session, &commands);
                 return;
             }
             DisplayPaintCommandKind::ApplyBackdropFilterInSurface => {
@@ -856,37 +857,37 @@ impl FrontendRenderEngine {
                 }
                 let bounds = scaled_display_node_bounds(&command.node, scale);
                 let clip = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
-                self.execute_painter_commands_in_session(
-                    session,
-                    &[PainterCommand::ApplyFilter {
+                let commands = scooped_backdrop_commands(&command.node, scale, bounds, |radii| {
+                    PainterCommand::ApplyFilter {
                         rect: bounds,
-                        radii: scale_corners(command.node.style.border_radius, scale),
+                        radii,
                         filter: PainterFilter::Backdrop(scaled_visual_filter(
                             command.node.style.backdrop_filter,
                             scale,
                         )),
                         clip,
-                    }],
-                );
+                    }
+                });
+                self.execute_painter_commands_in_session(session, &commands);
                 return;
             }
             DisplayPaintCommandKind::ApplyBackdropRefraction => {
                 let frame = self.backdrop_frame();
                 let bounds = scaled_display_node_bounds(&command.node, scale);
                 let clip = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
-                self.execute_painter_commands_in_session(
-                    session,
-                    &[PainterCommand::DrawBackdropRefraction {
+                let commands = scooped_backdrop_commands(&command.node, scale, bounds, |radii| {
+                    PainterCommand::DrawBackdropRefraction {
                         rect: bounds,
-                        radii: scale_corners(command.node.style.border_radius, scale),
+                        radii,
                         filter: scaled_visual_filter(command.node.style.backdrop_filter, scale),
                         frame: super::super::backdrop::BackdropFrame {
                             origin: (frame.origin.0 * scale, frame.origin.1 * scale),
                             output: (frame.output.0 * scale, frame.output.1 * scale),
                         },
                         clip,
-                    }],
-                );
+                    }
+                });
+                self.execute_painter_commands_in_session(session, &commands);
                 return;
             }
             DisplayPaintCommandKind::ApplyBackdropFilterRejected => {
@@ -1065,47 +1066,7 @@ impl FrontendRenderEngine {
         let h = bounds.height;
 
         node_commands.clear();
-
-        for shadow in style
-            .additional_box_shadows
-            .iter()
-            .rev()
-            .chain(std::iter::once(&style.box_shadow))
-        {
-            push_box_shadow_command(
-                node_commands,
-                bounds,
-                scale_corners(style.border_radius, scale),
-                *shadow,
-                clip,
-            );
-        }
-        if style.background_color.a > 0 {
-            push_fill_shape_command(
-                node_commands,
-                bounds,
-                scale_corners(style.border_radius, scale),
-                style.background_color,
-                node_clip,
-            );
-        }
-        push_background_paint_command(
-            node_commands,
-            &style.background_paint,
-            bounds,
-            scale_corners(style.border_radius, scale),
-            node_clip,
-        );
-
-        push_border_commands(
-            node_commands,
-            bounds,
-            &style.border_width,
-            scale_corners(style.border_radius, scale),
-            style.border_color,
-            scale,
-            node_clip,
-        );
+        push_box_commands(node_commands, style, scale, bounds, clip, node_clip);
         self.execute_painter_commands_in_session(session, node_commands);
         node_commands.clear();
 
@@ -1226,25 +1187,58 @@ fn append_display_node_self_paint_commands(
     }
 
     let start_len = commands.len();
+    push_box_commands(commands, style, scale, bounds, clip, node_clip);
+    commands.len() > start_len
+}
+
+/// Shadows, background and border of one node. A box with scooped corners
+/// paints its squared-off shape under a clip that removes the scoops, and its
+/// outer shadows are kept out of them.
+fn push_box_commands(
+    commands: &mut Vec<PainterCommand>,
+    style: &DisplayPaintStyle,
+    scale: f32,
+    bounds: ClipRect,
+    clip: ClipRect,
+    node_clip: ClipRect,
+) {
+    let radii = scale_corners(style.border_radius, scale);
+    let scooped = style.corner_shape.scoops(radii);
+    let paint_radii = if scooped {
+        style.corner_shape.round_radii(radii)
+    } else {
+        radii
+    };
+    let mark = commands.len();
+    if scooped {
+        commands.push(PainterCommand::PushClip(PainterClip {
+            mode: PainterClipMode::OutsideScoops,
+            ..PainterClip::shape(bounds, radii, style.corner_shape)
+        }));
+    }
     for shadow in style
         .additional_box_shadows
         .iter()
         .rev()
         .chain(std::iter::once(&style.box_shadow))
     {
-        push_box_shadow_command(
-            commands,
+        push_box_shadow_command(commands, bounds, paint_radii, *shadow, clip);
+    }
+    close_scoop_clip(commands, scooped, mark);
+
+    let mark = commands.len();
+    if scooped {
+        commands.push(PainterCommand::PushClip(PainterClip::shape(
             bounds,
-            scale_corners(style.border_radius, scale),
-            *shadow,
-            clip,
-        );
+            radii,
+            style.corner_shape,
+        )));
     }
     if style.background_color.a > 0 {
         push_fill_shape_command(
             commands,
             bounds,
-            scale_corners(style.border_radius, scale),
+            paint_radii,
             style.background_color,
             node_clip,
         );
@@ -1253,20 +1247,53 @@ fn append_display_node_self_paint_commands(
         commands,
         &style.background_paint,
         bounds,
-        scale_corners(style.border_radius, scale),
+        paint_radii,
         node_clip,
     );
-
     push_border_commands(
         commands,
         bounds,
         &style.border_width,
-        scale_corners(style.border_radius, scale),
+        paint_radii,
         style.border_color,
         scale,
         node_clip,
     );
-    commands.len() > start_len
+    close_scoop_clip(commands, scooped, mark);
+}
+
+/// Pop the scoop clip pushed at `mark`, or drop it when nothing was drawn
+/// under it.
+fn close_scoop_clip(commands: &mut Vec<PainterCommand>, scooped: bool, mark: usize) {
+    if !scooped {
+        return;
+    }
+    if commands.len() == mark + 1 {
+        commands.truncate(mark);
+    } else {
+        commands.push(PainterCommand::PopClip);
+    }
+}
+
+/// Wrap one backdrop command of `node` in its scoop clip, squaring off the
+/// scooped corners of the radii the command carries.
+fn scooped_backdrop_commands(
+    node: &DisplayPaintNode,
+    scale: f32,
+    bounds: ClipRect,
+    command: impl FnOnce(Corners) -> PainterCommand,
+) -> SmallVec<[PainterCommand; 3]> {
+    let radii = scale_corners(node.style.border_radius, scale);
+    let shapes = node.style.corner_shape;
+    let mut commands = SmallVec::new();
+    if !shapes.scoops(radii) {
+        commands.push(command(radii));
+        return commands;
+    }
+    commands.push(PainterCommand::PushClip(PainterClip::shape(bounds, radii, shapes)));
+    commands.push(command(shapes.round_radii(radii)));
+    commands.push(PainterCommand::PopClip);
+    commands
 }
 
 fn push_box_shadow_command(
@@ -1371,7 +1398,7 @@ fn push_background_paint_command(
         BackgroundPaint::None => {}
         BackgroundPaint::Image(source) => {
             if corners_have_radius(radii) {
-                commands.push(PainterCommand::PushClip(PainterClip { rect, radii }));
+                commands.push(PainterCommand::PushClip(PainterClip::shape(rect, radii, Default::default())));
             }
             commands.push(PainterCommand::DrawImage {
                 image: PainterImage {

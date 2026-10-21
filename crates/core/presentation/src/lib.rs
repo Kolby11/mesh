@@ -2210,6 +2210,7 @@ mod tests {
             .configure_popup(
                 "popup",
                 PopupConfig {
+                    input_passthrough: false,
                     parent_surface_id: "panel".to_string(),
                     placement: PopupPlacement::default(),
                     padding: SurfacePadding::default(),
@@ -2230,6 +2231,7 @@ mod tests {
             .configure("panel", SurfaceConfig::default())
             .expect("parent surface should be accepted");
         let popup_config = |parent_surface_id: &str| PopupConfig {
+            input_passthrough: false,
             parent_surface_id: parent_surface_id.to_string(),
             placement: PopupPlacement::default(),
             padding: SurfacePadding::default(),
@@ -2294,6 +2296,7 @@ mod tests {
                 .configure_popup(
                     popup_id,
                     PopupConfig {
+                        input_passthrough: false,
                         parent_surface_id: "panel".to_string(),
                         placement: PopupPlacement::default(),
                         padding: SurfacePadding::default(),
@@ -2419,6 +2422,7 @@ mod tests {
             .configure_popup(
                 "popup",
                 PopupConfig {
+                    input_passthrough: false,
                     parent_surface_id: "panel".to_string(),
                     placement: PopupPlacement::default(),
                     padding: SurfacePadding::default(),
@@ -2437,6 +2441,7 @@ mod tests {
             .configure_popup(
                 "popup",
                 PopupConfig {
+                    input_passthrough: false,
                     parent_surface_id: "panel".to_string(),
                     placement: PopupPlacement::default(),
                     padding: SurfacePadding::default(),
@@ -2730,6 +2735,7 @@ mod tests {
             .configure_popup(
                 "popup",
                 PopupConfig {
+                    input_passthrough: false,
                     parent_surface_id: "panel".to_string(),
                     placement: PopupPlacement::default(),
                     padding: SurfacePadding::default(),

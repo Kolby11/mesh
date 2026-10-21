@@ -218,6 +218,10 @@ pub enum ChildSurfaceKind {
     Overflow,
     /// An embedded widget promoted into its own `xdg_toplevel` window.
     Window,
+    /// The hovered element's tooltip, when it does not fit inside its own
+    /// surface: anchored to the element, flipped by the compositor at output
+    /// edges, and transparent to pointer input.
+    Tooltip,
 }
 
 /// The two sizes a surface paints against, which are not the same size.

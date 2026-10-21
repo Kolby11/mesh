@@ -179,6 +179,7 @@ pub(super) fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher)
     }
     hash_color(style.border_color, hasher);
     hash_corners(style.border_radius, hasher);
+    style.corner_shape.hash(hasher);
     style.opacity.to_bits().hash(hasher);
     hash_transform(style.transform, hasher);
     for origin in [style.transform_origin.x, style.transform_origin.y] {

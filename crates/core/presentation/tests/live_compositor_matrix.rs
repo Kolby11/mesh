@@ -151,6 +151,7 @@ fn popup_configure_rejects_an_unknown_parent_on_a_live_compositor() {
         .configure_popup(
             "mesh-live-matrix-orphan-popup",
             PopupConfig {
+                input_passthrough: false,
                 parent_surface_id: "mesh-live-matrix-no-such-parent".to_string(),
                 placement: PopupPlacement::default(),
                 padding: Default::default(),

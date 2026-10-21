@@ -33,7 +33,7 @@ pub use render::{
     build_embedded_widget_tree_from_component_with_prepared_styles,
     build_embedded_widget_tree_from_component_with_prepared_styles_and_owner,
     build_widget_tree_from_component, patch_template_bindings, props_settings_schema,
-    resolve_css_props,
+    refresh_keyed_template_list, resolve_css_props,
 };
 pub use tags::UiTag;
 
@@ -43,6 +43,7 @@ struct LayeredStore<'a> {
     item_name: &'a str,
     item_value: &'a serde_json::Value,
     loop_identity: Option<String>,
+    keyed_item: Option<mesh_core_elements::KeyedTemplateItem>,
 }
 
 impl VariableStore for LayeredStore<'_> {
@@ -81,6 +82,9 @@ impl VariableStore for LayeredStore<'_> {
     }
     fn loop_identity(&self) -> Option<&str> {
         self.loop_identity.as_deref()
+    }
+    fn keyed_template_item(&self) -> Option<mesh_core_elements::KeyedTemplateItem> {
+        self.keyed_item.clone()
     }
     fn in_loop(&self) -> bool {
         true
@@ -192,6 +196,36 @@ pub fn collect_template_expressions(
     expressions
 }
 
+/// Only native, fixed-shape bodies can reuse their binding targets after an
+/// item changes. Structural consumers and captured handler arguments rebuild.
+fn patchable_keyed_loop(repetition: &mesh_core_component::template::ForNode) -> bool {
+    use mesh_core_component::template::{AttributeValue, TemplateNode};
+    fn native(nodes: &[TemplateNode]) -> bool {
+        nodes.iter().all(|node| match node {
+            TemplateNode::Element(element) => {
+                element.attributes.iter().all(|attribute| {
+                    !attribute.name.starts_with("on")
+                        && !matches!(
+                            attribute.value,
+                            AttributeValue::InstanceBinding(_)
+                                | AttributeValue::TwoWayBinding(_)
+                                | AttributeValue::EventHandlerExpression { .. }
+                                | AttributeValue::EventHandlerCall { .. }
+                        )
+                }) && native(&element.children)
+            }
+            TemplateNode::Text(_) | TemplateNode::Expr(_) => true,
+            _ => false,
+        })
+    }
+    repetition.key.is_some()
+        && repetition
+            .children
+            .iter()
+            .any(|node| matches!(node, TemplateNode::Element(_) | TemplateNode::Expr(_)))
+        && native(&repetition.children)
+}
+
 /// Expressions whose consumers require template evaluation rather than a
 /// property patch, even when the same source also occurs in an element binding.
 pub fn collect_unpatchable_template_expressions(component: &ComponentFile) -> HashSet<String> {
@@ -234,11 +268,13 @@ pub fn collect_unpatchable_template_expressions(component: &ComponentFile) -> Ha
                     visit(&condition.else_children, unkeyed, out);
                 }
                 TemplateNode::For(repetition) => {
-                    out.insert(repetition.iterable.trim().to_owned());
+                    if unkeyed || !patchable_keyed_loop(repetition) {
+                        out.insert(repetition.iterable.trim().to_owned());
+                    }
                     out.extend(repetition.key.iter().map(|source| source.trim().to_owned()));
                     visit(
                         &repetition.children,
-                        unkeyed || repetition.key.is_none(),
+                        unkeyed || !patchable_keyed_loop(repetition),
                         out,
                     );
                 }

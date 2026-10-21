@@ -407,6 +407,7 @@ impl WaylandSurfaceBackend {
             }
             if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
                 entry.padding = config.padding;
+                entry.input_passthrough = config.input_passthrough;
                 if placement_changed && let WaylandRole::Popup(role) = &mut entry.role {
                     role.placement = config.placement;
                 }
@@ -528,7 +529,7 @@ impl WaylandSurfaceBackend {
             // that reserve so the entry confines input to the visible content.
             ..SurfaceConfig::default()
         };
-        let entry = SurfaceEntry::new(
+        let mut entry = SurfaceEntry::new(
             WaylandRole::Popup(PopupRole {
                 popup,
                 parent_id: config.parent_surface_id.clone(),
@@ -542,6 +543,7 @@ impl WaylandSurfaceBackend {
             KeyboardMode::None,
             object_generation,
         );
+        entry.input_passthrough = config.input_passthrough;
         let wl_surface = entry.wl_surface().clone();
         self.state.insert_surface(surface_id.to_string(), entry);
 

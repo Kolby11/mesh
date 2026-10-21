@@ -147,6 +147,11 @@ const STYLE_PROFILE_PROPERTIES: &[StyleProfileProperty] = &[
         status: StyleProfileStatus::Implemented,
     },
     StyleProfileProperty {
+        property: "corner-shape",
+        category: "radius",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
         property: "border-top-left-radius",
         category: "radius",
         status: StyleProfileStatus::Implemented,
@@ -828,6 +833,7 @@ pub struct ComputedStyle {
     pub background_paint: BackgroundPaint,
     pub border_color: Color,
     pub border_radius: Corners,
+    pub corner_shape: CornerShapes,
     pub opacity: f32,
     pub transform: Transform2D,
     pub transform_origin: TransformOrigin,
@@ -922,6 +928,7 @@ impl Default for ComputedStyle {
             background_paint: BackgroundPaint::None,
             border_color: Color::TRANSPARENT,
             border_radius: Corners::zero(),
+            corner_shape: CornerShapes::default(),
             opacity: 1.0,
             transform: Transform2D::IDENTITY,
             transform_origin: TransformOrigin::default(),
@@ -1045,6 +1052,79 @@ impl Corners {
             top_right: value,
             bottom_right: value,
             bottom_left: value,
+        }
+    }
+}
+
+/// CSS `corner-shape` keyword for one corner. `Scoop` curves the corner
+/// inward: its arc is centred on the box's corner point, so the quarter disc
+/// of the `border-radius` there is removed from the box rather than added.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub enum CornerShape {
+    #[default]
+    Round,
+    Scoop,
+}
+
+impl CornerShape {
+    /// Unsupported keywords (`bevel`, `notch`, `squircle`, `superellipse()`)
+    /// resolve to `round`.
+    pub fn from_css(value: &str) -> Self {
+        match value.trim() {
+            "scoop" => Self::Scoop,
+            _ => Self::Round,
+        }
+    }
+}
+
+/// Per-corner [`CornerShape`], in the same order as [`Corners`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
+pub struct CornerShapes {
+    pub top_left: CornerShape,
+    pub top_right: CornerShape,
+    pub bottom_right: CornerShape,
+    pub bottom_left: CornerShape,
+}
+
+impl CornerShapes {
+    /// The `corner-shape` shorthand: one to four keywords expanding like
+    /// `border-radius`.
+    pub fn from_css(value: &str) -> Self {
+        let shapes: Vec<_> = value.split_whitespace().map(CornerShape::from_css).collect();
+        let [top_left, top_right, bottom_right, bottom_left] = match shapes.as_slice() {
+            [all] => [*all; 4],
+            [a, b] => [*a, *b, *a, *b],
+            [a, b, c] => [*a, *b, *c, *b],
+            [a, b, c, d, ..] => [*a, *b, *c, *d],
+            [] => [CornerShape::Round; 4],
+        };
+        Self {
+            top_left,
+            top_right,
+            bottom_right,
+            bottom_left,
+        }
+    }
+
+    /// Whether any corner with a radius in `radii` is scooped.
+    pub fn scoops(self, radii: Corners) -> bool {
+        (self.top_left == CornerShape::Scoop && radii.top_left > 0.0)
+            || (self.top_right == CornerShape::Scoop && radii.top_right > 0.0)
+            || (self.bottom_right == CornerShape::Scoop && radii.bottom_right > 0.0)
+            || (self.bottom_left == CornerShape::Scoop && radii.bottom_left > 0.0)
+    }
+
+    /// `radii` with every scooped corner squared off: a scooped box paints as
+    /// this shape under a clip that removes the scoops.
+    pub fn round_radii(self, radii: Corners) -> Corners {
+        let keep = |shape: CornerShape, radius: f32| {
+            if shape == CornerShape::Scoop { 0.0 } else { radius }
+        };
+        Corners {
+            top_left: keep(self.top_left, radii.top_left),
+            top_right: keep(self.top_right, radii.top_right),
+            bottom_right: keep(self.bottom_right, radii.bottom_right),
+            bottom_left: keep(self.bottom_left, radii.bottom_left),
         }
     }
 }

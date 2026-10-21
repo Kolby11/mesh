@@ -745,8 +745,10 @@ here are public reactive component members; their template bindings update when
 they change. Element attributes and text patch in place when all readers of a
 changed member are recorded bindings. Direct service-field reads and function
 calls in element bindings also patch in place. Keyed loop bodies preserve
-iteration locals for patches; changing the collection or key reconciles the
-template. Structural conditions, unkeyed loops, component props, and pre-bound
+iteration locals for patches. Fixed-shape native keyed lists patch changed
+items after checking that the ordered unique string/numeric keys are unchanged;
+key, order or length changes reconcile the template. Nested control flow, child
+components, two-way bindings and captured handlers still rebuild. Structural conditions, unkeyed loops, component props, and pre-bound
 handler arguments use template evaluation and retained diffing. Calls
 conservatively invalidate on public writes because a helper can capture state.
 `local` variables and functions stay private to the script.

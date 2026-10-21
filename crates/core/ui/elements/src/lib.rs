@@ -71,7 +71,8 @@ pub use pseudo_state::{
     pseudo_state_mask, pseudo_state_specs,
 };
 pub use style::{
-    AlignContent, AlignItems, AlignSelf, BlendMode, BoxShadow, Color, ComputedStyle, Corners,
+    AlignContent, AlignItems, AlignSelf, BlendMode, BoxShadow, Color, ComputedStyle, CornerShape,
+    CornerShapes, Corners,
     Dimension, Display, Edges, FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow,
     Position, StepPosition, StyleContext, StyleResolver, StyleRuleIndex, TextAlign, TextDirection,
     TextOverflow, Transform2D, TransitionEasing, TransitionProperties, TransitionStyle,
@@ -79,9 +80,10 @@ pub use style::{
 };
 pub use tree::EventHandlerCall;
 pub use tree::{
-    InputPreedit, NodeId, NodeState, OpenBinding, PaintOrderChildren, TemplateBindings,
-    TextSelection, WidgetNode, WidgetScrollMetrics, WidgetTreeValidationError, WindowSurfaceState,
-    children_in_paint_order, paint_order_child_indices, validate_widget_tree,
+    InputPreedit, KeyedTemplateItem, KeyedTemplateList, NodeId, NodeState, OpenBinding,
+    PaintOrderChildren, TemplateBindings, TextSelection, WidgetNode, WidgetScrollMetrics,
+    WidgetTreeValidationError, WindowSurfaceState, children_in_paint_order,
+    paint_order_child_indices, validate_widget_tree,
 };
 
 /// Abstraction over the source of variable values for template evaluation.
@@ -107,8 +109,11 @@ pub trait VariableStore {
     fn loop_identity(&self) -> Option<&str> {
         None
     }
-    /// Whether this store is evaluating a `{#for}` body, where expressions
-    /// also read the loop item and cannot be re-evaluated on their own.
+    /// Retained collection identity for a fixed-shape keyed native loop.
+    fn keyed_template_item(&self) -> Option<KeyedTemplateItem> {
+        None
+    }
+    /// Whether expressions also read a captured loop item.
     fn in_loop(&self) -> bool {
         false
     }

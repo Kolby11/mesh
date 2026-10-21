@@ -28,11 +28,11 @@ use std::cell::RefCell;
 use std::sync::Arc;
 
 use mesh_core_elements::lru::ByteLruCache;
-use mesh_core_elements::style::{Color, Corners, Edges};
+use mesh_core_elements::style::{Color, CornerShape, CornerShapes, Corners, Edges};
 use skia_safe::{
-    AlphaType, BlendMode, Canvas, ColorType, Data, FilterMode, IRect, ImageInfo, Matrix,
-    MipmapMode, Paint, PaintStyle, PictureRecorder, RRect, RSXform, Rect, Region, SamplingOptions,
-    Shader, TileMode, Vector, images, region::RegionOp, surfaces,
+    AlphaType, BlendMode, Canvas, ClipOp, ColorType, Data, FilterMode, IRect, ImageInfo, Matrix,
+    MipmapMode, Paint, PaintStyle, Path, PathBuilder, PictureRecorder, Point, RRect, RSXform,
+    Rect, Region, SamplingOptions, Shader, TileMode, Vector, images, region::RegionOp, surfaces,
 };
 
 use super::geometry::{ClipRect, intersect_clip};
@@ -48,7 +48,7 @@ const MAX_WHOLE_SHAPE_PIXELS: i64 = 256 * 256;
 thread_local! {
     static COVERAGE: RefCell<ByteLruCache<ShapeKey, ShapeCoverage>> =
         RefCell::new(ByteLruCache::new(COVERAGE_CACHE_ENTRIES, COVERAGE_CACHE_BYTES));
-    static CLIP_SHADERS: RefCell<ByteLruCache<ShapeKey, Shader>> =
+    static CLIP_SHADERS: RefCell<ByteLruCache<ClipKey, Shader>> =
         RefCell::new(ByteLruCache::new(CLIP_CACHE_ENTRIES, CLIP_CACHE_BYTES));
     // Runtime evaluation keeps mask composition on Skia's high-precision
     // pipeline; the bitmap fast path rounds differently for narrow spans.
@@ -58,13 +58,28 @@ thread_local! {
 }
 
 /// Intersect with coverage rasterized independently of the damage clip.
-pub(super) fn clip(canvas: &Canvas, rect: ClipRect, radii: Corners) {
+/// Corners that `shapes` marks as scooped curve inward instead of outward.
+pub(super) fn clip(canvas: &Canvas, rect: ClipRect, radii: Corners, shapes: CornerShapes) {
     let shape = RoundedShape {
         rect,
         outer: super::backend::normalize_corners(rect.width as f32, rect.height as f32, radii),
         ring: None,
     };
-    let key = shape.key();
+    let scooped = shapes.scoops(shape.outer).then(|| {
+        scooped_path(
+            Rect::from_wh(rect.width as f32, rect.height as f32),
+            shape.outer,
+            shapes,
+        )
+    });
+    let key = ClipKey {
+        shape: shape.key(),
+        shapes: if scooped.is_some() {
+            shapes
+        } else {
+            CornerShapes::default()
+        },
+    };
     let shader = CLIP_SHADERS.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(shader) = cache.get(&key) {
@@ -80,14 +95,19 @@ pub(super) fn clip(canvas: &Canvas, rect: ClipRect, radii: Corners) {
         paint.set_anti_alias(true);
         // A picture shader rasterizes its complete intrinsic bounds, so the
         // destination damage never cuts the shape during coverage generation.
-        draw_shape(
-            recording,
-            rect.width,
-            rect.height,
-            shape.outer,
-            None,
-            &paint,
-        );
+        match &scooped {
+            Some(path) => {
+                recording.draw_path(path, &paint);
+            }
+            None => draw_shape(
+                recording,
+                rect.width,
+                rect.height,
+                shape.outer,
+                None,
+                &paint,
+            ),
+        }
         let picture = recorder.finish_recording_as_picture(None)?;
         let shader = picture.to_shader(
             (TileMode::Decal, TileMode::Decal),
@@ -114,6 +134,12 @@ pub(super) fn clip(canvas: &Canvas, rect: ClipRect, radii: Corners) {
     if let Some(shader) = shader {
         let matrix = Matrix::translate((rect.x as f32, rect.y as f32));
         canvas.clip_shader(shader.with_local_matrix(&matrix), None);
+    } else if let Some(path) = scooped {
+        canvas.clip_path(
+            &path.make_offset((rect.x as f32, rect.y as f32)),
+            None,
+            true,
+        );
     } else {
         canvas.clip_rrect(
             rrect(
@@ -129,6 +155,66 @@ pub(super) fn clip(canvas: &Canvas, rect: ClipRect, radii: Corners) {
             true,
         );
     }
+}
+
+/// Remove the scooped corners' quarter discs from everything drawn after it,
+/// leaving the rest of the canvas, including outside `rect`, unclipped.
+/// Outer shadows of a scooped box use this so they do not fill the scoops.
+pub(super) fn clip_out_scoops(canvas: &Canvas, rect: ClipRect, radii: Corners, shapes: CornerShapes) {
+    let radii = super::backend::normalize_corners(rect.width as f32, rect.height as f32, radii);
+    let bounds = Rect::from_xywh(
+        rect.x as f32,
+        rect.y as f32,
+        rect.width as f32,
+        rect.height as f32,
+    );
+    let corners = [
+        (shapes.top_left, radii.top_left, (bounds.left, bounds.top)),
+        (shapes.top_right, radii.top_right, (bounds.right, bounds.top)),
+        (shapes.bottom_right, radii.bottom_right, (bounds.right, bounds.bottom)),
+        (shapes.bottom_left, radii.bottom_left, (bounds.left, bounds.bottom)),
+    ];
+    for (shape, radius, (x, y)) in corners {
+        if shape == CornerShape::Scoop && radius > 0.0 {
+            let disc = Rect::from_ltrb(x - radius, y - radius, x + radius, y + radius);
+            canvas.clip_rrect(RRect::new_oval(disc), ClipOp::Difference, true);
+        }
+    }
+}
+
+/// The outline of `rect` with normalized `radii`, each corner curving outward
+/// (`round`) or inward (`scoop`). A scoop's quarter arc is centred on the
+/// corner point; a round one on the point `radius` inside it.
+pub(super) fn scooped_path(rect: Rect, radii: Corners, shapes: CornerShapes) -> Path {
+    let (l, t, r, b) = (rect.left, rect.top, rect.right, rect.bottom);
+    let mut builder = PathBuilder::new();
+    builder.move_to((l + radii.top_left, t));
+    let corners = [
+        ((r, t), radii.top_right, shapes.top_right, (-1.0, 0.0), (0.0, 1.0)),
+        ((r, b), radii.bottom_right, shapes.bottom_right, (0.0, -1.0), (-1.0, 0.0)),
+        ((l, b), radii.bottom_left, shapes.bottom_left, (1.0, 0.0), (0.0, -1.0)),
+        ((l, t), radii.top_left, shapes.top_left, (0.0, 1.0), (1.0, 0.0)),
+    ];
+    for ((cx, cy), radius, shape, into, out) in corners {
+        let start = Point::new(cx + into.0 * radius, cy + into.1 * radius);
+        builder.line_to(start);
+        if radius > 0.0 {
+            let end = Point::new(cx + out.0 * radius, cy + out.1 * radius);
+            let control = match shape {
+                CornerShape::Round => Point::new(cx, cy),
+                CornerShape::Scoop => Point::new(start.x + end.x - cx, start.y + end.y - cy),
+            };
+            builder.conic_to(control, end, std::f32::consts::FRAC_1_SQRT_2);
+        }
+    }
+    builder.close();
+    builder.detach()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ClipKey {
+    shape: ShapeKey,
+    shapes: CornerShapes,
 }
 
 /// A rounded rectangle at integer device bounds, optionally hollowed into a

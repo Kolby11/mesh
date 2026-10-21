@@ -824,6 +824,7 @@ fn glass_dashboard_spectrum_profile() {
     const FRAMES: u32 = 120;
     let theme = theme();
     let mut component = host("glass-dashboard");
+    component.force_full_template_build = std::env::var_os("MESH_BENCH_FORCE_TEMPLATE").is_some();
     dashboard_payloads(&mut component);
     let extent = SurfaceExtent::unpadded(WIDTH, HEIGHT);
     let mut pixels = PixelBuffer::new(WIDTH, HEIGHT);

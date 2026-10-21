@@ -1,5 +1,5 @@
 {
-  "revision": 172,
+  "revision": 186,
   "schemaVersion": 1,
   "shell": {
     "fonts": {
@@ -20,7 +20,7 @@
       }
     },
     "theme": {
-      "active": "@mesh/tokyo-night:tokyo-night"
+      "active": "@mesh/catppuccin-mocha:catppuccin-mocha"
     }
   }
 }

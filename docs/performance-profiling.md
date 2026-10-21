@@ -122,7 +122,7 @@ Taffy's internal solver, raster workers and backend work are excluded.
 | --- | --- |
 | `restyle_scan`, `style_resolve` | Restyle traversal entries and snapshot-path steps versus actual style resolutions, including diagnostics |
 | `layout_build`, `layout_sync`, `layout_write` | Taffy construction/reconciliation, retained input synchronization, and geometry write visits |
-| `layout_fit`, `layout_extents`, `layout_discovery` | Fit-size correction, descendant extent traversal, and fingerprint discovery for layout inputs |
+| `layout_fit`, `layout_extents`, `layout_discovery` | Fit-size correction, bottom-up descendant extent aggregation (one visit per node), and fingerprint discovery for layout inputs |
 | `animation_sample`, `animation_previous_style`, `animation_lookup` | Sampling visits, previous-style capture visits, and child-path steps |
 | `accessibility_normalize`, `accessibility_project` | Full/memo normalization traversal and local/snapshot semantic projections |
 | `validation`, `annotation` | Tree validation and runtime/scroll annotation visits, including snapshot-path steps |
@@ -148,8 +148,16 @@ interaction frames the same way: hovering between two tiles beside 16 or
 retained-lookup, retained-sync and semantic-projection counts, with no
 retained discovery. A twin forced onto the full walks must paint identical
 pixels and computed styles, and a rebuild must reproduce them.
+`keyed_list_one_item_write_does_not_patch_clean_siblings` checks that an
+in-place item write patches one node with both 8 and 256 list items and emits
+no tree-build stage. The companion keyed-list tests compare forced-rebuild
+pixels and verify structural fallbacks. Key validation and binding-target
+discovery still scan their collections/tree; this is a property-patch gate,
+not an all-pass proportionality claim.
 The glass dock and spectrum profile tests print visits per measured paint
-alongside their timings. Use profiling-disabled runs for timing claims about
+alongside their timings. `MESH_BENCH_FORCE_TEMPLATE=1` disables template
+patching/selective template builds in the spectrum profile for comparison.
+Use profiling-disabled runs for timing claims about
 instrumentation overhead.
 
 ## Repeatable captures

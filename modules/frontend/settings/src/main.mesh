@@ -163,7 +163,7 @@ end
        tiling, interactive resize). The state rules further down handle the
        cases where it does. */
     .settings-shell {
-        margin: 12px 12px 12px 0;
+        margin: 12px;
         exclusive-zone: none;
         width: 920px;
         height: 700px;
@@ -184,10 +184,12 @@ end
        square off the corners. A floating layer surface reads as chrome sitting
        over the desktop, but a window with client-side decorations owns its
        whole rectangle, and rounded corners there fight whatever the compositor
-       draws around it. */
+       draws around it. The chrome margin goes too: inside a window it would
+       leave an uneven inset that the compositor's own rounding then cuts. */
     .settings-shell:windowed {
         width: 100%;
         height: 100%;
+        margin: 0;
         border-radius: 0;
     }
 
@@ -229,6 +231,14 @@ end
         border-right-width: 1px;
         border-right-style: solid;
         border-right-color: var(--color-outline-variant);
+        /* The shell does not clip its children, so the sidebar fill follows
+           the shell's left corners itself. */
+        border-top-left-radius: var(--radius-lg);
+        border-bottom-left-radius: var(--radius-lg);
+    }
+
+    .settings-sidebar:windowed {
+        border-radius: 0;
     }
 
     .settings-brand {

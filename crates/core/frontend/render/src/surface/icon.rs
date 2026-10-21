@@ -49,6 +49,7 @@ const IMAGE_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
 const METADATA_CACHE_MAX_BYTES: usize = 256 * 1024;
 const MAX_ICON_DIMENSION: u32 = 2048;
 const MAX_ICON_RASTER_BYTES: usize = 16 * 1024 * 1024;
+const MAX_TRANSFORM_RASTER_SCALE: f32 = 4.0;
 const MAX_SOURCE_IMAGE_DIMENSION: u32 = 8192;
 const MAX_SOURCE_IMAGE_BYTES: usize = 64 * 1024 * 1024;
 #[cfg(test)]
@@ -1209,15 +1210,24 @@ fn cached_skia_image_for_variant(variant: &RasterVariant) -> Option<skia_safe::I
 }
 
 fn blit_variant_on_canvas(canvas: &Canvas, variant: &RasterVariant, dest_x: i32, dest_y: i32) {
-    let Some(image) = cached_skia_image_for_variant(variant) else {
-        return;
-    };
     let dest = Rect::from_xywh(
         dest_x as f32,
         dest_y as f32,
         variant.width as f32,
         variant.height as f32,
     );
+    blit_variant_into_rect(canvas, variant, dest, SamplingOptions::default());
+}
+
+fn blit_variant_into_rect(
+    canvas: &Canvas,
+    variant: &RasterVariant,
+    dest: Rect,
+    sampling: SamplingOptions,
+) {
+    let Some(image) = cached_skia_image_for_variant(variant) else {
+        return;
+    };
     let mut paint = Paint::default();
     paint.set_anti_alias(false);
     let (image, source) = crate::surface::image_pages::resolve(&image);
@@ -1228,9 +1238,29 @@ fn blit_variant_on_canvas(canvas: &Canvas, variant: &RasterVariant, dest_x: i32,
             .as_ref()
             .map(|rect| (rect, skia_safe::canvas::SrcRectConstraint::Strict)),
         dest,
-        SamplingOptions::default(),
+        sampling,
         &paint,
     );
+}
+
+/// Device pixels per local unit under the canvas's current matrix, for
+/// rasterizing bitmaps that a CSS `transform` magnifies. Rounded up to a
+/// quarter step so an animated `scale()` reuses a few cached rasters instead
+/// of rasterizing one per frame; minification keeps the 1:1 raster.
+pub(crate) fn canvas_raster_scale(canvas: &Canvas) -> f32 {
+    let matrix = canvas.local_to_device_as_3x3();
+    let scale_x = matrix.scale_x().hypot(matrix.skew_y());
+    let scale_y = matrix.skew_x().hypot(matrix.scale_y());
+    let scale = scale_x.max(scale_y);
+    if !scale.is_finite() || scale <= 1.0 + 1e-3 {
+        return 1.0;
+    }
+    ((scale * 4.0 - 1e-3).ceil() / 4.0).min(MAX_TRANSFORM_RASTER_SCALE)
+}
+
+/// Sampling for a raster drawn at a size other than its own.
+pub(crate) fn resampled_sampling() -> SamplingOptions {
+    SamplingOptions::new(skia_safe::FilterMode::Linear, skia_safe::MipmapMode::None)
 }
 
 #[cfg(test)]
@@ -1394,10 +1424,23 @@ pub fn draw_icon_from_path_with_options_on_canvas(
     tint: Color,
     multicolor: bool,
 ) {
-    if let Some(variant) = resolve_file_variant(path, dest_w, dest_h, tint, multicolor) {
+    let raster_scale = canvas_raster_scale(canvas);
+    let raster_w = (dest_w as f32 * raster_scale).ceil() as i32;
+    let raster_h = (dest_h as f32 * raster_scale).ceil() as i32;
+    let Some(variant) = resolve_file_variant(path, raster_w, raster_h, tint, multicolor) else {
+        draw_missing_icon_fallback_on_canvas(canvas, dest_x, dest_y, dest_w, dest_h, tint);
+        return;
+    };
+    if raster_scale == 1.0 {
         blit_variant_on_canvas(canvas, &variant, dest_x, dest_y);
     } else {
-        draw_missing_icon_fallback_on_canvas(canvas, dest_x, dest_y, dest_w, dest_h, tint);
+        let dest = Rect::from_xywh(
+            dest_x as f32,
+            dest_y as f32,
+            variant.width as f32 / raster_scale,
+            variant.height as f32 / raster_scale,
+        );
+        blit_variant_into_rect(canvas, &variant, dest, resampled_sampling());
     }
 }
 
@@ -2076,6 +2119,56 @@ mod tests {
         assert_eq!(image.get_pixel(0, 0), &Rgba([255, 0, 0, 255]));
         assert!(poll_image_decode_jobs());
         assert!(!image_decode_jobs_pending());
+    }
+
+    #[test]
+    fn magnified_bitmap_icons_rasterize_at_their_device_scale() {
+        if crate::isolate_resource_state_test(
+            "surface::icon::tests::magnified_bitmap_icons_rasterize_at_their_device_scale",
+        ) {
+            return;
+        }
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("checker.png");
+        ImageBuffer::from_fn(32, 32, |x, y| {
+            let value = if (x + y) % 2 == 0 { 255u8 } else { 0 };
+            Rgba([value, value, value, 255])
+        })
+        .save(&path)
+        .unwrap();
+
+        let mut buffer = PixelBuffer::new(32, 32);
+        PixelCanvasSession::new(&mut buffer).with_canvas(|canvas| {
+            canvas.scale((4.0, 4.0));
+            assert_eq!(canvas_raster_scale(canvas), 4.0);
+            draw_icon_from_path_with_options_on_canvas(canvas, &path, 0, 0, 8, 8, tint(), true);
+        });
+
+        let row = &buffer.data()[..32 * 4];
+        let first = row[0] as i32;
+        let second = row[4] as i32;
+        assert!(
+            (first - second).abs() > 200,
+            "a 4x-magnified 8px icon must keep its 32px source detail: {first} vs {second}"
+        );
+    }
+
+    #[test]
+    fn raster_scale_rounds_magnification_up_to_quarter_steps() {
+        let mut buffer = PixelBuffer::new(4, 4);
+        PixelCanvasSession::new(&mut buffer).with_canvas(|canvas| {
+            assert_eq!(canvas_raster_scale(canvas), 1.0);
+            canvas.scale((0.96, 0.96));
+            assert_eq!(canvas_raster_scale(canvas), 1.0);
+            canvas.reset_matrix();
+            canvas.translate((5.0, -12.0));
+            canvas.scale((1.22, 1.22));
+            assert_eq!(canvas_raster_scale(canvas), 1.25);
+            canvas.scale((2.0, 2.0));
+            assert_eq!(canvas_raster_scale(canvas), 2.5);
+        });
     }
 
     #[test]

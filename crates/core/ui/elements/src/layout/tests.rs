@@ -1780,3 +1780,30 @@ fn fixed_child_full_width_stretch() {
         bar_layout.width
     );
 }
+
+#[test]
+fn nested_fit_extents_visit_once_and_respect_surface_boundaries() {
+    let mut root = make_node("box", Dimension::Fit, Dimension::Fit);
+    root.layout.x = 10.0;
+    let mut child = make_node("box", Dimension::Fit, Dimension::Fit);
+    child.layout.x = 20.0;
+    let mut leaf = make_node("box", Dimension::Px(30.0), Dimension::Px(40.0));
+    leaf.layout.x = 50.0;
+    leaf.layout.width = 30.0;
+    leaf.layout.height = 40.0;
+    let mut fixed = leaf.clone();
+    fixed.computed_style.position = Position::Fixed;
+    fixed.layout.x = 1000.0;
+    let mut promoted = leaf.clone();
+    promoted.mark_promoted_popover();
+    promoted.layout.x = 2000.0;
+    child.children = vec![leaf, fixed, promoted].into();
+    root.children = vec![child].into();
+    let scope = crate::frame_work::Scope::new(true);
+    super::lowering::resolve_fit_sizing(&mut root);
+    assert_eq!(root.layout.width, 70.0);
+    assert_eq!(root.children[0].layout.width, 60.0);
+    assert_eq!(root.layout.height, 40.0);
+    assert_eq!(scope.snapshot()["layout_extents"], 5);
+    assert_eq!(scope.snapshot()["layout_fit"], 5);
+}

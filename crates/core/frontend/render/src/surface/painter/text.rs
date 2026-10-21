@@ -1269,18 +1269,19 @@ impl FrontendRenderEngine {
         scale: f32,
         clip: Option<(u32, u32, u32, u32)>,
     ) {
-        let font_size = 12.0 * scale;
-        let pad_h = (8.0 * scale) as i32;
-        let pad_v = (5.0 * scale) as i32;
-        let max_text_w = 320.0 * scale;
+        let style = self.tooltip_style();
+        let font_size = style.font_size * scale;
+        let pad_h = (style.padding_x * scale) as i32;
+        let pad_v = (style.padding_y * scale) as i32;
+        let max_text_w = style.max_width * scale;
         let font_family = self.tooltip_font_family();
 
         let (text_w, text_h) = self.text_renderer.measure_styled(
             text,
             &font_family,
             font_size,
-            400,
-            1.3,
+            style.font_weight,
+            TooltipPaintStyle::LINE_HEIGHT,
             Some(max_text_w),
         );
 
@@ -1339,7 +1340,6 @@ impl FrontendRenderEngine {
             return;
         }
 
-        let colors = self.tooltip_colors();
         let apply_opacity =
             |c: mesh_core_elements::style::Color| mesh_core_elements::style::Color {
                 r: c.r,
@@ -1347,51 +1347,55 @@ impl FrontendRenderEngine {
                 b: c.b,
                 a: (c.a as f32 * opacity) as u8,
             };
-        let bg = apply_opacity(colors.background);
-        let border = apply_opacity(colors.border);
-        let text_color = apply_opacity(colors.foreground);
-        let radius = ((6.0 * scale) * anim_scale).max(1.0);
+        let bg = apply_opacity(style.background);
+        let border = apply_opacity(style.border);
+        let text_color = apply_opacity(style.foreground);
+        let radius = ((style.radius * scale) * anim_scale).max(0.0);
+        let border_width = if border.a == 0 {
+            0
+        } else {
+            (style.border_width * scale).round().max(0.0) as i32
+        };
 
         // Isolate tooltip chrome so rounded-corner antialiasing is resolved
         // against a transparent layer before compositing onto panel content.
+        // The border is drawn outside the box, so it never shifts the text.
         let layer_bounds = ClipRect {
-            x: tx - 1,
-            y: ty - 1,
-            width: draw_w + 2,
-            height: draw_h + 2,
+            x: tx - border_width,
+            y: ty - border_width,
+            width: draw_w + border_width * 2,
+            height: draw_h + border_width * 2,
         };
         let clipped_layer_bounds = intersect_clip(layer_bounds, tooltip_clip);
         if clipped_layer_bounds.width <= 0 || clipped_layer_bounds.height <= 0 {
             return;
         }
-        self.execute_painter_commands_in_session(
-            session,
-            &[
-                PainterCommand::PushLayer(PainterLayer::isolated(
-                    clipped_layer_bounds,
-                    1.0,
-                    PainterBlendMode::SrcOver,
-                )),
-                PainterCommand::DrawRoundedRect {
-                    rect: layer_bounds,
-                    radii: mesh_core_elements::style::Corners::all(radius + 1.0),
-                    paint: PainterPaint::fill(border),
-                    clip: tooltip_clip,
-                },
-                PainterCommand::DrawRoundedRect {
-                    rect: ClipRect {
-                        x: tx,
-                        y: ty,
-                        width: draw_w,
-                        height: draw_h,
-                    },
-                    radii: mesh_core_elements::style::Corners::all(radius),
-                    paint: PainterPaint::fill(bg),
-                    clip: tooltip_clip,
-                },
-                PainterCommand::PopLayer,
-            ],
-        );
+        let mut chrome = vec![PainterCommand::PushLayer(PainterLayer::isolated(
+            clipped_layer_bounds,
+            1.0,
+            PainterBlendMode::SrcOver,
+        ))];
+        if border_width > 0 {
+            chrome.push(PainterCommand::DrawRoundedRect {
+                rect: layer_bounds,
+                radii: mesh_core_elements::style::Corners::all(radius + border_width as f32),
+                paint: PainterPaint::fill(border),
+                clip: tooltip_clip,
+            });
+        }
+        chrome.push(PainterCommand::DrawRoundedRect {
+            rect: ClipRect {
+                x: tx,
+                y: ty,
+                width: draw_w,
+                height: draw_h,
+            },
+            radii: mesh_core_elements::style::Corners::all(radius),
+            paint: PainterPaint::fill(bg),
+            clip: tooltip_clip,
+        });
+        chrome.push(PainterCommand::PopLayer);
+        self.execute_painter_commands_in_session(session, &chrome);
         // Clip text to the scaled box so it doesn't bleed outside during grow.
         let text_clip = intersect_clip(
             tooltip_clip,
@@ -1413,8 +1417,8 @@ impl FrontendRenderEngine {
                 text,
                 &font_family,
                 font_size,
-                400,
-                1.3,
+                style.font_weight,
+                TooltipPaintStyle::LINE_HEIGHT,
                 TextAlign::Left,
                 text_color,
                 canvas,

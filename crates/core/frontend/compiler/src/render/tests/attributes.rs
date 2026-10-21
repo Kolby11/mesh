@@ -549,3 +549,32 @@ fn class_and_style_directives_follow_script_state() {
     assert_eq!(node.computed_style.opacity, 0.25);
     assert!(!node.attributes.get(Prop::Style).unwrap().contains("color"));
 }
+
+#[test]
+fn compiler_normalizes_completed_tree_once() {
+    let component = mesh_core_component::parse_component(
+        "<template><box><column><button><text>Launch</text></button></column></box></template>",
+    )
+    .unwrap();
+    let scope = mesh_core_elements::frame_work::Scope::new(true);
+    let tree = build_widget_tree_from_component(
+        &component,
+        &test_manifest(),
+        &mesh_core_theme::default_theme(),
+        320.0,
+        120.0,
+        None,
+        "root",
+        None,
+        &[],
+    );
+    assert_eq!(scope.snapshot()["validation"], 5);
+    assert_eq!(scope.snapshot()["accessibility_normalize"], 5);
+    assert_eq!(
+        tree.children[0].children[0].children[0]
+            .accessibility
+            .label
+            .as_deref(),
+        Some("Launch")
+    );
+}

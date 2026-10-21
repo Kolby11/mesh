@@ -136,6 +136,7 @@ impl FrontendSurfaceComponent {
         paint_width: u32,
         paint_height: u32,
     ) -> Option<(Arc<str>, f32, f32)> {
+        self.tooltip_popup = None;
         if !self.tooltip_visible {
             return None;
         }
@@ -170,10 +171,8 @@ impl FrontendSurfaceComponent {
         // the component tree.
         let container_bounds = None;
 
-        // Measure the real logical tooltip box (mirrors render_tooltip's
-        // geometry at scale 1: the active UI family, 1.3 line height, 320px
-        // wrap width, 8px/5px padding) so fit checks match what actually
-        // paints.
+        // Measure the real logical tooltip box with the same style the painter
+        // uses, so fit checks match what actually paints.
         let font_family = theme
             .resolve_token_value("typography.family")
             .ok()
@@ -185,13 +184,17 @@ impl FrontendSurfaceComponent {
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| "Inter".into());
         self.paint_context.tooltip_font_family = font_family.clone();
-        self.paint_context.tooltip_colors = resolve_tooltip_colors(theme);
-        let (text_w, text_h) =
-            SharedTextMeasurer.measure_styled(&text, &font_family, 12.0, 400, 1.3, Some(320.0));
-        let tooltip_size = (
-            (text_w.ceil() + 16.0).min(320.0 + 16.0),
-            (text_h.ceil() + 10.0).max(12.0 + 10.0),
+        let style = tooltip::tooltip_paint_style_from_theme(theme);
+        self.paint_context.tooltip_style = style;
+        let (text_w, text_h) = SharedTextMeasurer.measure_styled(
+            &text,
+            &font_family,
+            style.font_size,
+            style.font_weight,
+            mesh_core_render::TooltipPaintStyle::LINE_HEIGHT,
+            Some(style.max_width),
         );
+        let tooltip_size = style.box_size(text_w, text_h);
 
         let placement = tooltip::compute_tooltip_placement(
             anchor,
@@ -203,6 +206,25 @@ impl FrontendSurfaceComponent {
             sample.opacity,
             &self.tooltip_settings,
         );
+
+        let surface = (paint_width as f32, paint_height as f32);
+        if placement.side != tooltip::PlacedSide::Cursor
+            && let Some(element) = element_bounds
+            && tooltip::TooltipPopup::overflows(&placement, tooltip_size, surface)
+        {
+            self.tooltip_popup = Some(tooltip::TooltipPopup {
+                text: Arc::clone(&tooltip_target.text),
+                element,
+                side: placement.side,
+                size: tooltip_size,
+                gap: self.tooltip_settings.gap,
+                style,
+                font_family,
+                opacity: placement.opacity,
+                scale: sample.scale,
+            });
+            return None;
+        }
 
         // The keyframes' `translate()` moves the whole box relative to its
         // resting spot; the authored element offset stacks on top.
@@ -437,6 +459,65 @@ impl FrontendSurfaceComponent {
         &self,
     ) -> Option<&mesh_core_render::FocusedProofSnapshot> {
         self.focused_proof_snapshot.as_ref()
+    }
+
+    /// Paint the promoted tooltip into its popup buffer, the box placed at the
+    /// popup's padding. `false` when no tooltip is promoted.
+    pub(super) fn paint_tooltip_popup(
+        &self,
+        canvas: &mut SurfaceCanvas,
+        scale: f32,
+        content_offset: (u32, u32),
+    ) -> bool {
+        let Some(popup) = self.tooltip_popup.as_ref() else {
+            return false;
+        };
+        let scale_policy = mesh_core_render::FractionalScale::new(scale);
+        let width = scale_policy.logical_extent(canvas.width());
+        let height = scale_policy.logical_extent(canvas.height());
+        let mut display_list = self.tooltip_popup_display_list.borrow_mut();
+        let mut root = WidgetNode::new("box");
+        root.layout.width = width as f32;
+        root.layout.height = height as f32;
+        display_list.update(&root, width, height, true, false);
+        let full = DamageRect {
+            x: 0,
+            y: 0,
+            width: width.max(1),
+            height: height.max(1),
+        };
+        if let SurfaceCanvas::Scene(scene) = canvas {
+            scene.begin(display_list.frame_paint_plan());
+        }
+        let selected = display_list
+            .select_paint_commands_for_rects(&[full], DisplayListRepaintPolicy::FullSurface);
+        let context = mesh_core_render::PaintContext {
+            tooltip_style: popup.style,
+            tooltip_font_family: popup.font_family.clone(),
+            tooltip_opacity: popup.opacity,
+            tooltip_scale: popup.scale,
+            tooltip_center_x: false,
+            ..self.paint_context.clone()
+        };
+        let mut session = canvas.session();
+        let physical = scale_damage_rect_to_buffer(full, scale, session.width(), session.height());
+        session.clear_rect(physical, mesh_core_elements::style::Color::TRANSPARENT);
+        mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session_with_context(
+            &selected,
+            &mut session,
+            scale,
+            None,
+            None,
+            Some((
+                popup.text.as_ref(),
+                content_offset.0 as f32,
+                content_offset.1 as f32,
+            )),
+            Some(self.compiled.manifest.package.id.as_str()),
+            false,
+            Some(&context),
+        );
+        true
     }
 }
 

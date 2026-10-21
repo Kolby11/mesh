@@ -6,9 +6,7 @@
 
 <template>
     <row class="dock-shell">
-        <box class="flare flare-left" aria-hidden="true">
-            <box class="flare-cut flare-cut-left" />
-        </box>
+        <box class="flare flare-left" aria-hidden="true" />
         <row class="dock" onpointerleave={onLeave}>
             <column class="slot launcher-slot">
                 <button class="tile launcher-tile" ref="glassLauncher" aria-label={t("launcher.title")} title={t("launcher.title")}>
@@ -38,9 +36,7 @@
                 </column>
             {/for}
         </row>
-        <box class="flare flare-right" aria-hidden="true">
-            <box class="flare-cut flare-cut-right" />
-        </box>
+        <box class="flare flare-right" aria-hidden="true" />
     </row>
 </template>
 
@@ -108,34 +104,23 @@ end
         backdrop-filter: blur(14px) refract(18px 16px) dispersion(1.2px);
     }
 
-    /* Concave feet. Each flare is a square of the same glass with a
-    quarter-round cut-out that paints the plain backdrop source
-    (`refract(0px 0px)`), so the shelf sweeps outward into the floor. */
+    /* Concave feet: squares of the same glass whose upper outer corner is
+    scooped out, so the shelf sweeps outward into the floor. */
     .flare {
-        position: relative;
         width: 30px;
         height: 30px;
         flex-shrink: 0;
+        corner-shape: scoop;
         background-image: var(--glass-surface-flare);
         backdrop-filter: blur(8px) refract(0px 0px);
     }
 
-    .flare-cut {
-        position: absolute;
-        top: 0;
-        width: 30px;
-        height: 30px;
-        backdrop-filter: refract(0px 0px);
+    .flare-left {
+        border-top-left-radius: 30px;
     }
 
-    .flare-cut-left {
-        left: 0;
-        border-radius: 0 0 30px 0;
-    }
-
-    .flare-cut-right {
-        left: 0;
-        border-radius: 0 0 0 30px;
+    .flare-right {
+        border-top-right-radius: 30px;
     }
 
     .slot {
@@ -215,11 +200,14 @@ end
         border-color: var(--glass-rim-hover);
     }
 
+    /* The lift is the dock's signature motion: a medium duration on the
+    emphasized curve, so the rise and magnification read as movement rather
+    than the near-instant jump of the decelerate curve. */
     .tile {
         transform: scale(1);
         transition-property: transform, background-color, border-color, opacity;
-        transition-duration: var(--animation-duration-short);
-        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+        transition-duration: var(--animation-duration-medium);
+        transition-timing-function: var(--animation-curves-bezier-emphasized);
     }
 
     .tile:hover {

@@ -1875,6 +1875,7 @@ impl Shell {
                         ),
                     };
                     let popup_config = PopupConfig {
+                        input_passthrough: false,
                         parent_surface_id: trigger_surface.clone(),
                         // A promoted popover surface carries no overshoot ring:
                         // its size is its content.

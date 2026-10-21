@@ -4,7 +4,8 @@ use crate::style::{
 };
 use crate::tags::lower_source_tag;
 use crate::{FrontendCompositionResolver, LayeredStore};
-use mesh_core_elements::Prop;
+use mesh_core_elements::{KeyedTemplateItem, KeyedTemplateList, Prop};
+use std::sync::Arc;
 
 use mesh_core_component::template::{
     Attribute, AttributeValue, ElementNode, ForNode, TemplateNode,
@@ -275,7 +276,7 @@ pub(crate) fn build_widget_node(
     instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
 ) -> WidgetNode {
-    let mut node = build_widget_node_inner(
+    build_widget_node_inner(
         node,
         manifest,
         build_style,
@@ -285,9 +286,7 @@ pub(crate) fn build_widget_node(
         instance_key,
         composition,
         None,
-    );
-    normalize_accessibility(&mut node);
-    node
+    )
 }
 
 /// Build a template node as zero or more layout children. Control-flow nodes
@@ -441,7 +440,7 @@ pub(crate) fn build_widget_node_selective(
     previous: Option<&WidgetNode>,
     rebuild_node_ids: &HashSet<NodeId>,
 ) -> WidgetNode {
-    let mut node = build_widget_node_inner(
+    build_widget_node_inner(
         node,
         manifest,
         build_style,
@@ -451,9 +450,7 @@ pub(crate) fn build_widget_node_selective(
         instance_key,
         composition,
         previous.map(|previous| (previous, rebuild_node_ids)),
-    );
-    normalize_accessibility(&mut node);
-    node
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -531,6 +528,7 @@ fn build_widget_node_inner(
                 node.set_template_bindings(std::sync::Arc::new(
                     mesh_core_elements::TemplateBindings {
                         instance_key: instance_key.into(),
+                        keyed_item: state.keyed_template_item(),
                         locals: state
                             .in_loop()
                             .then(|| std::sync::Arc::new(state.template_locals())),
@@ -768,10 +766,45 @@ where
 {
     // `WidgetNode` is a large struct, so growing this vector re-copies every
     // node built so far. The exact child count is known before the first push.
-    let items = items.into_iter();
+    let items: Vec<_> = items.into_iter().collect();
     let mut children = Vec::with_capacity(items.len().saturating_mul(for_node.children.len()));
     let mut seen_keyed_identities = HashSet::new();
-    for (item_ordinal, item_val) in items.enumerate() {
+    let mut keys = Vec::with_capacity(items.len());
+    let mut unique = HashSet::new();
+    let patchable = !store.in_loop() && crate::patchable_keyed_loop(for_node);
+    let mut valid_keys = true;
+    if patchable {
+        for item in &items {
+            let item_store = LayeredStore {
+                base: store,
+                item_name: &for_node.item_name,
+                item_value: item,
+                loop_identity: None,
+                keyed_item: None,
+            };
+            let value = evaluate_template_expression(
+                for_node.key.as_deref().unwrap(),
+                Some(&item_store),
+                instance_key,
+                composition,
+            );
+            valid_keys &= matches!(
+                value,
+                serde_json::Value::String(_) | serde_json::Value::Number(_)
+            ) && unique.insert(value.to_string());
+            keys.push(value);
+        }
+    }
+    let keyed_list = patchable.then(|| {
+        Arc::new(KeyedTemplateList {
+            source: for_node.iterable.trim().to_owned(),
+            item_name: for_node.item_name.clone(),
+            key: for_node.key.clone().unwrap(),
+            keys: keys.clone().into(),
+            valid_keys,
+        })
+    });
+    for (item_ordinal, item_val) in items.into_iter().enumerate() {
         let loop_identity = for_node
             .key
             .as_ref()
@@ -781,9 +814,11 @@ where
                     item_name: &for_node.item_name,
                     item_value: item_val,
                     loop_identity: store.loop_identity().map(str::to_owned),
+                    keyed_item: None,
                 };
-                let key_value =
-                    evaluate_template_expression(key, Some(&item_store), instance_key, composition);
+                let key_value = keys.get(item_ordinal).cloned().unwrap_or_else(|| {
+                    evaluate_template_expression(key, Some(&item_store), instance_key, composition)
+                });
                 let key =
                     serde_json::to_string(&key_value).unwrap_or_else(|_| item_ordinal.to_string());
                 match store.loop_identity() {
@@ -797,6 +832,10 @@ where
             item_name: &for_node.item_name,
             item_value: item_val,
             loop_identity,
+            keyed_item: keyed_list.as_ref().map(|list| KeyedTemplateItem {
+                list: Arc::clone(list),
+                index: item_ordinal,
+            }),
         };
         for (child_index, child) in for_node.children.iter().enumerate() {
             let mut built = build_widget_nodes(
@@ -1094,17 +1133,55 @@ fn record_template_bindings(
             .iter()
             .any(|child| matches!(child, TemplateNode::Expr(_))))
     .then(|| element.children.clone().into());
-    if attributes.is_empty() && inline_content.is_none() {
+    if attributes.is_empty() && inline_content.is_none() && state.keyed_template_item().is_none() {
         return;
     }
     node.set_template_bindings(std::sync::Arc::new(mesh_core_elements::TemplateBindings {
         instance_key: instance_key.into(),
+        keyed_item: state.keyed_template_item(),
         locals: state
             .in_loop()
             .then(|| std::sync::Arc::new(state.template_locals())),
         attributes,
         inline_content,
     }));
+}
+
+/// Resolve a retained native list through the normal expression runtime.
+/// Returns `None` when its ordered, unique keys no longer match; callers must
+/// rebuild before publishing any item patches in that case.
+pub fn refresh_keyed_template_list(
+    list: &KeyedTemplateList,
+    state: &dyn VariableStore,
+    instance_key: &str,
+    composition: Option<&dyn FrontendCompositionResolver>,
+) -> Option<Vec<serde_json::Value>> {
+    if !list.valid_keys {
+        return None;
+    }
+    let serde_json::Value::Array(items) =
+        evaluate_template_expression(&list.source, Some(state), instance_key, composition)
+    else {
+        return None;
+    };
+    if items.len() != list.keys.len() {
+        return None;
+    }
+    for (item, previous_key) in items.iter().zip(list.keys.iter()) {
+        let item_store = LayeredStore {
+            base: state,
+            item_name: &list.item_name,
+            item_value: item,
+            loop_identity: None,
+            keyed_item: None,
+        };
+        let key =
+            evaluate_template_expression(&list.key, Some(&item_store), instance_key, composition);
+        if &key != previous_key {
+            return None;
+        }
+    }
+    Some(items)
 }
 
 /// What [`patch_template_bindings`] changed on a node.

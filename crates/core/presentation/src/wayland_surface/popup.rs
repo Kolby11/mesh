@@ -120,6 +120,10 @@ pub struct PopupConfig {
     /// See [`SurfacePadding`](super::SurfacePadding): it is what keeps clicks
     /// over the transparent ring falling through to whatever is behind it.
     pub padding: super::SurfacePadding,
+    /// Commit an empty input region, so pointer input over the popup reaches
+    /// whatever is beneath it. Tooltips use this: they describe what is under
+    /// the pointer and must never take hover from it.
+    pub input_passthrough: bool,
     /// Take a compositor input grab (click-to-dismiss-outside + keyboard).
     /// Requires a recent input serial; when no identity is available the
     /// backend opens without a grab and emits a downgrade diagnostic.

@@ -7030,3 +7030,76 @@ ancestors. Hover-change frames still capture previous styles for all 63
 registered transition nodes. Every frame clones the annotation inputs (small
 maps; not measured separately). Layout propagation, validation, child-surface
 requests and the dashboard's P3 list path are unchanged.
+
+## 2026-10-21 — Dashboard pass audit and P3 keyed native lists
+
+`working tree` (baseline `1d50170a`) · area: compiler tree build, fit sizing, template patching
+
+**Pass audit.** The dashboard's repeated visits came from nested building.
+`build_widget_node`, its selective variant and `build_component_ref`
+validated and normalized accessibility for each subtree they returned, so
+the work was O(nodes × depth). The completed tree is now normalized once.
+`resolve_fit_sizing` walked the descendants again for every fit-sized
+ancestor. It now returns extents bottom-up in one visit per node; promoted
+popovers and `position: fixed` subtrees are still excluded. Gates:
+`compiler_normalizes_completed_tree_once` and
+`nested_fit_extents_visit_once_and_respect_surface_boundaries`.
+
+**P3 keyed native lists.** A `{#for … key={…}}` whose body contains only
+native elements, text and expressions, with no handlers, two-way or instance
+bindings and no nested control flow or components, records a
+`KeyedTemplateList` with its source, item name, key expression and ordered
+keys. When the source changes, the patcher re-evaluates it once per list. If
+the keys are unique strings or numbers in the same order and the length is
+unchanged, it refreshes the captured item local only on changed items' nodes,
+and those nodes go through the normal property patch and frame dirty set.
+Any key, order or length change, a duplicate key or an expression failure
+falls back to the rebuild path.
+Gates: `keyed_list_item_patches_preserve_pixels_and_structural_fallbacks`
+(pixel parity against a forced rebuild across mutate/replace/reorder/append/
+remove/duplicate/empty), `keyed_list_one_item_write_does_not_patch_clean_siblings`
+(one patched node, no tree build, at 8 and 256 items),
+`keyed_list_structural_body_and_duplicate_keys_keep_rebuild`.
+
+**Visits** (release `glass_dashboard_spectrum_profile`, 151 nodes, per frame,
+run 2 of the third invocation):
+
+| Pass | Before → after |
+| --- | --- |
+| `validation` | 1,657 → 151 |
+| `layout_extents` | 763 → 151 |
+| `accessibility_normalize` | 567 → 0 |
+| `accessibility_project` | 152 → 100 |
+| `layout_build` / `layout_sync` / `layout_discovery` | 151 / 0 / 0 → 0 / 25 / 151 |
+| `style_resolve` | 137 → 47 |
+| `restyle_scan` | 59 → 336.5 |
+| `retained_sync` | 63 → 35 |
+
+The `tree_build` stage (1.009 ms/frame, 0.600 ms of it the Player
+component) no longer appears. Layout rose from 0.165 to 0.274 ms/frame on the
+sync-and-discover path, and the patched-node restyle scans about 2.2× the
+tree. Both are P2 targets.
+
+**Timing.** AMD Ryzen 7 7840HS, release (thin LTO, one codegen unit), CPU Skia
+raster 1920×1080, `taskset -c 2`, 32 spectrum bars, 120 measured frames per
+run. Three alternating invocations each of the saved baseline test binary and
+the candidate (3 runs each; the baseline's first warm-up run of invocation 1,
+8.3/3.8 ms mean, excluded):
+
+| | mean | p50 | p90 |
+| --- | --- | --- | --- |
+| Before | 2.955–3.084 ms | 2.921–3.003 ms | 3.054–3.428 ms |
+| After | 2.119–2.292 ms | 2.105–2.172 ms | 2.224–2.593 ms |
+
+About 28% per frame. Both changes are in the candidate binary, so the audit's
+and the keyed list's shares are not separated.
+
+**Verified.** Release `mesh-core-shell --lib` (all tests, 8 threads): the
+baseline binary and the candidate both fail the same 42 tests. Elements:
+301 passed / 7 ignored. Frontend: 89 passed / 2 failed. Both failures are the
+known `phase87_layout_display_source_semantics_survive_lowering` and
+`shipped_settings_surface_compiles_with_local_pages`. While writing the
+fallback test, two sibling keyed loops with overlapping keys under one parent
+panicked on a NodeId collision. The collision predates this work, and the
+loop identity has no loop discriminator. Filed in the backlog; the test gives
+each loop its own parent.

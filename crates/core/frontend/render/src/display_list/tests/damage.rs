@@ -1342,3 +1342,32 @@ fn frame_plan_derivation_and_visual_damage_profile() {
         "filtered visual damage should be at least 1.5x"
     );
 }
+
+#[test]
+fn compositor_blur_bands_leave_scooped_corners_out() {
+    use mesh_core_elements::style::{CornerShapes, Corners};
+    let bounds = DamageRect {
+        x: 0,
+        y: 0,
+        width: 20,
+        height: 20,
+    };
+    let radii = Corners {
+        top_left: 10.0,
+        ..Corners::zero()
+    };
+    let bands = rounded_region_bands(
+        bounds,
+        radii,
+        CornerShapes::from_css("scoop round round round"),
+        bounds,
+    );
+    let covers = |x: u32, y: u32| {
+        bands
+            .iter()
+            .any(|r| x >= r.x && x < r.x + r.width && y >= r.y && y < r.y + r.height)
+    };
+    assert!(!covers(1, 1), "inside the scoop: {bands:?}");
+    assert!(!covers(6, 6), "inside the scoop: {bands:?}");
+    assert!(covers(11, 1) && covers(1, 11) && covers(10, 10));
+}

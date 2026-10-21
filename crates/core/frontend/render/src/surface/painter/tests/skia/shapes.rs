@@ -490,6 +490,8 @@ fn skia_shape_push_clip_intersects_command_clip() {
                     height: 4,
                 },
                 radii: mesh_core_elements::style::Corners::zero(),
+                shapes: Default::default(),
+                mode: crate::surface::painter::PainterClipMode::Inside,
             }),
             PainterCommand::DrawRect {
                 rect: ClipRect {
@@ -955,4 +957,94 @@ fn rounded_shapes_repaint_identically_under_any_clip() {
             }
         }
     }
+}
+
+fn scooped_top_left() -> mesh_core_elements::CornerShapes {
+    mesh_core_elements::CornerShapes::from_css("scoop round round round")
+}
+
+#[test]
+fn skia_scoop_clip_removes_the_disc_centred_on_the_corner() {
+    let mut buffer = PixelBuffer::new(24, 24);
+    let mut diagnostics = Vec::new();
+    let rect = ClipRect {
+        x: 2,
+        y: 2,
+        width: 20,
+        height: 20,
+    };
+    let red = Color::from_hex("#ff0000").unwrap();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[
+            PainterCommand::PushClip(PainterClip::shape(
+                rect,
+                Corners {
+                    top_left: 12.0,
+                    ..Corners::zero()
+                },
+                scooped_top_left(),
+            )),
+            PainterCommand::DrawRect {
+                rect,
+                paint: PainterPaint::fill(red),
+                clip: full_clip(24, 24),
+            },
+            PainterCommand::PopClip,
+        ],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    // Inside the disc of radius 12 around (2, 2): transparent.
+    assert_eq!(pixel(&buffer, 3, 3), Color::TRANSPARENT);
+    assert_eq!(pixel(&buffer, 9, 9), Color::TRANSPARENT);
+    // Beyond the disc, on both edges and in the far corners: painted.
+    assert_eq!(pixel(&buffer, 16, 3), red);
+    assert_eq!(pixel(&buffer, 3, 16), red);
+    assert_eq!(pixel(&buffer, 20, 20), red);
+    assert_eq!(pixel(&buffer, 20, 3), red);
+}
+
+#[test]
+fn skia_outside_scoops_clip_keeps_everything_but_the_scoops() {
+    let mut buffer = PixelBuffer::new(24, 24);
+    let mut diagnostics = Vec::new();
+    let rect = ClipRect {
+        x: 6,
+        y: 6,
+        width: 12,
+        height: 12,
+    };
+    let red = Color::from_hex("#ff0000").unwrap();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[
+            PainterCommand::PushClip(PainterClip {
+                mode: crate::surface::painter::PainterClipMode::OutsideScoops,
+                ..PainterClip::shape(
+                    rect,
+                    Corners {
+                        top_left: 8.0,
+                        ..Corners::zero()
+                    },
+                    scooped_top_left(),
+                )
+            }),
+            PainterCommand::DrawRect {
+                rect: full_clip(24, 24),
+                paint: PainterPaint::fill(red),
+                clip: full_clip(24, 24),
+            },
+            PainterCommand::PopClip,
+        ],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(pixel(&buffer, 7, 7), Color::TRANSPARENT);
+    assert_eq!(pixel(&buffer, 1, 20), red);
+    assert_eq!(pixel(&buffer, 16, 16), red);
 }

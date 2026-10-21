@@ -79,7 +79,9 @@ impl Shell {
                         // Overflow is a geometry projection. Once the node no
                         // longer escapes the parent, keeping a detached copy
                         // alive would make stale content receive input.
-                        ChildSurfaceKind::Overflow | ChildSurfaceKind::Window => 0,
+                        ChildSurfaceKind::Overflow
+                        | ChildSurfaceKind::Window
+                        | ChildSurfaceKind::Tooltip => 0,
                     };
                     if duration == 0 {
                         self.destroy_child_surface_at(index, child_index);
@@ -130,6 +132,7 @@ impl Shell {
                 .iter()
                 .position(|child| child.node_key == request.node_key);
             if existing_child.is_none()
+                && request.kind != ChildSurfaceKind::Tooltip
                 && !self.components[index]
                     .entering_child_node_keys
                     .contains(&request.node_key)
@@ -381,6 +384,7 @@ impl Shell {
                     None
                 };
                 let popup_config = PopupConfig {
+                    input_passthrough: request.kind == ChildSurfaceKind::Tooltip,
                     parent_surface_id: parent_surface_id.to_string(),
                     // The reserve travels with the padded size it produced, so
                     // the popup's input region is confined to the visible
@@ -709,7 +713,9 @@ fn child_kind_supported(
     window_supported: bool,
 ) -> bool {
     match kind {
-        ChildSurfaceKind::Popover | ChildSurfaceKind::Overflow => popup_supported,
+        ChildSurfaceKind::Popover | ChildSurfaceKind::Overflow | ChildSurfaceKind::Tooltip => {
+            popup_supported
+        }
         ChildSurfaceKind::Window => window_supported,
     }
 }
@@ -731,7 +737,7 @@ fn child_popup_placement(kind: ChildSurfaceKind, authored: PopoverPlacement) -> 
             grab: PopoverGrab::Hover,
             open_on: authored.open_on,
         },
-        ChildSurfaceKind::Window => authored,
+        ChildSurfaceKind::Window | ChildSurfaceKind::Tooltip => authored,
     }
 }
 

@@ -370,18 +370,23 @@ impl AnimatableStyle {
     }
 }
 
-/// Clamp each corner radius to half the shorter box side — the largest radius
-/// the painter can actually render for a box of this size.
+/// The radii the painter renders for a box of this size: when two adjacent
+/// radii exceed their shared side, all four scale down by the same factor
+/// (CSS Backgrounds 3 §5.5). A single corner may span the whole side.
 fn visual_border_radius(radius: Corners, width: f32, height: f32) -> Corners {
-    let cap = (width.min(height) * 0.5).max(0.0);
-    if cap <= 0.0 {
+    if width <= 0.0 || height <= 0.0 {
         return radius;
     }
+    let fit = |side: f32, a: f32, b: f32| if a + b > side { side / (a + b) } else { 1.0 };
+    let scale = fit(width, radius.top_left, radius.top_right)
+        .min(fit(width, radius.bottom_left, radius.bottom_right))
+        .min(fit(height, radius.top_left, radius.bottom_left))
+        .min(fit(height, radius.top_right, radius.bottom_right));
     Corners {
-        top_left: radius.top_left.min(cap),
-        top_right: radius.top_right.min(cap),
-        bottom_right: radius.bottom_right.min(cap),
-        bottom_left: radius.bottom_left.min(cap),
+        top_left: radius.top_left * scale,
+        top_right: radius.top_right * scale,
+        bottom_right: radius.bottom_right * scale,
+        bottom_left: radius.bottom_left * scale,
     }
 }
 
@@ -1047,8 +1052,20 @@ mod tests {
 
         let style = AnimatableStyle::from_node(&node);
 
-        // cap = min(32, 28) / 2 = 14.
+        // The vertical sides bind: 28 / (9999 + 9999) scales every corner to 14.
         assert_eq!(style.border_radius, Corners::all(14.0));
+
+        node.layout.width = 30.0;
+        node.layout.height = 30.0;
+        node.computed_style.border_radius = Corners {
+            top_left: 30.0,
+            ..Corners::zero()
+        };
+        assert_eq!(
+            AnimatableStyle::from_node(&node).border_radius.top_left,
+            30.0,
+            "a lone corner may span the whole side"
+        );
     }
 
     #[test]

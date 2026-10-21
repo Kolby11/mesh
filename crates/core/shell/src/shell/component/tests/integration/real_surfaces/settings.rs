@@ -425,3 +425,119 @@ fn settings_pages_render_their_template_conditionals_without_errors() {
         "the advanced page shows either its rows or their empty states"
     );
 }
+
+#[test]
+fn appearance_theme_cards_stack_their_preview_above_the_label() {
+    // Shipped themes lay buttons out as rows; the card must still give its
+    // preview the full card width rather than squeezing it beside the label.
+    let mut theme = default_theme();
+    theme
+        .defaults_mut()
+        .components
+        .entry("button".into())
+        .or_default()
+        .insert("flex-direction".into(), "row".into());
+    let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+    settings
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
+        .unwrap();
+    settings
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = settings.last_tree.as_ref().expect("rendered appearance tree");
+    let card = first_node_with_class_token(tree, "theme-option").expect("theme card");
+    let preview = first_node_with_class_token(card, "theme-preview").expect("theme preview");
+    let copy = first_node_with_class_token(card, "theme-option-copy").expect("theme copy");
+
+    assert!(
+        preview.layout.width + 1.0 >= copy.layout.width && preview.layout.width > 100.0,
+        "preview {:?} should span the card like its label {:?}",
+        preview.layout,
+        copy.layout
+    );
+    assert!(
+        copy.layout.y >= preview.layout.y + preview.layout.height,
+        "label {:?} should sit below the preview {:?}",
+        copy.layout,
+        preview.layout
+    );
+}
+
+#[test]
+fn clicking_a_theme_card_repaints_settings_in_the_new_theme_in_one_frame() {
+    let theme = default_theme();
+    let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+    let extent = SurfaceExtent::unpadded(920, 900);
+    settings
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
+        .unwrap();
+    for _ in 0..8 {
+        settings.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+    }
+
+    let (x, y) = {
+        let tree = settings.last_tree.as_ref().unwrap();
+        let card = first_node_with_class_token(tree, "theme-option").expect("theme card");
+        (
+            card.layout.x + card.layout.width / 2.0,
+            card.layout.y + card.layout.height / 2.0,
+        )
+    };
+    settings
+        .handle_input(&theme, 920, 900, ComponentInput::PointerMove { x, y })
+        .unwrap();
+    settings.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+    for pressed in [true, false] {
+        settings
+            .handle_input(
+                &theme,
+                920,
+                900,
+                ComponentInput::PointerButton {
+                    x,
+                    y,
+                    button: 0x110,
+                    pressed,
+                },
+            )
+            .unwrap();
+    }
+
+    // The shell applies the picked theme and broadcasts it before the next
+    // frame of the clicked surface.
+    let mut picked = theme.clone();
+    picked.set_token(
+        "color.surface",
+        mesh_core_theme::TokenValue::String("#c00000".into()),
+        mesh_core_theme::ThemeProvenance::BaseRecovery,
+    );
+    picked.set_token(
+        "color.surface-container",
+        mesh_core_theme::TokenValue::String("#00c000".into()),
+        mesh_core_theme::ThemeProvenance::BaseRecovery,
+    );
+    settings.theme_changed().unwrap();
+    settings.paint_raster(&picked, extent, &mut buffer, 1.0).unwrap();
+
+    let tree = settings.last_tree.as_ref().unwrap();
+    let shell = first_node_with_class_token(tree, "settings-shell").expect("settings shell");
+    assert_eq!(
+        shell.computed_style.background_color,
+        mesh_core_elements::style::Color::from_hex("#c00000").unwrap(),
+        "the shell restyles with the picked theme"
+    );
+    // BGRA, at a point of the shell's right edge that no child covers.
+    let (px, py) = (
+        (shell.layout.x + shell.layout.width - 4.0) as u32,
+        (shell.layout.y + shell.layout.height / 2.0) as u32,
+    );
+    let offset = ((py * buffer.width() + px) * 4) as usize;
+    assert_eq!(
+        &buffer.data()[offset..offset + 4],
+        &[0x00, 0x00, 0xc0, 0xff],
+        "the frame after the click paints the picked theme"
+    );
+}

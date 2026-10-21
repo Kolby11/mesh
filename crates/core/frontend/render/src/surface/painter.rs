@@ -18,7 +18,8 @@ pub use backend::{BlurQuality, MAX_BLUR_PASSES};
 #[allow(unused_imports)]
 pub(crate) use backend::{
     MAX_BLUR_LAYER_DEPTH, MAX_EFFECT_BLUR_RADIUS, PaintBackend, PainterBackendCapabilities,
-    PainterBlendMode, PainterClip, PainterCommand, PainterDiagnostic, PainterDiagnosticSource,
+    PainterBlendMode, PainterClip, PainterClipMode, PainterCommand, PainterDiagnostic,
+    PainterDiagnosticSource,
     PainterFilter, PainterImage, PainterImageSource, PainterLayer, PainterLayerStack,
     PainterLinearGradient, PainterPaint, PainterPaintStyle, PainterPath, PainterPathElement,
     PainterStroke, SkiaPaintBackend, UnsupportedPainterFeature,
@@ -56,14 +57,26 @@ pub struct PainterDiagnosticSnapshot {
     pub property: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct TooltipPaintColors {
+/// Chrome of the standalone tooltip overlay, resolved from the theme's
+/// `tooltip {}` rule. Lengths are logical pixels; the painter scales them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TooltipPaintStyle {
     pub background: Color,
     pub border: Color,
     pub foreground: Color,
+    pub border_width: f32,
+    pub radius: f32,
+    pub padding_x: f32,
+    pub padding_y: f32,
+    pub font_size: f32,
+    pub font_weight: u16,
+    /// Wrap width of the text, excluding padding.
+    pub max_width: f32,
 }
 
-impl TooltipPaintColors {
+impl TooltipPaintStyle {
+    pub const LINE_HEIGHT: f32 = 1.3;
+
     pub const DEFAULT_DARK: Self = Self {
         background: Color {
             r: 0x32,
@@ -83,14 +96,30 @@ impl TooltipPaintColors {
             b: 0xb2,
             a: 0xff,
         },
+        border_width: 1.0,
+        radius: 6.0,
+        padding_x: 8.0,
+        padding_y: 5.0,
+        font_size: 12.0,
+        font_weight: 400,
+        max_width: 320.0,
     };
+
+    /// The tooltip box for text measured at this style's font size and wrap
+    /// width, both in the same units as the style's lengths.
+    pub fn box_size(&self, text_width: f32, text_height: f32) -> (f32, f32) {
+        (
+            text_width.ceil().min(self.max_width) + self.padding_x * 2.0,
+            text_height.ceil().max(self.font_size) + self.padding_y * 2.0,
+        )
+    }
 }
 
 pub struct FrontendRenderEngine {
     paint_backend: Box<dyn PaintBackend>,
     painter_diagnostics: Mutex<Vec<PainterDiagnostic>>,
     text_renderer: SharedTextMeasurer,
-    tooltip_colors: Cell<TooltipPaintColors>,
+    tooltip_style: Cell<TooltipPaintStyle>,
     tooltip_opacity: Cell<f32>,
     /// Font family used by the standalone tooltip overlay. Tooltips are
     /// painted outside the display list, so the shell supplies the active
@@ -152,7 +181,7 @@ impl FrontendRenderEngine {
             paint_backend: Box::<SkiaPaintBackend>::default(),
             painter_diagnostics: Mutex::new(Vec::new()),
             text_renderer: SharedTextMeasurer,
-            tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
+            tooltip_style: Cell::new(TooltipPaintStyle::DEFAULT_DARK),
             tooltip_opacity: Cell::new(1.0),
             tooltip_font_family: RefCell::new("Inter".into()),
             tooltip_center_x: Cell::new(false),
@@ -171,7 +200,7 @@ impl FrontendRenderEngine {
             paint_backend,
             painter_diagnostics: Mutex::new(Vec::new()),
             text_renderer: SharedTextMeasurer,
-            tooltip_colors: Cell::new(TooltipPaintColors::DEFAULT_DARK),
+            tooltip_style: Cell::new(TooltipPaintStyle::DEFAULT_DARK),
             tooltip_opacity: Cell::new(1.0),
             tooltip_font_family: RefCell::new("Inter".into()),
             tooltip_center_x: Cell::new(false),
@@ -210,8 +239,8 @@ impl FrontendRenderEngine {
         self.backdrop_frame.get()
     }
 
-    pub fn set_tooltip_colors(&self, colors: TooltipPaintColors) {
-        self.tooltip_colors.set(colors);
+    pub fn set_tooltip_style(&self, style: TooltipPaintStyle) {
+        self.tooltip_style.set(style);
     }
 
     pub fn set_tooltip_opacity(&self, opacity: f32) {
@@ -230,8 +259,8 @@ impl FrontendRenderEngine {
         self.tooltip_scale.set(scale.max(0.0));
     }
 
-    pub(super) fn tooltip_colors(&self) -> TooltipPaintColors {
-        self.tooltip_colors.get()
+    pub(super) fn tooltip_style(&self) -> TooltipPaintStyle {
+        self.tooltip_style.get()
     }
 
     pub(super) fn tooltip_opacity(&self) -> f32 {

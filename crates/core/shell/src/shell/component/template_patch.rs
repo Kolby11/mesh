@@ -5,7 +5,7 @@
 //! the retained tree in place. The template is not rebuilt and the retained
 //! tree is not diffed; the patched nodes go through the targeted restyle.
 //! Any member read by something a binding does not cover (a `{#if}`
-//! condition, a `{#for}` source or key, component props, or an unkeyed loop
+//! condition, a structural loop change, component props, or an unkeyed loop
 //! body) leaves the frame on the narrow rebuild path.
 
 use super::*;
@@ -112,7 +112,67 @@ impl FrontendSurfaceComponent {
         // binding somewhere in the tree; collect the nodes those bind.
         let mut covered: HashMap<&str, HashSet<&str>> = HashMap::new();
         let mut targets: Vec<NodePath> = Vec::new();
-        collect_binding_targets(tree, &readers, &mut Vec::new(), &mut covered, &mut targets);
+        let mut list_targets = Vec::new();
+        collect_binding_targets(
+            tree,
+            &readers,
+            &mut Vec::new(),
+            &mut covered,
+            &mut targets,
+            &mut list_targets,
+        );
+        let mut lists = HashMap::new();
+        let mut refreshed_bindings = HashMap::new();
+        for (path, bindings) in list_targets {
+            let item = bindings
+                .keyed_item
+                .as_ref()
+                .expect("collected keyed binding");
+            let identity = Arc::as_ptr(&item.list) as usize;
+            if !lists.contains_key(&identity) {
+                let instance = bindings.instance_key.as_ref();
+                let Some(state) = self.runtime_state(instance) else {
+                    return false;
+                };
+                let Some(module_id) = module_ids.get(instance) else {
+                    return false;
+                };
+                let bound = LocaleBoundState::with_localized_misses(
+                    &state,
+                    self.locale.module_translator(module_id),
+                    self.localized_misses_handle(instance),
+                );
+                let Some(items) = mesh_core_frontend::refresh_keyed_template_list(
+                    &item.list,
+                    &bound,
+                    instance,
+                    Some(&*self),
+                ) else {
+                    return false;
+                };
+                lists.insert(identity, items);
+            }
+            let value = &lists[&identity][item.index];
+            if bindings
+                .locals
+                .as_ref()
+                .and_then(|locals| locals.get(&item.list.item_name))
+                != Some(value)
+            {
+                let mut next = (*bindings).clone();
+                let mut locals = next.locals.as_deref().cloned().unwrap_or_default();
+                locals.insert(item.list.item_name.clone(), value.clone());
+                next.locals = Some(Arc::new(locals));
+                refreshed_bindings.insert(path.clone(), Arc::new(next));
+                targets.push(path);
+            }
+        }
+        if readers
+            .keys()
+            .any(|instance| self.has_template_expression_failure_for(instance))
+        {
+            return false;
+        }
         targets.sort_unstable();
         targets.dedup();
         for (instance_key, expressions) in &readers {
@@ -138,6 +198,9 @@ impl FrontendSurfaceComponent {
             let Some(node) = node_at_path_mut(&mut tree, path) else {
                 continue;
             };
+            if let Some(bindings) = refreshed_bindings.get(path) {
+                node.set_template_bindings(Arc::clone(bindings));
+            }
             let Some(instance_key) = node
                 .template_bindings()
                 .map(|bindings| bindings.instance_key.to_string())
@@ -224,11 +287,18 @@ fn collect_binding_targets<'tree>(
     path: &mut NodePath,
     covered: &mut HashMap<&'tree str, HashSet<&'tree str>>,
     targets: &mut Vec<NodePath>,
+    list_targets: &mut Vec<(NodePath, Arc<mesh_core_elements::TemplateBindings>)>,
 ) {
     if let Some(bindings) = node.template_bindings()
         && let Some(changed) = readers.get(bindings.instance_key.as_ref())
     {
         let entry = covered.entry(bindings.instance_key.as_ref()).or_default();
+        if let Some(item) = &bindings.keyed_item
+            && changed.contains(&item.list.source)
+        {
+            entry.insert(item.list.source.as_str());
+            list_targets.push((path.clone(), Arc::clone(bindings)));
+        }
         let mut reads_change = false;
         for expression in bindings.expressions() {
             entry.insert(expression);
@@ -240,7 +310,7 @@ fn collect_binding_targets<'tree>(
     }
     for (index, child) in node.children.iter().enumerate() {
         path.push(index);
-        collect_binding_targets(child, readers, path, covered, targets);
+        collect_binding_targets(child, readers, path, covered, targets, list_targets);
         path.pop();
     }
 }

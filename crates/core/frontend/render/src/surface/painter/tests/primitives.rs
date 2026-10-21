@@ -22,6 +22,8 @@ fn painter_primitive_command_classes_record_helper_backed_rects() {
         PainterCommand::PushClip(PainterClip {
             rect,
             radii: mesh_core_elements::style::Corners::all(2.0),
+            shapes: Default::default(),
+            mode: crate::surface::painter::PainterClipMode::Inside,
         }),
         PainterCommand::PopClip,
         PainterCommand::PushLayer(PainterLayer::isolated(clip, 0.5, PainterBlendMode::SrcOver)),

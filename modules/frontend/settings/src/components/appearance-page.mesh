@@ -383,6 +383,8 @@ end
     }
 
     .theme-option {
+        flex-direction: column;
+        align-items: stretch;
         min-width: 0;
         flex-basis: 180px;
         flex-grow: 1;

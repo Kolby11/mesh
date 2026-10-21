@@ -21,6 +21,8 @@ fn painter_command_contract_constructs_required_command_set() {
         PainterCommand::PushClip(PainterClip {
             rect,
             radii: mesh_core_elements::style::Corners::all(2.0),
+            shapes: Default::default(),
+            mode: crate::surface::painter::PainterClipMode::Inside,
         }),
         PainterCommand::PopClip,
         PainterCommand::PushLayer(PainterLayer::isolated(clip, 0.5, PainterBlendMode::SrcOver)),
