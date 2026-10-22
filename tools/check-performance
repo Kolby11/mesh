@@ -111,6 +111,7 @@ if ! "$workloads_only"; then
   cargo test -p mesh-core-elements --release --lib retained_layout_validates_only_structure_changes
   cargo test -p mesh-core-elements --release --lib semantic_reindex_reuses_validated_structure
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib hover_frame_visits_scale_with_the_hovered_item_not_the_tree
+  MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib keyed_list_hover_restyle_visits_scale_with_affected_items
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib patched_frame_restyle_visits_scale_with_the_patch_not_the_tree
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib patched_frame_layout_visits_scale_with_the_patch
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib retained_change_paths_cover_geometry_and_overlapping_subtrees
@@ -134,6 +135,7 @@ if ! "$workloads_only"; then
   run_benchmark mesh-core-scripting native_subscription_idle_profile
   run_benchmark mesh-core-scripting validated_state_publication_profile
   run_benchmark mesh-core-render resource_completion_fanout_profile
+  run_benchmark mesh-core-shell glass_dock_cpu_raster_timing_profile
   run_benchmark mesh-core-render glass_raster_profile
   run_benchmark mesh-core-render frame_plan_derivation_and_visual_damage_profile
   run_benchmark mesh-core-render label_resize_scroll_viewport_damage_profile

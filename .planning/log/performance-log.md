@@ -7869,3 +7869,84 @@ atlas-publication and frozen-drawable corrections: 934 passed / 42 failed /
 `retained_change_paths_cover_geometry_and_overlapping_subtrees` each pass with
 `MESH_VERIFY_RETAINED=1`. Final logs are `/tmp/mesh-w6/final-shell-tests.log`
 and `/tmp/mesh-w6/final-shell-gates.log`.
+
+## 2026-10-22 — P2 keyed-list hover diagnostics and CPU glass raster context
+
+`working tree after 470fb285` · area: keyed binding restyle scope, runtime style diagnostics, glass CPU timing
+
+Patched binding IDs explicitly join the restyle targets, including patches
+without a STATE invalidation. The existing interaction collector already carried
+those IDs on ordinary hover frames. The remaining live dock full resolution was
+in runtime style diagnostics: intervening animation generations broke its
+consecutive-generation condition and made each hover patch diagnose the whole
+1,877-node tree. Diagnostics now reuse the exact path-validated restyled set when
+rules, props, container and structure are unchanged. Global changes keep the full
+path. The test-only full-frame switch now forces actual full style resolution,
+not just a full-tree ID-filtered traversal.
+
+**Gate.** `keyed_list_hover_restyle_visits_scale_with_affected_items`, registered
+in `tools/check-performance`, moves over a keyed list at 16 and 1,024 items.
+Hovered and neighboring classes change inherited text color. An unpatched
+pointer-leave frame changes opacity and advances the retained generation between
+diagnostic updates, reproducing the animation-generation gap. Four hover steps
+have exactly the same `(restyle_scan, style_resolve)` counts at both sizes:
+`(23,25), (30,33), (30,33), (44,49)`. Every frame matches a full-restyle twin's
+computed styles and pixels; `MESH_VERIFY_RETAINED=1` finds no missing updates.
+
+**Timing.** AMD Ryzen 7 7840HS, release (thin LTO, one codegen unit), CPU Skia,
+`taskset -c 2`, desktop in use. `glass_dock_hover_animation_profile`: 10 pinned /
+150 installed apps, 1,877 nodes, 2880×180 scale 1, three fresh processes per
+side interleaved, three 60-step sweeps per process, 16 ms sleeps outside timing.
+Before is the pre-edit executable saved from the workspace's release artifacts,
+not a fresh rebuild of HEAD; possible pre-existing artifact/source drift means
+these timings are comparative evidence, not a commit-isolated speedup claim.
+
+| All nine sweeps | Saved executable | Final candidate |
+| --- | --- | --- |
+| mean ms/frame | 10.747–11.895 | 5.579–8.176 |
+| p50 ms | 6.744–8.289 | 4.944–7.790 |
+| p90 ms | 26.750–34.453 | 8.436–12.185 |
+
+Steady sweeps (runs 1–2 in each process) resolve about 313.4 styles/frame before
+and 1.9 after. The candidate's first sweep includes one full diagnostic pass
+while its initial global inputs settle (33.4 resolutions/frame averaged over
+that sweep). An IDs-only intermediate did not fix diagnostics: nine sweeps still
+resolved 313.4–313.8 styles/frame, with mean 10.371–12.015 ms versus the saved
+executable's 10.078–11.770 ms in that earlier interleaved batch. The complete
+fix, rather than further cascade scoping, removes the repeated whole-tree work.
+
+**CPU glass fixture.** `glass_dock_cpu_raster_timing_profile`, also registered in
+`tools/check-performance`, uses the shipped dock at the live 2880×114 size,
+scale 1, bottom-aligned at `(0,1686)` on a 2880×1800 output. It loads an
+output-sized nonuniform BMP (or `MESH_BENCH_WALLPAPER`) and supplies the real
+`PaintContext`/`BackdropFrame`, compositor blur policy, and deferred
+`SurfaceCanvas`/`RasterReplay::run` boundary. Service state is delivered after
+mount. Direct/deferred snapped-animation pixels must match exactly; removing
+the output backdrop must change them. Timed transitions retain wall-clock pacing,
+and only requested frames are sampled. There is no hardware-independent latency
+ceiling.
+
+Same release build and CPU pin, three 60-step sweeps per mode, modes run serially
+in fresh processes (not interleaved). Means across sweeps, milliseconds/frame:
+
+| Fixture mode | Total | Preparation/input | Deferred replay |
+| --- | --- | --- | --- |
+| output backdrop, deferred | 35.445–39.760 | 4.059–4.534 | 31.355–35.448 |
+| zero-output context, deferred | 6.624–7.319 | 4.443–4.699 | 2.169–2.630 |
+| output backdrop, direct | 30.650–39.725 | 30.647–39.722 | 0 |
+
+The backdrop control exposes the expensive raster branch absent from the visit
+fixture. This synthetic wallpaper and compositor-free replay do not establish
+pixel identity with a user's live desktop or reproduce the earlier live 19–21 ms
+measurement exactly. No Wayland presentation is included. Preparation includes
+input/scripts and recording, so the direct mode includes its raster there.
+
+**Validation.** Release shell suite: 976 passed / 32 ignored, zero failures.
+The new gate passes in release and debug with the retained completeness verifier;
+existing patch restyle/layout gates pass with it too. All three CPU fixture modes
+pass their pixel/effect checks. Performance-tool tests: 6 passed; shell script
+syntax and targeted Rust formatting pass. Debug full suite: 975 passed / 32
+ignored / one failure, `load_frontend_components_respects_disabled_debug_inspector`;
+it also fails alone in the pre-change debug executable. No pending planning note
+became orphaned. Both completed backlog items are removed; the broader pipeline
+note remains linked because its other work is open.

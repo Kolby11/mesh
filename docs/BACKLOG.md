@@ -26,10 +26,6 @@ other performance work. Evidence, the Qt Quick / GTK4 comparison, exit
 criteria and the items folded in here:
 [design](../.planning/todos/pending/2026-10-21-change-proportional-pipeline.md).
 
-- [ ] **P2:** Frames that patch a keyed list from a hover handler (the dock's `hovered_index`)
-      re-resolve style for the whole tree instead of the patched items.
-- [ ] Add a CPU glass timing fixture with the live backdrop/refraction context and deferred
-      replay; the current visit-count fixture does not reproduce the live raster workload.
 - [ ] The live replay's first `mesh.apps` injection before the dock's first paint is lost.
 - [ ] GPU-enabled live replay exceeds the CPU fixture's animation visit envelope; align the
       workloads' animation timing before treating that envelope as a GPU structural gate.

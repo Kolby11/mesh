@@ -316,6 +316,33 @@ GPU execution or Wayland presentation budgets; those remain separate renderer
 work. Disable optional stage profiling when comparing timing results.
 
 
+## CPU glass timing fixture
+
+```bash
+nix develop -c cargo test -p mesh-core-shell --release --lib glass_dock_cpu_raster_timing_profile -- --ignored --nocapture --test-threads=1
+```
+
+This compositor-free timing fixture paints the shipped glass dock at 2880×114,
+scale 1, bottom-aligned on a 2880×1800 output. It loads an output-sized,
+nonuniform wallpaper and supplies the live `BackdropFrame` and compositor-blur
+policy, so the dock's refraction and dispersion execute. It uses the shell's
+`SurfaceCanvas` recording and `RasterReplay::run` boundary. Three paced sweeps
+cross ten pinned apps beside 150 installed apps, after entrance animations settle.
+Only requested frames are sampled; preparation includes input, script and paint
+recording, while replay reports CPU raster separately. Total includes both and
+excludes pacing sleeps and Wayland presentation.
+
+Before timing, snapped-animation frames must paint identical bytes directly and
+through deferred replay; removing the output backdrop must change those bytes.
+The fixture runs serially because the renderer's wallpaper source is global.
+`MESH_BENCH_WALLPAPER=/absolute/image.png` selects a real wallpaper instead of
+the deterministic source. `MESH_GLASS_TIMING_MODE=direct` measures immediate
+raster; `no-backdrop` measures deferred replay with the old zero-output context.
+The default is `deferred`. These are attribution controls, not identical pixel
+workloads. The fixture is included in `tools/check-performance`; its timings
+are diagnostic and carry no machine-independent latency ceiling. The existing
+visit fixture still supplies the live replay's structural envelope.
+
 ## GPU residency and workload gates
 
 ```bash

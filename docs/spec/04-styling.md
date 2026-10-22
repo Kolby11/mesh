@@ -340,7 +340,10 @@ invalidation, including all states in multi-state compounds. Class dependencies
 include every class atom, independently of the forward candidate bucket.
 Targeted updates test changed dependencies for selector entry and exit; nodes
 whose matched rules do not change retain their computed style. Inherited text
-and custom-property changes still propagate to descendants.
+and custom-property changes still propagate to descendants. Fixed-shape keyed-list
+patches, including hover-handler writes, target the changed binding nodes through
+retained paths; unrelated items do not add style-resolution work. Runtime style
+diagnostics reuse the resolved set even across intervening animation frames.
 
 **Shipped:** component memo entries retain pre-animation styles. Reuse checks
 the theme, rule-index revision, component props, container dimensions, inherited

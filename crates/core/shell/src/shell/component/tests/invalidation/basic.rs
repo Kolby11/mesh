@@ -2467,6 +2467,122 @@ function pick(label) picked = label end
     );
 }
 
+#[test]
+fn keyed_list_hover_restyle_visits_scale_with_affected_items() {
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(320, 100);
+    let mut per_size = Vec::new();
+    for item_count in [16, 1024] {
+        let source = format!(
+            r##"
+<script lang="luau">
+hovered_index = 0
+items = {{}}
+effect(function()
+    local list = {{}}
+    for index = 1, {item_count} do
+        list[index] = {{id = index, hot = hovered_index == index,
+            neighbor = hovered_index > 0 and math.abs(hovered_index - index) == 1}}
+    end
+    items = list
+end)
+function onHover(index) hovered_index = index end
+</script>
+<template><row style="width: 320px; height: 100px">
+{{#for item in items key={{item.id}}}}<button style="width: 40px; height: 40px; flex-shrink: 0" class:hot={{item.hot}} class:neighbor={{item.neighbor}} onpointerenter={{onHover(item.id)}}><text>x</text><box><text>y</text></box></button>{{/for}}
+</row></template>
+<style>
+button {{ color: #101010; background: #222222; }}
+button:hover {{ opacity: 0.8; }}
+.hot {{ color: #ff0000; background: #0000ff; }}
+.neighbor {{ color: #00ff00; }}
+</style>
+"##
+        );
+        let mut scoped = test_frontend_component(&source);
+        let mut full = test_frontend_component(&source);
+        full.force_full_interaction_frames = true;
+        let mut pixels = PixelBuffer::new(320, 100);
+        let mut full_pixels = PixelBuffer::new(320, 100);
+        for _ in 0..3 {
+            scoped
+                .paint_raster(&theme, extent, &mut pixels, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut full_pixels, 1.0)
+                .unwrap();
+        }
+        scoped.set_profiling_enabled(true);
+        let mut visits = Vec::new();
+        for index in [2, 3, 5, 2] {
+            for component in [&mut scoped, &mut full] {
+                let key = first_node_by_tag(component.last_tree.as_ref().unwrap(), "row")
+                    .unwrap()
+                    .children[index - 1]
+                    .mesh_key()
+                    .unwrap()
+                    .to_owned();
+                let (left, top, right, bottom) =
+                    find_node_bounds_by_key(component.last_tree.as_ref().unwrap(), &key, 0.0, 0.0)
+                        .unwrap();
+                component
+                    .handle_input(
+                        &theme,
+                        320,
+                        100,
+                        ComponentInput::PointerMove {
+                            x: (left + right) / 2.0,
+                            y: (top + bottom) / 2.0,
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(runtime_number(component, "hovered_index"), index as f64);
+            }
+            scoped
+                .paint_raster(&theme, extent, &mut pixels, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut full_pixels, 1.0)
+                .unwrap();
+            let snapshot = scoped.take_invalidation_snapshot().unwrap();
+            assert!(!snapshot.full_rebuild, "{snapshot:?}");
+            assert!(snapshot.patched_node_count > 0, "{snapshot:?}");
+            let counts = snapshot.node_visits;
+            assert!(
+                counts["style_resolve"] > 3,
+                "inherited descendants must resolve: {counts:?}"
+            );
+            assert_eq!(counts["retained_discovery"], 0);
+            visits.push([counts["restyle_scan"], counts["style_resolve"]]);
+            scoped
+                .retained_tree
+                .assert_complete(scoped.last_tree.as_ref().unwrap());
+            assert_eq!(pixels.data(), full_pixels.data(), "hover {index}");
+            let (mut styles, mut full_styles) = (Vec::new(), Vec::new());
+            computed_styles(scoped.last_tree.as_ref().unwrap(), &mut styles);
+            computed_styles(full.last_tree.as_ref().unwrap(), &mut full_styles);
+            assert!(styles == full_styles, "hover {index}: styles diverged");
+            // An unpatched interaction frame advances the retained generation
+            // between diagnostic updates, as animation frames do in the dock.
+            for component in [&mut scoped, &mut full] {
+                component
+                    .handle_input(&theme, 320, 100, ComponentInput::PointerLeave)
+                    .unwrap();
+            }
+            scoped
+                .paint_raster(&theme, extent, &mut pixels, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut full_pixels, 1.0)
+                .unwrap();
+            let _ = scoped.take_invalidation_snapshot();
+        }
+        eprintln!("keyed hover items={item_count} restyle/resolve={visits:?}");
+        per_size.push(visits);
+    }
+    assert_eq!(
+        per_size[0], per_size[1],
+        "unrelated items increased restyle work"
+    );
+}
+
 fn patched_scope_source(clean_siblings: usize) -> String {
     format!(
         r##"

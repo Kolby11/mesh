@@ -1,6 +1,7 @@
 use super::*;
 use crate::shell::ComponentContext;
 use crate::shell::component::catalog::FrontendCatalog;
+mod cpu_timing;
 mod live_replay;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_frontend::compile_frontend_module;

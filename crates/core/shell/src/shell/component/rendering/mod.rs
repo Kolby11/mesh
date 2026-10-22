@@ -831,8 +831,12 @@ impl FrontendSurfaceComponent {
         let targeted_interaction_restyle = trigger_kind == "restyle"
             && (dirty_types.contains(ComponentDirtyFlags::STATE)
                 || animation_only_frame
-                || !lifecycle_nodes.is_empty())
+                || !lifecycle_nodes.is_empty()
+                || !self.patched_binding_nodes.is_empty())
             && !dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
+        #[cfg(test)]
+        let targeted_interaction_restyle =
+            targeted_interaction_restyle && !self.force_full_interaction_frames;
         let paint_only_restyle = trigger_kind == "restyle"
             && !dirty_types.is_empty()
             && dirty_types
@@ -849,6 +853,7 @@ impl FrontendSurfaceComponent {
         affected_keys.affected.extend(lifecycle_nodes);
         let patched_nodes = std::mem::take(&mut self.patched_binding_nodes);
         let patched_frame = !patched_nodes.is_empty();
+        affected_keys.affected.extend(&patched_nodes);
         let patched_layout_class = std::mem::take(&mut self.patched_binding_layout);
         let mut scoped_layout_changed = false;
         let interaction_snapshot_valid = self.interaction_snapshot_valid;
@@ -1646,17 +1651,23 @@ impl FrontendSurfaceComponent {
         }
         // Diagnostics are a per-node function of the node's own style inputs
         // under fixed rules, props, and container size. When this retained
-        // update is the only one since the last diagnosed tree and it kept
-        // the structure, only the nodes it marked style/attribute/state dirty
-        // can report anything new.
+        // update kept the structure, the exact restyled set covers new inputs
+        // even when animation-only generations separated binding patches. Without
+        // that set, retained dirty flags are valid only for consecutive updates.
         let dirty = self.retained_tree.last_dirty();
+        let restyled_paths = self.frame_restyled_nodes.as_ref().and_then(|ids| {
+            self.last_frame_snapshot
+                .as_ref()?
+                .live_paths(tree, ids, || {})
+        });
         let scoped = previous.is_some_and(|previous| {
             RuntimeStyleDiagnosticFingerprint {
                 retained_tree_generation: fingerprint.retained_tree_generation,
                 ..previous
             } == fingerprint
-                && previous.retained_tree_generation.checked_add(1)
-                    == Some(fingerprint.retained_tree_generation)
+                && (restyled_paths.is_some()
+                    || previous.retained_tree_generation.checked_add(1)
+                        == Some(fingerprint.retained_tree_generation))
         }) && dirty.inserted == 0
             && dirty.removed == 0
             && dirty.children == 0;
@@ -1674,6 +1685,22 @@ impl FrontendSurfaceComponent {
             .as_ref()
             .expect("style index cache populated during tree finalization");
         if scoped {
+            if let Some(paths) = restyled_paths {
+                for path in paths {
+                    let mut node = &mut *tree;
+                    for &child in path {
+                        node = &mut node.children[child];
+                    }
+                    self.record_runtime_style_diagnostics_for_single_node(
+                        node,
+                        restyle_rules,
+                        style_index,
+                        &resolver,
+                        context,
+                    );
+                }
+                return;
+            }
             self.record_runtime_style_diagnostics_for_dirty_nodes(
                 tree,
                 restyle_rules,

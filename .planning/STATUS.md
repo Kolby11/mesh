@@ -14,6 +14,16 @@ measurements live in [`log/`](log/README.md).
   fixtures and a CPU-only profiler fixture choosing GPU presentation. The testing
   guide records the supported matrix; see October's log.
 
+- **P2 keyed-list hover and CPU glass fixture implemented:** patched binding IDs
+  join restyle and diagnostic targets across animation-generation gaps.
+  The 16/1,024-item gate passes with identical restyle work, full
+  style/pixel parity and complete retained updates. The new 2880×114 CPU fixture
+  supplies wallpaper/output context and deferred replay, with direct pixel parity
+  and a backdrop-effect check. CPU replay is 31.4–35.4 ms with the synthetic
+  output backdrop versus 2.2–2.6 ms with zero-output context. Release shell suite:
+  976 passed / 32 ignored. Measurements are in the performance log; the recorded
+  inspector baseline failure was cleared by the test fixes described below.
+
 - **Default-feature test baseline cleared:** the full workspace suite passes.
   Shell: 977 passed / 32 existing ignored; module: 330 passed; frontend: 92 passed;
   scripting: 357 passed. Compiler builtin validation and Advanced settings prop
@@ -111,8 +121,8 @@ measurements live in [`log/`](log/README.md).
   priority. P1 (typed node state, typed runtime fields, `Prop` vocabulary with
   change classes) landed 2026-10-21: ~7% dashboard, ~18% steady dock hover.
   W3 scoping, W6 scene preparation and W7 discovery retirement are implemented.
-  Next: scope keyed-list hover-handler restyles and reproduce live glass raster
-  costs in the CPU timing fixture; layout annotation and shared paths remain open.
+  Keyed-list hover-handler restyles and the CPU glass timing fixture are implemented;
+  live replay injection/timing alignment, layout annotation and shared paths remain open.
   [Design](todos/pending/2026-10-21-change-proportional-pipeline.md); backlog
   lines at the top of `docs/BACKLOG.md`. Single-pass scoping buys 3–10% and is
   deprioritized.

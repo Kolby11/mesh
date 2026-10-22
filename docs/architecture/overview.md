@@ -68,7 +68,10 @@ restyle their state-changed nodes through the same paths; with no selector
 combinators, only inherited values reach other nodes. The exact restyled set
 drives semantics and retained updates. Fixed-shape keyed native lists validate ordered keys and refresh only changed
 items' captured binding locals and handlers. Their property writes feed the same frame dirty
-set; structural list changes retain the rebuild path. Layout-class patches lay
+set and restyle targets, including writes made by hover handlers. Inherited-value
+changes alone propagate beyond those targets. Style diagnostics reuse that exact
+set across intervening animation frames. Structural list changes retain the rebuild
+path. Layout-class patches lay
 out only the patched branch from the restyled set and report the nodes whose
 geometry changed. Full layout passes also report geometry changes while updating
 their projection. Stable frames synchronize producer-reported nodes and subtrees
