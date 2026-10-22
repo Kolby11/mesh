@@ -284,6 +284,7 @@ pub(super) fn annotate_runtime_tree_inner(
         project_runtime_node(node, key, node_id, context);
     }
 
+    let previous_scroll = node.scroll_metrics;
     let offset = context
         .scroll_offsets
         .get(&node_id)
@@ -329,6 +330,9 @@ pub(super) fn annotate_runtime_tree_inner(
     let bounds = annotate_overflow.then(|| {
         mesh_core_interaction::annotate_overflow_node(node, context.scroll_offsets, children_bounds)
     });
+    if context.retained && previous_scroll != node.scroll_metrics {
+        context.changed.insert(node.id);
+    }
     if !context.retained {
         node.validate_finalized_subtree();
     }
@@ -610,11 +614,15 @@ pub(in crate::shell::component) fn annotate_runtime_nodes(
             || node.computed_style.overflow_y.is_scrollable())
             && let Some(metrics) = node.scroll_metrics.as_mut()
         {
+            let previous = *metrics;
             let offset = context.scroll_offsets.entry(node.id).or_default();
             offset.x = offset.x.clamp(0.0, metrics.max_x);
             offset.y = offset.y.clamp(0.0, metrics.max_y);
             metrics.x = offset.x;
             metrics.y = offset.y;
+            if previous != *metrics {
+                context.changed.insert(node.id);
+            }
         }
     }
     true

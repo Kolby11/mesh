@@ -12,6 +12,10 @@ macro_rules! passes {
     };
 }
 passes! {
+    BindingTargetDiscovery => "binding_target_discovery",
+    BindingPatch => "binding_patch",
+    KeyedItemCompare => "keyed_item_compare",
+    KeyedKeyValidation => "keyed_key_validation",
     StyleResolve => "style_resolve",
     RestyleScan => "restyle_scan",
     LayoutBuild => "layout_build",

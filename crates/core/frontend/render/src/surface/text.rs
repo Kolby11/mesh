@@ -81,7 +81,11 @@ pub struct TextRenderer {
 }
 
 struct TextEngine {
+    /// Holds no fonts until [`Self::ensure_font_system`] runs or a database
+    /// is set: [`FontSystem::new`] scans every system font, and the shell sets
+    /// its own database before the first frame.
     font_system: FontSystem,
+    font_system_loaded: bool,
     locale: String,
     font_database: Option<fontdb::Database>,
     font_aliases: HashMap<String, String>,
@@ -414,11 +418,14 @@ pub struct TextSelectionGeometry {
 
 impl TextRenderer {
     pub fn new() -> Self {
-        let font_system = FontSystem::new();
-        let locale = font_system.locale().to_owned();
+        let locale = sys_locale::get_locale().unwrap_or_else(|| String::from("en-US"));
         Self {
             engine: RefCell::new(TextEngine {
-                font_system,
+                font_system: FontSystem::new_with_locale_and_db(
+                    locale.clone(),
+                    fontdb::Database::new(),
+                ),
+                font_system_loaded: false,
                 locale,
                 font_database: None,
                 font_aliases: HashMap::new(),
@@ -1242,6 +1249,7 @@ impl TextEngine {
         self.font_database = Some(database.clone());
         self.bump_measurer_base();
         self.font_system = FontSystem::new_with_locale_and_db(self.locale.clone(), database);
+        self.font_system_loaded = true;
         self.swash_cache = SwashCache::new();
         self.layout_cache.clear();
         GLYPH_ATLAS.with(|atlas| atlas.borrow_mut().clear());
@@ -1286,9 +1294,17 @@ impl TextEngine {
             .saturating_add(self.alias_set_id);
     }
 
+    fn ensure_font_system(&mut self) {
+        if !self.font_system_loaded {
+            self.font_system = FontSystem::new();
+            self.font_system_loaded = true;
+        }
+    }
+
     fn ensure_resource_revision(&mut self) {
         let revision = resource_revision();
         if self.resource_revision == revision {
+            self.ensure_font_system();
             return;
         }
 
@@ -1301,6 +1317,7 @@ impl TextEngine {
                 FontSystem::new_with_locale_and_db(self.locale.clone(), database.clone())
             })
             .unwrap_or_else(FontSystem::new);
+        self.font_system_loaded = true;
         self.swash_cache = SwashCache::new();
         self.layout_cache.clear();
         GLYPH_ATLAS.with(|atlas| atlas.borrow_mut().clear());
@@ -2035,6 +2052,20 @@ fn extract_selected_text(text: &str, start: Cursor, end: Cursor) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_fonts_load_on_first_text_use_unless_a_database_is_set() {
+        let renderer = TextRenderer::new();
+        assert!(!renderer.engine.borrow().font_system_loaded);
+        renderer.measure("text", "sans-serif", 14.0, None);
+        assert!(renderer.engine.borrow().font_system_loaded);
+        assert!(renderer.engine.borrow().font_system.db().len() > 0);
+
+        let renderer = TextRenderer::new();
+        renderer.set_font_database(fontdb::Database::new());
+        renderer.engine.borrow_mut().ensure_resource_revision();
+        assert_eq!(renderer.engine.borrow().font_system.db().len(), 0);
+    }
 
     #[test]
     fn interned_alias_sets_never_share_layouts() {

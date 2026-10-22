@@ -62,11 +62,12 @@ type ShadowRasterKey = (i32, i32, [u32; 4], u32, u32);
 type GradientShaderCacheKey = (u32, u32, Vec<u32>, i32, i32);
 type RoundedGradientKey = (GradientShaderCacheKey, [u32; 4]);
 
-// Keyed by the `Arc<RgbaImage>` allocation's address, so the value holds a
-// strong reference — otherwise a freed allocation could be reused at the same
-// address and silently return the wrong image.
+// Keyed by the `Arc<RgbaImage>` allocation's address. The weak reference keeps
+// that allocation from being reused at the same address, so a key never names
+// a different image, without pinning the decoded pixels: the entry's only
+// pixel memory is the Skia copy.
 struct CachedSkiaImage {
-    _keep_alive: Arc<image::RgbaImage>,
+    _source: std::sync::Weak<image::RgbaImage>,
     image: skia_safe::Image,
 }
 
@@ -1872,8 +1873,6 @@ impl SkiaPaintBackend {
         }
         // Use the Arc pointer as cache key: same allocation == same pixel data,
         // so we can skip `Data::new_copy` and re-use the cached Skia image.
-        // The cache value holds a strong Arc reference so the heap allocation
-        // cannot be freed and re-used at the same address while cached.
         let arc_ptr = Arc::as_ptr(&rgba) as usize;
         let skia_image = SKIA_IMAGE_CACHE.with(|cache| {
             let mut map = cache.borrow_mut();
@@ -1891,10 +1890,10 @@ impl SkiaPaintBackend {
             map.insert(
                 arc_ptr,
                 CachedSkiaImage {
-                    _keep_alive: Arc::clone(&rgba),
+                    _source: Arc::downgrade(&rgba),
                     image: img.clone(),
                 },
-                rgba.as_raw().len().saturating_mul(2),
+                rgba.as_raw().len(),
             );
             Some(img)
         });

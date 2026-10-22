@@ -1,5 +1,5 @@
 <template>
-  <column class="elements-view" hidden={hidden}>
+  <column class="elements-view">
     <row class="elements-toolbar">
       <column class="elements-heading">
         <text class="section-title">Element inspector</text>
@@ -9,44 +9,45 @@
         <text class="picker-button-text">{picker_button_text}</text>
       </button>
     </row>
-    <empty-state class="empty-card" hidden={empty_hidden}>
-      <column class="empty-copy">
-        <text class="empty-title">No element selected</text>
-        <text class="empty-text">Start picking, hover over another surface, and click to keep its details here.</text>
+    {#if type(selected_element) ~= "table"}
+      <empty-state class="empty-card">
+        <column class="empty-copy">
+          <text class="empty-title">No element selected</text>
+          <text class="empty-text">Start picking, hover over another surface, and click to keep its details here.</text>
+        </column>
+      </empty-state>
+    {:else}
+      <column class="element-details">
+        <box class="element-card"><column class="element-copy">
+          <text class="element-title">{element_title}</text>
+          <text class="element-meta">{element_selector}</text>
+          <text class="source-path">{source_file}</text>
+          <text class="element-meta">{module_label}</text>
+          <button class="open-source-button" onclick={onOpenSource} aria-label="Open selected element source in VS Code">
+            <text class="open-source-button-text">{open_source_button_text}</text>
+          </button>
+        </column></box>
+        <box class="element-card"><column class="element-copy">
+          <text class="card-title">Box model</text>
+          <text class="box-size">{size_label}</text>
+          <text class="box-row box-margin">margin  {margin_label}</text>
+          <text class="box-row box-border">border  {border_label}</text>
+          <text class="box-row box-padding">padding {padding_label}</text>
+          <text class="box-row box-content">content {content_size_label}</text>
+        </column></box>
+        <box class="element-card"><column class="element-copy">
+          <text class="card-title">Computed</text>
+          {#for row in computed_rows}
+            <row class="computed-row"><text class="computed-name">{row.name}</text><text class="computed-value">{row.value}</text></row>
+          {/for}
+        </column></box>
       </column>
-    </empty-state>
-    <column class="element-details" hidden={details_hidden}>
-      <box class="element-card"><column class="element-copy">
-        <text class="element-title">{element_title}</text>
-        <text class="element-meta">{element_selector}</text>
-        <text class="source-path">{source_file}</text>
-        <text class="element-meta">{module_label}</text>
-        <button class="open-source-button" onclick={onOpenSource} aria-label="Open selected element source in VS Code">
-          <text class="open-source-button-text">{open_source_button_text}</text>
-        </button>
-      </column></box>
-      <box class="element-card"><column class="element-copy">
-        <text class="card-title">Box model</text>
-        <text class="box-size">{size_label}</text>
-        <text class="box-row box-margin">margin  {margin_label}</text>
-        <text class="box-row box-border">border  {border_label}</text>
-        <text class="box-row box-padding">padding {padding_label}</text>
-        <text class="box-row box-content">content {content_size_label}</text>
-      </column></box>
-      <box class="element-card"><column class="element-copy">
-        <text class="card-title">Computed</text>
-        {#for row in computed_rows}
-          <row class="computed-row"><text class="computed-name">{row.name}</text><text class="computed-value">{row.value}</text></row>
-        {/for}
-      </column></box>
-    </column>
+    {/if}
   </column>
 </template>
 
 <script lang="luau">
-hidden = false
-empty_hidden = false
-details_hidden = true
+selected_element = nil
 picking = false
 picker_button_label = "Start selecting an element"
 picker_button_text = "Select element"

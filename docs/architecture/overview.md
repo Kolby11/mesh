@@ -67,8 +67,18 @@ drives semantics and retained updates. Fixed-shape keyed native lists validate o
 items' captured binding locals and handlers. Their property writes feed the same frame dirty
 set; structural list changes retain the rebuild path. Layout-class patches lay
 out only the patched branch from the restyled set and report the nodes whose
-geometry changed; other layout and rebuild paths still use conservative
-discovery.
+geometry changed. Full layout passes also report geometry changes while updating
+their projection. Stable frames synchronize producer-reported nodes and subtrees
+through snapshot paths, including scroll metadata and sampled style writes;
+retained fingerprint discovery is test-only. Rebuilds and mismatched topology
+reconcile the full retained tree before publishing the frame.
+Retained restyles sample the exact restyled and registered animation nodes;
+previous transition values come from immutable frame records. Child lifecycle
+markers retain and restore their base classes, including when bindings write
+before paint. Display ancestors use retained paths. Child-surface requests
+retain dependencies on trigger geometry, ancestor policy and descendant paint
+extents, and refresh from the finalized dirty set. Identity/element validation
+runs on structural changes; semantic reindexing reuses validated structure.
 Asynchronous icon, glyph and image jobs track their requesting component instances,
 including promoted child targets, and repaint only those consumers on completion.
 An icon lookup whose job also finds nothing is remembered for the resource

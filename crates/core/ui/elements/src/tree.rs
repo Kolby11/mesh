@@ -388,7 +388,7 @@ pub struct TemplateBindings {
     pub locals: Option<Arc<serde_json::Map<String, serde_json::Value>>>,
     pub keyed_item: Option<KeyedTemplateItem>,
     /// `(attribute, expression)` for every non-handler `name={expression}`.
-    pub attributes: Vec<(String, String)>,
+    pub attributes: Vec<(crate::AttrKey, String)>,
     /// The inline children of a `<text>` whose `content` they produce.
     pub inline_content: Option<Arc<[mesh_core_component::TemplateNode]>>,
     /// Handler expressions that capture loop locals, re-bound when a patch
@@ -436,6 +436,8 @@ pub struct KeyedTemplateList {
     pub item_name: String,
     pub key: String,
     pub valid_keys: bool,
+    /// Static item-field dependency of a plain key reference, excluding the item name.
+    pub key_path: Option<Arc<[String]>>,
     pub keys: Arc<[serde_json::Value]>,
 }
 

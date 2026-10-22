@@ -36,17 +36,13 @@ criteria and the items folded in here:
 - [ ] Live replay counts GPU submission as first present; record completion/commit before
       using its GPU open latency as time to visible content.
 - [ ] Give the live replay its own layer-namespace suffix so it can run beside a desktop shell.
-- [ ] **P2:** Complete the shared dirty-set pipeline beyond the animation, interaction and
-      paint-only patch scopes. Layout-class patch frames now lay out only the patched branch, but
-      still annotate, rediscover retained changes and sample animations over the whole tree;
-      nothing consumes `PerSurfaceLayoutState::changed_nodes` yet.
-- [ ] **P2:** Stable-tree layout resolves each dirty node's path from the root (`layout_sync`
-      grows as dirty nodes × depth); share path prefixes. Full passes also pay a
+- [ ] **P2:** Narrow runtime/overflow annotation on layout-class patch frames;
+      these frames still annotate the whole tree before layout.
+- [ ] **P2:** Stable-tree layout and retained synchronization resolve each dirty node's
+      path from the root; share path prefixes. Full layout passes also pay a
       `seed_projection` walk that could fold into the write.
-- [ ] **P3:** Bindings compile to typed setters (finishes D1; with D4 typed patches).
-      Fixed-shape native keyed lists already patch items; key validation and binding-target
-      discovery still scan. Free-form `style:*` bindings are classed STYLE|A11Y, so only a style
-      diff can tell whether they reach layout; typed setters should classify them.
+- [ ] **P3 / D4:** Replace collection snapshot comparisons with write-time item deltas;
+      fixed-shape keyed lists still compare their snapshots to find changed items.
 - [ ] **P4:** Narrow GPU scene preparation by retained revision (each frame records the full
       selection; design inputs are in the pipeline note), after W3. Presentation no longer waits
       for the worker, but a surface is gated while its frame is in flight.
@@ -88,10 +84,6 @@ unless an item says otherwise. IDs point into the
 
 - [ ] **Paint-time effects cannot reach the shell:** `mesh.shell.*` and published events
       from effects that settle during paint are lowered only by the next handler call.
-- [ ] **Sibling keyed loops collide:** two `{#for}` blocks under one parent with overlapping key
-      values get the same `@loop:` NodeId; the retained update asserts and panics. Add a per-loop discriminator.
-- [ ] **`contributes.keybinds` reads as undeclared:** `config doctor` reports subscribed
-      actions of the glass overlays as undeclared; check that runtime Escape bindings resolve.
 - [ ] **`corner-shape: scoop` gaps:** borders are not stroked along a scoop's curve, and
       `overflow: hidden` clips descendants to the rounded shape, not the scooped one ([04 §12.1](spec/04-styling.md#121-corner-shapes-corner-shape)).
 - [ ] **Retire the tooltip overlay reserve:** tooltips that leave their surface are now
@@ -99,8 +91,6 @@ unless an item says otherwise. IDs point into the
 - [ ] **Component styles leak across a surface:** every component's `<style>` joins one
       source-ordered cascade, so a parent's or sibling's `.pill` overrode `status.mesh`'s
       `.pill.battery`. Decide per-component scoping (and migrate modules) or document the global model.
-- [ ] **`border-radius` shorthand with `var()`:** `var(--radius-lg) 0 0 var(--radius-lg)` left the
-      settings sidebar square live, while the longhands work; find where the mixed shorthand drops.
 - [ ] **Settings theme switch may not repaint:** reported 2026-10-21 as needing a tab change; not
       reproduced on `1d50170a` (layer and window roles, file and click paths). Capture a repro.
 
@@ -111,8 +101,6 @@ unless an item says otherwise. IDs point into the
 - [ ] **Host APIs:** `net.http` and `exec.launch-app` are catalogued but unimplemented
       (providers shell out to `curl` / `hyprctl dispatch`). A StatusNotifier tray still needs
       a watcher/host provider; `mesh.dbus_serve` now owns names and exports one object each.
-- [ ] **Icon chains during live switch:** newly mounted modules briefly resolve with an empty pack
-      chain (`effective_chain=[]`), logging missing-icon warnings until the chain is rebuilt.
 - [ ] **Backdrop placement beyond MESH:** refraction predicts surface origins from MESH's own
       surfaces; another client's exclusive zone (e.g. a quickshell bar) misaligns it. Multi-output backdrops are untested.
       A foreign wallpaper layer above MESH's (`quickshell:background`) makes glass refract a different
@@ -124,9 +112,8 @@ Goal: components written as plain Luau, with the framework owning dependency
 tracking, validation and scheduling.
 [Review and evidence](../.planning/todos/pending/2026-10-10-authoring-model.md).
 
-- [ ] The debug-inspector views still compute their empty-state and section
-      `hidden` flags in script, and bubble-options builds rotation class names
-      in functions; move them to `{#if}` and per-item data when next touched.
+- [ ] Bubble-options builds rotation class names in functions; move them to
+      per-item data when next touched.
 - [ ] Narrow compound public inputs and captured template-helper dependencies;
       tables and function calls still use conservative invalidation.
 - [ ] Optimistic pending values on proxy methods, reconciled with emitted state
@@ -141,8 +128,6 @@ tracking, validation and scheduling.
 - [ ] `self` at script top level, plus event forwarding in markup
       (`onpointerenter={self.PopoverEnter}`), replacing `init` captures and
       one-line forwarding handlers.
-- [ ] Locale matching helper (`mesh.locale.is("sk")`) alongside RES-03's
-      formatters.
 
 ## Runtime architecture direction
 
@@ -199,8 +184,6 @@ evidence and test workloads are in the linked reports.
 - [ ] **`mesh.theme` snapshot exceeds the 64 KiB command budget:** full
       tokens/provenance plus every host font family are published together and
       warn at startup; split or page the host font list.
-- [ ] **LSP completion for module and family tokens:** diagnostics accept them,
-      but `var(--` completion offers only contract roles and local properties.
 
 ### Section 05 — Localization and i18n
 

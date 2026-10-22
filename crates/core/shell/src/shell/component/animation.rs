@@ -172,42 +172,53 @@ impl FrontendSurfaceComponent {
             .unwrap_or_default()
     }
 
+    pub(super) fn lifecycle_style_nodes(&mut self, tree: &WidgetNode) -> HashSet<NodeId> {
+        fn descendants(node: &WidgetNode, ids: &mut HashSet<NodeId>) {
+            mesh_core_elements::frame_work::visit(
+                mesh_core_elements::frame_work::Pass::AnimationLookup,
+            );
+            ids.insert(node.id);
+            for child in &node.children {
+                descendants(child, ids);
+            }
+        }
+        let mut current = HashSet::new();
+        if self.surface_entering || self.surface_exiting {
+            descendants(tree, &mut current);
+        } else if let Some(snapshot) = &self.last_frame_snapshot {
+            for key in self
+                .entering_child_keys
+                .iter()
+                .chain(&self.closing_child_keys)
+            {
+                let id = super::runtime_tree::runtime_node_id_for_key(key);
+                let Some(path) = snapshot.node_path(id) else {
+                    continue;
+                };
+                let mut node = tree;
+                for &index in path {
+                    mesh_core_elements::frame_work::visit(
+                        mesh_core_elements::frame_work::Pass::AnimationLookup,
+                    );
+                    let Some(child) = node.children.get(index) else {
+                        break;
+                    };
+                    node = child;
+                }
+                if node.id == id {
+                    descendants(node, &mut current);
+                }
+            }
+        }
+        let mut changed = std::mem::replace(&mut self.previous_lifecycle_nodes, current.clone());
+        changed.extend(current);
+        changed
+    }
+
     pub(super) fn animation_sample_nodes(&self) -> HashSet<NodeId> {
         self.transitions
             .node_ids()
             .chain(self.keyframe_animation_slots.keys().map(|(id, _)| *id))
-            .collect()
-    }
-
-    pub(super) fn scoped_visual_styles(
-        &self,
-        ids: &HashSet<NodeId>,
-    ) -> HashMap<NodeId, AnimatableStyle> {
-        let tree = self.last_tree.as_ref().expect("retained animation tree");
-        let snapshot = self
-            .last_frame_snapshot
-            .as_ref()
-            .expect("retained animation snapshot");
-        ids.iter()
-            .map(|&id| {
-                mesh_core_elements::frame_work::visit(
-                    mesh_core_elements::frame_work::Pass::AnimationPreviousStyle,
-                );
-                let mut node = tree;
-                let mut container = (tree.layout.width, tree.layout.height);
-                for &index in snapshot.node_path(id).expect("retained animation path") {
-                    mesh_core_elements::frame_work::visit(
-                        mesh_core_elements::frame_work::Pass::AnimationLookup,
-                    );
-                    container = animation_child_container(node);
-                    node = &node.children[index];
-                }
-                assert_eq!(node.id, id);
-                (
-                    id,
-                    AnimatableStyle::from_node_in_containing_block(node, container),
-                )
-            })
             .collect()
     }
 
@@ -273,7 +284,7 @@ impl FrontendSurfaceComponent {
                 .last_frame_snapshot
                 .clone()
                 .expect("scoped animation snapshot");
-            for &id in scope {
+            'sample: for &id in scope {
                 let path = snapshot.node_path(id).expect("scoped animation path");
                 let mut container = (tree.layout.width, tree.layout.height);
                 let mut entering = false;
@@ -282,6 +293,9 @@ impl FrontendSurfaceComponent {
                     mesh_core_elements::frame_work::visit(
                         mesh_core_elements::frame_work::Pass::AnimationLookup,
                     );
+                    if self.is_dormant_popover_wrapper(node) {
+                        continue 'sample;
+                    }
                     entering |= node
                         .state
                         .contains(mesh_core_elements::NodeState::SURFACE_ENTERING);
@@ -438,6 +452,7 @@ impl FrontendSurfaceComponent {
                 .contains(mesh_core_elements::NodeState::SURFACE_ENTERING);
         if node.mesh_key().is_some() {
             let node_id = node.id;
+            let before_border_radius = node.computed_style.border_radius;
             let before_sampling =
                 AnimatableStyle::from_node_in_containing_block(node, containing_block);
             live_keys.insert(node_id);
@@ -505,6 +520,7 @@ impl FrontendSurfaceComponent {
             }
             if animation_is_live
                 || before_sampling != sampled
+                || before_border_radius != node.computed_style.border_radius
                 || previous_styles
                     .get(&node_id)
                     .copied()
@@ -916,8 +932,12 @@ fn theme_keyframe_stop(theme: &Theme, stop: &ThemeKeyframeStop) -> component_sty
 }
 
 #[cfg(test)]
-#[cfg(test)]
 pub(super) fn collect_visual_styles(root: &WidgetNode) -> HashMap<NodeId, AnimatableStyle> {
+    visual_styles_for_tree(root)
+}
+
+#[cfg(test)]
+pub(super) fn visual_styles_for_tree(root: &WidgetNode) -> HashMap<NodeId, AnimatableStyle> {
     let mut styles = HashMap::new();
     collect_visual_styles_with_container(
         root,
@@ -926,6 +946,39 @@ pub(super) fn collect_visual_styles(root: &WidgetNode) -> HashMap<NodeId, Animat
         &|_| false,
     );
     styles
+}
+
+pub(super) fn snapshot_visual_styles(
+    snapshot: &mesh_core_elements::FrameSnapshot,
+    ids: &HashSet<NodeId>,
+) -> HashMap<NodeId, AnimatableStyle> {
+    ids.iter()
+        .filter_map(|id| {
+            let node = snapshot.node_by_id(*id)?;
+            mesh_core_elements::frame_work::visit(
+                mesh_core_elements::frame_work::Pass::AnimationPreviousStyle,
+            );
+            let container = node
+                .parent()
+                .and_then(|parent| snapshot.node(parent))
+                .map(|parent| {
+                    (
+                        (parent.layout().width
+                            - parent.style().padding.horizontal()
+                            - parent.style().border_width.horizontal())
+                        .max(0.0),
+                        (parent.layout().height
+                            - parent.style().padding.vertical()
+                            - parent.style().border_width.vertical())
+                        .max(0.0),
+                    )
+                })
+                .unwrap_or((node.layout().width, node.layout().height));
+            let mut style = AnimatableStyle::from_style_and_layout(node.style(), node.layout());
+            style.containing_block = Some(container);
+            Some((*id, style))
+        })
+        .collect()
 }
 
 fn collect_visual_styles_with_container(

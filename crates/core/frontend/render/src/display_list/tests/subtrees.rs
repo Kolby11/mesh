@@ -656,3 +656,31 @@ fn scroll_shift_plans_only_scopes_over_a_uniform_backdrop() {
     scroll(&mut root, &mut list, &mut objects, 8.0);
     assert!(list.scroll_shifts().is_empty());
 }
+
+#[test]
+fn display_ancestors_visit_only_retained_paths() {
+    let mut visits = Vec::new();
+    for count in [16, 1024] {
+        let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
+        for index in 0..count {
+            root.children
+                .push(node(10 + index, "box", 0.0, 0.0, 1.0, 1.0));
+        }
+        let mut branch = node(2, "box", 0.0, 0.0, 20.0, 20.0);
+        branch.children.push(node(3, "box", 0.0, 0.0, 10.0, 10.0));
+        root.children.push(branch);
+        let mut index = super::super::batch_index::BatchIndex::default();
+        index.rebuild(&root, 0.0, 0.0, &HashMap::new());
+        let dirty = HashSet::from([3]);
+        let expected = collect_dirty_ancestor_ids(&root, &dirty);
+        let scope = mesh_core_elements::frame_work::Scope::new(true);
+        let mut actual = HashSet::new();
+        assert!(index.collect_dirty_ancestors(&root, &dirty, &mut actual));
+        assert_eq!(actual, expected);
+        visits.push(scope.snapshot()["display_ancestors"]);
+        drop(scope);
+        root.children.swap(0, count as usize);
+        assert!(!index.collect_dirty_ancestors(&root, &dirty, &mut actual));
+    }
+    assert_eq!(visits, vec![3, 3]);
+}

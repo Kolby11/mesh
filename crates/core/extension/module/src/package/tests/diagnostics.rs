@@ -359,6 +359,10 @@ fn graph_diagnostics_report_keybind_subscription_contract_gaps() {
             && diagnostic.status == "undeclared_keybind_subscription"
             && diagnostic.message.contains("missing")
     }));
+    assert!(!authoring.iter().any(|diagnostic| {
+        diagnostic.status == "undeclared_keybind_subscription"
+            && diagnostic.message.contains("'mute'")
+    }));
     assert!(authoring.iter().any(|diagnostic| {
         diagnostic.module_id == "@mesh/test-frontend"
             && diagnostic.status == "keybind_subscription_missing_handler"

@@ -32,6 +32,7 @@ khronos-egl = { version = "6", features = ["dynamic"], optional = true }
 libc = { workspace = true, optional = true }
 
 cosmic-text = "0.18"
+sys-locale = "0.3"
 fontdb = "0.23"
 image = "0.24"
 resvg = "0.44"

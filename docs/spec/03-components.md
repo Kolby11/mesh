@@ -66,6 +66,10 @@ Component rules (shipped):
 template readers are all recorded element bindings patch those attributes and
 text in place by default.
 Patched nodes still receive style, layout, accessibility, and damage updates.
+The compiler resolves binding targets to typed core properties (or explicit
+free-form attributes); setters report their change classes. A binding index
+retains target paths between template rebuilds, so patches do not rediscover
+targets by walking the tree.
 Keyed native loops with fixed-shape bodies retain their ordered unique string
 or numeric keys and captured item locals. Replacing a collection or mutating an
 item in place patches only changed items when those keys stay unchanged. Key,
@@ -73,8 +77,10 @@ order or length changes reconcile the template. Event handlers in the body are
 re-bound to the patched item's locals; nested control flow, component instances
 and two-way bindings keep the rebuild path. Writes made by handlers during input
 dispatch patch once the dispatch returns.
-Collection/key validation still scans the list; write-time indexed collection
-tracking remains a target. Template function calls can patch
+Collection snapshots still require item comparisons. Plain item-field key
+references reuse validated keys when their dependencies are unchanged; complex
+keys retain runtime validation. Write-time indexed collection tracking remains
+a target. Template function calls can patch
 element properties, with conservative invalidation for captured public state.
 Readers in structural conditions, unsupported loop sources or keys, unkeyed loop bodies,
 component props, or handler bindings use template evaluation and

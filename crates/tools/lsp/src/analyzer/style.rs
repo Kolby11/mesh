@@ -2,14 +2,30 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, InsertTextFormat, MarkupContent, MarkupKind,
 };
 
-use crate::{document::Document, knowledge::css::CSS_PROPERTIES, util::StyleContext};
+use crate::{
+    document::Document, knowledge::css::CSS_PROPERTIES, module_registry::ModuleRegistry,
+    util::StyleContext,
+};
 use std::{collections::BTreeSet, sync::OnceLock};
 
-pub fn complete(ctx: StyleContext, doc: &Document, style_source: &str) -> Vec<CompletionItem> {
+pub fn complete(
+    ctx: StyleContext,
+    doc: &Document,
+    style_source: &str,
+    registry: &ModuleRegistry,
+) -> Vec<CompletionItem> {
     match ctx {
         StyleContext::Property => complete_properties(),
         StyleContext::Value { property } => complete_values(&property),
-        StyleContext::Variable { prefix } => complete_variables(&prefix, style_source),
+        StyleContext::Variable { prefix } => {
+            let tokens = doc
+                .uri
+                .to_file_path()
+                .ok()
+                .map(|path| registry.local_theme_tokens(&path))
+                .unwrap_or_default();
+            complete_variables(&prefix, style_source, &tokens)
+        }
         StyleContext::Prop { prefix } => complete_props(&prefix, doc),
         StyleContext::Selector => vec![],
     }
@@ -143,14 +159,14 @@ fn prop_default_label(value: &mesh_core_component::PropValue) -> String {
     }
 }
 
-fn complete_variables(prefix: &str, style_source: &str) -> Vec<CompletionItem> {
+fn complete_variables(prefix: &str, style_source: &str, tokens: &[String]) -> Vec<CompletionItem> {
     let normalized_prefix = prefix.trim();
     let alternate_prefix = normalized_prefix
         .strip_prefix("--")
         .map(|prefix| prefix.to_string())
         .unwrap_or_else(|| format!("--{normalized_prefix}"));
 
-    available_css_variables(style_source)
+    available_css_variables(style_source, tokens)
         .into_iter()
         .filter(|name| {
             normalized_prefix.is_empty()
@@ -168,9 +184,14 @@ fn complete_variables(prefix: &str, style_source: &str) -> Vec<CompletionItem> {
         .collect()
 }
 
-fn available_css_variables(style_source: &str) -> Vec<String> {
+fn available_css_variables(style_source: &str, tokens: &[String]) -> Vec<String> {
     let mut variables: BTreeSet<String> = theme_css_variables().iter().cloned().collect();
     variables.extend(local_css_variables(style_source));
+    variables.extend(
+        tokens
+            .iter()
+            .map(|name| format!("--{}", name.replace('.', "-"))),
+    );
     variables.into_iter().collect()
 }
 
@@ -220,7 +241,7 @@ mod tests {
 
     #[test]
     fn completions_publish_semantics_and_keep_palette_tokens_private() {
-        let items = complete_variables("", "");
+        let items = complete_variables("", "", &[]);
         assert!(labels(&items).contains(&"--font-body"));
         assert!(labels(&items).contains(&"--icon-size-md"));
         assert!(!labels(&items).contains(&"--base16-base00"));
@@ -254,6 +275,7 @@ mod tests {
                 color: var(--co
             }
             "#,
+            &[],
         );
         let item_labels = labels(&items);
 
@@ -269,13 +291,14 @@ mod tests {
                 color: var(--custom
             }
             "#,
+            &[],
         );
         assert!(labels(&local_items).contains(&"--custom-accent"));
     }
 
     #[test]
     fn variable_completions_accept_prefix_without_custom_property_marker() {
-        let items = complete_variables("color-p", "");
+        let items = complete_variables("color-p", "", &[]);
         assert!(labels(&items).contains(&"--color-primary"));
     }
 }

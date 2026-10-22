@@ -33,6 +33,10 @@ const MOMENTUM_WINDOW: Duration = Duration::from_millis(700);
 const OPEN_LIMIT: Duration = Duration::from_secs(10);
 const SETTLE_AFTER_OPEN: Duration = Duration::from_millis(1200);
 
+/// Keeps replay surfaces apart from a running desktop shell's in compositor
+/// rules and tools such as `hyprctl layers`.
+const REPLAY_NAMESPACE_SUFFIX: &str = ".mesh-replay";
+
 const SURFACES: [&str; 4] = ["glass-bar", "glass-dock", "glass-dashboard", "settings"];
 
 fn compositor_reachable() -> bool {
@@ -390,21 +394,8 @@ impl Replay {
                     .is_none_or(|at| now - at > QUIET);
                 if elapsed > BOOT_LIMIT {
                     return self.fail(shell, "boot did not settle".into());
-                } else if elapsed > BOOT_MIN && (quiet || self.stage == 1) {
-                    if self.stage == 0 {
-                        if !self.inject(shell, "mesh.apps", serde_json::json!({"available":false,"apps":[],"installed":[]})) {
-                            return ReplayStep { wake_at: None };
-                        }
-                        for (interface, payload) in fixed_service_state() {
-                            if !self.inject(shell, interface, payload) {
-                                return ReplayStep { wake_at: None };
-                            }
-                        }
-                        self.stage = 1;
-                        self.next_at = now + Duration::from_millis(1500);
-                    } else if now >= self.next_at {
-                        self.enter(Phase::Clock, now);
-                    }
+                } else if elapsed > BOOT_MIN && quiet {
+                    self.enter(Phase::Clock, now);
                 }
             }
             Phase::Clock => {
@@ -430,8 +421,11 @@ impl Replay {
                             refs(tree, &mut all);
                             eprintln!("refs: {all:?}");
                             fn tiles(node: &WidgetNode) -> usize {
-                                usize::from(node.attributes.get(mesh_core_elements::Prop::Class).is_some_and(|c| c.split_whitespace().any(|t| t == "tile")))
-                                    + node.children.iter().map(tiles).sum::<usize>()
+                                usize::from(
+                                    node.attributes
+                                        .get(mesh_core_elements::Prop::Class)
+                                        .is_some_and(|c| c.split_whitespace().any(|t| t == "tile")),
+                                ) + node.children.iter().map(tiles).sum::<usize>()
                             }
                             eprintln!("tile nodes: {}", tiles(tree));
                             return self.fail(
@@ -607,12 +601,7 @@ struct Frames {
     visits: Vec<BTreeMap<String, u64>>,
 }
 
-fn frames_in(
-    records: &[CapturedRecord],
-    surface: &str,
-    from: Instant,
-    to: Instant,
-) -> Frames {
+fn frames_in(records: &[CapturedRecord], surface: &str, from: Instant, to: Instant) -> Frames {
     let mut frames = Frames::default();
     for record in records {
         match record {
@@ -861,6 +850,9 @@ fn live_glass_replay() {
         eprintln!("skipping live glass replay: the Wayland surface backend did not initialise");
         return;
     }
+    shell
+        .presentation_engine
+        .set_layer_namespace_suffix(REPLAY_NAMESPACE_SUFFIX);
     assert_eq!(
         shell.active_profile_id.as_deref(),
         Some("glass"),

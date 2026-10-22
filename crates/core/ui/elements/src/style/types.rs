@@ -152,6 +152,26 @@ const STYLE_PROFILE_PROPERTIES: &[StyleProfileProperty] = &[
         status: StyleProfileStatus::Implemented,
     },
     StyleProfileProperty {
+        property: "corner-top-left-shape",
+        category: "radius",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "corner-top-right-shape",
+        category: "radius",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "corner-bottom-right-shape",
+        category: "radius",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "corner-bottom-left-shape",
+        category: "radius",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
         property: "border-top-left-radius",
         category: "radius",
         status: StyleProfileStatus::Implemented,

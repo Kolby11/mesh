@@ -7535,3 +7535,222 @@ every gate.
 pass). Elements 302/1 and frontend 89/2 have identical failure names on both
 sides. Mutation check: with the stable-tree call disabled, the gate fails on
 `layout_discovery` 25.
+
+## 2026-10-22 — P3 W5: typed binding targets and retained binding addresses
+
+`working tree` (baseline `4d6b37bb` plus the pre-existing working-tree changes,
+compiled and saved before editing) · area: compiler bindings, template patches,
+key dependency metadata
+
+Element bindings now retain their resolved `Prop` or explicit free-form
+`AttrKey` at build time. Patches compare resolved values without allocating a
+scratch attribute map or resolving names again, then use the typed setter's
+`ChangeClass`. Scalar and structured values keep their original runtime types;
+equal legacy text representations retain the existing no-op semantics.
+`class:*` and `style:*` continue to use the parser's ordinary combined class
+and style bindings; computed style differences determine layout effects.
+
+A rebuild-time index retains expression-to-target paths and per-list item
+paths/snapshots. Write-time patches select these addresses directly instead of
+walking the widget tree. Item snapshots publish only after all expressions
+succeed, alongside the patched tree. Plain name/dotted key dependencies come
+from the existing full_moon expression AST: unchanged item-field inputs reuse
+the previous validated key. Changed inputs and complex/dynamic keys still
+execute through Luau; key/order/length changes and duplicates retain the rebuild
+fallback. This is dependency analysis, not another expression evaluator.
+Collection snapshots still require item comparisons; write-time item deltas
+remain open under P3/D4.
+
+**Structural gates.** `binding_patch_visits_no_target_discovery` counts the
+handler/patch dispatch itself, before paint: one patched node, zero target
+discovery visits and zero runtime key validations at both 16 and 1,024 keyed
+siblings, across repeated item and inherited-color writes. Every frame matches
+a forced-rebuild twin's pixels/computed styles, and the full retained diff finds
+no omitted changes. `typed_binding_setters_preserve_values_and_change_classes`
+covers numeric, boolean, semantic and free-form structured bindings.
+`keyed_list_dynamic_keys_and_nested_key_changes_keep_rebuild_parity` covers
+nested, dynamic-index and function keys across data/key/duplicate changes.
+The existing keyed-list, service-binding and scoped-restyle/layout gates pass.
+The source-offset sibling-loop discriminator and its regression already existed
+in the starting working tree; retained and verified them, and added the
+collision regression plus the new binding gates to `tools/check-performance`.
+
+**Measured.** AMD Ryzen 7 7840HS, `nix develop`, release (thin LTO, one codegen
+unit), CPU Skia, `taskset -c 2`, `glass_dashboard_spectrum_profile`: 151 nodes,
+32 spectrum bars, 1920×1080, 30 warm-up frames then three 120-frame samples per
+invocation. Three alternating baseline/candidate invocations (nine samples per
+side), after all compilation and other tests finished:
+
+| | mean | p50 | p90 |
+| --- | --- | --- | --- |
+| Before | 2.035–2.286 ms | 2.008–2.236 ms | 2.164–2.694 ms |
+| After | 1.958–2.136 ms | 1.916–1.998 ms | 2.167–2.700 ms |
+
+Median sample p50 is 2.029 → 1.960 ms (about 3.4%). Mean and p90 ranges overlap;
+this is a modest p50 improvement, not evidence of a large frame-time win. The
+structural exit gate passes. Stop W5 here; downstream full-tree passes belong
+to W3/W7, rather than extending this change with further local scoping.
+
+**Verified.** Full release shell suite, eight threads: 922 → 925 passed,
+44 failed and 31 ignored on both saved binaries; the 44 failure names are
+identical. Elements: 306 passed / 7 ignored. Expressions: 8 passed / 1 ignored.
+Frontend: 89 passed and the two already recorded failures,
+`phase87_layout_display_source_semantics_survive_lowering` and
+`shipped_settings_surface_compiles_with_local_pages`. Shell syntax check passes
+for `tools/check-performance`. The shared pipeline design note stays pending
+for W3/W6/W7; all pending notes remain linked from the backlog.
+
+
+## 2026-10-22 — W7: retained discovery retired from stable frames
+
+`working tree` (baseline: saved release binary at task entry, `4d6b37bb` plus
+pre-existing changes including W5) · area: retained synchronization, layout
+change reporting, annotation and animation writes
+
+**Change.** Stable frames synchronize producer-reported nodes and subtrees
+through immutable snapshot paths. The former full-tree retained discovery and
+layout-candidate discovery helpers are compiled only in tests. Full layout
+passes report changed geometry while updating their existing projection;
+paint-only layout clears the report. Scoped layout, restyle, semantic
+normalization, scroll annotation, and animation reports select retained updates.
+Selected topology is checked before any retained snapshot is mutated; stale
+paths, changed child lists, and rebuilt trees use full reconciliation.
+Overlapping subtree/node selections synchronize each node once.
+
+**Completeness.** `MESH_VERIFY_RETAINED=1` runs a test-only full verifier after
+every paint, outside visit counters. It checks retained categories, node-owned
+render categories, and stale snapshots. It uses the renderer's authoritative
+render diff: the renderer-global resource generation can advance during
+parallel tests and is invalidated separately. A deliberate omitted-layout
+mutation proves the verifier fails. The verifier exposed scroll-metadata writes
+missing from annotation reports, semantic/scroll changes missing from narrow
+rebuild comparison, and raw border-radius clamping missing from animation
+reports because effective samples were equal; those producers now report them.
+
+**Structural gates.** `patched_frame_layout_visits_scale_with_the_patch` now
+requires zero retained discovery and constant retained synchronization at 16 and
+1,024 clean siblings, plus full retained completeness and forced-full pixel and
+layout parity. `retained_change_paths_cover_geometry_and_overlapping_subtrees`
+covers moved siblings, overlapping scopes and topology recovery. Added a raw
+radius-clamping regression and updated the full-frame animation twin to use its
+explicit forced-full switch. Lifecycle coverage checks the reported subtree
+before the normal post-entrance snapshot retirement. The relevant structural
+gates in `tools/check-performance` enable the full verifier.
+
+**Measured.** AMD Ryzen 7 7840HS, `nix develop`, release (thin LTO, one codegen
+unit), CPU Skia, `taskset -c 2`, `glass_dashboard_spectrum_profile`: 151 nodes,
+32 spectrum bars, 1920×1080, 30 warm-up frames, three 120-frame samples per
+invocation. Three alternating baseline/candidate invocations give nine samples
+per side. Candidate also includes concurrent W3 changes. A concurrent W3 build
+was active; these establish structural counts, not an isolated latency win.
+Raw logs and saved binaries are under `/tmp/mesh-w7/`.
+
+| Per frame, range across nine samples | Before | After |
+| --- | --- | --- |
+| `retained_discovery` | 151–151 | 0–0 |
+| `retained_sync` | 35–35 | 35–35 |
+| `retained_lookup` | 0–0 | 209–209 |
+| `layout_discovery` | 0–0 | 0–0 |
+| Render-object synchronization | 0.066–0.078 ms | 0.062–0.075 ms |
+| Total mean | 2.360–2.949 ms | 2.209–2.921 ms |
+| Total p50 | 2.312–2.911 ms | 2.132–2.768 ms |
+| Total p90 | 2.821–3.476 ms | 2.648–4.080 ms |
+
+Timing ranges overlap; no latency speedup is claimed. Stop W7 at its structural
+exit gate. Repeated root-to-node lookup steps remain explicit work; sharing
+path prefixes is recorded in the existing backlog item.
+
+**Verified.** Saved release baseline: 925 passed / 44 failed / 31 ignored.
+Release production candidate: 933 passed / 42 failed / 31 ignored, with no
+added failure names; the two scoped-scroll tests now pass. Full debug suite
+with the corrected verifier: 935 passed / 40 failed / 31 ignored; no added
+failure names, omitted changes or stale snapshots. The early strict verifier
+reported a parallel global-resource-generation change; switching to the
+existing render-category diff corrects that test-only mismatch. Release
+elements: 309 passed / 7 ignored. Production `cargo check -p mesh-core-shell`
+passes. Changed Rust files were formatted; shell syntax and whitespace checks
+pass. The shared pipeline note remains pending for the remaining W3/W6 work;
+all pending design notes remain linked from the backlog.
+
+**Additional workload checks.** The saved release candidate also passes
+`navigation_hover_profile` and `glass_dock_hover_animation_profile`; these
+are workload validation, not isolated latency claims.
+
+### 2026-10-22 — W3: scope remaining frame consumers
+
+**Implemented.** Display ancestor discovery follows checked retained paths, with
+full discovery only for invalid paths. Transition previous values come directly
+from immutable snapshot records; sampling selects restyled and registered
+animation nodes. Lifecycle classes retain their base values, restore without
+overwriting intervening binding writes, and invalidate scoped interaction
+restyles instead of rebuilding the tree. Stable layout and semantic reindexing
+reuse structural validation; public/full entry points still validate, and
+structural changes retain the validated fallback.
+
+Child-surface requests retain candidate paths, reference indexes and reverse
+dependencies. Dirty paths refresh affected requests, including trigger geometry,
+overflow, content extents and lifecycle changes. Closed popovers retain only
+self/ancestor dependencies until opened. Cached requests and diagnostics match
+the full collector, including request ordering. Request work is now counted in
+the paint counters; the old paint counter's zero excluded collection and is not
+a valid before/after comparison.
+
+**Structural gates.** `display_ancestors_visit_only_retained_paths`,
+`transition_and_lifecycle_frames_visit_only_changed_nodes`,
+`retained_layout_validates_only_structure_changes`,
+`semantic_reindex_reuses_validated_structure`,
+`child_surface_requests_visit_only_dirty_dependencies`, and
+`closed_child_surface_requests_skip_clean_descendants` compare 16 and 1,024
+clean siblings/descendants. They cover constant scoped visits, zero retained
+validation, semantic and request parity, invalid-structure/path fallbacks,
+actual child lifecycle setters and marker removal. Transition/lifecycle twins
+also compare pixels/styles with full frames. Shell gates run with
+`MESH_VERIFY_RETAINED=1`; lifecycle restoration has a separate binding-write
+regression. Gates are wired into `tools/check-performance`.
+
+**Measured.** AMD Ryzen 7 7840HS, `nix develop`, release (thin LTO, one codegen
+unit), CPU Skia (`MESH_RENDER_GPU=0`), `taskset -c 2`, verifier disabled during
+timing. Saved baseline is `4d6b37bb` plus the starting workspace's W5 changes;
+the candidate includes concurrent W7 work. These are combined workspace
+measurements, not an isolated W3 latency attribution. Three alternating
+baseline/candidate invocations per workload; no compile ran during final timing.
+Raw logs, script and saved binaries are under `/tmp/mesh-w3/`.
+
+Dock gate `glass_dock_hover_animation_profile`: 150 installed apps, 1,877 nodes,
+2,880×180; each invocation has three 60-frame samples at 16 ms spacing (nine
+samples per side). Navigation gate `navigation_hover_profile`: 1,920px width,
+CSS-measured height, 25 cycles × four triggers, 100 popover opens, 400 steps and
+400 painted frames per invocation (three samples per side).
+
+| Metric, range across samples | Before | After |
+| --- | --- | --- |
+| Dock previous-style and animation-sample visits/frame | 14.7–14.8 | 6.2–6.3 |
+| Dock display-ancestor visits/frame | 1,823.8–1,823.8 | 21.5–22.1 |
+| Dock structural-validation visits/frame | 0–0 | 0–0 |
+| Dock child-request visits/frame | Not counted in paint | 44.1–45.4 |
+| Dock total mean | 6.049–7.968 ms | 5.650–8.184 ms |
+| Dock total p50 | 4.052–6.087 ms | 3.859–6.048 ms |
+| Dock total p90 | 15.131–18.148 ms | 14.714–18.010 ms |
+| Navigation step mean | 0.9544–1.0008 ms | 0.6469–0.7228 ms |
+| Navigation step p50 | 0.9427–0.9831 ms | 0.6328–0.6851 ms |
+| Navigation step p90 | 1.1327–1.2906 ms | 0.7338–0.8869 ms |
+
+Dock timing ranges overlap; no dock latency win is claimed. Navigation improves
+in the combined candidate. Stop this wave at its structural exit gates; remaining
+layout annotation, shared path prefixes and scene preparation stay in the backlog.
+
+**Measured correction.** The first child-request cache registered descendant
+extent dependencies even for closed popovers. It measured 317.7–348.1 dock
+child-request visits/frame in the same release fixture. The closed-descendant
+gate exposed that residual walk; pruning inactive dependencies gives
+44.1–45.4 visits/frame above. Earlier measurements are retained under
+`/tmp/mesh-w3/pre-pruning/`; they are not the final timing baseline.
+
+**Verified.** Final release shell: 934 passed / 42 failed / 31 ignored versus
+saved starting workspace 925 passed / 44 failed / 31 ignored; no new failure
+names. The two scoped-scroll tests now pass in the combined W3/W7 candidate.
+All new shell structural gates and existing visit gates pass with the full
+retained verifier. Full release elements: 309 passed / 7 ignored; renderer:
+323 passed / 12 ignored; interaction: 50 passed; animation: 46 passed. Rust
+formatting, shell syntax and whitespace checks pass. Architecture/profiling
+references and status are updated; the shared design remains linked for W6.

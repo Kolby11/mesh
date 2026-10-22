@@ -8,6 +8,7 @@ use super::*;
 
 pub(super) struct LayoutProjection {
     raw: LayoutRect,
+    final_layout: LayoutRect,
     extents: (f32, f32),
     pub(super) hidden: bool,
     pub(super) hidden_ancestor: bool,
@@ -18,8 +19,17 @@ pub(super) fn seed_projection(root: &WidgetNode, state: &mut PerSurfaceLayoutSta
         node: &WidgetNode,
         state: &mut PerSurfaceLayoutState,
         parent: Option<(&WidgetNode, bool)>,
+        changed: &mut HashSet<NodeId>,
+        complete: &mut bool,
     ) -> (f32, f32) {
         crate::frame_work::visit(crate::frame_work::Pass::LayoutExtents);
+        match state.projection.get(&node.id) {
+            Some(previous) if previous.final_layout != node.layout => {
+                changed.insert(node.id);
+            }
+            None => *complete = false,
+            _ => {}
+        }
         let hidden_ancestor = parent.is_some_and(|(_, hidden)| hidden);
         let hidden = hidden_ancestor
             || node.computed_style.display == Display::None
@@ -54,16 +64,18 @@ pub(super) fn seed_projection(root: &WidgetNode, state: &mut PerSurfaceLayoutSta
             node.layout.y + node.layout.height,
         );
         for child in &node.children {
-            let child_extents = seed(child, state, Some((node, hidden)));
+            let child_extents = seed(child, state, Some((node, hidden)), changed, complete);
             if !child.is_promoted_popover() && child.computed_style.position != Position::Fixed {
                 extents.0 = extents.0.max(child_extents.0);
                 extents.1 = extents.1.max(child_extents.1);
             }
         }
+        let extents = super::lowering::clip_layout_extents(node, extents);
         state.projection.insert(
             node.id,
             LayoutProjection {
                 raw,
+                final_layout: node.layout,
                 extents,
                 hidden,
                 hidden_ancestor,
@@ -71,8 +83,16 @@ pub(super) fn seed_projection(root: &WidgetNode, state: &mut PerSurfaceLayoutSta
         );
         extents
     }
-    state.projection.clear();
-    seed(root, state, None);
+    let previous_len = state.projection.len();
+    let mut changed = HashSet::new();
+    let mut complete = true;
+    seed(root, state, None, &mut changed, &mut complete);
+    if !complete || previous_len != state.node_map.len() {
+        state
+            .projection
+            .retain(|id, _| state.node_map.contains_key(id));
+    }
+    state.changed_nodes = (complete && previous_len == state.node_map.len()).then_some(changed);
 }
 
 pub(super) fn write_sparse_layout(
@@ -179,6 +199,7 @@ fn write(
             node.layout.height = (extents.1 - raw.y).max(0.0);
         }
     }
+    let extents = super::lowering::clip_layout_extents(node, extents);
     if node.layout != previous {
         changed.insert(node.id);
     }
@@ -186,6 +207,7 @@ fn write(
         node.id,
         LayoutProjection {
             raw,
+            final_layout: node.layout,
             extents,
             hidden,
             hidden_ancestor,

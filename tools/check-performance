@@ -98,14 +98,28 @@ if ! "$workloads_only"; then
   cargo test -p mesh-core-resources --release --lib frozen_font
   cargo test -p mesh-core-scripting --release --lib context::tests::effects
   cargo test -p mesh-core-shell --release --lib legacy_render_is_not_automatically_scheduled
-  cargo test -p mesh-core-shell --release --lib animation_frame_visits_registered_nodes_and_full_diff_finds_no_omissions
-  cargo test -p mesh-core-shell --release --lib hover_frame_visits_scale_with_the_hovered_item_not_the_tree
-  cargo test -p mesh-core-shell --release --lib patched_frame_restyle_visits_scale_with_the_patch_not_the_tree
+  MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib animation_frame_visits_registered_nodes_and_full_diff_finds_no_omissions
+  MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib transition_and_lifecycle_frames_visit_only_changed_nodes
+  MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib child_surface_requests_visit_only_dirty_dependencies
+  MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib closed_child_surface_requests_skip_clean_descendants
+  cargo test -p mesh-core-shell --release --lib lifecycle_classes_restore_without_overwriting_binding_writes
+  cargo test -p mesh-core-render --release --lib display_ancestors_visit_only_retained_paths
+  cargo test -p mesh-core-elements --release --lib retained_layout_validates_only_structure_changes
+  cargo test -p mesh-core-elements --release --lib semantic_reindex_reuses_validated_structure
+  MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib hover_frame_visits_scale_with_the_hovered_item_not_the_tree
+  MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib patched_frame_restyle_visits_scale_with_the_patch_not_the_tree
+  MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib patched_frame_layout_visits_scale_with_the_patch
+  MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib retained_change_paths_cover_geometry_and_overlapping_subtrees
+  cargo test -p mesh-core-shell --release --lib retained_completeness_verifier_detects_an_omitted_layout_change
+  MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib animation_reports_clamped_radius_even_when_the_effective_sample_is_unchanged
   cargo test -p mesh-core-shell --release --lib template_patching
   cargo test -p mesh-core-shell --release --lib service_field_update_patches
   cargo test -p mesh-core-shell --release --lib service_fields_patch_keyed
   cargo test -p mesh-core-shell --release --lib service_binding_failure
   cargo test -p mesh-core-shell --release --lib keyed_list_
+  cargo test -p mesh-core-shell --release --lib typed_binding_setters_preserve_values_and_change_classes
+  cargo test -p mesh-core-shell --release --lib binding_patch_visits_no_target_discovery
+  cargo test -p mesh-core-shell --release --lib sibling_keyed_loops_with_overlapping_keys_get_distinct_node_ids
   cargo test -p mesh-core-elements --release --lib nested_fit_extents_visit_once
   cargo test -p mesh-core-frontend --release --lib compiler_normalizes_completed_tree_once
   cargo test -p mesh-core-shell --release --lib keyed_loop_bindings_capture_locals

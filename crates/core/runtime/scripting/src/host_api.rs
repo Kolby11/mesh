@@ -13,6 +13,7 @@
 /// mesh.theme.on_change(cb)    → subscription   (requires theme.read)
 /// import("mesh.i18n", "t")    → string         (requires locale.read)
 /// mesh.locale.current()       → string         (requires locale.read)
+/// mesh.locale.is(tag)         → boolean        (requires locale.read)
 /// mesh.locale.format_number(value) → string   (requires locale.read)
 /// mesh.locale.format_date(timestamp, style?)  (requires locale.read)
 /// mesh.locale.format_time(timestamp, style?)  (requires locale.read)

@@ -10,6 +10,7 @@ use crate::host_api::{HostApiManifest, InterfaceProxy};
 use crate::operation::OperationRegistry;
 use mesh_core_locale::{
     format_date, format_duration, format_number_value, format_percent, format_time,
+    normalize_locale_tag,
 };
 use mlua::{Error as LuaError, LuaSerdeExt, Table, Value as LuaValue, Variadic};
 use serde_json::Value;
@@ -218,6 +219,24 @@ impl ScriptContext {
                     self.lua()
                         .create_function(move |_lua, ()| {
                             Ok(locale_cell.lock().unwrap().resolver.locale().to_string())
+                        })
+                        .map_err(lua_err)?,
+                )
+                .map_err(lua_err)?;
+
+            let locale_cell_for_is = Arc::clone(&self.locale_cell);
+            mesh_locale
+                .set(
+                    "is",
+                    self.lua()
+                        .create_function(move |_lua, tag: String| {
+                            let tag = normalize_locale_tag(&tag).map_err(LuaError::external)?;
+                            let cell = locale_cell_for_is.lock().unwrap();
+                            let active = cell.resolver.locale();
+                            Ok(active == tag
+                                || active
+                                    .strip_prefix(tag.as_str())
+                                    .is_some_and(|suffix| suffix.starts_with('-')))
                         })
                         .map_err(lua_err)?,
                 )
@@ -711,9 +730,8 @@ impl ScriptContext {
                     if spec.as_bytes() == b"mesh.locale" {
                         let key_name = key.to_str()?.to_string();
                         let allowed = match key_name.as_str() {
-                            "current" | "format_number" | "format_date" | "format_duration" => {
-                                has_locale_read
-                            }
+                            "current" | "is" | "format_number" | "format_date"
+                            | "format_duration" => has_locale_read,
                             "set" => has_locale_write,
                             _ => true,
                         };

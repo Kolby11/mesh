@@ -1,5 +1,5 @@
 <template>
-  <column class="benchmark-view" hidden={hidden}>
+  <column class="benchmark-view">
     <text class="section-title">Benchmark / Interaction</text>
     <text class="section-copy">
       Run fixed shell interactions and compare their live profiling summaries.
@@ -28,7 +28,6 @@
 </template>
 
 <script lang="luau">
-hidden = false
 rows = {}
 onRunScenario = nil
 </script>

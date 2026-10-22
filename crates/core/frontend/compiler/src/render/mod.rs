@@ -803,6 +803,14 @@ where
             key: for_node.key.clone().unwrap(),
             keys: keys.clone().into(),
             valid_keys,
+            key_path: mesh_core_expression::compile_expression(for_node.key.as_deref().unwrap())
+                .ok()
+                .and_then(|expression| {
+                    expression
+                        .reference_path()
+                        .filter(|path| path.first() == Some(&for_node.item_name))
+                        .map(|path| Arc::from(&path[1..]))
+                }),
         })
     });
     for (item_ordinal, item_val) in items.into_iter().enumerate() {
@@ -851,7 +859,12 @@ where
             );
             for (fragment_index, child) in built.iter_mut().enumerate() {
                 if let Some(identity) = item_store.loop_identity() {
-                    let identity = format!("{identity}/{child_index}/{fragment_index}");
+                    // Sibling loops under one parent may yield equal keys; the
+                    // block's source offset keeps their node identities apart.
+                    let identity = format!(
+                        "{}:{identity}/{child_index}/{fragment_index}",
+                        for_node.span.start
+                    );
                     if seen_keyed_identities.insert(identity.clone()) {
                         child.set_loop_identity(identity);
                     } else {
@@ -1124,14 +1137,17 @@ fn record_template_bindings(
     state: &dyn VariableStore,
     namespace_handlers: bool,
 ) {
-    let attributes: Vec<(String, String)> = element
+    let attributes: Vec<(mesh_core_elements::AttrKey, String)> = element
         .attributes
         .iter()
         .filter_map(|attribute| match &attribute.value {
             AttributeValue::Binding(expression) | AttributeValue::TwoWayBinding(expression)
                 if !elements::is_event_handler_attribute(&attribute.name) =>
             {
-                Some((attribute.name.clone(), expression.clone()))
+                Some((
+                    mesh_core_elements::AttrKey::new(&attribute.name),
+                    expression.clone(),
+                ))
             }
             _ => None,
         })
@@ -1208,7 +1224,8 @@ fn rebind_template_handlers(
         if handler.namespaced {
             target.namespace(&bindings.instance_key);
         }
-        node.event_handlers.insert(handler.event.clone(), target.clone());
+        node.event_handlers
+            .insert(handler.event.clone(), target.clone());
         node.event_handler_calls.insert(
             handler.event.clone(),
             mesh_core_elements::EventHandlerCall {
@@ -1227,6 +1244,7 @@ pub fn refresh_keyed_template_list(
     state: &dyn VariableStore,
     instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
+    previous_items: &[serde_json::Value],
 ) -> Option<Vec<serde_json::Value>> {
     if !list.valid_keys {
         return None;
@@ -1236,10 +1254,34 @@ pub fn refresh_keyed_template_list(
     else {
         return None;
     };
-    if items.len() != list.keys.len() {
+    if items.len() != list.keys.len() || items.len() != previous_items.len() {
         return None;
     }
-    for (item, previous_key) in items.iter().zip(list.keys.iter()) {
+    for ((item, previous), previous_key) in items.iter().zip(previous_items).zip(list.keys.iter()) {
+        mesh_core_elements::frame_work::visit(
+            mesh_core_elements::frame_work::Pass::KeyedItemCompare,
+        );
+        // Only plain item-field keys have a complete local dependency proof.
+        // Calls and dynamic keys continue through the real runtime every time.
+        if let Some(path) = &list.key_path {
+            fn field<'a>(
+                mut value: &'a serde_json::Value,
+                path: &[String],
+            ) -> Option<&'a serde_json::Value> {
+                for name in path {
+                    value = value.as_object()?.get(name)?;
+                }
+                Some(value)
+            }
+            if let (Some(next), Some(old)) = (field(item, path), field(previous, path))
+                && next == old
+            {
+                continue;
+            }
+        }
+        mesh_core_elements::frame_work::visit(
+            mesh_core_elements::frame_work::Pass::KeyedKeyValidation,
+        );
         let item_store = LayeredStore {
             base: state,
             item_name: &list.item_name,
@@ -1288,20 +1330,16 @@ pub fn patch_template_bindings(
     let tracking_state = TrackingVariableStore::new(&bound_state);
     let state = &tracking_state as &dyn VariableStore;
     let mut patch = TemplateBindingPatch::default();
-    for (name, expression) in &bindings.attributes {
+    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::BindingPatch);
+    for (target, expression) in &bindings.attributes {
         let value = expr_eval::evaluate_template_expression(
             expression,
             Some(state),
             &bindings.instance_key,
             composition,
         );
-        let key = mesh_core_elements::AttrKey::new(name);
-        // `attributes` lives in the shared authored payload; compare before
-        // writing so an unchanged binding does not copy it.
-        let mut next = mesh_core_elements::AttributeMap::new();
-        next.insert_value(key.clone(), value.clone());
-        if node.attributes.get_by_name(name) != next.get_by_name(name) {
-            patch.change |= node.attributes.set_value(key, value);
+        if !node.attributes.matches_value(target, &value) {
+            patch.change |= node.attributes.set_value(target.clone(), value);
         }
     }
     if let Some(parts) = bindings.inline_content.as_deref() {

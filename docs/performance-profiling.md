@@ -137,15 +137,16 @@ Taffy's internal solver, raster workers and backend work are excluded.
 | `animation_sample`, `animation_previous_style`, `animation_lookup` | Sampling visits, previous-style capture visits, and child-path steps |
 | `accessibility_normalize`, `accessibility_project` | Full/memo normalization traversal and local/snapshot semantic projections |
 | `validation`, `annotation` | Tree validation and runtime/scroll annotation visits, including snapshot-path steps |
-| `retained_discovery`, `retained_sync`, `retained_lookup` | Candidate discovery, selected-node fingerprint refresh, and child-path steps |
+| `retained_discovery`, `retained_sync`, `retained_lookup` | Test-only discovery, selected-node fingerprint refresh, and child-path steps |
 | `display_entries`, `display_ancestors`, `display_build` | Display-entry traversal, dirty-ancestor discovery, and paint-subtree visits |
-| `child_surface_requests` | Child-surface discovery visits; emitted as separate call samples after paint |
+| `child_surface_requests` | Child-surface indexing, dependency/path lookup and affected subtree extent visits |
 
 These counters measure the named functions, not every operation in their
 subsystems. For example, semantic child-text aggregation and reference lookup
 are not counted as normalization visits. Pruned/cache-hit nodes still count
-when a traversal examines them. Child requests run outside the paint scope,
-so their paint-snapshot count is zero; use their separate session-log samples.
+when a traversal examines them. Child requests are refreshed before the paint
+snapshot publishes, so these visits belong to that paint. Repeated request
+reads reuse the cache; a standalone discovery fallback emits a separate sample.
 
 `tools/check-performance` runs
 `animation_frame_visits_registered_nodes_and_full_diff_finds_no_omissions` as
@@ -162,9 +163,19 @@ pixels and computed styles, and a rebuild must reproduce them.
 `keyed_list_one_item_write_does_not_patch_clean_siblings` checks that an
 in-place item write patches one node with both 8 and 256 list items and emits
 no tree-build stage. The companion keyed-list tests compare forced-rebuild
-pixels and verify structural fallbacks. Key validation and binding-target
-discovery still scan their collections/tree; this is a property-patch gate,
-not an all-pass proportionality claim.
+pixels and verify structural fallbacks. Binding targets retain typed setters
+and indexed paths. Plain item-field keys reuse validation when their dependencies
+are unchanged; collection snapshots still require item comparisons.
+The W3 gates compare 16 and 1,024 clean siblings:
+`display_ancestors_visit_only_retained_paths`,
+`transition_and_lifecycle_frames_visit_only_changed_nodes`,
+`child_surface_requests_visit_only_dirty_dependencies`,
+`closed_child_surface_requests_skip_clean_descendants`,
+`retained_layout_validates_only_structure_changes`, and
+`semantic_reindex_reuses_validated_structure`. They check path-proportional
+ancestor work, scoped transition snapshots/sampling, cached child requests,
+and zero retained structural validation; semantic reindexing is compared with
+a complete capture, and actual invalid tags still fail validation.
 The glass dock and spectrum profile tests print visits per measured paint
 alongside their timings. `MESH_BENCH_FORCE_TEMPLATE=1` disables template
 patching/selective template builds in the spectrum profile for comparison.
@@ -209,7 +220,10 @@ animation, enters the dock from outside on each run and paints at 16 ms pacing,
 so its envelope includes hover script patches and the dock's own `:hover`
 transition.
 Replay surfaces appear on the compositor for about a minute under the shipped
-module ids as layer namespaces (not unique, so stop a running desktop shell first); the shell then shuts down and its private files are removed.
+module ids with a `.mesh-replay` suffix as layer namespaces (before any `:blur`
+marker), so they can be told apart from a running desktop shell's surfaces; the
+replay also uses its own IPC socket and state. The shell then shuts down and its
+private files are removed.
 
 ## Repeatable captures
 
@@ -336,3 +350,17 @@ MESH_REQUIRE_GPU=1 cargo test -p mesh-core-render --features renderer-gpu --rele
 
 This keeps scene preparation and GPU completion identical to the gated path;
 it does not model compositor latency or frame pipelining.
+
+### Retained dirty-set completeness
+
+Run shell tests with `MESH_VERIFY_RETAINED=1` to compare the finalized retained
+snapshots with a full fingerprint verifier after every paint. For example:
+
+```sh
+nix develop -c env MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib
+```
+
+The verifier is compiled only in tests and runs outside visit counters. Leave it
+disabled for timing profiles: its full-tree work is intentional verification,
+not production frame cost. `tools/check-performance` enables it for the dirty-set
+structural gates, including the layout gate at 16 and 1,024 clean siblings.

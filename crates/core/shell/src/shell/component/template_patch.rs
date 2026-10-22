@@ -14,6 +14,82 @@ use mesh_core_scripting::LocaleBoundState;
 /// A node to patch, addressed by its child-index path from the root.
 type NodePath = Vec<usize>;
 
+#[derive(Default)]
+pub(super) struct TemplateBindingIndex {
+    readers: HashMap<Arc<str>, HashMap<String, Vec<NodePath>>>,
+    list_readers: HashMap<Arc<str>, HashMap<String, Vec<usize>>>,
+    lists: Vec<IndexedTemplateList>,
+}
+
+struct IndexedTemplateList {
+    instance: Arc<str>,
+    list: Arc<mesh_core_elements::KeyedTemplateList>,
+    items: Vec<Vec<NodePath>>,
+    values: Vec<serde_json::Value>,
+}
+
+impl TemplateBindingIndex {
+    pub(super) fn build(tree: &WidgetNode) -> Self {
+        fn collect(
+            node: &WidgetNode,
+            path: &mut NodePath,
+            index: &mut TemplateBindingIndex,
+            lists: &mut HashMap<usize, usize>,
+        ) {
+            mesh_core_elements::frame_work::visit(
+                mesh_core_elements::frame_work::Pass::BindingTargetDiscovery,
+            );
+            if let Some(bindings) = node.template_bindings() {
+                for expression in bindings.expressions() {
+                    index
+                        .readers
+                        .entry(Arc::clone(&bindings.instance_key))
+                        .or_default()
+                        .entry(expression.to_owned())
+                        .or_default()
+                        .push(path.clone());
+                }
+                if let Some(item) = &bindings.keyed_item {
+                    let identity = Arc::as_ptr(&item.list) as usize;
+                    let list_index = *lists.entry(identity).or_insert_with(|| {
+                        let list_index = index.lists.len();
+                        index
+                            .list_readers
+                            .entry(Arc::clone(&bindings.instance_key))
+                            .or_default()
+                            .entry(item.list.source.clone())
+                            .or_default()
+                            .push(list_index);
+                        index.lists.push(IndexedTemplateList {
+                            instance: Arc::clone(&bindings.instance_key),
+                            list: Arc::clone(&item.list),
+                            items: vec![Vec::new(); item.list.keys.len()],
+                            values: vec![serde_json::Value::Null; item.list.keys.len()],
+                        });
+                        list_index
+                    });
+                    let list = &mut index.lists[list_index];
+                    list.items[item.index].push(path.clone());
+                    list.values[item.index] = bindings
+                        .locals
+                        .as_ref()
+                        .and_then(|locals| locals.get(&item.list.item_name))
+                        .cloned()
+                        .unwrap_or_default();
+                }
+            }
+            for (child_index, child) in node.children.iter().enumerate() {
+                path.push(child_index);
+                collect(child, path, index, lists);
+                path.pop();
+            }
+        }
+        let mut index = Self::default();
+        collect(tree, &mut Vec::new(), &mut index, &mut HashMap::new());
+        index
+    }
+}
+
 impl FrontendSurfaceComponent {
     /// Start a dispatch that moves the retained tree out of `last_tree`.
     /// Handler writes during it cannot be patched against a missing tree, so
@@ -148,64 +224,75 @@ impl FrontendSurfaceComponent {
             }
         }
 
-        // Every expression that reads a changed member must be a recorded
-        // binding somewhere in the tree; collect the nodes those bind.
-        let mut covered: HashMap<&str, HashSet<&str>> = HashMap::new();
         let mut targets: Vec<NodePath> = Vec::new();
-        let mut list_targets = Vec::new();
-        collect_binding_targets(
-            tree,
-            &readers,
-            &mut Vec::new(),
-            &mut covered,
-            &mut targets,
-            &mut list_targets,
-        );
-        let mut lists = HashMap::new();
+        let mut list_targets = HashSet::new();
+        for (instance, expressions) in &readers {
+            for expression in expressions {
+                let bindings = self
+                    .template_binding_index
+                    .readers
+                    .get(instance.as_str())
+                    .and_then(|readers| readers.get(expression));
+                let lists = self
+                    .template_binding_index
+                    .list_readers
+                    .get(instance.as_str())
+                    .and_then(|readers| readers.get(expression));
+                if bindings.is_none() && lists.is_none() {
+                    return false;
+                }
+                if let Some(bindings) = bindings {
+                    targets.extend(bindings.iter().cloned());
+                }
+                if let Some(lists) = lists {
+                    list_targets.extend(lists.iter().copied());
+                }
+            }
+        }
+        let mut refreshed_lists = Vec::new();
         let mut refreshed_bindings = HashMap::new();
-        for (path, bindings) in list_targets {
-            let item = bindings
-                .keyed_item
-                .as_ref()
-                .expect("collected keyed binding");
-            let identity = Arc::as_ptr(&item.list) as usize;
-            if !lists.contains_key(&identity) {
-                let instance = bindings.instance_key.as_ref();
-                let Some(state) = self.runtime_state(instance) else {
-                    return false;
-                };
-                let Some(module_id) = module_ids.get(instance) else {
-                    return false;
-                };
-                let bound = LocaleBoundState::with_localized_misses(
-                    &state,
-                    self.locale.module_translator(module_id),
-                    self.localized_misses_handle(instance),
-                );
-                let Some(items) = mesh_core_frontend::refresh_keyed_template_list(
-                    &item.list,
-                    &bound,
-                    instance,
-                    Some(&*self),
-                ) else {
-                    return false;
-                };
-                lists.insert(identity, items);
+        for list_index in list_targets {
+            let list = &self.template_binding_index.lists[list_index];
+            let instance = list.instance.as_ref();
+            let Some(state) = self.runtime_state(instance) else {
+                return false;
+            };
+            let Some(module_id) = module_ids.get(instance) else {
+                return false;
+            };
+            let bound = LocaleBoundState::with_localized_misses(
+                &state,
+                self.locale.module_translator(module_id),
+                self.localized_misses_handle(instance),
+            );
+            let Some(items) = mesh_core_frontend::refresh_keyed_template_list(
+                &list.list,
+                &bound,
+                instance,
+                Some(&*self),
+                &list.values,
+            ) else {
+                return false;
+            };
+            for (index, value) in items.iter().enumerate() {
+                if list.values[index] == *value {
+                    continue;
+                }
+                for path in &list.items[index] {
+                    let Some(bindings) =
+                        node_at_path(tree, path).and_then(WidgetNode::template_bindings)
+                    else {
+                        return false;
+                    };
+                    let mut next = (**bindings).clone();
+                    let mut locals = next.locals.as_deref().cloned().unwrap_or_default();
+                    locals.insert(list.list.item_name.clone(), value.clone());
+                    next.locals = Some(Arc::new(locals));
+                    refreshed_bindings.insert(path.clone(), Arc::new(next));
+                    targets.push(path.clone());
+                }
             }
-            let value = &lists[&identity][item.index];
-            if bindings
-                .locals
-                .as_ref()
-                .and_then(|locals| locals.get(&item.list.item_name))
-                != Some(value)
-            {
-                let mut next = (*bindings).clone();
-                let mut locals = next.locals.as_deref().cloned().unwrap_or_default();
-                locals.insert(item.list.item_name.clone(), value.clone());
-                next.locals = Some(Arc::new(locals));
-                refreshed_bindings.insert(path.clone(), Arc::new(next));
-                targets.push(path);
-            }
+            refreshed_lists.push((list_index, items));
         }
         if readers
             .keys()
@@ -215,15 +302,6 @@ impl FrontendSurfaceComponent {
         }
         targets.sort_unstable();
         targets.dedup();
-        for (instance_key, expressions) in &readers {
-            let bound = covered.get(instance_key.as_str());
-            if expressions
-                .iter()
-                .any(|expression| !bound.is_some_and(|bound| bound.contains(expression.as_str())))
-            {
-                return false;
-            }
-        }
 
         let mut tree = self.last_tree.take().expect("checked above");
         // Children are shared copy-on-write, so this keeps the last good
@@ -292,6 +370,9 @@ impl FrontendSurfaceComponent {
         if dependencies_changed {
             self.node_service_field_deps = NodeServiceFieldDependencies::build(&tree);
         }
+        for (index, values) in refreshed_lists {
+            self.template_binding_index.lists[index].values = values;
+        }
         self.last_tree = Some(tree);
         self.pending_service_template_nodes = None;
         self.pending_service_binding_readers.clear();
@@ -307,7 +388,8 @@ impl FrontendSurfaceComponent {
         if !patched.is_empty() {
             for (id, change) in changes.iter() {
                 self.frame_dirty.mark(id, change);
-                self.patched_binding_layout |= change.contains(mesh_core_elements::ChangeClass::LAYOUT);
+                self.patched_binding_layout |=
+                    change.contains(mesh_core_elements::ChangeClass::LAYOUT);
             }
             self.patched_binding_nodes.extend(patched);
             // Like the narrow script path, leave the pixels valid: the retained
@@ -322,38 +404,12 @@ impl FrontendSurfaceComponent {
     }
 }
 
-fn collect_binding_targets<'tree>(
-    node: &'tree WidgetNode,
-    readers: &HashMap<String, HashSet<String>>,
-    path: &mut NodePath,
-    covered: &mut HashMap<&'tree str, HashSet<&'tree str>>,
-    targets: &mut Vec<NodePath>,
-    list_targets: &mut Vec<(NodePath, Arc<mesh_core_elements::TemplateBindings>)>,
-) {
-    if let Some(bindings) = node.template_bindings()
-        && let Some(changed) = readers.get(bindings.instance_key.as_ref())
-    {
-        let entry = covered.entry(bindings.instance_key.as_ref()).or_default();
-        if let Some(item) = &bindings.keyed_item
-            && changed.contains(&item.list.source)
-        {
-            entry.insert(item.list.source.as_str());
-            list_targets.push((path.clone(), Arc::clone(bindings)));
-        }
-        let mut reads_change = false;
-        for expression in bindings.expressions() {
-            entry.insert(expression);
-            reads_change |= changed.contains(expression);
-        }
-        if reads_change {
-            targets.push(path.clone());
-        }
+fn node_at_path<'tree>(root: &'tree WidgetNode, path: &[usize]) -> Option<&'tree WidgetNode> {
+    let mut node = root;
+    for &index in path {
+        node = node.children.get(index)?;
     }
-    for (index, child) in node.children.iter().enumerate() {
-        path.push(index);
-        collect_binding_targets(child, readers, path, covered, targets, list_targets);
-        path.pop();
-    }
+    Some(node)
 }
 
 fn node_at_path_mut<'tree>(

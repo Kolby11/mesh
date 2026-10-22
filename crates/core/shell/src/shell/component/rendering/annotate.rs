@@ -163,6 +163,9 @@ fn collapse_promoted_popover_node(node: &mut WidgetNode) {
         // rather than the min-content fallback a 0px available width forces
         // (Quick Settings' 300px panel collapsed to its widest row).
         node.computed_style.direction = mesh_core_elements::style::FlexDirection::Row;
+        // A single-line flex row clamps its line height to this zero-height
+        // wrapper. Wrapping lets the popup measure its intrinsic cross size.
+        node.computed_style.flex_wrap = mesh_core_elements::style::FlexWrap::Wrap;
         for child in &mut node.children {
             child.computed_style.flex_shrink = 0.0;
             child.computed_style.align_self = mesh_core_elements::style::AlignSelf::Start;
@@ -267,11 +270,90 @@ pub(super) fn append_class(node: &mut WidgetNode, class_name: &str) {
     class.push_str(class_name);
 }
 
-pub(in crate::shell::component) fn append_class_recursive(node: &mut WidgetNode, class_name: &str) {
-    append_class(node, class_name);
+pub(in crate::shell::component) fn append_lifecycle_class(
+    node: &mut WidgetNode,
+    class: &str,
+    bases: &mut HashMap<NodeId, (Option<String>, String)>,
+) {
+    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::AnimationLookup);
+    let entry = bases
+        .entry(node.id)
+        .or_insert_with(|| (node.attributes.get(Prop::Class).cloned(), String::new()));
+    append_class(node, class);
+    entry.1 = node
+        .attributes
+        .get(Prop::Class)
+        .cloned()
+        .unwrap_or_default();
     for child in &mut node.children {
-        append_class_recursive(child, class_name);
+        append_lifecycle_class(child, class, bases);
     }
+}
+
+pub(in crate::shell::component) fn restore_lifecycle_classes(
+    tree: &mut WidgetNode,
+    snapshot: Option<&FrameSnapshot>,
+    bases: &mut HashMap<NodeId, (Option<String>, String)>,
+) {
+    for (id, (class, applied)) in bases.drain() {
+        let Some(node) = lifecycle_node_by_id_mut(tree, snapshot, id) else {
+            continue;
+        };
+        // A binding may replace the class between lifecycle invalidation and
+        // paint. Only restore a value this marker pass still owns.
+        if node.attributes.text(Prop::Class) == Some(applied.as_str()) {
+            match class {
+                Some(class) => {
+                    node.attributes.insert(Prop::Class, class);
+                }
+                None => {
+                    node.attributes.remove(Prop::Class);
+                }
+            }
+        }
+        node.state
+            .remove(NodeState::SURFACE_ENTERING | NodeState::SURFACE_EXITING);
+    }
+}
+
+pub(in crate::shell::component) fn lifecycle_node_mut<'a>(
+    tree: &'a mut WidgetNode,
+    snapshot: Option<&FrameSnapshot>,
+    key: &str,
+) -> Option<&'a mut WidgetNode> {
+    lifecycle_node_by_id_mut(tree, snapshot, runtime_node_id_for_key(key))
+}
+
+fn lifecycle_node_by_id_mut<'a>(
+    tree: &'a mut WidgetNode,
+    snapshot: Option<&FrameSnapshot>,
+    id: NodeId,
+) -> Option<&'a mut WidgetNode> {
+    if let Some(path) = snapshot.and_then(|snapshot| snapshot.node_path(id)) {
+        let mut node = &*tree;
+        let valid = path
+            .iter()
+            .try_for_each(|&index| {
+                mesh_core_elements::frame_work::visit(
+                    mesh_core_elements::frame_work::Pass::AnimationLookup,
+                );
+                node = node.children.get(index).ok_or(())?;
+                Ok::<(), ()>(())
+            })
+            .is_ok()
+            && node.id == id;
+        if valid {
+            let mut node = tree;
+            for &index in path {
+                mesh_core_elements::frame_work::visit(
+                    mesh_core_elements::frame_work::Pass::AnimationLookup,
+                );
+                node = &mut node.children[index];
+            }
+            return Some(node);
+        }
+    }
+    tree.find_mut(id)
 }
 
 pub(super) fn find_node_by_key_mut<'a>(
@@ -351,4 +433,34 @@ pub(super) fn narrow_collect_ancestors(
         narrow_collect_ancestors(child, affected, ancestors, full_affected);
     }
     ancestors.pop();
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn lifecycle_classes_restore_without_overwriting_binding_writes() {
+        for initial in [None, Some("authored")] {
+            for replaced in [false, true] {
+                let mut node = WidgetNode::new("box");
+                if let Some(class) = initial {
+                    node.attributes.insert(Prop::Class, class.into());
+                }
+                let snapshot = FrameSnapshot::complete(&node, 1, None).unwrap();
+                let mut bases = HashMap::new();
+                append_lifecycle_class(&mut node, "mesh-surface-entering", &mut bases);
+                append_lifecycle_class(&mut node, "mesh-surface-exiting", &mut bases);
+                if replaced {
+                    node.attributes.insert(Prop::Class, "binding".into());
+                }
+                restore_lifecycle_classes(&mut node, Some(&snapshot), &mut bases);
+                assert_eq!(
+                    node.attributes.text(Prop::Class),
+                    if replaced { Some("binding") } else { initial }
+                );
+                assert!(bases.is_empty());
+            }
+        }
+    }
 }

@@ -1,39 +1,40 @@
 <template>
-  <column class="backend-view" hidden={hidden}>
+  <column class="backend-view">
     <text class="section-title">Backend services</text>
     <text class="section-copy">{state_copy}</text>
 
-    <empty-state class="empty-card" hidden={empty_hidden}>
-      <column class="empty-copy">
-        <text class="empty-title">No backend samples yet</text>
-        <text class="empty-text">Runtime health still appears separately once providers report live timing stages.</text>
-      </column>
-    </empty-state>
+    {#if #rows == 0}
+      <empty-state class="empty-card">
+        <column class="empty-copy">
+          <text class="empty-title">No backend samples yet</text>
+          <text class="empty-text">Runtime health still appears separately once providers report live timing stages.</text>
+        </column>
+      </empty-state>
+    {:else}
 
-    <list class="backend-list" label="Backend services">
-      {#for row in rows}
-        <list-item class="backend-card">
-          <column class="backend-copy">
-            <text class="backend-title">{row.interface}</text>
-            <text class="backend-meta">{row.provider_id}</text>
-            <text class="section-subtitle">Runtime health</text>
-            <text class="backend-metric">{row.runtime_label}</text>
-            <text class="section-subtitle">Timing stages</text>
-            <text class="backend-metric">poll_update: {row.poll_update}</text>
-            <text class="backend-metric">command_handling: {row.command_handling}</text>
-            <text class="backend-metric">state_publish_delivery: {row.state_publish_delivery}</text>
-          </column>
-        </list-item>
-      {/for}
-    </list>
+      <list class="backend-list" label="Backend services">
+        {#for row in rows}
+          <list-item class="backend-card">
+            <column class="backend-copy">
+              <text class="backend-title">{row.interface}</text>
+              <text class="backend-meta">{row.provider_id}</text>
+              <text class="section-subtitle">Runtime health</text>
+              <text class="backend-metric">{row.runtime_label}</text>
+              <text class="section-subtitle">Timing stages</text>
+              <text class="backend-metric">poll_update: {row.poll_update}</text>
+              <text class="backend-metric">command_handling: {row.command_handling}</text>
+              <text class="backend-metric">state_publish_delivery: {row.state_publish_delivery}</text>
+            </column>
+          </list-item>
+        {/for}
+      </list>
+    {/if}
   </column>
 </template>
 
 <script lang="luau">
-hidden = false
 rows = {}
 state_copy = ""
-empty_hidden = false
 </script>
 
 <style>

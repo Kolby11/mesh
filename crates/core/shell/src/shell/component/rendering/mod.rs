@@ -47,6 +47,10 @@ fn state_rule_requires_layout<'a>(
                     | "border-bottom-left-radius"
                     | "border-bottom-right-radius"
                     | "corner-shape"
+                    | "corner-top-left-shape"
+                    | "corner-top-right-shape"
+                    | "corner-bottom-right-shape"
+                    | "corner-bottom-left-shape"
                     | "opacity"
                     | "transform"
                     | "transform-origin"
@@ -635,6 +639,16 @@ impl FrontendSurfaceComponent {
         let mut dirty_types = dirty_types;
         self.retained_update_dirty_roots = None;
         self.retained_update_dirty_nodes.clear();
+        self.frame_restyled_nodes = None;
+        if trigger_kind == "restyle" {
+            restore_lifecycle_classes(
+                tree,
+                self.last_frame_snapshot.as_ref(),
+                &mut self.lifecycle_base_classes,
+            );
+        } else {
+            self.lifecycle_base_classes.clear();
+        }
         // Advance smooth-scroll animations before annotation reads scroll_offsets,
         // so the eased offset lands in this frame's `_mesh_scroll_*` attributes.
         let now = std::time::Instant::now();
@@ -647,15 +661,12 @@ impl FrontendSurfaceComponent {
         let mut scoped_finalize = trigger_kind == "restyle"
             && (dirty_types.contains(ComponentDirtyFlags::STATE)
                 || animation_only_frame
+                || !self.patched_binding_nodes.is_empty()
                 || dirty_types
                     .difference(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS)
                     .is_empty())
             && !dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT)
-            && self.interaction_snapshot_valid
-            && !self.surface_exiting
-            && !self.surface_entering
-            && self.closing_child_keys.is_empty()
-            && self.entering_child_keys.is_empty();
+            && self.interaction_snapshot_valid;
         let scoped_interaction_frame = scoped_finalize;
         #[cfg(test)]
         let scoped_interaction_frame =
@@ -733,22 +744,42 @@ impl FrontendSurfaceComponent {
             && self.entering_child_keys.is_empty())
         .then(|| self.capture_annotation_inputs());
         if self.surface_exiting {
-            append_class_recursive(tree, "mesh-surface-exiting");
+            append_lifecycle_class(
+                tree,
+                "mesh-surface-exiting",
+                &mut self.lifecycle_base_classes,
+            );
             tree.state.insert(NodeState::SURFACE_EXITING);
         }
         if self.surface_entering {
-            append_class_recursive(tree, "mesh-surface-entering");
+            append_lifecycle_class(
+                tree,
+                "mesh-surface-entering",
+                &mut self.lifecycle_base_classes,
+            );
             tree.state.insert(NodeState::SURFACE_ENTERING);
         }
         for node_key in &self.closing_child_keys {
-            if let Some(node) = find_node_by_key_mut(tree, node_key) {
-                append_class_recursive(node, "mesh-surface-exiting");
+            if let Some(node) =
+                lifecycle_node_mut(tree, self.last_frame_snapshot.as_ref(), node_key)
+            {
+                append_lifecycle_class(
+                    node,
+                    "mesh-surface-exiting",
+                    &mut self.lifecycle_base_classes,
+                );
                 node.state.insert(NodeState::SURFACE_EXITING);
             }
         }
         for node_key in &self.entering_child_keys {
-            if let Some(node) = find_node_by_key_mut(tree, node_key) {
-                append_class_recursive(node, "mesh-surface-entering");
+            if let Some(node) =
+                lifecycle_node_mut(tree, self.last_frame_snapshot.as_ref(), node_key)
+            {
+                append_lifecycle_class(
+                    node,
+                    "mesh-surface-entering",
+                    &mut self.lifecycle_base_classes,
+                );
                 node.state.insert(NodeState::SURFACE_ENTERING);
             }
         }
@@ -756,6 +787,16 @@ impl FrontendSurfaceComponent {
             self.node_service_field_deps = NodeServiceFieldDependencies::build(tree);
         }
 
+        let lifecycle_nodes = self.lifecycle_style_nodes(tree);
+        let scoped_interaction_frame = scoped_interaction_frame
+            || (!lifecycle_nodes.is_empty()
+                && trigger_kind == "restyle"
+                && !dirty_types
+                    .intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT)
+                && self.last_frame_snapshot.is_some());
+        #[cfg(test)]
+        let scoped_interaction_frame =
+            scoped_interaction_frame && !self.force_full_interaction_frames;
         // Populate the rule cache once, then run restyle while borrowing it.
         // The cache survives across paints — we only pay the clone cost on
         // source reload (when `cached_restyle_rules` is reset).
@@ -788,7 +829,9 @@ impl FrontendSurfaceComponent {
         // only need the animated values applied below. Reuse the targeted path
         // so an otherwise empty interaction diff avoids a full style walk.
         let targeted_interaction_restyle = trigger_kind == "restyle"
-            && (dirty_types.contains(ComponentDirtyFlags::STATE) || animation_only_frame)
+            && (dirty_types.contains(ComponentDirtyFlags::STATE)
+                || animation_only_frame
+                || !lifecycle_nodes.is_empty())
             && !dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
         let paint_only_restyle = trigger_kind == "restyle"
             && !dirty_types.is_empty()
@@ -797,12 +840,13 @@ impl FrontendSurfaceComponent {
                 .is_empty();
         // Collect affected ids before borrowing index_cache, to satisfy the
         // borrow checker.
-        let affected_keys =
+        let mut affected_keys =
             if targeted_interaction_restyle && dirty_types.contains(ComponentDirtyFlags::STATE) {
                 self.collect_interaction_changed_node_ids()
             } else {
                 InteractionChangedNodeIds::default()
             };
+        affected_keys.affected.extend(lifecycle_nodes);
         let patched_nodes = std::mem::take(&mut self.patched_binding_nodes);
         let patched_frame = !patched_nodes.is_empty();
         let patched_layout_class = std::mem::take(&mut self.patched_binding_layout);
@@ -1016,6 +1060,12 @@ impl FrontendSurfaceComponent {
         // applied together by the post-restyle state pass above. Retained
         // subtrees that were not restyled already carry those constraints.
 
+        if trigger_kind == "restyle"
+            && scoped_restyled.is_some()
+            && !dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT)
+        {
+            scoped_finalize = true;
+        }
         let layout_work_required = !reused_retained_layout || !self.layout_state.valid;
         // Annotation measures overflow before layout, except on rebuilds.
         self.scoped_annotation_inputs =
@@ -1029,14 +1079,17 @@ impl FrontendSurfaceComponent {
         let dirty_structural =
             dirty_types.intersects(ComponentDirtyFlags::SCRIPT | ComponentDirtyFlags::TEXT);
         let dirty_layout = dirty_types.contains(ComponentDirtyFlags::LAYOUT);
-        // A patch frame's path-scoped restyle names every node whose layout
-        // inputs can have changed, so layout needs no tree-wide discovery. The
-        // root joins it because the surface sizing above rewrites its style.
+        // Path-scoped restyle and active animation registrations name the
+        // changed layout inputs. The root joins them because surface sizing
+        // above rewrites its style.
         let stable_layout_nodes = scoped_restyled
-            .as_ref()
-            .filter(|_| patched_frame && dirty_layout && !dirty_structural)
-            .map(|restyled| {
-                let mut nodes: HashSet<NodeId> = restyled.union(&patched_nodes).copied().collect();
+            .clone()
+            .or_else(|| (paint_only_restyle || empty_restyle_avoided).then(HashSet::new))
+            .filter(|_| dirty_layout && !dirty_structural && scoped_finalize)
+            .map(|mut nodes| {
+                nodes.extend(&patched_nodes);
+                nodes.extend(&annotation_dirty);
+                nodes.extend(self.animation_sample_nodes());
                 nodes.insert(tree.id);
                 nodes
             });
@@ -1052,11 +1105,6 @@ impl FrontendSurfaceComponent {
                 Some(&measurer),
             );
         } else {
-            let layout_dirty_node_snapshots = if dirty_layout && !dirty_structural {
-                self.retained_tree.layout_dirty_node_snapshots(tree)
-            } else {
-                None
-            };
             LayoutEngine::compute_incremental_with_dirty_node_snapshots(
                 tree,
                 &mut self.layout_state,
@@ -1064,7 +1112,7 @@ impl FrontendSurfaceComponent {
                 height as f32,
                 dirty_layout,
                 dirty_structural,
-                layout_dirty_node_snapshots.as_deref(),
+                None,
                 &mut self.intrinsic_layout_cache,
                 Some(&measurer),
             );
@@ -1081,6 +1129,9 @@ impl FrontendSurfaceComponent {
             // New compiler trees have no provisional layout. Clamp scroll
             // offsets only against the authoritative post-style geometry.
             mesh_core_interaction::annotate_overflow_tree(tree, &mut self.scroll_offsets);
+        }
+        if let Some(changed) = &self.layout_state.changed_nodes {
+            annotation_dirty.extend(changed.iter().copied());
         }
         // Normalize the live projection after style/layout. Paint refreshes
         // any subsequently animated nodes before the retained diff and final
@@ -1101,13 +1152,21 @@ impl FrontendSurfaceComponent {
                     None => scoped_finalize = false,
                 }
             } else {
-                mesh_core_elements::normalize_accessibility(tree);
+                if trigger_kind == "restyle" {
+                    mesh_core_elements::normalize_accessibility_with_validated_structure(tree);
+                } else {
+                    mesh_core_elements::normalize_accessibility(tree);
+                }
                 scoped_finalize = false;
             }
         } else if trigger_kind == "rebuild" {
             mesh_core_elements::normalize_accessibility_finalized_memo(tree);
         } else {
-            mesh_core_elements::normalize_accessibility(tree);
+            if trigger_kind == "restyle" {
+                mesh_core_elements::normalize_accessibility_with_validated_structure(tree);
+            } else {
+                mesh_core_elements::normalize_accessibility(tree);
+            }
         }
         if cache_finalization {
             self.finalize_component_memo(tree);
@@ -1155,12 +1214,17 @@ impl FrontendSurfaceComponent {
             self.frame_dirty
                 .mark(id, mesh_core_elements::ChangeClass::STYLE);
         }
+        self.frame_restyled_nodes = if paint_only_restyle || empty_restyle_avoided {
+            Some(HashSet::new())
+        } else {
+            scoped_restyled.clone()
+        };
         self.retained_update_dirty_nodes = annotation_dirty;
-        self.sparse_retained_frame = false;
-        if let Some(restyled) = scoped_restyled.filter(|_| scoped_finalize && !layout_work_required)
-        {
-            // Geometry is unchanged and the restyle reported every node it
-            // re-resolved, so no subtree needs rediscovery.
+        if let Some(restyled) = scoped_restyled.filter(|_| {
+            scoped_finalize && (!layout_work_required || self.layout_state.changed_nodes.is_some())
+        }) {
+            // Restyle and layout report their complete changed sets, including
+            // inherited values and siblings moved by geometry propagation.
             for &id in &restyled {
                 self.frame_dirty.mark(
                     id,
@@ -1169,7 +1233,6 @@ impl FrontendSurfaceComponent {
             }
             self.retained_update_dirty_nodes.extend(restyled);
             self.retained_update_dirty_roots = Some(HashSet::new());
-            self.sparse_retained_frame = true;
         } else if scoped_finalize
             && ((targeted_interaction_restyle && interaction_snapshot_valid)
                 || animation_only_frame
@@ -1184,6 +1247,14 @@ impl FrontendSurfaceComponent {
             } else {
                 HashSet::new()
             });
+        }
+        if trigger_kind == "restyle"
+            && (self.retained_update_dirty_roots.is_none()
+                || (layout_work_required && self.layout_state.changed_nodes.is_none()))
+        {
+            // A broad restyle owns the whole subtree; there is no need to
+            // discover which descendants changed before synchronizing it.
+            self.retained_update_dirty_roots = Some(HashSet::from([tree.id]));
         }
     }
 

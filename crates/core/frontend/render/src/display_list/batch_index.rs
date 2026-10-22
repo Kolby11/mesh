@@ -220,6 +220,42 @@ impl BatchIndex {
         }
     }
 
+    /// Resolve dirty ancestors through retained paths. Invalid paths leave
+    /// the caller on the conservative topology-discovery path.
+    pub(super) fn collect_dirty_ancestors(
+        &self,
+        root: &WidgetNode,
+        dirty: &HashSet<NodeId>,
+        ancestors: &mut HashSet<NodeId>,
+    ) -> bool {
+        if !self.matches_root(root) {
+            return false;
+        }
+        for id in dirty {
+            let Some(location) = self.nodes.get(id) else {
+                return false;
+            };
+            let mut node = root;
+            for &index in &location.path {
+                mesh_core_elements::frame_work::visit(
+                    mesh_core_elements::frame_work::Pass::DisplayAncestors,
+                );
+                ancestors.insert(node.id);
+                let Some(child) = node.children.get(index) else {
+                    return false;
+                };
+                node = child;
+            }
+            mesh_core_elements::frame_work::visit(
+                mesh_core_elements::frame_work::Pass::DisplayAncestors,
+            );
+            if node.id != *id {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Re-collect display entries for `dirty` alone, descending to each node by
     /// its recorded path instead of walking the tree. Returns `false` when any
     /// node has moved, disappeared, or flipped visibility, in which case the

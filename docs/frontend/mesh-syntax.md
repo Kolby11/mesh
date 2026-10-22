@@ -747,7 +747,10 @@ changed member are recorded bindings. Direct service-field reads and function
 calls in element bindings also patch in place. Keyed loop bodies preserve
 iteration locals for patches. Fixed-shape native keyed lists patch changed
 items after checking that the ordered unique string/numeric keys are unchanged;
-key, order or length changes reconcile the template. Event handlers in the body
+key, order or length changes reconcile the template. Binding targets are indexed
+until the template rebuilds. Plain item-field keys reuse validation when those
+fields are unchanged; collection snapshots still require item comparisons.
+Event handlers in the body
 are re-bound to the patched item, so `onclick={pick(item.id)}` acts on its
 current value. Nested control flow, child components and two-way bindings
 still rebuild. Writes made by input handlers patch the same way once the event

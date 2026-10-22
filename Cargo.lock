@@ -2400,6 +2400,7 @@ dependencies = [
  "skia-safe",
  "smallvec",
  "swash",
+ "sys-locale",
  "taffy",
  "tempfile",
  "tracing",

@@ -133,7 +133,7 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
     );
     for label in [
         "Hover",
-        "Surface open/close",
+        "Audio popover open/close",
         "Pointer move",
         "Keyboard traversal",
         "Backend-driven update",
@@ -146,7 +146,7 @@ fn debug_inspector_all_four_views_keep_stable_empty_or_pending_states_on_real_su
 }
 
 #[test]
-fn debug_inspector_hidden_views_do_not_participate_in_layout() {
+fn debug_inspector_only_builds_the_active_view() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
     component
         .handle_service_event(&ServiceEvent::Updated {
@@ -171,20 +171,88 @@ fn debug_inspector_hidden_views_do_not_participate_in_layout() {
         .paint_raster(&theme, SurfaceExtent::unpadded(480, 640), &mut buffer, 1.0)
         .unwrap();
 
-    let tree = component.last_tree.as_ref().expect("rendered inspector");
-    let overview = first_node_with_class_token(tree, "overview-view").expect("overview view");
-    let modules = first_node_with_class_token(tree, "modules-view").expect("modules view");
-    let surfaces = first_node_with_class_token(tree, "surfaces-view").expect("surfaces view");
-    let backend = first_node_with_class_token(tree, "backend-view").expect("backend view");
-    let benchmark = first_node_with_class_token(tree, "benchmark-view").expect("benchmark view");
+    let views = [
+        ("showOverview", "overview-view"),
+        ("showElements", "elements-view"),
+        ("showModules", "modules-view"),
+        ("showSurfaces", "surfaces-view"),
+        ("showBackendServices", "backend-view"),
+        ("showBenchmark", "benchmark-view"),
+        ("showOverview", "overview-view"),
+    ];
+    for (handler, active_class) in views {
+        component
+            .call_namespaced_handler(
+                &format!("__mesh_embed__::@mesh/debug-inspector::{handler}"),
+                &[],
+            )
+            .unwrap();
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(480, 640), &mut buffer, 1.0)
+            .unwrap();
+        let tree = component.last_tree.as_ref().expect("rendered inspector");
+        for (_, class) in views {
+            let node = first_node_with_class_token(tree, class);
+            if class == active_class {
+                assert!(node.expect("active view").layout.height > 0.0);
+            } else {
+                assert!(
+                    node.is_none(),
+                    "{class} built while {active_class} is active"
+                );
+            }
+        }
+    }
+}
 
-    assert!(overview.layout.height > 0.0);
-    for hidden_view in [modules, surfaces, backend, benchmark] {
+#[test]
+fn debug_inspector_element_details_follow_selection_and_clear() {
+    let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(480, 640);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(480, 640), &mut buffer, 1.0)
+        .unwrap();
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/debug-inspector::showElements", &[])
+        .unwrap();
+
+    for selected in [
+        serde_json::Value::Null,
+        serde_json::json!({ "tag": "button", "id": "selected" }),
+        serde_json::Value::Null,
+    ] {
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.debug".into(),
+                source_module: "@mesh/core-debug".into(),
+                payload: serde_json::json!({
+                    "overlay_enabled": true,
+                    "profiling_enabled": false,
+                    "inspected_element": selected,
+                    "element_picker_enabled": false
+                }),
+            })
+            .unwrap();
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(480, 640), &mut buffer, 1.0)
+            .unwrap();
+        let tree = component.last_tree.as_ref().expect("rendered inspector");
         assert_eq!(
-            hidden_view.computed_style.display,
-            mesh_core_elements::style::Display::None
+            first_node_with_class_token(tree, "element-details").is_some(),
+            selected.is_object()
         );
-        assert_eq!(hidden_view.layout.height, 0.0);
+        assert_eq!(
+            first_node_with_class_token(tree, "empty-card").is_some(),
+            !selected.is_object()
+        );
+        if selected.is_object() {
+            assert!(
+                rendered_text(&component)
+                    .iter()
+                    .any(|text| text == "<button>")
+            );
+        }
     }
 }
 
@@ -230,6 +298,10 @@ fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
         .unwrap();
 
     let empty_text = rendered_text(&component);
+    assert!(
+        first_node_with_class_token(component.last_tree.as_ref().unwrap(), "surface-list")
+            .is_none()
+    );
     assert!(empty_text.iter().any(|line| line == "Surfaces"));
     assert!(
         empty_text
@@ -285,6 +357,9 @@ fn debug_inspector_surfaces_view_renders_empty_and_live_rows_on_real_surface() {
         .unwrap();
 
     let live_text = rendered_text(&component);
+    assert!(
+        first_node_with_class_token(component.last_tree.as_ref().unwrap(), "empty-card").is_none()
+    );
     assert!(live_text.iter().any(|line| line == "@mesh/navigation-bar"));
     assert!(
         live_text

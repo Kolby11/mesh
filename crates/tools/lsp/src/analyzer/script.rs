@@ -110,6 +110,7 @@ static CALL_PARAMS: &[(&str, &str)] = &[
     ("events.publish", "(\"$1\", $2)"),
     ("theme.token", "(\"$1\")"),
     ("locale.current", "()"),
+    ("locale.is", "(\"$1\")"),
     ("locale.format_number", "($1)"),
     ("locale.format_date", "($1, \"$2\")"),
     ("locale.format_time", "($1, \"$2\")"),

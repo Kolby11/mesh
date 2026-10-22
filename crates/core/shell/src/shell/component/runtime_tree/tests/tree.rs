@@ -345,3 +345,47 @@ fn exact_root_state_does_not_promote_unrelated_descendants_to_full_fingerprintin
     assert_eq!(scoped.dirty_node_ids(), full.dirty_node_ids());
     assert_eq!(scoped.render_dirty_node_ids(), full.render_dirty_node_ids());
 }
+
+#[test]
+fn retained_change_paths_cover_geometry_and_overlapping_subtrees() {
+    use mesh_core_elements::{ChangeClass, FrameDirty, FrameSnapshot};
+    let mut tree = WidgetNode::new("row");
+    let mut branch = WidgetNode::new("column");
+    branch.children.push(WidgetNode::new("text"));
+    tree.children.push(branch);
+    tree.children.push(WidgetNode::new("box"));
+    annotate_with_empty_context(&mut tree);
+    let snapshot = FrameSnapshot::complete(&tree, 1, None).unwrap();
+    let mut retained = RetainedWidgetTree::default();
+    retained.synchronize_rebuilt_tree(&tree);
+    tree.children[0].children[0].computed_style.color = Color::BLACK;
+    tree.children[1].layout.x = 42.0;
+    let mut changes = FrameDirty::default();
+    changes.mark(tree.children[0].children[0].id, ChangeClass::STYLE);
+    changes.mark(tree.children[1].id, ChangeClass::LAYOUT);
+    let roots = HashSet::from([tree.children[0].id, tree.children[0].children[0].id]);
+    let scope = mesh_core_elements::frame_work::Scope::new(true);
+    let dirty = retained.synchronize_changes(&tree, &snapshot, &changes, &roots);
+    assert_eq!(dirty.layout, 1);
+    assert_eq!(scope.snapshot()["retained_discovery"], 0);
+    assert_eq!(scope.snapshot()["retained_sync"], 3);
+    retained.assert_complete(&tree);
+
+    tree.children.remove(1);
+    tree.children.push(WidgetNode::new("button"));
+    annotate_with_empty_context(&mut tree);
+    changes.mark(tree.children[1].id, ChangeClass::STRUCTURE);
+    retained.synchronize_changes(&tree, &snapshot, &changes, &HashSet::new());
+    retained.assert_complete(&tree);
+    assert_eq!(retained.nodes.len(), 4);
+}
+
+#[test]
+#[should_panic(expected = "retained dirty set omitted node")]
+fn retained_completeness_verifier_detects_an_omitted_layout_change() {
+    let mut tree = WidgetNode::new("box");
+    let mut retained = RetainedWidgetTree::default();
+    retained.synchronize_rebuilt_tree(&tree);
+    tree.layout.width = 20.0;
+    retained.assert_complete(&tree);
+}

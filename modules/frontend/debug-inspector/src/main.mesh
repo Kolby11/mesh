@@ -36,80 +36,75 @@
             />
 
             <column class="inspector-body">
-                <ElementsView
-                    hidden={active_view ~= "elements"}
-                    onTogglePicker={onToggleElementPicker}
-                    onOpenSource={onOpenSelectedSource}
-                    picking={picking}
-                    picker_button_label={picker_button_label}
-                    picker_button_text={picker_button_text}
-                    empty_hidden={element_empty_hidden}
-                    details_hidden={element_details_hidden}
-                    element_title={element_title}
-                    element_selector={element_selector}
-                    source_file={element_source_file}
-                    module_label={element_module_label}
-                    size_label={element_size_label}
-                    margin_label={element_margin_label}
-                    border_label={element_border_label}
-                    padding_label={element_padding_label}
-                    content_size_label={element_content_size_label}
-                    computed_rows={element_computed_rows}
-                    open_source_button_text={element_open_source_button_text}
-                />
+                {#if active_view == "elements"}
+                    <ElementsView
+                        onTogglePicker={onToggleElementPicker}
+                        onOpenSource={onOpenSelectedSource}
+                        picking={picking}
+                        picker_button_label={picker_button_label}
+                        picker_button_text={picker_button_text}
+                        selected_element={debug_service and debug_service.inspected_element}
+                        element_title={element_title}
+                        element_selector={element_selector}
+                        source_file={element_source_file}
+                        module_label={element_module_label}
+                        size_label={element_size_label}
+                        margin_label={element_margin_label}
+                        border_label={element_border_label}
+                        padding_label={element_padding_label}
+                        content_size_label={element_content_size_label}
+                        computed_rows={element_computed_rows}
+                        open_source_button_text={element_open_source_button_text}
+                    />
 
-                <OverviewView
-                    hidden={active_view ~= "overview"}
-                    state_title={overview_state_title}
-                    state_copy={overview_state_copy}
-                    off_hidden={overview_off_hidden}
-                    warming_hidden={overview_warming_hidden}
-                    idle_hidden={overview_idle_hidden}
-                    session_value={session_value}
-                    overlay_value={overlay_value}
-                    module_count={module_count}
-                    active_surface_count={active_surface_count}
-                    backend_count={backend_count}
-                    allocation_value={allocation_value}
-                    shell_stage_label={shell_stage_label}
-                    shell_render_label={shell_render_label}
-                    onToggleProfiling={onToggleProfiling}
-                    profiling_button_label={profiling_button_label}
-                    profiling_button_text={profiling_button_text}
-                    onToggleLayoutBounds={onToggleLayoutBounds}
-                    layout_bounds_button_label={layout_bounds_button_label}
-                    layout_bounds_button_text={layout_bounds_button_text}
-                    layout_bounds_value={layout_bounds_value}
-                />
+                {:else if active_view == "overview"}
+                    <OverviewView
+                        state_title={overview_state_title}
+                        state_copy={overview_state_copy}
+                        state_kind={overview_state_kind}
+                        session_value={session_value}
+                        overlay_value={overlay_value}
+                        module_count={module_count}
+                        active_surface_count={active_surface_count}
+                        backend_count={backend_count}
+                        allocation_value={allocation_value}
+                        shell_stage_label={shell_stage_label}
+                        shell_render_label={shell_render_label}
+                        onToggleProfiling={onToggleProfiling}
+                        profiling_button_label={profiling_button_label}
+                        profiling_button_text={profiling_button_text}
+                        onToggleLayoutBounds={onToggleLayoutBounds}
+                        layout_bounds_button_label={layout_bounds_button_label}
+                        layout_bounds_button_text={layout_bounds_button_text}
+                        layout_bounds_value={layout_bounds_value}
+                    />
 
-                <ModulesView
-                    hidden={active_view ~= "modules"}
-                    state_copy={modules_state_copy}
-                    filter_value={module_filter_value}
-                    onFilterChange={onModuleFilterChange}
-                    empty_hidden={modules_empty_hidden}
-                    rows={module_rows}
-                />
+                {:else if active_view == "modules"}
+                    <ModulesView
+                        state_copy={modules_state_copy}
+                        filter_value={module_filter_value}
+                        onFilterChange={onModuleFilterChange}
+                        rows={module_rows}
+                    />
 
-                <SurfacesView
-                    hidden={active_view ~= "surfaces"}
-                    state_copy={surfaces_state_copy}
-                    empty_hidden={surfaces_empty_hidden}
-                    rows={surface_rows}
-                />
+                {:else if active_view == "surfaces"}
+                    <SurfacesView
+                        state_copy={surfaces_state_copy}
+                        rows={surface_rows}
+                    />
 
-                <BackendServicesView
-                    hidden={active_view ~= "backend_services"}
-                    state_copy={backend_state_copy}
-                    empty_hidden={backend_empty_hidden}
-                    rows={backend_rows}
-                />
+                {:else if active_view == "backend_services"}
+                    <BackendServicesView
+                        state_copy={backend_state_copy}
+                        rows={backend_rows}
+                    />
 
-                <BenchmarkView
-                    hidden={active_view ~= "benchmark"}
-                    rows={benchmark_rows}
-                    onRunScenario={runBenchmarkScenarioById}
-                />
+                {:else if active_view == "benchmark"}
+                    <BenchmarkView
+                        rows={benchmark_rows}
+                        onRunScenario={runBenchmarkScenarioById}
+                    />
+                {/if}
             </column>
         </column>
     </dialog>
@@ -138,9 +133,6 @@ layout_bounds_button_label = "Show debug layout bounds"
 layout_bounds_value = "Hidden"
 
 overview_state_kind = "off"
-overview_off_hidden = false
-overview_warming_hidden = true
-overview_idle_hidden = true
 overview_state_title = "Profiling is off"
 overview_state_copy = "Enable profiling to collect rolling shell, surface, and backend timings."
 session_value = "Session 0"
@@ -155,26 +147,18 @@ shell_render_label = "Total surface render: --"
 modules_state_copy =
     "Installed module contracts show declared dependencies, contributions, resources, and graph diagnostics."
 module_filter_value = ""
-modules_empty = true
-modules_empty_hidden = false
 module_rows = {}
 
 surfaces_state_copy = "Surface timing rows stay visible even when no recent work has been recorded."
-surfaces_empty = true
-surfaces_empty_hidden = false
 surface_rows = {}
 
 backend_state_copy = "Runtime health and stage timing stay separated even when providers are idle."
-backend_empty = true
-backend_empty_hidden = false
 backend_rows = {}
 benchmark_rows = {}
 picking = false
 picker_button_label = "Inspect element (Ctrl+Shift+C)"
 picker_button_text = "Select element"
 picker_header_button_text = "Inspect element"
-element_empty_hidden = false
-element_details_hidden = true
 element_title = "element"
 element_selector = ""
 element_source_file = "Source unavailable"
@@ -192,15 +176,6 @@ local function count_list(value)
         return tostring(#value)
     end
     return "0"
-end
-
-local function sync_view_state()
-end
-
-local function sync_overview_state_flags()
-    overview_off_hidden = overview_state_kind ~= "off"
-    overview_warming_hidden = overview_state_kind ~= "warming"
-    overview_idle_hidden = overview_state_kind ~= "idle"
 end
 
 local function list_size(value)
@@ -583,8 +558,6 @@ local function sync_module_rows()
             end
         end
     end
-    modules_empty = #filtered == 0
-    modules_empty_hidden = not modules_empty
     modules_state_copy =
         string.format("%s of %s installed graph entries match.", tostring(#filtered), tostring(list_size(graph)))
     module_rows = {}
@@ -735,32 +708,26 @@ end
 
 function showOverview()
     active_view = "overview"
-    sync_view_state()
 end
 
 function showElements()
     active_view = "elements"
-    sync_view_state()
 end
 
 function showModules()
     active_view = "modules"
-    sync_view_state()
 end
 
 function showSurfaces()
     active_view = "surfaces"
-    sync_view_state()
 end
 
 function showBackendServices()
     active_view = "backend_services"
-    sync_view_state()
 end
 
 function showBenchmark()
     active_view = "benchmark"
-    sync_view_state()
 end
 
 function showNextView()
@@ -772,7 +739,6 @@ function showNextView()
         end
     end
     active_view = VIEW_ORDER[next_index]
-    sync_view_state()
 end
 
 function onCloseInspector()
@@ -790,7 +756,6 @@ end
 function onToggleElementPicker()
     if not (debug_service and debug_service.element_picker_enabled) then
         active_view = "elements"
-        sync_view_state()
     end
     debug_service.toggle_element_picker()
 end
@@ -839,13 +804,8 @@ local function sync_element_inspector()
         picker_header_button_text = "Inspect element"
     end
     if type(selected) ~= "table" then
-        element_empty_hidden = false
-        element_details_hidden = true
         return
     end
-
-    element_empty_hidden = true
-    element_details_hidden = false
     local tag = tostring(selected.tag or "element")
     local id = tostring(selected.id or "")
     local classes = tostring(selected.classes or "")
@@ -931,11 +891,7 @@ effect(function()
         end
         shell_stage_label = "No recent samples yet"
         shell_render_label = "Total surface render: --"
-        surfaces_empty = true
-        surfaces_empty_hidden = false
         surface_rows = {}
-        backend_empty = true
-        backend_empty_hidden = false
         backend_rows = {}
         sync_module_rows()
         sync_benchmark_rows()
@@ -1031,17 +987,10 @@ effect(function()
         shell_render_label = "Total surface render: --"
         allocation_value = "Unavailable in this build"
     end
-
-    surfaces_empty = list_size(surface_samples) == 0
-    surfaces_empty_hidden = not surfaces_empty
-    backend_empty = list_size(backend_samples) == 0
-    backend_empty_hidden = not backend_empty
     surfaces_state_copy =
         "Compare per-surface timing, redraw activity, and retained paint filtering without leaving the right-side panel."
     backend_state_copy =
         "Runtime health and stage timing stay separated so lifecycle issues do not read like performance cost."
-    sync_view_state()
-    sync_overview_state_flags()
     sync_module_rows()
 
     surface_rows = {}

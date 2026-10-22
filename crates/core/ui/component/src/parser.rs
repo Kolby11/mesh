@@ -1630,6 +1630,8 @@ box {
     gap: 8px;
     padding: var(--spacing-md);
     background: var(--bg);
+    border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+    color: var(--fg, var(--bg));
 }
 </style>
 "#;
@@ -1639,6 +1641,11 @@ box {
         assert!(matches!(&decls[0].value, StyleValue::Literal(v) if v == "8px"));
         assert!(matches!(&decls[1].value, StyleValue::Var(v) if v == "--spacing-md"));
         assert!(matches!(&decls[2].value, StyleValue::Var(v) if v == "--bg"));
+        assert!(matches!(
+            &decls[3].value,
+            StyleValue::Literal(v) if v == "var(--radius-lg) 0 0 var(--radius-lg)"
+        ));
+        assert!(matches!(&decls[4].value, StyleValue::Var(v) if v == "--fg, var(--bg)"));
         assert!(style.rules[0].container_query.is_none());
         assert!(style.keyframes.is_empty());
     }

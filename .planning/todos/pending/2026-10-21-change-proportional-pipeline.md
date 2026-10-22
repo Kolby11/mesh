@@ -231,9 +231,19 @@ styles. Dock p50/p90 before and after on the release glass fixture.
 
 ## Execution plan (2026-10-21)
 
-**Status:** wave 1 running. W1 landed 2026-10-21 (`06d5750f`): the patched-frame restyle was already path-directed, with 336 visits = about 24 targets × path depth. Paint-only patches now keep geometry. Dashboard frames are bound by layout-class patches, which makes W2 the dashboard lever. W6 parts (b) and (c) landed 2026-10-21: pipelined presentation and the render-path diagnostic; part (a) follows W3. W4 landed 2026-10-21: the live replay gate. Its structural assertion now passes: the idle dock repaint (a missing-icon resolution loop) and the live hover full rebuilds (handler writes during input dispatch) are fixed; see the performance log. Wave 1 is complete. W2 landed 2026-10-22: layout-class patch frames lay out the patched branch from the restyled set (`compute_incremental_for_stable_tree`, `layout/sparse.rs`); gate `patched_frame_layout_visits_scale_with_the_patch`. Consuming its `changed_nodes` downstream belongs to W3/W7. Baseline commit `55800ed5`. Implementation
+**Status:** wave 1 running. W1 landed 2026-10-21 (`06d5750f`): the patched-frame restyle was already path-directed, with 336 visits = about 24 targets × path depth. Paint-only patches now keep geometry. Dashboard frames are bound by layout-class patches, which makes W2 the dashboard lever. W6 parts (b) and (c) landed 2026-10-21: pipelined presentation and the render-path diagnostic; part (a) follows W3. W4 landed 2026-10-21: the live replay gate. Its structural assertion now passes: the idle dock repaint (a missing-icon resolution loop) and the live hover full rebuilds (handler writes during input dispatch) are fixed; see the performance log. Wave 1 is complete. W2 landed 2026-10-22: layout-class patch frames lay out the patched branch from the restyled set (`compute_incremental_for_stable_tree`, `layout/sparse.rs`); gate `patched_frame_layout_visits_scale_with_the_patch`. Its `changed_nodes` report is consumed downstream by W7. W5 implemented 2026-10-22: bindings retain typed `Prop`/free-form targets; rebuild-time indexes retain target paths and item snapshots; plain item-field key dependencies reuse validation. `binding_patch_visits_no_target_discovery` holds one setter, zero target discovery and zero runtime key validation at 16 and 1,024 siblings, with forced-rebuild pixel/style parity. Snapshot item comparisons remain a P3/D4 target. Wave 2 is complete. W3 implemented 2026-10-22: retained display ancestor paths, snapshot-backed transition capture, restyled/registered animation sampling, retained structure validation, reversible lifecycle classes, and indexed child-request dependencies. The 16/1,024-sibling gates pass with pixel/style parity. Closed popovers retain only ancestor/self dependencies. Concurrent W7 edits are included in the measured candidate, so timings are not a W3-only attribution. W6 scene preparation can proceed; W7 discovery retirement is also implemented. Measurements are in the performance log. Baseline commit `55800ed5`. Implementation
 agents work in worktrees and do not edit this note, the backlog, STATUS or the
 log. The orchestrator integrates one commit per workstream.
+
+**W7 implemented 2026-10-22:** stable-frame retained synchronization uses explicit
+node/subtree paths, including layout and scroll changes. Discovery helpers are
+`#[cfg(test)]`; `MESH_VERIFY_RETAINED=1` runs a full completeness verifier after
+every paint. Rebuilds and topology mismatches reconcile the full tree before
+mutation. Dashboard discovery visits are 151 → 0 across nine samples per side;
+latency ranges overlap and the candidate includes concurrent W3 changes. The
+layout structural gate checks constant retained sync at 16 and 1,024 clean
+siblings plus full retained verification and pixel parity. See the performance
+log; shared path-prefix resolution remains open in the backlog.
 
 ### Workstreams
 

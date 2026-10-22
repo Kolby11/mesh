@@ -368,7 +368,6 @@ impl InstanceKeyInterner {
 use mesh_core_render::{
     DamageRect, DisplayListMetrics, DisplayListRepaintPolicy, DisplayPaintCommand,
     PixelCanvasSession, RetainedDisplayList, SharedTextMeasurer, SurfaceCanvas, TextCacheMetrics,
-    TextRenderer,
 };
 
 #[cfg(test)]
@@ -1019,6 +1018,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// presented frame, never by an immediate corrective pass.
     next_frame_only_dirty: bool,
     node_service_field_deps: NodeServiceFieldDependencies,
+    template_binding_index: template_patch::TemplateBindingIndex,
     /// Nodes whose bound properties `try_patch_template_writes` updated since
     /// the last restyle; the targeted restyle treats them as changed.
     patched_binding_nodes: HashSet<NodeId>,
@@ -1046,7 +1046,11 @@ pub(super) struct FrontendSurfaceComponent {
     /// rasters; the shell's per-child generation cache decides when raster is
     /// needed, while this cache makes that raster a command replay.
     child_display_lists: RefCell<ChildDisplayListCache>,
+    child_surface_cache: RefCell<shell_component::ChildSurfaceCache>,
     diagnostics: Option<Diagnostics>,
+    /// A profile candidate mounts before its icon registry is published, so
+    /// its declared-icon check waits for the commit.
+    defer_declared_icon_diagnostics: bool,
     /// A root runtime that failed during initialization/replacement leaves no
     /// usable runtime state to evaluate. Keep the failure outside the tree so
     /// every subsequent paint can publish the same bounded placeholder until
@@ -1231,7 +1235,9 @@ pub(super) struct FrontendSurfaceComponent {
     scoped_annotation_inputs: Option<RuntimeAnnotationInputs>,
     /// The last finalize reported its exact restyled set over reused geometry,
     /// so the retained update can skip subtree discovery.
-    sparse_retained_frame: bool,
+    frame_restyled_nodes: Option<HashSet<NodeId>>,
+    previous_lifecycle_nodes: HashSet<NodeId>,
+    lifecycle_base_classes: HashMap<NodeId, (Option<String>, String)>,
     #[cfg(test)]
     scoped_annotation_frames: u64,
     /// Forces interaction frames onto the full annotation, restyle and
@@ -1474,6 +1480,7 @@ impl FrontendSurfaceComponent {
             animation_only_dirty: false,
             next_frame_only_dirty: false,
             node_service_field_deps: NodeServiceFieldDependencies::default(),
+            template_binding_index: template_patch::TemplateBindingIndex::default(),
             patched_binding_nodes: HashSet::new(),
             patched_binding_layout: false,
             pending_service_template_nodes: None,
@@ -1488,7 +1495,9 @@ impl FrontendSurfaceComponent {
             force_full_template_build: false,
             retained_display_list: RetainedDisplayList::default(),
             child_display_lists: RefCell::new(ChildDisplayListCache::default()),
+            child_surface_cache: RefCell::new(shell_component::ChildSurfaceCache::default()),
             diagnostics: None,
+            defer_declared_icon_diagnostics: false,
             runtime_failure: RefCell::new(None),
             template_expression_failure: RefCell::new(None),
             pending_surface_states: RefCell::new(HashMap::new()),
@@ -1555,7 +1564,9 @@ impl FrontendSurfaceComponent {
             element_metric_usage,
             resolved_surface_shortcuts_cache: RefCell::new(None),
             scoped_annotation_inputs: None,
-            sparse_retained_frame: false,
+            frame_restyled_nodes: None,
+            previous_lifecycle_nodes: HashSet::new(),
+            lifecycle_base_classes: HashMap::new(),
             #[cfg(test)]
             scoped_annotation_frames: 0,
             #[cfg(test)]
@@ -1724,6 +1735,19 @@ impl FrontendSurfaceComponent {
     pub(super) fn with_locale_snapshot(mut self, snapshot: Arc<LocaleSnapshot>) -> Self {
         self.locale = snapshot;
         self
+    }
+
+    pub(super) fn with_deferred_declared_icon_diagnostics(mut self) -> Self {
+        self.defer_declared_icon_diagnostics = true;
+        self
+    }
+
+    /// Run the declared-icon check skipped at mount, against the registry
+    /// committed with this candidate.
+    pub(super) fn record_deferred_declared_icon_diagnostics(&mut self) {
+        if std::mem::take(&mut self.defer_declared_icon_diagnostics) {
+            self.record_declared_missing_icon_diagnostics();
+        }
     }
 
     #[cfg(test)]

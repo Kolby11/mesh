@@ -1623,7 +1623,8 @@ impl Shell {
             )
             .with_effective_capabilities(effective_capabilities.clone())
             .with_instance_id(instance_id)
-            .with_locale_snapshot(locale.snapshot());
+            .with_locale_snapshot(locale.snapshot())
+            .with_deferred_declared_icon_diagnostics();
             let diagnostics = self
                 .diagnostics
                 .register_instance(root.module.clone(), instance_id.clone());
@@ -2071,6 +2072,9 @@ impl Shell {
             prepared
                 .component
                 .adopt_frontend_catalog(self.frontend_catalog.clone());
+            prepared
+                .component
+                .record_deferred_declared_icon_diagnostics();
         }
         let initial_states = Arc::new(std::mem::take(&mut pending.candidate_initial_states));
         // All fallible candidate work is complete. From this point on the

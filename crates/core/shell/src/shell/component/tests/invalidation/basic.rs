@@ -648,7 +648,7 @@ scroll { width: 80px; height: 40px; overflow-y: auto; }
 }
 
 #[test]
-fn surface_transition_annotation_forces_full_retained_fingerprinting() {
+fn surface_transition_annotation_synchronizes_its_reported_subtree() {
     let mut component = test_frontend_component(
         r#"
 <template><box class="target" /></template>
@@ -661,6 +661,13 @@ fn surface_transition_annotation_forces_full_retained_fingerprinting() {
         .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
+    let expected_nodes = component
+        .last_frame_snapshot
+        .as_ref()
+        .unwrap()
+        .nodes()
+        .len();
+    component.set_profiling_enabled(true);
     component.surface_entering = true;
     component.hovered_path = ["root", "root/0"].map(runtime_node_id_for_key).to_vec();
     component.hovered_key = Some("root/0".into());
@@ -669,7 +676,13 @@ fn surface_transition_annotation_forces_full_retained_fingerprinting() {
         .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
-    assert!(!component.retained_tree.last_update_was_scoped());
+    assert_eq!(
+        component.retained_tree.last_selected_node_count,
+        expected_nodes
+    );
+    let counts = component.take_invalidation_snapshot().unwrap().node_visits;
+    assert_eq!(counts["retained_sync"], expected_nodes as u64);
+    assert_eq!(counts["retained_discovery"], 0);
 }
 
 #[test]
@@ -2610,7 +2623,12 @@ end
             let counts = snapshot.node_visits;
             assert_eq!(counts["layout_discovery"], 0, "{turn}: {counts:?}");
             assert_eq!(counts["validation"], 0, "{turn}: {counts:?}");
+            assert_eq!(counts["retained_discovery"], 0, "{turn}: {counts:?}");
+            scoped
+                .retained_tree
+                .assert_complete(scoped.last_tree.as_ref().unwrap());
             visits.push([
+                counts["retained_sync"],
                 counts["layout_sync"],
                 counts["layout_write"],
                 counts["layout_extents"],
@@ -2668,5 +2686,177 @@ function mutate() items[1].label = "after" items[1].show = false end
             .paint_raster(&theme, extent, &mut expected, 1.0)
             .unwrap();
         assert_eq!(pixels.data(), expected.data());
+    }
+}
+
+#[test]
+fn binding_patch_visits_no_target_discovery() {
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(320, 100);
+    let mut by_size = Vec::new();
+    for siblings in [16, 1024] {
+        let source = patched_scope_source(siblings);
+        let mut patched = test_frontend_component(&source);
+        let mut full = test_frontend_component(&source);
+        full.force_full_template_build = true;
+        let mut actual = PixelBuffer::new(320, 100);
+        let mut expected = PixelBuffer::new(320, 100);
+        for _ in 0..3 {
+            patched
+                .paint_raster(&theme, extent, &mut actual, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut expected, 1.0)
+                .unwrap();
+        }
+        let mut visits = Vec::new();
+        for handler in ["mutate", "mutate", "retint", "retint", "mutate"] {
+            let scope = mesh_core_elements::frame_work::Scope::new(true);
+            patched.call_namespaced_handler(handler, &[]).unwrap();
+            let counts = scope.snapshot();
+            assert_eq!(counts["binding_target_discovery"], 0, "{counts:?}");
+            assert_eq!(counts["keyed_key_validation"], 0, "{counts:?}");
+            assert_eq!(counts["binding_patch"], 1, "{counts:?}");
+            visits.push(counts["binding_patch"]);
+            drop(scope);
+            full.call_namespaced_handler(handler, &[]).unwrap();
+            patched
+                .paint_raster(&theme, extent, &mut actual, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut expected, 1.0)
+                .unwrap();
+            assert_eq!(actual.data(), expected.data(), "{handler}");
+            let tree = patched.last_tree.clone().unwrap();
+            assert!(
+                !patched.retained_tree.update(&tree).any(),
+                "{handler}: missed changes"
+            );
+            let (mut actual_styles, mut expected_styles) = (Vec::new(), Vec::new());
+            computed_styles(&tree, &mut actual_styles);
+            computed_styles(full.last_tree.as_ref().unwrap(), &mut expected_styles);
+            assert!(
+                actual_styles == expected_styles,
+                "{handler}: styles diverged"
+            );
+        }
+        by_size.push(visits);
+    }
+    assert_eq!(by_size[0], by_size[1]);
+}
+
+#[test]
+fn keyed_list_dynamic_keys_and_nested_key_changes_keep_rebuild_parity() {
+    for key in ["item.identity.id", "item.identity[field]", "key_for(item)"] {
+        let source = format!(
+            r##"
+<script lang="luau">
+field = "id"
+items = {{{{identity = {{id = "a"}}, color = "#ff0000"}}, {{identity = {{id = "b"}}, color = "#00ff00"}}}}
+function key_for(item) return item.identity.id end
+function recolor() items[1].color = "#0000ff" end
+function rekey() items[1].identity.id = "c" end
+function duplicate() items[1].identity.id = items[2].identity.id end
+</script>
+<template><row style="width: 100px; height: 30px">
+{{#for item in items key={{{key}}}}}<box style="width: 20px; height: 20px" style:background={{item.color}} />{{/for}}
+</row></template>
+"##
+        );
+        let theme = default_theme();
+        let extent = SurfaceExtent::unpadded(100, 30);
+        let mut patched = test_frontend_component(&source);
+        let mut full = test_frontend_component(&source);
+        full.force_full_template_build = true;
+        let mut actual = PixelBuffer::new(100, 30);
+        let mut expected = PixelBuffer::new(100, 30);
+        patched
+            .paint_raster(&theme, extent, &mut actual, 1.0)
+            .unwrap();
+        full.paint_raster(&theme, extent, &mut expected, 1.0)
+            .unwrap();
+        for handler in ["recolor", "rekey", "recolor", "duplicate"] {
+            patched.call_namespaced_handler(handler, &[]).unwrap();
+            full.call_namespaced_handler(handler, &[]).unwrap();
+            patched
+                .paint_raster(&theme, extent, &mut actual, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut expected, 1.0)
+                .unwrap();
+            assert_eq!(actual.data(), expected.data(), "{key}: {handler}");
+            if matches!(handler, "rekey" | "duplicate") {
+                assert_eq!(
+                    patched
+                        .take_invalidation_snapshot()
+                        .unwrap()
+                        .patched_node_count,
+                    0
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn typed_binding_setters_preserve_values_and_change_classes() {
+    use mesh_core_elements::{AttrKey, ChangeClass, Prop};
+    for (name, prop, initial, next) in [
+        ("min", Some(Prop::Min), "1", "2"),
+        ("disabled", Some(Prop::Disabled), "false", "true"),
+        ("aria-label", Some(Prop::AriaLabel), "\"old\"", "\"new\""),
+        ("data-extra", None, "{1}", "{2}"),
+    ] {
+        let source = format!(
+            r#"
+<script lang="luau">
+value = {initial}
+function mutate() value = {next} end
+</script>
+<template><slider {name}={{value}} /></template>
+"#
+        );
+        let mut component = test_frontend_component(&source);
+        let theme = default_theme();
+        let extent = SurfaceExtent::unpadded(100, 30);
+        let mut pixels = PixelBuffer::new(100, 30);
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+        fn bound(node: &WidgetNode) -> Option<&WidgetNode> {
+            if node.template_bindings().is_some() {
+                return Some(node);
+            }
+            node.children.iter().find_map(bound)
+        }
+        let node = bound(component.last_tree.as_ref().unwrap()).unwrap();
+        let id = node.id;
+        let target = &node.template_bindings().unwrap().attributes[0].0;
+        match (prop, target) {
+            (Some(expected), AttrKey::Known(actual)) => assert_eq!(expected, *actual),
+            (None, AttrKey::Shared(_)) => {}
+            _ => panic!("unresolved target: {target:?}"),
+        }
+        component.call_namespaced_handler("mutate", &[]).unwrap();
+        let change = component
+            .frame_dirty
+            .iter()
+            .find(|(node, _)| *node == id)
+            .unwrap()
+            .1;
+        assert_eq!(
+            change,
+            prop.map(Prop::change_class)
+                .unwrap_or(ChangeClass::FREE_FORM)
+        );
+        let node = bound(component.last_tree.as_ref().unwrap()).unwrap();
+        let value = node
+            .attributes
+            .get_value_by_name(name)
+            .unwrap()
+            .to_json_value();
+        match name {
+            "min" => assert_eq!(value.as_f64(), Some(2.0)),
+            "disabled" => assert_eq!(value.as_bool(), Some(true)),
+            "aria-label" => assert_eq!(value.as_str(), Some("new")),
+            _ => assert!(value.is_array()),
+        }
     }
 }

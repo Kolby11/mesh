@@ -414,12 +414,19 @@ impl RetainedDisplayList {
                 rebuild_ancestors.clear();
                 let mut ancestor_path = std::mem::take(&mut self.ancestor_path_scratch);
                 ancestor_path.clear();
-                collect_dirty_ancestor_ids_into(
+                if !self.batch_index.collect_dirty_ancestors(
                     root,
                     dirty_node_ids,
-                    &mut ancestor_path,
                     &mut rebuild_ancestors,
-                );
+                ) {
+                    rebuild_ancestors.clear();
+                    collect_dirty_ancestor_ids_into(
+                        root,
+                        dirty_node_ids,
+                        &mut ancestor_path,
+                        &mut rebuild_ancestors,
+                    );
+                }
                 let mut next_subtrees = std::mem::take(&mut self.next_subtrees_scratch);
                 next_subtrees.clear();
                 let mut local_metrics = LocalReuseMetrics::default();
@@ -1405,11 +1412,22 @@ pub fn widget_visual_bounds(node: &WidgetNode) -> Option<mesh_core_elements::Lay
 
 /// Conservative subtree bounds for allocating a promoted surface buffer.
 pub fn widget_subtree_visual_bounds(node: &WidgetNode) -> Option<mesh_core_elements::LayoutRect> {
-    subtree_bounds_at(node, 0.0, 0.0).map(|bounds| mesh_core_elements::LayoutRect {
-        x: bounds.left,
-        y: bounds.top,
-        width: bounds.right - bounds.left,
-        height: bounds.bottom - bounds.top,
+    widget_subtree_visual_bounds_with_visit(node, || {})
+}
+
+/// Painted subtree bounds, calling `visit` once per examined node, including
+/// hidden roots. Uses the same transforms and effect extents as painting.
+pub fn widget_subtree_visual_bounds_with_visit(
+    node: &WidgetNode,
+    mut visit: impl FnMut(),
+) -> Option<mesh_core_elements::LayoutRect> {
+    subtree_bounds_at_with_visit(node, 0.0, 0.0, &mut visit).map(|bounds| {
+        mesh_core_elements::LayoutRect {
+            x: bounds.left,
+            y: bounds.top,
+            width: bounds.right - bounds.left,
+            height: bounds.bottom - bounds.top,
+        }
     })
 }
 

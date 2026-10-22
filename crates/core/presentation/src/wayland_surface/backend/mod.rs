@@ -36,6 +36,9 @@ pub struct WaylandSurfaceBackend {
     _conn: Connection,
     event_queue: EventQueue<State>,
     state: State,
+    /// Appended to every layer namespace; see
+    /// [`crate::PresentationEngine::set_layer_namespace_suffix`].
+    namespace_suffix: String,
     #[cfg(feature = "gpu")]
     gpu: GpuPresenter,
     #[cfg(feature = "gpu")]

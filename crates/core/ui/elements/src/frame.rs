@@ -571,6 +571,16 @@ impl FrameSnapshot {
         phases: FramePhaseStamps,
         previous: Option<&Self>,
     ) -> Result<Self, FrameSnapshotError> {
+        Self::capture_inner(root, revision, phases, previous, true)
+    }
+
+    fn capture_inner(
+        root: &WidgetNode,
+        revision: u64,
+        phases: FramePhaseStamps,
+        previous: Option<&Self>,
+        validate_structure: bool,
+    ) -> Result<Self, FrameSnapshotError> {
         if !phases.is_complete() {
             return Err(FrameSnapshotError::IncompletePhaseStamps);
         }
@@ -584,7 +594,9 @@ impl FrameSnapshot {
         // Validate before building either identity-indexed frame maps or the
         // semantic projection. In particular, accessibility must not observe
         // a tree that the frame later rejects for duplicate or unknown nodes.
-        validate_widget_tree(root).map_err(FrameSnapshotError::from)?;
+        if validate_structure {
+            validate_widget_tree(root).map_err(FrameSnapshotError::from)?;
+        }
         let mut nodes = Vec::with_capacity(root.node_count());
         let mut node_ids = HashSet::with_capacity(root.node_count());
         let mut identities = HashSet::with_capacity(root.node_count());
@@ -705,7 +717,11 @@ impl FrameSnapshot {
             if !same_structure_and_references(live, old)
                 || policy.is_semantically_visible() != old.policy.is_semantically_visible()
             {
-                return fallback();
+                return if same_structure(live, old) {
+                    Self::capture_inner(root, revision, phases, Some(previous), false)
+                } else {
+                    fallback()
+                };
             }
             validate_layout(live)?;
             changed.insert(index);
@@ -733,7 +749,11 @@ impl FrameSnapshot {
             if !same_structure_and_references(live, old)
                 || policy.is_semantically_visible() != old.policy.is_semantically_visible()
             {
-                return fallback();
+                return if same_structure(live, old) {
+                    Self::capture_inner(root, revision, phases, Some(previous), false)
+                } else {
+                    fallback()
+                };
             }
             validate_layout(live)?;
             let child_text = old
@@ -1006,7 +1026,7 @@ impl FrameSnapshot {
     }
 }
 
-fn same_structure_and_references(live: &WidgetNode, old: &FrameNode) -> bool {
+fn same_structure(live: &WidgetNode, old: &FrameNode) -> bool {
     live.tag == old.tag.as_ref()
         && StableNodeIdentity::from_node(live) == old.identity
         && live.children.len() == old.children.len()
@@ -1015,8 +1035,12 @@ fn same_structure_and_references(live: &WidgetNode, old: &FrameNode) -> bool {
             .iter()
             .zip(old.children.iter())
             .all(|(child, identity)| StableNodeIdentity::from_node(child) == *identity)
+        && live.attributes.get(Prop::DataMeshElement) == old.attributes.get(Prop::DataMeshElement)
+}
+
+fn same_structure_and_references(live: &WidgetNode, old: &FrameNode) -> bool {
+    same_structure(live, old)
         && [
-            Prop::DataMeshElement,
             Prop::Id,
             Prop::Ref,
             Prop::AriaLabelledby,
@@ -1780,5 +1804,79 @@ mod tests {
             complete.latest().unwrap().phase(),
             FramePhase::SemanticsReady
         );
+    }
+}
+
+#[cfg(test)]
+mod retained_structure_tests {
+    use super::*;
+    use crate::Prop;
+
+    #[test]
+    fn semantic_reindex_reuses_validated_structure() {
+        for count in [16, 1024] {
+            let mut root = WidgetNode::new("column");
+            for index in 0..count {
+                let mut child = WidgetNode::new("text");
+                child.set_mesh_key(format!("item{index}"));
+                child.attributes.insert(Prop::Content, "label".into());
+                root.children.push(child);
+            }
+            let mut previous = FrameSnapshot::complete(&root, 1, None).unwrap();
+            for stage in 0..2 {
+                let child = &mut root.children[count - 1];
+                if stage == 0 {
+                    child.attributes.insert(Prop::AriaHidden, "true".into());
+                } else {
+                    child.attributes.remove(Prop::AriaHidden);
+                    child
+                        .attributes
+                        .insert(Prop::AriaLabelledby, "item0".into());
+                }
+                let dirty = HashSet::from([child.id]);
+                let scope = crate::frame_work::Scope::new(true);
+                let actual = FrameSnapshot::capture_dirty(
+                    &root,
+                    stage + 2,
+                    FramePhaseStamps::complete(stage + 2),
+                    &previous,
+                    &dirty,
+                )
+                .unwrap();
+                assert_eq!(scope.snapshot()["validation"], 0);
+                drop(scope);
+                let full = FrameSnapshot::complete(&root, stage + 2, Some(&previous)).unwrap();
+                assert_eq!(
+                    actual
+                        .nodes()
+                        .iter()
+                        .map(|node| format!("{node:?}"))
+                        .collect::<Vec<_>>(),
+                    full.nodes()
+                        .iter()
+                        .map(|node| format!("{node:?}"))
+                        .collect::<Vec<_>>()
+                );
+                assert_eq!(
+                    actual.semantic_diff().changes(),
+                    full.semantic_diff().changes()
+                );
+                previous = actual;
+            }
+            root.children[count - 1].tag = "invalid-tag".into();
+            let dirty = HashSet::from([root.children[count - 1].id]);
+            let scope = crate::frame_work::Scope::new(true);
+            assert!(
+                FrameSnapshot::capture_dirty(
+                    &root,
+                    4,
+                    FramePhaseStamps::complete(4),
+                    &previous,
+                    &dirty
+                )
+                .is_err()
+            );
+            assert!(scope.snapshot()["validation"] > 0);
+        }
     }
 }

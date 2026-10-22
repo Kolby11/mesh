@@ -123,6 +123,12 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
         backend_only: false,
     },
     MeshApiEntry {
+        path: "locale.is",
+        signature: "mesh.locale.is(tag: string) -> boolean",
+        description: "Match the active locale against a BCP 47 tag, ignoring case: sk matches sk-SK, but sk-SK does not match sk. Invalid tags raise an error. Requires locale.read.",
+        backend_only: false,
+    },
+    MeshApiEntry {
         path: "locale.format_number",
         signature: "mesh.locale.format_number(value: number|string) -> string",
         description: "Format a decimal using the active locale (requires the locale.read capability).",

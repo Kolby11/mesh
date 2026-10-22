@@ -5,6 +5,7 @@ mod internals;
 #[cfg(test)]
 mod tests;
 
+pub(super) use child_surface::ChildSurfaceCache;
 use child_surface::*;
 use damage::*;
 use mesh_core_elements::Prop;
@@ -204,7 +205,9 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.unmount_runtimes()?;
         }
         self.diagnostics = Some(ctx.diagnostics);
-        self.record_declared_missing_icon_diagnostics();
+        if !self.defer_declared_icon_diagnostics {
+            self.record_declared_missing_icon_diagnostics();
+        }
         if let Err(error) = self.init_root_runtime() {
             let message = self.record_frontend_runtime_issue(
                 "initialization",
@@ -597,6 +600,37 @@ impl ShellComponent for FrontendSurfaceComponent {
             source_module,
             generation,
         );
+        if self.last_tree.is_some() {
+            return;
+        }
+        // The cache seeds runtimes created later, but the root runtime exists
+        // from mount. Before the first build it has read nothing, so seed it
+        // the same way and let the first build see the value.
+        let mut seeded = false;
+        for runtime in self.runtimes.lock().unwrap().values_mut() {
+            if !runtime.script_ctx.can_read_service_interface(service) {
+                continue;
+            }
+            seeded |= runtime.script_ctx.apply_service_payload_with_generation(
+                service_name.as_ref(),
+                payload,
+                fingerprint,
+                Some(source_module),
+                generation,
+            );
+            apply_service_update_with_name_and_fingerprint(
+                runtime.script_ctx.state_mut(),
+                true,
+                true,
+                service_name.as_ref(),
+                source_module,
+                payload,
+                fingerprint,
+            );
+        }
+        if seeded {
+            self.reactive_effects_pending = true;
+        }
     }
 
     fn settle_effects_offscreen(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
@@ -1015,21 +1049,16 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .difference(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS)
                 .is_empty();
         let run_style_animation_pass = self.should_run_style_animation_pass(styles_unchanged);
-        let animation_scope = (animation_only_frame
-            && use_retained_style_path
-            && !dirty_types.contains(ComponentDirtyFlags::LAYOUT)
-            && self.last_frame_snapshot.is_some()
-            && !self.surface_entering
-            && !self.surface_exiting
-            && self.entering_child_keys.is_empty()
-            && self.closing_child_keys.is_empty())
-        .then(|| self.animation_sample_nodes());
-        let previous_visual_styles = if let Some(scope) = &animation_scope {
-            self.scoped_visual_styles(scope)
-        } else if run_style_animation_pass && self.last_tree.is_some() {
+        let previous_animation_snapshot = (run_style_animation_pass && use_retained_style_path)
+            .then(|| self.last_frame_snapshot.clone())
+            .flatten();
+        let previous_visual_styles = if previous_animation_snapshot.is_none()
+            && run_style_animation_pass
+            && self.last_tree.is_some()
+        {
             self.take_previous_visual_styles()
         } else {
-            Default::default()
+            HashMap::new()
         };
         let surface_css_props = self.surface_css_props();
         // Patched bindings changed authored attributes without a rebuild, so
@@ -1085,6 +1114,59 @@ impl ShellComponent for FrontendSurfaceComponent {
         {
             self.style_animation_passes += u64::from(run_style_animation_pass);
         }
+        let animation_scope = if !tree_was_rebuilt && previous_animation_snapshot.is_some() {
+            self.frame_restyled_nodes.as_ref().map(|restyled| {
+                let mut scope = self.animation_sample_nodes();
+                scope.extend(restyled);
+                scope
+            })
+        } else {
+            None
+        };
+        let previous_visual_styles = if let Some(previous) = &previous_animation_snapshot {
+            if let Some(scope) = &animation_scope {
+                let active = self.animation_sample_nodes();
+                let previous_ids: HashSet<_> =
+                    scope
+                        .iter()
+                        .copied()
+                        .filter(|id| {
+                            if active.contains(id) {
+                                return true;
+                            }
+                            let Some(path) = self
+                                .last_frame_snapshot
+                                .as_ref()
+                                .and_then(|s| s.node_path(*id))
+                            else {
+                                return false;
+                            };
+                            let mut node = &tree;
+                            for &index in path {
+                                mesh_core_elements::frame_work::visit(
+                                    mesh_core_elements::frame_work::Pass::AnimationLookup,
+                                );
+                                node = &node.children[index];
+                            }
+                            node.computed_style.transitions.iter().any(|transition| {
+                                transition.duration_ms > 0 || transition.delay_ms > 0
+                            }) || node
+                                .computed_style
+                                .animations
+                                .iter()
+                                .any(|animation| animation.name.is_some())
+                        })
+                        .collect();
+                super::animation::snapshot_visual_styles(previous, &previous_ids)
+            } else {
+                super::animation::snapshot_visual_styles(
+                    previous,
+                    &previous.nodes().iter().map(|node| node.id()).collect(),
+                )
+            }
+        } else {
+            previous_visual_styles
+        };
         let mut animation_dirty_roots = if run_style_animation_pass {
             self.apply_style_animations_scoped(
                 &mut tree,
@@ -1120,7 +1202,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                     self.retained_update_dirty_roots = None;
                 }
             } else {
-                mesh_core_elements::normalize_accessibility(&mut tree);
+                mesh_core_elements::normalize_accessibility_with_validated_structure(&mut tree);
             }
         }
         if !animation_dirty_roots.is_empty() {
@@ -1132,9 +1214,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         let retained_update_dirty_roots =
             retained_update_dirty_roots.filter(|_| !self.force_full_retained_update);
         // Animation-sampled nodes are already single dirty nodes above. The
-        // sampling pass reports every node whose own sample changed. Geometry
-        // propagation still requires the conservative scoped walk on layout
-        // frames; geometry-preserving samples use snapshot paths below.
+        // sampling pass reports every node whose own sample changed. Layout's
+        // change report already includes ancestors and siblings it moved.
         animation_dirty_roots.clear();
         self.animation_dirty_node_ids_scratch = animation_dirty_roots;
         self.advance_interaction_frame(
@@ -1151,32 +1232,19 @@ impl ShellComponent for FrontendSurfaceComponent {
                     | mesh_core_elements::ChangeClass::HIT,
             );
         }
-        let sparse_retained_update = (animation_scope.is_some()
-            || std::mem::take(&mut self.sparse_retained_frame))
-            && !self.frame_dirty.contains(
-                mesh_core_elements::ChangeClass::LAYOUT
-                    | mesh_core_elements::ChangeClass::STRUCTURE,
-            )
-            && retained_update_dirty_roots
-                .as_ref()
-                .is_some_and(HashSet::is_empty);
-        let retained_dirty = if sparse_retained_update {
-            self.retained_tree.update_for_frame_dirty(
-                &tree,
-                self.last_frame_snapshot.as_ref().expect("retained frame"),
-                &self.frame_dirty,
-            )
-        } else if let Some(dirty_roots) = retained_update_dirty_roots.as_ref() {
+        let retained_dirty = if let (Some(roots), Some(snapshot)) = (
+            retained_update_dirty_roots.as_ref(),
+            self.last_frame_snapshot.as_ref(),
+        ) {
             self.retained_tree
-                .update_for_dirty_roots_and_nodes_collect(
-                    &tree,
-                    dirty_roots,
-                    &self.retained_update_dirty_nodes,
-                )
-                .0
+                .synchronize_changes(&tree, snapshot, &self.frame_dirty, roots)
         } else {
-            self.retained_tree.update(&tree)
+            self.retained_tree.synchronize_rebuilt_tree(&tree)
         };
+        #[cfg(test)]
+        if std::env::var_os("MESH_VERIFY_RETAINED").is_some() {
+            self.retained_tree.assert_complete(&tree);
+        }
         let retained_tree_generation = self.retained_tree.generation();
         let render_object_dirty = self.retained_tree.render_dirty();
         self.record_profiling_stage_with_elapsed(
@@ -1573,16 +1641,33 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.dirty_node_visual_damage_scratch = dirty_node_visual_damage_rects;
         self.visual_damage_scratch = visual_damage_rects;
         self.effective_damage_scratch = std::mem::take(&mut effective_damage.rects);
+        let mut child_dirty = self.retained_tree.render_dirty_node_ids().clone();
+        child_dirty.extend(self.frame_dirty.iter().filter_map(|(id, class)| {
+            class
+                .contains(mesh_core_elements::ChangeClass::STRUCTURE)
+                .then_some(id)
+        }));
+        let structural = self.retained_tree.last_dirty();
+        self.child_surface_cache.borrow_mut().update(
+            &tree,
+            self.last_frame_snapshot.as_ref(),
+            &child_dirty,
+            tree_was_rebuilt
+                || structural.inserted > 0
+                || structural.removed > 0
+                || structural.children > 0,
+            self.frame_revision,
+        );
         let visit_surface_id = self.profiling_enabled.then(|| self.id().to_owned());
         if let Some(snapshot) = self.invalidation_snapshot.as_mut() {
             snapshot.node_visits = frame_work.snapshot();
             for (pass, visits) in &snapshot.node_visits {
-                if pass == "child_surface_requests" {
-                    continue;
-                }
                 tracing::debug!(target: "mesh_profiling", surface = visit_surface_id.as_deref().unwrap_or(""),
                     pass = pass.as_str(), node_visits = visits, "frame node visits");
             }
+        }
+        if tree_was_rebuilt {
+            self.template_binding_index = template_patch::TemplateBindingIndex::build(&tree);
         }
         self.last_tree = Some(tree);
         self.frame_dirty.clear();
@@ -2089,21 +2174,31 @@ impl ShellComponent for FrontendSurfaceComponent {
             return Vec::new();
         };
 
-        let mut requests: Vec<_> = self.tooltip_popup.iter().map(|popup| popup.request()).collect();
-        let mut diagnostics = Vec::new();
-        collect_child_surface_requests_with_diagnostics(
-            tree,
-            tree,
-            &mut requests,
-            &mut diagnostics,
-        );
-        for diagnostic in diagnostics {
-            self.record_child_surface_diagnostic(&diagnostic);
+        let mut cache = self.child_surface_cache.borrow_mut();
+        if !cache.matches(tree, self.frame_revision) {
+            cache.update(
+                tree,
+                self.last_frame_snapshot.as_ref(),
+                &HashSet::new(),
+                true,
+                self.frame_revision,
+            );
+        }
+        let mut requests: Vec<_> = self
+            .tooltip_popup
+            .iter()
+            .map(|popup| popup.request())
+            .collect();
+        requests.extend(cache.requests().iter().cloned());
+        for diagnostic in cache.diagnostics() {
+            self.record_child_surface_diagnostic(diagnostic);
         }
         if self.profiling_enabled {
             let visits = work.snapshot()["child_surface_requests"];
-            tracing::debug!(target: "mesh_profiling", surface = self.id(),
-                pass = "child_surface_requests", node_visits = visits, "frame node visits");
+            if visits > 0 {
+                tracing::debug!(target: "mesh_profiling", surface = self.id(),
+                    pass = "child_surface_requests", node_visits = visits, "frame node visits");
+            }
         }
         requests
     }
@@ -2370,11 +2465,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             return;
         }
         self.closing_child_keys = keys;
-        // A full rebuild (not just a style-only restyle) so the affected
-        // popover subtree's `class` attribute is re-derived fresh from the
-        // template rather than carrying forward a stale appended class from
-        // a previous closing/reopening cycle.
-        self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
+        self.invalidate_interaction_restyle();
     }
 
     fn set_closing_child_keys_from_slice(&mut self, keys: &[&str]) {
@@ -2386,11 +2477,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             return;
         }
         self.closing_child_keys = keys.iter().map(|key| (*key).to_owned()).collect();
-        // A full rebuild (not just a style-only restyle) so the affected
-        // popover subtree's `class` attribute is re-derived fresh from the
-        // template rather than carrying forward a stale appended class from
-        // a previous closing/reopening cycle.
-        self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
+        self.invalidate_interaction_restyle();
     }
 
     fn set_entering_child_keys(&mut self, keys: std::collections::HashSet<String>) {
@@ -2398,7 +2485,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             return;
         }
         self.entering_child_keys = keys;
-        self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
+        self.invalidate_interaction_restyle();
     }
 
     fn set_entering_child_keys_from_slice(&mut self, keys: &[&str]) {
@@ -2410,7 +2497,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             return;
         }
         self.entering_child_keys = keys.iter().map(|key| (*key).to_owned()).collect();
-        self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
+        self.invalidate_interaction_restyle();
     }
 
     fn allows_shrink_to_fit(&self) -> bool {

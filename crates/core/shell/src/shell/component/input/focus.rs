@@ -349,7 +349,7 @@ impl FrontendSurfaceComponent {
             };
         let text_x = node.layout.x + style.padding.left;
         let text_y = node.layout.y + style.padding.top;
-        let geometry = TextRenderer::new().selection_geometry(
+        let geometry = SharedTextMeasurer.selection_geometry(
             text,
             &style.font_family,
             style.font_size,

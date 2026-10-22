@@ -256,7 +256,8 @@ pub struct PerSurfaceLayoutState {
     /// full fresh-build on the next pass, which then sets `valid = true`.
     pub valid: bool,
     projection: HashMap<NodeId, sparse::LayoutProjection>,
-    /// Exact geometry changes from a stable-tree layout, or `None` after a full pass.
+    /// Exact geometry changes since the previous successful layout, or `None`
+    /// when no complete projection exists (for example after a topology change).
     pub changed_nodes: Option<HashSet<NodeId>>,
     #[cfg(test)]
     fail_next_layout: bool,
@@ -453,7 +454,9 @@ impl LayoutEngine {
 
     /// Compute layout by mutating a retained per-surface Taffy tree, optionally
     /// limiting style/context synchronization to known layout-relevant dirty
-    /// nodes on non-structural frames.
+    /// nodes on non-structural frames. Callers must set `dirty_structural`
+    /// whenever node identity, tags or children change; retained structure is
+    /// validated once, then reused until that flag or invalid state requires it.
     pub fn compute_incremental_with_dirty_nodes(
         root: &mut WidgetNode,
         state: &mut PerSurfaceLayoutState,
@@ -586,9 +589,10 @@ impl LayoutEngine {
             && retained_taffy_id(root, state).is_some()
         {
             intrinsic_cache.invalidate_text_measurements_if_needed(text_measure_revisions);
+            state.changed_nodes = Some(HashSet::new());
             return;
         }
-        if (!stable_tree || !state.valid || dirty_structural)
+        if (!state.valid || dirty_structural)
             && let Err(error) = validate_widget_tree(root)
         {
             tracing::error!(

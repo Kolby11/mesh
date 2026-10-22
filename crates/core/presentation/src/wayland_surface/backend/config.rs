@@ -412,11 +412,12 @@ impl SurfaceConfig {
     /// them all, on compositors that blur by rule rather than by protocol. It
     /// stays when a protocol is bound: the namespace is a stable name for
     /// compositor rules, and changing it would recreate the surface.
-    pub(in crate::wayland_surface) fn wayland_namespace(&self) -> String {
+    /// `suffix` follows the namespace and precedes `:blur`.
+    pub(in crate::wayland_surface) fn wayland_namespace(&self, suffix: &str) -> String {
         if self.blur {
-            format!("{}:blur", self.namespace)
+            format!("{}{suffix}:blur", self.namespace)
         } else {
-            self.namespace.clone()
+            format!("{}{suffix}", self.namespace)
         }
     }
 

@@ -1754,6 +1754,15 @@ impl PresentationEngine {
         }
     }
 
+    /// Append `suffix` to the namespace of every layer surface created from
+    /// now on, before any `:blur` marker, so compositor rules and tools can
+    /// tell these surfaces from a desktop shell's. Other backends ignore it.
+    pub fn set_layer_namespace_suffix(&mut self, suffix: &str) {
+        if let Backend::WaylandSurface(bridge) = &mut self.backend {
+            bridge.set_namespace_suffix(suffix);
+        }
+    }
+
     /// Returns true when the backend supports fd-based blocking dispatch (WaylandSurface).
     /// Returns false for DevWindow, which uses internal polling.
     pub fn supports_blocking_dispatch(&self) -> bool {

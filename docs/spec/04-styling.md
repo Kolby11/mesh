@@ -119,8 +119,11 @@ Doctor warns for missing/unknown version declarations, incomplete declared
 contracts and unknown token reads. These authoring warnings leave modules
 loadable. Missing tokens retain normal runtime resolution behavior.
 
-LSP completions use this contract and locally declared CSS variables. LSP and
-`config doctor` share CSS-token and Luau-AST analysis for static `var()` and
+LSP `var()` completions include this contract, locally declared CSS variables,
+the owning module's declared tokens, and its directly imported token families.
+Module and family names use their normalized CSS spelling; unrelated modules'
+tokens stay out of completion. LSP and `config doctor` share CSS-token and
+Luau-AST analysis for static `var()` and
 `mesh.theme.token()` / imported theme-proxy reads, including template expressions
 and CSS-capable prop defaults. Comments, quoted CSS content and unrelated Lua
 strings do not count as reads. Dynamic names remain runtime lookups. Local CSS
@@ -410,6 +413,11 @@ states override it:
 `none`, which (like `auto`) clears the constraint. A fixed size can therefore
 be capped against whatever surface it lands in with `max-width: 100%` instead
 of restating the clamp in every filling state.
+
+The `fit` size includes descendant layout extents, including absolute children.
+Overflow-clipping viewports stop those extents on each clipped axis: offscreen
+scroll content does not enlarge a fit-sized ancestor or its popup surface.
+Fixed and promoted surface subtrees do not contribute to ancestor fit sizing.
 
 There is **no CSS specificity**. Matching rules apply in source order and the
 last declaration wins, regardless of selector shape (`#id` does not beat

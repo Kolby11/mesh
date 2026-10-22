@@ -1,3 +1,6 @@
+mod cache;
+pub(in crate::shell::component) use cache::ChildSurfaceCache;
+
 use super::*;
 use crate::shell::PopoverTriggerReference;
 use mesh_core_elements::Prop;
@@ -12,6 +15,7 @@ pub(super) fn collect_child_surface_requests(
     collect_child_surface_requests_with_diagnostics(root, node, requests, &mut diagnostics);
 }
 
+#[cfg(test)]
 pub(super) fn collect_child_surface_requests_with_diagnostics(
     root: &WidgetNode,
     node: &WidgetNode,
@@ -141,6 +145,7 @@ pub(super) fn collect_child_surface_requests_with_diagnostics(
     }
 }
 
+#[cfg(test)]
 fn collect_overflow_surface_requests(
     root: &WidgetNode,
     node: &WidgetNode,

@@ -493,6 +493,18 @@ pub(super) fn debug_catalog() -> InterfaceCatalog {
         version: parse_contract_version("1.0").unwrap(),
         state_fields: vec![
             ContractStateField {
+                name: "inspected_element".into(),
+                field_type: "object".into(),
+                description: None,
+                ..Default::default()
+            },
+            ContractStateField {
+                name: "element_picker_enabled".into(),
+                field_type: "boolean".into(),
+                description: None,
+                ..Default::default()
+            },
+            ContractStateField {
                 name: "overlay_enabled".into(),
                 field_type: "boolean".into(),
                 description: None,
@@ -1128,6 +1140,14 @@ pub(super) fn real_frontend_module_component(
         .unwrap(),
         public_props: Default::default(),
         local_components: HashMap::from([
+            (
+                "ElementsView".into(),
+                parse_component(include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../../../modules/frontend/debug-inspector/src/components/elements-view.mesh"
+                )))
+                .unwrap(),
+            ),
             (
                 "ViewTabs".into(),
                 parse_component(include_str!(concat!(

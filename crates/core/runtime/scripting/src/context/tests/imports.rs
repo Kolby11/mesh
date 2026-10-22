@@ -283,12 +283,62 @@ end
 }
 
 #[test]
+fn locale_is_matches_active_subtags_and_tracks_snapshot_changes() {
+    let caps = CapabilitySet::from_ids(["locale.read"]);
+    let mut ctx = ScriptContext::new("@mesh/locale-match-test", caps).unwrap();
+    ctx.load_script(
+        r#"
+local matches = import("mesh.locale", "is")
+function check(tag)
+    matched = matches(tag)
+    direct = mesh.locale.is(tag)
+    required = require("mesh.locale").is(tag)
+end
+"#,
+    )
+    .unwrap();
+
+    for (active, tag, expected) in [
+        ("sk-SK", "sk", true),
+        ("sk-SK", "SK-sk", true),
+        ("sk-SK", "sk-CZ", false),
+        ("sk-SK", "en", false),
+        ("sk", "sk-SK", false),
+        ("zh-Hant-TW", "zh-Hant", true),
+        ("zh-Hant-TW", "zh-Hans", false),
+        ("fil", "fi", false),
+        ("en", "en", true),
+    ] {
+        let locale = LocaleEngine::with_fallback_locale(active, "en");
+        ctx.set_i18n_translator(&locale.module_translator("@mesh/locale-match-test"));
+        ctx.apply_service_payload("locale", &serde_json::json!({ "current": "de" }));
+        ctx.call_handler("check", &[serde_json::json!(tag)])
+            .unwrap();
+        for name in ["matched", "direct", "required"] {
+            assert_eq!(
+                ctx.state.get(name),
+                Some(serde_json::json!(expected)),
+                "{name}: {active} against {tag}"
+            );
+        }
+    }
+
+    for invalid in ["", "sk_SK", "sk--SK", "*"] {
+        assert!(
+            ctx.call_handler("check", &[serde_json::json!(invalid)])
+                .is_err()
+        );
+    }
+}
+
+#[test]
 fn locale_host_members_are_independently_capability_gated() {
-    fn member_types(caps: CapabilitySet) -> (Value, Value) {
+    fn member_types(caps: CapabilitySet) -> (Value, Value, Value) {
         let mut ctx = ScriptContext::new("@mesh/locale-capability-test", caps).unwrap();
         ctx.load_script(
             r#"
 current_type = type(mesh.locale.current)
+is_type = type(mesh.locale.is)
 set_type = type(mesh.locale.set)
 "#,
         )
@@ -296,24 +346,37 @@ set_type = type(mesh.locale.set)
         (
             ctx.state.get("current_type").unwrap().clone(),
             ctx.state.get("set_type").unwrap().clone(),
+            ctx.state.get("is_type").unwrap().clone(),
         )
     }
 
     assert_eq!(
         member_types(CapabilitySet::default()),
-        (serde_json::json!("nil"), serde_json::json!("nil"))
+        (
+            serde_json::json!("nil"),
+            serde_json::json!("nil"),
+            serde_json::json!("nil")
+        )
     );
 
     let read = CapabilitySet::from_ids(["locale.read"]);
     assert_eq!(
         member_types(read),
-        (serde_json::json!("function"), serde_json::json!("nil"))
+        (
+            serde_json::json!("function"),
+            serde_json::json!("nil"),
+            serde_json::json!("function")
+        )
     );
 
     let write = CapabilitySet::from_ids(["locale.write"]);
     assert_eq!(
         member_types(write),
-        (serde_json::json!("nil"), serde_json::json!("function"))
+        (
+            serde_json::json!("nil"),
+            serde_json::json!("function"),
+            serde_json::json!("nil")
+        )
     );
 }
 
@@ -370,6 +433,7 @@ fn named_locale_imports_enforce_read_and_write_members() {
             r#"
 function init()
     current_ok = pcall(import, "mesh.locale", "current")
+    is_ok = pcall(import, "mesh.locale", "is")
     set_ok = pcall(import, "mesh.locale", "set")
 end
 "#,
@@ -381,6 +445,7 @@ end
         Some(serde_json::json!(false))
     );
     assert_eq!(write_ctx.state.get("set_ok"), Some(serde_json::json!(true)));
+    assert_eq!(write_ctx.state.get("is_ok"), Some(serde_json::json!(false)));
 
     let read = CapabilitySet::from_ids(["locale.read"]);
     let mut read_ctx = ScriptContext::new("@mesh/locale-read-import", read).unwrap();
@@ -389,6 +454,7 @@ end
             r#"
 function init()
     current_ok = pcall(import, "mesh.locale", "current")
+    is_ok = pcall(import, "mesh.locale", "is")
     set_ok = pcall(import, "mesh.locale", "set")
 end
 "#,
@@ -400,6 +466,7 @@ end
         Some(serde_json::json!(true))
     );
     assert_eq!(read_ctx.state.get("set_ok"), Some(serde_json::json!(false)));
+    assert_eq!(read_ctx.state.get("is_ok"), Some(serde_json::json!(true)));
 }
 
 #[test]

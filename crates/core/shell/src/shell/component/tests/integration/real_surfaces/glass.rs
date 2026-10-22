@@ -299,6 +299,79 @@ fn liquid_glass_calendar_and_controls_are_promoted_local_popovers() {
 }
 
 #[test]
+fn liquid_glass_launcher_keeps_results_viewport_with_many_apps() {
+    let mut component = host("glass-dock");
+    component.motion_policy.reduced_motion = true;
+    paint(&mut component, 1920, 180);
+    let installed: Vec<_> = (0..100)
+        .map(|index| {
+            serde_json::json!({
+                "id": format!("app-{index}"), "name": format!("Application {index}"),
+                "icon": "", "pinned": false, "running": false, "focused": false, "windows": 0
+            })
+        })
+        .collect();
+    update(
+        &mut component,
+        "mesh.apps",
+        serde_json::json!({"available": true, "installed": installed, "apps": []}),
+    );
+    paint(&mut component, 1920, 180);
+    press(&mut component, "glassLauncher", 1920, 180);
+    paint(&mut component, 1920, 180);
+    let tree = component.last_tree.as_ref().unwrap();
+    let shell = first_node_by_class(tree, "launcher-shell").unwrap();
+    let results = first_node_by_class(tree, "results").unwrap();
+    let grid = first_node_by_class(tree, "app-grid").unwrap();
+    assert_eq!(results.layout.height, 320.0);
+    assert!(
+        grid.layout.height > results.layout.height * 2.0,
+        "{:?}",
+        grid.layout
+    );
+    assert!(shell.layout.height < 600.0, "{:?}", shell.layout);
+    let results_layout = results.layout;
+    let scroll_x = results.layout.x - shell.layout.x + 40.0;
+    let scroll_y = results.layout.y - shell.layout.y + 40.0;
+    let request = component
+        .child_surface_requests()
+        .into_iter()
+        .next()
+        .unwrap();
+    assert!(request.content_size.1 < 600, "{request:?}");
+    component
+        .handle_child_surface_input(
+            &request.node_key,
+            &theme(),
+            request.content_size.0,
+            request.content_size.1,
+            (0.0, 0.0),
+            ComponentInput::Scroll {
+                x: scroll_x,
+                y: scroll_y,
+                dx: 0.0,
+                dy: -180.0,
+            },
+        )
+        .unwrap();
+    paint(&mut component, 1920, 180);
+    let tree = component.last_tree.as_ref().unwrap();
+    let results = first_node_by_class(tree, "results").unwrap();
+    assert_eq!(results.layout, results_layout);
+    assert!(results.resolved_scroll_metrics().y > 0.0);
+    assert_eq!(
+        component.child_surface_requests()[0].content_size,
+        request.content_size
+    );
+    let mut pixels = PixelBuffer::new(request.content_size.0, request.content_size.1);
+    assert!(
+        component
+            .paint_child_surface_raster(&request.node_key, &mut pixels, 1.0, (0, 0), false)
+            .unwrap()
+    );
+}
+
+#[test]
 fn liquid_glass_dock_search_and_neighbor_magnification_work() {
     let mut component = host("glass-dock");
     update(
@@ -932,5 +1005,52 @@ fn glass_dashboard_spectrum_profile() {
             );
         }
         component.set_profiling_enabled(false);
+    }
+}
+
+#[test]
+fn zz_tmp_launcher_scroll_dump() {
+    let dir = PathBuf::from(std::env::var("ZZ_DIR").unwrap());
+    let mut component = host("glass-dock");
+    component.motion_policy.reduced_motion = true;
+    paint(&mut component, 1920, 180);
+    let installed: Vec<_> = (0..100)
+        .map(|index| {
+            serde_json::json!({
+                "id": format!("app-{index}"), "name": format!("Application {index}"),
+                "icon": "", "pinned": false, "running": false, "focused": false, "windows": 0
+            })
+        })
+        .collect();
+    update(&mut component, "mesh.apps",
+        serde_json::json!({"available": true, "installed": installed, "apps": []}));
+    paint(&mut component, 1920, 180);
+    press(&mut component, "glassLauncher", 1920, 180);
+    paint(&mut component, 1920, 180);
+    let tree = component.last_tree.as_ref().unwrap();
+    let shell = first_node_by_class(tree, "launcher-shell").unwrap();
+    let results = first_node_by_class(tree, "results").unwrap();
+    let sx = results.layout.x - shell.layout.x + 40.0;
+    let sy = results.layout.y - shell.layout.y + 40.0;
+    let request = component.child_surface_requests().into_iter().next().unwrap();
+    let (w, h) = request.content_size;
+    let mut retained = PixelBuffer::new(w, h);
+    component.paint_child_surface_raster(&request.node_key, &mut retained, 1.0, (0, 0), false).unwrap();
+    std::fs::write(dir.join(format!("a-{w}x{h}.bgra")), retained.data()).unwrap();
+    for step in 0..3 {
+        component.handle_child_surface_input(&request.node_key, &theme(), w, h, (0.0, 0.0),
+            ComponentInput::Scroll { x: sx, y: sy, dx: 0.0, dy: -60.0 }).unwrap();
+        paint(&mut component, 1920, 180);
+        let req = component.child_surface_requests().into_iter().next().unwrap();
+        eprintln!("step {step} size {:?}", req.content_size);
+        let tree = component.last_tree.as_ref().unwrap();
+        let r = first_node_by_class(tree, "results").unwrap();
+        let g = first_node_by_class(tree, "app-grid").unwrap();
+        eprintln!("results {:?} scroll {:?} grid {:?}", r.layout, r.resolved_scroll_metrics(), g.layout);
+        component.paint_child_surface_raster(&request.node_key, &mut retained, 1.0, (0, 0), false).unwrap();
+        std::fs::write(dir.join(format!("r{step}-{w}x{h}.bgra")), retained.data()).unwrap();
+        let mut fresh = PixelBuffer::new(w, h);
+        component.paint_child_surface_raster(&request.node_key, &mut fresh, 1.0, (0, 0), false).unwrap();
+        std::fs::write(dir.join(format!("f{step}-{w}x{h}.bgra")), fresh.data()).unwrap();
     }
 }

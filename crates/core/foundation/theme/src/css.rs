@@ -122,7 +122,17 @@ pub fn parse_selector(source: &str) -> Result<Selector, String> {
 pub fn variable_reference(value: &str) -> Option<String> {
     let value = value.trim();
     let inner = value.strip_prefix("var(")?.strip_suffix(')')?;
-    (!inner.trim().is_empty()).then(|| inner.trim().to_string())
+    // `var(--a) 0 var(--a)` also starts with `var(` and ends with `)`; the
+    // opening parenthesis must close only at the end.
+    let mut depth = 0usize;
+    for ch in inner.chars() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.checked_sub(1)?,
+            _ => {}
+        }
+    }
+    (depth == 0 && !inner.trim().is_empty()).then(|| inner.trim().to_string())
 }
 
 /// A byte range in the source passed to [`parse_stylesheet`].

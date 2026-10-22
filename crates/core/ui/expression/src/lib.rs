@@ -38,6 +38,7 @@ pub struct CompiledExpression {
     calls_function: bool,
     references: Vec<String>,
     is_reference: bool,
+    reference_path: Option<Vec<String>>,
 }
 
 pub type SharedCompiledExpression = Arc<CompiledExpression>;
@@ -54,6 +55,12 @@ impl CompiledExpression {
     pub fn referenced_identifiers(&self) -> &[String] {
         &self.references
     }
+    /// A plain name or dotted field reference, derived from the parsed AST.
+    /// Dynamic indexing, calls and operators have no static reference path.
+    pub fn reference_path(&self) -> Option<&[String]> {
+        self.reference_path.as_deref()
+    }
+
     pub fn is_reference(&self) -> bool {
         self.is_reference
     }
@@ -176,6 +183,33 @@ fn is_reference_expression(mut expression: &full_moon::ast::Expression) -> bool 
     matches!(expression, full_moon::ast::Expression::Var(_))
 }
 
+fn reference_path(mut expression: &full_moon::ast::Expression) -> Option<Vec<String>> {
+    use full_moon::ast::{Expression, Index, Prefix, Suffix, Var};
+    while let Expression::Parentheses {
+        expression: inner, ..
+    } = expression
+    {
+        expression = inner;
+    }
+    match expression {
+        Expression::Var(Var::Name(name)) => Some(vec![name.token().to_string()]),
+        Expression::Var(Var::Expression(expression)) => {
+            let Prefix::Name(name) = expression.prefix() else {
+                return None;
+            };
+            let mut path = vec![name.token().to_string()];
+            for suffix in expression.suffixes() {
+                let Suffix::Index(Index::Dot { name, .. }) = suffix else {
+                    return None;
+                };
+                path.push(name.token().to_string());
+            }
+            Some(path)
+        }
+        _ => None,
+    }
+}
+
 /// Two-generation bounded cache: hits in the old generation are promoted, and
 /// a full young generation retires the old one, so recently used expressions
 /// survive while the total stays under [`MAX_CACHED_EXPRESSIONS`].
@@ -217,9 +251,9 @@ fn expression_cache() -> std::sync::MutexGuard<'static, ExpressionCache> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// `(calls_function, sorted references, is_reference)`, or `None` when the
+/// `(calls_function, sorted references, is_reference, reference_path)`, or `None` when the
 /// source is not a valid expression.
-type ParsedExpression = Option<(bool, Vec<String>, bool)>;
+type ParsedExpression = Option<(bool, Vec<String>, bool, Option<Vec<String>>)>;
 
 struct ParseJob {
     candidate: String,
@@ -258,7 +292,11 @@ fn parse_expression(candidate: &str) -> ParsedExpression {
             let reference = matches!(ast.nodes().last_stmt(), Some(full_moon::ast::LastStmt::Return(statement)) if statement.returns().iter().next().is_some_and(is_reference_expression)) && !metadata.calls_function;
             let mut references = metadata.references.into_iter().collect::<Vec<_>>();
             references.sort();
-            (metadata.calls_function, references, reference)
+            let path = match ast.nodes().last_stmt() {
+                Some(full_moon::ast::LastStmt::Return(statement)) => statement.returns().iter().next().and_then(reference_path),
+                _ => None,
+            };
+            (metadata.calls_function, references, reference, path)
         })
         .ok()
 }
@@ -296,7 +334,7 @@ pub fn compile_expression(
                 },
             )
         })?;
-    let Some((calls_function, references, is_reference)) = parsed else {
+    let Some((calls_function, references, is_reference, reference_path)) = parsed else {
         return Err(non_ascii.map_or(
             ExpressionCompileError::Malformed,
             |(byte_offset, character)| ExpressionCompileError::NonAscii {
@@ -311,6 +349,7 @@ pub fn compile_expression(
         calls_function,
         references,
         is_reference,
+        reference_path,
     });
     // Another thread may have compiled the same source meanwhile; keep the
     // first so every consumer shares one value.
@@ -331,6 +370,28 @@ fn first_non_ascii(source: &str) -> Option<(usize, char)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn static_reference_paths_exclude_dynamic_or_computed_keys() {
+        for (source, expected) in [
+            ("item", Some(vec!["item"])),
+            ("((item.nested.id))", Some(vec!["item", "nested", "id"])),
+            ("item[index]", None),
+            ("item.id .. suffix", None),
+            ("key(item)", None),
+            ("item:identifier()", None),
+            ("function() return item.id end", None),
+        ] {
+            let expression = compile_expression(source).unwrap();
+            assert_eq!(
+                expression
+                    .reference_path()
+                    .map(|path| path.iter().map(String::as_str).collect::<Vec<_>>()),
+                expected,
+                "{source}"
+            );
+        }
+    }
 
     #[test]
     fn callback_references_respect_lexical_scopes_and_initializers() {

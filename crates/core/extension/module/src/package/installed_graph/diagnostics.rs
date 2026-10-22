@@ -561,7 +561,7 @@ fn diagnose_frontend_source_contracts(
         let declared_keybinds = module
             .manifest
             .mesh
-            .keybinds
+            .effective_keybinds()
             .actions
             .keys()
             .map(String::as_str)

@@ -1782,6 +1782,96 @@ fn fixed_child_full_width_stretch() {
 }
 
 #[test]
+fn fit_extents_stop_at_overflow_viewports() {
+    use crate::style::Overflow;
+
+    for overflow in [Overflow::Hidden, Overflow::Auto, Overflow::Scroll] {
+        for (clip_x, clip_y) in [(true, false), (false, true), (true, true)] {
+            let mut root = make_node("box", Dimension::Fit, Dimension::Fit);
+            let mut viewport = make_node("box", Dimension::Px(200.0), Dimension::Px(320.0));
+            viewport.layout = LayoutRect {
+                x: 20.0,
+                y: 100.0,
+                width: 200.0,
+                height: 320.0,
+            };
+            if clip_x {
+                viewport.computed_style.overflow_x = overflow;
+            }
+            if clip_y {
+                viewport.computed_style.overflow_y = overflow;
+            }
+            let mut content = make_node("box", Dimension::Fit, Dimension::Fit);
+            content.layout.x = 20.0;
+            content.layout.y = 100.0;
+            let mut item = make_node("box", Dimension::Px(400.0), Dimension::Px(1000.0));
+            item.layout = LayoutRect {
+                x: 20.0,
+                y: 100.0,
+                width: 400.0,
+                height: 1000.0,
+            };
+            content.children.push(item);
+            viewport.children.push(content);
+            root.children.push(viewport);
+
+            super::lowering::resolve_fit_sizing(&mut root);
+
+            assert_eq!(root.layout.width, if clip_x { 220.0 } else { 420.0 });
+            assert_eq!(root.layout.height, if clip_y { 420.0 } else { 1100.0 });
+            assert_eq!(root.children[0].children[0].layout.height, 1000.0);
+        }
+    }
+}
+
+#[test]
+fn stable_fit_layout_preserves_scroll_viewport_boundary() {
+    let mut root = keyed_node("root", "column", Dimension::Fit, Dimension::Fit);
+    let mut viewport = keyed_node(
+        "root/0",
+        "column",
+        Dimension::Px(200.0),
+        Dimension::Px(320.0),
+    );
+    viewport.computed_style.overflow_y = crate::style::Overflow::Auto;
+    let mut content = keyed_node(
+        "root/0/0",
+        "box",
+        Dimension::Px(180.0),
+        Dimension::Px(1000.0),
+    );
+    content.computed_style.flex_shrink = 0.0;
+    viewport.children.push(content);
+    root.children.push(viewport);
+    let mut state = PerSurfaceLayoutState::new();
+    let mut cache = IntrinsicLayoutCache::default();
+    LayoutEngine::compute_incremental(
+        &mut root, &mut state, 600.0, 600.0, true, true, &mut cache, None,
+    );
+    for height in [1500.0, 700.0] {
+        let previous = crate::FrameSnapshot::complete(&root, 0, None).unwrap();
+        let content = &mut root.children[0].children[0];
+        content.computed_style.height = Dimension::Px(height);
+        let id = content.id;
+        let mut full = root.clone();
+        LayoutEngine::compute(&mut full, 600.0, 600.0);
+        LayoutEngine::compute_incremental_for_stable_tree(
+            &mut root,
+            &mut state,
+            &previous,
+            &HashSet::from([id]),
+            600.0,
+            600.0,
+            &mut cache,
+            None,
+        );
+        assert_eq!(root.layout.height, 320.0);
+        assert_eq!(root.children[0].children[0].layout.height, height);
+        assert_layout_maps_eq(&keyed_layouts(&root), &keyed_layouts(&full));
+    }
+}
+
+#[test]
 fn nested_fit_extents_visit_once_and_respect_surface_boundaries() {
     let mut root = make_node("box", Dimension::Fit, Dimension::Fit);
     root.layout.x = 10.0;
@@ -1894,5 +1984,83 @@ fn stable_tree_layout_matches_full_layout_and_reports_moved_siblings() {
             }
             verify(&root, &before, state.changed_nodes.as_ref().unwrap());
         }
+    }
+}
+
+#[test]
+fn full_layout_reports_geometry_changes_and_paint_only_clears_them() {
+    let mut root = keyed_node("root", "row", Dimension::Px(200.0), Dimension::Px(100.0));
+    root.children.push(keyed_node(
+        "root/0",
+        "box",
+        Dimension::Px(20.0),
+        Dimension::Px(20.0),
+    ));
+    root.children.push(keyed_node(
+        "root/1",
+        "box",
+        Dimension::Px(20.0),
+        Dimension::Px(20.0),
+    ));
+    let mut state = PerSurfaceLayoutState::new();
+    let mut cache = IntrinsicLayoutCache::default();
+    LayoutEngine::compute_incremental(
+        &mut root, &mut state, 200.0, 100.0, true, true, &mut cache, None,
+    );
+    for width in [40.0, 60.0, 20.0] {
+        let before = keyed_layouts(&root);
+        root.children[0].computed_style.width = Dimension::Px(width);
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 200.0, 100.0, true, false, &mut cache, None,
+        );
+        let after = keyed_layouts(&root);
+        assert_eq!(
+            after
+                .iter()
+                .filter(|(key, layout)| before.get(*key) != Some(*layout))
+                .count(),
+            2
+        );
+        let expected = HashSet::from([root.children[0].id, root.children[1].id]);
+        assert_eq!(state.changed_nodes.as_ref(), Some(&expected));
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 200.0, 100.0, false, false, &mut cache, None,
+        );
+        assert_eq!(state.changed_nodes, Some(HashSet::new()));
+    }
+}
+
+#[test]
+fn retained_layout_validates_only_structure_changes() {
+    for count in [16, 1024] {
+        let mut root = WidgetNode::new("row");
+        for _ in 0..count {
+            let mut child = WidgetNode::new("box");
+            child.computed_style.width = Dimension::Px(1.0);
+            child.computed_style.height = Dimension::Px(10.0);
+            root.children.push(child);
+        }
+        let mut state = PerSurfaceLayoutState::default();
+        let mut cache = IntrinsicLayoutCache::default();
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 200.0, 40.0, true, true, &mut cache, None,
+        );
+        root.children[0].computed_style.width = Dimension::Px(2.0);
+        let scope = crate::frame_work::Scope::new(true);
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 200.0, 40.0, true, false, &mut cache, None,
+        );
+        assert_eq!(scope.snapshot()["validation"], 0);
+        drop(scope);
+        let mut expected = root.clone();
+        LayoutEngine::compute(&mut expected, 200.0, 40.0);
+        assert_eq!(root.children[0].layout, expected.children[0].layout);
+        root.children[0].tag = "invalid-element".into();
+        let scope = crate::frame_work::Scope::new(true);
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, 200.0, 40.0, true, true, &mut cache, None,
+        );
+        assert!(scope.snapshot()["validation"] > 0);
+        assert!(!state.valid);
     }
 }

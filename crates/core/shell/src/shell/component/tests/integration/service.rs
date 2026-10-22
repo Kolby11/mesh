@@ -645,6 +645,50 @@ end)
     );
 }
 
+#[test]
+fn root_runtime_reads_service_state_cached_before_its_first_build() {
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <text content="{label}" />
+</template>
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+label = "none"
+
+effect(function()
+    label = tostring(audio.percent or "none")
+end)
+</script>
+"#,
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+
+    let update = ServiceEvent::Updated {
+        service: "mesh.audio".into(),
+        source_module: "@mesh/pipewire-audio".into(),
+        payload: serde_json::json!({ "available": true, "percent": 42 }),
+    };
+
+    // The root runtime exists from mount but has read nothing yet, so the
+    // shell only caches the update for it.
+    assert!(!ShellComponent::observes_service_event(&component, &update));
+    ShellComponent::cache_service_payload(&mut component, &update);
+
+    let theme = mesh_core_theme::default_theme();
+    let mut buffer = PixelBuffer::new(160, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
+
+    assert!(
+        rendered_text(&component).iter().any(|text| text == "42"),
+        "root runtime should render service state cached before its first paint, got {:?}",
+        rendered_text(&component)
+    );
+}
+
 /// A hidden surface does not paint, which is where deferred effects run, so
 /// the shell settles them offscreen: an effect is how a hidden notification
 /// popup decides to show itself.

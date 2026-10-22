@@ -890,18 +890,30 @@ fn subtree_bounds_reach_clip(
         .any(|child| subtree_bounds_reach_clip(child, child_transform, clip, bounds))
 }
 
+#[cfg(test)]
 pub(super) fn subtree_bounds_at(
     node: &WidgetNode,
     offset_x: f32,
     offset_y: f32,
 ) -> Option<FloatBounds> {
-    subtree_bounds_at_with_transform(node, root_transform(offset_x, offset_y))
+    subtree_bounds_at_with_visit(node, offset_x, offset_y, &mut || {})
+}
+
+pub(super) fn subtree_bounds_at_with_visit(
+    node: &WidgetNode,
+    offset_x: f32,
+    offset_y: f32,
+    visit: &mut impl FnMut(),
+) -> Option<FloatBounds> {
+    subtree_bounds_at_with_transform(node, root_transform(offset_x, offset_y), visit)
 }
 
 fn subtree_bounds_at_with_transform(
     node: &WidgetNode,
     parent_transform: AffineTransform,
+    visit: &mut impl FnMut(),
 ) -> Option<FloatBounds> {
+    visit();
     if node_is_explicitly_hidden(node) {
         return None;
     }
@@ -911,7 +923,8 @@ fn subtree_bounds_at_with_transform(
     let scroll = node.resolved_scroll_metrics();
     let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);
     for child in &node.children {
-        if let Some(child_bounds) = subtree_bounds_at_with_transform(child, child_transform) {
+        if let Some(child_bounds) = subtree_bounds_at_with_transform(child, child_transform, visit)
+        {
             bounds = Some(match bounds {
                 Some(existing) => existing.union(child_bounds),
                 None => child_bounds,

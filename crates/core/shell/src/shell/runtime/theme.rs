@@ -932,9 +932,6 @@ impl Shell {
                 .provider_id("mesh.theme")
                 .unwrap_or("@mesh/shell"),
         );
-        if let Err(error) = mesh_core_backend::validate_command_payload(&payload) {
-            tracing::warn!("theme service snapshot exceeded backend command JSON budget: {error}");
-        }
         let mut requests = self.broadcast_service_event(ServiceEvent::Updated {
             service: "mesh.theme".into(),
             source_module: source_module.into(),

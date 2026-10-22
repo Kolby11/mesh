@@ -30,7 +30,7 @@ pub use accessibility::{
     AccessibilityInfo, AccessibilityRelationships, AccessibilityRole, AccessibilityState,
     AccessibilityTree, AccessibilityTreeNode, live_accessibility_focus, normalize_accessibility,
     normalize_accessibility_before_finalization, normalize_accessibility_finalized_memo,
-    try_normalize_accessibility,
+    normalize_accessibility_with_validated_structure, try_normalize_accessibility,
 };
 pub use attributes::{AttrKey, AttributeMap};
 pub use composition::{CallbackHandle, ComponentCompositionProps, HandlerTarget};
@@ -72,11 +72,10 @@ pub use pseudo_state::{
 };
 pub use style::{
     AlignContent, AlignItems, AlignSelf, BlendMode, BoxShadow, Color, ComputedStyle, CornerShape,
-    CornerShapes, Corners,
-    Dimension, Display, Edges, FlexDirection, FlexWrap, FontStyle, JustifyContent, Overflow,
-    Position, StepPosition, StyleContext, StyleResolver, StyleRuleIndex, TextAlign, TextDirection,
-    TextOverflow, Transform2D, TransitionEasing, TransitionProperties, TransitionStyle,
-    VisualFilter, WhiteSpace,
+    CornerShapes, Corners, Dimension, Display, Edges, FlexDirection, FlexWrap, FontStyle,
+    JustifyContent, Overflow, Position, StepPosition, StyleContext, StyleResolver, StyleRuleIndex,
+    TextAlign, TextDirection, TextOverflow, Transform2D, TransitionEasing, TransitionProperties,
+    TransitionStyle, VisualFilter, WhiteSpace,
 };
 pub use tree::EventHandlerCall;
 pub use tree::{

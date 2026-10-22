@@ -236,7 +236,7 @@ fn semantic_diff_carries_accepted_policy_revisions() {
 fn layer_namespace_and_blur_require_surface_recreation() {
     let cfg = base_cfg();
 
-    assert_eq!(cfg.wayland_namespace(), "@mesh/audio-popover");
+    assert_eq!(cfg.wayland_namespace(""), "@mesh/audio-popover");
 
     let mut renamed = cfg.clone();
     renamed.namespace = "@mesh/other-popover".into();
@@ -247,7 +247,11 @@ fn layer_namespace_and_blur_require_surface_recreation() {
 
     let mut blurred = cfg.clone();
     blurred.blur = true;
-    assert_eq!(blurred.wayland_namespace(), "@mesh/audio-popover:blur");
+    assert_eq!(blurred.wayland_namespace(""), "@mesh/audio-popover:blur");
+    assert_eq!(
+        blurred.wayland_namespace(".replay"),
+        "@mesh/audio-popover.replay:blur"
+    );
     assert_eq!(
         surface_config_change(&cfg, cfg.keyboard_mode, &blurred, blurred.keyboard_mode).change,
         SurfacePolicyChange::LayerRecreate

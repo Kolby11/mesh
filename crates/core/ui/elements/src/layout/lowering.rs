@@ -417,12 +417,13 @@ pub(super) fn write_taffy_layout(
 }
 
 /// Grow every `width/height: fit` node to cover the union bounding box of
-/// *all* its descendants — including absolutely/fixed-positioned ones, which
+/// its visible-overflow descendants — including absolutely positioned ones, which
 /// Taffy's own flex sizing (and standard `fit-content`) never counts, since
 /// out-of-flow elements don't contribute to intrinsic sizing per spec. Runs
 /// bottom-up after `write_taffy_layout_with_parent` has already resolved
-/// every node's absolute on-screen box, so a `fit` node whose own child is
-/// also `fit` picks up that child's corrected size.
+/// every node's absolute on-screen box. Clipping viewports stop descendant
+/// extents on their clipped axes; fixed and promoted subtrees are excluded.
+/// A `fit` node whose own child is also `fit` picks up that child's corrected size.
 ///
 /// This only *extends* the box Taffy already computed (`.max(...)`) — normal
 /// in-flow content is already covered by Taffy's own auto-sizing and this is
@@ -452,7 +453,17 @@ fn resolve_fit_extents(node: &mut WidgetNode) -> (f32, f32) {
     if matches!(node.computed_style.height, Dimension::Fit) {
         node.layout.height = (max_bottom - node.layout.y).max(0.0);
     }
-    (max_right, max_bottom)
+    clip_layout_extents(node, (max_right, max_bottom))
+}
+
+pub(super) fn clip_layout_extents(node: &WidgetNode, mut extents: (f32, f32)) -> (f32, f32) {
+    if node.computed_style.overflow_x.clips_contents() {
+        extents.0 = node.layout.x + node.layout.width;
+    }
+    if node.computed_style.overflow_y.clips_contents() {
+        extents.1 = node.layout.y + node.layout.height;
+    }
+    extents
 }
 
 pub(super) fn write_taffy_layout_with_parent(

@@ -105,7 +105,7 @@ pub fn complete(
         }
         Block::Style => {
             let ctx = crate::util::style_context_at(content, loc.offset_in_block);
-            style::complete(ctx, doc, content)
+            style::complete(ctx, doc, content, registry)
         }
         Block::Script => {
             let ctx = crate::util::script_context_at(content, loc.offset_in_block);
@@ -435,6 +435,7 @@ mesh.locale.$0
         let labels = completion_labels(&doc, position);
 
         assert!(labels.contains(&"current".to_string()));
+        assert!(labels.contains(&"is".to_string()));
         assert!(labels.contains(&"set".to_string()));
         assert!(!labels.contains(&"translate".to_string()));
     }

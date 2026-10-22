@@ -366,8 +366,55 @@ items = { { id = "first" }, { id = "second" } }
         rebuilt_first
             .mesh_key()
             .unwrap()
-            .contains("@loop:\"first\"%2F0")
+            .contains(":\"first\"%2F0")
     );
+}
+
+#[test]
+fn sibling_keyed_loops_with_overlapping_keys_get_distinct_node_ids() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    <column>
+        {#for item in left key={item}}
+            <text content={item} />
+        {/for}
+        {#for item in right key={item}}
+            <text content={item} />
+        {/for}
+    </column>
+</template>
+<script lang="luau">
+left = { "a", "b" }
+right = { "a", "b" }
+</script>
+"#,
+        &[],
+    );
+    rebuild(&mut component, 240, 120);
+    component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get_mut(PARENT_ID)
+        .unwrap()
+        .script_ctx
+        .set_member_state("right", serde_json::json!(["b", "a"]))
+        .unwrap();
+    rebuild(&mut component, 240, 120);
+
+    fn loop_ids(node: &WidgetNode, ids: &mut Vec<NodeId>) {
+        if node.loop_identity().is_some() {
+            ids.push(node.id);
+        }
+        for child in &node.children {
+            loop_ids(child, ids);
+        }
+    }
+    let mut ids = Vec::new();
+    loop_ids(component.last_tree.as_ref().unwrap(), &mut ids);
+    assert_eq!(ids.len(), 4);
+    assert_eq!(ids.iter().collect::<HashSet<_>>().len(), 4);
 }
 
 #[test]

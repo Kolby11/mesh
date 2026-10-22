@@ -512,3 +512,31 @@ fn transition_property_set_operations_expand_the_all_shorthand() {
     // A later `all` claims everything, leaving nothing for earlier entries.
     assert!(both.difference(TransitionProperties::all()).is_empty());
 }
+
+#[test]
+fn border_radius_shorthand_mixes_variables_and_literals() {
+    use mesh_core_component::parser::parse_component;
+
+    let source = r#"
+<template><box /></template>
+<style>
+.sidebar { border-radius: var(--radius-lg) 0 0 var(--radius-lg); }
+</style>
+"#;
+    let rules = parse_component(source).unwrap().style.unwrap().rules;
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let style = resolver.resolve_node_style(
+        &rules,
+        "box",
+        &["sidebar".to_string()],
+        None,
+        StyleContext::default(),
+        NodeState::default(),
+    );
+
+    assert!(style.border_radius.top_left > 0.0);
+    assert_eq!(style.border_radius.top_right, 0.0);
+    assert_eq!(style.border_radius.bottom_right, 0.0);
+    assert_eq!(style.border_radius.bottom_left, style.border_radius.top_left);
+}

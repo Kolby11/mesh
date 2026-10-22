@@ -854,6 +854,104 @@ mod tests {
     use super::*;
 
     #[test]
+    fn variable_completion_uses_the_owning_modules_declared_tokens_and_families() {
+        use crate::{analyzer, document::Document, util::offset_to_position};
+        use tower_lsp::lsp_types::Url;
+
+        let dir =
+            std::env::temp_dir().join(format!("mesh-lsp-token-completion-{}", std::process::id()));
+        let mut registry = ModuleRegistry::empty();
+        for (path, name, kind, tokens, dependencies) in [
+            (
+                dir.clone(),
+                "@alice/parent",
+                "ui",
+                serde_json::json!({"parent.hidden": "var(--color-primary)"}),
+                serde_json::json!({}),
+            ),
+            (
+                dir.join("family"),
+                "@alice/material",
+                "library",
+                serde_json::json!({"family.rim": "var(--color-outline)", "widget.accent": "var(--color-primary)"}),
+                serde_json::json!({}),
+            ),
+            (
+                dir.join("widget"),
+                "@alice/widget",
+                "ui",
+                serde_json::json!({"widget.accent": "var(--color-secondary)"}),
+                serde_json::json!({"@alice/material": "*"}),
+            ),
+            (
+                dir.join("other"),
+                "@alice/other",
+                "library",
+                serde_json::json!({"other.hidden": "var(--color-primary)"}),
+                serde_json::json!({}),
+            ),
+        ] {
+            std::fs::create_dir_all(&path).unwrap();
+            std::fs::write(path.join("module.json"), serde_json::to_string(&serde_json::json!({
+                "name": name, "version": "1.0.0",
+                "mesh": {"apiVersion": "0.1", "kind": kind, "entry": "src/main.mesh", "theme": {"tokens": tokens}, "uses": {"modules": dependencies}}
+            })).unwrap()).unwrap();
+            registry.try_load_module(&path);
+            assert!(registry.manifests.contains_key(name), "{name}");
+        }
+
+        for (path, prefix, expected) in [
+            (
+                dir.join("widget/src/main.mesh"),
+                "--",
+                vec!["--family-rim", "--widget-accent"],
+            ),
+            (
+                dir.join("widget/src/main.mesh"),
+                "--family",
+                vec!["--family-rim"],
+            ),
+            (
+                dir.join("widget/src/main.mesh"),
+                "family",
+                vec!["--family-rim"],
+            ),
+            (dir.join("src/main.mesh"), "--widget", vec![]),
+        ] {
+            let source = format!(
+                "<template></template><style>.panel {{ --color-primary: var(--color-outline); color: var({prefix}$0); }}</style>"
+            );
+            let cursor = source.find("$0").unwrap();
+            let source = source.replace("$0", "");
+            let position = offset_to_position(&source, cursor);
+            let doc = Document::new(Url::from_file_path(path).unwrap(), source);
+            let items = analyzer::complete(&doc, position, &registry);
+            let labels = items
+                .iter()
+                .map(|item| item.label.as_str())
+                .collect::<Vec<_>>();
+            for token in expected {
+                let matching = items
+                    .iter()
+                    .filter(|item| item.label == token)
+                    .collect::<Vec<_>>();
+                assert_eq!(matching.len(), 1, "{token}: {labels:?}");
+                assert_eq!(matching[0].insert_text.as_deref(), Some(token));
+            }
+            assert!(!labels.contains(&"--parent-hidden"));
+            assert!(!labels.contains(&"--other-hidden"));
+            if prefix == "--" {
+                assert!(labels.contains(&"--color-primary"));
+            } else if prefix == "--widget" {
+                assert!(labels.is_empty());
+            } else {
+                assert_eq!(labels, vec!["--family-rim"]);
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn independence_uses_the_nearest_owning_module() {
         let dir = std::env::temp_dir().join(format!("mesh-lsp-independent-{}", std::process::id()));
         std::fs::create_dir_all(dir.join("child")).unwrap();

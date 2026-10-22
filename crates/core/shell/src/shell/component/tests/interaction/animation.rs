@@ -1115,6 +1115,7 @@ fn animation_scoped_retained_diff_matches_full_pipeline() {
 "#;
     let mut scoped = test_frontend_component(source);
     let mut full = test_frontend_component(source);
+    full.force_full_retained_update = true;
     let theme = default_theme();
     let mut scoped_buffer = PixelBuffer::new(120, 40);
     let mut full_buffer = PixelBuffer::new(120, 40);
@@ -2309,4 +2310,133 @@ fn hover_frame_visits_scale_with_the_hovered_item_not_the_tree() {
         per_size[0], per_size[1],
         "hover visits grew with clean siblings"
     );
+}
+
+#[test]
+fn transition_and_lifecycle_frames_visit_only_changed_nodes() {
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(120, 40);
+    let mut by_size = Vec::new();
+    for count in [16, 1024] {
+        let mut source = String::from("<template><row>");
+        for _ in 0..count {
+            source.push_str("<box class=\"clean\" />");
+        }
+        source.push_str(r#"<box class="target" /></row></template><style>
+row { width: 120px; height: 40px; transition: none; }
+.clean { width: 0; height: 0; transition: none; }
+.target { width: 20px; height: 20px; background: #000000; transition: background-color 1000ms linear; }
+.target:hover, .target.mesh-surface-entering { background: #ff0000; }
+</style>"#);
+        let mut scoped = test_frontend_component(&source);
+        let mut full = test_frontend_component(&source);
+        full.force_full_interaction_frames = true;
+        scoped.motion_policy.reduced_motion = true;
+        full.motion_policy.reduced_motion = true;
+        // Match the policy refreshed at each frame boundary.
+        Arc::make_mut(&mut scoped.settings)
+            .set_namespace("shell", serde_json::json!({"motion":{"reduced":true}}));
+        Arc::make_mut(&mut full.settings)
+            .set_namespace("shell", serde_json::json!({"motion":{"reduced":true}}));
+        let mut actual = PixelBuffer::new(120, 40);
+        let mut expected = PixelBuffer::new(120, 40);
+        for _ in 0..3 {
+            scoped
+                .paint_raster(&theme, extent, &mut actual, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut expected, 1.0)
+                .unwrap();
+        }
+        let target = first_node_by_tag(scoped.last_tree.as_ref().unwrap(), "row")
+            .unwrap()
+            .children[count]
+            .mesh_key()
+            .unwrap()
+            .to_owned();
+        scoped.set_profiling_enabled(true);
+        let mut visits = Vec::new();
+        for stage in 0..4 {
+            for component in [&mut scoped, &mut full] {
+                match stage {
+                    0 => {
+                        component.hovered_path = vec![runtime_node_id_for_key(&target)];
+                    }
+                    1 => {
+                        component.hovered_path.clear();
+                        component.set_entering_child_keys(HashSet::from([target.clone()]));
+                    }
+                    2 => {
+                        component.set_entering_child_keys(HashSet::new());
+                    }
+                    _ => {}
+                }
+                component.invalidate_interaction_restyle();
+            }
+            scoped
+                .paint_raster(&theme, extent, &mut actual, 1.0)
+                .unwrap();
+            full.paint_raster(&theme, extent, &mut expected, 1.0)
+                .unwrap();
+            let counts = scoped.take_invalidation_snapshot().unwrap().node_visits;
+            assert_eq!(counts["validation"], 0, "stage {stage}: {counts:?}");
+            assert!(
+                counts["animation_previous_style"] <= 1,
+                "stage {stage}: {counts:?}"
+            );
+            visits.push([
+                counts["animation_previous_style"],
+                counts["animation_sample"],
+                counts["display_ancestors"],
+            ]);
+            assert_eq!(actual.data(), expected.data(), "stage {stage}");
+            if stage >= 2 {
+                let node = find_node_by_key(scoped.last_tree.as_ref().unwrap(), &target).unwrap();
+                assert!(
+                    !node
+                        .attributes
+                        .text(Prop::Class)
+                        .unwrap_or_default()
+                        .contains("mesh-surface-entering")
+                );
+            }
+            let tree = scoped.last_tree.clone().unwrap();
+            let missed = scoped.retained_tree.update(&tree);
+            assert!(!missed.any(), "stage {stage}: {missed:?}");
+            let (mut a, mut b) = (Vec::new(), Vec::new());
+            computed_styles(&tree, &mut a);
+            computed_styles(full.last_tree.as_ref().unwrap(), &mut b);
+            assert!(a == b, "stage {stage}: styles diverged");
+        }
+        by_size.push(visits);
+    }
+    assert_eq!(by_size[0], by_size[1]);
+}
+
+#[test]
+fn animation_reports_clamped_radius_even_when_the_effective_sample_is_unchanged() {
+    let mut component = test_frontend_component(
+        r#"<template><box style="width: 18px; height: 18px; border-radius: 9999px; transition: border-radius 100ms linear" /></template>"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(40, 40);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(40, 40), &mut buffer, 1.0)
+        .unwrap();
+    let mut tree = component.last_tree.clone().unwrap();
+    let target = &mut tree.children[0];
+    let id = target.id;
+    target.computed_style.border_radius = mesh_core_elements::Corners::all(9999.0);
+    let props = component.surface_css_props();
+    let dirty = component.apply_style_animations_with_previous(&mut tree, &HashMap::new(), &props);
+    assert_eq!(
+        tree.children[0].computed_style.border_radius,
+        mesh_core_elements::Corners::all(9.0)
+    );
+    assert!(
+        dirty.contains(&id),
+        "the stored style changed despite an equal effective radius"
+    );
+    assert!(component.frame_dirty.iter().any(
+        |(node, change)| node == id && change.contains(mesh_core_elements::ChangeClass::PAINT)
+    ));
 }

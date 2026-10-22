@@ -7,7 +7,9 @@ serves two kinds of files:
 
 Inside `<template>`, `<script lang="luau">`, and `<style>` blocks:
 
-- **Completion** for core element tags and attributes, CSS properties/values,
+- **Completion** for core element tags and attributes, CSS properties/values
+  and `var()` tokens (semantic roles, local custom properties, and the owning
+  module's declared tokens and imported families),
   the `mesh.*` host API, `refs.<name>` element references, and interface proxies
   bound via `require("mesh.<service>")`.
 - **Hover** documentation for elements, attributes, and service fields/commands.

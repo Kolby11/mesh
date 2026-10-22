@@ -1,27 +1,32 @@
 <template>
-  <column class="overview-view" hidden={hidden}>
+  <column class="overview-view">
     <text class="section-title">Overview</text>
 
-    <box class="state-card" hidden={off_hidden}>
-      <column class="state-copy">
-        <text class="state-title">Profiling is off</text>
-        <text class="state-text">{state_copy}</text>
-      </column>
-    </box>
+    {#if state_kind == "off"}
+      <box class="state-card">
+        <column class="state-copy">
+          <text class="state-title">Profiling is off</text>
+          <text class="state-text">{state_copy}</text>
+        </column>
+      </box>
 
-    <box class="state-card" hidden={warming_hidden}>
-      <column class="state-copy">
-        <text class="state-title">Profiling is live but still collecting samples</text>
-        <text class="state-text">The shell is collecting samples and still collecting samples for the first live summary.</text>
-      </column>
-    </box>
+    {:else if state_kind == "warming"}
+      <box class="state-card">
+        <column class="state-copy">
+          <text class="state-title">Profiling is live but still collecting samples</text>
+          <text class="state-text">The shell is collecting samples and still collecting samples for the first live summary.</text>
+        </column>
+      </box>
 
-    <box class="state-card" hidden={idle_hidden}>
-      <column class="state-copy">
-        <text class="state-title">No recent samples yet</text>
-        <text class="state-text">{state_copy}</text>
-      </column>
-    </box>
+    {:else if state_kind == "idle"}
+      <box class="state-card">
+        <column class="state-copy">
+          <text class="state-title">No recent samples yet</text>
+          <text class="state-text">{state_copy}</text>
+        </column>
+      </box>
+
+    {/if}
 
     <box class="summary-card">
       <column class="summary-copy">
@@ -78,12 +83,9 @@
 </template>
 
 <script lang="luau">
-hidden = false
 state_title = ""
 state_copy = ""
-off_hidden = false
-warming_hidden = true
-idle_hidden = true
+state_kind = "off"
 session_value = ""
 overlay_value = ""
 module_count = ""

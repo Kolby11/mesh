@@ -1,5 +1,5 @@
 <template>
-  <column class="modules-view" hidden={hidden}>
+  <column class="modules-view">
     <text class="section-title">Modules</text>
     <text class="section-copy">{state_copy}</text>
     <input
@@ -10,44 +10,45 @@
       onchange={onFilterChange}
     />
 
-    <empty-state class="empty-card" hidden={empty_hidden}>
-      <column class="empty-copy">
-        <text class="empty-title">No module graph loaded</text>
-        <text class="empty-text">Installed module contracts appear here after the shell publishes the debug snapshot.</text>
-      </column>
-    </empty-state>
+    {#if #rows == 0}
+      <empty-state class="empty-card">
+        <column class="empty-copy">
+          <text class="empty-title">No module graph loaded</text>
+          <text class="empty-text">Installed module contracts appear here after the shell publishes the debug snapshot.</text>
+        </column>
+      </empty-state>
+    {:else}
 
-    <list class="module-list" label="Installed module graph">
-      {#for row in rows}
-        <list-item class="module-card">
-          <column class="module-copy">
-            <row class="module-head">
-              <text class="module-title">{row.module_id}</text>
-              <text class="module-kind">{row.kind_label}</text>
-            </row>
-            <text class="module-meta">{row.status_label}</text>
-            <text class="section-subtitle">Uses</text>
-            <text class="module-metric">{row.uses_interfaces}</text>
-            <text class="module-metric">{row.uses_resources}</text>
-            <text class="section-subtitle">Provides</text>
-            <text class="module-metric">{row.provides_interfaces}</text>
-            <text class="module-metric">{row.provides_resources}</text>
-            <text class="section-subtitle">Health</text>
-            <text class="module-metric">{row.health_label}</text>
-          </column>
-        </list-item>
-      {/for}
-    </list>
+      <list class="module-list" label="Installed module graph">
+        {#for row in rows}
+          <list-item class="module-card">
+            <column class="module-copy">
+              <row class="module-head">
+                <text class="module-title">{row.module_id}</text>
+                <text class="module-kind">{row.kind_label}</text>
+              </row>
+              <text class="module-meta">{row.status_label}</text>
+              <text class="section-subtitle">Uses</text>
+              <text class="module-metric">{row.uses_interfaces}</text>
+              <text class="module-metric">{row.uses_resources}</text>
+              <text class="section-subtitle">Provides</text>
+              <text class="module-metric">{row.provides_interfaces}</text>
+              <text class="module-metric">{row.provides_resources}</text>
+              <text class="section-subtitle">Health</text>
+              <text class="module-metric">{row.health_label}</text>
+            </column>
+          </list-item>
+        {/for}
+      </list>
+    {/if}
   </column>
 </template>
 
 <script lang="luau">
-hidden = false
 rows = {}
 state_copy = ""
 filter_value = ""
 onFilterChange = nil
-empty_hidden = false
 </script>
 
 <style>

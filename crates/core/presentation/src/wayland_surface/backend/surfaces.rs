@@ -103,6 +103,7 @@ impl WaylandSurfaceBackend {
             _conn: conn,
             event_queue,
             state,
+            namespace_suffix: String::new(),
             #[cfg(feature = "gpu")]
             gpu: GpuPresenter::Untried,
             #[cfg(feature = "gpu")]
@@ -117,6 +118,10 @@ impl WaylandSurfaceBackend {
             tracing::warn!("gpu present: dmabuf feedback roundtrip failed: {error}");
         }
         Ok(backend)
+    }
+
+    pub fn set_namespace_suffix(&mut self, suffix: &str) {
+        self.namespace_suffix = suffix.to_owned();
     }
 
     pub fn set_pointer_interactive(&mut self, interactive: bool) {
@@ -335,7 +340,7 @@ impl WaylandSurfaceBackend {
                 qh,
                 wl_surface,
                 map_layer(cfg.layer),
-                Some(cfg.wayland_namespace()),
+                Some(cfg.wayland_namespace(&self.namespace_suffix)),
                 None,
             ),
         ))

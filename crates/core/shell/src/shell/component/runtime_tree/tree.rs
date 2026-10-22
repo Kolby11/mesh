@@ -130,6 +130,7 @@ impl RetainedWidgetTree {
         walk(self, node, visit, &mut total).then_some(total)
     }
 
+    #[cfg(test)]
     pub(in crate::shell::component) fn update(
         &mut self,
         root: &WidgetNode,
@@ -143,6 +144,13 @@ impl RetainedWidgetTree {
         root: &WidgetNode,
     ) -> RetainedTreeDirtySummary {
         self.update_inner(root, false)
+    }
+
+    pub(in crate::shell::component) fn synchronize_rebuilt_tree(
+        &mut self,
+        root: &WidgetNode,
+    ) -> RetainedTreeDirtySummary {
+        self.update_inner(root, true)
     }
 
     pub(super) fn update_inner(
@@ -260,6 +268,7 @@ impl RetainedWidgetTree {
 
     /// Style roots include their descendants; local runtime/semantic changes
     /// only refresh the named nodes. Geometry propagation is detected for both.
+    #[cfg(test)]
     pub(in crate::shell::component) fn update_for_dirty_roots_and_nodes_collect<'a>(
         &mut self,
         root: &'a WidgetNode,
@@ -295,38 +304,115 @@ impl RetainedWidgetTree {
         self.update_selected_nodes(update_nodes)
     }
 
-    /// Refresh only explicit nodes when neither structure nor geometry changed.
-    /// The snapshot's paths avoid scanning clean siblings to locate a change.
-    pub(in crate::shell::component) fn update_for_frame_dirty(
+    /// Synchronize producer-reported nodes and subtrees through the previous
+    /// frame's paths. Geometry changes must include every moved node, including
+    /// siblings; topology changes require `synchronize_rebuilt_tree` instead.
+    pub(in crate::shell::component) fn synchronize_changes(
         &mut self,
         root: &WidgetNode,
         snapshot: &mesh_core_elements::FrameSnapshot,
         dirty: &mesh_core_elements::FrameDirty,
+        subtrees: &HashSet<NodeId>,
     ) -> RetainedTreeDirtySummary {
-        assert!(!dirty.contains(
-            mesh_core_elements::ChangeClass::STRUCTURE | mesh_core_elements::ChangeClass::LAYOUT
-        ));
+        let ids: HashSet<NodeId> = dirty
+            .iter()
+            .map(|(id, _)| id)
+            .chain(subtrees.iter().copied())
+            .collect();
+        let Some(mut paths) = snapshot.live_paths(root, &ids, || {
+            mesh_core_elements::frame_work::visit(
+                mesh_core_elements::frame_work::Pass::RetainedLookup,
+            );
+        }) else {
+            return self.synchronize_rebuilt_tree(root);
+        };
+        if paths.len() != ids.len() {
+            return self.synchronize_rebuilt_tree(root);
+        }
+        paths.sort_unstable();
         let mut selected = Vec::new();
-        for (id, _) in dirty.iter() {
-            let Some(path) = snapshot.node_path(id) else {
-                return self.update(root);
-            };
+        let mut subtree_path: Option<&[usize]> = None;
+        fn select<'a>(node: &'a WidgetNode, selected: &mut Vec<(&'a WidgetNode, bool)>) {
+            selected.push((node, false));
+            for child in &node.children {
+                select(child, selected);
+            }
+        }
+        for path in paths {
+            if subtree_path
+                .as_ref()
+                .is_some_and(|parent| path.starts_with(parent))
+            {
+                continue;
+            }
             let mut node = root;
             for &index in path {
-                mesh_core_elements::frame_work::visit(
-                    mesh_core_elements::frame_work::Pass::RetainedLookup,
-                );
-                let Some(child) = node.children.get(index) else {
-                    return self.update(root);
-                };
-                node = child;
+                node = &node.children[index];
             }
-            if node.id != id {
-                return self.update(root);
+            if subtrees.contains(&node.id) {
+                select(node, &mut selected);
+                subtree_path = Some(path);
+            } else {
+                selected.push((node, false));
             }
-            selected.push((node, false));
+        }
+        if selected.iter().any(|(node, _)| {
+            self.node_keys
+                .get(&node.id)
+                .and_then(|key| self.nodes.get(*key))
+                .is_none_or(|previous| {
+                    !previous
+                        .child_ids
+                        .iter()
+                        .copied()
+                        .eq(node.children.iter().map(|child| child.id))
+                })
+        }) {
+            return self.synchronize_rebuilt_tree(root);
         }
         self.update_selected_nodes(selected).0
+    }
+
+    #[cfg(test)]
+    pub(in crate::shell::component) fn assert_complete(&self, root: &WidgetNode) {
+        let _scope = mesh_core_elements::frame_work::Scope::new(false);
+        fn verify(retained: &RetainedWidgetTree, node: &WidgetNode, count: &mut usize) {
+            let previous = retained
+                .node_keys
+                .get(&node.id)
+                .and_then(|key| retained.nodes.get(*key))
+                .expect("finalized node must have a retained snapshot");
+            let fresh = retained_snapshot(node);
+            assert_eq!(
+                previous.diff_flags(&fresh).0,
+                RetainedNodeDirtyFlags::empty(),
+                "retained dirty set omitted node {} ({:?}): layout {:?} -> {:?}",
+                node.id,
+                node.mesh_key(),
+                previous.layout,
+                fresh.layout
+            );
+            // Resource generations are invalidated by the renderer; the
+            // authoritative render diff compares the node-owned categories.
+            assert!(
+                !RenderObjectDirtySummary::default()
+                    .add_fingerprint_diff(&previous.render, &fresh.render),
+                "retained dirty set omitted render inputs for {} ({:?})",
+                node.id,
+                node.mesh_key()
+            );
+            *count += 1;
+            for child in &node.children {
+                verify(retained, child, count);
+            }
+        }
+        let mut count = 0;
+        verify(self, root, &mut count);
+        assert_eq!(
+            count,
+            self.nodes.len(),
+            "retained snapshot contains stale nodes"
+        );
     }
 
     fn update_selected_nodes<'a>(
@@ -443,6 +529,7 @@ impl RetainedWidgetTree {
             .is_some_and(|key| self.dirty.contains_key(*key))
     }
 
+    #[cfg(test)]
     pub(in crate::shell::component) fn layout_dirty_node_snapshots(
         &self,
         root: &WidgetNode,
@@ -578,6 +665,8 @@ pub(in crate::shell::component) fn narrow_script_dirty_roots(
             || previous.event_handlers != fresh.event_handlers
             || previous.event_handler_calls != fresh.event_handler_calls
             || previous.state != fresh.state
+            || previous.accessibility != fresh.accessibility
+            || previous.scroll_metrics != fresh.scroll_metrics
         {
             dirty_roots.insert(fresh.id);
             // The scoped retained pass fingerprints this complete subtree and
@@ -770,6 +859,7 @@ pub(super) fn update_retained_node(
     }
 }
 
+#[cfg(test)]
 pub(super) fn collect_scoped_update_nodes<'a>(
     node: &'a WidgetNode,
     ancestor_is_dirty: bool,

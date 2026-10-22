@@ -1,11 +1,27 @@
 # Status
 
-**Updated:** 2026-10-21
+**Updated:** 2026-10-22
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and
 measurements live in [`log/`](log/README.md).
 
 ## Now
+
+- **W3 implemented:** display ancestors resolve through retained paths; animation
+  snapshots/sampling use restyled and registered nodes; retained semantic/layout
+  updates reuse structural validation. Child lifecycle classes restore without
+  rebuilding, and child requests refresh from indexed dependencies, pruning
+  closed descendants. The 16/1,024-node gates and pixel/style parity pass.
+  Timings include concurrent W7 work; see the performance log.
+
+- **W7 implemented:** stable frames synchronize producer-reported dirty nodes
+  and layout changes through snapshot paths; discovery is test-only. The full
+  debug verifier finds no omissions. Dashboard discovery is 151 → 0 visits per
+  frame across nine samples; timing ranges overlap. See the performance log.
+
+- **Launcher sizing fixed:** promoted popups preserve intrinsic height, and
+  clipped scroll content no longer inflates fit-sized ancestors. The 100-app
+  launcher regression keeps its 320px viewport and fixed popup size while scrolling.
 
 - **Live hover attributed:** forced-CPU dock frames spend 19.3–20.6 ms in
   raster replay out of 25.0–26.9 ms total. Presentation is 0.11–0.14 ms.
@@ -28,8 +44,10 @@ measurements live in [`log/`](log/README.md).
   rebuilds came from handler writes during input dispatch and from keyed loops
   with handlers being unpatchable; both are fixed (live hover mean 40 → 25 ms).
   W2 landed 2026-10-22: dashboard layout-class patches lay out only the
-  patched branch (layout discovery and validation 151 → 0 per frame). W5 is next
-  in wave 2. Plan and waves are in the
+  patched branch (layout discovery and validation 151 → 0 per frame). W5 is
+  implemented: typed binding targets and retained target paths; plain item-field
+  keys reuse validation. The 16/1,024-sibling gate has one setter and no target
+  discovery or runtime key validation. W3 is implemented. Plan and waves are in the
   [pipeline note](todos/pending/2026-10-21-change-proportional-pipeline.md).
 
 - **Dock flares and dock tooltips fixed:** new `corner-shape: scoop` gives the
@@ -39,8 +57,8 @@ measurements live in [`log/`](log/README.md).
 - **Dashboard pass audit and P3 keyed native lists landed:** spectrum frames no
   longer rebuild Player (tree build 1.0 ms → 0); validation 1,657 → 151 and
   extents 763 → 151 visits per frame; p50 2.92–3.00 → 2.11–2.17 ms. Remaining:
-  typed setters, restyle scan on patched frames (~336 visits), layout
-  sync/discovery. See the performance log.
+  snapshot item comparisons, shared restyle/layout paths, and downstream dirty-set
+  consumers. See the performance log.
 
 - **P2 interaction-frame scope landed:** steady dock hover annotates 8–14
   nodes per paint (was 1,879) and restyles 12 (was 1,878), with no retained
@@ -71,8 +89,8 @@ measurements live in [`log/`](log/README.md).
 - **Change-proportional frame pipeline (P0–P4)** is the implementation
   priority. P1 (typed node state, typed runtime fields, `Prop` vocabulary with
   change classes) landed 2026-10-21: ~7% dashboard, ~18% steady dock hover.
-  Next: P2 layout propagation and the patched-frame restyle scan, display-list
-  ancestors, semantics and child-surface scopes; P0 live replay gate.
+  Next: W6 scene-preparation narrowing. W3 scoping and W7 discovery retirement
+  are implemented; layout annotation and shared path prefixes remain open.
   [Design](todos/pending/2026-10-21-change-proportional-pipeline.md); backlog
   lines at the top of `docs/BACKLOG.md`. Single-pass scoping buys 3–10% and is
   deprioritized.

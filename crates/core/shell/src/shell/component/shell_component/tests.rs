@@ -755,3 +755,131 @@ fn policy_keeps_tree_rebuild_below_entry_threshold_non_full_surface() {
 
     assert_eq!(policy, DisplayListRepaintPolicy::MinimalDamage);
 }
+
+#[test]
+fn child_surface_requests_visit_only_dirty_dependencies() {
+    let mut sizes = Vec::new();
+    for count in [16, 1024] {
+        let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 40.0);
+        for index in 0..count {
+            root.children.push(keyed_node(
+                "box",
+                &format!("root/clean{index}"),
+                0.0,
+                0.0,
+                1.0,
+                1.0,
+            ));
+        }
+        let mut trigger = keyed_node("button", "root/trigger", 20.0, 0.0, 20.0, 20.0);
+        trigger.attributes.insert(Prop::Ref, "trigger".into());
+        let trigger_id = trigger.id;
+        root.children.push(trigger);
+        let mut popup = keyed_node("popover", "root/popup", 20.0, 42.0, 90.0, 40.0);
+        popup.attributes.insert(Prop::Open, "true".into());
+        popup.attributes.insert(Prop::AnchorRef, "trigger".into());
+        let popup_id = popup.id;
+        root.children.push(popup);
+        let overlay = keyed_node("box", "root/overlay", 180.0, 20.0, 60.0, 30.0);
+        let overlay_id = overlay.id;
+        root.children.push(overlay);
+        let mut cache = ChildSurfaceCache::default();
+        let mut snapshot = mesh_core_elements::FrameSnapshot::complete(&root, 1, None).unwrap();
+        cache.update(&root, Some(&snapshot), &HashSet::new(), true, 1);
+        let mut counts = Vec::new();
+        for stage in 0..7 {
+            let changed = match stage {
+                0 => {
+                    root.children[count].layout.x += 5.0;
+                    trigger_id
+                }
+                1 => {
+                    root.children[count + 1].layout.width += 5.0;
+                    popup_id
+                }
+                2 => {
+                    root.children[count + 1]
+                        .attributes
+                        .insert(Prop::Open, "false".into());
+                    popup_id
+                }
+                3 => {
+                    root.children[count + 1]
+                        .attributes
+                        .insert(Prop::Open, "true".into());
+                    popup_id
+                }
+                4 => {
+                    root.children[count + 2].computed_style.position =
+                        mesh_core_elements::style::Position::Absolute;
+                    overlay_id
+                }
+                5 => {
+                    root.children[count + 2].computed_style.position =
+                        mesh_core_elements::style::Position::Static;
+                    overlay_id
+                }
+                _ => {
+                    root.children[0].computed_style.opacity = 0.5;
+                    root.children[0].id
+                }
+            };
+            snapshot =
+                mesh_core_elements::FrameSnapshot::complete(&root, stage + 2, Some(&snapshot))
+                    .unwrap();
+            let scope = mesh_core_elements::frame_work::Scope::new(true);
+            cache.update(
+                &root,
+                Some(&snapshot),
+                &HashSet::from([changed]),
+                false,
+                stage + 2,
+            );
+            counts.push(scope.snapshot()["child_surface_requests"]);
+            drop(scope);
+            let (mut requests, mut diagnostics) = (Vec::new(), Vec::new());
+            collect_child_surface_requests_with_diagnostics(
+                &root,
+                &root,
+                &mut requests,
+                &mut diagnostics,
+            );
+            assert_eq!(cache.requests(), requests, "stage {stage}");
+            assert_eq!(cache.diagnostics(), diagnostics, "stage {stage}");
+        }
+        sizes.push(counts);
+    }
+    assert_eq!(sizes[0], sizes[1]);
+}
+
+#[test]
+fn closed_child_surface_requests_skip_clean_descendants() {
+    let mut visits = Vec::new();
+    for count in [16, 1024] {
+        let mut root = keyed_node("row", "root", 0.0, 0.0, 200.0, 40.0);
+        let mut popup = keyed_node("popover", "root/popup", 20.0, 42.0, 90.0, 40.0);
+        popup.attributes.insert(Prop::Open, "false".into());
+        for index in 0..count {
+            popup.children.push(keyed_node(
+                "box",
+                &format!("root/popup/{index}"),
+                20.0,
+                42.0,
+                1.0,
+                1.0,
+            ));
+        }
+        root.children.push(popup);
+        let mut cache = ChildSurfaceCache::default();
+        let previous = mesh_core_elements::FrameSnapshot::complete(&root, 1, None).unwrap();
+        cache.update(&root, Some(&previous), &HashSet::new(), true, 1);
+        root.layout.width += 10.0;
+        let snapshot =
+            mesh_core_elements::FrameSnapshot::complete(&root, 2, Some(&previous)).unwrap();
+        let scope = mesh_core_elements::frame_work::Scope::new(true);
+        cache.update(&root, Some(&snapshot), &HashSet::from([root.id]), false, 2);
+        visits.push(scope.snapshot()["child_surface_requests"]);
+        assert!(cache.requests().is_empty());
+    }
+    assert_eq!(visits[0], visits[1]);
+}

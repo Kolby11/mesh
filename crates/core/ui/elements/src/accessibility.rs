@@ -225,6 +225,13 @@ pub fn normalize_accessibility(root: &mut WidgetNode) {
         );
         return;
     }
+    normalize_accessibility_with_validated_structure(root);
+}
+
+/// Normalize a tree whose identity and element contracts were already
+/// validated. Callers must revalidate after changing tags, identities or children.
+#[doc(hidden)]
+pub fn normalize_accessibility_with_validated_structure(root: &mut WidgetNode) {
     normalize_node(root, NodeEligibility::ROOT, false);
 }
 

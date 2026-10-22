@@ -248,6 +248,24 @@ impl AttributeMap {
         self.set_stored(key.into(), StoredAttributeValue::from_json(value))
     }
 
+    /// Compare a resolved binding before acquiring mutable authored storage.
+    pub fn matches_value(&self, key: &AttrKey, value: &serde_json::Value) -> bool {
+        let index = match key.prop() {
+            Some(prop) => self.find_prop(prop),
+            None => self.find(key.as_str()).ok(),
+        };
+        index.is_some_and(|index| {
+            let stored = &self.entries[index].1;
+            match stored {
+                StoredAttributeValue::Typed(previous) if previous.value == *value => true,
+                StoredAttributeValue::String(previous) if value.as_str().is_some() => {
+                    value.as_str() == Some(previous.as_str())
+                }
+                _ => stored.as_string() == &value_ref_to_string(value),
+            }
+        })
+    }
+
     /// Remove `key`, reporting its change class when it was present.
     pub fn unset(&mut self, key: impl Into<AttrKey>) -> ChangeClass {
         let key = key.into();
@@ -261,7 +279,12 @@ impl AttributeMap {
     }
 
     fn set_stored(&mut self, key: AttrKey, value: StoredAttributeValue) -> ChangeClass {
-        match self.find(key.as_str()) {
+        let slot = key
+            .prop()
+            .and_then(|prop| self.find_prop(prop))
+            .map(Ok)
+            .unwrap_or_else(|| self.find(key.as_str()));
+        match slot {
             Ok(index) if self.entries[index].1 == value => ChangeClass::empty(),
             Ok(index) => {
                 self.entries[index].1 = value;

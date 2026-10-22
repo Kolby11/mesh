@@ -216,6 +216,36 @@ pub fn find_nodes_by_keys<'a>(
     found
 }
 
+/// Resolve pointer bounds along a retained child-index path. The target ID
+/// is checked before returning; transforms, visibility and ancestor clips
+/// follow the same rules as the key-based lookup. `visit` counts examined nodes.
+pub fn find_node_bounds_by_path(
+    root: &WidgetNode,
+    path: &[usize],
+    id: mesh_core_elements::NodeId,
+    mut visit: impl FnMut(),
+) -> Option<ContentBounds> {
+    let mut node = root;
+    let mut parent = root_transform(0.0, 0.0);
+    let mut clips = AffineClipStack::default();
+    for index in 0..=path.len() {
+        visit();
+        if !node_allows(node, InteractionTarget::Pointer) {
+            return None;
+        }
+        let world = node_world_transform(parent, node);
+        if index == path.len() {
+            return (node.id == id)
+                .then(|| clipped_node_bounds(node, world, &clips))
+                .flatten();
+        }
+        parent = child_world_transform(world, node);
+        clips = push_node_clip(&clips, node, world);
+        node = node.children.get(path[index])?;
+    }
+    None
+}
+
 pub fn find_node_bounds_by_key(
     node: &WidgetNode,
     key: &str,

@@ -267,7 +267,14 @@ pub(super) fn subtree_visual_bounds(node: &WidgetNode) -> (f32, f32, f32, f32) {
 /// beyond its own laid-out box so descendant shadow/filter overshoot paints
 /// instead of clipping at the popup buffer edge.
 pub(super) fn popover_content_padding(node: &WidgetNode) -> (u32, u32, u32, u32) {
-    let (left, top, right, bottom) = subtree_visual_bounds(node);
+    let (left, top, right, bottom) =
+        mesh_core_render::display_list::widget_subtree_visual_bounds_with_visit(node, || {
+            mesh_core_elements::frame_work::visit(
+                mesh_core_elements::frame_work::Pass::ChildSurfaceRequests,
+            );
+        })
+        .map(layout_bounds_tuple)
+        .unwrap_or((f32::MAX, f32::MAX, f32::MIN, f32::MIN));
     if left > right || top > bottom {
         return (0, 0, 0, 0);
     }

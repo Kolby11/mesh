@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use mesh_core_elements::{
     BoxShadow, Corners, Dimension, Edges, NodeId, TransitionProperties, TransitionStyle,
     VisualFilter, WidgetNode,
-    style::{Color, Visibility},
+    style::{Color, ComputedStyle, Visibility},
 };
 
 use super::easing::{Easing, apply_easing, step_count};
@@ -54,19 +54,22 @@ pub struct AnimatableStyle {
 
 impl AnimatableStyle {
     pub fn from_node(node: &WidgetNode) -> Self {
-        let s = &node.computed_style;
+        Self::from_style_and_layout(&node.computed_style, node.layout)
+    }
+
+    /// Capture the displayed style and used box from an immutable frame record.
+    pub fn from_style_and_layout(
+        s: &ComputedStyle,
+        layout: mesh_core_elements::LayoutRect,
+    ) -> Self {
         Self {
-            used_width: node.layout.width,
-            used_height: node.layout.height,
+            used_width: layout.width,
+            used_height: layout.height,
             containing_block: None,
             // Clamp to the radius the painter can actually draw for this box so
             // transitions and keyframes interpolate toward the visible value
             // rather than an over-large authored radius.
-            border_radius: visual_border_radius(
-                s.border_radius,
-                node.layout.width,
-                node.layout.height,
-            ),
+            border_radius: visual_border_radius(s.border_radius, layout.width, layout.height),
             border_width: s.border_width,
             opacity: s.opacity,
             background_color: s.background_color,
