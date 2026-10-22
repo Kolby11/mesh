@@ -202,13 +202,14 @@ mod tests {
     };
     use mesh_core_elements::style::{
         BackgroundPaint, BlendMode, Color, Edges, FontStyle, Overflow, TextAlign, TextDirection,
-        TextOverflow,
+        TextOverflow, WhiteSpace,
     };
     use mesh_core_elements::{BoxShadow, LayoutRect, VisualFilter};
     use std::sync::Arc;
 
     fn base_style() -> DisplayPaintStyle {
         DisplayPaintStyle {
+            resource_revision: 0,
             background_color: Color::TRANSPARENT,
             background_paint: BackgroundPaint::None,
             border_color: Color::TRANSPARENT,
@@ -223,10 +224,14 @@ mod tests {
             font_size: 14.0,
             font_weight: 400,
             font_style: FontStyle::Normal,
+            letter_spacing: 0.0,
             line_height: 16.0,
             text_align: TextAlign::Left,
             text_overflow: TextOverflow::Clip,
             text_direction: TextDirection::Ltr,
+            white_space: WhiteSpace::Normal,
+            language: Arc::from(""),
+            shaping_features: Arc::from(""),
             opacity: 1.0,
             box_shadow: BoxShadow::NONE,
             additional_box_shadows: Vec::new(),

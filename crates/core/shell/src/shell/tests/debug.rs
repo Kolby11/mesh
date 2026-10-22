@@ -101,6 +101,7 @@ fn debug_snapshot_exposes_module_object_instances() {
 
 #[test]
 fn debug_snapshot_exposes_installed_module_graph_contracts() {
+    let _lock = settings_env_lock();
     let mut shell = Shell::new();
     shell.discover_modules();
 

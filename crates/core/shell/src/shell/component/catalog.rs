@@ -871,12 +871,9 @@ impl FrontendCatalog {
                 if !mesh_core_frontend::is_frontend_module(&module.manifest) {
                     return None;
                 }
-                // A graph-backed catalog is an activation boundary. Compile
-                // only graph-enabled frontends (plus the shell-owned debug
-                // inspector); an invalid or absent graph must never turn
-                // discovery into an implicit allow-all filter.
+                // A graph-backed catalog is an activation boundary, including
+                // for shipped modules such as the debug inspector.
                 if let Some(graph) = graph
-                    && *module_id != "@mesh/debug-inspector"
                     && !graph
                         .module(module_id)
                         .is_some_and(|entry| entry.enabled && entry.kind.is_mountable_root())

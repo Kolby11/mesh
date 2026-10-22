@@ -737,6 +737,9 @@ and kind); the root file holds only what is genuinely the user's choice:
 ```
 
 - A discovered module is enabled unless listed in `disabled`.
+  Shipped UI modules, including the debug inspector, follow the same activation
+  and capability rules: disabled modules are not compiled or mounted and receive
+  no runtime capability grants.
 - When exactly one enabled backend implements an interface, it is
   **auto-selected**; `providers` entries are needed only where several
   implement one interface (a genuine user choice).

@@ -307,17 +307,81 @@ fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candid
 
 #[test]
 fn load_frontend_components_respects_disabled_debug_inspector() {
+    let _lock = settings_env_lock();
     let mut shell = Shell::new();
     shell.discover_modules();
     shell.resolve_modules().unwrap();
     shell.load_frontend_components().unwrap();
 
     assert!(
+        !shell
+            .installed_module_graph
+            .as_ref()
+            .unwrap()
+            .module("@mesh/debug-inspector")
+            .unwrap()
+            .enabled
+    );
+    assert!(
+        !shell
+            .effective_capabilities
+            .contains_key("@mesh/debug-inspector")
+    );
+    assert!(
+        shell
+            .frontend_catalog
+            .snapshot()
+            .catalog
+            .module("@mesh/debug-inspector")
+            .is_none()
+    );
+    assert!(
         shell
             .components
             .iter()
             .all(|runtime| runtime.surface_id != "@mesh/debug-inspector"),
         "a disabled inspector must remain an ordinary module"
+    );
+}
+
+#[test]
+fn load_frontend_components_loads_enabled_debug_inspector() {
+    let _lock = settings_env_lock();
+    let root = tempfile::tempdir().unwrap();
+    let mut graph: serde_json::Value = serde_json::from_slice(
+        &fs::read(crate::shell::discovery::test_module_graph_path()).unwrap(),
+    )
+    .unwrap();
+    graph["mesh"]["disabled"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|id| id != "@mesh/debug-inspector");
+    let graph_path = root.path().join("module.json");
+    fs::write(&graph_path, serde_json::to_vec(&graph).unwrap()).unwrap();
+
+    let mut shell = Shell::new();
+    shell.discover_modules_at(&graph_path);
+    shell.resolve_modules().unwrap();
+    shell.load_frontend_components().unwrap();
+
+    assert!(
+        shell
+            .effective_capabilities
+            .contains_key("@mesh/debug-inspector")
+    );
+    assert!(
+        shell
+            .frontend_catalog
+            .snapshot()
+            .catalog
+            .module("@mesh/debug-inspector")
+            .is_some()
+    );
+    assert!(
+        shell
+            .components
+            .iter()
+            .any(|runtime| runtime.surface_id == "@mesh/debug-inspector")
     );
 }
 

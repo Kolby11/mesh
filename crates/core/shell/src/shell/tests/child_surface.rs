@@ -88,6 +88,8 @@ fn render_components_until_child_popup(shell: &mut Shell) {
 #[test]
 fn allocation_profiler_records_a_completed_surface_render_pass() {
     let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
     let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
     shell.register_component(Box::new(PopoverHarnessComponent::new(state)));
     shell

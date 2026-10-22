@@ -2,7 +2,7 @@ use super::child::child_surface_paint_cache_matches;
 #[cfg(feature = "allocation-profiling")]
 use mesh_core_elements::style::Color;
 #[cfg(feature = "allocation-profiling")]
-use mesh_core_elements::{NodeId, WidgetNode};
+use mesh_core_elements::{NodeId, Prop, WidgetNode};
 #[cfg(feature = "allocation-profiling")]
 use mesh_core_render::PixelBuffer;
 #[cfg(feature = "allocation-profiling")]

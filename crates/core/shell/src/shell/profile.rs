@@ -647,12 +647,7 @@ pub(super) fn candidate_capabilities(
     let mut effective = HashMap::with_capacity(modules.len());
     let mut failures = Vec::new();
     for (module_id, module) in modules {
-        // The shell loads the built-in inspector whether or not the graph
-        // enables it (`installed_enabled_frontend_ids`), so it needs a grant
-        // on the same terms.
-        if !graph.module(module_id).is_some_and(|node| node.enabled)
-            && module_id != super::discovery::BUILTIN_DEBUG_INSPECTOR_ID
-        {
+        if !graph.module(module_id).is_some_and(|node| node.enabled) {
             continue;
         }
         match policy.resolve_in(

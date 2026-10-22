@@ -1,17 +1,26 @@
 # Status
 
-**Updated:** 2026-10-22
+**Updated:** 2026-10-23
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and
 measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Optional-feature test baseline cleared:** all features pass across the
+  workspace excluding the CLI (shell 978 passed / 33 ignored; renderer 355 / 19).
+  CLI allocation profiling and Tracy pass separately (18 tests each); their
+  global allocators are intentionally incompatible. Fixed stale optional-renderer
+  fixtures and a CPU-only profiler fixture choosing GPU presentation. The testing
+  guide records the supported matrix; see October's log.
+
 - **Default-feature test baseline cleared:** the full workspace suite passes.
-  Shell: 975 passed / 31 existing ignored; module: 330 passed; frontend: 92 passed;
+  Shell: 977 passed / 32 existing ignored; module: 330 passed; frontend: 92 passed;
   scripting: 357 passed. Compiler builtin validation and Advanced settings prop
   calls are fixed; fixtures follow current composition and lifecycle contracts.
-  Signal and fast-file-read test races are fixed. See October's log.
+  Signal and fast-file-read test races are fixed. Disabled inspectors now follow
+  graph activation and capability rules; graph-reading tests share the existing
+  environment lock to prevent temporary-path and theme races. See October's log.
 
 - **W6 implemented:** bounded node recordings reuse retained paint payloads;
   complete scenes retain live effects, scroll scopes and tooltips. Resource and

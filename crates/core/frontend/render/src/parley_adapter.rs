@@ -7,7 +7,6 @@
 
 #![cfg(feature = "renderer-parley")]
 
-use mesh_core_elements::Prop;
 use std::cell::RefCell;
 
 use mesh_core_elements::WidgetNode;
@@ -161,7 +160,7 @@ pub fn shape_text_with_selection_evidence(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mesh_core_elements::{Dimension, LayoutRect, WidgetNode};
+    use mesh_core_elements::{Dimension, LayoutRect, Prop, WidgetNode};
 
     fn text_node(content: &str, width: f32) -> WidgetNode {
         let mut node = WidgetNode::new("text");

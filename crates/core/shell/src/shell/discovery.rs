@@ -6,8 +6,6 @@ use mesh_core_module::ModuleHealthRecord;
 use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-pub(super) const BUILTIN_DEBUG_INSPECTOR_ID: &str = "@mesh/debug-inspector";
-
 pub(in crate::shell) fn installed_module_graph_path() -> PathBuf {
     #[cfg(test)]
     if std::env::var_os("MESH_MODULE_GRAPH_PATH").is_none() {
@@ -3064,13 +3062,11 @@ impl Shell {
             .installed_module_graph
             .as_ref()
             .expect("frontend loading requires a validated installed module graph");
-        let mut enabled = graph
+        graph
             .frontend_modules()
             .into_iter()
             .map(|module| module.id.clone())
-            .collect::<HashSet<_>>();
-        enabled.insert(BUILTIN_DEBUG_INSPECTOR_ID.to_string());
-        enabled
+            .collect()
     }
 
     pub(super) fn register_component(&mut self, component: Box<dyn ShellComponent>) {

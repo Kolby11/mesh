@@ -1367,6 +1367,7 @@ fn newly_active_backend_interfaces_spawns_only_the_active_unrunning_provider() {
 
 #[test]
 fn frontend_module_activation_mounts_shipped_surface_live() {
+    let _lock = settings_env_lock();
     let mut shell = Shell::new();
     shell.presentation_engine =
         mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
@@ -1447,6 +1448,7 @@ fn frontend_module_activation_mounts_shipped_surface_live() {
 
 #[test]
 fn changing_ui_font_repaints_the_mounted_settings_surface() {
+    let _lock = settings_env_lock();
     let mut shell = Shell::new();
     shell.presentation_engine =
         mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);

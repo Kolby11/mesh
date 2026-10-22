@@ -9,7 +9,6 @@
 use accesskit::{
     Action, Node, NodeId as AccessKitNodeId, Rect, Role, Toggled, Tree, TreeId, TreeUpdate,
 };
-use mesh_core_elements::Prop;
 use mesh_core_elements::{
     AccessibilityRole, AccessibilityTree, AccessibilityTreeNode, NodeId, WidgetNode,
 };
@@ -176,7 +175,7 @@ fn role_for(role: &AccessibilityRole) -> Role {
 mod tests {
     use super::*;
     use mesh_core_elements::style::Dimension;
-    use mesh_core_elements::{LayoutRect, WidgetNode};
+    use mesh_core_elements::{LayoutRect, NodeState, Prop, WidgetNode};
 
     fn node(tag: &str, id: NodeId) -> WidgetNode {
         let mut node = WidgetNode::new(tag);

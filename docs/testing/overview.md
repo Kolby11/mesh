@@ -17,6 +17,15 @@ Run the complete workspace:
 nix develop -c cargo test --workspace
 ```
 
+Cover optional features with this matrix. The CLI's Tracy and allocation
+profilers use different global allocators and must be tested separately:
+
+```bash
+nix develop -c cargo test --workspace --exclude mesh-tools-cli --all-features
+nix develop -c cargo test -p mesh-tools-cli --features allocation-profiling
+nix develop -c cargo test -p mesh-tools-cli --features perf-tracy
+```
+
 Run one crate:
 
 ```bash
