@@ -217,8 +217,8 @@ fn overflow_child_surface_uses_geometry_placement_without_popover_ownership() {
     );
     assert_eq!(
         config.placement.offset,
-        (8, 10),
-        "top-left gravity compensates for the trailing shadow reserve"
+        (0, 0),
+        "paint padding must not offset content geometry"
     );
     assert!(!config.grab);
     assert!(config.grab_identity.is_none());

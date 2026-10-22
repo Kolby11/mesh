@@ -285,7 +285,12 @@ impl WaylandSurfaceBackend {
         let opaque_region_staged = entry.stage_opaque_region(&state.compositor_state);
         let blur_staged =
             stage_blur_region(&state.blur_protocols, &state.compositor_state, entry, &qh);
-        let window_geometry = entry.stage_window_geometry(input_region.unwrap_or(DamageRect {
+        let geometry = if entry.role.is_popup() {
+            entry.padding.content_rect(extent.0, extent.1)
+        } else {
+            input_region
+        };
+        let window_geometry = entry.stage_window_geometry(geometry.unwrap_or(DamageRect {
             x: 0,
             y: 0,
             width: extent.0,

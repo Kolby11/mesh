@@ -164,3 +164,160 @@ fn blur_prefers_background_effect_only_while_it_can_blur() {
     assert_eq!(preferred_blur_protocol(false, false, true), Some(Kde));
     assert_eq!(preferred_blur_protocol(false, false, false), None);
 }
+
+#[test]
+fn padded_popup_content_stays_at_output_edge_on_live_compositor() {
+    if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        return;
+    }
+    let mut backend = WaylandSurfaceBackend::new().unwrap();
+    let wait = |backend: &mut WaylandSurfaceBackend, id: &str| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !backend.state.surfaces[id].configured {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "configure timed out: {id}"
+            );
+            backend.pump().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    };
+    for (edge, anchor, gravity, offset_y) in [
+        (Edge::Top, PopupAnchor::Bottom, PopupGravity::Bottom, 12),
+        (Edge::Bottom, PopupAnchor::Top, PopupGravity::Top, -12),
+    ] {
+        let content = ContentExtent::from_size((800, 58)).unwrap();
+        backend
+            .configure(
+                "anchor-parent",
+                SurfaceConfig {
+                    namespace: "@mesh/popup-anchor-regression".into(),
+                    edge: Some(edge),
+                    exclusive_zone: -1,
+                    extent: SurfaceExtent::from_content_and_padding(
+                        content,
+                        SurfacePadding::default(),
+                    )
+                    .unwrap(),
+                    wire_size: LayerWireSize {
+                        width: LayerWireExtent::Span,
+                        height: LayerWireExtent::fixed(58).unwrap(),
+                    },
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        wait(&mut backend, "anchor-parent");
+        let (width, height) = backend.surface_size_if_known("anchor-parent").unwrap();
+        let mut canvas = mesh_core_render::SurfaceCanvas::from(mesh_core_render::PixelBuffer::new(
+            width, height,
+        ));
+        assert_eq!(
+            backend
+                .present_with_damage(
+                    "anchor-parent",
+                    "",
+                    true,
+                    &mut canvas,
+                    &[DamageRect {
+                        x: 0,
+                        y: 0,
+                        width,
+                        height
+                    }]
+                )
+                .unwrap(),
+            PresentStatus::Presented
+        );
+        backend.pump().unwrap();
+        // Layer-map animations move the parent while constraints are resolved.
+        let settled = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while std::time::Instant::now() < settled {
+            backend.pump().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let mut config = PopupConfig {
+            parent_surface_id: "anchor-parent".into(),
+            placement: PopupPlacement {
+                anchor_rect: (width as i32 - 36, 6, 36, 36),
+                size: (772, 835),
+                anchor,
+                gravity,
+                offset: (0, offset_y),
+                ..Default::default()
+            },
+            padding: SurfacePadding {
+                left: 188,
+                top: 170,
+                right: 188,
+                bottom: 206,
+            },
+            input_passthrough: false,
+            grab: false,
+            grab_identity: None,
+        };
+        backend
+            .configure_popup("padded-popup", config.clone())
+            .unwrap();
+        wait(&mut backend, "padded-popup");
+        let entry = &backend.state.surfaces["padded-popup"];
+        let WaylandRole::Popup(role) = &entry.role else {
+            unreachable!()
+        };
+        let right_gap = width as i32 - (role.position.0 + 396);
+        assert!(
+            (0..=36).contains(&right_gap),
+            "{edge:?}: shadow pushed content inward: {right_gap}"
+        );
+        let expected_y = if edge == Edge::Top {
+            42 + 12
+        } else {
+            6 - 459 - 12
+        };
+        assert_eq!(role.position.1, expected_y, "{edge:?}: vertical anchor gap");
+        assert_eq!(
+            (entry.width, entry.height),
+            (772, 835),
+            "configure must preserve paint reserve"
+        );
+        let mut canvas =
+            mesh_core_render::SurfaceCanvas::from(mesh_core_render::PixelBuffer::new(772, 835));
+        assert_eq!(
+            backend
+                .present_with_damage(
+                    "padded-popup",
+                    "",
+                    true,
+                    &mut canvas,
+                    &[DamageRect {
+                        x: 0,
+                        y: 0,
+                        width: 772,
+                        height: 835
+                    }]
+                )
+                .unwrap(),
+            PresentStatus::Presented
+        );
+        config.placement.anchor_rect.0 = 0;
+        backend.configure_popup("padded-popup", config).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            backend.pump().unwrap();
+            let WaylandRole::Popup(role) = &backend.state.surfaces["padded-popup"].role else {
+                unreachable!()
+            };
+            if role.pending_reposition_token.is_none() {
+                assert!(
+                    (0..=36).contains(&role.position.0),
+                    "shadow constrained reposition: {:?}",
+                    role.position
+                );
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "reposition timed out");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        backend.destroy_surface("anchor-parent");
+    }
+}

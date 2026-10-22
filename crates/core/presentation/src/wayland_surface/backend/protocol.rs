@@ -1,15 +1,16 @@
 use super::*;
 
-/// Build and configure an `xdg_positioner` from a [`PopupPlacement`]. Every
-/// field maps 1:1 onto a positioner request, so the compositor performs the
-/// anchoring and flip-at-edge math. Reactive mode is used only for the initial
+/// Build an `xdg_positioner` for the popup's content geometry, excluding paint
+/// reserves. The compositor performs anchoring and flip-at-edge math on that
+/// geometry. Reactive mode is used only for the initial
 /// popup positioner; later explicit reposition requests must remain
 /// token-correlated.
 pub(super) fn build_positioner(
     xdg_shell: &XdgShell,
-    placement: &PopupPlacement,
+    config: &PopupConfig,
     reactive: bool,
 ) -> Result<XdgPositioner, PresentationError> {
+    let placement = config.positioner_placement();
     let positioner = XdgPositioner::new(xdg_shell)
         .map_err(|e| PresentationError::SurfaceCreate(format!("xdg_positioner: {e}")))?;
     let (ax, ay, aw, ah) = placement.anchor_rect;

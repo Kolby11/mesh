@@ -171,6 +171,7 @@ pub(in crate::wayland_surface) struct PopupRole {
     /// id can survive role replacement, but the existing xdg parent cannot.
     pub(in crate::wayland_surface) parent_object_generation: u64,
     pub(in crate::wayland_surface) placement: PopupPlacement,
+    pub(in crate::wayland_surface) applied_geometry: Option<DamageRect>,
     /// Last compositor-resolved popup position, relative to the parent's
     /// window geometry. Reactive configures may adjust this without a new
     /// shell placement request.
@@ -573,15 +574,14 @@ impl SurfaceEntry {
 
     /// Tell the compositor which part of the buffer is the window proper.
     ///
-    /// Without this the compositor measures a toplevel by its whole buffer,
-    /// which for MESH includes the transparent tooltip overlay reserve — the
-    /// window would be placed, snapped, and decorated as if it were larger than
-    /// it looks. The content rect is the same one the input region is confined
-    /// to, so a click landing outside the window and a compositor drawing
-    /// outside the window are ruled out by the same number.
+    /// The compositor places and constrains this geometry instead of the
+    /// transparent shadow/filter reserves of a popup's buffer. Input regions
+    /// use the same content rectangle, except for pointer-transparent tooltips.
     pub(super) fn stage_window_geometry(&self, content: DamageRect) -> Option<DamageRect> {
-        let WaylandRole::Window(role) = &self.role else {
-            return None;
+        let (xdg_surface, applied_geometry) = match &self.role {
+            WaylandRole::Window(role) => (role.window.xdg_surface(), role.applied_geometry),
+            WaylandRole::Popup(role) => (role.popup.xdg_surface(), role.applied_geometry),
+            _ => return None,
         };
         let geometry = DamageRect {
             x: content.x,
@@ -589,10 +589,10 @@ impl SurfaceEntry {
             width: content.width.max(1),
             height: content.height.max(1),
         };
-        if role.applied_geometry == Some(geometry) {
+        if applied_geometry == Some(geometry) {
             return None;
         }
-        role.window.xdg_surface().set_window_geometry(
+        xdg_surface.set_window_geometry(
             content.x as i32,
             content.y as i32,
             geometry.width as i32,
@@ -602,8 +602,10 @@ impl SurfaceEntry {
     }
 
     pub(super) fn mark_window_geometry_committed(&mut self, geometry: DamageRect) {
-        if let WaylandRole::Window(role) = &mut self.role {
-            role.applied_geometry = Some(geometry);
+        match &mut self.role {
+            WaylandRole::Window(role) => role.applied_geometry = Some(geometry),
+            WaylandRole::Popup(role) => role.applied_geometry = Some(geometry),
+            _ => {}
         }
     }
 

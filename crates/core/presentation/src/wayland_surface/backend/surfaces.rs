@@ -412,7 +412,7 @@ impl WaylandSurfaceBackend {
         if self.state.surfaces.contains_key(surface_id) {
             let placement_changed = self.validate_existing_popup(surface_id, &config)?;
             if placement_changed {
-                self.reposition_popup(surface_id, &config.placement)?;
+                self.reposition_popup(surface_id, &config)?;
             }
             if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
                 entry.padding = config.padding;
@@ -477,7 +477,7 @@ impl WaylandSurfaceBackend {
                 .expect("xdg_shell presence checked above");
             let positioner = build_positioner(
                 xdg_shell,
-                &config.placement,
+                &config,
                 self.state
                     .negotiated_capabilities
                     .supports_xdg_popup_reactive_positioner(),
@@ -520,6 +520,13 @@ impl WaylandSurfaceBackend {
                 }
             }
 
+            let geometry = config.window_geometry();
+            popup.xdg_surface().set_window_geometry(
+                geometry.x as i32,
+                geometry.y as i32,
+                geometry.width as i32,
+                geometry.height as i32,
+            );
             // Initial commit (no buffer) maps the popup role and prompts the
             // compositor's first configure.
             popup.wl_surface().commit();
@@ -544,6 +551,7 @@ impl WaylandSurfaceBackend {
                 parent_id: config.parent_surface_id.clone(),
                 parent_object_generation,
                 placement: config.placement,
+                applied_geometry: None,
                 position: (0, 0),
                 next_reposition_token: 0,
                 pending_reposition_token: None,
@@ -617,13 +625,14 @@ impl WaylandSurfaceBackend {
                 config.parent_surface_id
             )));
         }
-        Ok(placement != config.placement)
+        let entry = &self.state.surfaces[surface_id];
+        Ok(placement != config.placement || entry.padding != config.padding)
     }
 
     fn reposition_popup(
         &mut self,
         surface_id: &str,
-        placement: &PopupPlacement,
+        config: &PopupConfig,
     ) -> Result<(), PresentationError> {
         if !self
             .state
@@ -639,7 +648,7 @@ impl WaylandSurfaceBackend {
                 "xdg_wm_base unavailable; cannot reposition popup".into(),
             ));
         };
-        let positioner = build_positioner(xdg_shell, placement, false)?;
+        let positioner = build_positioner(xdg_shell, config, false)?;
         let Some(entry) = self.state.surfaces.get_mut(surface_id) else {
             return Err(PresentationError::SurfaceCreate(format!(
                 "popup surface '{surface_id}' no longer exists"
@@ -655,7 +664,24 @@ impl WaylandSurfaceBackend {
         })?;
         role.next_reposition_token = token;
         role.pending_reposition_token = Some(token);
+        let geometry = config.window_geometry();
+        // Hyprland 0.56 offsets constraints by pending geometry during
+        // reposition. Keep that pending origin neutral for the request, then
+        // restore the actual geometry before any surface commit. Compositors
+        // using committed geometry see no geometry change.
+        role.popup.xdg_surface().set_window_geometry(
+            0,
+            0,
+            geometry.width as i32,
+            geometry.height as i32,
+        );
         role.popup.reposition(&positioner, token);
+        role.popup.xdg_surface().set_window_geometry(
+            geometry.x as i32,
+            geometry.y as i32,
+            geometry.width as i32,
+            geometry.height as i32,
+        );
         Ok(())
     }
 

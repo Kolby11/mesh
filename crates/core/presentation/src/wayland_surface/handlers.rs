@@ -1087,12 +1087,16 @@ impl PopupHandler for State {
         };
         // The compositor decides the popup's final size (it may have constrained
         // or resized the positioner request). Adopt it as the authoritative
-        // logical size, exactly as the layer-shell `configure` path does.
+        // content size; the paint reserve remains outside that geometry.
         if config.width > 0 {
-            entry.width = config.width as u32;
+            entry.width = (config.width as u32)
+                .saturating_add(entry.padding.left)
+                .saturating_add(entry.padding.right);
         }
         if config.height > 0 {
-            entry.height = config.height as u32;
+            entry.height = (config.height as u32)
+                .saturating_add(entry.padding.top)
+                .saturating_add(entry.padding.bottom);
         }
         if let WaylandRole::Popup(role) = &mut entry.role {
             role.position = config.position;

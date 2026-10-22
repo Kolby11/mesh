@@ -359,18 +359,6 @@ impl Shell {
                 // it must remain top-left anchored and cannot inherit a
                 // popover offset or click grab from a generic request.
                 let placement = child_popup_placement(request.kind, request.placement);
-                let offset_x = placement.offset_x
-                    + axis_padding_compensation(
-                        popover_gravity_horizontal_alignment(placement.gravity),
-                        pad_left,
-                        pad_right,
-                    );
-                let offset_y = placement.offset_y
-                    + axis_padding_compensation(
-                        popover_gravity_vertical_alignment(placement.gravity),
-                        pad_top,
-                        pad_bottom,
-                    );
                 let grab = placement.grab == PopoverGrab::Click;
                 let grab_identity = if grab
                     && self.components[index].children[child_index]
@@ -401,7 +389,7 @@ impl Shell {
                         anchor: map_popover_anchor(placement.anchor),
                         gravity: map_popover_gravity(placement.gravity),
                         constraint: map_popover_constraint(placement.constraint_adjustment),
-                        offset: (offset_x, offset_y),
+                        offset: (placement.offset_x, placement.offset_y),
                     },
                     grab,
                     grab_identity,

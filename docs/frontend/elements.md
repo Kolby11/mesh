@@ -172,6 +172,10 @@ Popovers retain the shell cross-surface focus system.
 
 Inline `<popover>` nodes, including roots of local `require("./panel.mesh")` components, are promoted to compositor popups when open, which lets a short parent surface such as a panel host content that paints outside its own buffer. Author placement with `anchor-ref`, `anchor`, `gravity`, `offset-x`, `offset-y`, and `constrain`; avoid manifest surface geometry for embeddable popovers.
 
+Anchors, offsets and screen-edge constraints use the popup's laid-out content
+box. Shadow/filter reserves paint outside that geometry, so large shadows do
+not add an invisible gap between the popup and its trigger or the screen edge.
+
 ### Popover disclosure
 
 `open-on` hands a popover's open/close policy to core, so a trigger and a

@@ -85,12 +85,12 @@ pub struct PopupPlacement {
     /// coordinates: `(x, y, width, height)`. The popup is positioned relative to
     /// this rectangle (typically the trigger element's layout box).
     pub anchor_rect: (i32, i32, i32, i32),
-    /// Requested popup size in logical pixels (the measured `<popover>` subtree).
+    /// Requested buffer size in logical pixels, including paint padding.
     pub size: (u32, u32),
     pub anchor: PopupAnchor,
     pub gravity: PopupGravity,
     pub constraint: PopupConstraint,
-    /// Extra offset applied to the computed position, in logical pixels.
+    /// Extra content-geometry offset, in logical pixels; excludes paint padding.
     pub offset: (i32, i32),
 }
 
@@ -119,6 +119,8 @@ pub struct PopupConfig {
     /// `box-shadow`/`filter` overshoot rather than visible popover content.
     /// See [`SurfacePadding`](super::SurfacePadding): it is what keeps clicks
     /// over the transparent ring falling through to whatever is behind it.
+    /// The same rectangle defines window geometry so the compositor constrains
+    /// the content instead of keeping transparent shadow reserves on-screen.
     pub padding: super::SurfacePadding,
     /// Commit an empty input region, so pointer input over the popup reaches
     /// whatever is beneath it. Tooltips use this: they describe what is under
@@ -134,6 +136,29 @@ pub struct PopupConfig {
     /// hover-bridge. The shell consumes this identity once when creating the
     /// popup; it is not retained for later reposition transactions.
     pub grab_identity: Option<PointerButtonIdentity>,
+}
+
+impl PopupConfig {
+    /// Content geometry in buffer-local logical coordinates. Shadow/filter
+    /// reserves paint outside this rectangle and do not constrain placement.
+    pub fn window_geometry(&self) -> mesh_core_render::DamageRect {
+        self.padding
+            .content_rect(self.placement.size.0, self.placement.size.1)
+            .unwrap_or(mesh_core_render::DamageRect {
+                x: 0,
+                y: 0,
+                width: self.placement.size.0.max(1),
+                height: self.placement.size.1.max(1),
+            })
+    }
+
+    pub(super) fn positioner_placement(&self) -> PopupPlacement {
+        let geometry = self.window_geometry();
+        PopupPlacement {
+            size: (geometry.width, geometry.height),
+            ..self.placement
+        }
+    }
 }
 
 pub(super) fn map_anchor(anchor: PopupAnchor) -> xdg_positioner::Anchor {
@@ -193,6 +218,48 @@ pub(super) fn map_constraint(constraint: PopupConstraint) -> xdg_positioner::Con
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn popup_positioner_constrains_content_instead_of_shadow_reserve() {
+        for gravity in [
+            PopupGravity::Top,
+            PopupGravity::Bottom,
+            PopupGravity::Left,
+            PopupGravity::Right,
+            PopupGravity::Center,
+            PopupGravity::TopLeft,
+            PopupGravity::TopRight,
+            PopupGravity::BottomLeft,
+            PopupGravity::BottomRight,
+        ] {
+            let config = PopupConfig {
+                parent_surface_id: "bar".into(),
+                placement: PopupPlacement {
+                    anchor_rect: (2844, 6, 36, 36),
+                    size: (772, 835),
+                    gravity,
+                    offset: (0, 12),
+                    ..Default::default()
+                },
+                padding: super::super::SurfacePadding {
+                    left: 188,
+                    top: 170,
+                    right: 188,
+                    bottom: 206,
+                },
+                input_passthrough: false,
+                grab: false,
+                grab_identity: None,
+            };
+            let positioner = config.positioner_placement();
+            assert_eq!(positioner.size, (396, 459));
+            assert_eq!(positioner.offset, (0, 12));
+            assert_eq!(positioner.anchor_rect, config.placement.anchor_rect);
+            assert_eq!(positioner.gravity, gravity);
+            let geometry = config.window_geometry();
+            assert_eq!((geometry.x, geometry.y), (188, 170));
+        }
+    }
 
     #[test]
     fn anchor_maps_to_wayland_enum() {

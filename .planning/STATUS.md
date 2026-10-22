@@ -7,6 +7,13 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Popup edge placement fixed:** popup anchors and compositor constraints use
+  content geometry instead of shadow/filter buffer reserves. Quick settings and
+  launcher trigger geometry is covered, and a live Hyprland regression verifies
+  top/bottom placement plus repositioning. Paint padding remains intact; the
+  compositor's pending-geometry reposition quirk is handled without committing
+  transient geometry. See October's log.
+
 - **Optional-feature test baseline cleared:** all features pass across the
   workspace excluding the CLI (shell 978 passed / 33 ignored; renderer 355 / 19).
   CLI allocation profiling and Tracy pass separately (18 tests each); their

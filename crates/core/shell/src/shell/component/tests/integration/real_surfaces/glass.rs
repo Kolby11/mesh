@@ -241,6 +241,61 @@ fn update(component: &mut FrontendSurfaceComponent, service: &str, payload: serd
 }
 
 #[test]
+fn liquid_glass_popup_anchor_geometry_stays_near_triggers() {
+    let catalog = GlassCatalog::new();
+    for (name, trigger, height) in [
+        ("glass-bar", "glassControls", 58),
+        ("glass-dock", "glassLauncher", 114),
+    ] {
+        let mut component = catalog.mount(name);
+        paint(&mut component, 2880, height);
+        press(&mut component, trigger, 2880, height);
+        let requests = component.child_surface_requests();
+        assert_eq!(requests.len(), 1);
+        let request = &requests[0];
+        let trigger_node =
+            first_node_with_ref(component.last_tree.as_ref().unwrap(), trigger).unwrap();
+        assert_eq!(
+            request.anchor_rect,
+            (
+                trigger_node.layout.x.floor() as i32,
+                trigger_node.layout.y.floor() as i32,
+                trigger_node.layout.width.ceil() as i32,
+                trigger_node.layout.height.ceil() as i32,
+            )
+        );
+        let (left, top, right, bottom) = request.content_padding;
+        let config = mesh_core_presentation::PopupConfig {
+            parent_surface_id: name.into(),
+            placement: mesh_core_presentation::PopupPlacement {
+                anchor_rect: request.anchor_rect,
+                size: (
+                    request.content_size.0 + left + right,
+                    request.content_size.1 + top + bottom,
+                ),
+                ..Default::default()
+            },
+            padding: mesh_core_presentation::SurfacePadding {
+                left,
+                top,
+                right,
+                bottom,
+            },
+            input_passthrough: false,
+            grab: false,
+            grab_identity: None,
+        };
+        let geometry = config.window_geometry();
+        assert_eq!(
+            (geometry.width, geometry.height),
+            request.content_size,
+            "{name}: paint reserves must not enlarge constrained popup geometry"
+        );
+        assert_eq!((geometry.x, geometry.y), (left, top));
+    }
+}
+
+#[test]
 fn liquid_glass_calendar_and_controls_are_promoted_local_popovers() {
     let mut component = host("glass-bar");
     paint(&mut component, 1920, 100);
