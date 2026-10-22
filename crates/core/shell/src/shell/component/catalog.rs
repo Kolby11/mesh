@@ -1767,7 +1767,7 @@ mod performance_tests {
     fn contributed_settings_pages_mount_through_the_extension_point() {
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let graph = mesh_core_module::package::load_authoring_snapshot(
-            &workspace_root.join("config/module.json"),
+            crate::shell::discovery::test_module_graph_path(),
         )
         .expect("shipped graph loads");
         let modules = shipped_frontend_modules();
@@ -1800,9 +1800,8 @@ mod performance_tests {
     /// while the legacy top-level surface set stays frontend-only.
     #[test]
     fn graph_backed_catalog_offers_component_modules_as_mountable_roots() {
-        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let graph = mesh_core_module::package::load_authoring_snapshot(
-            &workspace_root.join("config/module.json"),
+            crate::shell::discovery::test_module_graph_path(),
         )
         .expect("shipped graph loads");
         let modules = shipped_frontend_modules();
@@ -1861,9 +1860,8 @@ local Settings = require("@mesh/settings")
     fn catalog_with_navigation_contribution_source(
         settings_source: &str,
     ) -> (tempfile::TempDir, FrontendCatalog) {
-        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let graph = mesh_core_module::package::load_authoring_snapshot(
-            &workspace_root.join("config/module.json"),
+            crate::shell::discovery::test_module_graph_path(),
         )
         .expect("shipped graph loads");
         let mut modules = shipped_frontend_modules();
@@ -1956,9 +1954,8 @@ local audio = require("mesh.audio@>=2.0")
 
     #[test]
     fn source_reload_rejects_incompatible_contribution_interface_ranges() {
-        let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let graph = mesh_core_module::package::load_authoring_snapshot(
-            &workspace_root.join("config/module.json"),
+            crate::shell::discovery::test_module_graph_path(),
         )
         .expect("shipped graph loads");
         let (temp, catalog) = catalog_with_navigation_contribution_source(

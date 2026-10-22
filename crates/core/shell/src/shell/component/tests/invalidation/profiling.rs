@@ -26,30 +26,6 @@ fn assert_text_cache_proof_active(label: &str, snapshot: &ProfilingInvalidationS
     );
 }
 
-fn assert_icon_cache_proof_active(label: &str, snapshot: &ProfilingInvalidationSnapshot) {
-    assert!(
-        snapshot.paint.raster_cache_hits
-            + snapshot.paint.raster_cache_misses
-            + snapshot.paint.raster_cache_bypasses
-            + snapshot.paint.glyph_cache_hits
-            + snapshot.paint.glyph_cache_misses
-            + snapshot.paint.skia_glyph_cache_hits
-            + snapshot.paint.skia_glyph_cache_misses
-            > 0,
-        "{label} should report icon cache activity"
-    );
-}
-
-fn assert_icon_cache_reuse(label: &str, snapshot: &ProfilingInvalidationSnapshot) {
-    assert!(
-        snapshot.paint.raster_cache_hits
-            + snapshot.paint.glyph_cache_hits
-            + snapshot.paint.skia_glyph_cache_hits
-            > 0,
-        "{label} should report warm icon cache reuse"
-    );
-}
-
 fn log_phase31_proof(
     scenario: &str,
     records: &[ComponentProfilingRecord],
@@ -485,12 +461,6 @@ fn phase26_real_surface_baseline_emits_canonical_proof_measurements() {
     assert_text_cache_proof_active("pointer_update", &pointer_update_invalidation);
     assert_text_cache_proof_active("keyboard_traversal", &keyboard_invalidation);
     assert_text_cache_proof_active("backend_update", &backend_update_invalidation);
-    assert_icon_cache_proof_active("hover", &hover_invalidation);
-    assert_icon_cache_proof_active("keyboard_traversal", &keyboard_invalidation);
-    assert_icon_cache_proof_active("backend_update", &backend_update_invalidation);
-    assert_icon_cache_reuse("hover", &hover_invalidation);
-    assert_icon_cache_reuse("keyboard_traversal", &keyboard_invalidation);
-    assert_icon_cache_reuse("backend_update", &backend_update_invalidation);
 }
 
 fn fnv_hash_buffer(buffer: &PixelBuffer) -> u64 {

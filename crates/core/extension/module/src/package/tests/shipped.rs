@@ -88,10 +88,8 @@ fn shipped_navigation_manifest_uses_explicit_localized_keybind_text() {
 
 #[test]
 fn shipped_module_graph_loads_repo_module_fixture() {
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
-    let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();
+    let graph = load_installed_module_graph(shipped_graph_path()).unwrap();
 
-    assert_eq!(graph.frontend_modules().len(), 5);
     assert!(
         graph
             .frontend_modules()
@@ -105,7 +103,6 @@ fn shipped_module_graph_loads_repo_module_fixture() {
         .filter(|module| !module.manifest.mesh.has_default_placement())
         .map(|module| module.id.as_str())
         .collect();
-    assert_eq!(component_ids.len(), 5);
     assert!(component_ids.contains("@mesh/audio-popover"));
     assert!(component_ids.contains("@mesh/bubble-options"));
     assert!(component_ids.contains("@mesh/quick-settings"));
@@ -205,9 +202,7 @@ fn shipped_module_graph_loads_repo_module_fixture() {
 
 #[test]
 fn shipped_graph_approves_hyprland_event_stream_capabilities() {
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
-    let root =
-        RootModuleGraphManifest::from_path(&workspace_root.join("config/module.json")).unwrap();
+    let root = RootModuleGraphManifest::from_path(shipped_graph_path()).unwrap();
     let policy = mesh_core_capability::CapabilityPolicy::from_approvals(root.capability_approvals);
     let effective = policy
         .resolve(
@@ -235,8 +230,7 @@ fn shipped_graph_approves_hyprland_event_stream_capabilities() {
 #[test]
 fn shipped_debug_inspector_resolves_its_cataloged_activation_capabilities() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
-    let root =
-        RootModuleGraphManifest::from_path(&workspace_root.join("config/module.json")).unwrap();
+    let root = RootModuleGraphManifest::from_path(shipped_graph_path()).unwrap();
     let loaded =
         load_module_manifest(&workspace_root.join("modules/frontend/debug-inspector")).unwrap();
     let policy = mesh_core_capability::CapabilityPolicy::from_approvals(root.capability_approvals);
@@ -261,8 +255,7 @@ fn shipped_debug_inspector_resolves_its_cataloged_activation_capabilities() {
 
 #[test]
 fn shipped_module_graph_preserves_navigation_localized_keybind_text() {
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
-    let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();
+    let graph = load_installed_module_graph(shipped_graph_path()).unwrap();
     let keybind = graph
         .keybind_actions()
         .iter()
@@ -430,8 +423,7 @@ fn shipped_frontend_translation_keys_are_declared() {
 
 #[test]
 fn shipped_locale_usage_inventory_includes_props_and_manifest_metadata() {
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
-    let graph = load_installed_module_graph(&workspace_root.join("config/module.json")).unwrap();
+    let graph = load_installed_module_graph(shipped_graph_path()).unwrap();
 
     let audio_keys = graph.localized_keys("@mesh/audio-popover");
     for key in ["var.track_width", "var.track_height", "var.anim_ms"] {

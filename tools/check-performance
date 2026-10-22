@@ -94,7 +94,11 @@ esac
 if ! "$workloads_only"; then
   python3 tools/test-profile-report.py
   cargo test -p mesh-core-elements --release --lib frame_work
+  cargo test -p mesh-core-render --release --lib publishing_asset_pages_invalidates_standalone_scene_recordings
   cargo test -p mesh-core-render --release --lib scene_thread
+  cargo test -p mesh-core-render --release --lib scene_preparation_records_only_changed_nodes
+  cargo test -p mesh-core-render --release --lib scene_cache_
+  cargo test -p mesh-core-render --release --lib scene_node_cache_bounds_shared_resources_and_rejects_inflight_results
   cargo test -p mesh-core-resources --release --lib frozen_font
   cargo test -p mesh-core-scripting --release --lib context::tests::effects
   cargo test -p mesh-core-shell --release --lib legacy_render_is_not_automatically_scheduled

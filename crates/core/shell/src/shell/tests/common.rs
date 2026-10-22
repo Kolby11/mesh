@@ -1879,6 +1879,9 @@ impl super::types::ShellComponent for DirtyHiddenComponent {
 }
 
 pub(super) fn park_reload_deadlines(shell: &mut Shell) {
+    // Match the running event loop: unrelated resource jobs wake it through
+    // the callback rather than imposing the fallback polling deadline.
+    mesh_core_render::set_resource_completion_waker(Some(Arc::new(|| {})));
     let later = Instant::now() + Duration::from_secs(60);
     shell.next_theme_reload_check = later;
     shell.next_shell_settings_reload_check = later;

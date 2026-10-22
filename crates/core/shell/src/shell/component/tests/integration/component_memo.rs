@@ -362,12 +362,7 @@ items = { { id = "first" }, { id = "second" } }
     let rebuilt_first =
         first_node_with_attr(component.last_tree.as_ref().unwrap(), "value", "edited")
             .expect("keyed first input retains its runtime value");
-    assert!(
-        rebuilt_first
-            .mesh_key()
-            .unwrap()
-            .contains(":\"first\"%2F0")
-    );
+    assert!(rebuilt_first.mesh_key().unwrap().contains(":\"first\"%2F0"));
 }
 
 #[test]
@@ -549,7 +544,7 @@ fn unchanged_slot_contribution_reuses_memoized_subtree() {
     component
         .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut initial, 1.0)
         .unwrap();
-    rebuild(&mut component, 160, 60);
+    let initial = rebuild(&mut component, 160, 60);
     let hits_before = component.component_memo_hit_count();
     let second = rebuild(&mut component, 160, 60);
 

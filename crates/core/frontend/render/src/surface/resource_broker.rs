@@ -67,6 +67,7 @@ impl ResourceWaiters {
     }
 
     pub(crate) fn notify(self) {
+        crate::prepared_scene::resource_completed();
         for consumer in self.0.into_iter().filter_map(|waiter| waiter.upgrade()) {
             consumer.store(true, Ordering::Release);
         }

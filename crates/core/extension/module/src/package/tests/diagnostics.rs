@@ -281,7 +281,8 @@ fn graph_diagnostics_report_unknown_shell_event_publish() {
     fs::write(
         src_dir.join("main.mesh"),
         r#"
-<script>
+<template><box /></template>
+<script lang="luau">
 mesh.events.publish("shell.set-theme", { theme_id = "dark" })
 mesh.events.publish("shell.not-declared", {})
 </script>

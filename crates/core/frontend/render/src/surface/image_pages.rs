@@ -35,7 +35,9 @@ pub(crate) fn refresh() {
                 ..ImagePages::default()
             };
         }
-        pages.pages.refresh();
+        if pages.pages.refresh() {
+            crate::prepared_scene::resource_completed();
+        }
     });
 }
 
@@ -158,6 +160,25 @@ mod tests {
             );
         });
         pixels
+    }
+
+    #[test]
+    fn publishing_asset_pages_invalidates_standalone_scene_recordings() {
+        let _guard = crate::resource_state_test_lock();
+        PAGES.with(|pages| *pages.borrow_mut() = ImagePages::default());
+        refresh();
+        let epoch = crate::prepared_scene::resource_completion_epoch();
+        let image = source(true, 180);
+        let images = SceneImages::default();
+        let (_, source) = with_images(&images, || resolve(&image));
+        assert!(source.is_none());
+        refresh();
+        assert_ne!(crate::prepared_scene::resource_completion_epoch(), epoch);
+        let (_, source) = with_images(&images, || resolve(&image));
+        assert!(source.is_some());
+        let epoch = crate::prepared_scene::resource_completion_epoch();
+        refresh();
+        assert_eq!(crate::prepared_scene::resource_completion_epoch(), epoch);
     }
 
     #[test]

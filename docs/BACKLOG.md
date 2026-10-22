@@ -43,9 +43,6 @@ criteria and the items folded in here:
       `seed_projection` walk that could fold into the write.
 - [ ] **P3 / D4:** Replace collection snapshot comparisons with write-time item deltas;
       fixed-shape keyed lists still compare their snapshots to find changed items.
-- [ ] **P4:** Narrow GPU scene preparation by retained revision (each frame records the full
-      selection; design inputs are in the pipeline note), after W3. Presentation no longer waits
-      for the worker, but a surface is gated while its frame is in flight.
 - [ ] Shell tests build without the `gpu` feature, so nothing in the shell suite exercises
       `PresentStatus::Submitted` or `reconcile_scene_completions`; add a GPU-feature shell gate.
 - [ ] A scene frame that completes unpresented because the compositor holds every dmabuf slot
@@ -408,9 +405,3 @@ From the 2026-10-20 live `glass` captures; evidence in the
 - [ ] Experimental persistent-scene/database renderer that extends retained
       identity into raster resources and tiles, measured against the Skia-GL
       path. [Plan](../.planning/todos/pending/2026-09-20-persistent-scene-renderer.md).
-
-- [ ] **Existing default-feature test failures:** shipped-graph tests
-  assume the root graph, but `config/active-profile` is `glass`, so composition is
-  profile-driven. Shell real-surface popovers anchor at y 6 instead of 26.
-  Triage with `cargo test --workspace --no-fail-fast`; `HEAD` baseline is in
-  the log.

@@ -466,15 +466,35 @@ fn build_paint_subtree_with_transform(
         .get(&node.id)
         .and_then(|subtree| subtree.commands.first())
         .filter(|command| command.node.id == node.id)
-        .map(|command| command.node.as_ref());
-    let mut paint_node = build_paint_node_with_previous_transform_and_clips(
-        node,
-        world_transform,
-        previous_paint_node,
-        ancestor_clips,
-    );
-    paint_node.in_scroll_content = in_scroll_content;
-    let paint_node = Arc::new(paint_node);
+        .map(|command| &command.node);
+    // Rebuilding a clean ancestor's command topology does not change its own
+    // paint payload. Keep its identity when the inherited coordinate space agrees.
+    let paint_node = if !force_rebuild
+        && !node_is_dirty
+        && let Some(previous) = previous_paint_node
+        && previous.transform == world_transform
+        && previous.local_layout.width == node.layout.width.max(0.0)
+        && previous.local_layout.height == node.layout.height.max(0.0)
+        && previous.ancestor_clips.len() == ancestor_clips.as_slice().len()
+        && previous
+            .ancestor_clips
+            .iter()
+            .zip(ancestor_clips.as_slice())
+            .all(|(a, b)| a.transform == b.transform && a.rect == b.rect && a.radii == b.radii)
+        && previous.in_scroll_content == in_scroll_content
+        && previous.style.resource_revision == mesh_core_resources::resource_revision()
+    {
+        Arc::clone(previous)
+    } else {
+        let mut paint_node = build_paint_node_with_previous_transform_and_clips(
+            node,
+            world_transform,
+            previous_paint_node.map(Arc::as_ref),
+            ancestor_clips,
+        );
+        paint_node.in_scroll_content = in_scroll_content;
+        Arc::new(paint_node)
+    };
     let bounds = node_clip_for(&paint_node);
     let visual_bounds = visual_clip_for(&paint_node);
     let node_clip = intersect_display_clip(clip, visual_bounds);

@@ -340,7 +340,8 @@ fn graph_diagnostics_report_raw_interface_domain_event_publish() {
     fs::write(
         src_dir.join("main.mesh"),
         r#"
-<script>
+<template><box /></template>
+<script lang="luau">
 mesh.events.publish("shell.set-theme", { theme_id = "dark" })
 mesh.events.publish("mesh.hyprland.switch_workspace", { id = 1 })
 </script>

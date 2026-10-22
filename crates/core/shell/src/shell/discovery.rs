@@ -9,7 +9,37 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 pub(super) const BUILTIN_DEBUG_INSPECTOR_ID: &str = "@mesh/debug-inspector";
 
 pub(in crate::shell) fn installed_module_graph_path() -> PathBuf {
+    #[cfg(test)]
+    if std::env::var_os("MESH_MODULE_GRAPH_PATH").is_none() {
+        return test_module_graph_path().to_path_buf();
+    }
     mesh_core_config::default_module_graph_path()
+}
+
+#[cfg(test)]
+pub(in crate::shell) fn test_module_graph_path() -> &'static Path {
+    static GRAPH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    GRAPH.get_or_init(|| {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .canonicalize()
+            .unwrap();
+        let dir =
+            std::env::temp_dir().join(format!("mesh-shell-test-graph-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut graph: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(root.join("config/module.json")).unwrap())
+                .unwrap();
+        graph["mesh"]["modulesDir"] = PathBuf::from("../".repeat(dir.ancestors().count() - 1))
+            .join(root.strip_prefix("/").unwrap())
+            .join("modules")
+            .to_string_lossy()
+            .into_owned()
+            .into();
+        let path = dir.join("module.json");
+        std::fs::write(&path, serde_json::to_vec(&graph).unwrap()).unwrap();
+        path
+    })
 }
 
 /// Load a candidate graph. Once a graph is committed, a module whose

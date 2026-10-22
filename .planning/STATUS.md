@@ -7,6 +7,18 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Default-feature test baseline cleared:** the full workspace suite passes.
+  Shell: 975 passed / 31 existing ignored; module: 330 passed; frontend: 92 passed;
+  scripting: 357 passed. Compiler builtin validation and Advanced settings prop
+  calls are fixed; fixtures follow current composition and lifecycle contracts.
+  Signal and fast-file-read test races are fixed. See October's log.
+
+- **W6 implemented:** bounded node recordings reuse retained paint payloads;
+  complete scenes retain live effects, scroll scopes and tooltips. Resource and
+  atlas publication invalidate stale recordings. One changed node records one
+  picture beside 16 or 1,024 siblings; full/direct pixel parity and both GPUs'
+  workload gates pass. See the performance log for timings and limits.
+
 - **W3 implemented:** display ancestors resolve through retained paths; animation
   snapshots/sampling use restyled and registered nodes; retained semantic/layout
   updates reuse structural validation. Child lifecycle classes restore without
@@ -89,8 +101,9 @@ measurements live in [`log/`](log/README.md).
 - **Change-proportional frame pipeline (P0–P4)** is the implementation
   priority. P1 (typed node state, typed runtime fields, `Prop` vocabulary with
   change classes) landed 2026-10-21: ~7% dashboard, ~18% steady dock hover.
-  Next: W6 scene-preparation narrowing. W3 scoping and W7 discovery retirement
-  are implemented; layout annotation and shared path prefixes remain open.
+  W3 scoping, W6 scene preparation and W7 discovery retirement are implemented.
+  Next: scope keyed-list hover-handler restyles and reproduce live glass raster
+  costs in the CPU timing fixture; layout annotation and shared paths remain open.
   [Design](todos/pending/2026-10-21-change-proportional-pipeline.md); backlog
   lines at the top of `docs/BACKLOG.md`. Single-pass scoping buys 3–10% and is
   deprioritized.
@@ -101,10 +114,5 @@ measurements live in [`log/`](log/README.md).
 
 ## Blocked / known baselines
 
-- Shell default-feature serial debug: `2fb51469` and corrected `f03ce07d` have
-  the same 41 failure names (2026-10-20). Compare fresh failure sets, not counts.
-- Known module/elements/frontend fixture failures and shell interaction failures
-  remain recorded in October's log. GPU residency changes have passed the full
-  renderer suite and shell compilation, not a fresh full shell test run.
 - Live Hyprland presentation has been checked on AMD; NVIDIA as compositor main
   device and other compositor imports remain unchecked live.

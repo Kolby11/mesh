@@ -5,6 +5,13 @@ use mesh_core_frontend_shell_adapter::ShellComponent;
 fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({"available": true, "percent": 50, "muted": false}),
+        })
+        .unwrap();
     let theme = default_theme();
     let width = 960;
     let height = 80;
@@ -12,7 +19,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     component
         .paint_raster(
             &theme,
-            SurfaceExtent::unpadded(width, height),
+            SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
             &mut buffer,
             1.0,
         )
@@ -84,7 +91,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     component
         .paint_raster(
             &theme,
-            SurfaceExtent::unpadded(width, height),
+            SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
             &mut buffer,
             1.0,
         )
@@ -156,7 +163,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
     component
         .paint_raster(
             &theme,
-            SurfaceExtent::unpadded(width, height),
+            SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
             &mut buffer,
             1.0,
         )
@@ -193,7 +200,7 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
     component
         .paint_raster(
             &theme,
-            SurfaceExtent::unpadded(width, height),
+            SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
             &mut buffer,
             1.0,
         )
@@ -232,7 +239,7 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
     component
         .paint_raster(
             &theme,
-            SurfaceExtent::unpadded(width, height),
+            SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
             &mut buffer,
             1.0,
         )
@@ -317,7 +324,7 @@ fn navigation_language_button_opens_language_popover_on_real_surface() {
     component
         .paint_raster(
             &theme,
-            SurfaceExtent::unpadded(width, height),
+            SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
             &mut buffer,
             1.0,
         )

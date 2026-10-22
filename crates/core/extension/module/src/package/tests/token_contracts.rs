@@ -502,12 +502,12 @@ fn shipped_glass_material_resolves_and_paints_under_every_theme_mode() {
                 assert_eq!(style.box_shadow.blur_radius, 14.0);
                 assert!(style.box_shadow.color.a > 0 && style.box_shadow.color.a < 255);
                 if declaration.id == "violet-glass" {
-                    assert_eq!(gradient.from, Color::from_hex("#b468ff4d").unwrap());
-                    assert_eq!(gradient.to, Color::from_hex("#7a2ee033").unwrap());
+                    assert_eq!(gradient.from, Color::from_hex("#d4b8ff36").unwrap());
+                    assert_eq!(gradient.to, Color::from_hex("#44206e24").unwrap());
                     assert_eq!(style.color, Color::from_hex("#f5ecff").unwrap());
                     assert_eq!(
                         style.box_shadow.color,
-                        Color::from_hex("#14003259").unwrap()
+                        Color::from_hex("#10002045").unwrap()
                     );
                 } else {
                     let surface = theme

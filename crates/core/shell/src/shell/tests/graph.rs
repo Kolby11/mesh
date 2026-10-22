@@ -4,9 +4,8 @@ use std::fs;
 
 #[test]
 fn installed_module_graph_exposes_shell_package_choices() {
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let graph = mesh_core_module::package::load_installed_module_graph(
-        &workspace_root.join("config/module.json"),
+        crate::shell::discovery::test_module_graph_path(),
     )
     .unwrap();
 
@@ -31,7 +30,10 @@ fn installed_module_graph_exposes_shell_package_choices() {
             .iter()
             .any(|icon_pack| icon_pack.module_id == "@mesh/icons-default")
     );
-    assert!(graph.active_provider("mesh.network").is_none());
+    assert_eq!(
+        graph.active_provider("mesh.network").unwrap().module_id,
+        "@mesh/networkmanager-network"
+    );
     assert_eq!(
         graph.active_provider("mesh.power").unwrap().module_id,
         "@mesh/upower-power"
@@ -42,7 +44,7 @@ fn installed_module_graph_exposes_shell_package_choices() {
     );
     assert_eq!(
         graph.backend_providers_for_interface("mesh.network").len(),
-        0
+        1
     );
     assert_eq!(graph.backend_providers_for_interface("mesh.power").len(), 1);
     assert_eq!(
@@ -304,7 +306,7 @@ fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candid
 }
 
 #[test]
-fn load_frontend_components_keeps_shell_shipped_debug_inspector_even_when_not_in_package_graph() {
+fn load_frontend_components_respects_disabled_debug_inspector() {
     let mut shell = Shell::new();
     shell.discover_modules();
     shell.resolve_modules().unwrap();
@@ -314,8 +316,8 @@ fn load_frontend_components_keeps_shell_shipped_debug_inspector_even_when_not_in
         shell
             .components
             .iter()
-            .any(|runtime| runtime.surface_id == "@mesh/debug-inspector"),
-        "built-in debug inspector should load as a shell surface even when absent from config/module.json"
+            .all(|runtime| runtime.surface_id != "@mesh/debug-inspector"),
+        "a disabled inspector must remain an ordinary module"
     );
 }
 

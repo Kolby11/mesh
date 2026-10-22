@@ -87,16 +87,18 @@ fn promoted_popover_config_uses_content_size_not_stale_surface_size() {
     shell.presentation_engine =
         mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
     let trigger_state = Arc::new(Mutex::new(FocusRecordingState::default()));
-    shell.register_component(Box::new(FocusRecordingComponent::new(
-        "@mesh/navigation-bar",
-        trigger_state,
-    )));
+    let mut trigger = FocusRecordingComponent::new("@mesh/navigation-bar", trigger_state);
+    trigger.always_render = true;
+    shell.register_component(Box::new(trigger));
     shell.register_component(Box::new(PopupGeometryRecordingComponent::new(
         "@mesh/theme-selector",
         (112, 74),
         (240, 154),
     )));
 
+    let surface = shell.surfaces.get_mut("@mesh/navigation-bar").unwrap();
+    surface.width = 1280;
+    surface.height = 40;
     let mut emitted = shell
         .apply_request(CoreRequest::ActivatePopover {
             surface_id: "@mesh/theme-selector".into(),
@@ -449,15 +451,16 @@ fn dismissed_legacy_promoted_popover_hides_surface_state() {
         mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
     let trigger_state = Arc::new(Mutex::new(FocusRecordingState::default()));
     let popover_state = Arc::new(Mutex::new(FocusRecordingState::default()));
-    shell.register_component(Box::new(FocusRecordingComponent::new(
-        "@mesh/navigation-bar",
-        trigger_state,
-    )));
-    shell.register_component(Box::new(FocusRecordingComponent::new(
-        "@mesh/quick-settings",
-        popover_state,
-    )));
+    let mut trigger = FocusRecordingComponent::new("@mesh/navigation-bar", trigger_state);
+    trigger.always_render = true;
+    shell.register_component(Box::new(trigger));
+    let mut popup = FocusRecordingComponent::new("@mesh/quick-settings", popover_state);
+    popup.always_render = true;
+    shell.register_component(Box::new(popup));
 
+    let surface = shell.surfaces.get_mut("@mesh/navigation-bar").unwrap();
+    surface.width = 1280;
+    surface.height = 40;
     let mut emitted = shell
         .apply_request(CoreRequest::ActivatePopover {
             surface_id: "@mesh/quick-settings".into(),
@@ -475,6 +478,7 @@ fn dismissed_legacy_promoted_popover_hides_surface_state() {
             .is_some_and(|state| state.visible)
     );
 
+    shell.render_components().unwrap();
     shell
         .presentation_engine
         .testing_push_dismissed_popup("@mesh/quick-settings");

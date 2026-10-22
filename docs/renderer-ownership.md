@@ -29,6 +29,26 @@ icon files or consults the live resource registry. This avoids copying the
 entire installed font catalog into each scene. `FrozenFontDatabase` remains
 available for consumers that need owned font sources rather than prepared glyphs.
 
+Each scene canvas retains node pictures by immutable `DisplayPaintNode` identity,
+scale, effective clip and fallback module. Unchanged nodes contribute picture
+references to the complete scene without repeating drawing/resource preparation.
+Recorded drawables freeze their records at scene finalization, retaining small
+node drawings instead of allowing Skia to inline them into the parent recording.
+The cache admits at most 4,096 nodes and 16 MiB of picture storage plus uniquely
+counted raster images (charged at four bytes per pixel); insertion evicts oldest
+entries. Scale, clip and owner changes miss the cache. Resource revisions,
+completed async assets, newly published asset pages and font database/alias
+changes invalidate its entries. Recordings made with pending resource jobs are
+not admitted.
+
+Layer scopes, backdrop reads/refraction, scroll scopes and scroll-content nodes
+are prepared live. Tooltip paint remains outside the node cache. Complete-scene
+composition still visits command references; newly prepared node operations
+scale with changed retained payloads within the cache budget, rather than the
+whole scene. Submitted scenes own their pictures and images independently of
+cache eviction, resource changes and canvas retirement. `preparation_metrics()`
+separates recorded nodes/operations, reused nodes and live commands.
+
 `render::scene_thread` admits at most 64 surface incarnations in production,
 with one pending scene and one completed output per surface and one active
 render. Commits coalesce, and only current outputs may be attached. Missing
@@ -94,8 +114,7 @@ A frame that does not reach the compositor (superseded or removed canvas,
 recreated compositor object, hidden surface, busy buffers, GPU error) is
 reported through `take_scene_completions`; the shell repaints the whole surface.
 A worker silent for two seconds disables GPU presentation. The worker sleeps
-when idle. Scroll layer caching, blur caches and narrowing scene preparation by
-retained revision remain follow-ups in the backlog.
+when idle. Scroll layer caching and blur caches remain follow-ups in the backlog.
 
 ## Render path selection
 

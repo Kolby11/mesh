@@ -155,7 +155,7 @@ fn refs_scroll_into_view_smoothly_scrolls_the_container_to_reveal_the_target() {
     let mut component = test_frontend_component(
         r#"
 <style>
-scroll { height: 60px; overflow-y: auto; }
+scroll { width: 160px; height: 60px; overflow-y: auto; }
 .content { height: 240px; flex-shrink: 0; }
 .spacer { height: 200px; }
 .target { height: 40px; }
@@ -181,7 +181,12 @@ end
 
     // Paint once so overflow annotation populates scroll limits and the ref map.
     component
-        .paint_raster(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
+        .paint_raster(
+            &theme,
+            SurfaceExtent::unpadded(160, 120).bound_by_compositor(true),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     // Nothing scrolled yet.
     assert!(component.scroll_offsets.values().all(|o| o.y == 0.0));
@@ -223,7 +228,7 @@ fn refs_scroll_to_sets_offset_and_scroll_top_reads_it_back() {
     let mut component = test_frontend_component(
         r#"
 <style>
-scroll { height: 60px; overflow-y: auto; }
+scroll { width: 160px; height: 60px; overflow-y: auto; }
 .content { height: 240px; flex-shrink: 0; }
 </style>
 <template>
@@ -284,7 +289,7 @@ fn refs_scroll_to_smooth_eases_the_offset_over_time() {
     let mut component = test_frontend_component(
         r#"
 <style>
-scroll { height: 60px; overflow-y: auto; }
+scroll { width: 160px; height: 60px; overflow-y: auto; }
 .content { height: 240px; flex-shrink: 0; }
 </style>
 <template>

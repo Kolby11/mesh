@@ -175,10 +175,15 @@ impl GlyphPages {
     }
 
     /// Snapshot every page that gained glyphs since its last snapshot.
-    pub(super) fn refresh(&mut self) {
+    /// Returns whether any new snapshot was published.
+    pub(super) fn refresh(&mut self) -> bool {
+        let mut changed = false;
         for page in &mut self.pages {
+            let previous = page.snapshot_placed;
             page.snapshot_if_stale();
+            changed |= previous != page.snapshot_placed;
         }
+        changed
     }
 
     pub(super) fn clear(&mut self) {

@@ -529,11 +529,14 @@ effect(function()
     modules_notice_separator = module_notice == "" and "" or " · "
 end)
 
-local function publish_prop(channel, module_id, name, value, instance_id)
-    local payload = { module_id = module_id, prop = name }
-    if value ~= nil then payload.value = value end
-    if instance_id ~= nil and instance_id ~= "" then payload.instance_id = instance_id end
-    mesh.events.publish(channel, payload)
+local function write_prop(method, module_id, name, value, instance_id)
+    local settings = require("mesh.settings")
+    local scope = instance_id ~= "" and instance_id or nil
+    if method == "unset_prop" then
+        settings.unset_prop(module_id, scope, name)
+    else
+        settings.set_prop(module_id, scope, name, value)
+    end
 end
 
 function onPropScopeNext(module_id, current, instances)
@@ -577,7 +580,7 @@ end
 function onPropToggle(module_id, name, current, instance_id)
     local value = not (current == true)
     update_local_prop(module_id, name, value, true, instance_id)
-    publish_prop("mesh.settings.set_prop", module_id, name, value, instance_id)
+    write_prop("set_prop", module_id, name, value, instance_id)
 end
 
 function onPropEnumNext(module_id, name, current, options, instance_id)
@@ -588,14 +591,14 @@ function onPropEnumNext(module_id, name, current, options, instance_id)
     end
     local value = options[(index % #options) + 1]
     update_local_prop(module_id, name, value, true, instance_id)
-    publish_prop("mesh.settings.set_prop", module_id, name, value, instance_id)
+    write_prop("set_prop", module_id, name, value, instance_id)
 end
 
 function onPropNumber(module_id, name, instance_id, event)
     local value = tonumber(event_value(event))
     if value == nil then return end
     update_local_prop(module_id, name, value, true, instance_id)
-    publish_prop("mesh.settings.set_prop", module_id, name, value, instance_id)
+    write_prop("set_prop", module_id, name, value, instance_id)
 end
 
 function onPropText(module_id, name, prop_type, instance_id, event)
@@ -605,12 +608,12 @@ function onPropText(module_id, name, prop_type, instance_id, event)
         if value == nil then return end
     end
     update_local_prop(module_id, name, value, true, instance_id)
-    publish_prop("mesh.settings.set_prop", module_id, name, value, instance_id)
+    write_prop("set_prop", module_id, name, value, instance_id)
 end
 
 function onPropReset(module_id, name, inherited_value, instance_id)
     update_local_prop(module_id, name, inherited_value, false, instance_id)
-    publish_prop("mesh.settings.unset_prop", module_id, name, nil, instance_id)
+    write_prop("unset_prop", module_id, name, nil, instance_id)
 end
 
 function onModuleFilterChange(value)

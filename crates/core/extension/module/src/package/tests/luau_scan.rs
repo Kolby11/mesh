@@ -116,11 +116,13 @@ fn extract_t_keys_ignores_dynamic_expressions() {
 #[test]
 fn extract_mesh_event_publish_channels_finds_static_channels() {
     let src = r#"
-<script>
+<template><box /></template>
+<script lang="luau">
 mesh.events.publish("shell.set-theme", { theme_id = "dark" })
 mesh.events.publish('mesh.hyprland.switch_workspace', { id = 1 })
 </script>
 "#;
+    mesh_core_component::parse_component(src).unwrap();
     let channels = extract_mesh_event_publish_channels(src);
     assert_eq!(
         channels,
@@ -131,7 +133,8 @@ mesh.events.publish('mesh.hyprland.switch_workspace', { id = 1 })
 #[test]
 fn extract_mesh_event_publish_channels_ignores_dynamic_channels() {
     let src = r#"
-<script>
+<template><box /></template>
+<script lang="luau">
 local channel = "mesh." .. domain
 mesh.events.publish(channel, {})
 </script>

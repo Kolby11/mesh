@@ -270,7 +270,7 @@ fn navigation_bar_declares_icon_pack_dependency() {
             .manifest
             .icons
             .as_ref()
-            .map_or(true, |i| i.is_empty())
+            .is_some_and(|icons| icons.overrides.is_empty() && icons.ignore_shell_default)
     );
     assert!(loaded.manifest.icon_pack.is_none());
 }

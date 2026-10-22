@@ -44,8 +44,11 @@ are applied. Overflow then uses that geometry. Component memo entries preserve
 pre-animation styles and semantic projections while retaining original authored
 inputs; previews continue to produce a complete laid-out tree.
 
-GPU frames prepare a complete immutable Skia scene on the UI thread with pinned
-raster resources and explicit frame paint settings. A bounded worker owns EGL,
+GPU frames compose a complete immutable Skia scene on the UI thread with pinned
+raster resources and explicit frame paint settings. Each surface reuses bounded
+node recordings by retained payload identity, scale, clip and module; effects and
+scroll scopes remain live. Resource completions, asset-page publication and font/resource changes
+invalidate recordings, while submitted scenes retain their original resources. A bounded worker owns EGL,
 retained targets and fenced dmabuf exports; Wayland receives only descriptors
 and release leases. Presentation submits the scene and commits it when the worker
 publishes, so scripts and layout overlap GPU raster; the surface is gated until then, while

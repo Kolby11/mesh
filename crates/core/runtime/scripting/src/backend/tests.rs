@@ -2600,20 +2600,27 @@ end
 "#,
     )
     .unwrap();
-    ctx.call_init().unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+    let initial = ctx.call_init().unwrap();
+    let state = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        // A fast worker can finish task.spawn before start returns.
+        if let Some(state) = initial
+            && state["done"] == true
+        {
+            return state;
+        }
         loop {
             let BackendTaskRun { state, errors, .. } = ctx.run_due_tasks(std::time::Instant::now());
             assert!(errors.is_empty(), "{errors:?}");
             if let Some(state) = state {
-                assert_eq!(state["contents"], "hello from a file");
-                break;
+                assert_eq!(state["done"], true);
+                return state;
             }
             ctx.task_wakeup().notified().await;
         }
     })
     .await
     .unwrap();
+    assert_eq!(state["contents"], "hello from a file");
     drop(ctx);
     let _ = std::fs::remove_dir_all(root);
 }

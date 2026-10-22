@@ -41,16 +41,24 @@ end
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(200, 60);
     component
-        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(
+            &theme,
+            SurfaceExtent::unpadded(200, 60).bound_by_compositor(true),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
-    // Simulate a hover over the button region.  The button key is "root/0/0"
-    // (surface → column/row → button, index 0 in the single-child template).
     component.hovered_path = ["root", "root/0"].map(runtime_node_id_for_key).to_vec();
     component.hovered_key = Some("root/0".into());
-    component.dirty = true;
+    component.invalidate_interaction_restyle();
     component
-        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(
+            &theme,
+            SurfaceExtent::unpadded(200, 60).bound_by_compositor(true),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     // After the hover restyle the button should be 80px wide.
@@ -66,8 +74,8 @@ end
         button.layout.width
     );
 
-    // Click at x=60 — inside the restyled 80px bounds but outside the original 40px.
-    // The handler must fire, confirming hit testing used the post-restyle bounds.
+    let click_x = button.layout.x + 60.0;
+    let click_y = button.layout.y + button.layout.height / 2.0;
     component
         .handle_input(
             &theme,
@@ -75,8 +83,8 @@ end
             60,
             ComponentInput::PointerButton {
                 button: 0x110,
-                x: 60.0,
-                y: 5.0,
+                x: click_x,
+                y: click_y,
                 pressed: true,
             },
         )
@@ -88,8 +96,8 @@ end
             60,
             ComponentInput::PointerButton {
                 button: 0x110,
-                x: 60.0,
-                y: 5.0,
+                x: click_x,
+                y: click_y,
                 pressed: false,
             },
         )
@@ -130,7 +138,12 @@ button:focus {
 
     // First paint: no focus — button width should be 40px in metrics.
     component
-        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(
+            &theme,
+            SurfaceExtent::unpadded(200, 60).bound_by_compositor(true),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let width_before = {
         let runtimes = component.runtimes.lock().unwrap();
@@ -144,9 +157,14 @@ button:focus {
 
     // Focus the button and repaint.
     component.focused_key = Some("root/0".into());
-    component.dirty = true;
+    component.invalidate_interaction_restyle();
     component
-        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .paint_raster(
+            &theme,
+            SurfaceExtent::unpadded(200, 60).bound_by_compositor(true),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let width_after = {
         let runtimes = component.runtimes.lock().unwrap();
@@ -200,7 +218,12 @@ button:focus {
 
     // Paint without focus.
     component
-        .paint_raster(&theme, SurfaceExtent::unpadded(300, 80), &mut buffer, 1.0)
+        .paint_raster(
+            &theme,
+            SurfaceExtent::unpadded(300, 80).bound_by_compositor(true),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let tree_unfocused = component.last_tree.as_ref().unwrap().clone();
     let a11y_unfocused = AccessibilityTree::from_widget_tree(&tree_unfocused);
@@ -220,9 +243,14 @@ button:focus {
 
     // Focus the button and repaint.
     component.focused_key = Some("root/0".into());
-    component.dirty = true;
+    component.invalidate_interaction_restyle();
     component
-        .paint_raster(&theme, SurfaceExtent::unpadded(300, 80), &mut buffer, 1.0)
+        .paint_raster(
+            &theme,
+            SurfaceExtent::unpadded(300, 80).bound_by_compositor(true),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
     let tree_focused = component.last_tree.as_ref().unwrap().clone();
     let a11y_focused = AccessibilityTree::from_widget_tree(&tree_focused);

@@ -237,7 +237,7 @@ fn debug_snapshot_resolves_module_graph_layout_label_with_active_locale() {
                         }
                       ]
                     },
-                    "surfaceLayout": { "size_policy": "fixed" },
+                    "surface": { "size_policy": "fixed" },
                     "accessibility": { "role": "toolbar" }
                   }
                 }"#,

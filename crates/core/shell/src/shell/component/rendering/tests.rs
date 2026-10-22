@@ -22,9 +22,10 @@ fn restyle_rules_follow_component_imports_transitively() {
     use std::path::PathBuf;
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
-    let graph =
-        mesh_core_module::package::load_authoring_snapshot(&root.join("config/module.json"))
-            .expect("shipped graph loads");
+    let graph = mesh_core_module::package::load_authoring_snapshot(
+        crate::shell::discovery::test_module_graph_path(),
+    )
+    .expect("shipped graph loads");
     let modules: HashMap<String, ModuleInstance> = std::fs::read_dir(root.join("modules/frontend"))
         .unwrap()
         .filter_map(Result::ok)

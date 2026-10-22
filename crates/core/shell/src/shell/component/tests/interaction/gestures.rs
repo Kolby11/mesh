@@ -176,7 +176,7 @@ fn unhandled_two_finger_scroll_preserves_native_scroll_fallback() {
     let mut component = test_frontend_component(
         r#"
 <style>
-scroll { height: 60px; overflow-y: auto; }
+scroll { width: 160px; height: 60px; overflow-y: auto; }
 .content { height: 240px; flex-shrink: 0; }
 </style>
 <template><scroll><box class="content" /></scroll></template>
@@ -186,7 +186,12 @@ scroll { height: 60px; overflow-y: auto; }
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(160, 120);
     component
-        .paint_raster(&theme, SurfaceExtent::unpadded(160, 120), &mut buffer, 1.0)
+        .paint_raster(
+            &theme,
+            SurfaceExtent::unpadded(160, 120).bound_by_compositor(true),
+            &mut buffer,
+            1.0,
+        )
         .unwrap();
 
     component
@@ -195,8 +200,8 @@ scroll { height: 60px; overflow-y: auto; }
             160,
             120,
             ComponentInput::TwoFingerScroll {
-                x: 20.0,
-                y: 20.0,
+                x: 80.0,
+                y: 60.0,
                 dx: 0.0,
                 dy: -1.0,
             },

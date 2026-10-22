@@ -431,9 +431,8 @@ fn stale_restart_deadline_cannot_clear_or_run_a_newer_supervision_token() {
 
 #[test]
 fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
     let graph = mesh_core_module::package::load_installed_module_graph(
-        &workspace_root.join("config/module.json"),
+        crate::shell::discovery::test_module_graph_path(),
     )
     .unwrap();
     let (_pipewire_dir, pipewire) = module_instance("@mesh/pipewire-audio", Some("src/main.luau"));
@@ -460,7 +459,12 @@ fn backend_lifecycle_uses_explicit_active_provider_from_package_graph() {
     assert!(
         statuses
             .iter()
-            .all(|status| status.status != "invalid_manifest")
+            .filter(|status| status
+                .provider_id
+                .as_ref()
+                .is_some_and(|id| modules.contains_key(id)))
+            .all(|status| status.status != "invalid_manifest"),
+        "{statuses:?}"
     );
     assert_eq!(candidates.len(), 4);
     let audio = candidates

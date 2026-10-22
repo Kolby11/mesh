@@ -3,8 +3,7 @@ use std::collections::HashSet;
 use crate::display_list::{
     BackdropRegion, CheckmarkKind, DisplayCheckmarkPaint, DisplayListClip, DisplayPaintCommand,
     DisplayPaintCommandKind, DisplayPaintContent, DisplayPaintNode, DisplayPaintStyle,
-    RetainedDisplayList,
-    SelectedDisplayListPaint,
+    RetainedDisplayList, SelectedDisplayListPaint,
 };
 use mesh_core_elements::AffineTransform;
 use mesh_core_elements::style::{Corners, Edges};
@@ -188,14 +187,16 @@ impl FrontendRenderEngine {
         scratch.prepare(commands.len());
         for command in commands {
             let kind = command.kind;
-            if self.try_append_display_self_paint_batch(
-                command,
-                kind,
-                scale,
-                paint_clip,
-                paint_nodes,
-                &mut scratch.batched_commands,
-            ) {
+            if session.scene_cache.is_none()
+                && self.try_append_display_self_paint_batch(
+                    command,
+                    kind,
+                    scale,
+                    paint_clip,
+                    paint_nodes,
+                    &mut scratch.batched_commands,
+                )
+            {
                 continue;
             }
             if !scratch.batched_commands.is_empty() {
@@ -271,14 +272,16 @@ impl FrontendRenderEngine {
         let mut scratch = self.render_scratch.borrow_mut();
         scratch.prepare(commands.len());
         for (command, kind) in commands.iter_with_kinds() {
-            if self.try_append_display_self_paint_batch(
-                command,
-                kind,
-                scale,
-                paint_clip,
-                paint_nodes,
-                &mut scratch.batched_commands,
-            ) {
+            if session.scene_cache.is_none()
+                && self.try_append_display_self_paint_batch(
+                    command,
+                    kind,
+                    scale,
+                    paint_clip,
+                    paint_nodes,
+                    &mut scratch.batched_commands,
+                )
+            {
                 continue;
             }
             if !scratch.batched_commands.is_empty() {
@@ -356,14 +359,16 @@ impl FrontendRenderEngine {
         if paint_regions_overlap(&paint_clips) || selection_has_layer_scopes(commands) {
             for &paint_clip in &paint_clips {
                 for (command, kind) in commands.iter_with_kinds() {
-                    if self.try_append_display_self_paint_batch(
-                        command,
-                        kind,
-                        scale,
-                        paint_clip,
-                        paint_nodes,
-                        &mut scratch.batched_commands,
-                    ) {
+                    if session.scene_cache.is_none()
+                        && self.try_append_display_self_paint_batch(
+                            command,
+                            kind,
+                            scale,
+                            paint_clip,
+                            paint_nodes,
+                            &mut scratch.batched_commands,
+                        )
+                    {
                         continue;
                     }
                     if !scratch.batched_commands.is_empty() {
@@ -403,14 +408,16 @@ impl FrontendRenderEngine {
                 if effective_clip.width <= 0 || effective_clip.height <= 0 {
                     continue;
                 }
-                if self.try_append_display_self_paint_batch(
-                    command,
-                    kind,
-                    scale,
-                    paint_clip,
-                    paint_nodes,
-                    &mut scratch.batched_commands,
-                ) {
+                if session.scene_cache.is_none()
+                    && self.try_append_display_self_paint_batch(
+                        command,
+                        kind,
+                        scale,
+                        paint_clip,
+                        paint_nodes,
+                        &mut scratch.batched_commands,
+                    )
+                {
                     continue;
                 }
                 if !scratch.batched_commands.is_empty() {
@@ -492,14 +499,16 @@ impl FrontendRenderEngine {
         scratch.prepare(commands.len());
         let mut batched_command_count = 0_u64;
         for (command, kind) in commands.iter_with_kinds() {
-            if self.try_append_display_self_paint_batch(
-                command,
-                kind,
-                scale,
-                paint_clip,
-                paint_nodes,
-                &mut scratch.batched_commands,
-            ) {
+            if session.scene_cache.is_none()
+                && self.try_append_display_self_paint_batch(
+                    command,
+                    kind,
+                    scale,
+                    paint_clip,
+                    paint_nodes,
+                    &mut scratch.batched_commands,
+                )
+            {
                 batched_command_count = batched_command_count.saturating_add(1);
                 continue;
             }
@@ -597,14 +606,16 @@ impl FrontendRenderEngine {
         if paint_regions_overlap(&paint_clips) || selection_has_layer_scopes(commands) {
             for &paint_clip in &paint_clips {
                 for (command, kind) in commands.iter_with_kinds() {
-                    if self.try_append_display_self_paint_batch(
-                        command,
-                        kind,
-                        scale,
-                        paint_clip,
-                        paint_nodes,
-                        &mut scratch.batched_commands,
-                    ) {
+                    if session.scene_cache.is_none()
+                        && self.try_append_display_self_paint_batch(
+                            command,
+                            kind,
+                            scale,
+                            paint_clip,
+                            paint_nodes,
+                            &mut scratch.batched_commands,
+                        )
+                    {
                         batched_command_count = batched_command_count.saturating_add(1);
                         continue;
                     }
@@ -662,14 +673,16 @@ impl FrontendRenderEngine {
                 if effective_clip.width <= 0 || effective_clip.height <= 0 {
                     continue;
                 }
-                if self.try_append_display_self_paint_batch(
-                    command,
-                    kind,
-                    scale,
-                    paint_clip,
-                    paint_nodes,
-                    &mut scratch.batched_commands,
-                ) {
+                if session.scene_cache.is_none()
+                    && self.try_append_display_self_paint_batch(
+                        command,
+                        kind,
+                        scale,
+                        paint_clip,
+                        paint_nodes,
+                        &mut scratch.batched_commands,
+                    )
+                {
                     batched_command_count = batched_command_count.saturating_add(1);
                     continue;
                 }
@@ -769,6 +782,11 @@ impl FrontendRenderEngine {
         node_commands: &mut Vec<PainterCommand>,
         backdrop_regions: Option<&[BackdropRegion]>,
     ) {
+        if let Some(cache) = &session.scene_cache
+            && (kind != DisplayPaintCommandKind::Node || command.node.in_scroll_content)
+        {
+            cache.borrow_mut().metrics.live_commands += 1;
+        }
         // Layer scope commands are bookkeeping, not drawing: a push runs even
         // when its region is outside the damage clip or its node is filtered
         // out of this pass, because dropping it would either leave the pop
@@ -954,15 +972,80 @@ impl FrontendRenderEngine {
         match kind {
             DisplayPaintCommandKind::Node => {
                 let node_bounds = scaled_display_node_bounds(&command.node, scale);
-                self.render_display_node_self(
-                    &command.node,
-                    session,
-                    scale,
-                    node_bounds,
-                    clip,
-                    node_commands,
-                    module_id,
-                );
+                if let Some(cache) = session.scene_cache.clone()
+                    && !command.node.in_scroll_content
+                {
+                    let cache_clip = (clip.x, clip.y, clip.width, clip.height);
+                    let cached = cache.borrow_mut().get(
+                        &command.node,
+                        scale.to_bits(),
+                        cache_clip,
+                        module_id,
+                    );
+                    let recording = cached.unwrap_or_else(|| {
+                        let epoch = crate::prepared_scene::resource_completion_epoch();
+                        let mut recorder = skia_safe::PictureRecorder::new();
+                        let canvas = recorder.begin_recording(
+                            skia_safe::Rect::from_wh(
+                                session.width() as f32,
+                                session.height() as f32,
+                            ),
+                            false,
+                        );
+                        let images = crate::prepared_scene::SceneImages::default();
+                        self.render_display_node_self(
+                            &command.node,
+                            &mut PixelCanvasSession::on_recording(
+                                canvas,
+                                session.width(),
+                                session.height(),
+                                images.clone(),
+                            ),
+                            scale,
+                            node_bounds,
+                            clip,
+                            node_commands,
+                            module_id,
+                        );
+                        let mut drawable = recorder
+                            .finish_recording_as_drawable()
+                            .expect("node recording");
+                        let recording = std::rc::Rc::new(crate::prepared_scene::NodePicture {
+                            picture: drawable.make_picture_snapshot(),
+                            drawable: std::cell::RefCell::new(drawable),
+                            images: images.borrow().values().cloned().collect(),
+                        });
+                        cache.borrow_mut().insert(
+                            &command.node,
+                            crate::prepared_scene::NodePaintKey {
+                                scale: scale.to_bits(),
+                                clip: cache_clip,
+                                module: module_id.map(str::to_owned),
+                            },
+                            recording.clone(),
+                            epoch,
+                        );
+                        recording
+                    });
+                    session.with_canvas(|canvas| {
+                        for image in &recording.images {
+                            crate::prepared_scene::retain_image(image);
+                        }
+                        // Skia inlines small pictures into recording canvases. A drawable
+                        // keeps one reference here and freezes its immutable record at snapshot.
+                        canvas.draw_drawable(&mut recording.drawable.borrow_mut(), None);
+                    });
+                } else {
+                    self.render_display_node_self(
+                        &command.node,
+                        session,
+                        scale,
+                        node_bounds,
+                        clip,
+                        node_commands,
+                        module_id,
+                    );
+                }
             }
             DisplayPaintCommandKind::Scrollbars => {
                 let bounds = scaled_display_node_bounds(&command.node, scale);
@@ -1290,7 +1373,9 @@ fn scooped_backdrop_commands(
         commands.push(command(radii));
         return commands;
     }
-    commands.push(PainterCommand::PushClip(PainterClip::shape(bounds, radii, shapes)));
+    commands.push(PainterCommand::PushClip(PainterClip::shape(
+        bounds, radii, shapes,
+    )));
     commands.push(command(shapes.round_radii(radii)));
     commands.push(PainterCommand::PopClip);
     commands
@@ -1398,7 +1483,11 @@ fn push_background_paint_command(
         BackgroundPaint::None => {}
         BackgroundPaint::Image(source) => {
             if corners_have_radius(radii) {
-                commands.push(PainterCommand::PushClip(PainterClip::shape(rect, radii, Default::default())));
+                commands.push(PainterCommand::PushClip(PainterClip::shape(
+                    rect,
+                    radii,
+                    Default::default(),
+                )));
             }
             commands.push(PainterCommand::DrawImage {
                 image: PainterImage {

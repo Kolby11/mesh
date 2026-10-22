@@ -586,7 +586,10 @@ fn settle_dock(
 ) {
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while component.wants_render() {
-        assert!(std::time::Instant::now() < deadline, "the dock never settled");
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the dock never settled"
+        );
         component.paint_raster(theme, extent, pixels, 1.0).unwrap();
         std::thread::sleep(Duration::from_millis(8));
     }
@@ -658,9 +661,7 @@ fn glass_dock_hover_animation_profile() {
     // Like the shell, paint only frames the component asks for.
     let paint_frame = |component: &mut FrontendSurfaceComponent, pixels: &mut PixelBuffer| {
         if component.wants_render() {
-            component
-                .paint_raster(&theme, extent, pixels, 1.0)
-                .unwrap();
+            component.paint_raster(&theme, extent, pixels, 1.0).unwrap();
         }
     };
     eprintln!("glass-dock: {installed} installed apps, {nodes} nodes");
@@ -1005,52 +1006,5 @@ fn glass_dashboard_spectrum_profile() {
             );
         }
         component.set_profiling_enabled(false);
-    }
-}
-
-#[test]
-fn zz_tmp_launcher_scroll_dump() {
-    let dir = PathBuf::from(std::env::var("ZZ_DIR").unwrap());
-    let mut component = host("glass-dock");
-    component.motion_policy.reduced_motion = true;
-    paint(&mut component, 1920, 180);
-    let installed: Vec<_> = (0..100)
-        .map(|index| {
-            serde_json::json!({
-                "id": format!("app-{index}"), "name": format!("Application {index}"),
-                "icon": "", "pinned": false, "running": false, "focused": false, "windows": 0
-            })
-        })
-        .collect();
-    update(&mut component, "mesh.apps",
-        serde_json::json!({"available": true, "installed": installed, "apps": []}));
-    paint(&mut component, 1920, 180);
-    press(&mut component, "glassLauncher", 1920, 180);
-    paint(&mut component, 1920, 180);
-    let tree = component.last_tree.as_ref().unwrap();
-    let shell = first_node_by_class(tree, "launcher-shell").unwrap();
-    let results = first_node_by_class(tree, "results").unwrap();
-    let sx = results.layout.x - shell.layout.x + 40.0;
-    let sy = results.layout.y - shell.layout.y + 40.0;
-    let request = component.child_surface_requests().into_iter().next().unwrap();
-    let (w, h) = request.content_size;
-    let mut retained = PixelBuffer::new(w, h);
-    component.paint_child_surface_raster(&request.node_key, &mut retained, 1.0, (0, 0), false).unwrap();
-    std::fs::write(dir.join(format!("a-{w}x{h}.bgra")), retained.data()).unwrap();
-    for step in 0..3 {
-        component.handle_child_surface_input(&request.node_key, &theme(), w, h, (0.0, 0.0),
-            ComponentInput::Scroll { x: sx, y: sy, dx: 0.0, dy: -60.0 }).unwrap();
-        paint(&mut component, 1920, 180);
-        let req = component.child_surface_requests().into_iter().next().unwrap();
-        eprintln!("step {step} size {:?}", req.content_size);
-        let tree = component.last_tree.as_ref().unwrap();
-        let r = first_node_by_class(tree, "results").unwrap();
-        let g = first_node_by_class(tree, "app-grid").unwrap();
-        eprintln!("results {:?} scroll {:?} grid {:?}", r.layout, r.resolved_scroll_metrics(), g.layout);
-        component.paint_child_surface_raster(&request.node_key, &mut retained, 1.0, (0, 0), false).unwrap();
-        std::fs::write(dir.join(format!("r{step}-{w}x{h}.bgra")), retained.data()).unwrap();
-        let mut fresh = PixelBuffer::new(w, h);
-        component.paint_child_surface_raster(&request.node_key, &mut fresh, 1.0, (0, 0), false).unwrap();
-        std::fs::write(dir.join(format!("f{step}-{w}x{h}.bgra")), fresh.data()).unwrap();
     }
 }

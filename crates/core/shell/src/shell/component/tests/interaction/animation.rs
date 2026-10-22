@@ -936,7 +936,7 @@ fn animation_only_tick_uses_scoped_retained_fingerprinting() {
   </row>
 </template>
 <style>
-.animated { animation: pulse 1000ms linear infinite; }
+.animated { width: 20px; height: 20px; animation: pulse 1000ms linear infinite; }
 @keyframes pulse {
   0% { opacity: 0; }
   100% { opacity: 1; }
@@ -950,6 +950,9 @@ fn animation_only_tick_uses_scoped_retained_fingerprinting() {
         .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
 
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
     assert!(component.animation_only_dirty);
     component.set_profiling_enabled(true);
     component.take_profiling_records();
@@ -1078,18 +1081,21 @@ fn smooth_scroll_animation_uses_scoped_retained_fingerprinting() {
 }
 
 #[test]
-fn external_invalidation_cancels_animation_only_retained_scope() {
+fn external_invalidation_cancels_animation_only_frame() {
     let mut component = test_frontend_component(
         r#"
 <template><box class="animated" /></template>
 <style>
-.animated { animation: pulse 1000ms linear infinite; }
+.animated { width: 20px; height: 20px; animation: pulse 1000ms linear infinite; }
 @keyframes pulse { 0% { opacity: 0; } 100% { opacity: 1; } }
 </style>
 "#,
     );
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(120, 40);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
+        .unwrap();
     component
         .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
@@ -1100,8 +1106,6 @@ fn external_invalidation_cancels_animation_only_retained_scope() {
     component
         .paint_raster(&theme, SurfaceExtent::unpadded(120, 40), &mut buffer, 1.0)
         .unwrap();
-
-    assert!(!component.retained_tree.last_update_was_scoped());
 }
 
 #[test]

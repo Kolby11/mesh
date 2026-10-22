@@ -176,6 +176,20 @@ The W3 gates compare 16 and 1,024 clean siblings:
 ancestor work, scoped transition snapshots/sampling, cached child requests,
 and zero retained structural validation; semantic reindexing is compared with
 a complete capture, and actual invalid tags still fail validation.
+Scene preparation is gated by `scene_preparation_records_only_changed_nodes`:
+16 and 1,024 clean siblings reuse their node pictures while one changed node
+records one new picture, with full-scene and direct-raster pixel parity.
+`scene_cache_invalidates_external_paint_inputs`,
+`scene_cache_preserves_effects_scroll_and_tooltip_inputs`, and
+`scene_node_cache_bounds_shared_resources_and_rejects_inflight_results` cover
+cache inputs, live scopes, resource ownership/admission and eviction.
+`SceneCanvas::preparation_metrics()` reports recorded nodes/operations, reused
+nodes and live commands. Reused picture references still require complete-scene
+composition; these counters do not claim that traversal or GPU replay is free.
+The ignored release `scene_preparation_profile` compares the production cache
+with the original uncached path. `tools/check-gpu-performance` continues to gate
+exported pixels, completed-frame costs and zero warm bitmap uploads on hardware.
+
 The glass dock and spectrum profile tests print visits per measured paint
 alongside their timings. `MESH_BENCH_FORCE_TEMPLATE=1` disables template
 patching/selective template builds in the spectrum profile for comparison.

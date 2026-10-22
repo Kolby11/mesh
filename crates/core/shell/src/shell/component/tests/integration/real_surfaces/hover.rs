@@ -13,7 +13,7 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
     component
         .paint_raster(
             &theme,
-            SurfaceExtent::unpadded(width, height),
+            SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
             &mut buffer,
             1.0,
         )
@@ -38,35 +38,21 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
     let cluster_width_before = cluster_before.layout.width;
     let cluster_layout_before = cluster_before.layout;
 
-    let enter_handler = theme_button
-        .event_handlers
-        .get("pointerenter")
-        .unwrap_or_else(|| {
-            panic!(
-                "theme button should expose pointerenter handler, got {:?}",
-                theme_button.event_handlers
-            )
-        })
-        .clone();
     component
-        .call_handler_target(
-            &enter_handler,
-            &[serde_json::json!({
-                "surface": { "id": "@mesh/navigation-bar" },
-                "current_target": {
-                    "key": theme_button_key,
-                    "position": {
-                        "margin_left": theme_center_x as i64,
-                        "margin_bottom": theme_center_y as i64
-                    }
-                }
-            })],
+        .handle_input(
+            &theme,
+            width,
+            height,
+            ComponentInput::PointerMove {
+                x: theme_center_x,
+                y: theme_center_y,
+            },
         )
         .unwrap();
     component
         .paint_raster(
             &theme,
-            SurfaceExtent::unpadded(width, height),
+            SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
             &mut buffer,
             1.0,
         )
@@ -155,7 +141,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
         component
             .paint_raster(
                 &theme,
-                SurfaceExtent::unpadded(width, height),
+                SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
                 &mut buffer,
                 1.0,
             )
@@ -214,7 +200,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
         component
             .paint_raster(
                 &theme,
-                SurfaceExtent::unpadded(width, height),
+                SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
                 &mut buffer,
                 1.0,
             )
@@ -340,7 +326,7 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
         component
             .paint_raster(
                 &theme,
-                SurfaceExtent::unpadded(width, height),
+                SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
                 &mut buffer,
                 1.0,
             )

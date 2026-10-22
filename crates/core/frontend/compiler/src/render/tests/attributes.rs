@@ -148,7 +148,7 @@ fn phase87_layout_display_source_semantics_survive_lowering() {
         grid.accessibility.role,
         mesh_core_elements::AccessibilityRole::Region
     );
-    assert_eq!(grid.accessibility.label.as_deref(), Some("Main grid"));
+    assert_eq!(grid.accessibility.label.as_deref(), Some("Loading Ready"));
 
     let progress = grid
         .children

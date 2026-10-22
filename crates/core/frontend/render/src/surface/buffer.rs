@@ -307,6 +307,8 @@ impl PixelBuffer {
 /// raster targets and a canvas path elsewhere.
 pub struct PixelCanvasSession<'a> {
     target: SessionTarget<'a>,
+    pub(crate) scene_cache:
+        Option<std::rc::Rc<std::cell::RefCell<crate::prepared_scene::SceneNodeCache>>>,
     pub(crate) scroll_replay: Option<(Option<usize>, f32, f32)>,
 }
 
@@ -366,6 +368,7 @@ impl<'a> PixelCanvasSession<'a> {
                 buffer,
                 surface: None,
             },
+            scene_cache: None,
             scroll_replay: None,
         }
     }
@@ -376,6 +379,7 @@ impl<'a> PixelCanvasSession<'a> {
     pub(crate) fn on_surface(surface: &'a mut Surface) -> Self {
         Self {
             target: SessionTarget::Surface(surface),
+            scene_cache: None,
             scroll_replay: None,
         }
     }
@@ -384,6 +388,7 @@ impl<'a> PixelCanvasSession<'a> {
         let recorder = begin_deferred_recording(raster.width(), raster.height());
         Self {
             target: SessionTarget::Deferred { raster, recorder },
+            scene_cache: None,
             scroll_replay: None,
         }
     }
@@ -401,8 +406,21 @@ impl<'a> PixelCanvasSession<'a> {
                 width,
                 height,
             },
+            scene_cache: None,
             scroll_replay: None,
         }
+    }
+
+    pub(crate) fn with_scene_cache(
+        mut self,
+        cache: std::rc::Rc<std::cell::RefCell<crate::prepared_scene::SceneNodeCache>>,
+    ) -> Self {
+        #[cfg(test)]
+        if cache.borrow().disabled {
+            return self;
+        }
+        self.scene_cache = Some(cache);
+        self
     }
 
     pub fn width(&self) -> u32 {

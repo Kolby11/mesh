@@ -1168,7 +1168,10 @@ fn validate_expression(
     span: SourceSpan,
 ) -> Result<(), CompileFrontendError> {
     for identifier in referenced_identifiers(expr) {
-        if allowed_symbols.contains(&identifier) || loop_locals.contains(&identifier) {
+        if allowed_symbols.contains(&identifier)
+            || loop_locals.contains(&identifier)
+            || is_template_builtin(&identifier)
+        {
             continue;
         }
         return Err(CompileFrontendError::StandaloneComponentViolation {
@@ -1196,6 +1199,27 @@ fn validate_identifier(
         message: format!("unknown standalone component symbol `{identifier}`"),
         span,
     })
+}
+
+fn is_template_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "math"
+            | "string"
+            | "table"
+            | "utf8"
+            | "bit32"
+            | "buffer"
+            | "type"
+            | "typeof"
+            | "tostring"
+            | "tonumber"
+            | "pairs"
+            | "ipairs"
+            | "next"
+            | "select"
+            | "unpack"
+    )
 }
 
 fn is_handler_builtin(name: &str) -> bool {
@@ -1283,6 +1307,35 @@ mod tests {
 
     fn component(source: &str) -> ComponentFile {
         parse_component(source).unwrap()
+    }
+
+    #[test]
+    fn standalone_templates_accept_luau_builtins_and_reject_unknown_names() {
+        let allowed = HashSet::from(["value".to_owned()]);
+        for expression in [
+            "type(value) == 'table'",
+            "math.max(tonumber(value) or 0, 1)",
+            "string.upper(tostring(value))",
+        ] {
+            validate_expression(
+                expression,
+                Path::new("test.mesh"),
+                &allowed,
+                &HashSet::new(),
+                SourceSpan::default(),
+            )
+            .unwrap();
+        }
+        assert!(
+            validate_expression(
+                "unknown(value)",
+                Path::new("test.mesh"),
+                &allowed,
+                &HashSet::new(),
+                SourceSpan::default()
+            )
+            .is_err()
+        );
     }
 
     #[test]

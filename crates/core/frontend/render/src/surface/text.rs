@@ -1246,6 +1246,7 @@ fn glyph_atlas_storage_bytes(width: u32, height: u32, bytes_per_pixel: usize) ->
 
 impl TextEngine {
     fn set_font_database(&mut self, database: fontdb::Database) {
+        crate::prepared_scene::resource_completed();
         self.font_database = Some(database.clone());
         self.bump_measurer_base();
         self.font_system = FontSystem::new_with_locale_and_db(self.locale.clone(), database);
@@ -1277,6 +1278,7 @@ impl TextEngine {
                 self.alias_sets.len() as u64 - 1
             }
         };
+        crate::prepared_scene::resource_completed();
         self.font_aliases = aliases;
         self.alias_set_id = id;
         self.refresh_measurer_revision();

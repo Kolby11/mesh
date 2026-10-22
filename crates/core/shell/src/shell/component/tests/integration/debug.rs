@@ -416,62 +416,20 @@ fn debug_inspector_modules_view_renders_uses_provides_graph() {
 
 pub(in crate::shell) fn settings_catalog() -> InterfaceCatalog {
     let mut catalog = debug_catalog();
-    for (interface, base_module) in [
-        ("mesh.theme", "@mesh/theme-interface"),
-        ("mesh.locale", "@mesh/locale-interface"),
+    let shell = crate::shell::Shell::new();
+    let builtins = shell.interfaces.resolved_catalog();
+    for interface in [
+        "mesh.settings",
+        "mesh.packages",
+        "mesh.theme",
+        "mesh.locale",
     ] {
-        catalog.register_contract(InterfaceContract {
-            interface: interface.into(),
-            version: parse_contract_version("1.0").unwrap(),
-            state_fields: if interface == "mesh.theme" {
-                vec![
-                    ContractStateField {
-                        name: "current".into(),
-                        field_type: "string".into(),
-                        description: None,
-                        ..Default::default()
-                    },
-                    ContractStateField {
-                        name: "theme_id".into(),
-                        field_type: "string".into(),
-                        description: None,
-                        ..Default::default()
-                    },
-                    ContractStateField {
-                        name: "is_dark".into(),
-                        field_type: "boolean".into(),
-                        description: None,
-                        ..Default::default()
-                    },
-                    ContractStateField {
-                        name: "themes".into(),
-                        field_type: "any[]".into(),
-                        description: None,
-                        ..Default::default()
-                    },
-                    ContractStateField {
-                        name: "available".into(),
-                        field_type: "any[]".into(),
-                        description: None,
-                        ..Default::default()
-                    },
-                ]
-            } else {
-                Vec::new()
-            },
-            methods: Vec::new(),
-            events: Vec::new(),
-            types: HashMap::new(),
-            capabilities: ContractCapabilities::default(),
-        });
-        catalog.register_provider(InterfaceProvider {
-            interface: interface.into(),
-            version: Some("1.0".into()),
-            base_module: Some(base_module.into()),
-            provider_module: "@mesh/core-settings".into(),
-            backend_name: "Shell".into(),
-            priority: 100,
-        });
+        for contract in builtins.contracts_for(interface) {
+            catalog.register_contract(contract);
+        }
+        for provider in builtins.providers_for(interface) {
+            catalog.register_provider(provider);
+        }
     }
     catalog.register_contract(InterfaceContract {
         interface: "mesh.audio".into(),
@@ -856,18 +814,21 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
             ],
         )
         .unwrap();
-    assert!(matches!(
-        requests.as_slice(),
-        [CoreRequest::ServiceCall { interface, command, payload, .. }
-            | CoreRequest::ServiceCall { interface, command, payload, .. }]
-            if interface == "mesh.settings"
-                && command == "set_prop"
-                && payload.get("module_id")
-                    == Some(&serde_json::json!("@mesh/navigation-bar"))
-                && payload.get("prop") == Some(&serde_json::json!("blur_enabled"))
-                && payload.get("value") == Some(&serde_json::json!(true))
-                && payload.get("instance_id").is_none()
-    ));
+    assert!(
+        matches!(
+            requests.as_slice(),
+            [CoreRequest::ServiceCall { interface, command, payload, .. }
+                | CoreRequest::ServiceCall { interface, command, payload, .. }]
+                if interface == "mesh.settings"
+                    && command == "set_prop"
+                    && payload.get("module_id")
+                        == Some(&serde_json::json!("@mesh/navigation-bar"))
+                    && payload.get("prop") == Some(&serde_json::json!("blur_enabled"))
+                    && payload.get("value") == Some(&serde_json::json!(true))
+                    && payload.get("instance_id").is_none_or(serde_json::Value::is_null)
+        ),
+        "{requests:?}"
+    );
 
     component
         .call_namespaced_handler(
@@ -914,6 +875,28 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
                 && payload.get("value") == Some(&serde_json::json!(false))
     ));
 
+    let reset_requests = component
+        .call_namespaced_handler(
+            "__mesh_embed__::@mesh/settings/local:AdvancedPage::onPropReset",
+            &[
+                serde_json::json!("@mesh/navigation-bar"),
+                serde_json::json!("blur_enabled"),
+                serde_json::json!(true),
+                serde_json::json!("@mesh/navigation-bar#bottom"),
+            ],
+        )
+        .unwrap();
+    assert!(
+        matches!(reset_requests.as_slice(),
+            [CoreRequest::ServiceCall { interface, command, payload, .. }]
+                if interface == "mesh.settings" && command == "unset_prop"
+                    && payload["module_id"] == "@mesh/navigation-bar"
+                    && payload["instance_id"] == "@mesh/navigation-bar#bottom"
+                    && payload["prop"] == "blur_enabled"
+        ),
+        "{reset_requests:?}"
+    );
+
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
         .unwrap();
@@ -942,17 +925,16 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         node: &mesh_core_elements::WidgetNode,
         options: &mut Vec<(String, String)>,
     ) {
-        if let Some(call) = node.event_handler_calls.get("click")
-            && call.handler.handler() == "onThemeSelect"
-            && let Some(theme_id) = call.args.first().and_then(|arg| arg.as_str())
+        if let Some(class) = node.attributes.get(Prop::Class)
+            && class
+                .split_whitespace()
+                .any(|token| token == "theme-option")
         {
-            options.push((
-                theme_id.to_string(),
-                node.attributes
-                    .get(Prop::Class)
-                    .cloned()
-                    .unwrap_or_default(),
-            ));
+            assert!(node.event_handlers.contains_key("click"));
+            let id = first_node_by_class(node, "settings-card-meta")
+                .and_then(|meta| meta.attributes.get(Prop::Content))
+                .expect("theme card id");
+            options.push((id.clone(), class.clone()));
         }
         for child in &node.children {
             collect_theme_options(child, options);

@@ -1,10 +1,33 @@
 //! Immutable Skia scenes pin prepared images and glyph pages without retaining
 //! a live component, resource resolver, font database, or GPU context.
 
+mod node_cache;
+
+pub use node_cache::ScenePreparationMetrics;
+pub(crate) use node_cache::{NodePaintKey, NodePicture, SceneNodeCache};
+
 use crate::{FramePaintPlan, PixelCanvasSession};
 use skia_safe::{Picture, PictureRecorder, Rect};
 use std::sync::Arc;
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
+
+static RESOURCE_COMPLETION_EPOCH: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+pub(crate) fn resource_completed() {
+    RESOURCE_COMPLETION_EPOCH.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+}
+
+pub(crate) fn resource_completion_epoch() -> u64 {
+    RESOURCE_COMPLETION_EPOCH.load(std::sync::atomic::Ordering::Acquire)
+}
+
+fn resources_pending() -> bool {
+    crate::surface::icon_resolution_jobs_pending()
+        || crate::surface::icon_raster_jobs_pending()
+        || crate::surface::glyph_raster_jobs_pending()
+        || crate::surface::image_decode_jobs_pending()
+}
 
 pub(crate) type SceneImages = Rc<RefCell<BTreeMap<u32, skia_safe::Image>>>;
 
@@ -71,6 +94,7 @@ pub struct SceneCanvas {
     height: u32,
     recorder: PictureRecorder,
     images: SceneImages,
+    node_cache: Rc<RefCell<SceneNodeCache>>,
     plan: Option<Arc<FramePaintPlan>>,
     prepared: Option<Arc<PreparedScene>>,
     pub surface: crate::scene_thread::SceneSurface,
@@ -96,6 +120,7 @@ impl SceneCanvas {
             height,
             recorder: PictureRecorder::new(),
             images: SceneImages::default(),
+            node_cache: Rc::default(),
             plan: None,
             prepared: None,
             surface: crate::scene_thread::SceneSurface { id, incarnation: 1 },
@@ -120,6 +145,9 @@ impl SceneCanvas {
     pub fn begin(&mut self, plan: &FramePaintPlan) {
         crate::surface::image_pages::refresh();
         self.images.borrow_mut().clear();
+        self.node_cache
+            .borrow_mut()
+            .begin(plan.inputs.resource_revision);
         self.recorder = PictureRecorder::new();
         self.recorder
             .begin_recording(Rect::from_wh(self.width as f32, self.height as f32), false);
@@ -136,6 +164,17 @@ impl SceneCanvas {
             self.height,
             Rc::clone(&self.images),
         )
+        .with_scene_cache(Rc::clone(&self.node_cache))
+    }
+
+    /// Return preparation work since the most recent `begin`, excluding GPU replay.
+    pub fn preparation_metrics(&self) -> ScenePreparationMetrics {
+        self.node_cache.borrow().metrics
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_node_cache_enabled(&mut self, enabled: bool) {
+        self.node_cache.borrow_mut().disabled = !enabled;
     }
 
     pub fn snapshot(
@@ -262,3 +301,6 @@ mod tests {
         assert_eq!(buffer.get_pixel(12, 12).g, 255);
     }
 }
+
+#[cfg(test)]
+mod retained_tests;

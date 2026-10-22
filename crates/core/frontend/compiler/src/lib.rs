@@ -205,7 +205,10 @@ fn patchable_keyed_loop(repetition: &mesh_core_component::template::ForNode) -> 
             TemplateNode::Element(element) => {
                 element.attributes.iter().all(|attribute| {
                     // The patch re-binds handler expressions to refreshed locals.
-                    if matches!(attribute.value, AttributeValue::EventHandlerExpression { .. }) {
+                    if matches!(
+                        attribute.value,
+                        AttributeValue::EventHandlerExpression { .. }
+                    ) {
                         return true;
                     }
                     !attribute.name.starts_with("on")
@@ -909,9 +912,7 @@ mod tests {
         }
         assert_eq!(compiled.watched_paths.len(), 7);
 
-        // A hidden layer surface starts against a 1x1 safety configure, so
-        // concrete constraints must still expose the intended content size.
-        let tree = compiled.build_preview_tree(&mesh_core_theme::default_theme(), 1, 1);
+        let tree = compiled.build_preview_tree(&mesh_core_theme::default_theme(), 1280, 900);
         let settings_shell =
             first_node_with_class(&tree, "settings-shell").expect("settings-shell node");
         assert_eq!(

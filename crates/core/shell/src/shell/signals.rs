@@ -72,8 +72,16 @@ mod tests {
             message,
             Ok(Some(ShellMessage::Ipc(CoreRequest::Shutdown)))
         ));
-        let mut counter = [0u8; 8];
-        rustix::io::read(eventfd.as_fd(), &mut counter).unwrap();
-        assert_eq!(u64::from_ne_bytes(counter), 1);
+        runtime.block_on(async {
+            let eventfd = tokio::io::unix::AsyncFd::new(eventfd).unwrap();
+            let _ready =
+                tokio::time::timeout(std::time::Duration::from_secs(2), eventfd.readable())
+                    .await
+                    .unwrap()
+                    .unwrap();
+            let mut counter = [0u8; 8];
+            rustix::io::read(eventfd.get_ref().as_fd(), &mut counter).unwrap();
+            assert_eq!(u64::from_ne_bytes(counter), 1);
+        });
     }
 }

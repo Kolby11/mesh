@@ -124,6 +124,7 @@ fn phase44_navigation_audio_surface_emits_focused_proof_snapshot() {
     assert_phase44_focused_proof_snapshot(&navigation, "navigation bar");
 
     let mut audio = real_frontend_module_component("@mesh/audio-popover", audio_network_catalog());
+    audio.focused_proof_enabled = true;
     audio
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
@@ -418,7 +419,7 @@ fn shipped_navigation_volume_hover_opens_embedded_audio_popover() {
     navigation
         .paint_raster(
             &theme,
-            SurfaceExtent::unpadded(width, height),
+            SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
             &mut buffer,
             1.0,
         )
@@ -455,7 +456,7 @@ fn shipped_navigation_volume_hover_opens_embedded_audio_popover() {
     navigation
         .paint_raster(
             &theme,
-            SurfaceExtent::unpadded(width, height),
+            SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
             &mut buffer,
             1.0,
         )
@@ -637,7 +638,7 @@ fn shipped_navigation_volume_icon_inherits_button_click_and_tooltip() {
         .expect("rendered localized navigation bar");
     assert_eq!(
         find_tooltip_text_by_key(tree, &icon_key).as_deref(),
-        Some("Hlasitost 50%"),
+        Some("Hlasitost 50\u{a0}%"),
         "volume tooltip should update when the shell locale changes"
     );
 

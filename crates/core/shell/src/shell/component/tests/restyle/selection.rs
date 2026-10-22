@@ -175,6 +175,7 @@ fn phase44_selection_restyle_keeps_focused_text_payload() {
 </template>
 "#,
     );
+    component.focused_proof_enabled = true;
     component.selection = Some(TextSelectionState {
         anchor: TextSelectionPoint {
             node_key: "root/0".into(),

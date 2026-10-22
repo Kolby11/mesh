@@ -526,7 +526,7 @@ fn profiling_snapshot_groups_backend_stage_proof_under_expected_provider_identit
                 event: service_update(
                     "mesh.audio",
                     "@mesh/pipewire-audio",
-                    serde_json::json!({ "available": true, "percent": 44.0 }),
+                    serde_json::json!({ "available": true, "percent": 44.0, "muted": false, "source_module": "@mesh/pipewire-audio" }),
                 ),
             },
         )
@@ -535,7 +535,7 @@ fn profiling_snapshot_groups_backend_stage_proof_under_expected_provider_identit
         .broadcast_service_event(service_update(
             "mesh.audio",
             "@mesh/pipewire-audio",
-            serde_json::json!({ "available": true, "percent": 45.0 }),
+            serde_json::json!({ "available": true, "percent": 45.0, "muted": false, "source_module": "@mesh/pipewire-audio" }),
         ))
         .unwrap();
 

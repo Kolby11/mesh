@@ -7754,3 +7754,118 @@ retained verifier. Full release elements: 309 passed / 7 ignored; renderer:
 323 passed / 12 ignored; interaction: 50 passed; animation: 46 passed. Rust
 formatting, shell syntax and whitespace checks pass. Architecture/profiling
 references and status are updated; the shared design remains linked for W6.
+
+### 2026-10-22 — W6: retain node recordings during complete GPU scene preparation
+
+**Implemented.** Each `SceneCanvas` retains prepared node drawings by immutable
+`Arc<DisplayPaintNode>` identity, scale, effective clip and fallback module.
+Clean ancestors retain their payload when only descendant topology changes and
+inherited transforms/clips still agree. The cache admits at most 4,096 nodes /
+16 MiB of picture storage and uniquely counted raster images (four bytes/pixel),
+evicting oldest entries. Scene snapshots remain complete, immutable and usable
+after skipped submissions, cache eviction, resource replacement or canvas drop.
+
+Layer scopes, backdrop blur/refraction, scroll commands and scroll-content nodes
+stay live; tooltips remain outside the node cache. No damage-clipped node picture
+is reused for a different clip. Resource revision, async result publication,
+font database/alias changes and newly snapshotted asset pages invalidate cached
+recordings. Pending jobs prevent admission so placeholders cannot mask final
+assets. The existing worker/presentation ownership and full-replay fallback
+are unchanged.
+
+**Recording seam.** Skia can inline small pictures during `drawPicture`, so
+pictures alone do not establish retained command reuse. Node recordings use
+recorded drawables; scene finalization freezes their immutable records. The
+structural gate checks one actual scene operation per node reference as well
+as preparation counters. Source checks against Skia m148:
+[`SkCanvas::drawPicture`](https://github.com/google/skia/blob/chrome/m148/src/core/SkCanvas.cpp#L2634),
+[`SkRecordedDrawable::onMakePictureSnapshot`](https://github.com/google/skia/blob/chrome/m148/src/core/SkRecordedDrawable.cpp#L41).
+Complete-scene composition still visits references; GPU replay and live effects
+are not made change-proportional by this cache.
+
+**Gates.** `scene_preparation_records_only_changed_nodes` compares 16 and 1,024
+clean siblings at scale 1.25: a clean frame records zero node operations; each
+single material change records one node with at most eight operations, reusing
+all other nodes. It compares bytes with uncached complete scenes and direct CPU
+paint, and keeps the first snapshot unchanged across subsequent edits.
+`scene_cache_preserves_effects_scroll_and_tooltip_inputs` covers affine/overflow
+clips, opacity/blending, blur/backdrop, scroll offsets and tooltip opacity.
+External-input and cache-budget gates cover scale/module/clip changes, result
+publication, image deduplication, eviction and in-flight result rejection.
+`publishing_asset_pages_invalidates_standalone_scene_recordings` checks the
+standalone-to-page handoff. CPU structural gates are in `tools/check-performance`.
+Hardware gates remain `gpu_workload_visual_match_gate` and
+`gpu_workload_frame_cost_gate` through `tools/check-gpu-performance`.
+
+**Measured.** Baseline `fa4e1bbb`, clean workspace before W6. AMD Ryzen 7 7840HS,
+`nix develop`, release (thin LTO, one codegen unit), `taskset -c 2`. Three
+alternating baseline/candidate GPU invocations; each workload has four warmups,
+three samples × 20 completed frames (nine means per side). Hardware: NVIDIA
+RTX 4060 Laptop and AMD Radeon 780M. Workload gate is 920×900 logical at scale 2
+(1,840×1,800 device): full Settings, frosted panel 840×260, widget 138×76,
+40 text lines/full, one text line 880×20, and 256 image/icon instances using
+128 generated 32×32 PNG sources plus eight text rows. Measurements include UI
+preparation, handoff, worker replay, dmabuf copy/fence and GPU completion, not
+compositor import/scanout. No build ran during these final timings. Raw scripts,
+binaries and logs are under `/tmp/mesh-w6/`.
+
+| NVIDIA completed-frame mean, range across nine samples | Before | After |
+| --- | --- | --- |
+| Settings full | 2.325–3.693 ms | 2.247–2.513 ms |
+| Frosted panel | 1.485–1.816 ms | 1.377–1.470 ms |
+| Small widget | 0.879–1.183 ms | 0.617–0.722 ms |
+| Text full | 2.318–2.936 ms | 2.394–2.639 ms |
+| Text line | 0.795–0.899 ms | 0.332–0.386 ms |
+| Assets full | 1.483–1.730 ms | 0.798–0.900 ms |
+
+| AMD completed-frame mean, range across nine samples | Before | After |
+| --- | --- | --- |
+| Settings full | 4.872–6.222 ms | 4.144–6.061 ms |
+| Frosted panel | 2.535–4.105 ms | 2.029–3.880 ms |
+| Small widget | 0.959–1.988 ms | 0.746–1.770 ms |
+| Text full | 3.355–4.999 ms | 2.498–5.129 ms |
+| Text line | 0.887–1.625 ms | 0.480–1.554 ms |
+| Assets full | 2.144–3.705 ms | 1.605–3.752 ms |
+
+AMD ranges overlap; no AMD latency improvement is claimed. All workloads pass
+the existing worst-mean and frame-p90 budgets (16.67 ms full, 12 ms partial)
+on both GPUs with zero warm GLES bitmap transfers. NVIDIA small-widget, line
+and asset means improve; full Settings/text ranges overlap.
+
+The in-binary `scene_preparation_profile` compares the original uncached path
+with the production cache: translucent 6×6 boxes on an 8px grid, a 256×256
+logical scene at scale 1.25 (320×320 device). Four warmups; three samples ×
+120 recordings per invocation, repeated three times on core 2. Mean preparation
+ranges: 16 siblings 0.0042–0.0061 → 0.0026–0.0031 ms; 1,024 siblings
+0.3341–0.3891 → 0.1675–0.2009 ms. Warm frames record zero node operations and
+reuse 17 / 1,025 references. This fixture measures preparation, not GPU replay.
+
+**Measured corrections.** The first prototype rebuilt a clean ancestor's paint
+payload when a descendant changed: the gate found two recorded nodes instead
+of one. Preserving valid ancestor payload identity fixes it. Initial picture
+composition also inlined small records; the actual scene-op gate required frozen
+drawable references. Before the atlas-publication invalidation, NVIDIA assets
+regressed from 1.375–1.500 to 2.914–3.383 ms/frame across nine samples of the
+same hardware fixture: cached standalone images prevented warm atlas use.
+Publishing pages now invalidates those recordings; final results are above.
+The rejected intermediate binary/logs are in `/tmp/mesh-w6/pre-atlas-fix/`.
+
+**Verified.** Final GPU-feature renderer release suite: 339 passed / 19 ignored,
+versus baseline 334 passed / 18 ignored. Exported-image visual gate passes on
+both GPUs under the existing tolerances, including complete and partial damage.
+Production shell `cargo check` passes. The shell candidate before the final
+atlas/drawable correction has 934 passed / 42 failed / 31 ignored, identical to
+its starting failure set; final shell regression validation follows below.
+Rust formatting, shell syntax and whitespace checks pass. Ownership,
+architecture/profiling guides, backlog and status are updated. The shared
+pipeline design remains linked for its remaining annotation, binding-delta,
+path-sharing and live-workload work.
+
+**Final shell validation, same W6 candidate.** Rebuilt release shell with the
+atlas-publication and frozen-drawable corrections: 934 passed / 42 failed /
+31 ignored, with exactly the starting failure names (none added or removed).
+`complete_scene_frames_match_raster_at_fractional_scale`,
+`transition_and_lifecycle_frames_visit_only_changed_nodes` and
+`retained_change_paths_cover_geometry_and_overlapping_subtrees` each pass with
+`MESH_VERIFY_RETAINED=1`. Final logs are `/tmp/mesh-w6/final-shell-tests.log`
+and `/tmp/mesh-w6/final-shell-gates.log`.

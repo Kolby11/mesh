@@ -303,3 +303,26 @@ pub(super) fn collect_mesh_files(dir: &std::path::Path, out: &mut Vec<PathBuf>) 
         }
     }
 }
+
+/// Legacy inventory fixtures must not inherit the developer's active profile.
+pub(super) fn shipped_graph_path() -> &'static std::path::Path {
+    static GRAPH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    GRAPH.get_or_init(|| {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../..")
+            .canonicalize()
+            .unwrap();
+        let dir = temp_dir("shipped-graph");
+        let mut graph: serde_json::Value =
+            serde_json::from_slice(&fs::read(root.join("config/module.json")).unwrap()).unwrap();
+        graph["mesh"]["modulesDir"] = PathBuf::from("../".repeat(dir.ancestors().count() - 1))
+            .join(root.strip_prefix("/").unwrap())
+            .join("modules")
+            .to_string_lossy()
+            .into_owned()
+            .into();
+        let path = dir.join("module.json");
+        fs::write(&path, serde_json::to_vec(&graph).unwrap()).unwrap();
+        path
+    })
+}
