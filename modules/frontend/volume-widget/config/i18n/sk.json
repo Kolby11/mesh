@@ -1,0 +1,10 @@
+{
+  "keybind.category.audio": "Zvuk",
+  "keybind.mute.description": "Prepnut stlmenie zvuku",
+  "keybind.mute.label": "Stlmit zvuk",
+  "nav.audio_service_unavailable": "Zvukova sluzba nedostupna",
+  "nav.volume": "Hlasitost",
+  "nav.volume_level": "Hlasitost",
+  "nav.volume_muted_at": "Hlasitost stlmena na",
+  "nav.volume_unavailable": "Hlasitost nedostupna"
+}

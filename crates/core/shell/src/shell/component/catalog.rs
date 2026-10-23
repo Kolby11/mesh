@@ -1857,14 +1857,23 @@ local Settings = require("@mesh/settings")
     fn catalog_with_navigation_contribution_source(
         settings_source: &str,
     ) -> (tempfile::TempDir, FrontendCatalog) {
+        catalog_with_contribution_source("@mesh/navigation-bar", "src/settings.mesh", settings_source)
+    }
+
+    /// The shipped catalog with `module_id` copied to a temporary directory
+    /// whose contribution at `entry` holds `source`.
+    fn catalog_with_contribution_source(
+        module_id: &str,
+        entry_path: &str,
+        source: &str,
+    ) -> (tempfile::TempDir, FrontendCatalog) {
+        let settings_source = source;
         let graph = mesh_core_module::package::load_authoring_snapshot(
             crate::shell::discovery::test_module_graph_path(),
         )
         .expect("shipped graph loads");
         let mut modules = shipped_frontend_modules();
-        let navigation = modules
-            .remove("@mesh/navigation-bar")
-            .expect("shipped navigation module");
+        let navigation = modules.remove(module_id).expect("shipped module");
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join("src")).unwrap();
         std::fs::write(
@@ -1874,14 +1883,14 @@ local Settings = require("@mesh/settings")
         .unwrap();
         for entries in graph.all_extension_point_contributions().values() {
             for entry in entries {
-                if entry.source_module_id != "@mesh/navigation-bar" {
+                if entry.source_module_id != module_id {
                     continue;
                 }
                 let path = temp.path().join(&entry.entry);
                 if let Some(parent) = path.parent() {
                     std::fs::create_dir_all(parent).unwrap();
                 }
-                let source = if entry.entry == "src/settings.mesh" {
+                let source = if entry.entry == entry_path {
                     settings_source
                 } else {
                     "<template><text /></template>"
@@ -1889,10 +1898,17 @@ local Settings = require("@mesh/settings")
                 std::fs::write(path, source).unwrap();
             }
         }
+        let mut manifest = navigation.manifest;
+        if manifest.entrypoints.main.as_deref() == Some(entry_path) {
+            // Keep the module root compilable while its contribution fails.
+            std::fs::write(temp.path().join("src/root.mesh"), "<template><box /></template>")
+                .unwrap();
+            manifest.entrypoints.main = Some("src/root.mesh".into());
+        }
         modules.insert(
-            "@mesh/navigation-bar".into(),
+            module_id.into(),
             ModuleInstance::new(
-                navigation.manifest,
+                manifest,
                 temp.path().to_path_buf(),
                 temp.path().join("module.json"),
                 navigation.manifest_source,
@@ -1928,7 +1944,9 @@ local unknown = require("mesh.unknown")
 
     #[test]
     fn contribution_roots_reject_incompatible_required_interface_ranges() {
-        let (_temp, catalog) = catalog_with_navigation_contribution_source(
+        let (_temp, catalog) = catalog_with_contribution_source(
+            "@mesh/volume-widget",
+            "src/main.mesh",
             r#"
 <template><text /></template>
 <script lang="luau">
@@ -1939,12 +1957,12 @@ local audio = require("mesh.audio@>=2.0")
 
         assert!(
             catalog
-                .contribution_entry("@mesh/navigation-bar", "navigation-bar")
+                .contribution_entry("@mesh/volume-widget", "volume")
                 .is_none()
         );
         assert!(catalog.diagnostics().iter().any(|diagnostic| {
-            diagnostic.module_id == "@mesh/navigation-bar"
-                && diagnostic.contribution_id.as_deref() == Some("navigation-bar")
+            diagnostic.module_id == "@mesh/volume-widget"
+                && diagnostic.contribution_id.as_deref() == Some("volume")
                 && diagnostic.message.contains("versions are incompatible")
         }));
     }
@@ -1955,7 +1973,9 @@ local audio = require("mesh.audio@>=2.0")
             crate::shell::discovery::test_module_graph_path(),
         )
         .expect("shipped graph loads");
-        let (temp, catalog) = catalog_with_navigation_contribution_source(
+        let (temp, catalog) = catalog_with_contribution_source(
+            "@mesh/volume-widget",
+            "src/main.mesh",
             r#"
 <props>
 {
@@ -1967,8 +1987,8 @@ local audio = require("mesh.audio@>=2.0")
 "#,
         );
         let manifest = catalog
-            .module("@mesh/navigation-bar")
-            .expect("navigation module is catalogued")
+            .module("@mesh/volume-widget")
+            .expect("volume widget is catalogued")
             .compiled
             .manifest
             .clone();
@@ -1976,19 +1996,19 @@ local audio = require("mesh.audio@>=2.0")
         handle.replace_with_graph(catalog, None, &graph);
         let before = handle.snapshot();
         assert!(before.validation_graph.is_some());
-        assert!(before.catalog.modules.contains_key("@mesh/navigation-bar"));
+        assert!(before.catalog.modules.contains_key("@mesh/volume-widget"));
         assert!(
             before
                 .catalog
                 .extension_point_entries
                 .contains_key(&contribution_entry_key(
-                    "@mesh/navigation-bar",
-                    "navigation-bar"
+                    "@mesh/volume-widget",
+                    "volume"
                 ))
         );
 
         std::fs::write(
-            temp.path().join("src/settings.mesh"),
+            temp.path().join("src/main.mesh"),
             r#"
 <props>
 {
@@ -2004,7 +2024,7 @@ local audio = require("mesh.audio@>=2.0")
         )
         .unwrap();
         let reloaded_contribution =
-            compile_frontend_entrypoint(&manifest, temp.path(), "src/settings.mesh")
+            compile_frontend_entrypoint(&manifest, temp.path(), "src/main.mesh")
                 .expect("reloaded contribution compiles");
         assert_eq!(
             compiled_interface_imports(&reloaded_contribution),
@@ -2014,12 +2034,12 @@ local audio = require("mesh.audio@>=2.0")
             handle
                 .snapshot()
                 .catalog
-                .validate_interface_imports("@mesh/navigation-bar", &reloaded_contribution, &graph,)
+                .validate_interface_imports("@mesh/volume-widget", &reloaded_contribution, &graph,)
                 .is_err(),
             "incompatible contribution should fail graph validation"
         );
         let error = handle
-            .reload_module("@mesh/navigation-bar", &manifest, temp.path())
+            .reload_module("@mesh/volume-widget", &manifest, temp.path())
             .expect_err("incompatible contribution interface range was reloaded");
         assert!(error.to_string().contains("versions are incompatible"));
         let after = handle.snapshot();
@@ -2027,11 +2047,11 @@ local audio = require("mesh.audio@>=2.0")
         assert_eq!(
             after
                 .catalog
-                .contribution_entry("@mesh/navigation-bar", "navigation-bar")
+                .contribution_entry("@mesh/volume-widget", "volume")
                 .expect("last-known-good contribution remains published")
                 .source_path,
             temp.path()
-                .join("src/settings.mesh")
+                .join("src/main.mesh")
                 .canonicalize()
                 .expect("contribution path canonicalizes")
         );

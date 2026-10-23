@@ -60,6 +60,7 @@ pub struct ScriptContext {
     pub capabilities: CapabilitySet,
     pub state: ScriptState,
     pub(super) optional_interfaces: Arc<HashSet<String>>,
+    pub(super) luau_libraries: Arc<super::LuauLibraries>,
     pub(super) vm: Option<ScriptVm>,
     /// Optional surface-owned handle to the thread realm. Must be attached
     /// before the script is loaded so live bindings use the surface's handle.
@@ -332,6 +333,7 @@ impl ScriptContext {
             capabilities,
             state: ScriptState::new(),
             optional_interfaces: Arc::new(HashSet::new()),
+            luau_libraries: Arc::default(),
             vm: None,
             shared_vm: None,
             env_table: None,
@@ -394,6 +396,11 @@ impl ScriptContext {
 
     pub fn set_optional_interfaces(&mut self, interfaces: HashSet<String>) {
         self.optional_interfaces = Arc::new(interfaces);
+    }
+
+    /// Library roots `require` may load from. Set before the script loads.
+    pub fn set_luau_libraries(&mut self, libraries: impl Into<Arc<super::LuauLibraries>>) {
+        self.luau_libraries = libraries.into();
     }
 
     /// Replace the compatibility catalog behind `mesh.i18n.t()`. Existing

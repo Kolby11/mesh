@@ -1,0 +1,90 @@
+{
+  "name": "@mesh/volume-widget",
+  "version": "0.1.0",
+  "description": "Output volume control with an audio popover for any navigation bar.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "modules": {
+        "@mesh/audio-popover": ">=0.1.0",
+        "@mesh/volume-presentation": ">=0.1.0"
+      },
+      "interfaces": {
+        "mesh.audio": ">=1.0"
+      },
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      },
+      "capabilities": [
+        "service.audio.read",
+        "service.audio.control",
+        "locale.read"
+      ]
+    },
+    "i18n": {
+      "defaultLocale": "en"
+    },
+    "icons": {
+      "ignore_shell_default": true
+    },
+    "iconRequirements": {
+      "required": [
+        "audio-volume-muted",
+        "audio-volume-low",
+        "audio-volume-medium",
+        "audio-volume-high"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "contributes": {
+      "keybinds": {
+        "mute": {
+          "label": {
+            "t": "keybind.mute.label",
+            "fallback": "Mute audio"
+          },
+          "description": {
+            "t": "keybind.mute.description",
+            "fallback": "Toggle audio mute"
+          },
+          "category": {
+            "t": "keybind.category.audio",
+            "fallback": "Audio"
+          },
+          "trigger": {
+            "kind": "shortcut",
+            "key": "m"
+          }
+        }
+      },
+      "i18n": [
+        {
+          "id": "en",
+          "locale": "en",
+          "path": "config/i18n/en.json"
+        },
+        {
+          "id": "sk",
+          "locale": "sk",
+          "path": "config/i18n/sk.json"
+        }
+      ]
+    },
+    "provides": {
+      "extensionPoints": {
+        "mesh.navigation.item": [
+          {
+            "id": "volume",
+            "entry": "src/main.mesh"
+          }
+        ]
+      }
+    },
+    "accessibility": {
+      "role": "button"
+    }
+  }
+}

@@ -113,18 +113,24 @@ fn shipped_navigation_brightness_uses_one_level_icon_and_scrolls_both_input_kind
 }
 
 #[test]
-fn shipped_navigation_brightness_uses_configured_scroll_sensitivity() {
+fn shipped_navigation_brightness_uses_placement_scroll_sensitivity() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
-    component.settings_json = serde_json::json!({
-        "props": {
-            "instances": {
-                "@mesh/navigation-bar/slot:end/default-0": {
-                    "scroll_sensitivity": 12
-                }
-            }
-        }
-    });
+    let mut catalog = (*component.frontend_catalog).clone();
+    let placement: mesh_core_module::package::NodeSlotOverride =
+        serde_json::from_value(serde_json::json!({
+            "nodes": [{
+                "id": "brightness",
+                "use": "@mesh/brightness-widget:brightness",
+                "props": { "scroll_sensitivity": 12 }
+            }]
+        }))
+        .unwrap();
+    catalog.node_slot_placements.insert(
+        component.root_instance_key().to_string(),
+        std::collections::BTreeMap::from([("end".to_string(), placement)]),
+    );
+    component.adopt_frontend_catalog(catalog.into());
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.brightness".into(),

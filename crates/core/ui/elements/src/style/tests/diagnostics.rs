@@ -215,7 +215,7 @@ fn style_diagnostics_shipped_navigation_fixture_expected_properties_are_exact() 
         "../../../../../../../modules/frontend/navigation-bar/src/main.mesh"
     ));
     rules.extend(parse_fixture_style(include_str!(
-        "../../../../../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
+        "../../../../../../../modules/frontend/volume-widget/src/main.mesh"
     )));
 
     let (_nav_style, nav_diagnostics) = resolve_class(&resolver, &rules, "nav-shell");
@@ -237,7 +237,7 @@ fn style_diagnostics_shipped_navigation_fixture_expected_properties_are_exact() 
 #[test]
 fn style_diagnostics_descendant_selector_out_of_scope_documented() {
     let rules = parse_fixture_style(include_str!(
-        "../../../../../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
+        "../../../../../../../modules/frontend/volume-widget/src/main.mesh"
     ));
     let docs = include_str!("../../../../../../../docs/css-coverage.md");
 

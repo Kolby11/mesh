@@ -70,6 +70,7 @@ hidden = false
 local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
 local t = import("mesh.i18n", "t")
+local volume_presentation = require("@mesh/volume-presentation/volume")
 
 audio_status = "audio.waiting"
 service_pill = "common.unavailable"
@@ -100,15 +101,7 @@ end
 local function sync_volume(percent, muted)
     volume_percent = clamp_percent(percent)
     volume_label = mesh.locale.format_percent(volume_percent)
-    if muted or volume_percent == 0 then
-        volume_icon = "audio-volume-muted"
-    elseif volume_percent < 34 then
-        volume_icon = "audio-volume-low"
-    elseif volume_percent < 67 then
-        volume_icon = "audio-volume-medium"
-    else
-        volume_icon = "audio-volume-high"
-    end
+    volume_icon = volume_presentation.icon(volume_percent, muted)
     mute_button_label = muted and "audio.unmute" or "audio.mute"
     muted_state = muted
 end

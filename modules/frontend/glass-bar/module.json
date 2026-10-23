@@ -43,7 +43,8 @@
       ],
       "modules": {
         "@mesh/glass-material": ">=0.1.0",
-        "@mesh/profile-switcher": ">=0.1.0"
+        "@mesh/profile-switcher": ">=0.1.0",
+        "@mesh/volume-presentation": ">=0.1.0"
       }
     },
     "entry": "src/main.mesh",

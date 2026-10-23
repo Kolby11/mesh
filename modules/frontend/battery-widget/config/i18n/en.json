@@ -1,0 +1,8 @@
+{
+  "nav.battery": "Battery",
+  "nav.charging": "Charging",
+  "nav.discharging": "Discharging",
+  "nav.health": "Health",
+  "nav.time_to_empty": "Time to empty",
+  "nav.time_to_full": "Time to full"
+}

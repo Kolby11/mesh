@@ -34,6 +34,7 @@ local ControlCenter = require("./control-center.mesh")
 local audio = require("mesh.audio")
 local power = require("mesh.power")
 local network = require("mesh.network")
+local volume = require("@mesh/volume-presentation/volume")
 
 language = string.upper(string.sub(mesh.locale.current() or "en", 1, 2))
 network_glyph = "network-wireless-offline"
@@ -68,11 +69,9 @@ effect(function()
         volume_glyph = "audio-volume-muted"
         return
     end
-    local percent = math.floor(audio.percent or 0)
+    local percent = volume.percent(audio.percent)
     volume_text = tostring(percent) .. "%"
-    volume_glyph = (audio.muted or percent == 0) and "audio-volume-muted"
-        or percent < 50 and "audio-volume-medium"
-        or "audio-volume-high"
+    volume_glyph = volume.icon(percent, audio.muted)
     volume_label = audio.muted and "Muted" or ("Volume " .. volume_text)
 end)
 

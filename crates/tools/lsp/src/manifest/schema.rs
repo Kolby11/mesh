@@ -1209,6 +1209,14 @@ fn implements_node() -> Node {
                 false,
                 scalar("Selection priority (higher wins).", "number"),
             ),
+            field(
+                "features",
+                false,
+                string_array(
+                    "Optional contract features this provider supplies.",
+                    "Feature name declared by the contract.",
+                ),
+            ),
         ],
     )
 }
@@ -1467,35 +1475,6 @@ fn contract_node() -> Node {
                             ),
                         ),
                         field(
-                            "featureGroups",
-                            false,
-                            node(
-                                "Named groups of capabilities a consumer enables together.",
-                                "object<string, featureGroup>",
-                                Kind::Map(Box::new(obj(
-                                    "A named capability feature group.",
-                                    vec![
-                                        field(
-                                            "required",
-                                            false,
-                                            scalar(
-                                                "Whether consumers must enable this group.",
-                                                "boolean",
-                                            ),
-                                        ),
-                                        field(
-                                            "capabilities",
-                                            false,
-                                            string_array(
-                                                "Capabilities in this group.",
-                                                "Capability id.",
-                                            ),
-                                        ),
-                                    ],
-                                ))),
-                            ),
-                        ),
-                        field(
                             "permissions",
                             false,
                             node(
@@ -1511,6 +1490,30 @@ fn contract_node() -> Node {
                             ),
                         ),
                     ],
+                ),
+            ),
+            field(
+                "features",
+                false,
+                node(
+                    "Optional features, keyed by lowercase dashed name. A provider supplies \
+                     a feature's members only when its `implements` entry lists the feature; \
+                     consumers check `service:supports(name)`.",
+                    "object<string, feature>",
+                    Kind::Map(Box::new(obj(
+                        "One optional contract feature.",
+                        vec![
+                            field("description", false, scalar("What the feature adds.", "string")),
+                            field(
+                                "members",
+                                true,
+                                string_array(
+                                    "State fields (optional types), methods and events the feature gates.",
+                                    "Member name.",
+                                ),
+                            ),
+                        ],
+                    ))),
                 ),
             ),
         ],

@@ -102,11 +102,12 @@ pub struct CompiledOperationPolicy {
     pub methods: Arc<BTreeMap<String, Arc<[String]>>>,
 }
 
+/// One optional contract feature: the members a provider supplies only when
+/// it advertises the feature.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompiledFeatureGroup {
+pub struct CompiledFeature {
     pub name: String,
-    pub required: bool,
-    pub capabilities: Arc<[String]>,
+    pub members: Arc<[String]>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,7 +137,9 @@ pub struct CompiledContract {
     pub capabilities: Arc<ContractCapabilities>,
     pub schemas: CompiledSchemas,
     pub operation_policy: CompiledOperationPolicy,
-    pub feature_groups: Arc<BTreeMap<String, CompiledFeatureGroup>>,
+    pub features: Arc<BTreeMap<String, CompiledFeature>>,
+    /// The feature gating each feature member, by member name.
+    pub member_features: Arc<HashMap<String, String>>,
     pub behavioral: CompiledBehavioralMetadata,
     pub schema_fingerprint: u64,
     pub policy_fingerprint: u64,
@@ -164,10 +167,22 @@ impl CompiledContract {
         }
         validate_unique_symbols(&contract)?;
         validate_coalescing_keys(&contract)?;
+        validate_features(&contract)?;
 
         let schemas = compile_schemas(&contract)?;
         let operation_policy = compile_operation_policy(&contract.capabilities);
-        let feature_groups = compile_feature_groups(&contract.capabilities.feature_groups);
+        let features = compile_features(&contract.capabilities.features);
+        let member_features = Arc::new(
+            features
+                .values()
+                .flat_map(|feature| {
+                    feature
+                        .members
+                        .iter()
+                        .map(|member| (member.clone(), feature.name.clone()))
+                })
+                .collect(),
+        );
         let behavioral = CompiledBehavioralMetadata {
             methods: Arc::new(
                 contract
@@ -186,7 +201,7 @@ impl CompiledContract {
             ),
         };
         let schema_fingerprint = fingerprint_schemas(&schemas);
-        let policy_fingerprint = fingerprint_policy(&operation_policy, &feature_groups);
+        let policy_fingerprint = fingerprint_policy(&operation_policy, &features);
         let behavior_fingerprint = fingerprint_behavior(&behavioral);
         let raw = Arc::new(contract.clone());
 
@@ -201,7 +216,8 @@ impl CompiledContract {
             capabilities: Arc::new(contract.capabilities.clone()),
             schemas,
             operation_policy,
-            feature_groups,
+            features,
+            member_features,
             behavioral,
             schema_fingerprint,
             policy_fingerprint,
@@ -562,8 +578,9 @@ pub struct ContractCapabilities {
     pub events: HashMap<String, Vec<String>>,
     /// Capability requirements keyed by declared method name.
     pub methods: HashMap<String, Vec<String>>,
-    /// Provider feature groups. Groups are optional unless `required` is true.
-    pub feature_groups: BTreeMap<String, ContractFeatureGroup>,
+    /// Optional features, by name. A provider supplies a feature's members only
+    /// when it advertises the feature; see [`negotiate_features`].
+    pub features: BTreeMap<String, ContractFeature>,
     /// Service-operation permissions this interface declares for its
     /// consumers, by name → privilege level (`standard` | `elevated` |
     /// `high`). The graph validates ownership and level before any module
@@ -572,9 +589,10 @@ pub struct ContractCapabilities {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ContractFeatureGroup {
-    pub required: bool,
-    pub capabilities: Vec<String>,
+pub struct ContractFeature {
+    pub description: Option<String>,
+    /// Declared state fields, methods and events this feature gates.
+    pub members: Vec<String>,
 }
 
 impl ContractCapabilities {
@@ -1134,19 +1152,18 @@ fn compile_operation_policy(capabilities: &ContractCapabilities) -> CompiledOper
     }
 }
 
-fn compile_feature_groups(
-    groups: &BTreeMap<String, ContractFeatureGroup>,
-) -> Arc<BTreeMap<String, CompiledFeatureGroup>> {
+fn compile_features(
+    features: &BTreeMap<String, ContractFeature>,
+) -> Arc<BTreeMap<String, CompiledFeature>> {
     Arc::new(
-        groups
+        features
             .iter()
-            .map(|(name, group)| {
+            .map(|(name, feature)| {
                 (
                     name.clone(),
-                    CompiledFeatureGroup {
+                    CompiledFeature {
                         name: name.clone(),
-                        required: group.required,
-                        capabilities: normalize_capabilities(&group.capabilities),
+                        members: arc_slice(feature.members.clone()),
                     },
                 )
             })
@@ -1154,23 +1171,88 @@ fn compile_feature_groups(
     )
 }
 
-/// Result of negotiating one provider's advertised feature set against the
-/// contract. Optional groups can be absent without rejecting the provider;
-/// required groups make the provider ineligible until advertised.
+/// Member name a contract reserves for `service:supports(feature)`.
+pub const SUPPORTS_MEMBER: &str = "supports";
+
+/// Feature names are lowercase words joined by `-`, such as `per-app-volume`.
+fn valid_feature_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.split('-').all(|word| {
+            !word.is_empty()
+                && word
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        })
+}
+
+fn validate_features(contract: &InterfaceContract) -> Result<(), ContractError> {
+    let invalid = |message: String| ContractError::InvalidDeclaration {
+        interface: contract.interface.clone(),
+        message,
+    };
+    let reserved = contract
+        .state_fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .chain(contract.methods.iter().map(|method| method.name.as_str()))
+        .chain(contract.events.iter().map(|event| event.name.as_str()))
+        .any(|name| name == SUPPORTS_MEMBER);
+    if reserved {
+        return Err(invalid(format!(
+            "'{SUPPORTS_MEMBER}' is reserved for feature checks and cannot name a member"
+        )));
+    }
+    let mut owners = HashMap::<&str, &str>::new();
+    for (name, feature) in &contract.capabilities.features {
+        if !valid_feature_name(name) {
+            return Err(invalid(format!(
+                "feature '{name}' must be lowercase words joined by '-'"
+            )));
+        }
+        if feature.members.is_empty() {
+            return Err(invalid(format!("feature '{name}' gates no members")));
+        }
+        for member in &feature.members {
+            if let Some(previous) = owners.insert(member, name) {
+                return Err(invalid(format!(
+                    "member '{member}' belongs to both feature '{previous}' and '{name}'"
+                )));
+            }
+            if let Some(field) = contract.state_fields.iter().find(|field| &field.name == member) {
+                let optional = TypeExpr::parse(&field.field_type).is_ok_and(|ty| ty.optional);
+                if !optional {
+                    return Err(invalid(format!(
+                        "state field '{member}' belongs to feature '{name}' and must have an optional type"
+                    )));
+                }
+            } else if !contract.methods.iter().any(|method| &method.name == member)
+                && !contract.events.iter().any(|event| &event.name == member)
+            {
+                return Err(invalid(format!(
+                    "feature '{name}' names undeclared member '{member}'"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The features one provider supplies, after checking its advertised names
+/// against the contract. Unknown advertised names are dropped; the graph
+/// reports them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FeatureNegotiation {
     pub enabled: Arc<[String]>,
-    pub unavailable_optional: Arc<[String]>,
-    pub missing_required: Arc<[String]>,
+    pub unavailable: Arc<[String]>,
 }
 
 impl FeatureNegotiation {
-    pub fn is_compatible(&self) -> bool {
-        self.missing_required.is_empty()
+    pub fn supports(&self, feature: &str) -> bool {
+        self.enabled.iter().any(|enabled| enabled == feature)
     }
 }
 
-pub fn negotiate_feature_groups(
+pub fn negotiate_features(
     contract: &CompiledContract,
     provider_features: impl IntoIterator<Item = impl AsRef<str>>,
 ) -> FeatureNegotiation {
@@ -1178,22 +1260,14 @@ pub fn negotiate_feature_groups(
         .into_iter()
         .map(|feature| feature.as_ref().to_string())
         .collect::<HashSet<_>>();
-    let mut enabled = Vec::new();
-    let mut unavailable_optional = Vec::new();
-    let mut missing_required = Vec::new();
-    for (name, group) in contract.feature_groups.iter() {
-        if advertised.contains(name) {
-            enabled.push(name.clone());
-        } else if group.required {
-            missing_required.push(name.clone());
-        } else {
-            unavailable_optional.push(name.clone());
-        }
-    }
+    let (enabled, unavailable): (Vec<_>, Vec<_>) = contract
+        .features
+        .keys()
+        .cloned()
+        .partition(|name| advertised.contains(name));
     FeatureNegotiation {
         enabled: arc_slice(enabled),
-        unavailable_optional: arc_slice(unavailable_optional),
-        missing_required: arc_slice(missing_required),
+        unavailable: arc_slice(unavailable),
     }
 }
 
@@ -1310,7 +1384,7 @@ fn fingerprint_behavior(behavioral: &CompiledBehavioralMetadata) -> u64 {
 
 fn fingerprint_policy(
     policy: &CompiledOperationPolicy,
-    feature_groups: &BTreeMap<String, CompiledFeatureGroup>,
+    features: &BTreeMap<String, CompiledFeature>,
 ) -> u64 {
     let mut builder = FingerprintBuilder::default();
     if let Some(read) = &policy.read {
@@ -1333,11 +1407,10 @@ fn fingerprint_policy(
             builder.string(capability);
         }
     }
-    for (name, group) in feature_groups {
+    for (name, feature) in features {
         builder.string(name);
-        builder.bool(group.required);
-        for capability in group.capabilities.iter() {
-            builder.string(capability);
+        for member in feature.members.iter() {
+            builder.string(member);
         }
     }
     builder.finish()
@@ -1443,16 +1516,15 @@ pub fn parse_interface_contract(
             read: parsed.capabilities.read,
             events: parsed.capabilities.events,
             methods: parsed.capabilities.methods,
-            feature_groups: parsed
-                .capabilities
-                .feature_groups
+            features: parsed
+                .features
                 .into_iter()
-                .map(|(name, group)| {
+                .map(|(name, feature)| {
                     (
                         name,
-                        ContractFeatureGroup {
-                            required: group.required,
-                            capabilities: group.capabilities,
+                        ContractFeature {
+                            description: feature.description,
+                            members: feature.members,
                         },
                     )
                 })
@@ -1812,6 +1884,16 @@ struct ContractJson {
     types: HashMap<String, ContractTypeJson>,
     #[serde(default)]
     capabilities: ContractCapabilitiesJson,
+    #[serde(default)]
+    features: BTreeMap<String, ContractFeatureJson>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ContractFeatureJson {
+    #[serde(default)]
+    description: Option<String>,
+    members: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1890,19 +1972,8 @@ struct ContractCapabilitiesJson {
     events: HashMap<String, Vec<String>>,
     #[serde(default)]
     methods: HashMap<String, Vec<String>>,
-    #[serde(default, rename = "featureGroups")]
-    feature_groups: BTreeMap<String, ContractFeatureGroupJson>,
     #[serde(default)]
     permissions: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ContractFeatureGroupJson {
-    #[serde(default)]
-    required: bool,
-    #[serde(default)]
-    capabilities: Vec<String>,
 }
 
 impl ContractFieldJson {
@@ -2215,40 +2286,60 @@ mod tests {
     }
 
     #[test]
-    fn compiles_optional_and_required_provider_feature_groups() {
+    fn compiles_features_and_negotiates_provider_support() {
         let contract = serde_json::json!({
-            "capabilities": {
-                "featureGroups": {
-                    "recording": {
-                        "capabilities": ["service.audio.record"]
-                    },
-                    "exclusive_output": {
-                        "required": true,
-                        "capabilities": ["service.audio.exclusive"]
-                    }
+            "state": {
+                "percent": { "type": "float" },
+                "apps": { "type": "object[]?" }
+            },
+            "methods": {
+                "set_app_volume": { "args": [{ "name": "app", "type": "string" }] }
+            },
+            "events": { "AppsChanged": {} },
+            "features": {
+                "per-app-volume": {
+                    "description": "Per-application streams",
+                    "members": ["apps", "set_app_volume", "AppsChanged"]
                 }
             }
         });
         let compiled = parse_compiled_contract("mesh.audio", "1.0", &contract).unwrap();
+        assert_eq!(
+            compiled.member_features.get("set_app_volume").map(String::as_str),
+            Some("per-app-volume")
+        );
+        assert!(!compiled.member_features.contains_key("percent"));
+        assert!(!negotiate_features(&compiled, std::iter::empty::<&str>()).supports("per-app-volume"));
+        let supported = negotiate_features(&compiled, ["per-app-volume", "unknown"]);
+        assert!(supported.supports("per-app-volume"));
+        assert_eq!(supported.enabled.as_ref(), &["per-app-volume".to_string()][..]);
+    }
 
-        assert!(!compiled.feature_groups["recording"].required);
-        assert!(compiled.feature_groups["exclusive_output"].required);
-        let partial = negotiate_feature_groups(&compiled, std::iter::empty::<&str>());
-        assert!(!partial.is_compatible());
-        assert_eq!(
-            partial.missing_required.as_ref(),
-            &["exclusive_output".to_string()][..]
-        );
-        assert_eq!(
-            partial.unavailable_optional.as_ref(),
-            &["recording".to_string()][..]
-        );
-        let complete = negotiate_feature_groups(&compiled, ["recording", "exclusive_output"]);
-        assert!(complete.is_compatible());
-        assert_eq!(
-            complete.enabled.as_ref(),
-            &["exclusive_output".to_string(), "recording".to_string()][..]
-        );
+    #[test]
+    fn rejects_malformed_features() {
+        let reject = |features: serde_json::Value, state_type: &str| {
+            let contract = serde_json::json!({
+                "state": { "level": { "type": state_type } },
+                "methods": { "boost": {} },
+                "features": features
+            });
+            parse_compiled_contract("mesh.audio", "1.0", &contract)
+                .unwrap_err()
+                .to_string()
+        };
+        assert!(reject(serde_json::json!({ "x": { "members": ["level"] } }), "float")
+            .contains("must have an optional type"));
+        assert!(reject(serde_json::json!({ "x": { "members": ["missing"] } }), "float?")
+            .contains("undeclared member"));
+        assert!(reject(
+            serde_json::json!({ "a": { "members": ["boost"] }, "b": { "members": ["boost"] } }),
+            "float?"
+        )
+        .contains("belongs to both"));
+        assert!(reject(serde_json::json!({ "Per App": { "members": ["boost"] } }), "float?")
+            .contains("lowercase words"));
+        let reserved = serde_json::json!({ "methods": { "supports": {} } });
+        assert!(parse_compiled_contract("mesh.audio", "1.0", &reserved).is_err());
     }
 
     #[test]

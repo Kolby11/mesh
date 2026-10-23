@@ -181,6 +181,7 @@ fn contribution_index_exposes_frontend_keybind_resource_interface_and_provider_r
             provider: Some("example".into()),
             label: None,
             priority: 10,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -555,6 +556,7 @@ fn disabled_modules_remain_catalog_nodes_but_not_runtime_contributions() {
             provider: Some("disabled".into()),
             label: None,
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -663,6 +665,7 @@ fn manifest_driven_extension_graph_indexes_provider_library_resource_and_fronten
                 "Example".to_string(),
             )),
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );

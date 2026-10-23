@@ -183,6 +183,26 @@ fn resolve_active_providers(
                 });
             }
         }
+        if let Some(contract) = contract {
+            for provider in interface_providers {
+                for feature in &provider.features {
+                    if !contract.capabilities.features.contains_key(feature) {
+                        diagnostics.push(ModuleGraphDiagnostic {
+                            module_id: provider.module_id.clone(),
+                            contribution_id: Some(format!(
+                                "{}:provider:{interface}:feature:{feature}",
+                                provider.module_id
+                            )),
+                            status: "unknown_provider_feature".into(),
+                            message: format!(
+                                "provider {} advertises feature '{feature}', which the {interface} contract does not declare; consumers never see it",
+                                provider.module_id
+                            ),
+                        });
+                    }
+                }
+            }
+        }
         let provider_candidates = contract
             .map(|contract| {
                 interface_providers
@@ -696,6 +716,7 @@ impl InstalledModuleGraph {
                         provider: provided.provider.clone(),
                         label: provided.label.clone(),
                         priority: provided.priority,
+                        features: provided.features.clone(),
                         required_capabilities: node.manifest.mesh.capabilities.required.clone(),
                         optional_capabilities: node.manifest.mesh.capabilities.optional.clone(),
                     };
@@ -1948,6 +1969,8 @@ pub struct BackendProviderNode {
     pub provider: Option<String>,
     pub label: Option<manifest::LocalizedText>,
     pub priority: u32,
+    /// Contract features the provider advertises, as declared.
+    pub features: Vec<String>,
     pub required_capabilities: Vec<String>,
     pub optional_capabilities: Vec<String>,
 }

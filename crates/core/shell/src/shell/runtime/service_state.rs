@@ -881,10 +881,26 @@ impl Shell {
         provider_id: &str,
         payload: &serde_json::Value,
     ) -> bool {
-        let Some(contract) = self.interfaces.resolve(interface, None).compiled_contract else {
+        let resolution = self.interfaces.resolve(interface, None);
+        let Some(contract) = resolution.compiled_contract else {
             return true;
         };
-        let warnings = contract.state_warnings(payload);
+        let mut warnings = contract.state_warnings(payload);
+        if let Some(state) = payload.as_object() {
+            warnings.extend(
+                state
+                    .keys()
+                    .filter_map(|field| {
+                        unadvertised_feature(&contract, &resolution.feature_negotiation, field)
+                            .map(|feature| (field, feature))
+                    })
+                    .map(|(field, feature)| {
+                        format!(
+                            "state field '{field}' belongs to feature '{feature}', which the provider does not advertise"
+                        )
+                    }),
+            );
+        }
         let valid = warnings.is_empty();
         for warning in warnings {
             self.record_service_contract_warning(interface, provider_id, warning);
@@ -910,11 +926,19 @@ impl Shell {
         event_name: &str,
         payload: &serde_json::Value,
     ) -> Vec<String> {
-        let Some(contract) = self.interfaces.resolve(interface, None).compiled_contract else {
+        let resolution = self.interfaces.resolve(interface, None);
+        let Some(contract) = resolution.compiled_contract else {
             return vec![format!(
                 "event '{event_name}' emitted for unknown interface {interface}"
             )];
         };
+        if let Some(feature) =
+            unadvertised_feature(&contract, &resolution.feature_negotiation, event_name)
+        {
+            return vec![format!(
+                "event '{event_name}' belongs to feature '{feature}', which the provider does not advertise"
+            )];
+        }
         contract.event_warnings(event_name, payload)
     }
 
@@ -968,4 +992,17 @@ fn service_values_equivalent(actual: &serde_json::Value, expected: &serde_json::
             .as_f64()
             .zip(expected.as_f64())
             .is_some_and(|(actual, expected)| (actual - expected).abs() < f64::EPSILON)
+}
+
+/// The feature gating `member` when the bound provider does not advertise it.
+fn unadvertised_feature<'a>(
+    contract: &'a mesh_core_service::CompiledContract,
+    negotiation: &mesh_core_service::FeatureNegotiation,
+    member: &str,
+) -> Option<&'a str> {
+    contract
+        .member_features
+        .get(member)
+        .map(String::as_str)
+        .filter(|feature| !negotiation.supports(feature))
 }

@@ -54,9 +54,6 @@ unless an item says otherwise. IDs point into the
 
 ### Priority 7 — Customization and ecosystem
 
-- [ ] **A6 / RES-05:** Ship bar widgets as separate `mesh.navigation.item`
-      modules with per-instance props; share volume presentation in a library.
-- [ ] **A2:** Optional named features inside contracts with `supports()` checks.
 - [ ] **A8:** Move UPower/NetworkManager state reads from `exec.argv` to scoped
       `dbus.call` grants; scope `dbus.*` subscriptions per sender and `fs.*` per path;
       ext-workspace protocol data; plain-language permissions.

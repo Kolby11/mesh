@@ -96,7 +96,7 @@ pub fn diff_contracts(locked: &InterfaceContract, candidate: &InterfaceContract)
     diff_events(locked, candidate, &mut changes);
     diff_types(locked, candidate, &mut changes);
     diff_capabilities(locked, candidate, &mut changes);
-    diff_feature_groups(locked, candidate, &mut changes);
+    diff_features(locked, candidate, &mut changes);
 
     changes.sort_by(|left, right| {
         right
@@ -634,49 +634,55 @@ fn diff_capabilities(
     }
 }
 
-fn diff_feature_groups(
+/// A feature only gates members it adds; gating an existing member, or
+/// dropping a feature so its members become mandatory, breaks consumers or
+/// providers of the locked contract.
+fn diff_features(
     locked: &InterfaceContract,
     candidate: &InterfaceContract,
     changes: &mut Vec<ContractChange>,
 ) {
-    for (name, group) in &candidate.capabilities.feature_groups {
-        let Some(previous) = locked.capabilities.feature_groups.get(name) else {
-            changes.push(ContractChange {
-                class: if group.required {
-                    CompatibilityClass::Breaking
-                } else {
-                    CompatibilityClass::Additive
-                },
-                path: format!("capabilities.featureGroups.{name}"),
-                detail: format!(
-                    "{} provider feature group '{name}' was added",
-                    if group.required {
-                        "required"
-                    } else {
-                        "optional"
-                    }
-                ),
-            });
+    let declared_in_locked = |member: &str| {
+        locked.state_fields.iter().any(|field| field.name == member)
+            || locked.methods.iter().any(|method| method.name == member)
+            || locked.events.iter().any(|event| event.name == member)
+    };
+    for (name, feature) in &candidate.capabilities.features {
+        let previous = locked.capabilities.features.get(name);
+        let previous_members = previous.map(|feature| feature.members.as_slice()).unwrap_or(&[]);
+        let gates_existing = feature
+            .members
+            .iter()
+            .filter(|member| !previous_members.contains(member))
+            .any(|member| declared_in_locked(member));
+        let ungates = previous_members
+            .iter()
+            .any(|member| !feature.members.contains(member));
+        if previous.is_some_and(|previous| previous == feature) {
             continue;
+        }
+        let (class, detail) = if gates_existing || ungates {
+            (
+                CompatibilityClass::Breaking,
+                format!("feature '{name}' changes which existing members are optional"),
+            )
+        } else if previous.is_none() {
+            (CompatibilityClass::Additive, format!("feature '{name}' was added"))
+        } else {
+            (CompatibilityClass::Additive, format!("feature '{name}' gained new members"))
         };
-        if previous != group {
+        changes.push(ContractChange {
+            class,
+            path: format!("features.{name}"),
+            detail,
+        });
+    }
+    for name in locked.capabilities.features.keys() {
+        if !candidate.capabilities.features.contains_key(name) {
             changes.push(ContractChange {
                 class: CompatibilityClass::Breaking,
-                path: format!("capabilities.featureGroups.{name}"),
-                detail: format!("provider feature group '{name}' changed"),
-            });
-        }
-    }
-    for (name, group) in &locked.capabilities.feature_groups {
-        if !candidate.capabilities.feature_groups.contains_key(name) {
-            changes.push(ContractChange {
-                class: if group.required {
-                    CompatibilityClass::Breaking
-                } else {
-                    CompatibilityClass::Additive
-                },
-                path: format!("capabilities.featureGroups.{name}"),
-                detail: format!("provider feature group '{name}' was removed"),
+                path: format!("features.{name}"),
+                detail: format!("feature '{name}' was removed; its members became mandatory"),
             });
         }
     }
@@ -877,29 +883,32 @@ mod tests {
     }
 
     #[test]
-    fn optional_feature_groups_are_additive_but_required_groups_are_breaking() {
-        let mut optional = base();
-        optional.capabilities.feature_groups.insert(
-            "recording".to_string(),
-            crate::contract::ContractFeatureGroup::default(),
+    fn features_over_new_members_are_additive_but_gating_existing_members_breaks() {
+        let added = contract(
+            r#"{"state":[{"name":"percent","type":"float"},{"name":"muted","type":"boolean"}],
+                "methods":[{"name":"set_volume",
+                    "args":[{"name":"percent","type":"float"}],"returns":"Result"},
+                    {"name":"set_app_volume","args":[{"name":"percent","type":"float"}],
+                    "returns":"Result"}],
+                "events":[{"name":"VolumeChanged","payload":[{"name":"level","type":"float"}]}],
+                "features":{"per-app-volume":{"members":["set_app_volume"]}}}"#,
         );
-        let diff = diff_contracts(&base(), &optional);
+        let diff = diff_contracts(&base(), &added);
         assert!(!diff.is_breaking());
         assert!(diff.changes.iter().any(|change| {
-            change.path == "capabilities.featureGroups.recording"
-                && change.class == CompatibilityClass::Additive
+            change.path == "features.per-app-volume" && change.class == CompatibilityClass::Additive
         }));
 
-        let mut required = base();
-        required.capabilities.feature_groups.insert(
-            "exclusive_output".to_string(),
-            crate::contract::ContractFeatureGroup {
-                required: true,
-                ..Default::default()
+        let mut gated = base();
+        gated.capabilities.features.insert(
+            "control".to_string(),
+            crate::contract::ContractFeature {
+                description: None,
+                members: vec!["set_volume".into()],
             },
         );
-        let diff = diff_contracts(&base(), &required);
-        assert!(diff.is_breaking());
+        assert!(diff_contracts(&base(), &gated).is_breaking());
+        assert!(diff_contracts(&gated, &base()).is_breaking());
     }
 
     #[test]

@@ -100,6 +100,21 @@ pub fn generate_luau_consumer_types(contract: &CompiledContract) -> String {
 
     output.push_str("export type Service = State & Events & {\n");
     output.push_str("    state: State,\n    events: Events,\n");
+    let feature_names = contract
+        .features
+        .keys()
+        .map(|name| format!("\"{name}\""))
+        .collect::<Vec<_>>();
+    let feature_type = if feature_names.is_empty() {
+        "string".to_string()
+    } else {
+        feature_names.join(" | ")
+    };
+    writeln!(
+        output,
+        "    -- Whether the bound provider supplies an optional feature.\n    supports: (self: any, feature: {feature_type}) -> boolean,"
+    )
+    .unwrap();
     for method in contract.schemas.methods.iter() {
         writeln!(output, "    {}: {},", method.name, luau_method_type(method)).unwrap();
     }

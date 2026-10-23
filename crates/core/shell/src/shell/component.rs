@@ -1631,6 +1631,7 @@ impl FrontendSurfaceComponent {
         let snapshot = handle.snapshot();
         self.frontend_catalog_handle = handle;
         self.child_settings_cache.get_mut().clear();
+        self.resolved_surface_shortcuts_cache.get_mut().take();
         self.frontend_catalog = snapshot.catalog;
         self.frontend_catalog_version = snapshot.version;
         self.last_frontend_frame = None;

@@ -14,7 +14,8 @@ All are `ui` modules. Placement is `surface` when the module declares default
 
 | Module | Placement | Entrypoint | Purpose |
 | --- | --- | --- | --- |
-| `@mesh/navigation-bar` | surface | `src/main.mesh` | Main navigation surface |
+| `@mesh/navigation-bar` | surface | `src/main.mesh` | Top bar with start/center/end `mesh.navigation.item` regions; defaults place the widget modules below |
+| `@mesh/workspaces-widget`, `@mesh/window-title-widget`, `@mesh/clock-widget`, `@mesh/brightness-widget`, `@mesh/volume-widget`, `@mesh/theme-widget`, `@mesh/language-widget`, `@mesh/battery-widget`, `@mesh/settings-widget` | embedded | `src/main.mesh` | Independent `mesh.navigation.item` contributions any bar can host; per-instance props come from profile placements |
 | `@mesh/audio-popover` | embedded | `src/main.mesh` | Audio control surface |
 | `@mesh/quick-settings` | embedded | `src/main.mesh` | Quick settings surface |
 | `@mesh/settings` | surface | `src/main.mesh` | Current settings surface |
@@ -90,6 +91,7 @@ and easing, with separate entrance animations for islands, cards and popups.
 | `@mesh/wallpapers-interface` | interface | `mesh.wallpapers` wallpaper library contract |
 | `@mesh/recorder-interface` | interface | `mesh.recorder` screen-recording contract |
 | `@mesh/violet-glass` | theme | Violet glass palette with monospace type; tunes `@mesh/glass-material` |
+| `@mesh/volume-presentation` | library | Luau `require("@mesh/volume-presentation/volume")`: level normalization, scroll steps and the semantic volume icon shared by every audio frontend |
 | `@mesh/glass-material` | library | Shared surface gradients, translucent fills, text, accents, rims, hovers and shadows; defaults derive from any theme, with Violet Glass tuning the original palette |
 | `@mesh/shell-ui-interface` | interface | Named UI extension-point contracts a host surface renders foreign module UI into |
 | `@mesh/icons-default` | icon-pack | Default semantic icon mappings |

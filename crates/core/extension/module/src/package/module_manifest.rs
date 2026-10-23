@@ -1351,6 +1351,9 @@ pub struct MeshProvidesDeclaration {
     pub label: Option<manifest::LocalizedText>,
     #[serde(default)]
     pub priority: u32,
+    /// Optional contract features this provider supplies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<String>,
 }
 
 impl MeshProvidesDeclaration {
@@ -1566,6 +1569,7 @@ impl From<crate::manifest::ProvidedInterface> for MeshProvidesDeclaration {
                 .backend_name
                 .map(crate::manifest::LocalizedText::Literal),
             priority: provided.priority,
+            features: Vec::new(),
         }
     }
 }

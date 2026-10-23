@@ -35,13 +35,13 @@ pub use compatibility::{
 };
 pub use contract::{
     BaseType, CommandCoalescing, CompiledBehavioralMetadata, CompiledContract, CompiledEventSchema,
-    CompiledFeatureGroup, CompiledField, CompiledMethodBehavior, CompiledMethodSchema,
+    CompiledFeature, CompiledField, CompiledMethodBehavior, CompiledMethodSchema,
     CompiledOperationPolicy, CompiledSchemas, CompiledStateField, CompiledTypeSchema,
-    ContractCapabilities, ContractError, ContractFeatureGroup, ContractStateField,
+    ContractCapabilities, ContractError, ContractFeature, ContractStateField,
     DeclarationProvenance, FeatureNegotiation, InterfaceArgument, InterfaceContract,
     InterfaceEvent, InterfaceMethod, InterfaceTypeDef, RUNTIME_METADATA_STATE_FIELDS, StateBinding,
-    TypeExpr, compile_interface_contract, contract_type_errors, json_type_name,
-    negotiate_feature_groups, parse_compiled_contract, parse_compiled_contract_with_provenance,
+    SUPPORTS_MEMBER, TypeExpr, compile_interface_contract, contract_type_errors, json_type_name,
+    negotiate_features, parse_compiled_contract, parse_compiled_contract_with_provenance,
     parse_contract_version, parse_interface_contract, parse_version_req,
 };
 pub use generator::{

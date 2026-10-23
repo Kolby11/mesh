@@ -1010,3 +1010,137 @@ is_null = decoded.value == mesh.json.null
     );
     assert_eq!(context.state.get("is_null"), Some(serde_json::json!(true)));
 }
+
+#[test]
+fn luau_libraries_load_once_in_a_private_environment() {
+    let root = std::env::temp_dir().join(format!("mesh-luau-library-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("nested")).unwrap();
+    std::fs::write(
+        root.join("volume.luau"),
+        "loads = (loads or 0) + 1\nlocal M = {}\nfunction M.icon(level) return level > 50 and 'high' or 'low' end\nreturn M",
+    )
+    .unwrap();
+    std::fs::write(root.join("nested/value.luau"), "return 7").unwrap();
+    let mut libraries = LuauLibraries::default();
+    libraries.insert("@alice/kit", &root);
+    let mut ctx = ScriptContext::new("@alice/widget", CapabilitySet::default()).unwrap();
+    ctx.set_luau_libraries(libraries);
+    ctx.load_script(
+        r#"
+local volume = require("@alice/kit/volume")
+same = volume == require("@alice/kit/volume")
+icon = volume.icon(80)
+nested = require("@alice/kit/nested/value")
+leaked = loads == nil
+undeclared = pcall(require, "@bob/kit/volume")
+escaped = pcall(require, "@alice/kit/../volume")
+"#,
+    )
+    .unwrap();
+
+    assert_eq!(ctx.state.get("same"), Some(Value::Bool(true)));
+    assert_eq!(ctx.state.get("icon"), Some(Value::String("high".into())));
+    assert_eq!(ctx.state.get("nested"), Some(Value::from(7)));
+    assert_eq!(ctx.state.get("leaked"), Some(Value::Bool(true)));
+    assert_eq!(ctx.state.get("undeclared"), Some(Value::Bool(false)));
+    assert_eq!(ctx.state.get("escaped"), Some(Value::Bool(false)));
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+fn thermal_catalog(features: &[&str]) -> mesh_core_service::InterfaceCatalog {
+    let mut catalog = mesh_core_service::InterfaceCatalog::default();
+    catalog.register_contract(
+        mesh_core_service::parse_interface_contract(
+            "mesh.thermal",
+            "1.0",
+            &serde_json::json!({
+                "state": {
+                    "available": { "type": "boolean" },
+                    "fans": { "type": "int?" }
+                },
+                "methods": { "calibrate": {}, "set_fan": {} },
+                "features": { "fan-control": { "members": ["fans", "set_fan"] } },
+                "capabilities": {
+                    "read": ["service.thermal.read"],
+                    "methods": {
+                        "calibrate": ["service.thermal.control"],
+                        "set_fan": ["service.thermal.control"]
+                    }
+                }
+            }),
+        )
+        .unwrap(),
+    );
+    catalog.register_provider(mesh_core_service::InterfaceProvider {
+        interface: "mesh.thermal".into(),
+        version: Some("1.0".into()),
+        base_module: None,
+        provider_module: "@alice/thermal".into(),
+        backend_name: "thermal".into(),
+        priority: 100,
+    });
+    catalog.register_provider_features("mesh.thermal", "@alice/thermal", features.iter().copied());
+    catalog
+}
+
+fn thermal_context(features: &[&str]) -> ScriptContext {
+    let caps = CapabilitySet::from_ids(["service.thermal.read", "service.thermal.control"]);
+    let mut ctx = ScriptContext::new("@alice/panel", caps).unwrap();
+    ctx.set_interface_catalog(thermal_catalog(features));
+    ctx.load_script(
+        r#"
+local thermal = require("mesh.thermal")
+supported = thermal:supports("fan-control")
+dot_supported = thermal.supports("fan-control")
+unknown = thermal:supports("turbo")
+local result = thermal.set_fan()
+fan_call_ok = result.ok ~= false
+fan_call_error = result.error
+fans_seen = nil
+function read_fans()
+    fans_seen = thermal.fans
+end
+"#,
+    )
+    .unwrap();
+    ctx.apply_service_payload(
+        "thermal",
+        &serde_json::json!({ "available": true, "fans": 2 }),
+    );
+    ctx.call_handler("read_fans", &[]).unwrap();
+    ctx
+}
+
+#[test]
+fn unsupported_contract_features_are_absent_from_the_proxy() {
+    let mut ctx = thermal_context(&[]);
+    assert_eq!(ctx.state.get("supported"), Some(Value::Bool(false)));
+    assert_eq!(ctx.state.get("dot_supported"), Some(Value::Bool(false)));
+    assert_eq!(ctx.state.get("unknown"), Some(Value::Bool(false)));
+    assert_eq!(ctx.state.get("fan_call_ok"), Some(Value::Bool(false)));
+    assert_eq!(
+        ctx.state.get("fan_call_error"),
+        Some(Value::String(
+            "mesh.thermal provider does not support feature 'fan-control'".into()
+        ))
+    );
+    assert_eq!(ctx.state.get("fans_seen"), None);
+    assert!(
+        ctx.drain_published_events().is_empty(),
+        "a gated call is never dispatched"
+    );
+}
+
+#[test]
+fn advertised_contract_features_dispatch_normally() {
+    let mut ctx = thermal_context(&["fan-control"]);
+    assert_eq!(ctx.state.get("supported"), Some(Value::Bool(true)));
+    assert_eq!(ctx.state.get("unknown"), Some(Value::Bool(false)));
+    assert_eq!(ctx.state.get("fan_call_ok"), Some(Value::Bool(true)));
+    assert_eq!(ctx.state.get("fans_seen"), Some(Value::from(2)));
+    assert!(
+        ctx.drain_published_events()
+            .iter()
+            .any(|event| event.channel == "mesh.thermal.set_fan")
+    );
+}

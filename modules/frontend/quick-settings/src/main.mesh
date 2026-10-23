@@ -81,19 +81,12 @@ locale_is_sk = false
 local audio      = require("mesh.audio")
 local brightness = require("mesh.brightness")
 local theme      = require("mesh.theme")
-
-local function volume_icon_for(percent, muted)
-    if muted or percent == 0 then return "audio-volume-muted"
-    elseif percent < 34 then return "audio-volume-low"
-    elseif percent < 67 then return "audio-volume-medium"
-    else return "audio-volume-high"
-    end
-end
+local volume     = require("@mesh/volume-presentation/volume")
 
 local function sync_volume(percent, muted)
     volume_percent = percent
     volume_label   = mesh.locale.format_percent(percent)
-    volume_icon    = volume_icon_for(percent, muted)
+    volume_icon    = volume.icon(percent, muted)
 end
 
 local function sync_theme(is_dark)
@@ -115,8 +108,7 @@ end
 
 effect(function(self)
     if audio and audio.available then
-        local p = math.max(0, math.min(100, math.floor(tonumber(audio.percent) or 0)))
-        sync_volume(p, audio.muted or false)
+        sync_volume(volume.percent(audio.percent), audio.muted or false)
     end
 
     if brightness and brightness.level ~= nil then

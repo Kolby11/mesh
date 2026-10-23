@@ -28,6 +28,7 @@
 <script lang="luau">
 local audio = require("mesh.audio")
 local AudioPopover = require("@mesh/audio-popover")
+local volume = require("@mesh/volume-presentation/volume")
 
 icon_name = "audio-volume-muted"
 audio_tooltip_key = "nav.volume_unavailable"
@@ -43,18 +44,9 @@ local function normalized_scroll_sensitivity()
 end
 
 local function update_audio_copy(percent, muted)
-    local safe = math.floor(percent)
+    local safe = volume.percent(percent)
     audio_percent = safe
-
-    if muted or safe == 0 then
-        icon_name = "audio-volume-muted"
-    elseif safe < 34 then
-        icon_name = "audio-volume-low"
-    elseif safe < 67 then
-        icon_name = "audio-volume-medium"
-    else
-        icon_name = "audio-volume-high"
-    end
+    icon_name = volume.icon(safe, muted)
 
     if muted then
         audio_tooltip_key = "nav.volume_muted_at"
@@ -66,7 +58,7 @@ end
 
 audio.VolumeChanged:on(function(event)
     -- Event payloads carry no declared range, unlike `audio.percent`.
-    update_audio_copy(math.clamp(event.level, 0, 100), audio.muted)
+    update_audio_copy(event.level, audio.muted)
 end)
 
 effect(function(self)
@@ -108,9 +100,7 @@ function onVolumeScroll(event)
         return
     end
 
-    local amount = normalized_scroll_sensitivity()
-    local step = dy > 0 and amount or -amount
-    update_audio_copy(math.clamp(audio_percent + step, 0, 100), false)
+    update_audio_copy(volume.step(audio_percent, dy, normalized_scroll_sensitivity()), false)
     audio.set_volume("default", audio_percent)
 end
 </script>

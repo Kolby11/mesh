@@ -5,6 +5,7 @@ mod context;
 mod effects;
 mod helpers;
 mod host_api;
+mod libraries;
 mod lifecycle;
 mod prop_layers;
 mod shell_api;
@@ -15,6 +16,7 @@ mod template;
 mod vm;
 
 pub use context::*;
+pub use libraries::LuauLibraries;
 pub use vm::*;
 
 pub(in crate::context::runtime) use helpers::*;

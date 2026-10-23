@@ -1,0 +1,17 @@
+{
+  "name": "@mesh/volume-presentation",
+  "version": "0.1.0",
+  "description": "Shared volume presentation for audio frontends: level normalization and the semantic volume icon.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "library",
+    "provides": {
+      "libraries": [
+        {
+          "namespace": "@mesh/volume-presentation",
+          "path": "lib"
+        }
+      ]
+    }
+  }
+}

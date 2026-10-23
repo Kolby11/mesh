@@ -65,6 +65,7 @@ fn inline_backend_interface_declaration_registers_contract() {
             provider: Some("hyprland".into()),
             label: None,
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -144,6 +145,7 @@ fn duplicate_interface_declaration_rejects_inline_copy() {
             provider: Some("example".into()),
             label: None,
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -180,6 +182,7 @@ fn inline_example_backend(module_id: &str, priority: u32, method: &str) -> Loade
             provider: Some(module_id.into()),
             label: None,
             priority,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -436,6 +439,7 @@ end
             provider: Some("example".into()),
             label: None,
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -544,6 +548,7 @@ fn graph_health_marks_active_provider_unavailable_when_required_binary_is_missin
             provider: Some("test".into()),
             label: Some(crate::manifest::LocalizedText::Literal("Test".to_string())),
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -606,6 +611,7 @@ fn graph_health_marks_frontend_required_interface_unavailable_when_active_provid
             provider: Some("test".into()),
             label: None,
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -664,6 +670,7 @@ fn graph_diagnostics_flag_backend_provider_restating_consumer_capability() {
             provider: Some("example".into()),
             label: None,
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -746,6 +753,7 @@ fn graph_diagnostics_report_frontend_missing_interface_required_capability() {
             provider: Some("example".into()),
             label: None,
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -788,6 +796,7 @@ fn graph_diagnostics_report_backend_provider_missing_base_module_dependency() {
             provider: Some("example".into()),
             label: None,
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -826,6 +835,7 @@ fn graph_diagnostics_accept_backend_provider_declared_base_module_dependency() {
             provider: Some("example".into()),
             label: None,
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -856,6 +866,7 @@ fn interface_contracts_declare_owned_service_permissions() {
             provider: Some("openmeteo".into()),
             label: None,
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     ));
@@ -971,6 +982,7 @@ fn a_missing_required_provider_degrades_while_an_unusable_one_blocks() {
             provider: Some("old".into()),
             label: None,
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     ));
@@ -1149,4 +1161,54 @@ fn wm_contract_separates_workspace_identity_position_and_output_focus() {
             contract.state_warnings(&state)
         );
     }
+}
+
+#[test]
+fn providers_advertising_undeclared_features_get_a_diagnostic() {
+    let root = root_with_modules(
+        &[("@alice/thermal", ModuleKind::Backend)],
+        &[("alice.thermal", "@alice/thermal")],
+        None,
+    );
+    let mut backend = loaded_module(
+        "@alice/thermal",
+        ModuleKind::Backend,
+        MeshDependencies::default(),
+        vec![MeshProvidesDeclaration {
+            interface: "alice.thermal".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider: Some("thermal".into()),
+            label: None,
+            priority: 100,
+            features: vec!["fan-control".into(), "turbo".into()],
+        }],
+        MeshContributes::default(),
+    );
+    backend.manifest.mesh.interfaces =
+        vec![crate::package::module_manifest::MeshInterfaceDeclaration {
+            name: "alice.thermal".into(),
+            version: Some("1.0".into()),
+            contract: Some(serde_json::json!({
+                "state": { "fans": { "type": "int?" } },
+                "methods": { "set_fan": {} },
+                "features": { "fan-control": { "members": ["fans", "set_fan"] } }
+            })),
+            domain: Some("thermal".into()),
+            extends: None,
+            relationship: Some(crate::package::module_manifest::InterfaceRelationship::Base),
+            reason: None,
+        }];
+
+    let graph = InstalledModuleGraph::from_parts(root, vec![backend]).unwrap();
+
+    let provider = &graph.backend_provider_contributions()[0];
+    assert_eq!(provider.features, vec!["fan-control".to_string(), "turbo".to_string()]);
+    let unknown = graph
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.status == "unknown_provider_feature")
+        .collect::<Vec<_>>();
+    assert_eq!(unknown.len(), 1, "{unknown:?}");
+    assert!(unknown[0].message.contains("'turbo'"));
 }

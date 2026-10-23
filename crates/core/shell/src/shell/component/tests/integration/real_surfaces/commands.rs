@@ -119,7 +119,7 @@ fn shipped_workspace_button_publishes_focus_workspace_request() {
     ctx.set_interface_catalog(catalog);
     ctx.load_script(&shipped_component_script(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../modules/frontend/navigation-bar/src/components/workspace-list.mesh"
+        "/../../../modules/frontend/workspaces-widget/src/main.mesh"
     ))))
     .unwrap();
 
@@ -167,14 +167,14 @@ fn real_core_surfaces_reject_legacy_service_callback_api_in_shipped_surfaces() {
             "navigation-bar volume button",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
+                "/../../../modules/frontend/volume-widget/src/main.mesh"
             )),
         ),
         (
             "navigation-bar settings button",
             include_str!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/../../../modules/frontend/navigation-bar/src/components/settings-button.mesh"
+                "/../../../modules/frontend/settings-widget/src/main.mesh"
             )),
         ),
     ];
@@ -215,6 +215,7 @@ fn real_quick_settings_theme_chips_switch_the_active_theme_mode() {
         priority: 100,
     });
     ctx.set_interface_catalog(catalog);
+    ctx.set_luau_libraries(crate::shell::component::runtime::shipped_luau_libraries());
     ctx.load_script(&shipped_component_script(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../../modules/frontend/quick-settings/src/main.mesh"

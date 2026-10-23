@@ -27,9 +27,21 @@
         "exec.argv:brightnessctl:[\"set\",\"*\"]",
         "fs.watch"
       ],
+      "@mesh/battery-widget": [
+        "locale.read",
+        "service.power.read"
+      ],
       "@mesh/blur-test": ["shell.surface", "theme.read"],
+      "@mesh/brightness-widget": [
+        "locale.read",
+        "service.brightness.control",
+        "service.brightness.read"
+      ],
       "@mesh/cava-visualizer": [
         "exec.argv:sh:[\"-c\",\"c=\\\"${XDG_RUNTIME_DIR:-/tmp}/mesh-cava.conf\\\"; printf '[general]\\\\nbars = 24\\\\nframerate = 30\\\\nsleep_timer = 1\\\\n[output]\\\\nmethod = raw\\\\nraw_target = /dev/stdout\\\\ndata_format = ascii\\\\nascii_max_range = 1000\\\\nbar_delimiter = 59\\\\nframe_delimiter = 10\\\\n[smoothing]\\\\nnoise_reduction = 77\\\\n' > \\\"$c\\\" && exec cava -p \\\"$c\\\"\"]"
+      ],
+      "@mesh/clock-widget": [
+        "locale.read"
       ],
       "@mesh/composition-editor": [
         "service.composition.control",
@@ -144,6 +156,9 @@
         "net.socket"
       ],
       "@mesh/language-popover": ["locale.read", "locale.write"],
+      "@mesh/language-widget": [
+        "locale.read"
+      ],
       "@mesh/mpris-media": [
         "exec.argv:curl:[\"-sfL\",\"--max-time\",\"10\",\"-o\",\"*\",\"*\"]",
         "exec.argv:playerctl:[\"--follow\",\"metadata\",\"--format\",\"*\"]",
@@ -155,19 +170,8 @@
         "exec.argv:sh:[\"-c\",\"d=\\\"${XDG_CACHE_HOME:-$HOME/.cache}/mesh/media-art\\\"; mkdir -p \\\"$d\\\" && printf '%s' \\\"$d\\\"\"]"
       ],
       "@mesh/navigation-bar": [
-        "locale.read",
-        "locale.write",
-        "service.audio.control",
-        "service.audio.read",
-        "service.brightness.control",
-        "service.brightness.read",
-        "service.media.read",
-        "service.power.read",
         "service.settings.read",
-        "service.wm.control",
-        "service.wm.read",
-        "shell.surface",
-        "theme.read"
+        "shell.surface"
       ],
       "@mesh/networkmanager-network": [
         "dbus.system",
@@ -238,14 +242,27 @@
         "shell.surface",
         "theme.read"
       ],
+      "@mesh/settings-widget": [
+        "locale.read",
+        "shell.surface"
+      ],
       "@mesh/text-selection-proof": ["shell.surface", "theme.read"],
       "@mesh/theme-selector": ["service.theme.control", "theme.read"],
+      "@mesh/theme-widget": [
+        "locale.read",
+        "theme.read"
+      ],
       "@mesh/touch-gesture-proof": ["shell.surface", "theme.read"],
       "@mesh/upower-power": [
         "dbus.system",
         "exec.argv:upower:[\"-e\"]",
         "exec.argv:upower:[\"-i\",\"*\"]",
         "exec.argv:upower:[\"--monitor\"]"
+      ],
+      "@mesh/volume-widget": [
+        "locale.read",
+        "service.audio.control",
+        "service.audio.read"
       ],
       "@mesh/wallpaper-directory": [
         "exec.argv:sh:[\"-c\",\"d=\\\"$1\\\"; [ \\\"$d\\\" = \\\"~\\\" ] && d=\\\"$HOME\\\"; [ \\\"${d#\\\"~/\\\"}\\\" != \\\"$d\\\" ] && d=\\\"$HOME/${d#\\\"~/\\\"}\\\"; [ -d \\\"$d\\\" ] || exit 1; printf '%s\\\\n' \\\"$d\\\"; find \\\"$d\\\" -maxdepth 1 -type f\",\"sh\",\"*\"]",
@@ -256,6 +273,13 @@
         "exec.argv:pkill:[\"-INT\",\"-x\",\"wf-recorder\"]",
         "exec.argv:sh:[\"-c\",\"d=\\\"${XDG_VIDEOS_DIR:-$HOME/Videos}/Recordings\\\"; mkdir -p \\\"$d\\\" && printf '%s' \\\"$d\\\"\"]",
         "exec.argv:wf-recorder:[\"-f\",\"*\"]"
+      ],
+      "@mesh/window-title-widget": [
+        "service.wm.read"
+      ],
+      "@mesh/workspaces-widget": [
+        "service.wm.control",
+        "service.wm.read"
       ]
     },
     "schemaVersion": 1

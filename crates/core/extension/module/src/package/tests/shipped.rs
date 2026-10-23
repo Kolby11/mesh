@@ -16,9 +16,9 @@ fn shipped_language_popover_reads_locale_from_the_shell_service() {
 }
 
 #[test]
-fn shipped_navigation_manifest_uses_explicit_localized_keybind_text() {
+fn shipped_volume_widget_manifest_uses_explicit_localized_keybind_text() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../modules/frontend/navigation-bar");
+        .join("../../../../modules/frontend/volume-widget");
     let loaded = load_module_manifest(&dir).unwrap();
 
     assert!(
@@ -27,14 +27,13 @@ fn shipped_navigation_manifest_uses_explicit_localized_keybind_text() {
                 .message
                 .contains("looks like an i18n key but is a raw literal string")
         }),
-        "shipped navigation manifest should not use ambiguous raw i18n keys: {:?}",
+        "shipped volume widget manifest should not use ambiguous raw i18n keys: {:?}",
         loaded.diagnostics
     );
     assert_eq!(
         loaded.manifest.mesh.i18n.default_locale.as_deref(),
         Some("en")
     );
-    // supportedLocales removed from navigation-bar; locales are declared once via contributes.i18n
     assert!(loaded.manifest.mesh.i18n.supported_locales.is_empty());
     assert!(
         loaded
@@ -62,7 +61,7 @@ fn shipped_navigation_manifest_uses_explicit_localized_keybind_text() {
         .keybinds
         .actions
         .get("mute")
-        .expect("navigation mute keybind");
+        .expect("volume widget mute keybind");
     assert_eq!(
         action.label,
         Some(crate::manifest::LocalizedText::Translation {
@@ -180,14 +179,14 @@ fn shipped_module_graph_loads_repo_module_fixture() {
         graph
             .keybind_actions()
             .iter()
-            .any(|keybind| keybind.module_id == "@mesh/navigation-bar"
+            .any(|keybind| keybind.module_id == "@mesh/volume-widget"
                 && keybind.action_id == "mute")
     );
     assert!(
         graph
             .icon_requirements()
             .iter()
-            .any(|icon| icon.module_id == "@mesh/navigation-bar"
+            .any(|icon| icon.module_id == "@mesh/volume-widget"
                 && icon.name == "audio-volume-high"
                 && icon.required)
     );
@@ -254,13 +253,13 @@ fn shipped_debug_inspector_resolves_its_cataloged_activation_capabilities() {
 }
 
 #[test]
-fn shipped_module_graph_preserves_navigation_localized_keybind_text() {
+fn shipped_module_graph_preserves_volume_widget_localized_keybind_text() {
     let graph = load_installed_module_graph(shipped_graph_path()).unwrap();
     let keybind = graph
         .keybind_actions()
         .iter()
-        .find(|keybind| keybind.module_id == "@mesh/navigation-bar" && keybind.action_id == "mute")
-        .expect("navigation mute keybind contribution");
+        .find(|keybind| keybind.module_id == "@mesh/volume-widget" && keybind.action_id == "mute")
+        .expect("volume widget mute keybind contribution");
 
     assert_eq!(
         keybind.label.as_ref(),
@@ -329,31 +328,29 @@ fn shipped_module_diagnostics_report_missing_navigation_icon() {
 #[test]
 fn shipped_frontend_icon_literals_are_declared() {
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
-    let module_dir = workspace_root.join("modules/frontend/navigation-bar");
-    let loaded = load_module_manifest(&module_dir).unwrap();
-    let declared = loaded
-        .manifest
-        .mesh
-        .icon_requirements
-        .required
-        .iter()
-        .chain(loaded.manifest.mesh.icon_requirements.optional.iter())
-        .collect::<std::collections::HashSet<_>>();
-
-    for source_path in [
-        module_dir.join("src/main.mesh"),
-        module_dir.join("src/components/battery-button.mesh"),
-        module_dir.join("src/components/volume-button.mesh"),
-        module_dir.join("src/components/now-playing.mesh"),
-        module_dir.join("src/components/settings-button.mesh"),
-        module_dir.join("src/components/theme-button.mesh"),
+    for module in [
+        "navigation-bar",
+        "battery-widget",
+        "volume-widget",
+        "settings-widget",
+        "theme-widget",
+        "brightness-widget",
     ] {
-        let source = fs::read_to_string(&source_path).unwrap();
+        let module_dir = workspace_root.join("modules/frontend").join(module);
+        let loaded = load_module_manifest(&module_dir).unwrap();
+        let declared = loaded
+            .manifest
+            .mesh
+            .icon_requirements
+            .required
+            .iter()
+            .chain(loaded.manifest.mesh.icon_requirements.optional.iter())
+            .collect::<std::collections::HashSet<_>>();
+        let source = fs::read_to_string(module_dir.join("src/main.mesh")).unwrap();
         for icon in obvious_semantic_icon_literals(&source) {
             assert!(
                 declared.contains(&icon),
-                "{} uses semantic icon '{icon}' but @mesh/navigation-bar does not declare it in iconRequirements",
-                source_path.display()
+                "@mesh/{module} uses semantic icon '{icon}' but does not declare it in iconRequirements"
             );
         }
     }
@@ -433,14 +430,14 @@ fn shipped_locale_usage_inventory_includes_props_and_manifest_metadata() {
         );
     }
 
-    let navigation_keys = graph.localized_keys("@mesh/navigation-bar");
+    let volume_keys = graph.localized_keys("@mesh/volume-widget");
     for key in [
         "keybind.mute.label",
         "keybind.mute.description",
         "keybind.category.audio",
     ] {
         assert!(
-            navigation_keys.contains(&key.to_string()),
+            volume_keys.contains(&key.to_string()),
             "missing manifest key {key}"
         );
     }

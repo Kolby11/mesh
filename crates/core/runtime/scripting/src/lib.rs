@@ -32,7 +32,7 @@ pub use backend::{
     StreamExitStatus, StreamHandle, StreamId, StreamLine, StreamState, StreamStatus,
 };
 pub use context::{
-    ElementAction, LocaleBoundState, PublishedEvent, ScriptContext, ScriptDiagnostic,
+    ElementAction, LocaleBoundState, LuauLibraries, PublishedEvent, ScriptContext, ScriptDiagnostic,
     ScriptDiagnosticCategory, ScriptError, ScriptInterfaceImport, ScriptState, SurfaceVm,
 };
 pub use operation::{OperationRegistry, OperationRejection, ShellOperation};

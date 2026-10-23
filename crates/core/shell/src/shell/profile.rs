@@ -606,6 +606,7 @@ pub(super) fn interface_catalog_for_graph(
             .entry(interface.clone())
             .or_default()
             .push(provider.module_id.clone());
+        catalog.register_provider_features(&interface, &provider.module_id, &provider.features);
         catalog.register_provider(mesh_core_service::InterfaceProvider {
             interface,
             version: provider.version.clone(),

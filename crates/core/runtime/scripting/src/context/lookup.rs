@@ -61,7 +61,6 @@ pub(super) fn degrades_to_unavailable(
 ) -> bool {
     resolution.provider.is_none()
         && resolution.contract.is_some()
-        && resolution.feature_negotiation.missing_required.is_empty()
         && catalog.providers_for(&resolution.requested).is_empty()
 }
 
@@ -69,16 +68,6 @@ pub(super) fn lookup_failure_reason(
     catalog: &ResolvedServiceCatalog,
     resolution: &InterfaceResolution,
 ) -> String {
-    if !resolution.feature_negotiation.missing_required.is_empty() {
-        let groups = resolution
-            .feature_negotiation
-            .missing_required
-            .iter()
-            .map(String::as_str)
-            .collect::<Vec<_>>()
-            .join(", ");
-        return format!("provider is missing required feature groups: {groups}");
-    }
     let has_contracts = !catalog.contracts_for(&resolution.requested).is_empty();
     let has_providers = !catalog.providers_for(&resolution.requested).is_empty();
 

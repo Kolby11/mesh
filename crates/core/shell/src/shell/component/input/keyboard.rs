@@ -561,12 +561,40 @@ impl FrontendSurfaceComponent {
         declarations
     }
 
+    /// The module declaring `keybind_id` for this surface and its action,
+    /// in the precedence of [`Self::manifest_surface_shortcut_declarations`].
+    fn keybind_declaration(
+        &self,
+        keybind_id: &str,
+    ) -> Option<(String, mesh_core_module::KeybindAction)> {
+        let host = &self.compiled.manifest;
+        let contributions = self
+            .frontend_catalog
+            .contribution_entries_for_host(&host.package.id);
+        std::iter::once(host)
+            .chain(contributions.iter().map(|compiled| &compiled.manifest))
+            .find_map(|manifest| {
+                manifest
+                    .keybinds
+                    .actions
+                    .get(keybind_id)
+                    .map(|action| (manifest.package.id.clone(), action.clone()))
+            })
+    }
+
+    /// Keybinds the surface module declares, then those of the contribution
+    /// modules it hosts: a navigation item declares its own shortcut. The
+    /// host's declaration wins an id both declare.
     fn manifest_surface_shortcut_declarations(&self) -> Vec<SurfaceShortcutDeclaration> {
-        self.compiled
-            .manifest
-            .keybinds
-            .actions
-            .iter()
+        let host = &self.compiled.manifest;
+        let contributions = self
+            .frontend_catalog
+            .contribution_entries_for_host(&host.package.id);
+        let mut seen = HashSet::new();
+        std::iter::once(host)
+            .chain(contributions.iter().map(|compiled| &compiled.manifest))
+            .flat_map(|manifest| manifest.keybinds.actions.iter())
+            .filter(|(keybind_id, _)| seen.insert(keybind_id.as_str()))
             .map(|(keybind_id, action)| SurfaceShortcutDeclaration {
                 keybind_id: keybind_id.clone(),
                 generic_trigger: action.trigger.clone(),
@@ -580,7 +608,7 @@ impl FrontendSurfaceComponent {
     }
 
     pub(in crate::shell::component) fn has_surface_shortcut_declarations(&self) -> bool {
-        !self.compiled.manifest.keybinds.actions.is_empty()
+        !self.manifest_surface_shortcut_declarations().is_empty()
             || !self
                 .legacy_settings_surface_shortcut_declarations()
                 .is_empty()
@@ -682,16 +710,16 @@ impl FrontendSurfaceComponent {
         self.resolved_surface_shortcuts(&keyboard_settings)
             .into_iter()
             .map(|shortcut| {
-                let action = self
-                    .compiled
-                    .manifest
-                    .keybinds
-                    .actions
-                    .get(&shortcut.keybind_id);
+                let (declaring_module, action) = self
+                    .keybind_declaration(&shortcut.keybind_id)
+                    .map_or((None, None), |(module, action)| (Some(module), Some(action)));
+                let module_id = declaring_module
+                    .unwrap_or_else(|| self.compiled.manifest.package.id.clone());
+                let action = action.as_ref();
                 let label = action.and_then(|action| {
                     action.label.as_ref().map(|text| {
                         self.resolve_manifest_text(
-                            &self.compiled.manifest.package.id,
+                            &module_id,
                             &format!("mesh.contributes.keybinds.{}.label", shortcut.keybind_id),
                             text,
                         )
@@ -700,7 +728,7 @@ impl FrontendSurfaceComponent {
                 let description = action.and_then(|action| {
                     action.description.as_ref().map(|text| {
                         self.resolve_manifest_text(
-                            &self.compiled.manifest.package.id,
+                            &module_id,
                             &format!(
                                 "mesh.contributes.keybinds.{}.description",
                                 shortcut.keybind_id
@@ -712,7 +740,7 @@ impl FrontendSurfaceComponent {
                 let category = action.and_then(|action| {
                     action.category.as_ref().map(|text| {
                         self.resolve_manifest_text(
-                            &self.compiled.manifest.package.id,
+                            &module_id,
                             &format!("mesh.contributes.keybinds.{}.category", shortcut.keybind_id),
                             text,
                         )
@@ -720,7 +748,7 @@ impl FrontendSurfaceComponent {
                 });
                 mesh_core_debug::DebugKeybindEntry {
                     surface_id: self.surface_id().to_string(),
-                    module_id: self.compiled.manifest.package.id.clone(),
+                    module_id: module_id.clone(),
                     action_id: shortcut.keybind_id.clone(),
                     label: label.as_ref().map(|text| text.text.clone()),
                     description: description.as_ref().map(|text| text.text.clone()),

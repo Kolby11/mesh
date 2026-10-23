@@ -105,7 +105,7 @@ fn shipped_navigation_style_fixtures_parse_without_syntax_regression() {
         "../../../../../../../modules/frontend/navigation-bar/src/main.mesh"
     ));
     let volume_rules = parse_fixture_style(include_str!(
-        "../../../../../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
+        "../../../../../../../modules/frontend/volume-widget/src/main.mesh"
     ));
 
     assert!(
@@ -131,12 +131,12 @@ fn shipped_navigation_style_expected_diagnostics_do_not_block_tokens() {
         "../../../../../../../modules/frontend/navigation-bar/src/main.mesh"
     ));
     rules.extend(parse_fixture_style(include_str!(
-        "../../../../../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
+        "../../../../../../../modules/frontend/volume-widget/src/main.mesh"
     )));
     // The hover lift lives in the settings button since the navigation triggers
     // stopped sharing one `.nav-button:hover` rule.
     rules.extend(parse_fixture_style(include_str!(
-        "../../../../../../../modules/frontend/navigation-bar/src/components/settings-button.mesh"
+        "../../../../../../../modules/frontend/settings-widget/src/main.mesh"
     )));
 
     let (nav_style, nav_diagnostics) = resolve_class(&resolver, &rules, "nav-shell");

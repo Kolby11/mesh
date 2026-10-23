@@ -713,7 +713,7 @@ fn navigation_shipped_i18n_covers_all_template_translation_keys() {
             let Some(end) = fragment.find(')') else {
                 continue;
             };
-            let raw = fragment[..end].trim();
+            let raw = fragment[..end].split(',').next().unwrap_or_default().trim();
             let quoted = raw
                 .strip_prefix('"')
                 .and_then(|value| value.strip_suffix('"'))
@@ -727,66 +727,34 @@ fn navigation_shipped_i18n_covers_all_template_translation_keys() {
         }
     }
 
-    let mut keys = Vec::new();
-    for source in [
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../modules/frontend/navigation-bar/src/main.mesh"
-        )),
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../modules/frontend/navigation-bar/src/components/battery-button.mesh"
-        )),
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../modules/frontend/navigation-bar/src/components/language-button.mesh"
-        )),
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../modules/frontend/navigation-bar/src/components/meta-label.mesh"
-        )),
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../modules/frontend/navigation-bar/src/components/meta-pill.mesh"
-        )),
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../modules/frontend/navigation-bar/src/components/settings-button.mesh"
-        )),
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../modules/frontend/navigation-bar/src/components/theme-button.mesh"
-        )),
-        include_str!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
-        )),
-    ] {
-        collect_keys(source, &mut keys);
-    }
-    keys.sort();
-    keys.dedup();
-
-    let en: serde_json::Value = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../modules/frontend/navigation-bar/config/i18n/en.json"
-    )))
-    .unwrap();
-    let sk: serde_json::Value = serde_json::from_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../modules/frontend/navigation-bar/config/i18n/sk.json"
-    )))
-    .unwrap();
-
-    for key in keys {
-        assert!(
-            en.get(&key).is_some(),
-            "missing English nav translation for {key}"
+    let modules = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../modules/frontend");
+    for widget in NAVIGATION_WIDGET_MODULES {
+        let widget_dir = modules.join(widget);
+        let mut keys = Vec::new();
+        collect_keys(
+            &std::fs::read_to_string(widget_dir.join("src/main.mesh")).unwrap(),
+            &mut keys,
         );
-        assert!(
-            sk.get(&key).is_some(),
-            "missing Slovak nav translation for {key}"
-        );
+        keys.sort();
+        keys.dedup();
+        if keys.is_empty() {
+            continue;
+        }
+        let catalog = |locale: &str| -> serde_json::Value {
+            let path = widget_dir.join(format!("config/i18n/{locale}.json"));
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap()
+        };
+        let (en, sk) = (catalog("en"), catalog("sk"));
+        for key in keys {
+            assert!(
+                en.get(&key).is_some(),
+                "{widget}: missing English translation for {key}"
+            );
+            assert!(
+                sk.get(&key).is_some(),
+                "{widget}: missing Slovak translation for {key}"
+            );
+        }
     }
 }
 
@@ -1467,18 +1435,24 @@ fn navigation_bar_volume_scroll_changes_level_immediately() {
 }
 
 #[test]
-fn navigation_bar_volume_scroll_respects_instance_sensitivity() {
+fn navigation_bar_volume_scroll_respects_placement_props() {
     let mut component =
         real_frontend_module_component("@mesh/navigation-bar", navigation_bar_catalog());
-    component.settings_json = serde_json::json!({
-        "props": {
-            "instances": {
-                "@mesh/navigation-bar/slot:end/default-1": {
-                    "scroll_sensitivity": 12
-                }
-            }
-        }
-    });
+    let mut catalog = (*component.frontend_catalog).clone();
+    let placement: mesh_core_module::package::NodeSlotOverride =
+        serde_json::from_value(serde_json::json!({
+            "nodes": [{
+                "id": "volume",
+                "use": "@mesh/volume-widget:volume",
+                "props": { "scroll_sensitivity": 12 }
+            }]
+        }))
+        .unwrap();
+    catalog.node_slot_placements.insert(
+        component.root_instance_key().to_string(),
+        std::collections::BTreeMap::from([("end".to_string(), placement)]),
+    );
+    component.adopt_frontend_catalog(catalog.into());
     component
         .handle_service_event(&ServiceEvent::Updated {
             service: "mesh.audio".into(),
@@ -1509,7 +1483,7 @@ fn navigation_bar_volume_scroll_respects_instance_sensitivity() {
         .expect("rendered navigation tree");
     let volume_button = first_node_with_click_handler(
         tree,
-        "__mesh_embed__::@mesh/navigation-bar/slot:end/default-1::onAudioToggle",
+        "__mesh_embed__::@mesh/navigation-bar/slot:end/volume::onAudioToggle",
     )
     .expect("rendered volume button");
     let volume_key = volume_button
@@ -1903,3 +1877,4 @@ fn navigation_quick_settings_popup_animates_open_and_close() {
     );
     assert!(closing_transformed, "closing should lift the popup out");
 }
+

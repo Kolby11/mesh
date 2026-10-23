@@ -112,15 +112,24 @@ fn debug_snapshot_exposes_installed_module_graph_contracts() {
         .find(|entry| entry.module_id == "@mesh/navigation-bar")
         .expect("navigation module graph entry");
 
-    assert!(navigation.uses_interfaces.contains(&"mesh.audio".into()));
-    assert!(navigation.uses_interfaces.contains(&"mesh.power".into()));
+    let entry = |module_id: &str| {
+        snapshot
+            .module_graph
+            .iter()
+            .find(|entry| entry.module_id == module_id)
+            .unwrap_or_else(|| panic!("{module_id} module graph entry"))
+    };
+    let volume = entry("@mesh/volume-widget");
+    let battery = entry("@mesh/battery-widget");
+    assert!(volume.uses_interfaces.contains(&"mesh.audio".into()));
+    assert!(battery.uses_interfaces.contains(&"mesh.power".into()));
     assert!(
-        navigation
+        entry("@mesh/brightness-widget")
             .uses_optional_interfaces
             .contains(&"mesh.brightness".into())
     );
     assert!(
-        navigation
+        volume
             .uses_icon_packs
             .contains(&"@mesh/icons-material-symbols".into())
     );
@@ -138,19 +147,15 @@ fn debug_snapshot_exposes_installed_module_graph_contracts() {
     );
     assert!(navigation.settings_values.is_object());
     assert!(
-        navigation
+        volume
             .provides_i18n
             .iter()
             .any(|entry| entry == "en:config/i18n/en.json")
     );
+    assert!(battery.required_icons.contains(&"battery-caution".into()));
+    assert!(volume.keybind_actions.contains(&"mute".into()));
     assert!(
-        navigation
-            .required_icons
-            .contains(&"battery-caution".into())
-    );
-    assert!(navigation.keybind_actions.contains(&"mute".into()));
-    assert!(
-        navigation
+        battery
             .active_providers
             .iter()
             .any(|entry| entry.starts_with("mesh.power="))
@@ -178,7 +183,7 @@ fn debug_snapshot_exposes_installed_module_graph_contracts() {
         debug_payload.state["module_graph"]
             .as_array()
             .is_some_and(|entries| entries.iter().any(|entry| {
-                entry["module_id"] == serde_json::json!("@mesh/navigation-bar")
+                entry["module_id"] == serde_json::json!("@mesh/volume-widget")
                     && entry["uses"]["interfaces"]
                         .as_array()
                         .is_some_and(|interfaces| {
@@ -187,6 +192,13 @@ fn debug_snapshot_exposes_installed_module_graph_contracts() {
                     && entry["uses"]["keybinds"]
                         .as_array()
                         .is_some_and(|actions| actions.contains(&serde_json::json!("mute")))
+            }))
+    );
+    assert!(
+        debug_payload.state["module_graph"]
+            .as_array()
+            .is_some_and(|entries| entries.iter().any(|entry| {
+                entry["module_id"] == serde_json::json!("@mesh/navigation-bar")
                     && entry["provides"]["settings_schema"]["properties"]["blur_enabled"]["type"]
                         == serde_json::json!("bool")
             }))

@@ -905,6 +905,19 @@ pub(super) fn test_frontend_component_with_catalog(
     component
 }
 
+/// Shipped modules contributing the navigation bar's default items.
+pub(super) const NAVIGATION_WIDGET_MODULES: [&str; 9] = [
+    "workspaces-widget",
+    "window-title-widget",
+    "clock-widget",
+    "brightness-widget",
+    "volume-widget",
+    "theme-widget",
+    "language-widget",
+    "battery-widget",
+    "settings-widget",
+];
+
 pub(super) fn real_frontend_module_component(
     module_id: &str,
     interface_catalog: InterfaceCatalog,
@@ -957,111 +970,8 @@ pub(super) fn real_frontend_module_component(
         )))
         .unwrap(),
         public_props: Default::default(),
-        local_components: HashMap::from([
-            (
-                "BatteryButton".into(),
-                parse_component(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../../modules/frontend/navigation-bar/src/components/battery-button.mesh"
-                )))
-                .unwrap(),
-            ),
-            (
-                "MetaLabel".into(),
-                parse_component(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../../modules/frontend/navigation-bar/src/components/meta-label.mesh"
-                )))
-                .unwrap(),
-            ),
-            (
-                "MetaPill".into(),
-                parse_component(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../../modules/frontend/navigation-bar/src/components/meta-pill.mesh"
-                )))
-                .unwrap(),
-            ),
-            (
-                "SettingsButton".into(),
-                parse_component(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../../modules/frontend/navigation-bar/src/components/settings-button.mesh"
-                )))
-                .unwrap(),
-            ),
-            (
-                "VolumeButton".into(),
-                parse_component(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../../modules/frontend/navigation-bar/src/components/volume-button.mesh"
-                )))
-                .unwrap(),
-            ),
-            (
-                "ThemeButton".into(),
-                parse_component(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../../modules/frontend/navigation-bar/src/components/theme-button.mesh"
-                )))
-                .unwrap(),
-            ),
-            (
-                "LanguageButton".into(),
-                parse_component(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../../modules/frontend/navigation-bar/src/components/language-button.mesh"
-                )))
-                .unwrap(),
-            ),
-            (
-                "BrightnessButton".into(),
-                parse_component(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../../modules/frontend/navigation-bar/src/components/brightness-button.mesh"
-                )))
-                .unwrap(),
-            ),
-            (
-                "ClockButton".into(),
-                parse_component(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../../modules/frontend/navigation-bar/src/components/clock-button.mesh"
-                )))
-                .unwrap(),
-            ),
-            (
-                "NowPlaying".into(),
-                parse_component(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../../modules/frontend/navigation-bar/src/components/now-playing.mesh"
-                )))
-                .unwrap(),
-            ),
-            (
-                "WindowTitle".into(),
-                parse_component(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../../modules/frontend/navigation-bar/src/components/window-title.mesh"
-                )))
-                .unwrap(),
-            ),
-            (
-                "WorkspaceList".into(),
-                parse_component(include_str!(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/../../../modules/frontend/navigation-bar/src/components/workspace-list.mesh"
-                )))
-                .unwrap(),
-            ),
-        ]),
-        module_component_imports: HashMap::from([
-            ("AudioPopover".into(), "@mesh/audio-popover".into()),
-            ("LanguagePopover".into(), "@mesh/language-popover".into()),
-            ("ThemeSelector".into(), "@mesh/theme-selector".into()),
-            ("QuickSettings".into(), "@mesh/quick-settings".into()),
-            ("Settings".into(), "@mesh/settings".into()),
-        ]),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
     };
     let audio_popover_compiled = CompiledFrontendModule {
@@ -1261,30 +1171,46 @@ pub(super) fn real_frontend_module_component(
         node_slot_placements: Default::default(),
     };
     let mut navigation_items = Vec::new();
-    for contribution in navigation_compiled
-        .manifest
-        .extension_point_contributions
-        .get("mesh.navigation.item")
-        .into_iter()
-        .flatten()
-    {
-        let compiled = compile_frontend_entrypoint(
-            &navigation_compiled.manifest,
-            &navigation_dir,
-            &contribution.entry,
-        )
-        .expect("navigation item contribution should compile");
-        catalog.extension_point_entries.insert(
-            contribution_entry_key("@mesh/navigation-bar", &contribution.id),
-            compiled.into(),
+    let mut widget_locale_roots = Vec::new();
+    for widget in NAVIGATION_WIDGET_MODULES {
+        let widget_dir = root.join("modules/frontend").join(widget);
+        let widget_id = format!("@mesh/{widget}");
+        let manifest = mesh_core_module::manifest::load_canonical_manifest(&widget_dir)
+            .expect("navigation widget manifest")
+            .manifest;
+        for contribution in manifest
+            .extension_point_contributions
+            .get("mesh.navigation.item")
+            .into_iter()
+            .flatten()
+        {
+            let compiled =
+                compile_frontend_entrypoint(&manifest, &widget_dir, &contribution.entry)
+                    .expect("navigation item contribution should compile");
+            catalog.extension_point_entries.insert(
+                contribution_entry_key(&widget_id, &contribution.id),
+                compiled.into(),
+            );
+            navigation_items.push(ResolvedExtensionPointContribution {
+                source_module_id: widget_id.clone(),
+                contribution_id: contribution.id.clone(),
+                order: contribution.order.unwrap_or(0),
+                props_fingerprint: 0,
+                props: contribution.props.clone(),
+            });
+        }
+        let compiled = compile_frontend_module(&manifest, &widget_dir)
+            .expect("navigation widget module should compile");
+        catalog.modules.insert(
+            widget_id.clone(),
+            FrontendCatalogEntry {
+                module_dir: widget_dir.clone(),
+                compiled: compiled.into(),
+            },
         );
-        navigation_items.push(ResolvedExtensionPointContribution {
-            source_module_id: "@mesh/navigation-bar".into(),
-            contribution_id: contribution.id.clone(),
-            order: contribution.order.unwrap_or(0),
-            props_fingerprint: 0,
-            props: contribution.props.clone(),
-        });
+        if widget_dir.join("config/i18n/en.json").exists() {
+            widget_locale_roots.push((widget_id, widget_dir));
+        }
     }
     catalog.extension_point_contributions.insert(
         extension_point_key("@mesh/navigation-bar", "mesh.navigation.item"),
@@ -1297,9 +1223,11 @@ pub(super) fn real_frontend_module_component(
     // modules represented by this helper.
     let mut locale = LocaleEngine::new("en");
     let mut sources = Vec::new();
+    let widget_locales = widget_locale_roots
+        .iter()
+        .map(|(id, dir)| (id.as_str(), dir, &["en", "sk"][..]));
     for (id, dir, locales) in [
-        ("@mesh/navigation-bar", &navigation_dir, &["en", "sk"][..]),
-        ("@mesh/audio-popover", &audio_popover_dir, &["en", "sk"]),
+        ("@mesh/audio-popover", &audio_popover_dir, &["en", "sk"][..]),
         (
             "@mesh/language-popover",
             &language_popover_dir,
@@ -1307,7 +1235,10 @@ pub(super) fn real_frontend_module_component(
         ),
         ("@mesh/settings", &settings_dir, &["en", "sk"]),
         ("@mesh/quick-settings", &quick_settings_dir, &["en", "sk"]),
-    ] {
+    ]
+    .into_iter()
+    .chain(widget_locales)
+    {
         for catalog_locale in locales {
             sources.push(
                 mesh_core_locale::CatalogSource::module_from_root(

@@ -78,6 +78,10 @@ Modules declare actions; controls subscribe; users remap.
   keep their generic key unless the user overrides).
 - A control subscribes by setting `keybind="mute"` (or
   `{this.keybinds.mute.id}`) with an `onkeybind` handler.
+- A surface resolves the keybinds its own module declares, then those of the
+  contribution modules it hosts, so a navigation item ships its own shortcut.
+  The host's declaration wins an id both declare; labels resolve through the
+  declaring module's catalog.
 
 Effective binding resolution, first match wins:
 

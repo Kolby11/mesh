@@ -249,10 +249,10 @@ fn canonical_runtime_loader_routes_legacy_inputs_to_migration_diagnostics() {
 }
 
 #[test]
-fn navigation_bar_declares_icon_pack_dependency() {
+fn volume_widget_declares_icon_pack_dependency() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../../modules/frontend/navigation-bar");
-    let loaded = super::load_canonical_manifest(&dir).expect("navigation-bar manifest should load");
+        .join("../../../../modules/frontend/volume-widget");
+    let loaded = super::load_canonical_manifest(&dir).expect("volume-widget manifest should load");
     assert!(
         loaded
             .manifest

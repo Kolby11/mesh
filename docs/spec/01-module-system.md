@@ -451,7 +451,7 @@ The external form keeps `module.json` canonical:
 
 `contract.json` uses keyed `state`, `methods`, `events`, and `types` objects.
 It declares descriptions, units, ranges, errors, capabilities, and optional
-feature groups. Tooling compiles inline and external forms into the same
+features. Tooling compiles inline and external forms into the same
 canonical `InterfaceContract` representation. Runtime validation and LSP
 completion use its strict Luau field, argument, return, and event-payload types.
 Services without a validated contract have no service-member suggestions;
@@ -467,6 +467,21 @@ is never selected or bound: the graph reports `missing_interface_contract` for
 it, required consumers are blocked, and the service catalog creates no
 contract-less binding.
 
+- **Shipped — optional features.** A contract groups optional members into
+  named features, `"features": { "per-app-volume": { "description": "…",
+  "members": ["apps", "set_app_volume", "AppsChanged"] } }`. Names are
+  lowercase words joined by `-`; members are declared state fields (which must
+  have optional types), methods or events, each in at most one feature;
+  `supports` is reserved. A provider lists what it supplies in
+  `implements[].features`; an undeclared name is the graph diagnostic
+  `unknown_provider_feature`. A missing feature never makes a provider
+  ineligible. Consumers call `svc:supports(name)`, which is false without a
+  provider. A method of an unsupported feature returns `{ ok = false, error }`
+  without dispatch, its state fields read nil, and its events never fire; the
+  shell rejects state fields and events of features the provider did not
+  advertise with `service_contract_warning`. A feature over new members is an
+  additive contract change; gating existing members, or removing a feature, is
+  breaking. Generated consumer types include `supports`.
 - **Provider eligibility.** Profile activation and graph selection use the
   same version rule: an explicit offered version must equal the declared
   contract version, and that version must satisfy the consumer's requirement.
@@ -1035,7 +1050,15 @@ default for a malformed argument.
   reads rerender only affected components).
 - `require`/`import` are the single resolver for builtin `mesh.*` libraries,
   interface proxies, Luau libraries (`@scope/kit/file`), and component
-  definitions (`./x.mesh`, `@scope/name`). `import(spec, ...names)` returns
+  definitions (`./x.mesh`, `@scope/name`).
+- **Shipped — frontend Luau libraries.** `require("@scope/name/path")` loads
+  `path.luau` under a `mesh.provides.libraries` root (`@scope/name` alone loads
+  `init.luau`) of a module the requiring module lists in `mesh.uses.modules`.
+  Each component context evaluates a library once, in a private environment
+  that reads through to the caller's, so library globals never become reactive
+  members. Paths cannot leave the root; sources are limited to 1 MiB; a cycle
+  is an error. Libraries run with the caller's capabilities and grant none.
+  Backend contexts do not resolve libraries yet. `import(spec, ...names)` returns
   named fields as multiple values.
 - Ambient `mesh` global keeps genuinely ambient backend powers (`mesh.exec`,
   `mesh.service`, `mesh.config`); discoverable subsystems prefer explicit

@@ -570,7 +570,14 @@ fn icon_reliability_core_surfaces_proof() {
         );
     }
 
-    let surface_manifests = [root.join("modules/frontend/navigation-bar")];
+    let surface_manifests = [
+        "brightness-widget",
+        "volume-widget",
+        "theme-widget",
+        "battery-widget",
+        "settings-widget",
+    ]
+    .map(|widget| root.join("modules/frontend").join(widget));
     for module_dir in surface_manifests {
         let loaded = mesh_core_module::manifest::load_canonical_manifest(&module_dir).unwrap();
         assert!(
@@ -587,11 +594,10 @@ fn icon_reliability_core_surfaces_proof() {
 
     for path in [
         "modules/frontend/navigation-bar/src/main.mesh",
-        "modules/frontend/navigation-bar/src/components/volume-button.mesh",
-        "modules/frontend/navigation-bar/src/components/settings-button.mesh",
-        "modules/frontend/navigation-bar/src/components/theme-button.mesh",
-        "modules/frontend/navigation-bar/src/components/battery-widget.mesh",
-        "modules/frontend/navigation-bar/src/components/battery-button.mesh",
+        "modules/frontend/volume-widget/src/main.mesh",
+        "modules/frontend/settings-widget/src/main.mesh",
+        "modules/frontend/theme-widget/src/main.mesh",
+        "modules/frontend/battery-widget/src/main.mesh",
     ] {
         let source = fs::read_to_string(root.join(path)).unwrap();
         for line in source.lines().filter(|line| line.contains("<icon")) {

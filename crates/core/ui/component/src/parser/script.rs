@@ -852,7 +852,8 @@ fn classify_import_target(source: &str) -> Option<ComponentImportTarget> {
     {
         return Some(ComponentImportTarget::ComponentLocal(source.to_string()));
     }
-    if source.starts_with("@mesh/") {
+    // `@scope/name/file` names a Luau library file, resolved at runtime.
+    if source.starts_with("@mesh/") && !source["@mesh/".len()..].contains('/') {
         return Some(ComponentImportTarget::ComponentModule(source.to_string()));
     }
     if source.starts_with("mesh.") {

@@ -7,7 +7,8 @@
     "kind": "ui",
     "uses": {
       "modules": {
-        "@mesh/settings": ">=0.1.0"
+        "@mesh/settings": ">=0.1.0",
+        "@mesh/volume-presentation": ">=0.1.0"
       },
       "interfaces": {
         "mesh.audio": ">=1.0",

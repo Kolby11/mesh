@@ -285,7 +285,7 @@ fn template_expression_cache_accumulates_changes_until_template_evaluation() {
 fn workspace_component_uses_provider_ids_and_display_order() {
     let repository = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let source = std::fs::read_to_string(
-        repository.join("modules/frontend/navigation-bar/src/components/workspace-list.mesh"),
+        repository.join("modules/frontend/workspaces-widget/src/main.mesh"),
     )
     .unwrap();
     let component = mesh_core_component::parse_component(&source).unwrap();

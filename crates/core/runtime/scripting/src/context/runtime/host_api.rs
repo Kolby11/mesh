@@ -553,6 +553,8 @@ impl ScriptContext {
         // channels stay private when components share one thread VM.
         let scope_for_require = globals.clone();
         let mesh_for_require = mesh_for_require.clone();
+        let luau_libraries = Arc::clone(&self.luau_libraries);
+        let library_cache = self.lua().create_table().map_err(lua_err)?;
         let require = self
             .lua()
             .create_function(move |lua, module: String| {
@@ -590,6 +592,22 @@ impl ScriptContext {
 
                 if let Some(host_api) = resolve_host_api(&mesh_for_require, &module)? {
                     return Ok(LuaValue::Table(host_api));
+                }
+
+                if let Some(library) = super::libraries::require_library(
+                    lua,
+                    &luau_libraries,
+                    &library_cache,
+                    &scope_for_require,
+                    &module,
+                ) {
+                    return library;
+                }
+                if super::libraries::is_library_path_specifier(&module) {
+                    return Err(mlua::Error::external(ScriptError::LuaError(format!(
+                        "require {module}: no Luau library with that namespace; declare the \
+                         library module in mesh.uses.modules"
+                    ))));
                 }
 
                 if is_component_definition_specifier(&module) {

@@ -1,0 +1,32 @@
+{
+  "name": "@mesh/workspaces-widget",
+  "version": "0.1.0",
+  "description": "Workspace switcher for any navigation bar.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "interfaces": {
+        "mesh.wm": ">=1.0"
+      },
+      "capabilities": [
+        "service.wm.read",
+        "service.wm.control"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "provides": {
+      "extensionPoints": {
+        "mesh.navigation.item": [
+          {
+            "id": "workspaces",
+            "entry": "src/main.mesh"
+          }
+        ]
+      }
+    },
+    "accessibility": {
+      "role": "toolbar"
+    }
+  }
+}

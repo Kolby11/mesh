@@ -1,0 +1,8 @@
+{
+  "nav.battery": "Bateria",
+  "nav.charging": "Nabija sa",
+  "nav.discharging": "Vybija sa",
+  "nav.health": "Zdravie",
+  "nav.time_to_empty": "Cas do vybitia",
+  "nav.time_to_full": "Cas do nabitia"
+}

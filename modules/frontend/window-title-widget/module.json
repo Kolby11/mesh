@@ -1,0 +1,31 @@
+{
+  "name": "@mesh/window-title-widget",
+  "version": "0.1.0",
+  "description": "Title of the focused window for any navigation bar.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "interfaces": {
+        "mesh.wm": ">=1.0"
+      },
+      "capabilities": [
+        "service.wm.read"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "provides": {
+      "extensionPoints": {
+        "mesh.navigation.item": [
+          {
+            "id": "window-title",
+            "entry": "src/main.mesh"
+          }
+        ]
+      }
+    },
+    "accessibility": {
+      "role": "status"
+    }
+  }
+}

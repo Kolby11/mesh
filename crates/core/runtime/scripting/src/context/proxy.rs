@@ -81,9 +81,22 @@ pub(super) fn create_interface_proxy(
     pending_side_channels: Arc<AtomicBool>,
     resources: ResourceBudget,
 ) -> mlua::Result<Table> {
+    let features = FeatureGate {
+        member_features: resolution
+            .compiled_contract
+            .as_ref()
+            .map(|contract| Arc::clone(&contract.member_features))
+            .unwrap_or_default(),
+        enabled: if resolution.provider.is_some() {
+            Arc::clone(&resolution.feature_negotiation.enabled)
+        } else {
+            Arc::from([])
+        },
+    };
     create_service_proxy(
         lua,
         scope,
+        features,
         service_name_from_interface(&resolution.requested),
         resolution.contract,
         resolution.requested,
@@ -100,9 +113,32 @@ pub(super) fn create_interface_proxy(
     )
 }
 
-pub(super) fn create_service_proxy(
+/// Which contract features the bound provider supplies. Members of other
+/// features are absent: methods fail without dispatch and state reads nil.
+#[derive(Clone)]
+struct FeatureGate {
+    member_features: Arc<HashMap<String, String>>,
+    enabled: Arc<[String]>,
+}
+
+impl FeatureGate {
+    fn supports(&self, feature: &str) -> bool {
+        self.enabled.iter().any(|enabled| enabled == feature)
+    }
+
+    /// The unsupported feature gating `member`, if any.
+    fn unsupported(&self, member: &str) -> Option<&str> {
+        self.member_features
+            .get(member)
+            .map(String::as_str)
+            .filter(|feature| !self.supports(feature))
+    }
+}
+
+fn create_service_proxy(
     lua: &Lua,
     scope: &Table,
+    features: FeatureGate,
     service_name: String,
     contract: Option<Arc<InterfaceContract>>,
     interface_name: String,
@@ -211,6 +247,31 @@ pub(super) fn create_service_proxy(
             }
             if key == "events" {
                 return Ok(LuaValue::Table(events_for_index.clone()));
+            }
+            if key == mesh_core_service::SUPPORTS_MEMBER {
+                let features = features.clone();
+                let function = lua.create_function(move |_, args: mlua::Variadic<LuaValue>| {
+                    let offset = consume_self_arg(&args)?;
+                    match args.get(offset) {
+                        Some(LuaValue::String(name)) => Ok(features.supports(&name.to_str()?)),
+                        _ => Err(mlua::Error::runtime("supports expects a feature name")),
+                    }
+                })?;
+                proxy_table.raw_set(key.as_str(), function.clone())?;
+                return Ok(LuaValue::Function(function));
+            }
+            if let Some(feature) = features.unsupported(&key)
+                && !event_names.iter().any(|name| name == &key)
+            {
+                if !methods.iter().any(|method| method.name == key) {
+                    return Ok(LuaValue::Nil);
+                }
+                let message = format!("{interface_name} provider does not support feature '{feature}'");
+                let function = lua.create_function(move |lua, _: mlua::Variadic<LuaValue>| {
+                    command_result_table(lua, false, false, Some(&message)).map(LuaValue::Table)
+                })?;
+                proxy_table.raw_set(key.as_str(), function.clone())?;
+                return Ok(LuaValue::Function(function));
             }
             if event_names.iter().any(|name| name == &key)
                 && !method_names.contains(&key)

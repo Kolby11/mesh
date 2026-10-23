@@ -57,6 +57,7 @@ fn graph_diff_reports_inventory_activation_and_provider_changes() {
                 provider: Some("before".into()),
                 label: None,
                 priority: 10,
+                features: Vec::new(),
             }],
             MeshContributes::default(),
         ),
@@ -92,6 +93,7 @@ fn graph_diff_reports_inventory_activation_and_provider_changes() {
                 provider: Some("before".into()),
                 label: None,
                 priority: 10,
+                features: Vec::new(),
             }],
             MeshContributes::default(),
         ),
@@ -106,6 +108,7 @@ fn graph_diff_reports_inventory_activation_and_provider_changes() {
                 provider: Some("after".into()),
                 label: None,
                 priority: 20,
+                features: Vec::new(),
             }],
             MeshContributes::default(),
         ),
@@ -336,6 +339,7 @@ fn installed_module_graph_blocks_required_consumers_from_incompatible_provider_v
             provider: Some("example".into()),
             label: None,
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -390,6 +394,7 @@ fn installed_module_graph_rejects_provider_versions_that_do_not_match_the_contra
             provider: Some("example".into()),
             label: None,
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -469,6 +474,7 @@ fn installed_module_graph_keeps_provider_interface_and_frontend_requirements_sep
             provider: Some("interface-owned-provider".into()),
             label: None,
             priority: 200,
+            features: Vec::new(),
         });
 
     let modules = vec![
@@ -492,6 +498,7 @@ fn installed_module_graph_keeps_provider_interface_and_frontend_requirements_sep
                     "Example".to_string(),
                 )),
                 priority: 100,
+                features: Vec::new(),
             }],
             MeshContributes::default(),
         ),
@@ -554,6 +561,7 @@ fn provider_capability_metadata_comes_only_from_backend_manifest() {
                 "Example".to_string(),
             )),
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -602,6 +610,7 @@ fn installed_module_graph_routes_generic_interface_provider_without_service_bran
                 "Example Alt".to_string(),
             )),
             priority: 25,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );
@@ -785,6 +794,7 @@ fn installed_module_graph_requires_a_typed_contract_for_every_provider() {
                 provider: Some("lmsensors".into()),
                 label: None,
                 priority: 100,
+                features: Vec::new(),
             }],
             MeshContributes::default(),
         )
@@ -842,6 +852,7 @@ fn installed_module_graph_rejects_active_provider_interface_mismatch() {
                 "NetworkManager".to_string(),
             )),
             priority: 100,
+            features: Vec::new(),
         }],
         MeshContributes::default(),
     );

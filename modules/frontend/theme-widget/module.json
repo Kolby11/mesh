@@ -1,0 +1,66 @@
+{
+  "name": "@mesh/theme-widget",
+  "version": "0.1.0",
+  "description": "Theme selector trigger for any navigation bar.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "modules": {
+        "@mesh/theme-selector": ">=0.1.0"
+      },
+      "interfaces": {
+        "mesh.theme": ">=1.0"
+      },
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      },
+      "capabilities": [
+        "theme.read",
+        "locale.read"
+      ]
+    },
+    "i18n": {
+      "defaultLocale": "en"
+    },
+    "icons": {
+      "ignore_shell_default": true
+    },
+    "iconRequirements": {
+      "required": [
+        "weather-clear-night",
+        "weather-clear"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "contributes": {
+      "i18n": [
+        {
+          "id": "en",
+          "locale": "en",
+          "path": "config/i18n/en.json"
+        },
+        {
+          "id": "sk",
+          "locale": "sk",
+          "path": "config/i18n/sk.json"
+        }
+      ]
+    },
+    "provides": {
+      "extensionPoints": {
+        "mesh.navigation.item": [
+          {
+            "id": "theme",
+            "entry": "src/main.mesh"
+          }
+        ]
+      }
+    },
+    "accessibility": {
+      "role": "button"
+    }
+  }
+}

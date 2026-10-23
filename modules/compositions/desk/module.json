@@ -51,11 +51,11 @@
               },
               {
                 "id": "workspaces",
-                "use": "@mesh/navigation-bar:workspaces"
+                "use": "@mesh/workspaces-widget:workspaces"
               },
               {
                 "id": "window-title",
-                "use": "@mesh/navigation-bar:window-title"
+                "use": "@mesh/window-title-widget:window-title"
               }
             ]
           }

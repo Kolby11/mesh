@@ -1,0 +1,10 @@
+{
+  "keybind.category.audio": "Audio",
+  "keybind.mute.description": "Toggle audio mute",
+  "keybind.mute.label": "Mute audio",
+  "nav.audio_service_unavailable": "Audio service unavailable",
+  "nav.volume": "Volume",
+  "nav.volume_level": "Volume",
+  "nav.volume_muted_at": "Volume muted at",
+  "nav.volume_unavailable": "Volume unavailable"
+}

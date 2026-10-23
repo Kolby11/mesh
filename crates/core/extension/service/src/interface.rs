@@ -1,6 +1,6 @@
 use crate::contract::{
     CompiledContract, ContractError, DeclarationProvenance, FeatureNegotiation, InterfaceContract,
-    negotiate_feature_groups, parse_contract_version, parse_version_req,
+    negotiate_features, parse_contract_version, parse_version_req,
 };
 use semver::Version;
 use std::borrow::Cow;
@@ -48,6 +48,10 @@ pub struct ResolvedServiceBinding {
 /// Name retained for callers that construct a catalog explicitly. Runtime
 /// code must publish the built [`ResolvedServiceCatalog`] instead.
 pub type InterfaceCatalogBuilder = InterfaceCatalog;
+
+fn provider_feature_key(interface: &str, provider_module: &str) -> String {
+    format!("{}\u{1}{provider_module}", canonical_interface_name(interface))
+}
 
 /// Metadata about an available interface provider.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,16 +234,18 @@ impl InterfaceCatalog {
         self.generation = self.generation.saturating_add(1);
     }
 
+    /// Record the features `provider_module` advertises for `interface`.
     pub fn register_provider_features(
         &mut self,
-        provider_module: impl Into<String>,
+        interface: &str,
+        provider_module: &str,
         features: impl IntoIterator<Item = impl Into<String>>,
     ) {
         let mut features = features.into_iter().map(Into::into).collect::<Vec<_>>();
         features.sort();
         features.dedup();
         self.provider_features
-            .insert(provider_module.into(), features);
+            .insert(provider_feature_key(interface, provider_module), features);
         self.generation = self.generation.saturating_add(1);
     }
 
@@ -346,25 +352,16 @@ impl ResolvedServiceCatalog {
                     if !provider_matches_contract(candidate, contract) {
                         continue;
                     }
-                    let negotiation = negotiate_feature_groups(
+                    feature_negotiation = negotiate_features(
                         contract,
                         builder
                             .provider_features
-                            .get(&candidate.provider_module)
+                            .get(&provider_feature_key(&interface, &candidate.provider_module))
                             .cloned()
                             .unwrap_or_default(),
                     );
-                    if provider.is_none() {
-                        // Retain the first compatible-version negotiation for
-                        // fail-closed diagnostics when every provider misses a
-                        // required feature group.
-                        feature_negotiation = negotiation.clone();
-                    }
-                    if negotiation.is_compatible() {
-                        provider = Some(candidate.clone());
-                        feature_negotiation = negotiation;
-                        break;
-                    }
+                    provider = Some(candidate.clone());
+                    break;
                 }
                 interface_bindings.push(ResolvedServiceBinding {
                     interface: interface.clone(),
@@ -573,7 +570,7 @@ fn version_matches_contract(requested: Option<&str>, contract_version: &Version)
 mod tests {
     use super::*;
     use crate::contract::{
-        ContractCapabilities, ContractFeatureGroup, InterfaceArgument, InterfaceEvent,
+        ContractCapabilities, ContractFeature, InterfaceArgument, InterfaceEvent,
         InterfaceMethod,
     };
     use std::collections::BTreeMap;
@@ -733,47 +730,6 @@ mod tests {
     }
 
     #[test]
-    fn resolved_catalog_tries_the_next_compatible_provider() {
-        let mut catalog = InterfaceCatalog::default();
-        let mut contract = test_contract("mesh.audio", 1);
-        contract.capabilities.feature_groups = BTreeMap::from([(
-            "recording".into(),
-            ContractFeatureGroup {
-                required: true,
-                capabilities: Vec::new(),
-            },
-        )]);
-        catalog.register_contract(contract);
-        catalog.register_provider(InterfaceProvider {
-            interface: "mesh.audio".into(),
-            version: Some("1.0".into()),
-            base_module: None,
-            provider_module: "@mesh/missing-feature".into(),
-            backend_name: "missing".into(),
-            priority: 100,
-        });
-        catalog.register_provider(InterfaceProvider {
-            interface: "mesh.audio".into(),
-            version: Some("1.0".into()),
-            base_module: None,
-            provider_module: "@mesh/recording".into(),
-            backend_name: "recording".into(),
-            priority: 10,
-        });
-        catalog.register_provider_features("@mesh/recording", ["recording"]);
-
-        assert_eq!(
-            catalog
-                .build()
-                .resolve("mesh.audio", None)
-                .provider
-                .unwrap()
-                .provider_module,
-            "@mesh/recording"
-        );
-    }
-
-    #[test]
     fn repeated_registry_resolution_shares_contract_storage() {
         let mut catalog = InterfaceCatalog::default();
         catalog.register_contract(test_contract("mesh.audio", 8));
@@ -786,28 +742,17 @@ mod tests {
     }
 
     #[test]
-    fn provider_feature_negotiation_keeps_optional_groups_and_rejects_required_gaps() {
+    fn provider_features_are_negotiated_per_interface() {
         let mut catalog = InterfaceCatalog::default();
-        let mut capabilities = ContractCapabilities::default();
-        capabilities.feature_groups = BTreeMap::from([
-            ("recording".into(), ContractFeatureGroup::default()),
-            (
-                "exclusive_output".into(),
-                ContractFeatureGroup {
-                    required: true,
-                    capabilities: vec!["service.audio.exclusive".into()],
-                },
-            ),
-        ]);
-        catalog.register_contract(InterfaceContract {
-            interface: "mesh.audio".into(),
-            version: Version::parse("1.0.0").unwrap(),
-            state_fields: vec![],
-            methods: vec![],
-            events: vec![],
-            types: HashMap::new(),
-            capabilities,
-        });
+        let mut contract = test_contract("mesh.audio", 2);
+        contract.capabilities.features = BTreeMap::from([(
+            "recording".into(),
+            ContractFeature {
+                description: None,
+                members: vec!["method_1".into()],
+            },
+        )]);
+        catalog.register_contract(contract);
         catalog.register_provider(InterfaceProvider {
             interface: "mesh.audio".into(),
             version: Some("1.0".into()),
@@ -817,20 +762,18 @@ mod tests {
             priority: 100,
         });
 
-        let unavailable = catalog.resolve("mesh.audio", None);
-        assert!(unavailable.provider.is_none());
-        assert_eq!(
-            unavailable.feature_negotiation.missing_required.as_ref(),
-            &["exclusive_output".to_string()][..]
-        );
+        let plain = catalog.resolve("mesh.audio", None);
+        assert!(plain.provider.is_some(), "a missing feature never blocks a provider");
+        assert!(!plain.feature_negotiation.supports("recording"));
 
-        catalog.register_provider_features("@mesh/audio", ["recording", "exclusive_output"]);
+        catalog.register_provider_features("mesh.video", "@mesh/audio", ["recording"]);
+        assert!(!catalog.resolve("mesh.audio", None).feature_negotiation.supports("recording"));
+        catalog.register_provider_features("mesh.audio", "@mesh/audio", ["recording", "unknown"]);
         let resolved = catalog.resolve("mesh.audio", None);
-        assert!(resolved.provider.is_some());
-        assert!(resolved.feature_negotiation.is_compatible());
+        assert!(resolved.feature_negotiation.supports("recording"));
         assert_eq!(
             resolved.feature_negotiation.enabled.as_ref(),
-            &["exclusive_output".to_string(), "recording".to_string()][..]
+            &["recording".to_string()][..]
         );
     }
 

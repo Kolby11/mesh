@@ -1,0 +1,48 @@
+{
+  "name": "@mesh/language-widget",
+  "version": "0.1.0",
+  "description": "Language selector trigger for any navigation bar.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "modules": {
+        "@mesh/language-popover": ">=0.1.0"
+      },
+      "capabilities": [
+        "locale.read"
+      ]
+    },
+    "i18n": {
+      "defaultLocale": "en"
+    },
+    "entry": "src/main.mesh",
+    "contributes": {
+      "i18n": [
+        {
+          "id": "en",
+          "locale": "en",
+          "path": "config/i18n/en.json"
+        },
+        {
+          "id": "sk",
+          "locale": "sk",
+          "path": "config/i18n/sk.json"
+        }
+      ]
+    },
+    "provides": {
+      "extensionPoints": {
+        "mesh.navigation.item": [
+          {
+            "id": "language",
+            "entry": "src/main.mesh"
+          }
+        ]
+      }
+    },
+    "accessibility": {
+      "role": "button"
+    }
+  }
+}

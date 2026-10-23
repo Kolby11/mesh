@@ -56,6 +56,51 @@ fn apply_runtime_props(
     Ok(())
 }
 
+/// Library roots of the modules `manifest` declares, plus its own.
+fn declared_luau_libraries(
+    graph: &mesh_core_module::package::InstalledModuleGraph,
+    manifest: &mesh_core_module::Manifest,
+) -> mesh_core_scripting::LuauLibraries {
+    let mut libraries = mesh_core_scripting::LuauLibraries::default();
+    for library in graph.contributed_libraries() {
+        let declared = library.module_id == manifest.package.id
+            || manifest.dependencies.modules.contains_key(&library.module_id);
+        if declared && let Some(module_dir) = library.source.manifest_path.parent() {
+            libraries.insert(library.namespace.clone(), module_dir.join(&library.path));
+        }
+    }
+    libraries
+}
+
+/// Graph-free test fixtures see every shipped library.
+#[cfg(test)]
+pub(super) fn shipped_luau_libraries() -> std::sync::Arc<mesh_core_scripting::LuauLibraries> {
+    static LIBRARIES: std::sync::OnceLock<std::sync::Arc<mesh_core_scripting::LuauLibraries>> =
+        std::sync::OnceLock::new();
+    LIBRARIES
+        .get_or_init(|| {
+            let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../modules/libraries");
+            let mut libraries = mesh_core_scripting::LuauLibraries::default();
+            for entry in std::fs::read_dir(&root).into_iter().flatten().flatten() {
+                let Ok(manifest) = std::fs::read_to_string(entry.path().join("module.json")) else {
+                    continue;
+                };
+                let manifest: serde_json::Value =
+                    serde_json::from_str(&manifest).expect("shipped library manifest");
+                let provided = manifest["mesh"]["provides"]["libraries"].as_array();
+                for library in provided.into_iter().flatten() {
+                    if let (Some(namespace), Some(path)) =
+                        (library["namespace"].as_str(), library["path"].as_str())
+                    {
+                        libraries.insert(namespace, entry.path().join(path));
+                    }
+                }
+            }
+            std::sync::Arc::new(libraries)
+        })
+        .clone()
+}
+
 impl Drop for FrontendSurfaceComponent {
     fn drop(&mut self) {
         if let Err(error) = self.unmount_runtimes() {
@@ -692,6 +737,12 @@ impl FrontendSurfaceComponent {
                 .map(|dep| dep.name.clone())
                 .collect(),
         );
+        if let Some(graph) = self.frontend_catalog_handle.snapshot().validation_graph {
+            script_ctx.set_luau_libraries(declared_luau_libraries(&graph, manifest));
+        } else {
+            #[cfg(test)]
+            script_ctx.set_luau_libraries(shipped_luau_libraries());
+        }
         seed_service_context(&mut script_ctx).map_err(|source| ComponentError::Script {
             component_id: component_id.clone(),
             source,
