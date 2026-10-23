@@ -7,6 +7,12 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **hyprland-wm reads workspaces from ext-workspace:** the `hyprctl
+  activeworkspace`/`workspaces` grants are gone; the native request socket adds
+  window counts and monitors. Verified against live Hyprland with and without
+  optional grants; not yet run in the shell session. `module fork` now refuses
+  interface modules. See October's log.
+
 - **Module-architecture items A2, A4, A6, A8 landed:** bar widgets are separate
   navigation-item modules with a shared volume library; contracts have optional
   features with `supports()`; UPower/NetworkManager read over scoped D-Bus grants
@@ -177,7 +183,8 @@ measurements live in [`log/`](log/README.md).
 - Glass D9 gates, closed-popover pruning and held-animation sleep landed
   2026-10-21 (performance log).
 - Wave 5: [in-surface blur engine](todos/pending/2026-09-30-in-surface-blur-engine.md).
-- Continue customization with A6; see the backlog for other open work.
+- Customization and ecosystem: Priority 7 in the backlog (fork dependents
+  rewiring); see the backlog for other open work.
 
 ## Blocked / known baselines
 

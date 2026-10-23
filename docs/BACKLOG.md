@@ -60,12 +60,8 @@ October log.
 
 ### Priority 7 — Customization and ecosystem
 
-- [ ] Read `hyprland-wm` workspace state from `mesh.wayland_subscribe("workspace")`
-      instead of `hyprctl` (dispatch stays); backend contexts do not resolve Luau
-      libraries yet.
-- [ ] Forking an interface module duplicates its interface declaration; `module fork`
-      should refuse or rename the interface. Forks of modules other modules
-      `uses.modules` keep those dependents on the upstream.
+- [ ] Forks of modules that other modules name in `uses.modules` leave those
+      dependents on the upstream; `module fork` rewires only the active profile.
 
 ### Priority 8 — Structural mechanics
 

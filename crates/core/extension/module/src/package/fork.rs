@@ -49,6 +49,9 @@ pub fn fork_record(fork_dir: &Path) -> Result<Option<ForkRecord>, ModuleManifest
 
 /// Copy `upstream_dir` to `destination` as module `fork_id`, keeping a
 /// snapshot of the upstream tree for later diffs and rebases.
+///
+/// Interface modules are refused: a copy would declare a second contract
+/// under the same interface name.
 pub fn create_fork(
     upstream_dir: &Path,
     upstream_id: &str,
@@ -58,6 +61,22 @@ pub fn create_fork(
 ) -> Result<ForkRecord, ModuleManifestError> {
     if destination.exists() {
         return Err(invalid(format!("{} already exists", destination.display())));
+    }
+    let upstream_manifest = upstream_dir.join("module.json");
+    let text = std::fs::read_to_string(&upstream_manifest)
+        .map_err(|error| io_error(&upstream_manifest, error))?;
+    let manifest: serde_json::Value =
+        serde_json::from_str(&text).map_err(|source| ModuleManifestError::Json {
+            path: upstream_manifest.clone(),
+            source,
+        })?;
+    if manifest["mesh"]["kind"] == "interface" {
+        return Err(invalid(format!(
+            "{upstream_id} is an interface module and cannot be forked: the copy would \
+             declare a second {} contract. Fork a provider or consumer instead, or \
+             publish a new interface under its own name",
+            manifest["mesh"]["interface"]["name"].as_str().unwrap_or("interface")
+        )));
     }
     copy_tree(upstream_dir, destination)?;
     copy_tree(upstream_dir, &destination.join(FORK_STATE_DIR).join(BASE_DIR))?;
@@ -525,6 +544,27 @@ mod tests {
         let (merged, clean) = merge3(base, "a\nb\nc\nd\ne\nfork tail\n", "upstream head\na\nb\nc\nd\ne\n");
         assert!(clean);
         assert_eq!(merged, "upstream head\na\nb\nc\nd\ne\nfork tail\n");
+    }
+
+    #[test]
+    fn interface_modules_are_not_forked() {
+        let root = temp_dir("interface");
+        let upstream = root.join("upstream");
+        std::fs::create_dir_all(&upstream).unwrap();
+        std::fs::write(
+            upstream.join("module.json"),
+            r#"{"name": "@mesh/wm-interface", "version": "1.1.0",
+                "mesh": {"kind": "interface", "interface": {"name": "mesh.wm"}}}"#,
+        )
+        .unwrap();
+        let fork = root.join("fork");
+
+        let error = create_fork(&upstream, "@mesh/wm-interface", "1.1.0", "@me/wm", &fork)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("interface module") && error.contains("mesh.wm"), "{error}");
+        assert!(!fork.exists());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

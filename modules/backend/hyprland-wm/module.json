@@ -1,22 +1,21 @@
 {
   "name": "@mesh/hyprland-wm",
   "version": "0.1.0",
-  "description": "Hyprland compositor backend \u2014 workspace and window state over Hyprland's IPC sockets.",
+  "description": "Hyprland compositor backend \u2014 workspace state over ext-workspace, window state over Hyprland's IPC sockets.",
   "private": true,
   "mesh": {
     "apiVersion": "0.1",
     "kind": "backend",
     "uses": {
       "capabilities": [
-        "exec.argv:hyprctl:[\"activeworkspace\",\"-j\"]",
         "exec.argv:hyprctl:[\"activewindow\",\"-j\"]",
         "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.focus({ workspace = \\\"*\\\" })\"]",
         "exec.argv:hyprctl:[\"dispatch\",\"workspace\",\"*\"]",
         "exec.argv:hyprctl:[\"instances\",\"-j\"]",
-        "exec.argv:hyprctl:[\"workspaces\",\"-j\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$HYPRLAND_INSTANCE_SIGNATURE\\\"\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\\\"\"]",
-        "exec.argv:sh:[\"-c\",\"test -S \\\"$1\\\" && echo ok\",\"sh\",\"*\"]"
+        "exec.argv:sh:[\"-c\",\"test -S \\\"$1\\\" && echo ok\",\"sh\",\"*\"]",
+        "wayland.observe"
       ],
       "optionalCapabilities": [
         "net.socket",
@@ -26,7 +25,7 @@
       "binaries": [
         {
           "name": "hyprctl",
-          "reason": "Dispatch workspace switches, and query state when native socket access is not granted.",
+          "reason": "Dispatch workspace switches, and query the active window when native socket access is not granted.",
           "packages": {
             "arch": "hyprland",
             "nixos": "hyprland"

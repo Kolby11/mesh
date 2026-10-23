@@ -274,6 +274,8 @@ profile is rewired to the copy: roots and providers that used upstream, and
 `upstream:<contribution>` placements in customizable slots — including host
 defaults the profile had not overridden — now name the fork. Upstream stays
 installed as the fallback; without an active profile nothing is rewired.
+Interface modules cannot be forked, since the copy would declare a second
+contract under the same interface name.
 
 `mesh-shell module diff <fork-id> [--stat]` shows upstream's changes (snapshot
 → current upstream) and the fork's own (snapshot → fork) as unified diffs.

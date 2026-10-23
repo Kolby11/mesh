@@ -1162,6 +1162,9 @@ end
 mesh.exec_stream = function(_program, _args)
     return true
 end
+mesh.wayland_subscribe = function(_kind)
+    return { program = "wayland:workspace" }
+end
 mesh.exec = function(program, args)
     exec_calls[#exec_calls + 1] = { program = program, args = args }
     if program == "sh" then
@@ -1191,6 +1194,18 @@ end
         .unwrap();
 
     ctx.call_init().unwrap();
+    ctx.run_stream_batch(
+        "wayland:workspace",
+        &[
+            r#"{"event":"added","id":7}"#,
+            r#"{"event":"name","id":7,"value":"3"}"#,
+            r#"{"event":"coordinates","id":7,"value":[3]}"#,
+            r#"{"event":"state","id":7,"value":1}"#,
+            r#"{"event":"done"}"#,
+        ]
+        .map(String::from),
+    )
+    .unwrap();
     ctx.drain_events();
     ctx.ensure_lua()
         .unwrap()
@@ -1264,13 +1279,114 @@ end
         )
         .unwrap()
         .unwrap();
-    assert_eq!(calls.raw_len(), 1);
-    let call = calls.get::<Table>(1).unwrap();
-    assert_eq!(call.get::<String>("program").unwrap(), "hyprctl");
-    let args = call.get::<Table>("args").unwrap();
-    assert_eq!(args.get::<String>(1).unwrap(), "workspaces");
+    assert_eq!(
+        calls.raw_len(),
+        0,
+        "workspace lists come from ext-workspace or the request socket, never hyprctl"
+    );
     assert_eq!(catalog_state["active_workspace"], serde_json::json!(3));
     assert!(ctx.drain_events().is_empty());
+}
+
+#[test]
+fn hyprland_reads_workspaces_from_ext_workspace_records() {
+    let script = bundled_backend_script("../../../../modules/backend/hyprland-wm/src/main.luau");
+    let mut ctx = BackendScriptContext::new("@mesh/hyprland-wm");
+    ctx.load_script(&script).unwrap();
+    ctx.ensure_lua()
+        .unwrap()
+        .load(
+            r#"
+exec_calls = {}
+mesh.wayland_subscribe = function(kind)
+    assert(kind == "workspace")
+    return { program = "wayland:workspace" }
+end
+mesh.exec = function(program, args)
+    exec_calls[#exec_calls + 1] = { program = program, args = args }
+    return { success = false, stdout = "", stderr = "", code = 1 }
+end
+"#,
+        )
+        .exec()
+        .unwrap();
+    ctx.call_init().unwrap();
+    ctx.drain_events();
+
+    let records = [
+        r#"{"event":"group-added","id":10}"#,
+        r#"{"event":"group-added","id":11}"#,
+        r#"{"event":"added","id":1}"#,
+        r#"{"event":"name","id":1,"value":"1"}"#,
+        r#"{"event":"coordinates","id":1,"value":[1]}"#,
+        r#"{"event":"state","id":1,"value":1}"#,
+        r#"{"event":"added","id":2}"#,
+        r#"{"event":"name","id":2,"value":"notes"}"#,
+        r#"{"event":"coordinates","id":2,"value":[4294965959]}"#,
+        r#"{"event":"state","id":2,"value":2}"#,
+        r#"{"event":"added","id":3}"#,
+        r#"{"event":"name","id":3,"value":"special:chat"}"#,
+        r#"{"event":"coordinates","id":3,"value":[4294967197]}"#,
+        r#"{"event":"state","id":3,"value":4}"#,
+        r#"{"event":"added","id":4}"#,
+        r#"{"event":"name","id":4,"value":"2"}"#,
+        r#"{"event":"coordinates","id":4,"value":[2]}"#,
+        r#"{"event":"state","id":4,"value":1}"#,
+        r#"{"event":"group-workspace-enter","id":10,"workspace":1}"#,
+        r#"{"event":"done"}"#,
+    ]
+    .map(String::from);
+    let state = ctx
+        .run_stream_batch("wayland:workspace", &records)
+        .unwrap()
+        .unwrap();
+    assert_eq!(state["available"], serde_json::json!(true));
+    assert_eq!(state["active_workspace"], serde_json::json!(1));
+    let workspaces = state["workspaces"].as_array().unwrap();
+    let ids: Vec<_> = workspaces.iter().map(|w| w["id"].clone()).collect();
+    assert_eq!(ids, [serde_json::json!(-1337), serde_json::json!(1), serde_json::json!(2)]);
+    assert_eq!(workspaces[0]["name"], serde_json::json!("notes"));
+    assert_eq!(workspaces[0]["urgent"], serde_json::json!(true));
+    assert!(workspaces[0].get("index").is_none_or(serde_json::Value::is_null));
+    assert_eq!(workspaces[1]["focused"], serde_json::json!(true));
+    assert_eq!(workspaces[1]["visible"], serde_json::json!(true));
+    assert_eq!(workspaces[2]["focused"], serde_json::json!(false));
+    assert_eq!(workspaces[2]["visible"], serde_json::json!(true));
+    assert_eq!(workspaces[2]["windows"], serde_json::json!(0));
+
+    ctx.drain_events();
+    let switched = ctx
+        .run_stream_batch(
+            "wayland:workspace",
+            &[
+                r#"{"event":"state","id":1,"value":0}"#,
+                r#"{"event":"state","id":2,"value":1}"#,
+                r#"{"event":"done"}"#,
+            ]
+            .map(String::from),
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(switched["active_workspace"], serde_json::json!(-1337));
+    let events = ctx.drain_events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].name, "WorkspaceChanged");
+    assert_eq!(events[0].payload["id"], serde_json::json!(-1337));
+
+    let calls = ctx
+        .ensure_lua()
+        .unwrap()
+        .globals()
+        .get::<Table>("exec_calls")
+        .unwrap();
+    for index in 1..=calls.raw_len() {
+        let args = calls.get::<Table>(index).unwrap().get::<Table>("args").unwrap();
+        let first: String = args.get(1).unwrap_or_default();
+        assert!(
+            first != "workspaces" && first != "activeworkspace",
+            "workspace state must not be read through hyprctl"
+        );
+    }
 }
 
 #[test]
@@ -2948,14 +3064,22 @@ fn hyprland_workspace_snapshot_preserves_named_ids_and_output_metadata() {
     let mut context = BackendScriptContext::new("@mesh/hyprland-wm");
     context.load_script(&script).unwrap();
     context.ensure_lua().unwrap().load(r#"
+mesh.socket_stream = function(_path) return { program = "socket" } end
+mesh.socket_request = function(_path, request)
+    if request == "j/activeworkspace" then return { success = true, response = '{"id":-1337}' } end
+    if request == "j/activewindow" then return { success = true, response = '{}' } end
+    if request == "j/workspaces" then return { success = true, response = [=[[{"id":-1337,"name":"code \"quoted\" {pane}","windows":1,"lastwindow":{"title":"{nested}"},"monitor":"DP-1"},{"id":2,"name":"2","windows":0,"monitor":"DP-2"},{"id":-99,"name":"special:chat","windows":1}]]=] } end
+    return { success = false }
+end
 mesh.exec = function(program, args)
-    if program == "sh" then return { success = false } end
-    if args[1] == "activeworkspace" then return { success = true, stdout = '{"id":-1337}' } end
-    if args[1] == "activewindow" then return { success = true, stdout = '{}' } end
-    if args[1] == "workspaces" then return { success = true, stdout = [=[[{"id":-1337,"name":"code \"quoted\" {pane}","windows":1,"lastwindow":{"title":"{nested}"},"monitor":"DP-1"},{"id":2,"name":"2","windows":0,"monitor":"DP-2"},{"id":-99,"name":"special:chat","windows":1}]]=] } end
+    if program == "sh" and string.find(args[2], "HYPRLAND_INSTANCE_SIGNATURE", 1, true) then
+        return { success = true, stdout = "test-instance" }
+    end
+    if program == "sh" then return { success = true, stdout = "/run/user/1000" } end
     return { success = false }
 end
 "#).exec().unwrap();
+    context.call_init().unwrap();
     let state = settled_poll(&mut context);
     assert_eq!(state["active_workspace"], serde_json::json!(-1337));
     let workspaces = state["workspaces"].as_array().unwrap();
@@ -3820,4 +3944,79 @@ async fn live_ext_workspace_records() {
     }
     assert!(records.iter().any(|line| line.contains("\"added\"")));
     ctx.shutdown_streams().await;
+}
+
+// cargo test -p mesh-core-scripting live_hyprland_wm_reads_ext_workspaces -- --ignored --nocapture
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires a running Hyprland session"]
+async fn live_hyprland_wm_reads_ext_workspaces() {
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(format!(
+            "{}/../../../../modules/backend/hyprland-wm/module.json",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let grants = |key: &str| {
+        manifest["mesh"]["uses"][key]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|grant| grant.as_str().unwrap().to_string())
+            .collect::<Vec<_>>()
+    };
+    let required = grants("capabilities");
+    let all = [required.clone(), grants("optionalCapabilities")].concat();
+    for (label, granted) in [("required", required), ("required+optional", all)] {
+        let mut ctx = BackendScriptContext::new_with_capabilities("@mesh/hyprland-wm", granted);
+        ctx.load_script(&bundled_backend_script(
+            "../../../../modules/backend/hyprland-wm/src/main.luau",
+        ))
+        .unwrap();
+        let mut state = ctx.call_init().unwrap();
+        let socket_granted = label != "required";
+        // Every Hyprland workspace has a monitor, which only the request socket reports.
+        let has_workspaces = |state: &Option<BackendState>| {
+            state.as_ref().is_some_and(|state| {
+                state["available"] == true
+                    && state["workspaces"].as_array().is_some_and(|list| {
+                        !list.is_empty()
+                            && list.iter().all(|w| !socket_granted || w["output"].is_string())
+                    })
+            })
+        };
+        let mut started = state.is_some();
+        let streams = ctx.stream_state();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !(started && has_workspaces(&state)) && std::time::Instant::now() < deadline {
+            for event in streams.drain_events() {
+                let result = match event.kind {
+                    StreamEventKind::Line(line) => {
+                        ctx.run_stream_batch_for_stream(&event.stream, &[line])
+                    }
+                    StreamEventKind::Exited(status) => {
+                        ctx.run_stream_closed(&event.stream, status.success)
+                    }
+                    _ => Ok(None),
+                };
+                state = result.unwrap().or(state);
+            }
+            let run = ctx.run_due_tasks(std::time::Instant::now());
+            assert!(run.errors.is_empty(), "{:?}", run.errors);
+            if let Some(start) = run.start {
+                start.unwrap();
+                started = true;
+            }
+            state = run.state.or(state);
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_millis(100),
+                streams.wait_for_event(),
+            )
+            .await;
+        }
+        println!("{label}: {state:?}");
+        assert!(started && has_workspaces(&state), "{label}");
+        ctx.shutdown_streams().await;
+    }
 }

@@ -142,18 +142,17 @@
         "net.socket"
       ],
       "@mesh/hyprland-wm": [
-        "exec.argv:hyprctl:[\"activeworkspace\",\"-j\"]",
         "exec.argv:hyprctl:[\"activewindow\",\"-j\"]",
         "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.focus({ workspace = \\\"*\\\" })\"]",
         "exec.argv:hyprctl:[\"dispatch\",\"workspace\",\"*\"]",
         "exec.argv:hyprctl:[\"instances\",\"-j\"]",
-        "exec.argv:hyprctl:[\"workspaces\",\"-j\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$HYPRLAND_INSTANCE_SIGNATURE\\\"\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\\\"\"]",
         "exec.argv:sh:[\"-c\",\"test -S \\\"$1\\\" && echo ok\",\"sh\",\"*\"]",
         "exec.argv:nc:[\"-U\",\"*\"]",
         "exec.argv:socat:[\"-\",\"UNIX-CONNECT:*\"]",
-        "net.socket"
+        "net.socket",
+        "wayland.observe"
       ],
       "@mesh/language-popover": ["locale.read", "locale.write"],
       "@mesh/language-widget": [
