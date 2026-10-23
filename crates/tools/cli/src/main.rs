@@ -40,6 +40,7 @@ fn main() {
         Some("rollback") => cmd_rollback(&args[2..]),
         Some("uninstall") => cmd_uninstall(&args[2..]),
         Some("permissions") => cmd_permissions(&args[2..]),
+        Some("module") => cmd_module(&args[2..]),
         Some("lock") => cmd_lock(&args[2..]),
         Some("status") => cmd_status(),
         Some("locale") => cmd_locale(&args[2..]),
@@ -1050,6 +1051,227 @@ fn cmd_install(args: &[String]) {
     print_permissions(installed.graph.capability_catalog(), &installed.manifest);
 }
 
+fn cmd_module(args: &[String]) {
+    match args.first().map(String::as_str) {
+        Some("fork") => cmd_module_fork(&args[1..]),
+        Some("diff") => cmd_module_diff(&args[1..]),
+        Some("rebase") => cmd_module_rebase(&args[1..]),
+        Some("forks") => cmd_module_forks(),
+        _ => exit_error("usage: mesh-shell module <fork|diff|rebase|forks> ..."),
+    }
+}
+
+fn installed_graph() -> mesh_core_module::package::InstalledModuleGraph {
+    mesh_core_module::package::load_installed_module_graph(&root_module_graph_path())
+        .unwrap_or_else(|error| exit_error(error))
+}
+
+fn module_dir(node: &mesh_core_module::package::InstalledModuleNode) -> std::path::PathBuf {
+    node.manifest_path
+        .parent()
+        .expect("module manifest has a directory")
+        .to_path_buf()
+}
+
+/// A fork and its upstream module directory, or an exit when either is missing.
+fn tracked_fork(
+    graph: &mesh_core_module::package::InstalledModuleGraph,
+    fork_id: &str,
+) -> (
+    std::path::PathBuf,
+    mesh_core_module::package::ForkRecord,
+    std::path::PathBuf,
+    String,
+) {
+    let fork = graph
+        .module(fork_id)
+        .unwrap_or_else(|| exit_error(format!("module {fork_id} is not installed")));
+    let fork_dir = module_dir(fork);
+    let record = mesh_core_module::package::fork_record(&fork_dir)
+        .unwrap_or_else(|error| exit_error(error))
+        .unwrap_or_else(|| exit_error(format!("{fork_id} is not a tracked fork")));
+    let upstream = graph.module(&record.upstream).unwrap_or_else(|| {
+        exit_error(format!("upstream {} is no longer installed", record.upstream))
+    });
+    let version = upstream.manifest.version.clone();
+    (fork_dir, record, module_dir(upstream), version)
+}
+
+fn cmd_module_fork(args: &[String]) {
+    let upstream_id = required_arg(args, 0, "mesh-shell module fork <module-id> [--as <new-id>]");
+    let fork_id = match args.iter().position(|arg| arg == "--as") {
+        Some(index) => args
+            .get(index + 1)
+            .unwrap_or_else(|| exit_error("--as requires a module id"))
+            .clone(),
+        None => format!(
+            "@local/{}",
+            upstream_id.rsplit('/').next().unwrap_or(upstream_id)
+        ),
+    };
+    mesh_core_module::package::check_installable_module_id(&fork_id)
+        .unwrap_or_else(|reason| exit_error(reason));
+    let graph = installed_graph();
+    let upstream = graph
+        .module(upstream_id)
+        .unwrap_or_else(|| exit_error(format!("module {upstream_id} is not installed")));
+    if graph.module(&fork_id).is_some() {
+        exit_error(format!("module {fork_id} is already installed"));
+    }
+    let (root_path, _, modules_dir) = lock_paths();
+    let destination = mesh_core_module::package::module_install_path(&modules_dir, &fork_id)
+        .unwrap_or_else(|error| exit_error(error));
+    mesh_core_module::package::create_fork(
+        &module_dir(upstream),
+        upstream_id,
+        &upstream.manifest.version,
+        &fork_id,
+        &destination,
+    )
+    .unwrap_or_else(|error| exit_error(error));
+
+    // The fork requests what upstream requests; carry over the approvals the
+    // user already gave so the copy activates the same way.
+    let mut root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
+        .unwrap_or_else(|error| exit_error(error));
+    if let Some(approvals) = root.capability_approvals.get(upstream_id).cloned() {
+        root.capability_approvals.insert(fork_id.clone(), approvals);
+        root.save(&root_path).unwrap_or_else(|error| exit_error(error));
+    }
+    println!("forked {upstream_id} {} as {fork_id} at {}", upstream.manifest.version, destination.display());
+
+    let paths = profile_paths();
+    let Some((profile_id, profile)) = paths.load_active().unwrap_or_else(|error| exit_error(error))
+    else {
+        println!("no active profile; reference {fork_id} where {upstream_id} was used");
+        return;
+    };
+    let graph = installed_graph();
+    let manifests = graph
+        .modules()
+        .into_iter()
+        .map(|node| &node.manifest)
+        .collect::<Vec<_>>();
+    let effective = mesh_core_module::package::resolve_composition(&profile, manifests.iter().copied())
+        .unwrap_or_else(|error| exit_error(error))
+        .to_profile();
+    let slot_defaults = effective
+        .roots
+        .iter()
+        .filter(|(_, root)| root.is_active())
+        .filter_map(|(instance, root)| graph.module(&root.module).map(|host| (instance, host)))
+        .flat_map(|(instance, host)| {
+            host.manifest.mesh.hosts.values().flat_map(move |hosted| {
+                hosted.slots.iter().map(move |(slot, declared)| {
+                    (instance.clone(), slot.clone(), declared.defaults.clone())
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    let (next, changed) = mesh_core_module::package::rewire_profile(
+        &profile,
+        &effective,
+        &slot_defaults,
+        upstream_id,
+        &fork_id,
+    );
+    if changed {
+        save_profile_revision(&paths, &profile_id, &next).unwrap_or_else(|error| exit_error(error));
+        println!("profile {profile_id} now uses {fork_id}; {upstream_id} stays installed as the fallback");
+    } else {
+        println!("profile {profile_id} does not use {upstream_id} directly");
+    }
+}
+
+fn print_fork_changes(label: &str, changes: &[mesh_core_module::package::ForkFileDiff], patches: bool) {
+    if changes.is_empty() {
+        println!("{label}: no changes");
+        return;
+    }
+    println!("{label}:");
+    for change in changes {
+        let marker = match change.change {
+            mesh_core_module::package::FileChange::Added => "added",
+            mesh_core_module::package::FileChange::Removed => "removed",
+            mesh_core_module::package::FileChange::Modified => "modified",
+        };
+        println!("  {marker:<8} {}", change.path.display());
+    }
+    if patches {
+        for change in changes {
+            match &change.patch {
+                Some(patch) => print!("{patch}"),
+                None => println!("Binary file {} differs", change.path.display()),
+            }
+        }
+    }
+}
+
+fn cmd_module_diff(args: &[String]) {
+    let fork_id = required_arg(args, 0, "mesh-shell module diff <fork-id> [--stat]");
+    let graph = installed_graph();
+    let (fork_dir, record, upstream_dir, version) = tracked_fork(&graph, fork_id);
+    let diff = mesh_core_module::package::diff_fork(&fork_dir, &upstream_dir)
+        .unwrap_or_else(|error| exit_error(error));
+    let patches = !args.iter().any(|arg| arg == "--stat");
+    println!(
+        "{fork_id} forked from {} {} (upstream now {version})",
+        record.upstream, record.upstream_version
+    );
+    print_fork_changes("upstream changes", &diff.upstream, patches);
+    print_fork_changes("local changes", &diff.local, patches);
+}
+
+fn cmd_module_rebase(args: &[String]) {
+    let fork_id = required_arg(args, 0, "mesh-shell module rebase <fork-id>");
+    let graph = installed_graph();
+    let (fork_dir, record, upstream_dir, version) = tracked_fork(&graph, fork_id);
+    let outcome = mesh_core_module::package::rebase_fork(&fork_dir, &upstream_dir, &version)
+        .unwrap_or_else(|error| exit_error(error));
+    println!(
+        "rebased {fork_id} from {} {} onto {version}",
+        record.upstream, record.upstream_version
+    );
+    for (label, paths) in [
+        ("updated", &outcome.updated),
+        ("merged", &outcome.merged),
+        ("conflict", &outcome.conflicts),
+    ] {
+        for path in paths {
+            println!("  {label:<8} {}", path.display());
+        }
+    }
+    if !outcome.conflicts.is_empty() {
+        exit_error("resolve the conflict markers, then reload; the fork now tracks the new upstream");
+    }
+}
+
+fn cmd_module_forks() {
+    let graph = installed_graph();
+    let mut count = 0;
+    for node in graph.modules() {
+        let Ok(Some(record)) = mesh_core_module::package::fork_record(&module_dir(node)) else {
+            continue;
+        };
+        count += 1;
+        let upstream = graph
+            .module(&record.upstream)
+            .map(|upstream| upstream.manifest.version.clone());
+        let state = match &upstream {
+            Some(version) if *version == record.upstream_version => "up to date".to_string(),
+            Some(version) => format!("upstream moved to {version}"),
+            None => "upstream not installed".to_string(),
+        };
+        println!(
+            "{}  fork of {} {} ({state})",
+            node.id, record.upstream, record.upstream_version
+        );
+    }
+    if count == 0 {
+        println!("no tracked forks");
+    }
+}
+
 fn cmd_permissions(args: &[String]) {
     let module_id = required_arg(args, 0, "mesh-shell permissions <module-id>");
     let graph = mesh_core_module::package::load_installed_module_graph(&root_module_graph_path())
@@ -1692,6 +1914,10 @@ fn cmd_help() {
     println!("  rollback  Restore the previous lock generation [<generation>]");
     println!("  uninstall Remove a module [--force]");
     println!("  permissions <module>  List what a module may do, in plain language");
+    println!("  module fork <id> [--as <new-id>]  Copy a module into a tracked fork and use it");
+    println!("  module diff <fork-id>    Show upstream and local changes since the fork synced");
+    println!("  module rebase <fork-id>  Merge upstream changes into the fork");
+    println!("  module forks             List tracked forks and whether upstream moved");
     println!("  lock      verify   recompute digests and report local edits");
     println!(
         "  install <path-or-git-url>[#ref]  Install a module; frontends are added to the active profile"

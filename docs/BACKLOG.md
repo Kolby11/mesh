@@ -49,15 +49,17 @@ criteria and the items folded in here:
 Ordered by implementation priority: finish a tier before starting the next
 unless an item says otherwise. IDs point into the
 [block review](../.planning/codebase/audits/2026-09-30-block-review/REPORT.md)
-(evidence and tests); `A2`–`A8` point into the
-[module architecture direction](../.planning/todos/pending/2026-09-30-module-architecture-direction.md).
+(evidence and tests). The `A*` module-architecture items have landed; see the
+October log.
 
 ### Priority 7 — Customization and ecosystem
 
-- [ ] **A8 follow-up:** read `hyprland-wm` workspace state from
-      `mesh.wayland_subscribe("workspace")` instead of `hyprctl` (dispatch stays);
-      backend contexts do not resolve Luau libraries yet.
-- [ ] **A4:** `module fork` / `diff` / `rebase` with recorded upstream.
+- [ ] Read `hyprland-wm` workspace state from `mesh.wayland_subscribe("workspace")`
+      instead of `hyprctl` (dispatch stays); backend contexts do not resolve Luau
+      libraries yet.
+- [ ] Forking an interface module duplicates its interface declaration; `module fork`
+      should refuse or rename the interface. Forks of modules other modules
+      `uses.modules` keep those dependents on the upstream.
 
 ### Priority 8 — Structural mechanics
 

@@ -7,6 +7,12 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Module-architecture items A2, A4, A6, A8 landed:** bar widgets are separate
+  navigation-item modules with a shared volume library; contracts have optional
+  features with `supports()`; UPower/NetworkManager read over scoped D-Bus grants
+  with plain-language permissions and ext-workspace records; `module fork`/`diff`/
+  `rebase` track upstream. Not yet run in the live shell session. See October's log.
+
 - **Popup edge placement fixed:** popup anchors and compositor constraints use
   content geometry instead of shadow/filter buffer reserves. Quick settings and
   launcher trigger geometry is covered, and a live Hyprland regression verifies

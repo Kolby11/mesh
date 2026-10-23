@@ -262,6 +262,28 @@ the shell; the dedicated `dev` entry is target. Dev modules load at the
 `local` trust tier. Hot reload preserves `self.storage`; UI state is
 best-effort.
 
+### 4.1 Tracked forks
+
+**Shipped.** Editing an installed module in place loses the edits on update.
+`mesh-shell module fork <id> [--as <new-id>]` copies the module to
+`<modulesDir>/<new-id>` (default `@local/<name>`; the `@mesh` scope is
+reserved), renames it in its `module.json`, copies upstream's capability
+approvals, and stores the upstream id, version and a snapshot of its tree in
+`.mesh-fork/` (module discovery never loads that snapshot). The active
+profile is rewired to the copy: roots and providers that used upstream, and
+`upstream:<contribution>` placements in customizable slots — including host
+defaults the profile had not overridden — now name the fork. Upstream stays
+installed as the fallback; without an active profile nothing is rewired.
+
+`mesh-shell module diff <fork-id> [--stat]` shows upstream's changes (snapshot
+→ current upstream) and the fork's own (snapshot → fork) as unified diffs.
+`mesh-shell module rebase <fork-id>` merges upstream's changes line by line:
+files only upstream changed are taken, files both changed merge when the edits
+do not overlap, and overlapping edits get `<<<<<<< fork` / `>>>>>>> upstream`
+markers (binary files keep the fork's version beside `<file>.upstream`). The
+snapshot and recorded version then advance to the current upstream.
+`mesh-shell module forks` lists forks and whether upstream moved.
+
 ## 5. Health
 
 **Status: target in this unified form** (diagnostics plumbing, binary
