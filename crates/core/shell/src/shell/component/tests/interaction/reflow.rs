@@ -400,6 +400,7 @@ scroll {
 }
 text {
   height: 100px;
+  flex-shrink: 0;
 }
 @container (min-width: 400px) {
   .panel {

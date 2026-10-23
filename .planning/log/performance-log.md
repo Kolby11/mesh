@@ -8021,3 +8021,35 @@ measures 2.2–2.3×): full-template control is now 1.13–1.16 s per 100 update
 full rebuilds got faster. Per patch frame, annotation, layout write and display
 build each still visit all 1,028 nodes, which is the open P2 item.
 
+## 2026-10-23 — P2: scoped annotation survives layout-class patch frames
+
+`working tree after 16d95ed2` · area: runtime annotation, overflow measurement
+
+**Change.** Runtime annotation measures overflow before layout, so every frame
+that ran layout dropped its stored `RuntimeAnnotationInputs` and the next frame
+walked the whole tree. After layout on a restyle frame whose layout reports its
+changed nodes, `refresh_overflow_paths` now re-measures those nodes and their
+ancestors (deepest first, reading other children's stored extents) and the
+inputs are kept. This also fixes a one-frame-stale scroll extent: a frame that
+grew scrolled content reported the old `max_y` until the next frame.
+
+**Measured.** `affected_template_eval_beats_full_rebuild`, release, 100 one-field
+updates over a 1,027-node column, desktop in use, three runs each:
+
+| | annotation visits / patch frame | selective total | full-template control |
+| --- | --- | --- | --- |
+| before | 1,028 | 505–512 ms | 1,128–1,158 ms |
+| after | 2 | 472–494 ms | 1,122–1,148 ms |
+
+`affected_template_eval_speedup` 2.22–2.29 → 2.27–2.44 (gate needs 4.5, still
+fails). Layout write and display build still visit 1,028 nodes per patch frame:
+each dirty ancestor iterates all its children, and Taffy relays out the column
+although the patched text keeps its size (backlog P2).
+
+**Validation.** New test `layout_patch_remeasures_scroll_extents_without_a_full_annotation`
+fails before the change. `container_size_restyle_preserves_runtime_and_local_state`
+asserted a scroll offset that only survived because of the stale extent (its
+text shrank to fit, so nothing overflowed); its text now keeps `flex-shrink: 0`
+and the test passes before and after. Shell 988 passed / 0 failed, also with
+`MESH_VERIFY_RETAINED=1`; interaction 51 passed.
+

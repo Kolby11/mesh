@@ -1097,9 +1097,6 @@ impl FrontendSurfaceComponent {
             self.animation_pass_dirty_roots = Some(sampled);
         }
         let layout_work_required = !reused_retained_layout || !self.layout_state.valid;
-        // Annotation measures overflow before layout, except on rebuilds.
-        self.scoped_annotation_inputs =
-            annotation_inputs.filter(|_| trigger_kind == "rebuild" || !layout_work_required);
         // Enter the retained layout path on every finalized tree. On
         // VISUAL_REPAINT-only frames `compute_incremental` updates retained
         // styles and intentionally skips Taffy `compute_layout`; on invalid,
@@ -1163,6 +1160,34 @@ impl FrontendSurfaceComponent {
         if let Some(changed) = &self.layout_state.changed_nodes {
             annotation_dirty.extend(changed.iter().copied());
         }
+        // Annotation measures overflow before layout, except on rebuilds. A
+        // restyle whose layout reports its changed nodes re-measures just
+        // those and their ancestors, so the next frame can stay scoped.
+        let overflow_current = trigger_kind == "rebuild"
+            || !layout_work_required
+            || match (&self.layout_state.changed_nodes, &self.last_frame_snapshot) {
+                (Some(changed), Some(snapshot)) => {
+                    let visit = || {
+                        mesh_core_elements::frame_work::visit(
+                            mesh_core_elements::frame_work::Pass::Annotation,
+                        )
+                    };
+                    match snapshot.live_paths(tree, changed, visit) {
+                        Some(paths) if paths.len() == changed.len() => {
+                            let remeasured = mesh_core_interaction::refresh_overflow_paths(
+                                tree,
+                                &paths,
+                                &mut self.scroll_offsets,
+                            );
+                            annotation_dirty.extend(remeasured);
+                            true
+                        }
+                        _ => false,
+                    }
+                }
+                _ => false,
+            };
+        self.scoped_annotation_inputs = annotation_inputs.filter(|_| overflow_current);
         // Normalize the live projection after style/layout. Paint refreshes
         // any subsequently animated nodes before the retained diff and final
         // immutable capture, so all consumers see the sampled frame.

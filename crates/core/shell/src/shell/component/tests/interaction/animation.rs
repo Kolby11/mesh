@@ -2561,3 +2561,72 @@ end
         );
     }
 }
+
+/// A binding patch that resizes scrolled content re-measures overflow for the
+/// changed nodes and their ancestors after layout, matching a full re-measure,
+/// and keeps the following frames on scoped annotation.
+#[test]
+fn layout_patch_remeasures_scroll_extents_without_a_full_annotation() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <column class="page">
+    <button class="grow" onclick={grow()} />
+    <column class="scroller">
+      <box class="item" style:height={tall .. "px"} />
+      <box class="item" />
+    </column>
+  </column>
+</template>
+<script lang="luau">
+tall = 40
+function grow()
+    tall = tall + 60
+end
+</script>
+<style>
+.page { width: 200px; height: 200px; }
+.grow { width: 20px; height: 20px; }
+.scroller { height: 100px; overflow-y: scroll; }
+.item { width: 100px; height: 40px; flex-shrink: 0; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(200, 200);
+    let mut buffer = PixelBuffer::new(200, 200);
+    for _ in 0..3 {
+        component.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+    }
+    let max_y = |component: &FrontendSurfaceComponent| {
+        first_node_with_class_token(component.last_tree.as_ref().unwrap(), "scroller")
+            .and_then(|node| node.scroll_metrics)
+            .map(|metrics| metrics.max_y)
+            .unwrap()
+    };
+    assert_eq!(max_y(&component), 0.0);
+    let button = first_node_by_class(component.last_tree.as_ref().unwrap(), "grow")
+        .unwrap()
+        .mesh_key()
+        .unwrap()
+        .to_owned();
+    let mut previous = 0.0;
+    for _ in 0..2 {
+        component.focused_key = Some(button.clone());
+        component
+            .handle_input(&theme, 200, 200, ComponentInput::KeyPressed { key: "Enter".into(), modifiers: Default::default() })
+            .unwrap();
+        component.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+        assert!(max_y(&component) > previous, "the patch frame reports the grown extent");
+        previous = max_y(&component);
+        let mut full = component.last_tree.clone().unwrap();
+        let mut offsets = component.scroll_offsets.clone();
+        mesh_core_interaction::annotate_overflow_tree(&mut full, &mut offsets);
+        let refreshed = first_node_with_class_token(&full, "scroller").unwrap().scroll_metrics;
+        assert_eq!(
+            first_node_with_class_token(component.last_tree.as_ref().unwrap(), "scroller").unwrap().scroll_metrics,
+            refreshed
+        );
+        assert!(component.scoped_annotation_inputs.is_some(), "the next frame stays scoped");
+    }
+}

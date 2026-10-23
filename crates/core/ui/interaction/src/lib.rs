@@ -35,6 +35,7 @@ pub use hit_test::{
 pub use mesh_core_elements::node_can_receive_target;
 pub use scroll::{
     ScrollableHit, ScrollbarAxis, ScrollbarHit, annotate_overflow_node, annotate_overflow_tree,
+    refresh_overflow_paths,
     find_scrollable_at, find_scrollable_at_with_limits, find_scrollbar_at, measure_content_size,
     scroll_into_view_offsets, scroll_limits,
 };

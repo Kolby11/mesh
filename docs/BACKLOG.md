@@ -23,7 +23,7 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 - [ ] Two `tools/check-performance` gates fail: glass dashboard open p90 ~90–131 ms (CPU
       glass raster is 42–44 ms of a warm 57 ms open), and affected-template speedup ~2.2×
-      (full rebuilds got 6× faster; patch frames still annotate/lay out/display-build all nodes, P2).
+      (full rebuilds got 6× faster, so the ratio no longer tracks the patch path; see P2 layout).
 
 - [ ] Isolate renderer node-cache and keyed-hover regression state; cache tests
       and the keyed-hover frame snapshot fail intermittently in parallel suites.
@@ -42,8 +42,8 @@ criteria and the items folded in here:
 - [ ] Live replay counts GPU submission as first present; record completion/commit before
       using its GPU open latency as time to visible content.
 - [ ] Give the live replay its own layer-namespace suffix so it can run beside a desktop shell.
-- [ ] **P2:** Narrow runtime/overflow annotation on layout-class patch frames;
-      these frames still annotate the whole tree before layout.
+- [ ] **P2:** A size-preserving text patch still relays out its whole parent in Taffy, and
+      sparse layout write and display build visit every sibling of each dirty ancestor.
 - [ ] **P2:** Stable-tree layout and retained synchronization resolve each dirty node's
       path from the root; share path prefixes. Full layout passes also pay a
       `seed_projection` walk that could fold into the write.
