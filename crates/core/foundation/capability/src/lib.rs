@@ -135,10 +135,7 @@ pub const BUILTIN_CAPABILITIES: &[(&str, PrivilegeLevel)] = &[
     ("exec.locale", PrivilegeLevel::Elevated),
     ("shell.clipboard.write", PrivilegeLevel::Elevated),
     ("shell.notification", PrivilegeLevel::Elevated),
-    ("fs.read", PrivilegeLevel::Elevated),
     ("fs.write", PrivilegeLevel::Elevated),
-    ("fs.watch", PrivilegeLevel::Elevated),
-    ("dbus.session", PrivilegeLevel::Elevated),
     ("pipewire.observe", PrivilegeLevel::Elevated),
     ("wayland.observe", PrivilegeLevel::Elevated),
     ("net.netlink", PrivilegeLevel::Elevated),
@@ -158,7 +155,6 @@ pub const BUILTIN_CAPABILITIES: &[(&str, PrivilegeLevel)] = &[
     ("service.notifications.manage", PrivilegeLevel::Elevated),
     ("exec.command", PrivilegeLevel::High),
     ("shell.screenshot", PrivilegeLevel::High),
-    ("dbus.system", PrivilegeLevel::High),
     ("net.socket", PrivilegeLevel::High),
     ("locale.write", PrivilegeLevel::High),
 ];
@@ -253,6 +249,21 @@ impl CapabilityCatalog {
                 PrivilegeLevel::High
             } else {
                 PrivilegeLevel::Elevated
+            });
+        }
+        // System services hold machine state and enforce their own policy;
+        // session services hold the user's personal data.
+        if let Some(grant) = parse_dbus_read_capability(id) {
+            return Some(scoped_dbus_level(grant.system));
+        }
+        if let Some(grant) = parse_dbus_subscribe_capability(id) {
+            return Some(scoped_dbus_level(grant.system));
+        }
+        if let Some((_, pattern)) = parse_fs_capability(id) {
+            return Some(if pattern.is_broad() {
+                PrivilegeLevel::Elevated
+            } else {
+                PrivilegeLevel::Standard
             });
         }
         BUILTIN_CAPABILITIES
@@ -366,6 +377,272 @@ pub fn parse_dbus_call_capability(value: &str) -> Option<DbusCallGrant> {
         destination,
         interface: interface.to_string(),
     })
+}
+
+fn scoped_dbus_level(system: bool) -> PrivilegeLevel {
+    if system {
+        PrivilegeLevel::Standard
+    } else {
+        PrivilegeLevel::Elevated
+    }
+}
+
+/// A short plain-language description of what a grant lets a module do, for
+/// install review and permission listings. Unknown ids describe themselves.
+pub fn describe_capability(id: &str) -> String {
+    let bus = |system: bool| if system { "system" } else { "session" };
+    if let Some((program, arguments)) = parse_exec_argv_capability(id) {
+        return match arguments {
+            None => format!("run `{program}` with any arguments"),
+            Some(arguments) if arguments.is_empty() => format!("run `{program}`"),
+            Some(arguments) => format!("run `{program} {}`", arguments.join(" ")),
+        };
+    }
+    if let Some(grant) = parse_dbus_read_capability(id) {
+        return format!(
+            "read {} properties from {} ({} bus)",
+            grant.interface,
+            grant.destination,
+            bus(grant.system)
+        );
+    }
+    if let Some(grant) = parse_dbus_subscribe_capability(id) {
+        return format!("watch {} for changes ({} bus)", grant.sender, bus(grant.system));
+    }
+    if let Some(grant) = parse_dbus_call_capability(id) {
+        let destination = grant.destination.as_deref().unwrap_or("any service");
+        return format!(
+            "call {} methods on {destination} ({} bus)",
+            grant.interface,
+            bus(grant.system)
+        );
+    }
+    if let Some(grant) = parse_dbus_own_capability(id) {
+        return format!("provide the {} service ({} bus)", grant.name, bus(grant.system));
+    }
+    if let Some((access, _)) = parse_fs_capability(id) {
+        let pattern = id.split_once(':').map_or("", |(_, pattern)| pattern);
+        return match access {
+            FsAccess::Read => format!("read files matching {pattern}"),
+            FsAccess::Watch => format!("watch files matching {pattern} for changes"),
+        };
+    }
+    let fixed = match id {
+        "exec.command" => "run any command",
+        "exec.launch-app" => "launch applications",
+        "exec.locale" => "run commands in another language",
+        "fs.write" => "write files",
+        "net.http" => "make web requests",
+        "net.socket" => "connect to local sockets",
+        "net.netlink" => "observe network interfaces",
+        "pipewire.observe" => "observe audio devices and streams",
+        "wayland.observe" => "observe open windows",
+        "shell.surface" => "show shell surfaces",
+        "shell.widget" => "show widgets",
+        "shell.clipboard.write" => "write to the clipboard",
+        "shell.notification" => "show notifications",
+        "shell.screenshot" => "capture the screen",
+        "theme.read" => "read the theme",
+        "locale.read" => "read the display language",
+        "locale.write" => "change the display language",
+        _ => "",
+    };
+    if !fixed.is_empty() {
+        return fixed.to_string();
+    }
+    if let Some(rest) = id.strip_prefix("service.") {
+        if let Some(service) = rest.strip_suffix(".read") {
+            return format!("read {} status", service.replace('.', " "));
+        }
+        if let Some(service) = rest.strip_suffix(".control") {
+            return format!("control {}", service.replace('.', " "));
+        }
+        if let Some((service, operation)) = rest.rsplit_once('.') {
+            return format!("{}: {}", service.replace('.', " "), operation.replace(['_', '-'], " "));
+        }
+    }
+    id.to_string()
+}
+
+/// A `dbus.read:<bus>:<destination>:<interface>` grant: reading the
+/// properties of one interface at one bus name (`Properties.Get`/`GetAll`)
+/// and introspecting that name's objects. It permits no other call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DbusReadGrant {
+    pub system: bool,
+    pub destination: String,
+    pub interface: String,
+}
+
+pub const DBUS_PROPERTIES_INTERFACE: &str = "org.freedesktop.DBus.Properties";
+pub const DBUS_INTROSPECTABLE_INTERFACE: &str = "org.freedesktop.DBus.Introspectable";
+
+impl DbusReadGrant {
+    /// Whether a call is a read this grant covers. `property_interface` is the
+    /// first argument of a `Properties` call.
+    pub fn permits(
+        &self,
+        system: bool,
+        destination: &str,
+        interface: &str,
+        member: &str,
+        property_interface: Option<&str>,
+    ) -> bool {
+        if self.system != system || self.destination != destination {
+            return false;
+        }
+        match (interface, member) {
+            (DBUS_PROPERTIES_INTERFACE, "Get" | "GetAll") => {
+                property_interface == Some(self.interface.as_str())
+            }
+            (DBUS_INTROSPECTABLE_INTERFACE, "Introspect") => true,
+            _ => false,
+        }
+    }
+}
+
+pub fn parse_dbus_read_capability(value: &str) -> Option<DbusReadGrant> {
+    let mut parts = value.strip_prefix("dbus.read:")?.splitn(3, ':');
+    let system = parse_bus(parts.next()?)?;
+    let destination = parts.next()?;
+    let interface = parts.next()?;
+    (dbus_dotted_name(destination, true) && dbus_dotted_name(interface, false)).then(|| {
+        DbusReadGrant {
+            system,
+            destination: destination.to_string(),
+            interface: interface.to_string(),
+        }
+    })
+}
+
+/// A `dbus.subscribe:<bus>:<sender>` grant: receiving the signals one
+/// well-known bus name emits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DbusSubscribeGrant {
+    pub system: bool,
+    pub sender: String,
+}
+
+impl DbusSubscribeGrant {
+    pub fn permits(&self, system: bool, sender: &str) -> bool {
+        self.system == system && self.sender == sender
+    }
+}
+
+pub fn parse_dbus_subscribe_capability(value: &str) -> Option<DbusSubscribeGrant> {
+    let (bus, sender) = value.strip_prefix("dbus.subscribe:")?.split_once(':')?;
+    let system = parse_bus(bus)?;
+    dbus_dotted_name(sender, true).then(|| DbusSubscribeGrant {
+        system,
+        sender: sender.to_string(),
+    })
+}
+
+fn parse_bus(bus: &str) -> Option<bool> {
+    match bus {
+        "system" => Some(true),
+        "session" => Some(false),
+        _ => None,
+    }
+}
+
+/// Which file operation an `fs.*` path grant covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FsAccess {
+    Read,
+    Watch,
+}
+
+/// An absolute path pattern from an `fs.read:` or `fs.watch:` grant. A
+/// leading `~/` is the user's home directory; `*` matches within one path
+/// segment and a `**` segment matches any number of segments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathPattern {
+    home: bool,
+    segments: Vec<String>,
+}
+
+impl PathPattern {
+    pub fn parse(pattern: &str) -> Option<Self> {
+        let (home, rest) = match pattern.strip_prefix("~/") {
+            Some(rest) => (true, rest),
+            None => (false, pattern.strip_prefix('/')?),
+        };
+        let segments = rest.split('/').map(str::to_string).collect::<Vec<_>>();
+        let valid = segments.iter().all(|segment| {
+            !segment.is_empty()
+                && segment != "."
+                && segment != ".."
+                && !segment.contains('\0')
+                && (segment == "**" || !segment.contains("**"))
+        });
+        valid.then_some(Self { home, segments })
+    }
+
+    /// Whether the pattern reaches everywhere under `/` or the home directory.
+    pub fn is_broad(&self) -> bool {
+        self.home || self.segments.first().is_some_and(|segment| segment == "**")
+    }
+
+    /// Whether `path` matches. `path` must be absolute; it is matched as
+    /// written, after dropping empty and `.` segments, and a `..` segment
+    /// never matches. `home` resolves a `~/` pattern; without it the pattern
+    /// matches nothing.
+    pub fn matches(&self, path: &str, home: Option<&str>) -> bool {
+        let Some(path) = path.strip_prefix('/') else {
+            return false;
+        };
+        let path = path
+            .split('/')
+            .filter(|segment| !segment.is_empty() && *segment != ".")
+            .collect::<Vec<_>>();
+        if path.contains(&"..") {
+            return false;
+        }
+        let mut pattern = Vec::new();
+        if self.home {
+            let Some(home) = home.and_then(|home| home.strip_prefix('/')) else {
+                return false;
+            };
+            pattern.extend(home.split('/').filter(|segment| !segment.is_empty()));
+        }
+        pattern.extend(self.segments.iter().map(String::as_str));
+        glob_segments(&pattern, &path)
+    }
+}
+
+fn glob_segments(pattern: &[&str], path: &[&str]) -> bool {
+    match pattern.split_first() {
+        None => path.is_empty(),
+        Some((&"**", rest)) => (0..=path.len()).any(|skip| glob_segments(rest, &path[skip..])),
+        Some((segment, rest)) => path
+            .split_first()
+            .is_some_and(|(first, tail)| glob_segment(segment, first) && glob_segments(rest, tail)),
+    }
+}
+
+fn glob_segment(pattern: &str, text: &str) -> bool {
+    match pattern.split_once('*') {
+        None => pattern == text,
+        Some((prefix, rest)) => {
+            let Some(text) = text.strip_prefix(prefix) else {
+                return false;
+            };
+            (0..=text.len())
+                .filter(|index| text.is_char_boundary(*index))
+                .any(|index| glob_segment(rest, &text[index..]))
+        }
+    }
+}
+
+/// Split an `fs.read:<pattern>` or `fs.watch:<pattern>` grant.
+pub fn parse_fs_capability(value: &str) -> Option<(FsAccess, PathPattern)> {
+    let (access, pattern) = if let Some(pattern) = value.strip_prefix("fs.read:") {
+        (FsAccess::Read, pattern)
+    } else {
+        (FsAccess::Watch, value.strip_prefix("fs.watch:")?)
+    };
+    Some((access, PathPattern::parse(pattern)?))
 }
 
 /// A `dbus.own:<bus>:<name>` grant: owning one well-known name and exporting
@@ -702,6 +979,101 @@ impl Default for CapabilitySet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scoped_dbus_reads_and_subscriptions_name_one_service() {
+        let catalog = CapabilityCatalog::builtin();
+        assert_eq!(
+            catalog.validate("dbus.read:system:org.freedesktop.UPower:org.freedesktop.UPower.Device"),
+            Ok(PrivilegeLevel::Standard)
+        );
+        assert_eq!(
+            catalog.validate("dbus.subscribe:session:org.mpris.MediaPlayer2.spotify"),
+            Ok(PrivilegeLevel::Elevated)
+        );
+        for invalid in [
+            "dbus.system",
+            "dbus.session",
+            "dbus.read:system:*:org.a.B",
+            "dbus.read:system:org.a.B",
+            "dbus.subscribe:system:*",
+            "dbus.subscribe:user:org.a.B",
+        ] {
+            assert!(catalog.validate(invalid).is_err(), "{invalid}");
+        }
+
+        let read =
+            parse_dbus_read_capability("dbus.read:system:org.a.Daemon:org.a.Daemon.Device").unwrap();
+        let properties = DBUS_PROPERTIES_INTERFACE;
+        assert!(read.permits(true, "org.a.Daemon", properties, "GetAll", Some("org.a.Daemon.Device")));
+        assert!(read.permits(true, "org.a.Daemon", properties, "Get", Some("org.a.Daemon.Device")));
+        assert!(read.permits(true, "org.a.Daemon", DBUS_INTROSPECTABLE_INTERFACE, "Introspect", None));
+        assert!(!read.permits(true, "org.a.Daemon", properties, "Set", Some("org.a.Daemon.Device")));
+        assert!(!read.permits(true, "org.a.Daemon", properties, "GetAll", Some("org.a.Other")));
+        assert!(!read.permits(true, "org.a.Daemon", "org.a.Daemon.Device", "Reboot", None));
+        assert!(!read.permits(false, "org.a.Daemon", properties, "GetAll", Some("org.a.Daemon.Device")));
+
+        let subscribe = parse_dbus_subscribe_capability("dbus.subscribe:system:org.a.Daemon").unwrap();
+        assert!(subscribe.permits(true, "org.a.Daemon"));
+        assert!(!subscribe.permits(true, "org.b.Daemon"));
+        assert!(!subscribe.permits(false, "org.a.Daemon"));
+    }
+
+    #[test]
+    fn capabilities_describe_themselves_in_plain_language() {
+        for (id, text) in [
+            ("exec.command", "run any command"),
+            ("exec.argv:wpctl:[\"status\"]", "run `wpctl status`"),
+            ("exec.argv:curl:*", "run `curl` with any arguments"),
+            ("service.power.read", "read power status"),
+            ("service.audio.control", "control audio"),
+            ("service.notifications.post", "notifications: post"),
+            ("fs.read:/proc/stat", "read files matching /proc/stat"),
+            (
+                "dbus.read:system:org.freedesktop.UPower:org.freedesktop.UPower.Device",
+                "read org.freedesktop.UPower.Device properties from org.freedesktop.UPower (system bus)",
+            ),
+            ("dbus.subscribe:system:org.a.B", "watch org.a.B for changes (system bus)"),
+            ("dbus.call:session:*:org.a.Item", "call org.a.Item methods on any service (session bus)"),
+        ] {
+            assert_eq!(describe_capability(id), text);
+        }
+    }
+
+    #[test]
+    fn fs_grants_match_path_patterns() {
+        let catalog = CapabilityCatalog::builtin();
+        assert_eq!(catalog.validate("fs.read:/proc/stat"), Ok(PrivilegeLevel::Standard));
+        assert_eq!(
+            catalog.validate("fs.watch:/sys/class/backlight/*/actual_brightness"),
+            Ok(PrivilegeLevel::Standard)
+        );
+        assert_eq!(
+            catalog.validate("fs.read:/**/applications/*.desktop"),
+            Ok(PrivilegeLevel::Elevated)
+        );
+        assert_eq!(catalog.validate("fs.read:~/.config/app.json"), Ok(PrivilegeLevel::Elevated));
+        for invalid in ["fs.read", "fs.watch", "fs.read:proc/stat", "fs.read:/a/../b", "fs.read:/a/x**"] {
+            assert!(catalog.validate(invalid).is_err(), "{invalid}");
+        }
+
+        let (_, stat) = parse_fs_capability("fs.read:/proc/stat").unwrap();
+        assert!(stat.matches("/proc/stat", None));
+        assert!(stat.matches("//proc/./stat", None));
+        assert!(!stat.matches("/proc/stat/../../etc/passwd", None));
+        assert!(!stat.matches("/proc/meminfo", None));
+        let (_, hwmon) = parse_fs_capability("fs.read:/sys/class/hwmon/hwmon*/name").unwrap();
+        assert!(hwmon.matches("/sys/class/hwmon/hwmon3/name", None));
+        assert!(!hwmon.matches("/sys/class/hwmon/hwmon3/temp1_input", None));
+        let (_, desktop) = parse_fs_capability("fs.read:/**/applications/*.desktop").unwrap();
+        assert!(desktop.matches("/usr/share/applications/firefox.desktop", None));
+        assert!(desktop.matches("/applications/a.desktop", None));
+        assert!(!desktop.matches("/usr/share/applications/firefox.png", None));
+        let (_, home) = parse_fs_capability("fs.read:~/.config/*.json").unwrap();
+        assert!(home.matches("/home/alice/.config/app.json", Some("/home/alice")));
+        assert!(!home.matches("/home/bob/.config/app.json", Some("/home/alice")));
+        assert!(!home.matches("/home/alice/.config/app.json", None));
+    }
 
     #[test]
     fn dbus_own_grants_name_one_bus_name() {

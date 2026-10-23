@@ -1,8 +1,8 @@
 -- UPower-backed power/battery backend.
--- Discovers the first battery device via `upower -e` and parses the
--- `upower -i <path>` report into the mesh.power state contract. UPower D-Bus
--- signals (or the `upower --monitor` fallback) refresh promptly on power-source
--- and device changes; a slow poll keeps battery level and estimates current.
+-- Finds the first battery device by introspecting UPower's device tree and
+-- reads its properties over D-Bus into the mesh.power state contract. UPower
+-- signals refresh promptly on power-source and device changes; a slow poll
+-- keeps battery level and estimates current.
 
 state = {
     available = false,
@@ -15,6 +15,12 @@ state = {
     energy_full_watt_hours = 0,
     health_percent = 0,
 }
+
+local UPOWER = "org.freedesktop.UPower"
+local DEVICES = "/org/freedesktop/UPower/devices"
+local DEVICE_INTERFACE = "org.freedesktop.UPower.Device"
+-- UPower.Device.State: 1 charging, 4 fully charged.
+local CHARGING_STATES = { [1] = true, [4] = true }
 
 local battery_path = nil
 local last_availability = nil
@@ -29,97 +35,37 @@ local function debug_warn(message)
 end
 
 local function discover_battery_path()
-    local result = mesh.exec("upower", { "-e" })
-    if not result.success then
+    local reply = mesh.dbus_call("system", {
+        destination = UPOWER,
+        path = DEVICES,
+        interface = "org.freedesktop.DBus.Introspectable",
+        member = "Introspect",
+    })
+    if not reply.success then
         return nil
     end
-    for line in (result.stdout or ""):gmatch("([^\n]+)") do
-        local trimmed = line:match("^%s*(.-)%s*$")
-        if trimmed and trimmed:find("/battery_", 1, true) then
-            return trimmed
-        end
-    end
-    return nil
+    local xml = reply.body[1] and reply.body[1].value or ""
+    local name = xml:match('<node%s+name="(battery_[^"]+)"')
+    return name and (DEVICES .. "/" .. name) or nil
 end
 
--- Convert "39.1 minutes" / "2.3 hours" / "30 seconds" to minutes.
-local function parse_duration_to_minutes(raw)
-    if type(raw) ~= "string" then
-        return 0
+local function device_properties(path)
+    local reply = mesh.dbus_call("system", {
+        destination = UPOWER,
+        path = path,
+        interface = "org.freedesktop.DBus.Properties",
+        member = "GetAll",
+        signature = "s",
+        args = { DEVICE_INTERFACE },
+    })
+    if not reply.success then
+        return nil
     end
-    local value, unit = raw:match("([%d%.]+)%s*(%a+)")
-    local number = tonumber(value)
-    if not number or not unit then
-        return 0
+    local properties = {}
+    for name, entry in pairs(reply.body[1] and reply.body[1].value or {}) do
+        properties[name] = entry.value
     end
-    unit = unit:lower()
-    if unit:find("hour", 1, true) then
-        return number * 60
-    elseif unit:find("minute", 1, true) then
-        return number
-    elseif unit:find("second", 1, true) then
-        return number / 60
-    elseif unit:find("day", 1, true) then
-        return number * 60 * 24
-    end
-    return 0
-end
-
-local function parse_battery_report(report)
-    local parsed = {
-        available = true,
-        level = 0,
-        charging = false,
-        time_remaining_minutes = 0,
-        time_to_full_minutes = 0,
-        power_draw_watts = 0,
-        energy_now_watt_hours = 0,
-        energy_full_watt_hours = 0,
-        health_percent = 0,
-    }
-
-    -- Percentage is the source of truth for level. Capacity is health, not level.
-    local percentage = report:match("percentage:%s*([%d%.]+)")
-    if percentage then
-        parsed.level = tonumber(percentage) or 0
-    end
-
-    local capacity = report:match("capacity:%s*([%d%.]+)")
-    if capacity then
-        parsed.health_percent = tonumber(capacity) or 0
-    end
-
-    local state_value = report:match("state:%s*(%S+)")
-    if state_value then
-        parsed.charging = state_value == "charging" or state_value == "fully-charged"
-    end
-
-    local energy_now = report:match("energy:%s*([%d%.]+)%s*Wh")
-    if energy_now then
-        parsed.energy_now_watt_hours = tonumber(energy_now) or 0
-    end
-
-    local energy_full = report:match("energy%-full:%s*([%d%.]+)%s*Wh")
-    if energy_full then
-        parsed.energy_full_watt_hours = tonumber(energy_full) or 0
-    end
-
-    local energy_rate = report:match("energy%-rate:%s*([%d%.]+)%s*W")
-    if energy_rate then
-        parsed.power_draw_watts = tonumber(energy_rate) or 0
-    end
-
-    local time_to_empty = report:match("time to empty:%s*([^\n]+)")
-    if time_to_empty then
-        parsed.time_remaining_minutes = parse_duration_to_minutes(time_to_empty)
-    end
-
-    local time_to_full = report:match("time to full:%s*([^\n]+)")
-    if time_to_full then
-        parsed.time_to_full_minutes = parse_duration_to_minutes(time_to_full)
-    end
-
-    return parsed
+    return properties
 end
 
 local function read_state()
@@ -131,14 +77,24 @@ local function read_state()
         debug_info("discovered battery at " .. battery_path)
     end
 
-    local result = mesh.exec("upower", { "-i", battery_path })
-    if not result.success or (result.stdout or "") == "" then
+    local device = device_properties(battery_path)
+    if device == nil or device.IsPresent == false then
         -- Device may have been removed; rediscover next tick.
         battery_path = nil
         return nil
     end
 
-    return parse_battery_report(result.stdout)
+    return {
+        available = true,
+        level = tonumber(device.Percentage) or 0,
+        charging = CHARGING_STATES[device.State] == true,
+        time_remaining_minutes = (tonumber(device.TimeToEmpty) or 0) / 60,
+        time_to_full_minutes = (tonumber(device.TimeToFull) or 0) / 60,
+        power_draw_watts = tonumber(device.EnergyRate) or 0,
+        energy_now_watt_hours = tonumber(device.Energy) or 0,
+        energy_full_watt_hours = tonumber(device.EnergyFull) or 0,
+        health_percent = tonumber(device.Capacity) or 0,
+    }
 end
 
 local function unavailable_state()
@@ -192,43 +148,25 @@ local function refresh_state(self)
 end
 
 local POLL_MS = 10000
-local monitor_program = nil
+local monitor = nil
 
 function start(self)
     mesh.service.set_poll_interval(POLL_MS)
-    local started = mesh.dbus_subscribe("system", {
-        sender = "org.freedesktop.UPower",
+    monitor = mesh.dbus_subscribe("system", {
+        sender = UPOWER,
         path_namespace = "/org/freedesktop/UPower",
     })
-    if started then
-        monitor_program = started.program
-    elseif mesh.service.can_exec("upower", { "--monitor" }) then
-        started = mesh.exec_stream("upower", { "--monitor" })
-        monitor_program = started and started.program or nil
-    end
     refresh_state(self)
 end
 
 function on_stream_batch(self, program, lines)
-    if program ~= monitor_program then
-        return
-    end
-    if program:sub(1, 5) == "dbus:" then
-        for _, line in ipairs(lines) do
-            local signal = mesh.json.decode(line)
-            if signal.member == "DeviceAdded" or signal.member == "DeviceRemoved"
-                or (signal.path or ""):find("line_power", 1, true)
-            then
-                refresh_state(self)
-                return
-            end
-        end
+    if monitor == nil or program ~= monitor.program then
         return
     end
     for _, line in ipairs(lines) do
-        if line:find("line_power", 1, true)
-            or line:find("device added", 1, true)
-            or line:find("device removed", 1, true)
+        local signal = mesh.json.decode(line)
+        if signal.member == "DeviceAdded" or signal.member == "DeviceRemoved"
+            or (signal.path or ""):find("line_power", 1, true)
         then
             refresh_state(self)
             return
@@ -237,13 +175,8 @@ function on_stream_batch(self, program, lines)
 end
 
 function on_stream_closed(self, program, _success)
-    if program ~= monitor_program then
-        return
-    end
-    monitor_program = nil
-    if program:sub(1, 5) == "dbus:" and mesh.service.can_exec("upower", { "--monitor" }) then
-        local started = mesh.exec_stream("upower", { "--monitor" })
-        monitor_program = started and started.program or nil
+    if monitor ~= nil and program == monitor.program then
+        monitor = nil
     end
 end
 

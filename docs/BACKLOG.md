@@ -54,9 +54,9 @@ unless an item says otherwise. IDs point into the
 
 ### Priority 7 — Customization and ecosystem
 
-- [ ] **A8:** Move UPower/NetworkManager state reads from `exec.argv` to scoped
-      `dbus.call` grants; scope `dbus.*` subscriptions per sender and `fs.*` per path;
-      ext-workspace protocol data; plain-language permissions.
+- [ ] **A8 follow-up:** read `hyprland-wm` workspace state from
+      `mesh.wayland_subscribe("workspace")` instead of `hyprctl` (dispatch stays);
+      backend contexts do not resolve Luau libraries yet.
 - [ ] **A4:** `module fork` / `diff` / `rebase` with recorded upstream.
 
 ### Priority 8 — Structural mechanics

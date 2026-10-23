@@ -8,7 +8,7 @@
     "kind": "backend",
     "uses": {
       "capabilities": [
-        "fs.read",
+        "fs.read:/**/applications/*.desktop",
         "exec.argv:hyprctl:[\"clients\",\"-j\"]",
         "exec.argv:hyprctl:[\"activewindow\",\"-j\"]",
         "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.exec_cmd(\\\"*\\\")\"]",

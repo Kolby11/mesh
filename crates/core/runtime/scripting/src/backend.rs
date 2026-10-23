@@ -13,6 +13,7 @@ mod runtime;
 mod state;
 mod task_io;
 mod wayland_source;
+mod wayland_workspace;
 
 pub const MIN_POLL_INTERVAL_MS: u64 = 50;
 

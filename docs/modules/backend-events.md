@@ -8,11 +8,12 @@ registration; `failed` followed by `exited` reports a connection or source error
 
 | API | Capability | Records |
 | --- | --- | --- |
-| `mesh.dbus_subscribe(bus, filter)` | `dbus.session` or `dbus.system` | JSON signal records |
+| `mesh.dbus_subscribe(bus, filter)` | `dbus.subscribe:<bus>:<sender>` matching `filter.sender` | JSON signal records |
 | `mesh.pipewire_subscribe()` | `pipewire.observe` | JSON Node/Metadata invalidations |
 | `mesh.netlink_subscribe(groups)` | `net.netlink` | `changed` per route datagram |
 | `mesh.wayland_subscribe("foreign-toplevel")` | `wayland.observe` | JSON wlr foreign-toplevel records |
-| `mesh.watch_path(absolute_path)` | `fs.watch` | `modified` per inotify wakeup |
+| `mesh.wayland_subscribe("workspace")` | `wayland.observe` | JSON ext-workspace records |
+| `mesh.watch_path(absolute_path)` | `fs.watch:<pattern>` matching the path | `modified` per inotify wakeup |
 | `mesh.socket_stream(absolute_path)` | `net.socket` | Newline-delimited socket records |
 
 These APIs observe protocols. Providers keep domain interpretation, state reads,
@@ -97,8 +98,12 @@ D-Bus uses a bounded 64-message subscription queue before the shared stream queu
 
 `mesh.dbus_call(bus, call)` sends one method call and returns its reply. It
 needs a `dbus.call:<bus>:<destination>:<interface>` grant matching the call;
-`*` as the destination permits any bus name for that interface. The broad
-`dbus.system`/`dbus.session` grants do not permit calls.
+`*` as the destination permits any bus name for that interface. A read-only
+`dbus.read:<bus>:<destination>:<interface>` grant permits only
+`org.freedesktop.DBus.Properties.Get`/`GetAll` whose first argument is that
+interface, plus `org.freedesktop.DBus.Introspectable.Introspect`, at that
+destination; UPower and NetworkManager read their state this way. `GetAll`
+replies carry `body[1].value[<Property>].value`.
 
 ```lua
 local reply = mesh.dbus_call("system", {
@@ -193,3 +198,10 @@ Records have `event` and a connection-local `id`: `added`, `title`, `app-id`,
 `state`, `done` and `closed`. Title/app-id values are strings; state values are
 protocol enum numbers. `done` delimits a batch. Unsupported compositors fail
 locally so providers can select compositor-specific socket or polling fallbacks.
+
+`"workspace"` binds `ext_workspace_manager_v1` version 1. Records: `group-added`,
+`group-workspace-enter`/`group-workspace-leave` (with `workspace`),
+`group-removed`, `added`, `workspace-id`, `name`, `coordinates` (array),
+`state` (bitfield: 1 active, 2 urgent, 4 hidden), `removed`, and a
+manager-wide `done` that delimits each batch. At most 1,024 handles are
+tracked per connection.

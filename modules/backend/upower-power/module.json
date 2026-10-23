@@ -1,31 +1,15 @@
 {
   "name": "@mesh/upower-power",
   "version": "0.1.0",
-  "description": "Power/battery backend reading state via the upower CLI.",
+  "description": "Power/battery backend reading UPower over D-Bus.",
   "private": true,
   "mesh": {
     "apiVersion": "0.1",
     "kind": "backend",
     "uses": {
       "capabilities": [
-        "exec.argv:upower:[\"-e\"]",
-        "exec.argv:upower:[\"-i\",\"*\"]"
-      ],
-      "optionalCapabilities": [
-        "dbus.system",
-        "exec.argv:upower:[\"--monitor\"]"
-      ],
-      "binaries": [
-        {
-          "name": "upower",
-          "reason": "Battery state, charge level, and rate.",
-          "packages": {
-            "debian": "upower",
-            "arch": "upower",
-            "fedora": "upower",
-            "nixos": "upower"
-          }
-        }
+        "dbus.read:system:org.freedesktop.UPower:org.freedesktop.UPower.Device",
+        "dbus.subscribe:system:org.freedesktop.UPower"
       ],
       "modules": {
         "@mesh/power-interface": "^1.0.0"

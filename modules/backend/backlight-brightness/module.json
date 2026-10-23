@@ -12,7 +12,7 @@
         "exec.argv:brightnessctl:[\"set\",\"*\"]"
       ],
       "optionalCapabilities": [
-        "fs.watch"
+        "fs.watch:/sys/class/backlight/*/actual_brightness"
       ],
       "binaries": [
         {

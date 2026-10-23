@@ -58,7 +58,10 @@ pub enum InstallReviewError {
     UnknownCapability(#[from] CapabilityPolicyError),
     /// A capability above the supplied approval. Front ends add the hint
     /// for their own approval flag.
-    #[error("{module_id} requests {level} capability {capability}")]
+    #[error(
+        "{module_id} requests {level} capability {capability} ({})",
+        mesh_core_capability::describe_capability(.capability)
+    )]
     NeedsApproval {
         module_id: String,
         capability: String,

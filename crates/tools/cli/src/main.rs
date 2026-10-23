@@ -39,6 +39,7 @@ fn main() {
         Some("update") => cmd_update(&args[2..]),
         Some("rollback") => cmd_rollback(&args[2..]),
         Some("uninstall") => cmd_uninstall(&args[2..]),
+        Some("permissions") => cmd_permissions(&args[2..]),
         Some("lock") => cmd_lock(&args[2..]),
         Some("status") => cmd_status(),
         Some("locale") => cmd_locale(&args[2..]),
@@ -1046,6 +1047,43 @@ fn cmd_install(args: &[String]) {
     if let Some((id, _)) = &installed.plan.profile {
         println!("activated in profile {id}");
     }
+    print_permissions(installed.graph.capability_catalog(), &installed.manifest);
+}
+
+fn cmd_permissions(args: &[String]) {
+    let module_id = required_arg(args, 0, "mesh-shell permissions <module-id>");
+    let graph = mesh_core_module::package::load_installed_module_graph(&root_module_graph_path())
+        .unwrap_or_else(|error| exit_error(error));
+    let module = graph
+        .module(module_id)
+        .unwrap_or_else(|| exit_error(format!("module {module_id} is not installed")));
+    println!("{module_id}");
+    print_permissions(graph.capability_catalog(), &module.manifest);
+}
+
+/// Requested grants with their privilege level and a plain description, so
+/// the rare high-risk grant stands out.
+fn print_permissions(
+    catalog: &mesh_core_capability::CapabilityCatalog,
+    manifest: &mesh_core_module::package::ModuleManifest,
+) {
+    let reviewed = match mesh_core_module::package::review_capabilities(catalog, manifest) {
+        Ok(reviewed) => reviewed,
+        Err(error) => return eprintln!("permissions unavailable: {error}"),
+    };
+    if reviewed.is_empty() {
+        println!("permissions: none");
+        return;
+    }
+    println!("permissions:");
+    for capability in reviewed {
+        println!(
+            "  {:<8} {}{}",
+            capability.level.to_string(),
+            mesh_core_capability::describe_capability(&capability.id),
+            if capability.required { "" } else { " (optional)" }
+        );
+    }
 }
 
 /// Resolve `(root graph path, config dir, modules dir)` for lock-aware commands.
@@ -1653,6 +1691,7 @@ fn cmd_help() {
     println!("            [<module-id>|--all] [--dry-run] [--keep|--replace]");
     println!("  rollback  Restore the previous lock generation [<generation>]");
     println!("  uninstall Remove a module [--force]");
+    println!("  permissions <module>  List what a module may do, in plain language");
     println!("  lock      verify   recompute digests and report local edits");
     println!(
         "  install <path-or-git-url>[#ref]  Install a module; frontends are added to the active profile"

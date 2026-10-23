@@ -2585,7 +2585,7 @@ async fn backend_file_task_reads_regular_files_with_an_explicit_grant() {
     let mut ctx = BackendScriptContext::new_with_settings_and_capabilities(
         "@test/async-file",
         serde_json::json!({"path": path}),
-        mesh_core_capability::CapabilitySet::from_ids(["fs.read"]),
+        mesh_core_capability::CapabilitySet::from_ids([format!("fs.read:{}", path.display())]),
     );
     ctx.load_script(
         r#"
@@ -2639,7 +2639,7 @@ fn backend_file_reads_require_a_grant_and_an_absolute_regular_path() {
             .contains("fs.read")
     );
     let mut granted =
-        BackendScriptContext::new_with_capabilities("@test/file-path", ["fs.read".into()]);
+        BackendScriptContext::new_with_capabilities("@test/file-path", ["fs.read:/**".into()]);
     granted
         .load_script("function start(self) mesh.read_file('relative') end")
         .unwrap();
@@ -3096,7 +3096,8 @@ fn dbus_call_requires_a_matching_grant_and_startup() {
     let call = "mesh.dbus_call('session', { destination = 'org.mesh.Test', path = '/org/mesh/Test', interface = 'org.mesh.Test', member = 'Echo' })";
     for grants in [
         vec![],
-        vec!["dbus.session".to_string()],
+        vec!["dbus.subscribe:session:org.mesh.Test".to_string()],
+        vec!["dbus.read:session:org.mesh.Test:org.mesh.Test".to_string()],
         vec!["dbus.call:system:*:org.mesh.Test".to_string()],
         vec!["dbus.call:session:org.mesh.Other:org.mesh.Test".to_string()],
         vec!["dbus.call:session:*:org.mesh.Other".to_string()],
@@ -3132,7 +3133,7 @@ fn dbus_serve_requires_an_ownership_grant_for_that_name_and_bus() {
     let serve = "mesh.dbus_serve('session', { name = 'org.mesh.Served', path = '/org/mesh/Served', interface = 'org.mesh.Served' })";
     for grants in [
         vec![],
-        vec!["dbus.session".to_string()],
+        vec!["dbus.subscribe:session:org.mesh.Served".to_string()],
         vec!["dbus.call:session:*:org.mesh.Served".to_string()],
         vec!["dbus.own:system:org.mesh.Served".to_string()],
         vec!["dbus.own:session:org.mesh.Other".to_string()],
@@ -3248,18 +3249,20 @@ async fn stop_hook_has_a_bounded_shutdown_deadline() {
 
 #[test]
 fn shipped_providers_prefer_native_sources_and_fall_back_when_the_source_closes() {
-    for (module, native, program) in [
+    for (module, native, program, fallback) in [
         (
             "upower-power",
             "dbus_subscribe",
             "dbus:system:org.freedesktop.UPower",
+            0,
         ),
         (
             "networkmanager-network",
             "dbus_subscribe",
             "dbus:system:org.freedesktop.NetworkManager",
+            0,
         ),
-        ("pipewire-audio", "pipewire_subscribe", "pipewire"),
+        ("pipewire-audio", "pipewire_subscribe", "pipewire", 1),
     ] {
         let mut ctx = BackendScriptContext::new(format!("@mesh/{module}"));
         let source = bundled_backend_script(&format!(
@@ -3303,9 +3306,10 @@ mesh.exec = function(...) return {{ success = true, stdout = "", stderr = "" }} 
             .unwrap()
             .call::<()>((mlua::Value::Nil, program, false))
             .unwrap();
+        // UPower and NetworkManager read over D-Bus only; no CLI monitor remains.
         assert_eq!(
             lua.globals().get::<u32>("monitor_count").unwrap(),
-            1,
+            fallback,
             "{module}"
         );
     }
@@ -3320,7 +3324,18 @@ async fn live_provider_event_profile() {
         for module in ["upower-power", "networkmanager-network", "pipewire-audio"] {
             let mut ctx = BackendScriptContext::new_with_capabilities(
                 format!("@mesh/{module}"),
-                ["exec.command", "dbus.system", "pipewire.observe"].map(str::to_owned),
+                [
+                    "exec.command",
+                    "dbus.subscribe:system:org.freedesktop.UPower",
+                    "dbus.subscribe:system:org.freedesktop.NetworkManager",
+                    "dbus.read:system:org.freedesktop.UPower:org.freedesktop.UPower.Device",
+                    "dbus.read:system:org.freedesktop.NetworkManager:org.freedesktop.NetworkManager",
+                    "dbus.read:system:org.freedesktop.NetworkManager:org.freedesktop.NetworkManager.Device",
+                    "dbus.read:system:org.freedesktop.NetworkManager:org.freedesktop.NetworkManager.Device.Wireless",
+                    "dbus.read:system:org.freedesktop.NetworkManager:org.freedesktop.NetworkManager.AccessPoint",
+                    "pipewire.observe",
+                ]
+                .map(str::to_owned),
             );
             ctx.load_script(&bundled_backend_script(&format!(
                 "../../../../modules/backend/{module}/src/main.luau"
@@ -3490,7 +3505,7 @@ async fn native_stream_handles_cancel_only_their_own_generation() {
     let mut ctx = BackendScriptContext::new_with_settings_and_capabilities(
         "@test/watch-close",
         serde_json::json!({ "path": path }),
-        mesh_core_capability::CapabilitySet::from_ids(["fs.watch"]),
+        mesh_core_capability::CapabilitySet::from_ids([format!("fs.watch:{}", path.display())]),
     );
     ctx.load_script(
         r#"
@@ -3660,4 +3675,149 @@ mesh.exec = function(...) return { success = true, stdout = "", stderr = "" } en
     )
     .unwrap();
     assert_eq!(ctx.poll_interval_ms(), 400);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn scoped_grants_gate_file_reads_signals_and_property_reads() {
+    let root = temp_storage_root("scoped-grants");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("allowed"), "yes").unwrap();
+    std::fs::write(root.join("other"), "no").unwrap();
+    let mut ctx = BackendScriptContext::new_with_settings_and_capabilities(
+        "@test/scoped-grants",
+        serde_json::json!({ "root": root }),
+        mesh_core_capability::CapabilitySet::from_ids([
+            format!("fs.read:{}/allowed", root.display()),
+            "dbus.subscribe:session:org.mesh.Allowed".to_string(),
+            "dbus.read:session:org.mesh.Allowed:org.mesh.Allowed.Device".to_string(),
+        ]),
+    );
+    ctx.load_script(
+        r#"
+state = {}
+local function properties(interface, member)
+    return mesh.dbus_call("session", {
+        destination = "org.mesh.Allowed", path = "/org/mesh/Allowed",
+        interface = "org.freedesktop.DBus.Properties", member = member,
+        signature = "s", args = { interface },
+    })
+end
+function start(self)
+    local root = mesh.config().root
+    state.allowed = mesh.read_file(root .. "/allowed").contents
+    state.other = pcall(mesh.read_file, root .. "/other")
+    state.escape = pcall(mesh.read_file, root .. "/other/../allowed")
+    state.foreign_signals = mesh.dbus_subscribe("session", {
+        sender = "org.mesh.Other", path_namespace = "/org/mesh/Other",
+    })
+    state.read_error = properties("org.mesh.Allowed.Device", "GetAll").error
+    state.other_interface_error = properties("org.mesh.Allowed.Secret", "GetAll").error
+    state.set_error = properties("org.mesh.Allowed.Device", "Set").error
+    state.done = true
+end
+"#,
+    )
+    .unwrap();
+    let initial = ctx.call_init().unwrap();
+    let state = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        if let Some(state) = initial
+            && state["done"] == true
+        {
+            return state;
+        }
+        loop {
+            let BackendTaskRun { state, errors, .. } = ctx.run_due_tasks(std::time::Instant::now());
+            assert!(errors.is_empty(), "{errors:?}");
+            if let Some(state) = state
+                && state["done"] == true
+            {
+                return state;
+            }
+            ctx.task_wakeup().notified().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(state["allowed"], "yes");
+    assert_eq!(state["other"], false);
+    assert_eq!(state["escape"], false);
+    assert_eq!(state["foreign_signals"], false);
+    let denied = |field: &str| state[field].as_str().unwrap_or("").starts_with("missing capability");
+    assert!(!denied("read_error"), "{state:?}");
+    assert!(denied("other_interface_error"), "{state:?}");
+    assert!(denied("set_error"), "{state:?}");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+// cargo test -p mesh-core-scripting live_dbus_providers_read_state -- --ignored --nocapture
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires live UPower and NetworkManager on the system bus"]
+async fn live_dbus_providers_read_state() {
+    for module in ["upower-power", "networkmanager-network"] {
+        let manifest: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(format!(
+                "{}/../../../../modules/backend/{module}/module.json",
+                env!("CARGO_MANIFEST_DIR")
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let grants = manifest["mesh"]["uses"]["capabilities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|grant| grant.as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        let mut ctx = BackendScriptContext::new_with_capabilities(format!("@mesh/{module}"), grants);
+        ctx.load_script(&bundled_backend_script(&format!(
+            "../../../../modules/backend/{module}/src/main.luau"
+        )))
+        .unwrap();
+        let mut state = ctx.call_init().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while state.as_ref().is_none_or(|state| state["available"] != true)
+            && std::time::Instant::now() < deadline
+        {
+            let run = ctx.run_due_tasks(std::time::Instant::now());
+            assert!(run.errors.is_empty(), "{:?}", run.errors);
+            state = run.state.or(state);
+            let _ = tokio::time::timeout(
+                std::time::Duration::from_millis(200),
+                ctx.task_wakeup().notified(),
+            )
+            .await;
+        }
+        println!("{module}: {state:?}");
+        assert!(state.is_some_and(|state| state["available"] == true), "{module}");
+    }
+}
+
+// cargo test -p mesh-core-scripting live_ext_workspace_records -- --ignored --nocapture
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "requires a Wayland compositor advertising ext-workspace"]
+async fn live_ext_workspace_records() {
+    let mut ctx =
+        BackendScriptContext::new_with_capabilities("@test/workspaces", ["wayland.observe".to_string()]);
+    ctx.load_script("function start() mesh.wayland_subscribe(\"workspace\") end")
+        .unwrap();
+    ctx.call_init().unwrap();
+    let streams = ctx.stream_state();
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+    let mut records = Vec::new();
+    while tokio::time::Instant::now() < deadline
+        && !records.iter().any(|line: &String| line.contains("\"done\""))
+    {
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(200), streams.wait_for_event()).await;
+        for event in streams.drain_events() {
+            match event.kind {
+                StreamEventKind::Line(line) => records.push(line),
+                other => println!("{other:?}"),
+            }
+        }
+    }
+    for record in &records {
+        println!("{record}");
+    }
+    assert!(records.iter().any(|line| line.contains("\"added\"")));
+    ctx.shutdown_streams().await;
 }

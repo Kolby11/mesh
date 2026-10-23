@@ -1,21 +1,20 @@
 {
   "name": "@mesh/networkmanager-network",
   "version": "0.1.0",
-  "description": "NetworkManager provider over nmcli: connectivity, primary connection and Wi-Fi networks.",
+  "description": "NetworkManager provider: connectivity, primary connection and Wi-Fi networks read over D-Bus; nmcli for controls.",
   "private": true,
   "mesh": {
     "apiVersion": "0.1",
     "kind": "backend",
     "uses": {
       "capabilities": [
-        "exec.argv:nmcli:[\"monitor\"]",
-        "exec.argv:nmcli:[\"networking\",\"connectivity\"]",
-        "exec.argv:nmcli:[\"radio\",\"wifi\"]",
-        "exec.argv:nmcli:[\"-t\",\"-f\",\"TYPE,STATE,CONNECTION,DEVICE\",\"device\"]",
-        "exec.argv:nmcli:[\"-t\",\"-f\",\"ACTIVE,SSID,SIGNAL,SECURITY\",\"device\",\"wifi\",\"list\",\"--rescan\",\"no\"]"
+        "dbus.read:system:org.freedesktop.NetworkManager:org.freedesktop.NetworkManager",
+        "dbus.read:system:org.freedesktop.NetworkManager:org.freedesktop.NetworkManager.Device",
+        "dbus.read:system:org.freedesktop.NetworkManager:org.freedesktop.NetworkManager.Device.Wireless",
+        "dbus.read:system:org.freedesktop.NetworkManager:org.freedesktop.NetworkManager.AccessPoint",
+        "dbus.subscribe:system:org.freedesktop.NetworkManager"
       ],
       "optionalCapabilities": [
-        "dbus.system",
         "exec.argv:nmcli:[\"radio\",\"wifi\",\"*\"]",
         "exec.argv:nmcli:[\"device\",\"wifi\",\"rescan\"]",
         "exec.argv:nmcli:[\"device\",\"wifi\",\"connect\",\"*\"]"
@@ -23,8 +22,13 @@
       "binaries": [
         {
           "name": "nmcli",
-          "reason": "Read and control NetworkManager.",
-          "packages": { "arch": "networkmanager", "debian": "network-manager", "fedora": "NetworkManager", "nixos": "networkmanager" }
+          "reason": "Control NetworkManager: Wi-Fi radio, scans and connections.",
+          "packages": {
+            "arch": "networkmanager",
+            "debian": "network-manager",
+            "fedora": "NetworkManager",
+            "nixos": "networkmanager"
+          }
         }
       ],
       "modules": {

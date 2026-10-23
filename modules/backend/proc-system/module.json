@@ -8,14 +8,24 @@
     "kind": "backend",
     "uses": {
       "capabilities": [
-        "fs.read",
+        "fs.read:/proc/stat",
+        "fs.read:/proc/meminfo",
+        "fs.read:/proc/net/dev",
+        "fs.read:/proc/uptime",
+        "fs.read:/sys/class/hwmon/hwmon*/name",
+        "fs.read:/sys/class/hwmon/hwmon*/temp1_input",
         "exec.argv:df:[\"-B1\",\"--output=size,used\",\"/\"]"
       ],
       "binaries": [
         {
           "name": "df",
           "reason": "Report the root filesystem's size and use.",
-          "packages": { "arch": "coreutils", "debian": "coreutils", "fedora": "coreutils", "nixos": "coreutils" }
+          "packages": {
+            "arch": "coreutils",
+            "debian": "coreutils",
+            "fedora": "coreutils",
+            "nixos": "coreutils"
+          }
         }
       ],
       "modules": {

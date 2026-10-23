@@ -1076,7 +1076,7 @@ default for a malformed argument.
   (`task.spawn`, `task.delay`, `task.sleep`, `task.cancel`) once `start(self)`
   runs. `start`, `on_poll`, `on_command_<method>`, stream hooks and `stop` run as coroutines, as do
   tasks: inside them `mesh.exec`, `mesh.socket_request` and `mesh.read_file`
-  (`fs.read`, absolute regular files up to the output limit) suspend the
+  (`fs.read:<pattern>`, absolute regular files up to the output limit) suspend the
   callback while a host worker runs, and other callbacks keep running. The
   provider becomes ready when `start` finishes; a poll that suspended
   finishes before the next poll starts; a suspended command replies when its
@@ -1122,7 +1122,7 @@ without the grant.
   belong to frontends/automation consuming an interface; they are declared in
   the interface contract's `[capabilities]`.
 - **Provider capabilities** are the generic host powers an implementation
-  needs (`exec.argv:wpctl:["status"]`, `dbus.system`, `net.http`). A provider declaring a
+  needs (`exec.argv:wpctl:["status"]`, `dbus.read:…`, `net.http`). A provider declaring a
   consumer capability for an interface it implements gets
   `provider_declares_consumer_capability` with a removal action.
 - Executable provider access uses `exec.argv:<program>:<json-args>` grants.
@@ -1139,8 +1139,24 @@ without the grant.
 - **Shipped — scoped D-Bus calls.** `dbus.call:<bus>:<destination>:<interface>`
   permits `mesh.dbus_call` to one interface at one bus name, or at any name with
   `*` (for per-client services such as StatusNotifier items). `<bus>` is
-  `system` (High) or `session` (Elevated). The broad `dbus.system` and
-  `dbus.session` grants cover signal subscription only, not calls.
+  `system` (High) or `session` (Elevated).
+- **Shipped — scoped D-Bus reads and signals.** `dbus.read:<bus>:<destination>:<interface>`
+  permits only `Properties.Get`/`GetAll` for that interface and `Introspect` at
+  that name; `dbus.subscribe:<bus>:<sender>` permits `mesh.dbus_subscribe`
+  for that sender. Both are Standard on the system bus and Elevated on the
+  session bus. There is no bus-wide D-Bus grant.
+- **Shipped — scoped files.** `fs.read:<pattern>` and `fs.watch:<pattern>`
+  permit `mesh.read_file` and `mesh.watch_path` on matching paths. Patterns
+  are absolute or start with `~/` (home); `*` matches within a segment and a
+  `**` segment matches any number of segments. Paths match as written after
+  dropping empty and `.` segments; `..` never matches, and symlinks inside a
+  granted path are followed. Patterns rooted at `/**` or `~/` are Elevated,
+  others Standard. There is no unscoped `fs.read` or `fs.watch`.
+- **Shipped — plain-language permissions.** Every grant has a short
+  description (`describe_capability`): "run `nmcli device wifi rescan`", "read
+  battery status", "watch org.freedesktop.UPower for changes". Install
+  approval errors include it, and `mesh-shell permissions <module>` (also
+  printed after `install`) lists a module's grants by level.
 - **Shipped — owned D-Bus names.** `dbus.own:<bus>:<name>` permits
   `mesh.dbus_serve` to own one well-known name and export one interface at one
   object path; `<bus>` is `system` (High) or `session` (Elevated). See
@@ -1188,7 +1204,7 @@ Privilege levels (fixed set, part of install UX):
 | ----- | ------- | -------- |
 | `standard` | Safe read access | `theme.read`, `service.audio.read`, `locale.read` |
 | `elevated` | Meaningful system interaction; confirm at install | `service.network.control`, `exec.launch-app`, `net.http` |
-| `high` | Powerful/sensitive; explicit opt-in with warning | `exec.command`, `exec.shell`, `shell.screenshot`, `dbus.system`, `automation.act` |
+| `high` | Powerful/sensitive; explicit opt-in with warning | `exec.command`, `exec.argv:…`, `shell.screenshot`, `dbus.call:system:…`, `automation.act` |
 
 Trust tiers: `core` (shipped, reviewed), `verified` (reviewed + signed),
 `community` (unreviewed, user accepts risk), `local` (developer path, no

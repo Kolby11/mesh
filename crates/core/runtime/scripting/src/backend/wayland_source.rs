@@ -15,9 +15,12 @@ use super::{
 };
 
 pub(super) fn spawn(state: &Arc<StreamState>, protocol: &str) -> std::io::Result<StreamHandle> {
+    if protocol == "workspace" {
+        return super::wayland_workspace::spawn(state);
+    }
     if protocol != "foreign-toplevel" {
         return Err(std::io::Error::other(
-            "supported Wayland source: foreign-toplevel",
+            "supported Wayland sources: foreign-toplevel, workspace",
         ));
     }
     spawn_source(

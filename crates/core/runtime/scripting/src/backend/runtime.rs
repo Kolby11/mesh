@@ -165,6 +165,37 @@ fn exec_locale_option(options: Option<&Table>, granted: bool) -> mlua::Result<Ex
     ExecLocale::parse(&value).map_err(mlua::Error::external)
 }
 
+/// The `fs.*` path grants of one access kind, with the home directory that
+/// resolves their `~/` patterns.
+#[derive(Clone)]
+struct PathGrants {
+    patterns: Arc<[mesh_core_capability::PathPattern]>,
+    home: Option<String>,
+}
+
+impl PathGrants {
+    fn permits(&self, path: &str) -> bool {
+        self.patterns
+            .iter()
+            .any(|pattern| pattern.matches(path, self.home.as_deref()))
+    }
+}
+
+fn path_grants<'a>(
+    capabilities: impl IntoIterator<Item = &'a String>,
+    access: mesh_core_capability::FsAccess,
+) -> PathGrants {
+    PathGrants {
+        patterns: capabilities
+            .into_iter()
+            .filter_map(|id| mesh_core_capability::parse_fs_capability(id))
+            .filter(|(granted, _)| *granted == access)
+            .map(|(_, pattern)| pattern)
+            .collect(),
+        home: std::env::var("HOME").ok().filter(|home| home.starts_with('/')),
+    }
+}
+
 fn require_started(host_side_effects_enabled: &AtomicBool) -> mlua::Result<()> {
     if host_side_effects_enabled.load(Ordering::Acquire) {
         Ok(())
@@ -1740,16 +1771,20 @@ impl BackendScriptContext {
             self.lua_ref()?
                 .create_function(move |lua, (bus, filter): (String, Table)| {
                     require_started(&started)?;
-                    let capability = match bus.as_str() {
-                        "system" => "dbus.system",
-                        "session" => "dbus.session",
+                    let system = match bus.as_str() {
+                        "system" => true,
+                        "session" => false,
                         _ => return Err(mlua::Error::runtime("bus must be system or session")),
                     };
-                    if !capabilities.contains(capability) {
-                        return Ok(LuaValue::Boolean(false));
-                    }
                     let filter = lua
                         .from_value::<super::host_events::SignalFilter>(LuaValue::Table(filter))?;
+                    let granted = capabilities.iter().any(|id| {
+                        mesh_core_capability::parse_dbus_subscribe_capability(id)
+                            .is_some_and(|grant| grant.permits(system, &filter.sender))
+                    });
+                    if !granted {
+                        return Ok(LuaValue::Boolean(false));
+                    }
                     match super::host_events::spawn_dbus(&streams, &bus, filter) {
                         Ok(handle) => Ok(LuaValue::Table(stream_handle_table(lua, &handle)?)),
                         Err(error) => Err(mlua::Error::external(error)),
@@ -1761,15 +1796,30 @@ impl BackendScriptContext {
             .iter()
             .filter_map(|id| mesh_core_capability::parse_dbus_call_capability(id))
             .collect::<Arc<[_]>>();
+        let reads = self
+            .capabilities
+            .iter()
+            .filter_map(|id| mesh_core_capability::parse_dbus_read_capability(id))
+            .collect::<Arc<[_]>>();
         let permitted = move |bus: &str, call: &super::dbus_call::MethodCall| {
             let system = match bus {
                 "system" => true,
                 "session" => false,
                 _ => return Err(mlua::Error::runtime("bus must be system or session")),
             };
+            let property_interface = call.args.first().and_then(serde_json::Value::as_str);
             Ok(grants
                 .iter()
-                .any(|grant| grant.permits(system, &call.destination, &call.interface)))
+                .any(|grant| grant.permits(system, &call.destination, &call.interface))
+                || reads.iter().any(|grant| {
+                    grant.permits(
+                        system,
+                        &call.destination,
+                        &call.interface,
+                        &call.member,
+                        property_interface,
+                    )
+                }))
         };
         let denied = |bus: &str, call: &super::dbus_call::MethodCall| {
             serde_json::json!({
@@ -1900,7 +1950,14 @@ impl BackendScriptContext {
             ),
         ];
         for (name, capability, spawn) in sources {
-            let granted = self.capabilities.contains(capability);
+            let granted: Arc<dyn Fn(&str) -> bool + Send + Sync> =
+                if capability == host_sources::WATCH_CAPABILITY {
+                    let grants = path_grants(&self.capabilities, mesh_core_capability::FsAccess::Watch);
+                    Arc::new(move |path| grants.permits(path))
+                } else {
+                    let granted = self.capabilities.contains(capability);
+                    Arc::new(move |_| granted)
+                };
             let module_id = self.module_id.clone();
             let streams = Arc::clone(&self.streams);
             let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
@@ -1908,7 +1965,7 @@ impl BackendScriptContext {
                 name,
                 self.lua_ref()?.create_function(move |lua, path: String| {
                     require_started(&host_side_effects_enabled)?;
-                    if !granted {
+                    if !granted(&path) {
                         tracing::warn!(
                             module_id = %module_id,
                             path = %path,
@@ -2013,18 +2070,19 @@ impl BackendScriptContext {
     }
 
     fn install_file_api(&mut self, mesh: &Table) -> mlua::Result<()> {
-        let granted = self.capabilities.contains("fs.read");
+        let grants = path_grants(&self.capabilities, mesh_core_capability::FsAccess::Read);
+        let start_grants = grants.clone();
         let resources = self.policy.budget();
         let started = Arc::clone(&self.host_side_effects_enabled);
         let blocking = self.lua_ref()?.create_function(move |lua, path: String| {
             require_started(&started)?;
-            if !granted {
-                return Err(mlua::Error::external("missing capability fs.read"));
-            }
             if !Path::new(&path).is_absolute() {
                 return Err(mlua::Error::external(
                     "mesh.read_file requires an absolute path",
                 ));
+            }
+            if !grants.permits(&path) {
+                return Err(mlua::Error::external(format!("missing capability fs.read:{path}")));
             }
             let value = {
                 let _pause = resources.pause_frame_clock();
@@ -2043,13 +2101,13 @@ impl BackendScriptContext {
         let owner = Arc::clone(&self.task_io);
         let start = self.lua_ref()?.create_function(move |lua, path: String| {
             require_started(&started)?;
-            if !granted {
-                return Err(mlua::Error::external("missing capability fs.read"));
-            }
             if !Path::new(&path).is_absolute() {
                 return Err(mlua::Error::external(
                     "mesh.read_file requires an absolute path",
                 ));
+            }
+            if !start_grants.permits(&path) {
+                return Err(mlua::Error::external(format!("missing capability fs.read:{path}")));
             }
             let limit = resources.output_limit() as usize;
             owner.spawn(lua, resources.clone(), move || {
