@@ -15,4 +15,5 @@ mod element_refs;
 mod props;
 mod quick_settings;
 mod real_surfaces;
+mod scroll_contract;
 mod service;

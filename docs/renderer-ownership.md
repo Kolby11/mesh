@@ -41,6 +41,13 @@ completed async assets, newly published asset pages and font database/alias
 changes invalidate its entries. Recordings made with pending resource jobs are
 not admitted.
 
+Promoted buffer bounds clip descendant visual extents at overflow viewports,
+keeping scroll offsets from changing the popup reserve. Outer shadows remain
+included, and fixed descendants keep their surface coordinate space.
+
+Icon content applies its resolved node clip to file, glyph and fallback drawing,
+including when hovered transforms move a scroll subtree onto the affine path.
+
 Layer scopes, backdrop reads/refraction, scroll scopes and scroll-content nodes
 are prepared live. Tooltip paint remains outside the node cache. Complete-scene
 composition still visits command references; newly prepared node operations
@@ -100,6 +107,10 @@ present. Pictures pin their resources, so replay needs no painter thread-locals.
 Any pixel read — scroll shifts, debug overlays, the SHM copy — replays pending
 pictures first. Child popup surfaces still paint and present inside reconcile,
 and the SHM copy stays on the shell thread.
+
+A ready child target can advance its component VM and paint even while its
+parent waits for a compositor frame callback or buffer release. Each target
+retains its own presentation backpressure and pending damage.
 
 Presentation does not wait for the worker. `present_with_damage` submits the
 immutable scene and returns `PresentStatus::Submitted`; the surface then reports

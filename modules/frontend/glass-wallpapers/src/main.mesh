@@ -39,11 +39,12 @@
                             class:card-left={card.side < 0}
                             class:card-right={card.side > 0}
                             class:card-far={card.far}
+                            class:card-empty={card.empty}
                             onclick={onCard(card.index)}
                             aria-label={card.label}
                             aria-pressed={card.current}
                         >
-                            <image class="card-image" src={card.thumbnail} alt="" />
+                            <image class="card-image" src={card.thumbnail} alt="" hidden={card.empty} />
                             <box class="card-badge" hidden={not card.current}>
                                 <icon class="card-badge-glyph" name="object-select" size="14" />
                             </box>
@@ -56,7 +57,6 @@
             </row>
             <row class="foot" hidden={not has_wallpapers}>
                 <text class="focused-name">{focused_name}</text>
-                <box class="spacer" />
                 <text class="hint">{t("picker.hint")}</text>
                 <button class="apply" keybind="apply" onkeybind={onApply} onclick={onApply} disabled={focused_current} aria-label={apply_label}>
                     <icon class="apply-glyph" name="preferences-desktop-wallpaper" size="16" />
@@ -77,8 +77,10 @@ local theme = require("mesh.theme")
 local wallpapers = require("mesh.wallpapers")
 
 local SURFACE = "@mesh/glass-wallpapers"
--- Cards shown on each side of the focused one.
-local WINDOW = 3
+-- Card slots on each side of the focused one. Every slot is always laid out,
+-- empty ones invisibly, so the carousel keeps one width and the focused card
+-- stays centred at either end of the list.
+local WINDOW = 2
 local MAX_SWATCHES = 24
 
 focus = 1
@@ -132,7 +134,19 @@ effect(function()
     for offset = -WINDOW, WINDOW do
         local position = index + offset
         local wallpaper = items[position]
-        if wallpaper then
+        if not wallpaper then
+            visible[#visible + 1] = {
+                path = "empty:" .. offset,
+                index = 0,
+                thumbnail = "",
+                label = "",
+                focused = false,
+                side = offset,
+                far = false,
+                current = false,
+                empty = true,
+            }
+        else
             visible[#visible + 1] = {
                 path = wallpaper.path,
                 index = position,
@@ -142,6 +156,7 @@ effect(function()
                 side = offset,
                 far = math.abs(offset) >= 2,
                 current = wallpaper.path == current,
+                empty = false,
             }
         end
     end
@@ -189,6 +204,9 @@ function onNext() move(1) end
 function onApply() apply(clamp_focus(#list())) end
 
 function onCard(index)
+    if index == 0 then
+        return
+    end
     if index == focus then
         apply(index)
     else
@@ -347,8 +365,12 @@ end
         color: var(--glass-text-strong);
     }
 
+    /* Four side cards, the focused card and four gaps: a fixed width, so
+    browsing never resizes the picker. */
     .cards {
+        width: 1296px;
         height: 250px;
+        flex-shrink: 0;
         align-items: center;
         gap: 16px;
     }
@@ -374,6 +396,7 @@ end
     .card-left { transform: rotate(-9deg) translateY(10px) scale(0.94); }
     .card-right { transform: rotate(-3deg) translateY(-10px) scale(0.94); }
     .card-far { opacity: 0.55; }
+    .card-empty { visibility: hidden; }
 
     .card-focused {
         width: 336px;
@@ -383,10 +406,12 @@ end
         transform: rotate(0deg) scale(1);
     }
 
+    /* The card's radius less its 1px border, so the image corners follow
+    the border's inner curve. */
     .card-image {
         width: 100%;
         height: 100%;
-        border-radius: 20px;
+        border-radius: 19px;
     }
 
     .card-badge {
@@ -414,6 +439,8 @@ end
     }
 
     .focused-name {
+        width: 0;
+        flex-grow: 1;
         height: 22px;
         font-size: 15px;
         font-weight: 600;
@@ -484,6 +511,6 @@ end
     @container (max-width: 1300px) {
         .card { width: 176px; height: 110px; }
         .card-focused { width: 288px; height: 180px; }
-        .cards { height: 220px; gap: 10px; }
+        .cards { width: 1032px; height: 220px; gap: 10px; }
     }
 </style>

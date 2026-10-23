@@ -185,7 +185,21 @@ impl Shell {
             {
                 continue;
             }
+            let child_ready = self.components[index].children.iter().any(|child| {
+                let id = child.target.surface_id.as_str();
+                self.surface_is_effectively_visible(id)
+                    && !self
+                        .presentation_engine
+                        .surface_waiting_for_frame_callback(id)
+                    && !self
+                        .presentation_engine
+                        .surface_waiting_for_buffer_release(id)
+                    && self.presentation_engine.surface_ready_to_present(id)
+            });
+            // One VM advances every target; a ready popup must not wait for
+            // its parent's frame callback or buffer release.
             if visible
+                && !child_ready
                 && (self
                     .presentation_engine
                     .surface_waiting_for_frame_callback(&surface_id)
@@ -209,6 +223,7 @@ impl Shell {
             // for another frame.
             let owes_configure = self.components[index].parent.last_surface_config.is_none();
             if visible
+                && !child_ready
                 && !owes_configure
                 && !self
                     .presentation_engine

@@ -69,10 +69,17 @@ Display primitives:
 
 `meter` remains part of the taxonomy for future coverage, but Phase 87 does not create separate runtime behavior for it. Use `progress` for current progress-like display.
 
+Native scroll regions default to vertical scrolling and clipping in core,
+including with an empty theme. Authors declare a bounded viewport and its content;
+core handles wheel/touchpad input, momentum, offset clamping, scrollbar input,
+clipping and popup coordinate mapping. No scroll handlers or scripts are required.
+`scroll` and `scroll-view` use the same behavior. Explicit overflow and layout
+styles can select horizontal scrolling or disable an axis.
+
 Example:
 
 ```xml
-<scroll-area class="panel-scroll" overflow-y="auto">
+<scroll-area class="panel-scroll">
   <grid columns="120px auto" gap="8" label="Download status">
     <text>Package</text>
     <badge>Ready</badge>
@@ -80,6 +87,9 @@ Example:
     <progress value="{download_percent}" min="0" max="100" label="Download progress" />
   </grid>
 </scroll-area>
+<style>
+.panel-scroll { height: 220px; }
+</style>
 ```
 
 ## Action And Text Input Controls

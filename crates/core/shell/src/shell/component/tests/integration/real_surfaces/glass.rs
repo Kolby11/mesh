@@ -50,11 +50,12 @@ fn theme() -> Theme {
     .unwrap()
 }
 
-const GLASS_MODULES: [&str; 6] = [
+const GLASS_MODULES: [&str; 7] = [
     "glass-bar",
     "glass-widgets",
     "glass-dock",
     "glass-dashboard",
+    "glass-wallpapers",
     "profile-switcher",
     "profile-menu",
 ];
@@ -98,6 +99,7 @@ impl GlassCatalog {
             "recorder",
             "system",
             "visualizer",
+            "wallpapers",
             "weather",
             "wm",
         ] {
@@ -135,8 +137,17 @@ impl GlassCatalog {
             )
             .unwrap(),
         );
+        interfaces.register_contract(
+            mesh_core_service::contract::parse_interface_contract(
+                "mesh.theme",
+                "1.0",
+                &serde_json::json!({"state": [{"name":"backdrop_image","type":"string?"}],
+                    "methods": [{"name":"set_backdrop_image", "args":[{"name":"path","type":"string"}]}]}),
+            )
+            .unwrap(),
+        );
         let mut locale = mesh_core_locale::LocaleEngine::new("en");
-        for module in ["glass-bar", "glass-dock", "glass-dashboard"] {
+        for module in ["glass-bar", "glass-dock", "glass-dashboard", "glass-wallpapers"] {
             let path = root()
                 .join("modules/frontend")
                 .join(module)
@@ -357,6 +368,8 @@ fn liquid_glass_calendar_and_controls_are_promoted_local_popovers() {
 #[test]
 fn liquid_glass_launcher_keeps_results_viewport_with_many_apps() {
     let mut component = host("glass-dock");
+    Arc::make_mut(&mut component.settings)
+        .set_namespace("shell", serde_json::json!({"motion":{"reduced":true}}));
     component.motion_policy.reduced_motion = true;
     paint(&mut component, 1920, 180);
     let installed: Vec<_> = (0..100)
@@ -395,34 +408,151 @@ fn liquid_glass_launcher_keeps_results_viewport_with_many_apps() {
         .next()
         .unwrap();
     assert!(request.content_size.1 < 600, "{request:?}");
+    assert!(
+        request.content_padding.1 < request.content_size.1
+            && request.content_padding.3 < request.content_size.1,
+        "clipped rows must not pad the popup: {request:?}"
+    );
+    let (pad_left, pad_top, pad_right, pad_bottom) = request.content_padding;
+    let popup_size = (
+        request.content_size.0 + pad_left + pad_right,
+        request.content_size.1 + pad_top + pad_bottom,
+    );
+    let content_offset = (pad_left, pad_top);
+    let input_offset = (pad_left as f32, pad_top as f32);
+    let scroll_x = scroll_x + input_offset.0;
+    let scroll_y = scroll_y + input_offset.1;
+    let viewport = (
+        results.layout.x - shell.layout.x + input_offset.0,
+        results.layout.y - shell.layout.y + input_offset.1,
+        results.layout.width,
+        results.layout.height,
+    );
+    let initial_max = results.resolved_scroll_metrics().max_y;
     component
         .handle_child_surface_input(
             &request.node_key,
             &theme(),
-            request.content_size.0,
-            request.content_size.1,
-            (0.0, 0.0),
-            ComponentInput::Scroll {
+            popup_size.0,
+            popup_size.1,
+            input_offset,
+            ComponentInput::PointerMove {
                 x: scroll_x,
                 y: scroll_y,
-                dx: 0.0,
-                dy: -180.0,
             },
         )
         .unwrap();
     paint(&mut component, 1920, 180);
+    let mut popup_pixels = PixelBuffer::new(popup_size.0, popup_size.1);
+    component
+        .paint_child_surface_raster(
+            &request.node_key,
+            &mut popup_pixels,
+            1.0,
+            content_offset,
+            false,
+        )
+        .unwrap();
+    let baseline = popup_pixels.data().to_vec();
+    let mut previous = 0.0;
+    for step in 0..24 {
+        let dy = if step < 12 { -28.0 } else { 28.0 };
+        component
+            .handle_child_surface_input(
+                &request.node_key,
+                &theme(),
+                popup_size.0,
+                popup_size.1,
+                input_offset,
+                ComponentInput::TwoFingerScroll {
+                    x: scroll_x,
+                    y: scroll_y,
+                    dx: 0.0,
+                    dy,
+                },
+            )
+            .unwrap();
+        paint(&mut component, 1920, 180);
+        let tree = component.last_tree.as_ref().unwrap();
+        let results = first_node_by_class(tree, "results").unwrap();
+        let metrics = results.resolved_scroll_metrics();
+        assert_eq!(results.layout, results_layout);
+        assert_eq!(metrics.max_y, initial_max, "step {step}");
+        let expected = (previous - dy).clamp(0.0, initial_max);
+        assert_eq!(metrics.y, expected, "step {step}");
+        previous = metrics.y;
+        assert_eq!(
+            component.child_surface_requests()[0].content_size,
+            request.content_size
+        );
+        assert_eq!(
+            component.child_surface_requests()[0].content_padding,
+            request.content_padding,
+            "scrolling must not reposition the popup buffer, step {step}"
+        );
+        component
+            .paint_child_surface_raster(
+                &request.node_key,
+                &mut popup_pixels,
+                1.0,
+                content_offset,
+                false,
+            )
+            .unwrap();
+        for y in 0..popup_size.1 {
+            for x in 0..popup_size.0 {
+                if x as f32 >= viewport.0
+                    && (x as f32) < viewport.0 + viewport.2
+                    && y as f32 >= viewport.1
+                    && (y as f32) < viewport.1 + viewport.3
+                {
+                    continue;
+                }
+                let index = ((y * popup_size.0 + x) * 4) as usize;
+                assert_eq!(
+                    &popup_pixels.data()[index..index + 4],
+                    &baseline[index..index + 4],
+                    "outside viewport at {x},{y}, step {step}"
+                );
+            }
+        }
+    }
+    Arc::make_mut(&mut component.settings)
+        .set_namespace("shell", serde_json::json!({"motion":{"reduced":false}}));
+    component.motion_policy.reduced_motion = false;
+    for _ in 0..3 {
+        component
+            .handle_child_surface_input(
+                &request.node_key,
+                &theme(),
+                popup_size.0,
+                popup_size.1,
+                input_offset,
+                ComponentInput::TwoFingerScroll {
+                    x: scroll_x,
+                    y: scroll_y,
+                    dx: 0.0,
+                    dy: -24.0,
+                },
+            )
+            .unwrap();
+    }
+    paint(&mut component, 1920, 180);
     let tree = component.last_tree.as_ref().unwrap();
     let results = first_node_by_class(tree, "results").unwrap();
-    assert_eq!(results.layout, results_layout);
-    assert!(results.resolved_scroll_metrics().y > 0.0);
-    assert_eq!(
-        component.child_surface_requests()[0].content_size,
-        request.content_size
+    let direct = results.resolved_scroll_metrics().y;
+    let inertia = component.scroll_inertia[&results.id];
+    component.advance_scroll_inertia(inertia.last_input + Duration::from_millis(60));
+    paint(&mut component, 1920, 180);
+    let results = first_node_by_class(component.last_tree.as_ref().unwrap(), "results").unwrap();
+    assert!(
+        results.resolved_scroll_metrics().y > direct,
+        "momentum should keep moving the popup"
     );
-    let mut pixels = PixelBuffer::new(request.content_size.0, request.content_size.1);
+    let mut pixels = PixelBuffer::new(popup_size.0, popup_size.1);
     assert!(
         component
-            .paint_child_surface_raster(&request.node_key, &mut pixels, 1.0, (0, 0), false)
+            .paint_child_surface_raster(&request.node_key, &mut pixels, 1.0, content_offset, false)
             .unwrap()
     );
 }
@@ -479,6 +609,76 @@ fn liquid_glass_dock_search_and_neighbor_magnification_work() {
     let texts = rendered_text(&component);
     assert!(texts.iter().any(|text| text == "Terminal"));
     assert!(!texts.iter().any(|text| text == "Browser"));
+}
+
+#[test]
+fn wallpaper_picker_keeps_its_size_and_centres_the_focused_card() {
+    for (width, height) in [(1920, 1080), (1280, 800)] {
+        picker_geometry_is_stable(width, height);
+    }
+}
+
+fn picker_geometry_is_stable(width: u32, height: u32) {
+    let mut component = host("glass-wallpapers");
+    let wallpapers: Vec<_> = ["forest", "tree", "lake", "dusk", "night"]
+        .iter()
+        .map(|name| {
+            serde_json::json!({
+                "path": format!("/walls/{name}.png"),
+                "name": name,
+                "thumbnail": "",
+                "color": "#334455",
+            })
+        })
+        .collect();
+    update(
+        &mut component,
+        "mesh.wallpapers",
+        serde_json::json!({"available": true, "directory": "/walls", "wallpapers": wallpapers}),
+    );
+    let mut geometry = Vec::new();
+    for step in 0..7 {
+        paint(&mut component, width, height);
+        let tree = component.last_tree.as_ref().unwrap();
+        let picker = first_node_by_class(tree, "picker").unwrap().layout;
+        let focused = first_node_by_class(tree, "card-focused").unwrap().layout;
+        geometry.push((step, picker, focused));
+        let next = first_node_by_class(tree, "arrow-next")
+            .unwrap()
+            .mesh_key()
+            .unwrap()
+            .to_owned();
+        component.focused_key = Some(next);
+        component
+            .handle_input(
+                &theme(),
+                width,
+                height,
+                ComponentInput::KeyPressed {
+                    key: "Enter".into(),
+                    modifiers: Default::default(),
+                },
+            )
+            .unwrap();
+    }
+    let (_, picker, focused) = geometry[0];
+    let picker_centre = picker.x + picker.width / 2.0;
+    assert!(
+        (focused.x + focused.width / 2.0 - picker_centre).abs() < 1.0,
+        "{width}: focused card is centred: {focused:?} in {picker:?}"
+    );
+    for &(step, other_picker, other_focused) in &geometry[1..] {
+        assert_eq!(
+            (other_picker.x, other_picker.y, other_picker.width, other_picker.height),
+            (picker.x, picker.y, picker.width, picker.height),
+            "{width}: picker geometry changed at step {step}"
+        );
+        assert_eq!(
+            (other_focused.x, other_focused.width),
+            (focused.x, focused.width),
+            "{width}: focused card moved at step {step}"
+        );
+    }
 }
 
 #[test]
@@ -1062,5 +1262,42 @@ fn glass_dashboard_spectrum_profile() {
             );
         }
         component.set_profiling_enabled(false);
+    }
+}
+
+#[test]
+fn glass_settings_trigger_keeps_its_icon_centered_when_popup_opens() {
+    let mut component = host("glass-bar");
+    Arc::make_mut(&mut component.settings)
+        .set_namespace("shell", serde_json::json!({"motion":{"reduced":true}}));
+    for open in [false, true] {
+        paint(&mut component, 2880, 100);
+        if open {
+            press(&mut component, "glassControls", 2880, 100);
+            paint(&mut component, 2880, 100);
+        }
+        let trigger =
+            first_node_with_ref(component.last_tree.as_ref().unwrap(), "glassControls").unwrap();
+        let icon = first_node_by_class(trigger, "status-glyph").unwrap();
+        assert!(
+            (icon.layout.x + icon.layout.width / 2.0
+                - trigger.layout.x
+                - trigger.layout.width / 2.0)
+                .abs()
+                < 0.5,
+            "open={open}, trigger={:?}, icon={:?}",
+            trigger.layout,
+            icon.layout
+        );
+        assert!(
+            (icon.layout.y + icon.layout.height / 2.0
+                - trigger.layout.y
+                - trigger.layout.height / 2.0)
+                .abs()
+                < 0.5,
+            "open={open}, trigger={:?}, icon={:?}",
+            trigger.layout,
+            icon.layout
+        );
     }
 }

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "revision": 19,
+  "revision": 21,
   "from": {
     "module": "@mesh/glass"
   },
@@ -24,7 +24,7 @@
       },
       "render": {
         "backdrop": {
-          "image": "/home/kolby/Pictures/Wallpapers/red-horizon.jpg"
+          "image": "/home/kolby/Pictures/Wallpapers/space-panels.png"
         }
       }
     }

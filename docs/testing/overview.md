@@ -56,6 +56,22 @@ nix develop -c cargo test --release --workspace -- --ignored --nocapture
 - For renderer or interaction changes, include behavior assertions rather than
   relying only on snapshots or timing.
 
+## Scrolling contract checks
+
+The `Scrolling contract` workflow runs on pull requests, pushes to `main`, and
+manual dispatches. It checks core defaults with an empty theme, repeated wheel
+and touchpad input across all three scroll tags, horizontal and vertical axes,
+three display scales, boundary reversal, padded launcher pixels and geometry,
+momentum, popup progress while its parent is blocked, and clipped visual bounds.
+The shell checks compile with `gpu` enabled and use headless raster fixtures;
+hardware GPU workload coverage remains in the performance workflow.
+
+Run the generic handler-free input matrix locally:
+
+```bash
+nix develop -c cargo test -p mesh-core-shell --features gpu --lib scroll_contract
+```
+
 ## Performance regression checks
 
 The repository stores workload tolerances in

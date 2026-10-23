@@ -1709,6 +1709,7 @@ impl Shell {
                 self.set_surface_role(surface_id, role)
             }
             CoreRequest::ToggleSurfaceRole { surface_id } => {
+                let surface_id = self.resolve_root_surface_id(surface_id);
                 let role = match self
                     .component_index_for_surface(&surface_id)
                     .map(|index| self.components[index].component.surface_role())
@@ -2862,6 +2863,7 @@ impl Shell {
         role: mesh_core_wayland::SurfaceRole,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         self.invalidate_debug_snapshot_cache();
+        let surface_id = self.resolve_root_surface_id(surface_id);
         let Some(index) = self.component_index_for_surface(&surface_id) else {
             tracing::warn!(%surface_id, "cannot change surface role: no such surface");
             return Ok(VecDeque::new());

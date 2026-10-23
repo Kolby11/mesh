@@ -128,7 +128,9 @@ slider and checkbox controls. See the [syntax guide](../frontend/mesh-syntax.md#
 **Status: shipped.** Surfaces are containers, not authoring units. An in-tree
 `<popover open>` is authored inline and *deterministically* promoted to a
 compositor `xdg_popup` child surface when shown (content-driven size,
-compositor anchoring, grab/hover-bridge dismiss owned by the core). Popup anchor,
+compositor anchoring, grab/hover-bridge dismiss owned by the core). Embedded
+popup wrappers stay out of layout flow whether open or closed; their geometry
+and parent flex gaps cannot displace visible trigger content. Popup anchor,
 gravity, offsets and edge constraints apply to the laid-out content rectangle.
 Transparent shadow/filter buffer reserves remain outside its `xdg_surface`
 window geometry and do not push visible content away from screen edges;

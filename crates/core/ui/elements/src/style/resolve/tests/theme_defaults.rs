@@ -357,3 +357,58 @@ fn cached_diagnostic_theme_defaults_match_replayed_defaults() {
     ));
     assert_eq!(cached_diagnostics, replayed_diagnostics);
 }
+
+#[test]
+fn native_scroll_defaults_work_without_theme_rules_and_allow_explicit_overrides() {
+    let theme = mesh_core_theme::Theme::new("empty", "Empty");
+    let resolver = StyleResolver::new(&theme);
+    for tag in ["scroll", "scroll-view", "scroll-area"] {
+        let plain = resolver.resolve_node_style(
+            &[],
+            tag,
+            &[],
+            None,
+            Default::default(),
+            NodeState::default(),
+        );
+        assert_eq!(plain.direction, crate::style::FlexDirection::Column);
+        assert_eq!(plain.overflow_x, crate::style::Overflow::Hidden);
+        assert_eq!(plain.overflow_y, crate::style::Overflow::Auto);
+        let (inspected, diagnostics) = resolver.resolve_node_style_with_diagnostics(
+            &[],
+            tag,
+            &[],
+            None,
+            Default::default(),
+            NodeState::default(),
+        );
+        assert!(diagnostics.is_empty());
+        assert_eq!(plain, inspected);
+        let rules = vec![StyleRule {
+            selector: Selector::Tag(tag.into()),
+            declarations: [
+                ("overflow-x", "auto"),
+                ("overflow-y", "hidden"),
+                ("flex-direction", "row"),
+            ]
+            .into_iter()
+            .map(|(property, value)| Declaration {
+                property: property.into(),
+                value: StyleValue::Literal(value.into()),
+            })
+            .collect(),
+            container_query: None,
+        }];
+        let horizontal = resolver.resolve_node_style(
+            &rules,
+            tag,
+            &[],
+            None,
+            Default::default(),
+            NodeState::default(),
+        );
+        assert_eq!(horizontal.direction, crate::style::FlexDirection::Row);
+        assert_eq!(horizontal.overflow_x, crate::style::Overflow::Auto);
+        assert_eq!(horizontal.overflow_y, crate::style::Overflow::Hidden);
+    }
+}

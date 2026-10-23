@@ -34,7 +34,7 @@ model the renderer uses.
 3. **Themes are modules** (`mesh.kind: "theme"`), hot-swappable, with no
    privileged default.
 4. **`node` is the inheritance root.** Every element starts from
-   `ComputedStyle::default()`, inherits the theme's `node` rule, then its
+   the core defaults for its native element, inherits the theme's `node` rule, then its
    tag rule (`button`), then module-scoped defaults, then local styles.
 5. **Module theme contributions are scoped.** A UI module's tokens/defaults
    apply only inside its own rendered subtree; a token family's tokens apply
@@ -574,8 +574,18 @@ plan, phases 3–5.
 Popovers promoted to `xdg_popup` inherit their parent layer surface's blur on
 compositors that blur layer popups.
 
+**Native scrolling — shipped.** `scroll-area`, `scroll` and `scroll-view` start
+with column layout, `overflow-x: hidden` and `overflow-y: auto` in core before
+theme and authored declarations apply. A bounded viewport with overflowing
+content needs no script or event handler. Core owns wheel and touchpad input,
+momentum, offset clamping, scrollbar interaction, clipping, and promoted-surface
+coordinate mapping. Authors choose geometry and can explicitly override axes
+and layout through the normal style cascade.
+
 Rounded overflow clips constrain descendant painting and point hit testing,
-including retained scrolling content. Background images and gradients follow
+including retained scrolling content. Promoted popup buffer bounds apply these
+clips before measuring descendant effects, so offscreen scroll rows do not
+resize or reposition the popup buffer. Background images and gradients follow
 normalized corner radii. Partial damage repaints reproduce full-paint edge
 coverage; pixels outside the damage rectangle remain untouched.
 
@@ -586,14 +596,27 @@ reversals; the authored target is restored when the transition completes.
 
 ## 11. Liquid glass (`backdrop-filter: refract()`)
 
-**Status: shipped (in-surface Skia runtime shader); multi-output and foreign
-exclusive zones are targets.**
+**Status: shipped (in-surface Skia runtime shader on background/bottom-layer
+surfaces; compositor blur plus rim elsewhere); multi-output, foreign exclusive
+zones and a source built from MESH's presented frames are targets.**
 
 Compositor blur (§10) can only blur what is behind a surface; it cannot bend
 it. Refraction needs pixels MESH holds itself, so it samples one **backdrop
 source**: the image at `shell.render.backdrop.image`, cover-fit to the output.
 A profile that uses liquid glass normally also paints that image as its
-wallpaper (`@mesh/glass-wallpaper`), so what the glass bends is what is shown.
+wallpaper (`@mesh/glass-wallpaper`).
+
+The source stands for what is behind a surface only when nothing but layer
+surfaces can be there. Each surface is therefore routed by its layer:
+
+| Surface layer | `refract()` element |
+| --- | --- |
+| `background`, `bottom` (below every window) | Painted client-side from the source: blurred, refracted and dispersed. No compositor region. |
+| `top`, `overlay` (windows may be beneath) | Its `blur()` takes the ordinary backdrop route (§10): the compositor blurs the real backdrop and MESH blurs in-surface content beneath. MESH paints only the rim highlight; there is no displacement or dispersion. |
+
+So glass above windows never shows a stale or misplaced image: it stays in sync
+with whatever is really behind it, at the cost of the bending. Promoted popups
+follow the `top` row.
 `mesh.theme.set_backdrop_image { path }` (`service.theme.control`) selects an
 absolute image file, writing where the other appearance settings go, and
 repaints every surface; `mesh.theme` state publishes it as `backdrop_image`.
@@ -610,10 +633,13 @@ repaints every surface; `mesh.theme` state publishes it as `backdrop_image`.
 | `refract(<depth> [<edge>])` | Inside an `edge`-wide rim the sample moves up to `depth` along the outward normal of the element's rounded rect, steepening toward the rim. `edge` defaults to `depth`. `refract(0px 0px)` paints the source unrefracted. |
 | `dispersion(<px>)` | Extra red/blue separation along the same normal for chromatic fringing. |
 
-An element with `refract()` is painted client-side under its own background
-and border (`ApplyBackdropRefraction`), and is never exported as a compositor
-blur region. The rim also gets a soft top-left highlight. Without a backdrop
-source, the element paints only its own background.
+On a source-sampling surface, an element with `refract()` is painted
+client-side under its own background and border (`ApplyBackdropRefraction`)
+and is never exported as a compositor blur region. Elsewhere its rim
+highlight (`ApplyBackdropRim`) is painted over the blurred backdrop, under the
+element's own background. Either way the rim gets a soft top-left highlight
+when `edge` is non-zero. Without a backdrop source, a source-sampling element
+paints only its own background.
 
 **Placement.** Layer-shell never tells a client where its surface is, so the
 shell predicts each surface's origin from its anchor, margins and the

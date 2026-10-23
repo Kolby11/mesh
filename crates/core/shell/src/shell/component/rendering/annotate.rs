@@ -135,12 +135,10 @@ pub(super) fn apply_runtime_node_state_by_path(
     }
 }
 
-/// Collapses promoted `<popover>` wrappers to a zero-size, overflow-visible box so
-/// their (still full-size) popover subtree does not push trigger-row siblings around.
-/// A zero flex-basis contributes nothing to the parent's layout, while the overflowing
-/// popover content keeps its intrinsic size at the wrapper's in-flow position.
-/// Child-surface paint and input translate the subtree by its own layout origin.
-/// See the node's typed composition metadata.
+/// Removes promoted popover wrappers from flow so neither their geometry nor
+/// a parent flex gap displaces the trigger's visible children. The zero-size
+/// wrapper preserves intrinsic popup measurement; child-surface paint and input
+/// translate the subtree by its own layout origin.
 #[cfg(test)]
 pub(super) fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
     collapse_promoted_popover_node(node);
@@ -151,6 +149,7 @@ pub(super) fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
 
 fn collapse_promoted_popover_node(node: &mut WidgetNode) {
     if node.is_promoted_popover() {
+        node.computed_style.position = mesh_core_elements::style::Position::Absolute;
         node.computed_style.width = mesh_core_elements::Dimension::Px(0.0);
         node.computed_style.height = mesh_core_elements::Dimension::Px(0.0);
         node.computed_style.min_width = mesh_core_elements::Dimension::Px(0.0);

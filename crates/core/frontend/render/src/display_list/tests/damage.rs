@@ -812,6 +812,58 @@ fn backdrop_blur_policy_changes_retained_command_topology_and_regions() {
 }
 
 #[test]
+fn refraction_without_source_routes_blur_to_compositor_and_paints_rim() {
+    let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+    root.computed_style.background_color = Color::TRANSPARENT;
+    let mut glass = frosted_node(2, 20.0, 20.0, 40.0, 40.0);
+    glass.computed_style.backdrop_filter.refract = true;
+    glass.computed_style.backdrop_filter.refract_depth = 12.0;
+    glass.computed_style.backdrop_filter.refract_edge = 10.0;
+    root.children.push(glass);
+    let kinds = |list: &RetainedDisplayList| -> Vec<DisplayPaintCommandKind> {
+        list.paint_commands()
+            .iter()
+            .filter(|command| command.node.id == 2 && command.kind != DisplayPaintCommandKind::Node)
+            .map(|command| command.kind)
+            .collect()
+    };
+
+    // Above windows the image is not what lies beneath: the compositor blurs
+    // the real backdrop through an exported region, and only the rim paints.
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 100, 100, true, true);
+    assert_eq!(
+        kinds(&list),
+        [
+            DisplayPaintCommandKind::ApplyBackdropFilterCompositor,
+            DisplayPaintCommandKind::ApplyBackdropRim,
+        ]
+    );
+    assert_eq!(
+        list.blur_regions(),
+        &[DamageRect {
+            x: 20,
+            y: 20,
+            width: 40,
+            height: 40,
+        }]
+    );
+
+    // Below every window the source stands for the backdrop and is refracted
+    // client-side, with no compositor region.
+    let generation = list.generation();
+    list.set_refraction_source(true);
+    let metrics = list.update(&root, 100, 100, false, true);
+    assert!(list.generation() > generation);
+    assert!(metrics.full_surface_damage);
+    assert_eq!(
+        kinds(&list),
+        [DisplayPaintCommandKind::ApplyBackdropRefraction]
+    );
+    assert!(list.blur_regions().is_empty());
+}
+
+#[test]
 fn transformed_backdrop_regions_follow_cumulative_geometry() {
     let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
     root.computed_style.background_color = Color::TRANSPARENT;

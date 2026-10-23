@@ -3,7 +3,9 @@
 //! A Wayland client never sees what the compositor shows behind its surfaces,
 //! so displacement ("liquid glass") cannot read the real backdrop. It samples
 //! one image MESH holds instead — the wallpaper the active profile paints —
-//! cover-fit to the output and placed at the surface's position on it
+//! cover-fit to the output and placed at the surface's position on it. That
+//! image is what lies beneath only on surfaces below every window; elsewhere
+//! the compositor blurs the real backdrop and only the rim is painted here
 //! (spec 04 §11).
 
 use mesh_core_elements::VisualFilter;
@@ -23,6 +25,10 @@ use std::sync::{Arc, LazyLock, Mutex};
 pub struct BackdropFrame {
     pub origin: (f32, f32),
     pub output: (f32, f32),
+    /// The surface sits below every window (background or bottom layer), so
+    /// the source image stands for what lies beneath it. Only then does
+    /// `refract()` sample the source.
+    pub source_beneath: bool,
 }
 
 /// Cover-fit, pre-blurred copies are bounded by bytes rather than count: a
@@ -231,11 +237,50 @@ half4 main(float2 p) {
 }
 "#;
 
+/// The lens's rim highlight alone, as premultiplied white, for glass whose
+/// backdrop the compositor blurs. Source-over white of alpha `a` lightens the
+/// blurred backdrop by about the `+a` the lens adds to its sample. The shader
+/// computes its own edge coverage: Skia's anti-aliasing of a shaded rounded
+/// rect depends on whether the clip cuts the arc, which would make a partial
+/// repaint differ from a full one.
+const GLASS_RIM_SKSL: &str = r#"
+uniform float4 bounds;
+uniform float4 radii;
+uniform float rim;
+
+float sd(float2 p, float2 center, float2 half_size, float r) {
+    float2 q = abs(p - center) - half_size + r;
+    return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+}
+
+half4 main(float2 p) {
+    float2 half_size = bounds.zw * 0.5;
+    float2 center = bounds.xy + half_size;
+    float2 d = p - center;
+    float r = d.x < 0.0 ? (d.y < 0.0 ? radii.x : radii.w) : (d.y < 0.0 ? radii.y : radii.z);
+    r = min(r, min(half_size.x, half_size.y));
+    float dist = sd(p, center, half_size, r);
+    float2 grad = float2(
+        sd(p + float2(1.0, 0.0), center, half_size, r) - sd(p - float2(1.0, 0.0), center, half_size, r),
+        sd(p + float2(0.0, 1.0), center, half_size, r) - sd(p - float2(0.0, 1.0), center, half_size, r));
+    float glen = length(grad);
+    float2 n = glen > 0.0001 ? grad / glen : float2(0.0);
+    float band = clamp(1.0 + dist / rim, 0.0, 1.0);
+    float light = clamp(dot(n, normalize(float2(-1.0, -1.4))), 0.0, 1.0);
+    float coverage = clamp(0.5 - dist, 0.0, 1.0);
+    half a = half(min(band * band * (0.18 + 0.32 * light), 1.0) * coverage);
+    return half4(a, a, a, a);
+}
+"#;
+
 thread_local! {
     // `RuntimeEffect` is not `Send`; painting happens on the renderer thread,
     // which compiles the shader once on first use.
     static EFFECT: Option<RuntimeEffect> = RuntimeEffect::make_for_shader(LIQUID_GLASS_SKSL, None)
         .map_err(|error| tracing::error!("liquid glass shader failed to compile: {error}"))
+        .ok();
+    static RIM_EFFECT: Option<RuntimeEffect> = RuntimeEffect::make_for_shader(GLASS_RIM_SKSL, None)
+        .map_err(|error| tracing::error!("glass rim shader failed to compile: {error}"))
         .ok();
 }
 
@@ -280,6 +325,51 @@ pub(crate) fn draw_refraction(
     draw_backdrop(canvas, rect, radii, filter, backdrop)
 }
 
+/// Paint only the rim highlight `refract()` gives the glass edge, over
+/// whatever is already beneath. `rect`, `radii` and `filter` are
+/// device-scaled. Returns false when the element has no rim.
+pub(crate) fn draw_rim(canvas: &Canvas, rect: Rect, radii: Corners, filter: VisualFilter) -> bool {
+    let rim = rim_width(filter);
+    if rim <= 0.0 || rect.is_empty() {
+        return false;
+    }
+    let uniforms: [f32; 9] = [
+        rect.left,
+        rect.top,
+        rect.width(),
+        rect.height(),
+        radii.top_left,
+        radii.top_right,
+        radii.bottom_right,
+        radii.bottom_left,
+        rim,
+    ];
+    let bytes: Vec<u8> = uniforms
+        .iter()
+        .flat_map(|value| value.to_ne_bytes())
+        .collect();
+    let Some(shader) = RIM_EFFECT.with(|effect| {
+        effect
+            .as_ref()?
+            .make_shader(Data::new_copy(&bytes), &[], None)
+    }) else {
+        return false;
+    };
+    let mut paint = Paint::default();
+    paint.set_anti_alias(false);
+    paint.set_shader(shader);
+    canvas.draw_rect(rect.with_outset((1.0, 1.0)), &paint);
+    true
+}
+
+fn rim_width(filter: VisualFilter) -> f32 {
+    if filter.refract_edge > 0.0 {
+        (filter.refract_edge * 0.12).clamp(1.0, 3.0)
+    } else {
+        0.0
+    }
+}
+
 fn draw_backdrop(
     canvas: &Canvas,
     rect: Rect,
@@ -317,11 +407,7 @@ fn make_lens_shader(
     filter: VisualFilter,
     backdrop: Shader,
 ) -> Option<Shader> {
-    let rim = if filter.refract_edge > 0.0 {
-        (filter.refract_edge * 0.12).clamp(1.0, 3.0)
-    } else {
-        0.0
-    };
+    let rim = rim_width(filter);
     let uniforms: [f32; 12] = [
         rect.left,
         rect.top,

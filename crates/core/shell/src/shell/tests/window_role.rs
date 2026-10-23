@@ -234,6 +234,106 @@ fn toggling_a_surface_role_alternates_between_chrome_and_window() {
 }
 
 #[test]
+fn role_requests_by_module_id_reach_its_profile_root_surface() {
+    use mesh_core_wayland::SurfaceRole::{Layer, Window};
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    let mut component =
+        FocusRecordingComponent::promotable("@mesh/settings#default", Arc::clone(&state));
+    component.module_id = "@mesh/settings".into();
+    shell.register_component(Box::new(component));
+
+    for request in [
+        CoreRequest::SetSurfaceRole {
+            surface_id: "@mesh/settings".into(),
+            role: Window,
+        },
+        CoreRequest::SetSurfaceRole {
+            surface_id: "@mesh/settings".into(),
+            role: Layer,
+        },
+        CoreRequest::ToggleSurfaceRole {
+            surface_id: "@mesh/settings".into(),
+        },
+        CoreRequest::ToggleSurfaceRole {
+            surface_id: "@mesh/settings".into(),
+        },
+    ] {
+        shell.apply_request(request).unwrap();
+    }
+
+    assert_eq!(
+        state.lock().unwrap().applied_roles,
+        [Window, Layer, Window, Layer]
+    );
+    assert_eq!(
+        shell.presentation_engine.testing_destroyed_surfaces(),
+        ["@mesh/settings#default"]
+    );
+    assert!(!shell.core.surfaces.contains_key("@mesh/settings"));
+    assert_eq!(shell.components.len(), 1);
+}
+
+#[test]
+fn role_requests_require_an_instance_id_for_multiple_profile_roots() {
+    use mesh_core_wayland::SurfaceRole::{Layer, Window};
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let states: Vec<_> = ["@mesh/settings#first", "@mesh/settings#second"]
+        .into_iter()
+        .map(|surface_id| {
+            let state = Arc::new(Mutex::new(FocusRecordingState::default()));
+            let mut component = FocusRecordingComponent::promotable(surface_id, Arc::clone(&state));
+            component.module_id = "@mesh/settings".into();
+            shell.register_component(Box::new(component));
+            state
+        })
+        .collect();
+
+    for request in [
+        CoreRequest::SetSurfaceRole {
+            surface_id: "@mesh/settings".into(),
+            role: Window,
+        },
+        CoreRequest::ToggleSurfaceRole {
+            surface_id: "@mesh/settings".into(),
+        },
+    ] {
+        shell.apply_request(request).unwrap();
+    }
+    assert!(
+        shell
+            .presentation_engine
+            .testing_destroyed_surfaces()
+            .is_empty()
+    );
+
+    shell
+        .apply_request(CoreRequest::SetSurfaceRole {
+            surface_id: "@mesh/settings#second".into(),
+            role: Window,
+        })
+        .unwrap();
+    shell
+        .apply_request(CoreRequest::ToggleSurfaceRole {
+            surface_id: "@mesh/settings#second".into(),
+        })
+        .unwrap();
+
+    assert!(states[0].lock().unwrap().applied_roles.is_empty());
+    assert_eq!(states[1].lock().unwrap().applied_roles, [Window, Layer]);
+    assert_eq!(
+        shell.presentation_engine.testing_destroyed_surfaces(),
+        ["@mesh/settings#second"]
+    );
+}
+
+#[test]
 fn setting_the_role_a_surface_already_has_is_not_a_change() {
     let (mut shell, state) = promotable_surface_shell("@mesh/settings");
 

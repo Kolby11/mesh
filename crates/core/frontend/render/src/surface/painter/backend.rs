@@ -69,6 +69,9 @@ type RoundedGradientKey = (GradientShaderCacheKey, [u32; 4]);
 struct CachedSkiaImage {
     _source: std::sync::Weak<image::RgbaImage>,
     image: skia_safe::Image,
+    /// Whether `image` carries mipmaps; built the first time it is drawn
+    /// smaller than its source.
+    mipmapped: bool,
 }
 
 thread_local! {
@@ -334,6 +337,13 @@ pub(crate) enum PainterCommand {
         radii: Corners,
         filter: VisualFilter,
         frame: crate::surface::backdrop::BackdropFrame,
+        clip: ClipRect,
+    },
+    /// Paint a refracting element's rim highlight over what is beneath.
+    DrawGlassRim {
+        rect: ClipRect,
+        radii: Corners,
+        filter: VisualFilter,
         clip: ClipRect,
     },
 }
@@ -947,6 +957,40 @@ impl SkiaPaintBackend {
                         *radii,
                         *filter,
                         *frame,
+                    );
+                    canvas.restore_to_count(save_count);
+                }
+                PainterCommand::DrawGlassRim {
+                    rect,
+                    radii,
+                    filter,
+                    clip,
+                } => {
+                    let clip = effective_clip(*clip, &clip_stack);
+                    if clip.width <= 0 || clip.height <= 0 {
+                        continue;
+                    }
+                    let save_count = canvas.save();
+                    canvas.clip_rect(
+                        Rect::from_xywh(
+                            clip.x as f32,
+                            clip.y as f32,
+                            clip.width as f32,
+                            clip.height as f32,
+                        ),
+                        None,
+                        false,
+                    );
+                    crate::surface::backdrop::draw_rim(
+                        canvas,
+                        Rect::from_xywh(
+                            rect.x as f32,
+                            rect.y as f32,
+                            rect.width as f32,
+                            rect.height as f32,
+                        ),
+                        *radii,
+                        *filter,
                     );
                     canvas.restore_to_count(save_count);
                 }
@@ -1871,13 +1915,44 @@ impl SkiaPaintBackend {
             });
             return;
         }
+        let dst = Rect::from_xywh(
+            rect.x as f32,
+            rect.y as f32,
+            rect.width as f32,
+            rect.height as f32,
+        );
+        // A scaled or rotated image is resampled: nearest-neighbour sampling
+        // jags its edges and detail, and a source shown smaller than its
+        // size aliases without mipmaps.
+        let matrix = canvas.local_to_device_as_3x3();
+        let device_scale = matrix.max_scale().max(0.0);
+        let (device_w, device_h) = (dst.width() * device_scale, dst.height() * device_scale);
+        let resampled = !matrix.is_translate()
+            || (device_w - rgba.width() as f32).abs() > 0.5
+            || (device_h - rgba.height() as f32).abs() > 0.5;
+        let downscaled =
+            device_w < rgba.width() as f32 - 0.5 || device_h < rgba.height() as f32 - 0.5;
         // Use the Arc pointer as cache key: same allocation == same pixel data,
         // so we can skip `Data::new_copy` and re-use the cached Skia image.
         let arc_ptr = Arc::as_ptr(&rgba) as usize;
         let skia_image = SKIA_IMAGE_CACHE.with(|cache| {
             let mut map = cache.borrow_mut();
             if let Some(entry) = map.get(&arc_ptr) {
-                return Some(entry.image.clone());
+                if entry.mipmapped || !downscaled {
+                    return Some(entry.image.clone());
+                }
+                let entry = map.remove(&arc_ptr)?;
+                let image = entry.image.with_default_mipmaps().unwrap_or(entry.image);
+                map.insert(
+                    arc_ptr,
+                    CachedSkiaImage {
+                        _source: entry._source,
+                        image: image.clone(),
+                        mipmapped: true,
+                    },
+                    rgba.as_raw().len() / 3 * 4,
+                );
+                return Some(image);
             }
             let info = ImageInfo::new(
                 (rgba.width() as i32, rgba.height() as i32),
@@ -1887,13 +1962,23 @@ impl SkiaPaintBackend {
             );
             let data = Data::new_copy(rgba.as_raw());
             let img = images::raster_from_data(&info, data, (rgba.width() * 4) as usize)?;
+            let img = if downscaled {
+                img.with_default_mipmaps().unwrap_or(img)
+            } else {
+                img
+            };
             map.insert(
                 arc_ptr,
                 CachedSkiaImage {
                     _source: Arc::downgrade(&rgba),
                     image: img.clone(),
+                    mipmapped: downscaled,
                 },
-                rgba.as_raw().len(),
+                if downscaled {
+                    rgba.as_raw().len() / 3 * 4
+                } else {
+                    rgba.as_raw().len()
+                },
             );
             Some(img)
         });
@@ -1907,6 +1992,8 @@ impl SkiaPaintBackend {
             return;
         };
         let save_count = canvas.save();
+        // An axis-aligned clip sits on whole device pixels; a rotated one
+        // needs coverage or its edges stair-step.
         canvas.clip_rect(
             Rect::from_xywh(
                 clipped.x as f32,
@@ -1915,25 +2002,31 @@ impl SkiaPaintBackend {
                 clipped.height as f32,
             ),
             None,
-            false,
+            !matrix.rect_stays_rect(),
         );
         let mut skia_paint = skia_paint(paint.color, true);
         skia_paint.set_alpha(paint.color.a);
-        let dst = Rect::from_xywh(
-            rect.x as f32,
-            rect.y as f32,
-            rect.width as f32,
-            rect.height as f32,
-        );
         let (skia_image, source) = crate::surface::image_pages::resolve(&skia_image);
         crate::prepared_scene::retain_image(&skia_image);
+        // A paged image is a sub-rect of a shared atlas; mipmaps there would
+        // blend its neighbours in.
+        let sampling = match (resampled, downscaled && source.is_none()) {
+            (false, _) => SamplingOptions::default(),
+            (true, true) => SamplingOptions::new(
+                skia_safe::FilterMode::Linear,
+                skia_safe::MipmapMode::Linear,
+            ),
+            (true, false) => {
+                SamplingOptions::new(skia_safe::FilterMode::Linear, skia_safe::MipmapMode::None)
+            }
+        };
         canvas.draw_image_rect_with_sampling_options(
             skia_image,
             source
                 .as_ref()
                 .map(|rect| (rect, skia_safe::canvas::SrcRectConstraint::Strict)),
             dst,
-            SamplingOptions::default(),
+            sampling,
             &skia_paint,
         );
         canvas.restore_to_count(save_count);

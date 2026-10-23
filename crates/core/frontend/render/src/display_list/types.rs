@@ -442,6 +442,11 @@ pub struct RetainedDisplayList {
     pub(super) backdrop_blur_policy: BackdropBlurPolicy,
     /// Policy used by the currently retained command stream.
     pub(super) built_backdrop_blur_policy: BackdropBlurPolicy,
+    /// Whether `refract()` may sample the shell backdrop source on the next
+    /// build; see [`BackdropFrame::source_beneath`](crate::BackdropFrame).
+    pub(super) refraction_source: bool,
+    /// Source access used by the currently retained command stream.
+    pub(super) built_refraction_source: bool,
     pub(super) retained_tree_generation: Option<u64>,
     #[cfg(debug_assertions)]
     pub(super) retained_caller_lineage: Option<u64>,
@@ -494,6 +499,8 @@ impl Default for RetainedDisplayList {
             resource_revision: mesh_core_resources::resource_revision(),
             backdrop_blur_policy: BackdropBlurPolicy::CompositorRegion,
             built_backdrop_blur_policy: BackdropBlurPolicy::CompositorRegion,
+            refraction_source: false,
+            built_refraction_source: false,
             retained_tree_generation: None,
             #[cfg(debug_assertions)]
             retained_caller_lineage: None,
@@ -790,7 +797,12 @@ pub enum DisplayPaintCommandKind {
     /// Paints the shell backdrop source beneath the node, blurred and
     /// refracted (`backdrop-filter: refract()`). Always client-side: the
     /// compositor can only blur, never displace, what is behind a surface.
+    /// Lowered only where the source is what lies beneath the surface.
     ApplyBackdropRefraction,
+    /// Paints a refracting element's rim highlight without sampling a source.
+    /// The element's blur goes through the selected backdrop-blur policy, so
+    /// the compositor blurs the real backdrop beneath it (04 §11).
+    ApplyBackdropRim,
 }
 
 impl DisplayPaintCommandKind {

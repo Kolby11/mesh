@@ -270,6 +270,7 @@ impl FrontendRenderEngine {
         y: i32,
         w: i32,
         h: i32,
+        clip: ClipRect,
         module_id: Option<&str>,
     ) {
         let size = icon_paint.size.unwrap_or(w.max(h) as u32);
@@ -281,6 +282,20 @@ impl FrontendRenderEngine {
             optical_size: style.icon_optical_size,
         };
 
+        let save = session.with_canvas(|canvas| {
+            let save = canvas.save();
+            canvas.clip_rect(
+                skia_safe::Rect::from_xywh(
+                    clip.x as f32,
+                    clip.y as f32,
+                    clip.width as f32,
+                    clip.height as f32,
+                ),
+                None,
+                false,
+            );
+            save
+        });
         if let Some(src) = &icon_paint.src {
             icon::draw_icon_from_path_in_session(
                 session,
@@ -318,6 +333,11 @@ impl FrontendRenderEngine {
                     axes,
                 ),
             }
+        }
+        if let Some(save) = save {
+            session.with_canvas(|canvas| {
+                canvas.restore_to_count(save);
+            });
         }
     }
 

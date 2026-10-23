@@ -18,6 +18,12 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---
 
+- [ ] Replace the 500ms resource-preparation polling limit in the backend capability
+      activation test; concurrent build/test load can outlast it.
+
+- [ ] Isolate renderer node-cache and keyed-hover regression state; cache tests
+      and the keyed-hover frame snapshot fail intermittently in parallel suites.
+
 ## Change-proportional frame pipeline — next implementation priority
 
 Frame cost scales with tree size times about ten passes, not with what
@@ -93,7 +99,7 @@ October log.
 - [ ] **Host APIs:** `net.http` and `exec.launch-app` are catalogued but unimplemented
       (providers shell out to `curl` / `hyprctl dispatch`). A StatusNotifier tray still needs
       a watcher/host provider; `mesh.dbus_serve` now owns names and exports one object each.
-- [ ] **Backdrop placement beyond MESH:** refraction predicts surface origins from MESH's own
+- [ ] **Backdrop placement beyond MESH:** refraction on background/bottom-layer surfaces predicts origins from MESH's own
       surfaces; another client's exclusive zone (e.g. a quickshell bar) misaligns it. Multi-output backdrops are untested.
       A foreign wallpaper layer above MESH's (`quickshell:background`) makes glass refract a different
       image than the one on screen.
@@ -307,8 +313,7 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
 - [ ] An icon-pack publish advances the shared resource revision and rebuilds
       `FontSystem`; split font and icon revisions. `TextRenderer::new` does a
       system font scan that is discarded on the first frame.
-- [ ] Frame pacing is per component, not per target, so popover frames wait on
-      the parent's callback. Service updates run Lua per message, not per frame.
+- [ ] Service updates run Lua per message, not per frame.
 - [ ] Sparse frames still pay ~10 full passes (batch index rebuild, topology
       check, backdrop regions, layer-scope collection); the subtree reuse map
       drops descendants of reused subtrees (`build.rs:433`) — add a regression.
@@ -370,6 +375,9 @@ From the 2026-10-20 live `glass` captures; evidence in the
 
 ### Rendering and paint
 
+- [ ] Background/bottom-layer liquid glass still refracts a static wallpaper image, not
+      MESH's presented frames, so wallpaper transitions drift; top-layer glass has no bending
+      without a compositor glass protocol. Phases 2–4 of the [design](../.planning/todos/pending/2026-10-23-live-glass-backdrop.md).
 - [ ] Complete paint semantics for opacity layers, four-edge borders,
       four-corner radii, text physical scaling, and stable equal-z ordering;
       add retained and pixel regressions. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).

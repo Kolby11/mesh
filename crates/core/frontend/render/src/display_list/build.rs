@@ -139,6 +139,15 @@ impl FloatBounds {
             && self.top < clip_bottom
     }
 
+    fn intersection(self, other: Self) -> Self {
+        Self {
+            left: self.left.max(other.left),
+            top: self.top.max(other.top),
+            right: self.right.min(other.right),
+            bottom: self.bottom.min(other.bottom),
+        }
+    }
+
     pub(super) fn union(self, other: Self) -> Self {
         Self {
             left: self.left.min(other.left),
@@ -391,6 +400,7 @@ pub(super) fn build_paint_subtree(
     next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     metrics: &mut LocalReuseMetrics,
     backdrop_blur_policy: BackdropBlurPolicy,
+    refraction_source: bool,
     scroll_only: bool,
 ) -> Arc<RetainedPaintSubtree> {
     build_paint_subtree_with_transform(
@@ -407,6 +417,7 @@ pub(super) fn build_paint_subtree(
         next_subtrees,
         metrics,
         backdrop_blur_policy,
+        refraction_source,
         false,
         scroll_only,
     )
@@ -427,6 +438,7 @@ fn build_paint_subtree_with_transform(
     next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     metrics: &mut LocalReuseMetrics,
     backdrop_blur_policy: BackdropBlurPolicy,
+    refraction_source: bool,
     in_scroll_content: bool,
     scroll_only: bool,
 ) -> Arc<RetainedPaintSubtree> {
@@ -534,14 +546,19 @@ fn build_paint_subtree_with_transform(
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
-    if paint_node.style.backdrop_filter.has_refraction() {
+    let backdrop = paint_node.style.backdrop_filter;
+    // Refraction samples the shell backdrop source only where that source is
+    // what lies beneath the surface. Elsewhere its blur takes the ordinary
+    // backdrop route so the compositor blurs the real backdrop (04 §11).
+    let samples_source = backdrop.has_refraction() && refraction_source;
+    if samples_source {
         subtree.push_command(DisplayPaintCommand {
             node: Arc::clone(&paint_node),
             clip: node_clip,
             kind: DisplayPaintCommandKind::ApplyBackdropRefraction,
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
-    } else if paint_node.style.backdrop_filter.blur_radius > 0.0 {
+    } else if backdrop.blur_radius > 0.0 {
         let kind = match backdrop_blur_policy {
             BackdropBlurPolicy::CompositorRegion => {
                 DisplayPaintCommandKind::ApplyBackdropFilterCompositor
@@ -555,6 +572,14 @@ fn build_paint_subtree_with_transform(
             node: Arc::clone(&paint_node),
             clip: node_clip,
             kind,
+        });
+        metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+    }
+    if backdrop.has_refraction() && !samples_source && backdrop.refract_edge > 0.0 {
+        subtree.push_command(DisplayPaintCommand {
+            node: Arc::clone(&paint_node),
+            clip: node_clip,
+            kind: DisplayPaintCommandKind::ApplyBackdropRim,
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
@@ -648,6 +673,7 @@ fn build_paint_subtree_with_transform(
             next_subtrees,
             metrics,
             backdrop_blur_policy,
+            refraction_source,
             in_scroll_content || retain_content,
             scroll_only,
         );
@@ -802,6 +828,7 @@ pub(super) fn append_child_paint_subtree(
     next_subtrees: &mut HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     metrics: &mut LocalReuseMetrics,
     backdrop_blur_policy: BackdropBlurPolicy,
+    refraction_source: bool,
     in_scroll_content: bool,
     scroll_only: bool,
 ) {
@@ -826,6 +853,7 @@ pub(super) fn append_child_paint_subtree(
         next_subtrees,
         metrics,
         backdrop_blur_policy,
+        refraction_source,
         in_scroll_content,
         scroll_only,
     );
@@ -925,12 +953,13 @@ pub(super) fn subtree_bounds_at_with_visit(
     offset_y: f32,
     visit: &mut impl FnMut(),
 ) -> Option<FloatBounds> {
-    subtree_bounds_at_with_transform(node, root_transform(offset_x, offset_y), visit)
+    subtree_bounds_at_with_transform(node, root_transform(offset_x, offset_y), None, visit)
 }
 
 fn subtree_bounds_at_with_transform(
     node: &WidgetNode,
     parent_transform: AffineTransform,
+    ancestor_clip: Option<FloatBounds>,
     visit: &mut impl FnMut(),
 ) -> Option<FloatBounds> {
     visit();
@@ -939,11 +968,37 @@ fn subtree_bounds_at_with_transform(
     }
 
     let world_transform = node_transform(parent_transform, node);
-    let mut bounds = node_visual_bounds_at_with_transform(node, world_transform);
+    let mut bounds = node_visual_bounds_at_with_transform(node, world_transform)
+        .map(|bounds| ancestor_clip.map_or(bounds, |clip| bounds.intersection(clip)))
+        .filter(|bounds| bounds.right > bounds.left && bounds.bottom > bounds.top);
+    let child_clip = if node.computed_style.overflow_x.clips_contents()
+        || node.computed_style.overflow_y.clips_contents()
+    {
+        let rect = world_transform.transform_rect(LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: node.layout.width.max(0.0),
+            height: node.layout.height.max(0.0),
+        });
+        let clip = FloatBounds {
+            left: rect.x,
+            top: rect.y,
+            right: rect.x + rect.width,
+            bottom: rect.y + rect.height,
+        };
+        Some(ancestor_clip.map_or(clip, |ancestor| clip.intersection(ancestor)))
+    } else {
+        ancestor_clip
+    };
     let scroll = node.resolved_scroll_metrics();
     let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);
     for child in &node.children {
-        if let Some(child_bounds) = subtree_bounds_at_with_transform(child, child_transform, visit)
+        let (transform, clip) = if child.computed_style.position == Position::Fixed {
+            (root_transform(0.0, 0.0), None)
+        } else {
+            (child_transform, child_clip)
+        };
+        if let Some(child_bounds) = subtree_bounds_at_with_transform(child, transform, clip, visit)
         {
             bounds = Some(match bounds {
                 Some(existing) => existing.union(child_bounds),

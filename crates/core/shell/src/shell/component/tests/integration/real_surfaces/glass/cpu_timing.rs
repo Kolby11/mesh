@@ -58,6 +58,7 @@ fn context() -> PaintContext {
         backdrop: BackdropFrame {
             origin: (0.0, (OUTPUT_HEIGHT - HEIGHT) as f32),
             output: (WIDTH as f32, OUTPUT_HEIGHT as f32),
+            source_beneath: true,
         },
         ..Default::default()
     }

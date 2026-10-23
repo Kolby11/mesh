@@ -10,6 +10,19 @@ use mesh_core_component::style::StyleRule;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+fn initial_element_style(tag: &str) -> ComputedStyle {
+    if crate::element_runtime_tag_for_tag(tag) == Some("scroll") {
+        ComputedStyle {
+            direction: FlexDirection::Column,
+            overflow_x: Overflow::Hidden,
+            overflow_y: Overflow::Auto,
+            ..Default::default()
+        }
+    } else {
+        ComputedStyle::default()
+    }
+}
+
 impl<'a> StyleResolver<'a> {
     pub fn resolve_node_style(
         &self,
@@ -267,7 +280,7 @@ impl<'a> StyleResolver<'a> {
             return cached;
         }
 
-        let mut style = ComputedStyle::default();
+        let mut style = initial_element_style(tag);
         let mut variables = HashMap::new();
         self.apply_theme_component_defaults(&mut style, tag, module_id, None, &mut variables);
         let cached = Rc::new(ThemeComponentDefaults { style, variables });
@@ -513,7 +526,7 @@ impl<'a> StyleResolver<'a> {
             return cached;
         }
 
-        let mut style = ComputedStyle::default();
+        let mut style = initial_element_style(tag);
         let mut diagnostics = Vec::new();
         let mut default_variables = HashMap::new();
         self.apply_theme_component_defaults(

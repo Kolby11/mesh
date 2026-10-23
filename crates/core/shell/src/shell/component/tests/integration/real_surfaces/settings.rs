@@ -446,7 +446,10 @@ fn appearance_theme_cards_stack_their_preview_above_the_label() {
         .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
 
-    let tree = settings.last_tree.as_ref().expect("rendered appearance tree");
+    let tree = settings
+        .last_tree
+        .as_ref()
+        .expect("rendered appearance tree");
     let card = first_node_with_class_token(tree, "theme-option").expect("theme card");
     let preview = first_node_with_class_token(card, "theme-preview").expect("theme preview");
     let copy = first_node_with_class_token(card, "theme-option-copy").expect("theme copy");
@@ -467,7 +470,7 @@ fn appearance_theme_cards_stack_their_preview_above_the_label() {
 
 #[test]
 fn clicking_a_theme_card_repaints_settings_in_the_new_theme_in_one_frame() {
-    let theme = default_theme();
+    let theme = settings_material_theme(&default_theme());
     let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
     let mut buffer = PixelBuffer::new(920, 900);
     let extent = SurfaceExtent::unpadded(920, 900);
@@ -475,7 +478,9 @@ fn clicking_a_theme_card_repaints_settings_in_the_new_theme_in_one_frame() {
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
         .unwrap();
     for _ in 0..8 {
-        settings.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+        settings
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
     }
 
     let (x, y) = {
@@ -489,7 +494,9 @@ fn clicking_a_theme_card_repaints_settings_in_the_new_theme_in_one_frame() {
     settings
         .handle_input(&theme, 920, 900, ComponentInput::PointerMove { x, y })
         .unwrap();
-    settings.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+    settings
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
     for pressed in [true, false] {
         settings
             .handle_input(
@@ -510,34 +517,142 @@ fn clicking_a_theme_card_repaints_settings_in_the_new_theme_in_one_frame() {
     // frame of the clicked surface.
     let mut picked = theme.clone();
     picked.set_token(
-        "color.surface",
+        "color.surface-container-high",
         mesh_core_theme::TokenValue::String("#c00000".into()),
         mesh_core_theme::ThemeProvenance::BaseRecovery,
     );
     picked.set_token(
-        "color.surface-container",
-        mesh_core_theme::TokenValue::String("#00c000".into()),
+        "color.surface-container-low",
+        mesh_core_theme::TokenValue::String("#c00000".into()),
         mesh_core_theme::ThemeProvenance::BaseRecovery,
     );
+    let picked = settings_material_theme(&picked);
     settings.theme_changed().unwrap();
-    settings.paint_raster(&picked, extent, &mut buffer, 1.0).unwrap();
+    settings
+        .paint_raster(&picked, extent, &mut buffer, 1.0)
+        .unwrap();
 
     let tree = settings.last_tree.as_ref().unwrap();
     let shell = first_node_with_class_token(tree, "settings-shell").expect("settings shell");
-    assert_eq!(
-        shell.computed_style.background_color,
-        mesh_core_elements::style::Color::from_hex("#c00000").unwrap(),
-        "the shell restyles with the picked theme"
-    );
+    let mesh_core_elements::style::BackgroundPaint::LinearGradient(gradient) =
+        &shell.computed_style.background_paint
+    else {
+        panic!("settings surface must keep its theme gradient")
+    };
+    for color in [gradient.from, gradient.to] {
+        assert_eq!((color.r, color.g, color.b), (0xc0, 0, 0));
+        assert!(color.a > 0 && color.a < 255);
+    }
     // BGRA, at a point of the shell's right edge that no child covers.
     let (px, py) = (
         (shell.layout.x + shell.layout.width - 4.0) as u32,
         (shell.layout.y + shell.layout.height / 2.0) as u32,
     );
     let offset = ((py * buffer.width() + px) * 4) as usize;
-    assert_eq!(
-        &buffer.data()[offset..offset + 4],
-        &[0x00, 0x00, 0xc0, 0xff],
-        "the frame after the click paints the picked theme"
+    let pixel = &buffer.data()[offset..offset + 4];
+    assert!(
+        pixel[2] > 0 && pixel[0] == 0 && pixel[1] == 0 && pixel[3] > 0,
+        "the frame after the click paints the picked palette: {pixel:?}"
+    );
+}
+
+fn settings_material_theme(pack: &mesh_core_theme::Theme) -> mesh_core_theme::Theme {
+    use mesh_core_theme::{Theme, ThemeModule, ThemeModuleLayer};
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap();
+    let material: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("modules/libraries/glass-material/module.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("modules/frontend/settings/module.json")).unwrap(),
+    )
+    .unwrap();
+    let families = manifest["mesh"]["uses"]["modules"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .filter(|id| id.as_str() == "@mesh/glass-material")
+        .cloned()
+        .collect::<Vec<_>>();
+    Theme::compose_layers(
+        &default_theme(),
+        pack,
+        &pack.id,
+        "dark",
+        vec![
+            ThemeModuleLayer {
+                module_id: "@mesh/glass-material".into(),
+                module: serde_json::from_value(material["mesh"]["theme"].clone()).unwrap(),
+                families: Vec::new(),
+            },
+            ThemeModuleLayer {
+                module_id: "@mesh/settings".into(),
+                module: ThemeModule::default(),
+                families: families.clone(),
+            },
+        ],
+        &HashMap::new(),
+    )
+    .unwrap()
+}
+
+#[test]
+fn settings_glass_surfaces_follow_the_active_theme_palette() {
+    use mesh_core_theme::ThemeSourceHandle;
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .canonicalize()
+        .unwrap();
+    let mut surfaces = Vec::new();
+    for name in ["catppuccin-mocha", "violet-glass"] {
+        let pack = mesh_core_theme::load_theme_from_source(
+            &ThemeSourceHandle::new(root.join("modules/themes").join(name), "theme.css").unwrap(),
+            name,
+            name,
+        )
+        .unwrap();
+        let theme = settings_material_theme(&pack);
+        let mut settings =
+            real_frontend_module_component("@mesh/settings", audio_network_catalog());
+        let mut buffer = PixelBuffer::new(920, 900);
+        settings
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .unwrap();
+        let tree = settings.last_tree.as_ref().unwrap();
+        let shell = first_node_with_class_token(tree, "settings-shell").unwrap();
+        let sidebar = first_node_with_class_token(tree, "settings-sidebar").unwrap();
+        let card = first_node_with_class_token(tree, "settings-empty-state").unwrap();
+        assert_eq!(shell.computed_style.background_color.a, 0);
+        assert_ne!(
+            shell.computed_style.background_paint,
+            mesh_core_elements::style::BackgroundPaint::None
+        );
+        assert_eq!(shell.computed_style.backdrop_filter.blur_radius, 20.0);
+        assert!(
+            sidebar.computed_style.background_color.a > 0
+                && sidebar.computed_style.background_color.a < 255
+        );
+        assert!(
+            card.computed_style.background_color.a > 0
+                && card.computed_style.background_color.a < 255
+        );
+        surfaces.push(shell.computed_style.background_paint.clone());
+        if let Some(dir) = std::env::var_os("MESH_SETTINGS_PREVIEW_DIR") {
+            let dir = PathBuf::from(dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(
+                dir.join(format!("settings-{name}-920x900.bgra")),
+                buffer.data(),
+            )
+            .unwrap();
+        }
+    }
+    assert_ne!(
+        surfaces[0], surfaces[1],
+        "settings must follow the selected palette"
     );
 }

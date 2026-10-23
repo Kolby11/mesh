@@ -1288,6 +1288,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         let display_list_span = tracing::debug_span!("display_list_update").entered();
         self.retained_display_list
             .set_backdrop_blur_policy(self.paint_context.backdrop_policy);
+        self.retained_display_list
+            .set_refraction_source(self.paint_context.backdrop.source_beneath);
         let display_list_metrics = self.retained_display_list.update_for_retained_fingerprints(
             &tree,
             retained_tree_generation,
@@ -2242,6 +2244,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let mut child_display_lists = self.child_display_lists.borrow_mut();
         let display_list = child_display_lists.get_or_insert(node.id);
         display_list.set_backdrop_blur_policy(self.paint_context.backdrop_policy);
+        display_list.set_refraction_source(self.paint_context.backdrop.source_beneath);
         display_list.update_at_for_retained_generation_with_dirty_nodes(
             &child_root,
             retained_generation,

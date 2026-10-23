@@ -684,3 +684,58 @@ fn display_ancestors_visit_only_retained_paths() {
     }
     assert_eq!(visits, vec![3, 3]);
 }
+
+#[test]
+fn subtree_visual_bounds_clip_scrolled_content_and_preserve_outer_shadow() {
+    let mut root = node(1, "popover", 0.0, 0.0, 100.0, 100.0);
+    root.computed_style.box_shadow = mesh_core_elements::BoxShadow {
+        offset_y: 8.0,
+        blur_radius: 12.0,
+        color: Color::from_hex("#00000080").unwrap(),
+        ..Default::default()
+    };
+    let expected = widget_visual_bounds(&root).unwrap();
+    let mut viewport = node(2, "scroll-area", 10.0, 10.0, 80.0, 60.0);
+    viewport.computed_style.overflow_y = Overflow::Auto;
+    viewport.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+        max_y: 940.0,
+        content_width: 80.0,
+        content_height: 1000.0,
+        ..Default::default()
+    });
+    let mut content = node(3, "column", 10.0, 10.0, 80.0, 1000.0);
+    let mut tile = node(4, "button", 10.0, 10.0, 80.0, 40.0);
+    tile.computed_style.transform.scale_x = 1.04;
+    tile.computed_style.transform.scale_y = 1.04;
+    content.children.push(tile);
+    viewport.children.push(content);
+    root.children.push(viewport);
+    for offset in [0.0, 28.5, 400.0, 940.0, 0.0] {
+        root.children[0].scroll_metrics.as_mut().unwrap().y = offset;
+        assert_eq!(
+            widget_subtree_visual_bounds(&root),
+            Some(expected),
+            "offset={offset}"
+        );
+    }
+}
+
+#[test]
+fn subtree_visual_bounds_keep_fixed_descendants_outside_scroll_clip() {
+    let mut root = node(1, "popover", 0.0, 0.0, 100.0, 100.0);
+    root.computed_style.transform.translate_x = 50.0;
+    let mut viewport = node(2, "scroll-area", 10.0, 10.0, 80.0, 60.0);
+    viewport.computed_style.overflow_y = Overflow::Hidden;
+    viewport.scroll_metrics.get_or_insert_default().y = 500.0;
+    let mut content = node(3, "column", 10.0, 10.0, 80.0, 1000.0);
+    let mut fixed = node(4, "box", 300.0, 400.0, 10.0, 10.0);
+    fixed.computed_style.position = mesh_core_elements::style::Position::Fixed;
+    content.children.push(fixed);
+    viewport.children.push(content);
+    root.children.push(viewport);
+    let bounds = widget_subtree_visual_bounds(&root).unwrap();
+    assert_eq!(bounds.x, 50.0);
+    assert_eq!(bounds.y, 0.0);
+    assert_eq!(bounds.x + bounds.width, 310.0);
+    assert_eq!(bounds.y + bounds.height, 410.0);
+}

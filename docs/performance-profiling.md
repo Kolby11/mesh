@@ -324,8 +324,10 @@ nix develop -c cargo test -p mesh-core-shell --release --lib glass_dock_cpu_rast
 
 This compositor-free timing fixture paints the shipped glass dock at 2880×114,
 scale 1, bottom-aligned on a 2880×1800 output. It loads an output-sized,
-nonuniform wallpaper and supplies the live `BackdropFrame` and compositor-blur
-policy, so the dock's refraction and dispersion execute. It uses the shell's
+nonuniform wallpaper and supplies a `BackdropFrame` that samples the source,
+with the compositor-blur policy, so the dock's refraction and dispersion
+execute. (Live, the top-layer dock routes its blur to the compositor and paints
+only rims; the fixture keeps measuring the source-sampling path.) It uses the shell's
 `SurfaceCanvas` recording and `RasterReplay::run` boundary. Three paced sweeps
 cross ten pinned apps beside 150 installed apps, after entrance animations settle.
 Only requested frames are sampled; preparation includes input, script and paint

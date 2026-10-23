@@ -13,6 +13,41 @@ measurements live in [`log/`](log/README.md).
   with plain-language permissions and ext-workspace records; `module fork`/`diff`/
   `rebase` track upstream. Not yet run in the live shell session. See October's log.
 
+- **Settings pop-out resolves profile surfaces:** set-role and toggle-role requests
+  resolve module IDs to their sole root instance. All 11 window-role tests pass,
+  including round trips and explicit targeting with multiple profile roots.
+  The GPU-enabled release binary is rebuilt; live switching remains unchecked.
+
+- **Liquid glass above windows uses the real backdrop:** on top/overlay
+  surfaces, `refract()` glass sends its blur to the compositor and paints only
+  the rim. Background/bottom glass still refracts the wallpaper image. Tests
+  pass apart from known failures; not yet checked live on Hyprland. Phases 2–4
+  are in the [design](todos/pending/2026-10-23-live-glass-backdrop.md).
+
+- **Settings alignment and material fixed:** promoted popup wrappers are out of
+  flex flow, keeping the glass status gear centered both closed and open.
+  Settings imports the shared glass material family and uses the active palette
+  for translucent surfaces, rims and hovers. Catppuccin/Violet palette and
+  one-frame theme-switch regressions pass; Settings 13/13, glass 7/7 and popup
+  57/57. Manifest validation passes; the rebuilt GPU release is running.
+
+- **Core scrolling contract hardened:** native scroll tags have vertical scroll
+  and clipping defaults before theme/style rules. A handler-free, empty-theme
+  matrix checks three tags, two axes, three display scales and 2,880 repeated
+  wheel/touchpad inputs. Dedicated PR/push CI also covers padded launcher pixels,
+  popup backpressure and clipped bounds with GPU-feature shell builds. The GPU
+  release is running. Elements: 310 passed / 7 ignored; serial shell: 980 / 32.
+  All dedicated CI commands also pass with GPU-feature shell builds.
+
+- **Application launcher buffer drift fixed and verified live:** clipped application
+  rows no longer inflate popup padding or move its coordinate origin during
+  scroll. The live input trace confirmed finger events continued in both
+  directions during the stall. The 100-app regression now uses padded buffers
+  and checks reserve stability, pixel clipping and momentum. Shell: 979 passed /
+  32 ignored; renderer serial: 331 / 13. The GPU release build is running, and
+  the user verified repeated scrolling works in both directions. Prior icon
+  clipping and parent/child scheduling fixes remain.
+
 - **Popup edge placement fixed:** popup anchors and compositor constraints use
   content geometry instead of shadow/filter buffer reserves. Quick settings and
   launcher trigger geometry is covered, and a live Hyprland regression verifies

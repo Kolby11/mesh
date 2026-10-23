@@ -115,6 +115,7 @@ impl Shell {
         mesh_core_render::BackdropFrame {
             origin: predicted_origin(Placement::from(surface), others, output),
             output,
+            source_beneath: matches!(surface.layer, Some(Layer::Background | Layer::Bottom)),
         }
     }
 }

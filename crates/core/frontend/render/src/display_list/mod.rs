@@ -51,6 +51,14 @@ impl RetainedDisplayList {
         self.backdrop_blur_policy
     }
 
+    /// Select whether `backdrop-filter: refract()` samples the shell backdrop
+    /// source on the next update. Without the source, a refracting element's
+    /// blur follows the backdrop-blur policy and only its rim is painted.
+    /// A change is a command-topology change, like a policy change.
+    pub fn set_refraction_source(&mut self, source_beneath: bool) {
+        self.refraction_source = source_beneath;
+    }
+
     /// Stays stable when paint work elsewhere in the surface changes, so a
     /// promoted child surface can skip repainting for unrelated parent updates.
     pub fn subtree_generation(&self, node_id: NodeId) -> Option<u64> {
@@ -290,6 +298,7 @@ impl RetainedDisplayList {
             && self.surface_size == Some((surface.width, surface.height))
             && self.paint_origin == paint_origin
             && self.built_backdrop_blur_policy == self.backdrop_blur_policy
+            && self.built_refraction_source == self.refraction_source
             && !resource_revision_changed
         {
             return self.update_metrics_without_rebuild(
@@ -299,7 +308,8 @@ impl RetainedDisplayList {
             );
         }
 
-        let policy_changed = self.built_backdrop_blur_policy != self.backdrop_blur_policy;
+        let policy_changed = self.built_backdrop_blur_policy != self.backdrop_blur_policy
+            || self.built_refraction_source != self.refraction_source;
         let has_authoritative_dirty_summary = dirty_summary.is_some();
         let dirty_summary = dirty_summary.unwrap_or_default();
         let empty_dirty_nodes = HashSet::new();
@@ -454,6 +464,7 @@ impl RetainedDisplayList {
                     &mut next_subtrees,
                     &mut local_metrics,
                     self.backdrop_blur_policy,
+                    self.refraction_source,
                     scroll_only,
                 );
                 self.dirty_ancestors_scratch = rebuild_ancestors;
@@ -488,6 +499,7 @@ impl RetainedDisplayList {
                     &mut next_subtrees,
                     &mut local_metrics,
                     self.backdrop_blur_policy,
+                    self.refraction_source,
                     false,
                 );
                 let command_spans = build_command_spans(root, &next_subtrees);
@@ -536,7 +548,15 @@ impl RetainedDisplayList {
                 // From the full `root` tree, not `paint_commands`, so scoped
                 // updates never drop blur nodes (see field docs).
                 (self.backdrop_blur_policy == BackdropBlurPolicy::CompositorRegion)
-                    .then(|| backdrop_blur_regions_from_tree(root, offset_x, offset_y, surface))
+                    .then(|| {
+                        backdrop_blur_regions_from_tree(
+                            root,
+                            offset_x,
+                            offset_y,
+                            surface,
+                            self.refraction_source,
+                        )
+                    })
                     .unwrap_or_default(),
             )
         });
@@ -627,6 +647,7 @@ impl RetainedDisplayList {
         self.command_kinds = command_kinds;
         self.resource_revision = resource_revision;
         self.built_backdrop_blur_policy = self.backdrop_blur_policy;
+        self.built_refraction_source = self.refraction_source;
         self.layer_scopes = collect_layer_scopes(self.paint_commands.as_ref());
         // Every candidate must qualify, or the frame keeps ordinary repaint:
         // a partially shifted surface would mix two damage models.

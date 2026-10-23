@@ -18,7 +18,7 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/workspaces-widget`, `@mesh/window-title-widget`, `@mesh/clock-widget`, `@mesh/brightness-widget`, `@mesh/volume-widget`, `@mesh/theme-widget`, `@mesh/language-widget`, `@mesh/battery-widget`, `@mesh/settings-widget` | embedded | `src/main.mesh` | Independent `mesh.navigation.item` contributions any bar can host; per-instance props come from profile placements |
 | `@mesh/audio-popover` | embedded | `src/main.mesh` | Audio control surface |
 | `@mesh/quick-settings` | embedded | `src/main.mesh` | Quick settings surface |
-| `@mesh/settings` | surface | `src/main.mesh` | Current settings surface |
+| `@mesh/settings` | surface | `src/main.mesh` | Settings surface using the shared glass material family and active theme palette |
 | `@mesh/debug-inspector` | surface | `src/main.mesh` | Runtime inspection surface |
 | `@mesh/composition-editor` | surface | `src/main.mesh` | Replaceable visual editor for author-declared component slots |
 | `@mesh/text-selection-proof` | surface | `src/main.mesh` | Text-selection proof surface |
@@ -45,7 +45,9 @@ their close button or a click outside the panel. The media card grows a
 spectrum strip while audio plays. Popups
 support keyboard opening, Escape and outside dismissal through core disclosure.
 Control labels are available in English and Slovak. Audio and brightness use
-capability-gated providers; unavailable controls stay disabled.
+capability-gated providers; unavailable controls stay disabled. The full Settings
+surface shares the same material family, including translucent panels, rims and
+hover states, while preserving the active theme's colors.
 
 Desktop cards use the configurable `top_offset` prop (360px by default), compact
 widths and a stacked layout at 960px or below. The dock reserves space above the

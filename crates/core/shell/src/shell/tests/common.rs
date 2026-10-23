@@ -738,6 +738,7 @@ pub(super) struct FocusRecordingState {
 }
 
 pub(super) struct FocusRecordingComponent {
+    pub(super) module_id: String,
     pub(super) surface_id: String,
     pub(super) state: Arc<Mutex<FocusRecordingState>>,
     pub(super) popover_margin_left: i32,
@@ -751,6 +752,7 @@ pub(super) struct FocusRecordingComponent {
 impl FocusRecordingComponent {
     pub(super) fn new(surface_id: &str, state: Arc<Mutex<FocusRecordingState>>) -> Self {
         Self {
+            module_id: surface_id.to_string(),
             surface_id: surface_id.to_string(),
             state,
             popover_margin_left: 0,
@@ -813,7 +815,7 @@ impl super::types::ShellComponent for FocusRecordingComponent {
     }
 
     fn id(&self) -> &str {
-        &self.surface_id
+        &self.module_id
     }
 
     fn surface_id(&self) -> &str {

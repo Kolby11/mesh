@@ -172,11 +172,14 @@ end
            surface clips. */
         max-width: 100%;
         max-height: 100%;
-        background: var(--color-surface);
-        color: var(--color-on-surface);
+        background: transparent;
+        background-image: var(--glass-surface-panel);
+        backdrop-filter: blur(20px) refract(22px 18px) dispersion(1px);
+        box-shadow: var(--glass-shadow-card);
+        color: var(--glass-text);
         border-width: 1px;
         border-style: solid;
-        border-color: var(--color-outline-variant);
+        border-color: var(--glass-rim);
         border-radius: var(--radius-lg);
     }
 
@@ -227,10 +230,10 @@ end
         flex-shrink: 0;
         gap: var(--spacing-lg);
         padding: var(--spacing-lg);
-        background: var(--color-surface-container-low);
+        background: var(--glass-fill-inset);
         border-right-width: 1px;
         border-right-style: solid;
-        border-right-color: var(--color-outline-variant);
+        border-right-color: var(--glass-rim-inset);
         /* The shell does not clip its children, so the sidebar fill follows
            the shell's left corners itself. */
         border-top-left-radius: var(--radius-lg);
@@ -320,13 +323,14 @@ end
     }
 
     .settings-nav-item:hover {
-        background: var(--color-surface-container-high);
+        background: var(--glass-hover);
         color: var(--color-on-surface);
     }
 
     .settings-nav-item-active {
-        background: var(--color-secondary-container);
-        color: var(--color-on-secondary-container);
+        background: transparent;
+        background-image: var(--glass-surface-control);
+        color: var(--glass-text-strong);
     }
 
     .nav-title {
@@ -344,7 +348,7 @@ end
         width: 100%;
         padding: var(--spacing-md);
         border-radius: var(--radius-md);
-        background: var(--color-surface-container);
+        background: var(--glass-fill-inset);
     }
 
     .sidebar-foot-title {
@@ -370,7 +374,7 @@ end
         padding-block: var(--spacing-lg);
         border-bottom-width: 1px;
         border-bottom-style: solid;
-        border-bottom-color: var(--color-outline-variant);
+        border-bottom-color: var(--glass-rim-inset);
     }
 
     .page-eyebrow {
@@ -396,12 +400,12 @@ end
         justify-content: center;
         border-radius: var(--radius-full);
         border-width: 0;
-        background: var(--color-surface-container);
+        background: var(--glass-fill-inset);
         color: var(--color-on-surface-variant);
     }
 
     .header-button:hover {
-        background: var(--color-surface-container-high);
+        background: var(--glass-hover);
         color: var(--color-on-surface);
     }
 
@@ -492,8 +496,8 @@ end
         border-radius: var(--radius-md);
         border-width: 1px;
         border-style: solid;
-        border-color: var(--color-outline-variant);
-        background: var(--color-surface-container-low);
+        border-color: var(--glass-rim-inset);
+        background: var(--glass-fill-inset);
     }
 
     .settings-card-copy {
@@ -517,7 +521,7 @@ end
         padding-inline: var(--spacing-sm);
         padding-block: var(--spacing-xs);
         border-radius: var(--radius-full);
-        background: var(--color-surface-container-high);
+        background: var(--glass-hover);
         color: var(--color-on-surface-variant);
         font-size: var(--typography-size-xs);
         font-weight: 700;
@@ -548,8 +552,8 @@ end
     .settings-secondary-button {
         border-width: 1px;
         border-style: solid;
-        border-color: var(--color-outline-variant);
-        background: var(--color-surface-container);
+        border-color: var(--glass-rim-inset);
+        background: var(--glass-fill-inset);
         color: var(--color-on-surface);
     }
 

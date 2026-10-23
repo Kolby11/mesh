@@ -436,9 +436,10 @@ pub struct RenderSettings {
     pub backdrop: BackdropSettings,
 }
 
-/// The image `backdrop-filter: refract()` samples. A Wayland client cannot
-/// read what the compositor shows behind its surfaces, so refraction needs a
-/// source MESH holds itself: normally the wallpaper the active profile paints.
+/// The image `backdrop-filter: refract()` samples on background- and
+/// bottom-layer surfaces. A Wayland client cannot read what the compositor
+/// shows behind its surfaces, so refraction needs a source MESH holds itself:
+/// normally the wallpaper the active profile paints.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct BackdropSettings {
     /// Absolute path of the image, cover-fit to each output. Unset disables

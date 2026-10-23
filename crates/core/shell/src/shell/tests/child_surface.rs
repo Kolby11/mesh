@@ -1116,3 +1116,36 @@ fn child_popup_input_region_excludes_the_shadow_overshoot_ring() {
         "input stops at the visible popover content, not at the padded buffer"
     );
 }
+
+#[test]
+fn ready_child_keeps_painting_while_parent_waits_for_compositor() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+    render_components_until_child_popup(&mut shell);
+    let parent_id = shell.components[0].surface_id.clone();
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    for buffer_blocked in [false, true] {
+        shell
+            .presentation_engine
+            .testing_set_surface_frame_pending(&parent_id, !buffer_blocked);
+        shell
+            .presentation_engine
+            .testing_set_surface_buffer_backpressured(&parent_id, buffer_blocked);
+        for _ in 0..4 {
+            let before = state.lock().unwrap().painted_nodes.len();
+            assert!(shell.components_have_ready_render_work());
+            shell.render_components().unwrap();
+            assert_eq!(state.lock().unwrap().painted_nodes.len(), before + 1);
+            assert!(
+                shell
+                    .presentation_engine
+                    .testing_presented_surfaces()
+                    .iter()
+                    .any(|id| id == &child_id)
+            );
+        }
+    }
+}

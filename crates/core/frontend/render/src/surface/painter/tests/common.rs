@@ -176,6 +176,7 @@ pub(super) fn painter_command_classes(commands: &[PainterCommand]) -> Vec<&'stat
             PainterCommand::DrawShadow { .. } => "draw_shadow",
             PainterCommand::ApplyFilter { .. } => "apply_filter",
             PainterCommand::DrawBackdropRefraction { .. } => "draw_backdrop_refraction",
+            PainterCommand::DrawGlassRim { .. } => "draw_glass_rim",
         })
         .collect()
 }

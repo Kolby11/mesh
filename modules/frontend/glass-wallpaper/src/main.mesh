@@ -4,8 +4,8 @@
 
 <style>
     /* The shell backdrop image (`shell.render.backdrop.image`), cover-fit and
-    unrefracted. Every glass element refracts this same image, so the wallpaper
-    and what the glass bends always agree. */
+    unrefracted. Glass on the background and bottom layers refracts this same
+    image, so the wallpaper and what that glass bends agree. */
     .wallpaper {
         width: 100%;
         height: 100%;

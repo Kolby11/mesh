@@ -901,7 +901,22 @@ impl FrontendRenderEngine {
                         frame: super::super::backdrop::BackdropFrame {
                             origin: (frame.origin.0 * scale, frame.origin.1 * scale),
                             output: (frame.output.0 * scale, frame.output.1 * scale),
+                            source_beneath: frame.source_beneath,
                         },
+                        clip,
+                    }
+                });
+                self.execute_painter_commands_in_session(session, &commands);
+                return;
+            }
+            DisplayPaintCommandKind::ApplyBackdropRim => {
+                let bounds = scaled_display_node_bounds(&command.node, scale);
+                let clip = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
+                let commands = scooped_backdrop_commands(&command.node, scale, bounds, |radii| {
+                    PainterCommand::DrawGlassRim {
+                        rect: bounds,
+                        radii,
+                        filter: scaled_visual_filter(command.node.style.backdrop_filter, scale),
                         clip,
                     }
                 });
@@ -1078,7 +1093,8 @@ impl FrontendRenderEngine {
             | DisplayPaintCommandKind::ApplyBackdropFilterCompositor
             | DisplayPaintCommandKind::ApplyBackdropFilterInSurface
             | DisplayPaintCommandKind::ApplyBackdropFilterRejected
-            | DisplayPaintCommandKind::ApplyBackdropRefraction => {}
+            | DisplayPaintCommandKind::ApplyBackdropRefraction
+            | DisplayPaintCommandKind::ApplyBackdropRim => {}
             DisplayPaintCommandKind::PushScrollContent
             | DisplayPaintCommandKind::PopScrollContent => {}
         }
@@ -1174,6 +1190,7 @@ impl FrontendRenderEngine {
                     y,
                     w,
                     h,
+                    node_clip,
                     node.module_id.as_deref().or(module_id),
                 );
             }

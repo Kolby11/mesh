@@ -244,6 +244,10 @@ paths trigger it:
 | `mesh.shell.toggle_surface_role(surface_id)` | a control that flips whichever role is current |
 | `shell:promote_surface:<id>`, `shell:demote_surface:<id>`, `shell:toggle_surface_role:<id>` over the automation IPC | a *compositor* keybind, since MESH keybinds are focused-surface actions and cannot grab a global hotkey ([11](11-automation-ipc.md)) |
 
+These role requests accept an exact surface instance ID or a module ID when
+that module has exactly one root surface, just like show/hide/toggle. With
+multiple root instances, callers must supply the instance ID.
+
 A component tells the two apart in CSS with `:windowed`
 ([04 §6.1](04-styling.md)) rather than in script state, so its chrome follows
 the surface's actual role even when the role was changed from outside it. That

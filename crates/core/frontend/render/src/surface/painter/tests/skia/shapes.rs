@@ -1048,3 +1048,96 @@ fn skia_outside_scoops_clip_keeps_everything_but_the_scoops() {
     assert_eq!(pixel(&buffer, 1, 20), red);
     assert_eq!(pixel(&buffer, 16, 16), red);
 }
+
+fn write_checker_image(dir: &tempfile::TempDir, size: u32) -> String {
+    let path = dir.path().join("checker.png");
+    let image = image::RgbaImage::from_fn(size, size, |x, y| {
+        let on = (x + y) % 2 == 0;
+        image::Rgba(if on { [255, 255, 255, 255] } else { [0, 0, 0, 255] })
+    });
+    image.save(&path).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
+#[test]
+fn skia_downscaled_image_is_filtered_not_point_sampled() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_checker_image(&dir, 64);
+    let mut buffer = PixelBuffer::new(16, 16);
+    let mut diagnostics = Vec::new();
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawImage {
+            image: PainterImage {
+                source: PainterImageSource::Path(path),
+            },
+            rect: full_clip(16, 16),
+            paint: PainterPaint::fill(Color::WHITE),
+            clip: full_clip(16, 16),
+        }],
+        &mut diagnostics,
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    // A one-pixel checkerboard shrunk four times averages to mid grey;
+    // point sampling would pick pure black or white.
+    for (x, y) in [(3, 3), (8, 8), (12, 5)] {
+        let color = pixel(&buffer, x, y);
+        assert!((90..=170).contains(&color.r), "pixel {x},{y}: {color:?}");
+    }
+}
+
+#[test]
+fn skia_rotated_image_edges_are_antialiased() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_checker_image(&dir, 2);
+    let mut buffer = PixelBuffer::new(48, 48);
+    let mut diagnostics = Vec::new();
+    let angle = 12f32.to_radians();
+    let (sin, cos) = angle.sin_cos();
+    let rotation = mesh_core_elements::AffineTransform {
+        m11: cos,
+        m12: sin,
+        m21: -sin,
+        m22: cos,
+        tx: 24.0,
+        ty: 4.0,
+    };
+    let mut session = PixelCanvasSession::new(&mut buffer);
+    let save = SkiaPaintBackend.begin_affine_node(&mut session, rotation, &[], 1.0, full_clip(48, 48));
+    SkiaPaintBackend.execute_commands_in_session(
+        &mut session,
+        &[PainterCommand::DrawImage {
+            image: PainterImage {
+                source: PainterImageSource::Path(path),
+            },
+            rect: ClipRect {
+                x: -16,
+                y: 0,
+                width: 32,
+                height: 32,
+            },
+            paint: PainterPaint::fill(Color::WHITE),
+            clip: ClipRect {
+                x: -16,
+                y: 0,
+                width: 32,
+                height: 32,
+            },
+        }],
+        &mut diagnostics,
+    );
+    SkiaPaintBackend.end_affine_node(&mut session, save);
+    drop(session);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let partial = (0..48)
+        .flat_map(|y| (0..48).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            let alpha = pixel(&buffer, x, y).a;
+            alpha > 0 && alpha < 255
+        })
+        .count();
+    assert!(
+        partial > 20,
+        "a rotated image's edges get partial coverage, found {partial} edge pixels"
+    );
+}

@@ -15,36 +15,31 @@ use crate::{FractionalScale, RenderObjectDirtySummary};
 /// intermittently yields an empty set, which `org_kde_kwin_blur` reads as "blur
 /// the whole surface". `offset_x`/`offset_y` must be the paint origin the
 /// display list was built with, or the rects miss the painted content.
+/// `refraction_source` matches the display list's: a refracting element that
+/// samples the source paints its own backdrop and exports no region.
 pub fn backdrop_blur_regions_from_tree(
     root: &WidgetNode,
     offset_x: f32,
     offset_y: f32,
     surface: DamageRect,
+    refraction_source: bool,
 ) -> Vec<DamageRect> {
     let mut regions = Vec::new();
-    collect_backdrop_blur_regions(root, offset_x, offset_y, surface, &mut regions);
-    regions
-}
-
-pub(super) fn collect_backdrop_blur_regions(
-    node: &WidgetNode,
-    offset_x: f32,
-    offset_y: f32,
-    surface: DamageRect,
-    regions: &mut Vec<DamageRect>,
-) {
     collect_backdrop_blur_regions_with_transform(
-        node,
+        root,
         root_transform(offset_x, offset_y),
         surface,
-        regions,
+        refraction_source,
+        &mut regions,
     );
+    regions
 }
 
 fn collect_backdrop_blur_regions_with_transform(
     node: &WidgetNode,
     parent_transform: AffineTransform,
     surface: DamageRect,
+    refraction_source: bool,
     regions: &mut Vec<DamageRect>,
 ) {
     if node_is_explicitly_hidden(node) {
@@ -52,8 +47,9 @@ fn collect_backdrop_blur_regions_with_transform(
     }
     let world_transform = node_transform(parent_transform, node);
 
-    if node.computed_style.backdrop_filter.blur_radius > 0.0
-        && !node.computed_style.backdrop_filter.has_refraction()
+    let backdrop = node.computed_style.backdrop_filter;
+    if backdrop.blur_radius > 0.0
+        && !(backdrop.has_refraction() && refraction_source)
         && node.layout.width > 0.0
         && node.layout.height > 0.0
     {
@@ -75,7 +71,13 @@ fn collect_backdrop_blur_regions_with_transform(
     let scroll = node.resolved_scroll_metrics();
     let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);
     for child in &node.children {
-        collect_backdrop_blur_regions_with_transform(child, child_transform, surface, regions);
+        collect_backdrop_blur_regions_with_transform(
+            child,
+            child_transform,
+            surface,
+            refraction_source,
+            regions,
+        );
     }
 }
 
@@ -84,10 +86,16 @@ fn collect_backdrop_blur_regions_with_transform(
 /// popup items. Negative origins clamp to 0 with the clipped leading edge
 /// subtracted, so partially off-screen nodes do not snap to the corner.
 pub fn backdrop_blur_regions(commands: &[DisplayPaintCommand]) -> Vec<DamageRect> {
+    let samples_source: Vec<_> = commands
+        .iter()
+        .filter(|cmd| cmd.kind == DisplayPaintCommandKind::ApplyBackdropRefraction)
+        .map(|cmd| cmd.node.id)
+        .collect();
     let mut regions = Vec::new();
     for cmd in commands {
-        let backdrop = cmd.node.style.backdrop_filter;
-        if backdrop.blur_radius <= 0.0 || backdrop.has_refraction() {
+        if cmd.node.style.backdrop_filter.blur_radius <= 0.0
+            || samples_source.contains(&cmd.node.id)
+        {
             continue;
         }
         for rect in rounded_blur_regions(cmd) {
@@ -284,6 +292,7 @@ pub(super) fn display_command_paints_pixels(command: &DisplayPaintCommand) -> bo
         command.kind,
         DisplayPaintCommandKind::ApplyBackdropFilterInSurface
             | DisplayPaintCommandKind::ApplyBackdropRefraction
+            | DisplayPaintCommandKind::ApplyBackdropRim
     ) {
         return true;
     }

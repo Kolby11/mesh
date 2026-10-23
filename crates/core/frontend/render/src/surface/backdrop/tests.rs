@@ -306,6 +306,7 @@ fn downsampled_blur_matches_full_resolution_blur() {
         let frame = BackdropFrame {
             origin: (0.0, 0.0),
             output: (size.0 as f32, size.1 as f32),
+            source_beneath: true,
         };
         let mut local = Matrix::translate((-frame.origin.0, -frame.origin.1));
         local.pre_scale(
@@ -425,4 +426,62 @@ fn backdrop_prepare_profile() {
         }
         eprintln!("run={run} all nine radii cold_prepare={total:?}");
     }
+}
+
+#[test]
+fn rim_lights_only_the_glass_edge_over_what_is_beneath() {
+    let gray = skia_safe::Color::from_argb(255, 60, 60, 60);
+    let mut surface = surfaces::raster_n32_premul((96, 64)).unwrap();
+    surface.canvas().clear(gray);
+    let rect = Rect::from_xywh(8.0, 8.0, 80.0, 48.0);
+    let radii = Corners {
+        top_left: 12.0,
+        top_right: 12.0,
+        bottom_right: 12.0,
+        bottom_left: 12.0,
+    };
+    let filter = VisualFilter {
+        refract: true,
+        refract_depth: 12.0,
+        refract_edge: 20.0,
+        ..VisualFilter::NONE
+    };
+    assert!(draw_rim(surface.canvas(), rect, radii, filter));
+    let full = pixels(&mut surface);
+    let red = |x: usize, y: usize| full[(y * 96 + x) * 4 + 2].max(full[(y * 96 + x) * 4]);
+    assert_eq!(red(48, 32), 60, "the interior shows what is beneath");
+    assert_eq!(red(2, 2), 60, "outside the glass is untouched");
+    assert!(red(48, 8) > 60, "the top edge is lit");
+    assert!(
+        red(8, 32) > red(87, 32),
+        "light comes from the top-left: left {} vs right {}",
+        red(8, 32),
+        red(87, 32)
+    );
+
+    // A partial repaint whose clip cuts the corner arc reproduces the full
+    // paint's pixels.
+    let mut clipped = surfaces::raster_n32_premul((96, 64)).unwrap();
+    clipped.canvas().clear(gray);
+    clipped
+        .canvas()
+        .clip_rect(Rect::from_xywh(13.0, 11.0, 40.0, 40.0), None, false);
+    assert!(draw_rim(clipped.canvas(), rect, radii, filter));
+    let clipped = pixels(&mut clipped);
+    for y in 11..51 {
+        for x in 13..53 {
+            let index = (y * 96 + x) * 4;
+            assert_eq!(
+                &clipped[index..index + 4],
+                &full[index..index + 4],
+                "clipped rim pixel {x},{y}"
+            );
+        }
+    }
+
+    let flat = VisualFilter {
+        refract: true,
+        ..VisualFilter::NONE
+    };
+    assert!(!draw_rim(surface.canvas(), rect, radii, flat));
 }

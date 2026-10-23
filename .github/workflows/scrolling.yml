@@ -1,0 +1,32 @@
+name: Scrolling contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scrolling-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-scrolling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: Check native scroll defaults without theme rules
+        run: nix develop -c cargo test -p mesh-core-elements --lib native_scroll_defaults
+      - name: Check repeated input and reversals with GPU features enabled
+        run: nix develop -c cargo test -p mesh-core-shell --features gpu --lib scroll_contract
+      - name: Check padded launcher clipping, geometry and momentum
+        run: nix develop -c cargo test -p mesh-core-shell --features gpu --lib liquid_glass_launcher_keeps_results_viewport_with_many_apps
+      - name: Check popup progress while its parent is blocked
+        run: nix develop -c cargo test -p mesh-core-shell --features gpu --lib ready_child_keeps_painting_while_parent_waits_for_compositor
+      - name: Check clipped bounds and fixed descendants
+        run: nix develop -c cargo test -p mesh-core-render --lib subtree_visual_bounds -- --test-threads=1

@@ -45,6 +45,7 @@
       ],
       "modules": {
         "@mesh/shell-ui-interface": ">=1.0.0",
+        "@mesh/glass-material": ">=0.1.0",
         "@mesh/volume-presentation": ">=0.1.0"
       }
     },
