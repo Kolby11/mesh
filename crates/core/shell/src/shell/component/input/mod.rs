@@ -614,10 +614,19 @@ impl FrontendSurfaceComponent {
                 // Update hover state for CSS :hover and the tooltip system.
                 self.hovered_pos = (x, y);
                 let mut pointer_hit = mesh_core_interaction::pointer_hit_test(tree, x, y);
-                let new_event_path = pointer_hit
+                let mut new_event_path = pointer_hit
                     .as_mut()
                     .map(|hit| std::mem::take(&mut hit.path))
                     .unwrap_or_default();
+                if let Some(retained) = mesh_core_interaction::retain_hover_path(
+                    tree,
+                    &self.hovered_event_path,
+                    &new_event_path,
+                    x,
+                    y,
+                ) {
+                    new_event_path = retained;
+                }
                 let new_key = new_event_path.last().cloned();
                 let new_path = new_event_path
                     .iter()

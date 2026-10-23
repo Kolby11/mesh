@@ -7950,3 +7950,31 @@ ignored / one failure, `load_frontend_components_respects_disabled_debug_inspect
 it also fails alone in the pre-change debug executable. No pending planning note
 became orphaned. Both completed backlog items are removed; the broader pipeline
 note remains linked because its other work is open.
+
+## 2026-10-23 — Animation sampling moved before layout
+
+`working tree after ca8b18d1` · area: style animation pass ordering
+
+**Defect.** `finalize_tree` laid out the tree before paint ran the style
+animation pass, so every layout-affecting sample (width, padding, …) was laid
+out one frame late, and a transition starting on a keyed-list patch frame
+painted its end state for one frame before snapping back. Glass-bar workspace
+switch, release, scale 1, 16 ms paint pacing, dot widths per frame:
+before `[13,42] → [42,13] → [21,34] → [17,38] → … → [13,42]`; after
+`[42,13] → [22,33] → [18,37] → [16,39] → [15,40] → [14,41] → [13,42]`.
+Single-run frame times from that probe: patch frame 8.7 → 7.8 ms, animation
+frames 4.6–5.6 → 3.3–3.8 ms (one run; not a gate).
+
+**Change.** Paint hands the pass inputs to `finalize_tree`, which samples after
+restyle and before layout, and forces layout when a sample changed geometry.
+Layout positions still round to whole logical pixels.
+
+**Gates.** `tools/check-performance`: all pass except four that fail identically
+without the change. Three runs each, release, same machine, desktop in use,
+stashed baseline vs change: `d9_scroll_p90_ms` 36.0–37.5 vs 34.8–42.2;
+`d9_glass_dashboard_open_p90_ms` 105.3–130.6 vs 90.1–129.9;
+`affected_template_eval_speedup` 2.19–2.33 vs 2.12–2.20 (slightly lower,
+overlapping); `settings_scroll_shifted_fraction` 0 vs 0. Shell suite 986 passed
+/ 32 ignored / 1 existing failure; animation, glass, keyed and hover tests pass
+with `MESH_VERIFY_RETAINED=1`.
+

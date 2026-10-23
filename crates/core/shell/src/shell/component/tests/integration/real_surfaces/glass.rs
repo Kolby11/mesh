@@ -1301,3 +1301,66 @@ fn glass_settings_trigger_keeps_its_icon_centered_when_popup_opens() {
         );
     }
 }
+
+fn workspace_pill(node: &WidgetNode) -> Option<&WidgetNode> {
+    let is = |n: &WidgetNode, class: &str| {
+        n.attributes
+            .get(Prop::Class)
+            .is_some_and(|v| v.split_whitespace().any(|t| t == class))
+    };
+    if is(node, "pill") && node.children.iter().any(|c| is(c, "ws")) {
+        return Some(node);
+    }
+    node.children.iter().find_map(workspace_pill)
+}
+
+/// The glass theme lifts hovered pills by 3px. A pointer resting on the bottom
+/// edge must keep the pill hovered instead of un-hovering as it rises, then
+/// re-hovering as it drops back, every few frames.
+#[test]
+fn glass_bar_pill_hover_is_stable_at_its_lifted_edge() {
+    const WIDTH: u32 = 1440;
+    const HEIGHT: u32 = 100;
+    let theme = theme();
+    let mut component = host("glass-bar");
+    let extent = SurfaceExtent::unpadded(WIDTH, HEIGHT);
+    let mut pixels = PixelBuffer::new(WIDTH, HEIGHT);
+    update(
+        &mut component,
+        "mesh.wm",
+        serde_json::json!({"available":true,"active_workspace":1,"active_window":null,
+            "workspaces":[{"id":1,"name":"1","windows":2}]}),
+    );
+    settle_dock(&mut component, &theme, extent, &mut pixels);
+    let tree = component.last_tree.as_ref().unwrap();
+    let key = workspace_pill(tree).unwrap().mesh_key().unwrap().to_owned();
+    let (left, _, right, bottom) = find_node_bounds_by_key(tree, &key, 0.0, 0.0).unwrap();
+    let hovered = |component: &FrontendSurfaceComponent| {
+        workspace_pill(component.last_tree.as_ref().unwrap())
+            .unwrap()
+            .state
+            .contains(mesh_core_elements::NodeState::HOVERED)
+    };
+    let mut move_to = |component: &mut FrontendSurfaceComponent, x: f32, y: f32| {
+        component
+            .handle_input(&theme, WIDTH, HEIGHT, ComponentInput::PointerMove { x, y })
+            .unwrap();
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+    };
+    let x = (left + right) / 2.0 + 30.0;
+    let mut states = Vec::new();
+    for _ in 0..30 {
+        move_to(&mut component, x, bottom - 1.0);
+        states.push(hovered(&component));
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    assert!(states.iter().all(|&state| state), "{states:?}");
+
+    move_to(&mut component, x, bottom + 4.0);
+    assert!(
+        !hovered(&component),
+        "leaving the resting box still un-hovers"
+    );
+}

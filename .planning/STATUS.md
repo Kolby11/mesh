@@ -7,6 +7,11 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Workspace pill flash and hover shiver fixed:** animations sample before
+  layout (no end-state flash, no one-frame lag), and hover holds while the
+  pointer stays in the element's resting box. Not yet checked live. Four
+  performance gates fail at baseline (backlog). See October's log.
+
 - **hyprland-wm reads workspaces from ext-workspace:** the `hyprctl
   activeworkspace`/`workspaces` grants are gone; the native request socket adds
   window counts and monitors. Verified against live Hyprland with and without

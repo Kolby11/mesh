@@ -1071,6 +1071,31 @@ impl FrontendSurfaceComponent {
         {
             scoped_finalize = true;
         }
+        // Sample animations before layout: laying out first shows every
+        // layout-affecting sample one frame late, and a transition that
+        // starts this frame would flash its end state.
+        if let Some(pass) = self.pending_animation_pass.take() {
+            let restyled = if paint_only_restyle || empty_restyle_avoided {
+                Some(HashSet::new())
+            } else {
+                scoped_restyled.clone()
+            };
+            let sampled = self.run_style_animation_pass(
+                tree,
+                trigger_kind == "rebuild",
+                restyled.as_ref(),
+                pass,
+                surface_css_props,
+            );
+            let geometry_sampled = self.frame_dirty.iter().any(|(id, change)| {
+                change.contains(mesh_core_elements::ChangeClass::LAYOUT) && sampled.contains(&id)
+            });
+            if geometry_sampled {
+                reused_retained_layout = false;
+                dirty_types |= ComponentDirtyFlags::LAYOUT;
+            }
+            self.animation_pass_dirty_roots = Some(sampled);
+        }
         let layout_work_required = !reused_retained_layout || !self.layout_state.valid;
         // Annotation measures overflow before layout, except on rebuilds.
         self.scoped_annotation_inputs =

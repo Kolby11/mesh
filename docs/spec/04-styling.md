@@ -593,6 +593,16 @@ Transitions between pixel, percentage and intrinsic lengths use the layout
 measurements of their source and target styles. Reversing an interrupted
 transition shortens its duration by its eased progress, including repeated
 reversals; the authored target is restored when the transition completes.
+Animations are sampled before layout, so a layout-affecting value (width,
+padding, …) is laid out in the frame that samples it, and a transition that
+starts in a frame shows its start value in that frame. Layout positions remain
+rounded to whole logical pixels.
+
+A hovered element stays `:hover` while the pointer is inside its untransformed
+layout box and no other element is hit there, so a hover transform that moves
+it out from under a resting pointer (a lift or a shrink) cannot toggle hover
+every frame. Entering hover still uses the transformed box. Browsers have no
+such rule; MESH has no descendant combinators for the usual wrapper workaround.
 
 ## 11. Liquid glass (`backdrop-filter: refract()`)
 

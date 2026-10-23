@@ -21,6 +21,15 @@ use mesh_core_theme::{Theme, ThemeKeyframeStop};
 
 use super::FrontendSurfaceComponent;
 
+/// Inputs of one paint's style animation pass. See
+/// [`FrontendSurfaceComponent::run_style_animation_pass`].
+pub(super) struct PendingAnimationPass {
+    /// The previous frame, when this paint restyles the retained tree.
+    pub(super) previous_snapshot: Option<super::FrameSnapshot>,
+    /// Displayed styles of the previous tree, when there is no snapshot.
+    pub(super) previous_visual_styles: HashMap<NodeId, AnimatableStyle>,
+}
+
 pub(super) fn active_transition_bucket(transition: TransitionStyle) -> AnimationPropertyBucket {
     transition.properties.animation_bucket()
 }
@@ -241,6 +250,77 @@ impl FrontendSurfaceComponent {
         styles: HashMap<NodeId, AnimatableStyle>,
     ) {
         self.previous_visual_styles_scratch = styles;
+    }
+
+    /// Sample transitions and keyframe animations into `tree` after restyle
+    /// and before layout, so a layout-affecting sample is laid out in the
+    /// frame that takes it. `restyled` is this frame's exact restyled set,
+    /// when the restyle was scoped. Returns the nodes whose samples changed.
+    pub(super) fn run_style_animation_pass(
+        &mut self,
+        tree: &mut WidgetNode,
+        rebuilt: bool,
+        restyled: Option<&HashSet<NodeId>>,
+        pass: PendingAnimationPass,
+        surface_css_props: &SurfaceCssProps,
+    ) -> HashSet<NodeId> {
+        let scope = if !rebuilt && pass.previous_snapshot.is_some() {
+            restyled.map(|restyled| {
+                let mut scope = self.animation_sample_nodes();
+                scope.extend(restyled);
+                scope
+            })
+        } else {
+            None
+        };
+        let previous_visual_styles = if let Some(previous) = &pass.previous_snapshot {
+            if let Some(scope) = &scope {
+                let active = self.animation_sample_nodes();
+                let previous_ids: HashSet<_> =
+                    scope
+                        .iter()
+                        .copied()
+                        .filter(|id| {
+                            if active.contains(id) {
+                                return true;
+                            }
+                            let Some(path) = previous.node_path(*id) else {
+                                return false;
+                            };
+                            let mut node = &*tree;
+                            for &index in path {
+                                mesh_core_elements::frame_work::visit(
+                                    mesh_core_elements::frame_work::Pass::AnimationLookup,
+                                );
+                                node = &node.children[index];
+                            }
+                            node.computed_style.transitions.iter().any(|transition| {
+                                transition.duration_ms > 0 || transition.delay_ms > 0
+                            }) || node
+                                .computed_style
+                                .animations
+                                .iter()
+                                .any(|animation| animation.name.is_some())
+                        })
+                        .collect();
+                snapshot_visual_styles(previous, &previous_ids)
+            } else {
+                snapshot_visual_styles(
+                    previous,
+                    &previous.nodes().iter().map(|node| node.id()).collect(),
+                )
+            }
+        } else {
+            pass.previous_visual_styles
+        };
+        let dirty = self.apply_style_animations_scoped(
+            tree,
+            &previous_visual_styles,
+            surface_css_props,
+            scope.as_ref(),
+        );
+        self.restore_previous_visual_styles(previous_visual_styles);
+        dirty
     }
 
     #[cfg(test)]

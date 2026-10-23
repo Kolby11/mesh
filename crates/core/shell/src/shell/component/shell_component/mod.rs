@@ -1061,6 +1061,11 @@ impl ShellComponent for FrontendSurfaceComponent {
             HashMap::new()
         };
         let surface_css_props = self.surface_css_props();
+        self.pending_animation_pass =
+            run_style_animation_pass.then(|| super::animation::PendingAnimationPass {
+                previous_snapshot: previous_animation_snapshot,
+                previous_visual_styles,
+            });
         // Patched bindings changed authored attributes without a rebuild, so
         // their nodes still need the post-update style diagnostics.
         let patched_node_count = self.patched_binding_nodes.len() as u64;
@@ -1114,72 +1119,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         {
             self.style_animation_passes += u64::from(run_style_animation_pass);
         }
-        let animation_scope = if !tree_was_rebuilt && previous_animation_snapshot.is_some() {
-            self.frame_restyled_nodes.as_ref().map(|restyled| {
-                let mut scope = self.animation_sample_nodes();
-                scope.extend(restyled);
-                scope
-            })
-        } else {
-            None
-        };
-        let previous_visual_styles = if let Some(previous) = &previous_animation_snapshot {
-            if let Some(scope) = &animation_scope {
-                let active = self.animation_sample_nodes();
-                let previous_ids: HashSet<_> =
-                    scope
-                        .iter()
-                        .copied()
-                        .filter(|id| {
-                            if active.contains(id) {
-                                return true;
-                            }
-                            let Some(path) = self
-                                .last_frame_snapshot
-                                .as_ref()
-                                .and_then(|s| s.node_path(*id))
-                            else {
-                                return false;
-                            };
-                            let mut node = &tree;
-                            for &index in path {
-                                mesh_core_elements::frame_work::visit(
-                                    mesh_core_elements::frame_work::Pass::AnimationLookup,
-                                );
-                                node = &node.children[index];
-                            }
-                            node.computed_style.transitions.iter().any(|transition| {
-                                transition.duration_ms > 0 || transition.delay_ms > 0
-                            }) || node
-                                .computed_style
-                                .animations
-                                .iter()
-                                .any(|animation| animation.name.is_some())
-                        })
-                        .collect();
-                super::animation::snapshot_visual_styles(previous, &previous_ids)
-            } else {
-                super::animation::snapshot_visual_styles(
-                    previous,
-                    &previous.nodes().iter().map(|node| node.id()).collect(),
-                )
-            }
-        } else {
-            previous_visual_styles
-        };
-        let mut animation_dirty_roots = if run_style_animation_pass {
-            self.apply_style_animations_scoped(
-                &mut tree,
-                &previous_visual_styles,
-                &surface_css_props,
-                animation_scope.as_ref(),
-            )
-        } else {
-            HashSet::new()
-        };
-        if run_style_animation_pass {
-            self.restore_previous_visual_styles(previous_visual_styles);
-        }
+        let mut animation_dirty_roots = self.animation_pass_dirty_roots.take().unwrap_or_default();
         self.record_interaction_frame_dirty(
             animation_dirty_roots.iter().copied(),
             mesh_core_interaction::InteractionDirtyFlags::ANIMATION,

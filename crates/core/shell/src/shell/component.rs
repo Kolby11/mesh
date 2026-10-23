@@ -1236,6 +1236,11 @@ pub(super) struct FrontendSurfaceComponent {
     /// The last finalize reported its exact restyled set over reused geometry,
     /// so the retained update can skip subtree discovery.
     frame_restyled_nodes: Option<HashSet<NodeId>>,
+    /// Inputs of this paint's style animation pass, consumed by
+    /// `finalize_tree` so samples are taken before layout.
+    pending_animation_pass: Option<animation::PendingAnimationPass>,
+    /// Nodes the pre-layout animation pass sampled this paint.
+    animation_pass_dirty_roots: Option<HashSet<NodeId>>,
     previous_lifecycle_nodes: HashSet<NodeId>,
     lifecycle_base_classes: HashMap<NodeId, (Option<String>, String)>,
     #[cfg(test)]
@@ -1565,6 +1570,8 @@ impl FrontendSurfaceComponent {
             resolved_surface_shortcuts_cache: RefCell::new(None),
             scoped_annotation_inputs: None,
             frame_restyled_nodes: None,
+            pending_animation_pass: None,
+            animation_pass_dirty_roots: None,
             previous_lifecycle_nodes: HashSet::new(),
             lifecycle_base_classes: HashMap::new(),
             #[cfg(test)]

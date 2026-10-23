@@ -2444,3 +2444,120 @@ fn animation_reports_clamped_radius_even_when_the_effective_sample_is_unchanged(
         |(node, change)| node == id && change.contains(mesh_core_elements::ChangeClass::PAINT)
     ));
 }
+
+/// A keyed-list `class:` patch must start its width transition in the frame
+/// that applies it; laying out the target first flashes the end state.
+#[test]
+fn keyed_list_class_patch_starts_layout_transition_in_its_own_frame() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <row class="strip">
+    {#for item in items key={item.id}}
+      <button class="dot" class:on={item.on} onclick={pick(item.id)} />
+    {/for}
+  </row>
+</template>
+<script lang="luau">
+local active = 1
+items = {}
+local function rebuild()
+    local list = {}
+    for id = 1, 3 do
+        list[#list + 1] = { id = id, on = id == active }
+    end
+    items = list
+end
+rebuild()
+function pick(id)
+    active = id
+    rebuild()
+end
+</script>
+<style>
+.strip { width: 300px; height: 20px; gap: 4px; }
+.dot { width: 10px; height: 10px; padding: 0; transition: width 400ms linear; }
+.on { width: 40px; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(300, 20);
+    let mut buffer = PixelBuffer::new(300, 20);
+    let widths = |component: &FrontendSurfaceComponent| -> Vec<f32> {
+        let mut out = Vec::new();
+        fn walk(node: &WidgetNode, out: &mut Vec<f32>) {
+            if node
+                .attributes
+                .get(Prop::Class)
+                .is_some_and(|c| c.split_whitespace().any(|t| t == "dot"))
+            {
+                out.push(node.layout.width);
+            }
+            node.children.iter().for_each(|child| walk(child, out));
+        }
+        walk(component.last_tree.as_ref().unwrap(), &mut out);
+        out
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+    while component.wants_render() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(8));
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
+    }
+    assert_eq!(widths(&component), [40.0, 10.0, 10.0]);
+
+    let tree = component.last_tree.as_ref().unwrap();
+    let mut dots = Vec::new();
+    fn keys(node: &WidgetNode, out: &mut Vec<String>) {
+        if node
+            .attributes
+            .get(Prop::Class)
+            .is_some_and(|c| c.split_whitespace().any(|t| t == "dot"))
+        {
+            out.push(node.mesh_key().unwrap().to_owned());
+        }
+        node.children.iter().for_each(|child| keys(child, out));
+    }
+    keys(tree, &mut dots);
+    component.focused_key = Some(dots[1].clone());
+    component
+        .handle_input(
+            &theme,
+            300,
+            20,
+            ComponentInput::KeyPressed {
+                key: "Enter".into(),
+                modifiers: Default::default(),
+            },
+        )
+        .unwrap();
+    let mut frames = Vec::new();
+    for _ in 0..4 {
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
+        frames.push(widths(&component));
+        std::thread::sleep(std::time::Duration::from_millis(16));
+    }
+    eprintln!("{frames:?}");
+    let first = &frames[0];
+    assert!(
+        first[1] < 25.0 && first[0] > 25.0,
+        "first frame shows the start of the transition: {frames:?}"
+    );
+    for pair in frames.windows(2) {
+        assert!(
+            pair[1][1] >= pair[0][1],
+            "the growing item never shrinks: {frames:?}"
+        );
+        assert!(
+            pair[1][0] <= pair[0][0],
+            "the shrinking item never grows: {frames:?}"
+        );
+    }
+}

@@ -127,6 +127,71 @@ impl TooltipTarget<'_> {
 }
 
 /// Resolve all pointer-motion metadata in the same tree traversal.
+/// The hover path for a pointer at `(x, y)`, given the fresh hit path and the
+/// previous hover path.
+///
+/// A hovered node stays hovered while the point is inside its untransformed
+/// layout box and the hit lands on one of its ancestors, so a `:hover`
+/// transform that moves the node out from under a resting pointer (a lift or
+/// a shrink) cannot un-hover it and start an endless hover/unhover loop.
+/// Entering still uses the transformed box. Returns `None` when the hit path
+/// stands as it is.
+pub fn retain_hover_path(
+    tree: &WidgetNode,
+    previous: &[String],
+    hit: &[String],
+    x: f32,
+    y: f32,
+) -> Option<Vec<String>> {
+    if hit.len() >= previous.len() || previous[..hit.len()] != *hit {
+        return None;
+    }
+    let (mut node, mut parent_world) = if hit.is_empty() {
+        (tree, root_transform(0.0, 0.0))
+    } else {
+        find_node_with_parent_transform(tree, &hit[hit.len() - 1], root_transform(0.0, 0.0))?
+    };
+    let mut kept = hit.len();
+    for key in &previous[hit.len()..] {
+        let search_from = child_world_transform(node_world_transform(parent_world, node), node);
+        let Some((next, next_parent)) = node
+            .children
+            .iter()
+            .find_map(|child| find_node_with_parent_transform(child, key, search_from))
+        else {
+            break;
+        };
+        let resting = next_parent.then(AffineTransform::translation(next.layout.x, next.layout.y));
+        if !node_contains_with_transform(next, resting, x, y)
+            && !node_contains_with_transform(next, node_world_transform(next_parent, next), x, y)
+        {
+            break;
+        }
+        kept += 1;
+        node = next;
+        parent_world = next_parent;
+    }
+    (kept > hit.len()).then(|| previous[..kept].to_vec())
+}
+
+/// The node keyed `key` in `node`'s subtree with its parent's world transform.
+fn find_node_with_parent_transform<'a>(
+    node: &'a WidgetNode,
+    key: &str,
+    parent_transform: AffineTransform,
+) -> Option<(&'a WidgetNode, AffineTransform)> {
+    if !node_allows(node, InteractionTarget::Pointer) {
+        return None;
+    }
+    if node.mesh_key().is_some_and(|value| value == key) {
+        return Some((node, parent_transform));
+    }
+    let child_world = child_world_transform(node_world_transform(parent_transform, node), node);
+    node.children
+        .iter()
+        .find_map(|child| find_node_with_parent_transform(child, key, child_world))
+}
+
 pub fn pointer_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<PointerHit> {
     let mut hit = pointer_hit_test_reversed_affine(
         node,
@@ -851,6 +916,53 @@ fn find_tooltip_target_by_key_affine<'a>(
 mod tests {
     use super::*;
     use mesh_core_elements::{EventHandlerCall, LayoutRect, WidgetNode};
+
+    #[test]
+    fn hover_survives_its_own_transform_but_not_another_hit() {
+        let mut root = WidgetNode::new("surface");
+        root.set_mesh_key("root");
+        root.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 40.0,
+        };
+        for (index, key) in ["a", "b"].into_iter().enumerate() {
+            let mut button = WidgetNode::new("button");
+            button.set_mesh_key(key);
+            button.layout = LayoutRect {
+                x: index as f32 * 20.0,
+                y: 10.0,
+                width: 20.0,
+                height: 20.0,
+            };
+            root.children.push(button);
+        }
+        root.children[0].computed_style.transform.translate_y = -5.0;
+        let previous = ["root".to_string(), "a".to_string()];
+        let path_at = |x, y| {
+            pointer_hit_test(&root, x, y)
+                .map(|hit| hit.path)
+                .unwrap_or_default()
+        };
+
+        let lifted_off = path_at(10.0, 28.0);
+        assert_eq!(lifted_off, ["root"]);
+        assert_eq!(
+            retain_hover_path(&root, &previous, &lifted_off, 10.0, 28.0),
+            Some(previous.to_vec())
+        );
+        let sibling = path_at(30.0, 20.0);
+        assert_eq!(
+            retain_hover_path(&root, &previous, &sibling, 30.0, 20.0),
+            None
+        );
+        let outside = path_at(10.0, 35.0);
+        assert_eq!(
+            retain_hover_path(&root, &previous, &outside, 10.0, 35.0),
+            None
+        );
+    }
 
     fn indexed_tree(rows: usize, columns: usize) -> WidgetNode {
         let mut root = WidgetNode::new("surface");
