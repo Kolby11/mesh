@@ -8053,3 +8053,13 @@ text shrank to fit, so nothing overflowed); its text now keeps `flex-shrink: 0`
 and the test passes before and after. Shell 988 passed / 0 failed, also with
 `MESH_VERIFY_RETAINED=1`; interaction 51 passed.
 
+## 2026-10-23 — Gate run after the scroll and annotation changes
+
+`tools/check-performance` at 639d4dd7: 26 pass, 3 fail. `d9_scroll_p90_ms` 9.7
+(was failing at 35–42). Failing: `d9_glass_dashboard_open_p90_ms` 100.2,
+`affected_template_eval_speedup` 2.19 (both diagnosed above) and
+`d9_glass_dock_frame_p90_ms` 18.7. The dock gate is noise at its edge, not a
+regression: `d9_glass_dock_animation`, release, three runs each, 639d4dd7
+16.0–20.1 ms versus ca8b18d1 (before today's animation and annotation changes)
+17.4–19.7 ms; the morning run passed at 15.8.
+

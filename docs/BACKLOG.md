@@ -21,6 +21,8 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Replace the 500ms resource-preparation polling limit in the backend capability
       activation test; concurrent build/test load can outlast it.
 
+- [ ] `d9_glass_dock_frame_p90_ms` straddles its 16.7 ms budget run to run (16.0–20.1 ms at
+      639d4dd7, 17.4–19.7 ms at ca8b18d1); the CPU dock animation fixture needs headroom.
 - [ ] Two `tools/check-performance` gates fail: glass dashboard open p90 ~90–131 ms (CPU
       glass raster is 42–44 ms of a warm 57 ms open), and affected-template speedup ~2.2×
       (full rebuilds got 6× faster, so the ratio no longer tracks the patch path; see P2 layout).
