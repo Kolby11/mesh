@@ -578,7 +578,7 @@ compositors that blur layer popups.
 with column layout, `overflow-x: hidden` and `overflow-y: auto` in core before
 theme and authored declarations apply. A bounded viewport with overflowing
 content needs no script or event handler. Core owns wheel and touchpad input,
-momentum, offset clamping, scrollbar interaction, clipping, and promoted-surface
+momentum (whose offsets land on device pixels), offset clamping, scrollbar interaction, clipping, and promoted-surface
 coordinate mapping. Authors choose geometry and can explicitly override axes
 and layout through the normal style cascade.
 

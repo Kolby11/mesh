@@ -379,6 +379,7 @@ fn reduced_motion_snaps_smooth_scroll_without_starting_inertia() {
         viewport_id,
         ScrollInertia {
             velocity: ScrollOffsetState { x: 0.0, y: 120.0 },
+            position: ScrollOffsetState { x: 0.0, y: 100.0 },
             samples: 2,
             travel: 24.0,
             last_input: now,

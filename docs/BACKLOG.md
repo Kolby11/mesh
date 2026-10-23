@@ -21,9 +21,9 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Replace the 500ms resource-preparation polling limit in the backend capability
       activation test; concurrent build/test load can outlast it.
 
-- [ ] `tools/check-performance` fails four gates at the 2026-10-23 baseline: settings
-      scroll shifted fraction 0 (with `settings_scroll_shift_matches_full_paint`), d9 scroll
-      p90 ~35–42 ms, glass dashboard open p90 ~90–131 ms, affected-template speedup ~2.2×.
+- [ ] Two `tools/check-performance` gates fail: glass dashboard open p90 ~90–131 ms (CPU
+      glass raster is 42–44 ms of a warm 57 ms open), and affected-template speedup ~2.2×
+      (full rebuilds got 6× faster; patch frames still annotate/lay out/display-build all nodes, P2).
 
 - [ ] Isolate renderer node-cache and keyed-hover regression state; cache tests
       and the keyed-hover frame snapshot fail intermittently in parallel suites.

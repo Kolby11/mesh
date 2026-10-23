@@ -649,22 +649,28 @@ impl RetainedDisplayList {
         self.built_backdrop_blur_policy = self.backdrop_blur_policy;
         self.built_refraction_source = self.refraction_source;
         self.layer_scopes = collect_layer_scopes(self.paint_commands.as_ref());
+        if let Some((backdrop_regions, blur_regions)) = updated_blur_metadata {
+            self.backdrop_regions = backdrop_regions;
+            self.blur_regions = blur_regions;
+        }
         // Every candidate must qualify, or the frame keeps ordinary repaint:
         // a partially shifted surface would mix two damage models.
         let shifts = shift_candidates
             .iter()
             .map(|&(owner, viewport, delta)| {
-                scroll_shift::plan_scroll_shift(&self.paint_commands, owner, viewport, delta)
+                scroll_shift::plan_scroll_shift(
+                    &self.paint_commands,
+                    &self.backdrop_regions,
+                    owner,
+                    viewport,
+                    delta,
+                )
             })
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
         self.scroll_shifts = shifts;
         self.filter_layer_regions =
             filter_layer_regions(self.paint_commands.as_ref(), &self.layer_scopes, surface);
-        if let Some((backdrop_regions, blur_regions)) = updated_blur_metadata {
-            self.backdrop_regions = backdrop_regions;
-            self.blur_regions = blur_regions;
-        }
         self.root_id = Some(root.id);
         self.retained_tree_generation = retained_tree_generation;
         #[cfg(debug_assertions)]

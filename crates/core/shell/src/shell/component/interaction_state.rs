@@ -620,6 +620,8 @@ impl FrontendSurfaceComponent {
 
         let mut finished = Vec::new();
         let mut updates = Vec::new();
+        let scale = self.paint_scale.max(f32::EPSILON);
+        let snap = |value: f32| (value * scale).round() / scale;
         for (node_id, inertia) in &mut self.scroll_inertia {
             if now.saturating_duration_since(inertia.last_input) < START_DELAY {
                 inertia.last_tick = now;
@@ -651,8 +653,10 @@ impl FrontendSurfaceComponent {
                 .copied()
                 .unwrap_or_default();
             let mut next = ScrollOffsetState {
-                x: (current.x + inertia.velocity.x * average_scale).clamp(0.0, inertia.max_x),
-                y: (current.y + inertia.velocity.y * average_scale).clamp(0.0, inertia.max_y),
+                x: (inertia.position.x + inertia.velocity.x * average_scale)
+                    .clamp(0.0, inertia.max_x),
+                y: (inertia.position.y + inertia.velocity.y * average_scale)
+                    .clamp(0.0, inertia.max_y),
             };
             inertia.velocity.x *= decay;
             inertia.velocity.y *= decay;
@@ -670,10 +674,17 @@ impl FrontendSurfaceComponent {
                 next.y = next.y.clamp(0.0, inertia.max_y);
             }
 
-            if (next.x - current.x).abs() > f32::EPSILON
-                || (next.y - current.y).abs() > f32::EPSILON
+            inertia.position = next;
+            // A clamped edge is kept exact; anything else lands on a device pixel.
+            let snap_axis = |value: f32, max: f32| if value >= max { max } else { snap(value) };
+            let published = ScrollOffsetState {
+                x: snap_axis(next.x, inertia.max_x),
+                y: snap_axis(next.y, inertia.max_y),
+            };
+            if (published.x - current.x).abs() > f32::EPSILON
+                || (published.y - current.y).abs() > f32::EPSILON
             {
-                updates.push((*node_id, next));
+                updates.push((*node_id, published));
             }
             if inertia.velocity.x.abs() < STOP_VELOCITY && inertia.velocity.y.abs() < STOP_VELOCITY
             {

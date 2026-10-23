@@ -7978,3 +7978,46 @@ overlapping); `settings_scroll_shifted_fraction` 0 vs 0. Shell suite 986 passed
 / 32 ignored / 1 existing failure; animation, glass, keyed and hover tests pass
 with `MESH_VERIFY_RETAINED=1`.
 
+## 2026-10-23 — Settings scroll shifts again; momentum snaps to device pixels
+
+`working tree after 82bc82ab` · area: scroll-shift planning, momentum scrolling
+
+**Defects.** `settings_scroll_shift_matches_full_paint` and the
+`settings_scroll_shifted_fraction` gate had failed since Settings adopted the
+glass material: (1) a compositor `backdrop-filter` beneath the page viewport
+vetoed every shift although it paints nothing without an in-surface read
+region; (2) the glass rim (`ApplyBackdropRim`) beneath it also vetoed; (3) once
+shifting, `avoid_arc_edges` grew every replay band to the whole viewport,
+because arc rows/columns used unclamped `9999px` pill radii (arcs like
+240–10,239); (4) momentum offsets were fractional, so momentum frames replayed
+the full viewport.
+
+**Changes.** Backdrop regions are stored before shift planning; a compositor
+backdrop with no read region is skipped; a rim anchors bands of
+`max(radius, 3) + 2` px on each side; arc extents use CSS-scaled used radii;
+momentum keeps an unsnapped position and publishes offsets rounded to device
+pixels (clamped edges stay exact).
+
+**Measured.** `d9_settings_scroll_frame_gate`, release, 920×900, scale 1, 60
+finger + 30 momentum frames at 16 ms pacing, desktop in use:
+
+| | shifted frames | p50 | p90 |
+| --- | --- | --- | --- |
+| before (3 runs) | 0 | 31.3–43.2 ms | 34.8–54.3 ms |
+| shift planning fixed, arcs unclamped (1 run) | 60 finger | 31.7 ms | 44.0 ms |
+| arcs clamped (1 run) | 60 finger | 7.1 ms | 48.9 ms |
+| momentum snapped (1 run) | 60 finger + 21 momentum | 6.8 ms | 7.9 ms |
+
+Gates now pass: `settings_scroll_shifted_fraction` 1.0, `d9_scroll_p90_ms` 7.9
+(budget 16.7). The parity test compares every shifted frame with a full paint.
+Shell suite 987 passed / 0 failed / 32 ignored (first fully green run); renderer
+335 passed serially (the parallel `prepared_scene` flake is in the backlog).
+
+**Remaining failing gates, diagnosed.** `d9_glass_dashboard_open_p90_ms`: warm
+open is ~57 ms, of which CPU raster of glass primitives is 42–44 ms; cold
+samples push p90 to 90–131 ms. `affected_template_eval_speedup` (needs 4.5×,
+measures 2.2–2.3×): full-template control is now 1.13–1.16 s per 100 updates
+(was ~7.0 s on 2026-09), selective 0.51 s (was ~0.62 s). The ratio fell because
+full rebuilds got faster. Per patch frame, annotation, layout write and display
+build each still visit all 1,028 nodes, which is the open P2 item.
+

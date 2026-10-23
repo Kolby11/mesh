@@ -831,6 +831,7 @@ impl FrontendSurfaceComponent {
                                             blend_axis(old_velocity.y, sample.y)
                                         },
                                     },
+                                    position: next,
                                     samples: previous
                                         .map(|inertia| inertia.samples.saturating_add(1))
                                         .unwrap_or(1),

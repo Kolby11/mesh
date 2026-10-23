@@ -963,6 +963,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     ) -> Result<(), ComponentError> {
         let _span = tracing::debug_span!("paint", surface = %self.id()).entered();
         let frame_work = mesh_core_elements::frame_work::Scope::new(self.profiling_enabled);
+        self.paint_scale = scale;
         self.prepare_interaction_frame();
         // Capture and clear dirty flags up front. paint is the work-doer; if
         // anything during paint (measured_size change, active animation) needs

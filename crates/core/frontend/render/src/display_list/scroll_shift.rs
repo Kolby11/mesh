@@ -42,6 +42,7 @@ pub struct ScrollShift {
 
 pub(super) fn plan_scroll_shift(
     commands: &PaintSequence<DisplayPaintCommand>,
+    backdrop_regions: &[BackdropRegion],
     owner: NodeId,
     viewport: DamageRect,
     scroll_delta: (f32, f32),
@@ -77,8 +78,18 @@ pub(super) fn plan_scroll_shift(
             }
             _ => {}
         }
-        if command_bounds(command).intersects(viewport) {
-            anchored.extend(beneath_varying_parts(command, owner, viewport, axes)?);
+        // A compositor backdrop with no in-surface content beneath it leaves
+        // the buffer untouched; the compositor blurs behind the surface.
+        let paints_nothing = command.kind == DisplayPaintCommandKind::ApplyBackdropFilterCompositor
+            && !backdrop_regions
+                .iter()
+                .any(|region| region.node_id == command.node.id);
+        if !paints_nothing && command_bounds(command).intersects(viewport) {
+            if command.kind == DisplayPaintCommandKind::ApplyBackdropRim {
+                anchored.extend(rim_bands(command, viewport)?);
+            } else {
+                anchored.extend(beneath_varying_parts(command, owner, viewport, axes)?);
+            }
         }
     }
     let push_index = push_index?;
@@ -114,11 +125,11 @@ pub(super) fn plan_scroll_shift(
         let paints_edge = style.background_color.a > 0
             || !matches!(style.background_paint, BackgroundPaint::None)
             || style.border_color.a > 0;
-        let corners = style.border_radius;
         if command.kind != DisplayPaintCommandKind::Node || !paints_edge {
             continue;
         }
         let layout = command.node.layout;
+        let corners = used_radii(style.border_radius, layout.width, layout.height);
         let (x, y) = (layout.x - scroll_x, layout.y - scroll_y);
         let top = corners.top_left.max(corners.top_right);
         let bottom = corners.bottom_left.max(corners.bottom_right);
@@ -179,6 +190,67 @@ pub(super) fn plan_scroll_shift(
 /// it varies anywhere else (partial cover, gradients, images, shadows,
 /// transforms, content). The owner's own border and corners are covered by
 /// [`owner_edge_bands`].
+/// Corner radii as painted: CSS Backgrounds §5.5 scales all radii by one
+/// factor so adjacent radii fit their side, so a `9999px` pill's arcs span
+/// half its height rather than thousands of rows.
+fn used_radii(
+    corners: mesh_core_elements::style::Corners,
+    width: f32,
+    height: f32,
+) -> mesh_core_elements::style::Corners {
+    let fit = |side: f32, a: f32, b: f32| if a + b > side { side / (a + b) } else { 1.0 };
+    let factor = fit(width, corners.top_left, corners.top_right)
+        .min(fit(width, corners.bottom_left, corners.bottom_right))
+        .min(fit(height, corners.top_left, corners.bottom_left))
+        .min(fit(height, corners.top_right, corners.bottom_right))
+        .max(0.0);
+    mesh_core_elements::style::Corners {
+        top_left: corners.top_left * factor,
+        top_right: corners.top_right * factor,
+        bottom_right: corners.bottom_right * factor,
+        bottom_left: corners.bottom_left * factor,
+    }
+}
+
+/// The parts of a glass rim beneath the viewport, which stay in place while
+/// the content moves. The rim shader paints at most 3 device pixels inside the
+/// edge and the corner arcs, plus a pixel of anti-aliasing outside.
+fn rim_bands(
+    command: &DisplayPaintCommand,
+    viewport: DamageRect,
+) -> Option<SmallVec<[DamageRect; 8]>> {
+    if command.node.requires_affine_paint() {
+        return None;
+    }
+    let bounds = command_bounds(command);
+    let layout = command.node.layout;
+    let corners = used_radii(command.node.style.border_radius, layout.width, layout.height);
+    let radius = corners
+        .top_left
+        .max(corners.top_right)
+        .max(corners.bottom_left)
+        .max(corners.bottom_right);
+    let band = radius.max(3.0).ceil() as u32 + 2;
+    let mut parts = SmallVec::new();
+    for rect in [
+        DamageRect { height: band, ..bounds },
+        DamageRect {
+            y: bounds.bottom().saturating_sub(band),
+            height: band,
+            ..bounds
+        },
+        DamageRect { width: band, ..bounds },
+        DamageRect {
+            x: bounds.right().saturating_sub(band),
+            width: band,
+            ..bounds
+        },
+    ] {
+        parts.extend(clip_rect(rect, viewport));
+    }
+    Some(parts)
+}
+
 fn beneath_varying_parts(
     command: &DisplayPaintCommand,
     owner: NodeId,

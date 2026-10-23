@@ -671,7 +671,7 @@ fn settings_scroll_shift_matches_full_paint() {
         render_loop_frame(&mut settings, &theme, &mut buffer);
         assert_matches_full_paint(&settings, &buffer, &format!("frame {frame} (dy {dy})"));
     }
-    // Momentum ticks are fractional; they replay instead of shifting.
+    // Momentum offsets land on device pixels, so its frames shift too.
     for frame in 0..20 {
         std::thread::sleep(Duration::from_millis(8));
         if render_loop_frame(&mut settings, &theme, &mut buffer) == 0 {

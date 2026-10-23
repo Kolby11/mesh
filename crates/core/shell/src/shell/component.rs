@@ -450,6 +450,9 @@ pub(super) struct ScrollbarDragState {
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ScrollInertia {
     pub(super) velocity: ScrollOffsetState,
+    /// Unsnapped momentum position; the published offset is snapped to
+    /// device pixels so momentum frames can shift retained pixels.
+    pub(super) position: ScrollOffsetState,
     pub(super) samples: u8,
     pub(super) travel: f32,
     pub(super) last_input: Instant,
@@ -1239,6 +1242,8 @@ pub(super) struct FrontendSurfaceComponent {
     /// Inputs of this paint's style animation pass, consumed by
     /// `finalize_tree` so samples are taken before layout.
     pending_animation_pass: Option<animation::PendingAnimationPass>,
+    /// Device scale of the last paint, for snapping momentum offsets.
+    paint_scale: f32,
     /// Nodes the pre-layout animation pass sampled this paint.
     animation_pass_dirty_roots: Option<HashSet<NodeId>>,
     previous_lifecycle_nodes: HashSet<NodeId>,
@@ -1571,6 +1576,7 @@ impl FrontendSurfaceComponent {
             scoped_annotation_inputs: None,
             frame_restyled_nodes: None,
             pending_animation_pass: None,
+            paint_scale: 1.0,
             animation_pass_dirty_roots: None,
             previous_lifecycle_nodes: HashSet::new(),
             lifecycle_base_classes: HashMap::new(),
