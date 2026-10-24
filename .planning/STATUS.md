@@ -15,6 +15,9 @@ measurements live in [`log/`](log/README.md).
   [performance log](log/performance-log.md); a live measurement is still due.
 - Earlier today: sparse text, geometry and keyed-list patches (committed in
   `a163218a`). D9 CPU-raster wall times move with code placement, not work.
+- Live Settings scroll re-captured after the size-flip fix (2.8 / 4.8 ms
+  p50/p90). Fixed the glass bar animating every frame after a popover was
+  dismissed mid-exit; the CPU glass rim now shades only its edge band.
 
 ## Next
 

@@ -485,3 +485,58 @@ fn rim_lights_only_the_glass_edge_over_what_is_beneath() {
     };
     assert!(!draw_rim(surface.canvas(), rect, radii, flat));
 }
+
+#[test]
+fn rim_band_clip_matches_shading_the_whole_rect() {
+    let corners = |top_left, top_right, bottom_right, bottom_left| Corners {
+        top_left,
+        top_right,
+        bottom_right,
+        bottom_left,
+    };
+    let cases = [
+        (
+            Rect::from_xywh(8.0, 8.0, 160.0, 96.0),
+            corners(12.0, 12.0, 12.0, 12.0),
+            20.0,
+        ),
+        (
+            Rect::from_xywh(7.3, 9.6, 150.5, 90.2),
+            corners(28.0, 4.0, 0.0, 16.0),
+            25.0,
+        ),
+        (
+            Rect::from_xywh(10.0, 10.0, 140.0, 80.0),
+            corners(0.0, 0.0, 0.0, 0.0),
+            8.0,
+        ),
+        (
+            Rect::from_xywh(12.0, 6.0, 40.0, 100.0),
+            corners(60.0, 60.0, 60.0, 60.0),
+            30.0,
+        ),
+    ];
+    for (rect, radii, edge) in cases {
+        let filter = VisualFilter {
+            refract: true,
+            refract_depth: 12.0,
+            refract_edge: edge,
+            ..VisualFilter::NONE
+        };
+        let gray = skia_safe::Color::from_argb(255, 60, 60, 60);
+        let mut banded = surfaces::raster_n32_premul((180, 116)).unwrap();
+        banded.canvas().clear(gray);
+        assert!(draw_rim(banded.canvas(), rect, radii, filter));
+        let mut whole = surfaces::raster_n32_premul((180, 116)).unwrap();
+        whole.canvas().clear(gray);
+        let paint = rim_paint(rect, radii, rim_width(filter)).unwrap();
+        whole
+            .canvas()
+            .draw_rect(rect.with_outset((1.0, 1.0)), &paint);
+        assert_eq!(
+            pixels(&mut banded),
+            pixels(&mut whole),
+            "rect {rect:?} radii {radii:?} edge {edge}"
+        );
+    }
+}

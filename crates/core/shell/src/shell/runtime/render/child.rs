@@ -14,11 +14,17 @@ impl Shell {
             // Common no-popup frame: avoid allocating key sets and running
             // reconciliation bookkeeping. A dismissed popover only suppresses
             // recreation until its authored request disappears for one frame.
+            // A compositor dismissal can destroy a popover mid-exit; with no
+            // child left, its closing key would otherwise keep the subtree
+            // animating every frame.
             self.components[index].dismissed_child_surfaces.clear();
             self.components[index].entering_child_node_keys.clear();
             self.components[index]
                 .component
                 .set_entering_child_keys_from_slice(&[]);
+            self.components[index]
+                .component
+                .set_closing_child_keys_from_slice(&[]);
             return Ok(false);
         }
         let requested_keys: SmallVec<[(ChildSurfaceKind, &str); 4]> = requests

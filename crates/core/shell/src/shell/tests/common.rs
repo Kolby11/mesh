@@ -955,6 +955,8 @@ pub(super) struct PopoverHarnessState {
     pub(super) popover_trigger: Option<super::types::PopoverTriggerReference>,
     pub(super) painted_nodes: Vec<String>,
     pub(super) exiting_paints: Vec<bool>,
+    /// The closing child keys the shell last handed the component.
+    pub(super) closing_keys: Vec<String>,
     pub(super) child_inputs: Vec<(String, ComponentInput)>,
     pub(super) surface_sizes: Vec<(u32, u32)>,
     pub(super) profiling_enabled: Vec<bool>,
@@ -976,6 +978,7 @@ impl Default for PopoverHarnessState {
             popover_trigger: None,
             painted_nodes: Vec::new(),
             exiting_paints: Vec::new(),
+            closing_keys: Vec::new(),
             child_inputs: Vec::new(),
             surface_sizes: Vec::new(),
             profiling_enabled: Vec::new(),
@@ -1075,6 +1078,11 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
 
     fn theme_changed(&mut self) -> Result<(), super::types::ComponentError> {
         Ok(())
+    }
+
+    fn set_closing_child_keys_from_slice(&mut self, keys: &[&str]) {
+        self.state.lock().unwrap().closing_keys =
+            keys.iter().map(|key| (*key).to_owned()).collect();
     }
 
     fn child_surface_requests(&self) -> Vec<super::types::ChildSurfaceRequest> {

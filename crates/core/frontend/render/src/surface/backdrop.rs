@@ -11,8 +11,8 @@
 use mesh_core_elements::VisualFilter;
 use mesh_core_elements::style::Corners;
 use skia_safe::{
-    AlphaType, Canvas, ColorType, Data, FilterMode, ISize, ImageInfo, Matrix, MipmapMode, Paint,
-    RRect, Rect, RuntimeEffect, SamplingOptions, Shader, TileMode, image_filters, images,
+    AlphaType, Canvas, ClipOp, ColorType, Data, FilterMode, ISize, ImageInfo, Matrix, MipmapMode,
+    Paint, RRect, Rect, RuntimeEffect, SamplingOptions, Shader, TileMode, image_filters, images,
     runtime_effect::ChildPtr, surfaces,
 };
 use std::path::{Path, PathBuf};
@@ -333,6 +333,24 @@ pub(crate) fn draw_rim(canvas: &Canvas, rect: Rect, radii: Corners, filter: Visu
     if rim <= 0.0 || rect.is_empty() {
         return false;
     }
+    let Some(paint) = rim_paint(rect, radii, rim) else {
+        return false;
+    };
+    // The shader is exactly zero where `dist <= -rim`. The raster backend
+    // interprets it per pixel, so a large panel would otherwise spend most of
+    // a partial repaint shading interior pixels that it leaves unchanged.
+    let save_count = canvas.save();
+    for interior in band_interior(rect, radii, rim) {
+        if !interior.is_empty() {
+            canvas.clip_rect(interior, ClipOp::Difference, false);
+        }
+    }
+    canvas.draw_rect(rect.with_outset((1.0, 1.0)), &paint);
+    canvas.restore_to_count(save_count);
+    true
+}
+
+fn rim_paint(rect: Rect, radii: Corners, rim: f32) -> Option<Paint> {
     let uniforms: [f32; 9] = [
         rect.left,
         rect.top,
@@ -348,18 +366,45 @@ pub(crate) fn draw_rim(canvas: &Canvas, rect: Rect, radii: Corners, filter: Visu
         .iter()
         .flat_map(|value| value.to_ne_bytes())
         .collect();
-    let Some(shader) = RIM_EFFECT.with(|effect| {
+    let shader = RIM_EFFECT.with(|effect| {
         effect
             .as_ref()?
             .make_shader(Data::new_copy(&bytes), &[], None)
-    }) else {
-        return false;
-    };
+    })?;
     let mut paint = Paint::default();
     paint.set_anti_alias(false);
     paint.set_shader(shader);
-    canvas.draw_rect(rect.with_outset((1.0, 1.0)), &paint);
-    true
+    Some(paint)
+}
+
+/// Two rects whose union holds only points at least `band` inside the rounded
+/// rect, plus a margin: one clear of the top and bottom corner arcs,
+/// one clear of the left and right ones. Outside the corner squares the
+/// signed distance is the distance to the nearest straight edge.
+fn band_interior(rect: Rect, radii: Corners, band: f32) -> [Rect; 2] {
+    const MARGIN: f32 = 2.0;
+    // The shader clamps each radius to half the shorter side.
+    let max_radius = rect.width().min(rect.height()) / 2.0;
+    let inset = |radius: f32| radius.min(max_radius).max(band) + MARGIN;
+    let top = inset(radii.top_left.max(radii.top_right));
+    let bottom = inset(radii.bottom_left.max(radii.bottom_right));
+    let left = inset(radii.top_left.max(radii.bottom_left));
+    let right = inset(radii.top_right.max(radii.bottom_right));
+    let edge = band + MARGIN;
+    [
+        Rect::new(
+            rect.left + edge,
+            rect.top + top,
+            rect.right - edge,
+            rect.bottom - bottom,
+        ),
+        Rect::new(
+            rect.left + left,
+            rect.top + edge,
+            rect.right - right,
+            rect.bottom - edge,
+        ),
+    ]
 }
 
 fn rim_width(filter: VisualFilter) -> f32 {

@@ -829,6 +829,36 @@ fn child_surface_reconcile_plays_exit_transition_before_teardown() {
 }
 
 #[test]
+fn compositor_dismissal_mid_exit_clears_the_closing_key() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState {
+        hide_transition_ms: 120,
+        ..PopoverHarnessState::default()
+    }));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    state.lock().unwrap().open = false;
+    shell.render_components().unwrap();
+    assert_eq!(state.lock().unwrap().closing_keys, ["root/popover"]);
+
+    shell
+        .presentation_engine
+        .testing_push_dismissed_popup(child_id);
+    shell.render_components().unwrap();
+    shell.render_components().unwrap();
+
+    assert!(shell.components[0].children.is_empty());
+    assert!(
+        state.lock().unwrap().closing_keys.is_empty(),
+        "a popover destroyed mid-exit must not keep its subtree exiting"
+    );
+}
+
+#[test]
 fn child_surface_reopen_cancels_pending_exit_transition() {
     let mut shell = Shell::new();
     shell.presentation_engine =

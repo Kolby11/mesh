@@ -8442,3 +8442,63 @@ raster. That is not the live GPU path. Live after-numbers are not yet captured.
 
 **Validation.** Shell suite, serial with `MESH_VERIFY_RETAINED=1`: 998 passed /
 35 ignored. Presentation tests pass.
+
+## 2026-10-24 — live Settings scroll recapture; stuck popover exit; glass rim band
+
+`b52dedf6` + working tree · area: child-surface lifecycle, CPU glass rim raster
+
+**Live Settings scroll after the size-flip fix.** Same setup as the entry
+above (glass profile, `profiling` build, Hyprland, eDP 2880×1800 at scale 1,
+120 Hz, GPU scene worker), `profiles/session/20261024-141319`, built before
+the two changes below. During the 5.3 s scroll, 388 Settings frames had
+`total_surface_render` 2.8 ms p50 / 4.8 ms p90 / 40.7 ms max, with one paint
+per frame (589 renders, 590 paints over the session). Before the fix:
+34.0 ms p50 / 40.6 ms p90, two paints per frame.
+
+**Glass bar animating every frame.** The earlier "~4/s idle, ~47/s while
+another surface scrolls" was a session average, not a steady rate. In
+`20261024-125601`, `20261024-132147` and `20261024-141319` the bar rendered
+~1/s (the clock) until the control center was opened and its Settings tile
+clicked, then ~110/s (~30/s while Settings shared the frame) until shutdown:
+9,305 bar renders in 128 s in the last capture, 29% of a core while idle. Each
+frame sampled 41 nodes (1,608 `animation_lookup`, 421 `restyle_scan`, 184
+`annotation` visits). A temporary log of the live animation set showed the
+control-center subtree still `mesh-surface-exiting`, with its key in the bar's
+`closing_child_keys`. `onSettings` sets `open = false`, starting the exit, and
+~50 ms later the compositor dismissed the popup. The dismissal destroyed the
+child; with no requests and no children left, reconciliation took its early
+return, which cleared entering keys but not closing keys. Now it clears both.
+Regression: `compositor_dismissal_mid_exit_clears_the_closing_key` (fails
+before, passes after). Offline replays of clock ticks, title-only `mesh.wm`
+updates, `WindowChanged` events and plain dismissals did not reproduce it. Not
+re-captured live after the fix.
+
+**CPU glass rim.** On surfaces above windows, `draw_rim` shaded the whole
+element rect with the rim SkSL, which the CPU backend interprets per pixel;
+~75% of the glass scroll gate's samples were raster-pipeline SkSL stages. The
+shader is exactly zero where `dist <= -rim`, so two interior rects (clear of
+the top/bottom and left/right corner arcs, radii clamped as the shader clamps
+them, 2 px margin) are now clipped out. `rim_band_clip_matches_shading_the_whole_rect`
+compares every pixel against shading the whole rect: symmetric, asymmetric,
+zero and oversized radii, fractional rect.
+
+Release (thin LTO, one codegen unit), `taskset -c 2`,
+`MESH_SCROLL_GLASS=1 d9_settings_scroll_frame_gate` (Appearance, 240 icon
+themes + 240 fonts, 60 finger frames + 30 momentum ticks), three runs each:
+
+| | Before | After |
+| --- | --- | --- |
+| frame p50 | 31.0–32.5 ms | 8.4–8.5 ms |
+| frame p90 | 43.1–48.5 ms | 11.8–12.9 ms |
+| frames run | 74 | 90 |
+
+Fewer frames ran before because frames overran the 16 ms tick and the momentum
+tail ended early. `check-performance --workloads-only` after the change, one
+run, all gates pass: `d9_glass_dashboard_open_p90_ms` 28.7, `d9_glass_dock_frame_p90_ms`
+11.7, `d9_glass_clock_tick_p90_ms` 8.3, `d9_scroll_p90_ms` 4.3. No interleaved
+baseline was taken for those three glass gates; earlier same-day runs were
+63.9–88.0 (dashboard) and 16.0–20.1 (dock). The live GPU path draws the rim
+in a GPU shader and is not affected.
+
+**Validation.** Shell suite, serial with `MESH_VERIFY_RETAINED=1`: 999 passed /
+35 ignored. Render suite, serial: 340 passed / 13 ignored.
