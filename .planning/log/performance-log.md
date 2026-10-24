@@ -8761,3 +8761,42 @@ the full-layout/geometry-change regressions and complete elements suite pass
 again. Formatting and diff checks pass. The older unpinned exploratory samples
 were affected by concurrent compilation and are not used for the timing claim.
 Raw final logs: ignored `profiles/backlog-2026-10-24/layout-pinned-*`.
+
+## 2026-10-24 — Preserve blocked GPU scenes and retry export on release
+
+On main after `f6a68c5a` · area: scene worker and Wayland backpressure
+
+A `BuffersBusy` completion now parks the exact immutable frame/commit instead
+of producing a failed shell completion and forcing a full repaint. Native
+dmabuf release requeues export/copy from the retained raster target. No new
+commit, script execution, scene recording or raster is needed. The worker keeps
+at most one pending/parked frame per surface; supersession, removal and close
+discard stale retries outside its queue lock. Non-transient failures retain the
+existing full-replay/fallback contract.
+
+Presentation preserves pending logical damage and surface-object checks, waits
+for actual dmabuf availability, and preserves parent-before-popup commit order.
+Queued/active jobs retain the two-second worker deadline; parked frames and
+completed children awaiting their parent do not consume it. The release-before-
+completion case retries immediately rather than relying on another wakeup.
+
+**Measured structural control.** Standard release (thin LTO, one codegen unit),
+three fresh required-GPU processes (last two pinned to CPU 6). The existing
+32×24 native export/lease fixture holds all three slots, applies an 8×8 colour
+patch, observes `BuffersBusy`, releases one lease and retries that same commit.
+Normal render attempts increment the test raster counter by 1–1; resumed export
+increments it by 0–0. All three runs pass pixel checks against the exported slot,
+retain partial damage, and preserve the old-release isolation checks. This is
+a native GPU test with test-held leases, not a live compositor-stall capture
+or a wall-time speedup claim. Gate:
+`scene_worker_preserves_partial_damage_and_owns_compositor_leases`.
+
+**Validated.** Eleven generic worker tests pass, including retry identity/damage,
+unrelated-surface progress, fatal-error rejection, stale retry rejection, resource
+lifetime, and replacement/removal/close cleanup. Default renderer: 342 passed /
+13 ignored. GPU-feature presentation: 115 passed. GPU-feature shell: 1,017 passed /
+36 ignored. The GPU renderer suite reports 352 passed / one failed / 19 ignored;
+its panel recorded-scene parity failure reproduces identically on the unchanged
+`f6a68c5a` checkout (38 of 19,200 pixels, worst channel delta 36). It remains in
+the backlog; no tolerance was changed. Raw logs are under ignored
+`profiles/backlog-2026-10-24/scene-retry/`.

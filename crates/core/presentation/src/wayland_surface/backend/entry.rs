@@ -804,6 +804,11 @@ impl SurfaceEntry {
     }
 
     #[cfg(feature = "gpu")]
+    pub(super) fn dmabuf_slot_available(&self, busy: &std::collections::HashSet<ObjectId>) -> bool {
+        self.dmabuf_ring.has_free_slot(busy)
+    }
+
+    #[cfg(feature = "gpu")]
     pub(super) fn mark_buffer_backpressured(&mut self) {
         self.buffer_backpressured = true;
     }

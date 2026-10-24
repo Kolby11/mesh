@@ -7,6 +7,11 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Scene-buffer retry complete.** Transient export failures wait for dmabuf
+  release and resume without another raster. Three required-GPU release runs
+  pass; presentation and shell suites pass. The P2 sibling scan has a linked
+  producer-delta design and remains open.
+
 - **Change-proportional frame pipeline.** Full layout now records geometry,
   fit extents and projection in one traversal. Its structural gate passes;
   elements: 314 passed, GPU-feature shell: 1,017 passed.
@@ -31,5 +36,7 @@ measurements live in [`log/`](log/README.md).
 
 - CPU glass dashboard open remains over budget; the CPU dock budget remains
   noisy at its edge. This batch changes neither budget.
+- GPU panel recorded-scene parity fails identically on the baseline and current
+  tree; the defect is in the backlog and its tolerance remains unchanged.
 - NVIDIA as compositor main device and other compositor imports remain unchecked
   live.

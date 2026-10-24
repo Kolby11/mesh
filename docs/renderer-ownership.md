@@ -92,6 +92,13 @@ to Wayland. Presentation checks the format/modifier before import, attaches the
 buffer and acknowledges its scene only after a successful commit. A
 `wl_buffer.release` returns its lease; dropping an output never calls GL. Leases
 carry independent identities, so an old release cannot unlock a reused texture.
+When all scene export slots are leased, the worker retains that commit's
+immutable frame and raster target. Presentation waits for a native dmabuf
+release and retries export/copy with the same damage, without another scene
+recording or raster. The frame stays in flight; the shell receives no failed
+completion for this transient condition. Parked frames and completed children
+waiting for their parent do not consume the worker timeout. Newer submissions,
+removal and shutdown discard stale retries; other surfaces remain runnable.
 GPU errors switch subsequent canvases to SHM with a full repaint. The CLI enables
 GPU presentation by default when compositor device feedback and export support
 are available; `MESH_RENDER_GPU=0` selects SHM. Debug overlays and the dev-window

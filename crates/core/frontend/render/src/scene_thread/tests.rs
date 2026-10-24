@@ -112,6 +112,7 @@ fn coalescing_keeps_latest_scene_and_repairs_dropped_frame_damage() {
     let weak = Arc::downgrade(&resources);
     let first = harness.worker.submit(snapshot(1, resources)).unwrap();
     receive(&harness.started);
+    assert!(harness.worker.completion_pending(surface(1), first));
     assert!(weak.upgrade().is_some(), "active frame pins its resources");
     let second = harness
         .worker
@@ -356,6 +357,7 @@ fn render_failure_cannot_acknowledge_pixels_and_the_next_frame_recovers() {
         Err("render failed")
     );
     assert!(!worker.acknowledge_presented(surface(1), failed));
+    assert!(!worker.retry_failed(surface(1), failed));
     let recovered = worker.submit(snapshot(1, Arc::new(Resources(0)))).unwrap();
     receive(&ready);
     assert_eq!(worker.take_completed(surface(1)).unwrap().output, Ok(true));
@@ -449,4 +451,145 @@ fn discarded_output_leases_retire_outside_the_queue_lock() {
         "shutdown retirement may re-enter its resource owner"
     );
     worker.shutdown().unwrap();
+}
+
+struct RetryRenderer {
+    blocked: Arc<std::sync::atomic::AtomicBool>,
+    rasters: Arc<std::sync::atomic::AtomicUsize>,
+}
+impl SceneRenderer for RetryRenderer {
+    type Resources = Resources;
+    type Output = (u64, bool, Vec<crate::DamageRect>);
+    type Error = &'static str;
+
+    fn render(&mut self, frame: &SceneFrame<Resources>) -> Result<Self::Output, Self::Error> {
+        self.rasters
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.retry(frame)
+    }
+    fn retryable(error: &&'static str) -> bool {
+        *error == "busy"
+    }
+    fn retry(&mut self, frame: &SceneFrame<Resources>) -> Result<Self::Output, Self::Error> {
+        if frame.snapshot().surface().id == 1
+            && self.blocked.load(std::sync::atomic::Ordering::SeqCst)
+        {
+            Err("busy")
+        } else {
+            Ok((
+                frame.commit(),
+                frame.requires_full_replay(),
+                frame.snapshot().plan().damage.logical.to_vec(),
+            ))
+        }
+    }
+    fn remove_surface(&mut self, _: SceneSurface) {}
+}
+
+#[test]
+fn retryable_frames_keep_commit_damage_and_resources_without_blocking_other_surfaces() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let blocked = Arc::new(AtomicBool::new(false));
+    let rasters = Arc::new(AtomicUsize::new(0));
+    let renderer = RetryRenderer {
+        blocked: blocked.clone(),
+        rasters: rasters.clone(),
+    };
+    let worker = SceneRenderThread::spawn(2, move || Ok(renderer), || {}).unwrap();
+    let first = worker.submit(snapshot(1, Arc::new(Resources(7)))).unwrap();
+    assert!(
+        worker
+            .wait_completed(surface(1), Duration::from_secs(3))
+            .unwrap()
+            .output
+            .is_ok()
+    );
+    assert!(worker.acknowledge_presented(surface(1), first));
+    blocked.store(true, Ordering::SeqCst);
+    let resources = Arc::new(Resources(7));
+    let weak = Arc::downgrade(&resources);
+    let mut frame = snapshot(1, resources);
+    let damage = vec![crate::DamageRect {
+        x: 2,
+        y: 3,
+        width: 4,
+        height: 5,
+    }];
+    Arc::get_mut(&mut frame.plan).unwrap().damage.logical = damage.clone().into();
+    let commit = worker.submit(frame).unwrap();
+    assert_eq!(
+        worker
+            .wait_completed(surface(1), Duration::from_secs(3))
+            .unwrap()
+            .output,
+        Err("busy")
+    );
+    assert!(!worker.completion_pending(surface(1), commit));
+    assert!(weak.upgrade().is_some());
+    assert!(worker.retry_failed(surface(1), commit));
+    assert_eq!(
+        worker
+            .wait_completed(surface(1), Duration::from_secs(3))
+            .unwrap()
+            .output,
+        Err("busy")
+    );
+    assert_eq!(rasters.load(Ordering::SeqCst), 2);
+    let other = worker.submit(snapshot(2, Arc::new(Resources(7)))).unwrap();
+    assert!(
+        worker
+            .wait_completed(surface(2), Duration::from_secs(3))
+            .unwrap()
+            .output
+            .is_ok()
+    );
+    assert!(worker.acknowledge_presented(surface(2), other));
+    blocked.store(false, Ordering::SeqCst);
+    assert!(worker.retry_failed(surface(1), commit));
+    let completed = worker
+        .wait_completed(surface(1), Duration::from_secs(3))
+        .unwrap();
+    assert_eq!(completed.commit, commit);
+    assert_eq!(completed.output, Ok((commit, false, damage)));
+    assert_eq!(rasters.load(Ordering::SeqCst), 3);
+    assert_eq!(worker.metrics().retried, 2);
+    assert!(worker.acknowledge_presented(surface(1), commit));
+    assert!(!worker.retry_failed(surface(1), commit));
+    assert!(weak.upgrade().is_none());
+    worker.shutdown().unwrap();
+}
+
+#[test]
+fn retryable_resources_retire_on_replacement_removal_and_close() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize};
+    for action in ["replace", "remove", "close"] {
+        let renderer = RetryRenderer {
+            blocked: Arc::new(AtomicBool::new(true)),
+            rasters: Arc::new(AtomicUsize::new(0)),
+        };
+        let worker = SceneRenderThread::spawn(1, move || Ok(renderer), || {}).unwrap();
+        let resources = Arc::new(Resources(7));
+        let weak = Arc::downgrade(&resources);
+        let commit = worker.submit(snapshot(1, resources)).unwrap();
+        assert_eq!(
+            worker
+                .wait_completed(surface(1), Duration::from_secs(3))
+                .unwrap()
+                .output,
+            Err("busy")
+        );
+        assert!(weak.upgrade().is_some());
+        match action {
+            "replace" => {
+                worker.submit(snapshot(1, Arc::new(Resources(7)))).unwrap();
+            }
+            "remove" => {
+                assert!(worker.remove_surface(surface(1)));
+            }
+            _ => worker.close(),
+        }
+        assert!(!worker.retry_failed(surface(1), commit));
+        assert!(weak.upgrade().is_none(), "{action}");
+        worker.shutdown().unwrap();
+    }
 }

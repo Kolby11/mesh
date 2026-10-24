@@ -399,6 +399,7 @@ pub(in crate::wayland_surface) struct PendingScene {
     object: u64,
     damage: Vec<DamageRect>,
     submitted: Instant,
+    waiting_for_release: bool,
 }
 
 /// How long a submitted frame may stay unpublished before the worker is
@@ -440,6 +441,7 @@ impl WaylandSurfaceBackend {
                     object,
                     damage: damage.to_vec(),
                     submitted: Instant::now(),
+                    waiting_for_release: false,
                 });
                 PresentStatus::Submitted
             }
@@ -458,11 +460,21 @@ impl WaylandSurfaceBackend {
             .any(|pending| pending.surface_id == surface_id)
     }
 
-    /// The instant the oldest unpublished frame becomes a worker fault.
+    /// The oldest queued/active job's fault deadline. Completed and
+    /// release-blocked frames wait for protocol events instead.
     pub(super) fn scene_deadline(&self) -> Option<Instant> {
+        let GpuPresenter::Ready(runtime) = &self.gpu else {
+            return None;
+        };
         self.scene_pending
-            .first()
+            .iter()
+            .filter(|pending| {
+                runtime
+                    .worker
+                    .completion_pending(pending.scene, pending.commit)
+            })
             .map(|pending| pending.submitted + SCENE_COMPLETION_DEADLINE)
+            .min()
     }
 
     /// Forget in-flight frames of a hidden or destroyed surface. The worker
@@ -494,7 +506,7 @@ impl WaylandSurfaceBackend {
         };
         let pending = std::mem::take(&mut self.scene_pending);
         let mut waiting: Vec<PendingScene> = Vec::new();
-        for pending in pending {
+        for mut pending in pending {
             let parent_waiting = match self.state.surfaces.get(&pending.surface_id) {
                 Some(SurfaceEntry {
                     role: WaylandRole::Popup(role),
@@ -515,6 +527,37 @@ impl WaylandSurfaceBackend {
                 });
                 continue;
             }
+            if pending.waiting_for_release {
+                let Some(entry) = self.state.surfaces.get(&pending.surface_id) else {
+                    self.scene_results.push(crate::SceneCompletion {
+                        surface_id: pending.surface_id,
+                        presented: false,
+                    });
+                    continue;
+                };
+                if !entry.configured || entry.surface_generation().object != pending.object {
+                    self.scene_results.push(crate::SceneCompletion {
+                        surface_id: pending.surface_id,
+                        presented: false,
+                    });
+                    continue;
+                }
+                if !entry.dmabuf_slot_available(&self.state.dmabuf.busy) {
+                    waiting.push(pending);
+                    continue;
+                }
+                if !worker.retry_failed(pending.scene, pending.commit) {
+                    self.scene_results.push(crate::SceneCompletion {
+                        surface_id: pending.surface_id,
+                        presented: false,
+                    });
+                    continue;
+                }
+                pending.waiting_for_release = false;
+                pending.submitted = Instant::now();
+                waiting.push(pending);
+                continue;
+            }
             let Some(done) = worker.take_completed(pending.scene) else {
                 if pending.submitted.elapsed() > SCENE_COMPLETION_DEADLINE {
                     self.gpu.disable(&PresentationError::BufferAlloc(
@@ -529,6 +572,42 @@ impl WaylandSurfaceBackend {
                 }
                 continue;
             };
+            if done.commit == pending.commit
+                && matches!(
+                    done.output,
+                    Err(mesh_core_render::gpu::scene::GpuSceneError::BuffersBusy)
+                )
+            {
+                let Some(entry) =
+                    self.state
+                        .surfaces
+                        .get_mut(&pending.surface_id)
+                        .filter(|entry| {
+                            entry.configured && entry.surface_generation().object == pending.object
+                        })
+                else {
+                    self.scene_results.push(crate::SceneCompletion {
+                        surface_id: pending.surface_id,
+                        presented: false,
+                    });
+                    continue;
+                };
+                entry.mark_buffer_backpressured();
+                pending.waiting_for_release = true;
+                if entry.dmabuf_slot_available(&self.state.dmabuf.busy) {
+                    if !worker.retry_failed(pending.scene, pending.commit) {
+                        self.scene_results.push(crate::SceneCompletion {
+                            surface_id: pending.surface_id,
+                            presented: false,
+                        });
+                        continue;
+                    }
+                    pending.waiting_for_release = false;
+                    pending.submitted = Instant::now();
+                }
+                waiting.push(pending);
+                continue;
+            }
             let presented = done.commit == pending.commit
                 && self.import_scene_output(&worker, &pending, done.output);
             self.scene_results.push(crate::SceneCompletion {

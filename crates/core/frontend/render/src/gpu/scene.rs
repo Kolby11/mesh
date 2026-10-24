@@ -122,6 +122,8 @@ pub struct GpuSceneRenderer {
     residency: ImageResidency,
     context: GpuContext,
     budget: mesh_core_resources::ResourceByteBudget,
+    #[cfg(test)]
+    rasterizations: usize,
 }
 
 impl GpuSceneRenderer {
@@ -134,6 +136,8 @@ impl GpuSceneRenderer {
             residency: ImageResidency::new(64 * 1024 * 1024),
             context,
             budget: mesh_core_resources::ResourceByteBudget::new(512 * 1024 * 1024),
+            #[cfg(test)]
+            rasterizations: 0,
         })
     }
 
@@ -286,6 +290,10 @@ impl SceneRenderer for GpuSceneRenderer {
                     .saturating_add(self.residency.images.max_bytes()),
             );
         }
+        #[cfg(test)]
+        {
+            self.rasterizations += 1;
+        }
         let canvas = state.retained.canvas();
         canvas.save();
         canvas.clip_region(&region, None);
@@ -299,6 +307,49 @@ impl SceneRenderer for GpuSceneRenderer {
                 slot.pending = vec![full];
             }
         }
+        self.export(snapshot.surface())
+    }
+
+    fn retryable(error: &GpuSceneError) -> bool {
+        matches!(error, GpuSceneError::BuffersBusy)
+    }
+
+    fn retry(
+        &mut self,
+        frame: &SceneFrame<PreparedScene>,
+    ) -> Result<GpuSceneOutput, GpuSceneError> {
+        self.export(frame.snapshot().surface())
+    }
+
+    fn remove_surface(&mut self, surface: SceneSurface) {
+        self.surfaces.remove(&surface);
+        if self.residency.images.max_bytes() > 0 {
+            self.context.skia.set_resource_cache_limit(
+                self.budget
+                    .used_bytes()
+                    .saturating_add(self.residency.images.max_bytes()),
+            );
+        }
+    }
+}
+
+impl GpuSceneRenderer {
+    fn export(&mut self, surface: SceneSurface) -> Result<GpuSceneOutput, GpuSceneError> {
+        let state = self
+            .surfaces
+            .get_mut(&surface)
+            .expect("retry retains its raster target");
+        let size = (state.retained.width(), state.retained.height());
+        let full = DamageRect {
+            x: 0,
+            y: 0,
+            width: size.0,
+            height: size.1,
+        };
+        let bytes = crate::surface::checked_pixel_bytes(size.0, size.1, 4)
+            .ok_or(GpuSceneError::ResourceBudget)?;
+        let slots = &mut state.slots;
+        slots.retain(|slot| slot.leased.load(Ordering::Acquire) != RETIRED);
         let index = if let Some(index) = slots
             .iter()
             .position(|slot| slot.leased.load(Ordering::Acquire) == AVAILABLE)
@@ -336,17 +387,6 @@ impl SceneRenderer for GpuSceneRenderer {
             damage: copied,
             leased: Arc::clone(&slot.leased),
         })
-    }
-
-    fn remove_surface(&mut self, surface: SceneSurface) {
-        self.surfaces.remove(&surface);
-        if self.residency.images.max_bytes() > 0 {
-            self.context.skia.set_resource_cache_limit(
-                self.budget
-                    .used_bytes()
-                    .saturating_add(self.residency.images.max_bytes()),
-            );
-        }
     }
 }
 
@@ -397,16 +437,31 @@ mod tests {
             &mut self,
             frame: &SceneFrame<PreparedScene>,
         ) -> Result<Self::Output, Self::Error> {
-            let output = self.0.render(frame)?;
-            let state = self
-                .0
-                .surfaces
-                .get_mut(&frame.snapshot().surface())
-                .unwrap();
-            let pixels = state
-                .retained
-                .read_back(&mut self.0.context)
-                .map_err(GpuSceneError::Gpu)?;
+            let before = self.0.rasterizations;
+            let result = self.0.render(frame);
+            assert_eq!(self.0.rasterizations - before, 1);
+            let output = result?;
+            let pixels = self.0.read_back(frame.snapshot().surface(), &output)?;
+            Ok((output, pixels))
+        }
+        fn retryable(error: &GpuSceneError) -> bool {
+            GpuSceneRenderer::retryable(error)
+        }
+        fn retry(
+            &mut self,
+            frame: &SceneFrame<PreparedScene>,
+        ) -> Result<Self::Output, Self::Error> {
+            let before = self.0.rasterizations;
+            let output = self.0.retry(frame)?;
+            assert_eq!(
+                self.0.rasterizations, before,
+                "export retry must not rasterize"
+            );
+            eprintln!(
+                "scene_export_retry rasterizations={}",
+                self.0.rasterizations - before
+            );
+            let pixels = self.0.read_back(frame.snapshot().surface(), &output)?;
             Ok((output, pixels))
         }
         fn remove_surface(&mut self, surface: SceneSurface) {
@@ -521,7 +576,7 @@ mod tests {
             held.push(output);
             assert!(worker.acknowledge_presented(key, commit));
         }
-        worker
+        let commit = worker
             .submit(record(&mut canvas, skia_safe::Color::BLACK, true))
             .unwrap();
         assert!(matches!(
@@ -533,21 +588,22 @@ mod tests {
         ));
         let stale_release = releases.remove(0);
         stale_release.clone().release();
-        let commit = worker
-            .submit(record(&mut canvas, skia_safe::Color::BLACK, true))
-            .unwrap();
+        assert!(worker.retry_failed(key, commit));
         let (output, pixels) = worker
             .wait_completed(key, Duration::from_secs(10))
             .unwrap()
             .output
             .unwrap();
         assert_eq!(pixels.get_pixel(6, 6), mesh_core_elements::Color::BLACK);
-        assert!(output.damage.contains(&DamageRect {
+        assert!(!output.damage.contains(&DamageRect {
             x: 0,
             y: 0,
             width: 32,
             height: 24
         }));
+        assert_eq!(pixels.get_pixel(1, 1).r, 255);
+        assert_eq!(worker.metrics().submitted, 4);
+        assert_eq!(worker.metrics().retried, 1);
         assert!(worker.acknowledge_presented(key, commit));
         releases.push(output.attached());
         stale_release.release();

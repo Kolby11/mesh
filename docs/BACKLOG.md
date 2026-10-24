@@ -22,6 +22,8 @@ are from the retired milestone scheme and are kept only as rough sequencing.
       639d4dd7, 17.4–19.7 ms at ca8b18d1); the CPU dock animation fixture needs headroom.
 - [ ] The CPU glass dashboard open gate remains over budget; its raster drawing
       needs attention.
+- [ ] Recorded-scene panel GPU parity exceeds its pixel budget on the available
+      driver; reproduced on unchanged `f6a68c5a` and the scene-retry candidate.
 
 ## Change-proportional frame pipeline — next implementation priority
 
@@ -33,12 +35,10 @@ criteria and the items folded in here:
 
 - [ ] **P2:** Geometry patches still visit every child of a re-laid-out parent in layout
       write-back and overflow annotation (the order of Taffy's flex pass); display patches
-      rebuild under layer/scrollbar ancestors, scroll viewports and boxes that clip or scale children.
+      rebuild under layer/scrollbar ancestors, scroll viewports and boxes that clip or scale children. [Producer-delta design](../.planning/todos/pending/2026-10-24-sparse-geometry-producer-deltas.md).
 - [ ] **P3 / D1:** Handler sync converts every compound global to JSON (~1 ms for a 1,024-item
       list) and keyed item deltas come from that comparison; record table writes instead.
       Lists read through anything but a plain member still compare every item.
-- [ ] A scene frame that completes unpresented because the compositor holds every dmabuf slot
-      is repainted in full; retry on buffer release, keeping damage, instead.
 
 ## 2026-09-30 block review and module-architecture direction
 

@@ -82,6 +82,7 @@ pub struct SceneFrame<R: SceneResources> {
     snapshot: SceneSnapshot<R>,
     commit: u64,
     full_replay: bool,
+    retry: bool,
 }
 
 impl<R: SceneResources> SceneFrame<R> {
@@ -108,6 +109,14 @@ pub trait SceneRenderer: 'static {
     type Output: Send + 'static;
     type Error: Send + 'static;
     fn render(&mut self, frame: &SceneFrame<Self::Resources>) -> Result<Self::Output, Self::Error>;
+    /// Whether a failed job can resume from retained renderer state.
+    fn retryable(_error: &Self::Error) -> bool {
+        false
+    }
+    /// Resume a retryable job. Its commit, resources and damage are unchanged.
+    fn retry(&mut self, frame: &SceneFrame<Self::Resources>) -> Result<Self::Output, Self::Error> {
+        self.render(frame)
+    }
     fn remove_surface(&mut self, surface: SceneSurface);
 }
 
@@ -121,6 +130,7 @@ pub struct RenderedScene<O, E> {
 pub struct SceneThreadMetrics {
     pub submitted: u64,
     pub coalesced: u64,
+    pub retried: u64,
     pub rendered: u64,
     pub discarded: u64,
     pub pending: usize,
@@ -136,6 +146,7 @@ struct SurfaceState<R: SceneResources, O, E> {
     identity: (u64, FractionalScale, (u32, u32)),
     pending: Option<SceneFrame<R>>,
     completed: Option<RenderedScene<O, E>>,
+    retry: Option<SceneFrame<R>>,
     queued: bool,
     in_flight: bool,
     removed: bool,
@@ -164,8 +175,8 @@ pub enum SceneThreadStartError<E> {
     Panicked,
 }
 
-/// Bounded latest-frame queue: at most one pending frame, one active render,
-/// and one completed output per admitted surface. Removed surfaces occupy
+/// Bounded latest-frame queue: at most one pending or parked frame, one active
+/// render, and one completed output per admitted surface. Removed surfaces occupy
 /// their slot until the renderer acknowledges resource retirement.
 pub struct SceneRenderThread<B: SceneRenderer> {
     shared: Arc<Shared<B::Resources, B::Output, B::Error>>,
@@ -213,7 +224,13 @@ impl<B: SceneRenderer> SceneRenderThread<B> {
                         let discarded: Vec<_> = state
                             .surfaces
                             .values_mut()
-                            .map(|surface| (surface.pending.take(), surface.completed.take()))
+                            .map(|surface| {
+                                (
+                                    surface.pending.take(),
+                                    surface.completed.take(),
+                                    surface.retry.take(),
+                                )
+                            })
                             .collect();
                         drop(state);
                         drop(discarded);
@@ -287,6 +304,7 @@ impl<B: SceneRenderer> SceneRenderThread<B> {
             identity,
             pending: None,
             completed: None,
+            retry: None,
             queued: false,
             in_flight: false,
             removed: false,
@@ -299,8 +317,10 @@ impl<B: SceneRenderer> SceneRenderThread<B> {
             snapshot,
             commit,
             full_replay,
+            retry: false,
         });
         let discarded_output = entry.completed.take();
+        let discarded_retry = entry.retry.take();
         if !entry.queued {
             entry.queued = true;
             state.ready.push_back(key);
@@ -310,6 +330,7 @@ impl<B: SceneRenderer> SceneRenderThread<B> {
         drop(state);
         drop(discarded_frame);
         drop(discarded_output);
+        drop(discarded_retry);
         self.shared.changed.notify_one();
         Ok(commit)
     }
@@ -327,6 +348,7 @@ impl<B: SceneRenderer> SceneRenderThread<B> {
         surface.removed = true;
         let discarded_frame = surface.pending.take();
         let discarded_output = surface.completed.take();
+        let discarded_retry = surface.retry.take();
         if !surface.queued {
             surface.queued = true;
             state.ready.push_back(key);
@@ -334,6 +356,7 @@ impl<B: SceneRenderer> SceneRenderThread<B> {
         drop(state);
         drop(discarded_frame);
         drop(discarded_output);
+        drop(discarded_retry);
         self.shared.changed.notify_one();
         true
     }
@@ -348,6 +371,49 @@ impl<B: SceneRenderer> SceneRenderThread<B> {
             0
         };
         Some(completed)
+    }
+
+    /// Requeue the current retryable failure after its outcome was taken.
+    /// Newer submissions and removal invalidate the retry; no commit is allocated.
+    pub fn retry_failed(&self, key: SceneSurface, commit: u64) -> bool {
+        let mut state = self.shared.state.lock().unwrap();
+        if state.closed {
+            return false;
+        }
+        let Some(surface) = state.surfaces.get_mut(&key) else {
+            return false;
+        };
+        if surface.removed
+            || surface.latest != commit
+            || surface.in_flight
+            || surface.pending.is_some()
+            || surface.completed.is_some()
+        {
+            return false;
+        }
+        let Some(mut frame) = surface.retry.take() else {
+            return false;
+        };
+        frame.retry = true;
+        surface.pending = Some(frame);
+        surface.queued = true;
+        state.ready.push_back(key);
+        state.metrics.retried += 1;
+        drop(state);
+        self.shared.changed.notify_one();
+        true
+    }
+
+    /// Whether this commit still has queued or active renderer work. A parked
+    /// retry or a completed output is not a worker timeout candidate.
+    pub fn completion_pending(&self, key: SceneSurface, commit: u64) -> bool {
+        let state = self.shared.state.lock().unwrap();
+        !state.closed
+            && state.surfaces.get(&key).is_some_and(|surface| {
+                !surface.removed
+                    && surface.latest == commit
+                    && (surface.in_flight || surface.pending.is_some())
+            })
     }
 
     /// Wait for a commit at a synchronous presentation boundary. Idle workers
@@ -432,7 +498,13 @@ impl<B: SceneRenderer> SceneRenderThread<B> {
         let discarded: Vec<_> = state
             .surfaces
             .values_mut()
-            .map(|surface| (surface.pending.take(), surface.completed.take()))
+            .map(|surface| {
+                (
+                    surface.pending.take(),
+                    surface.completed.take(),
+                    surface.retry.take(),
+                )
+            })
             .collect();
         drop(state);
         drop(discarded);
@@ -492,7 +564,14 @@ fn run_worker<B: SceneRenderer>(
                     .expect("live queued surface has a frame"),
             )
         };
-        let output = backend.render(&frame);
+        let output = if frame.retry {
+            backend.retry(&frame)
+        } else {
+            backend.render(&frame)
+        };
+        let retryable = output.as_ref().err().is_some_and(B::retryable);
+        let commit = frame.commit;
+        let mut retry_frame = retryable.then_some(frame);
         let publish = {
             let mut state = shared.state.lock().unwrap();
             state.metrics.rendered += 1;
@@ -502,12 +581,13 @@ fn run_worker<B: SceneRenderer>(
                 .get_mut(&key)
                 .expect("in-flight surface is retained");
             surface.in_flight = false;
-            if !closed && !surface.removed && surface.latest == frame.commit {
+            if !closed && !surface.removed && surface.latest == commit {
                 surface.completed = Some(RenderedScene {
                     surface: key,
-                    commit: frame.commit,
+                    commit,
                     output,
                 });
+                surface.retry = retry_frame.take();
                 true
             } else {
                 state.metrics.discarded += 1;
