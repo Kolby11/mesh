@@ -18,16 +18,10 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---
 
-- [ ] Replace the 500ms resource-preparation polling limit in the backend capability
-      activation test; concurrent build/test load can outlast it.
-
 - [ ] `d9_glass_dock_frame_p90_ms` straddles its 16.7 ms budget run to run (16.0–20.1 ms at
       639d4dd7, 17.4–19.7 ms at ca8b18d1); the CPU dock animation fixture needs headroom.
 - [ ] The CPU glass dashboard open gate remains over budget; its raster drawing
       needs attention.
-
-- [ ] Isolate renderer node-cache and keyed-hover regression state; cache tests
-      and the keyed-hover frame snapshot fail intermittently in parallel suites.
 
 ## Change-proportional frame pipeline — next implementation priority
 

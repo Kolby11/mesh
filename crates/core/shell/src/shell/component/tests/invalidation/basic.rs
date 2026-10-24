@@ -2469,6 +2469,11 @@ function pick(label) picked = label end
 
 #[test]
 fn keyed_list_hover_restyle_visits_scale_with_affected_items() {
+    if crate::shell::component::tests::common::isolate_frame_test(
+        "shell::component::tests::invalidation::basic::keyed_list_hover_restyle_visits_scale_with_affected_items",
+    ) {
+        return;
+    }
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(320, 100);
     let mut per_size = Vec::new();

@@ -1219,10 +1219,12 @@ fn legacy_graph_delta_uses_the_activation_coordinator_commit_boundary() {
     );
 
     shell.activate_graph_candidate(graph.clone());
-    for _ in 0..500 {
-        if shell.pending_resource_preparation.is_none() && shell.pending_profile_switch.is_none() {
-            break;
-        }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while shell.pending_resource_preparation.is_some() || shell.pending_profile_switch.is_some() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "activation did not finish preparing resources and committing within 10 seconds"
+        );
         std::thread::sleep(std::time::Duration::from_millis(1));
         shell.poll_pending_resource_preparation();
     }
@@ -1266,10 +1268,12 @@ fn committed_activation_replaces_the_previous_capability_grants() {
     );
 
     shell.activate_graph_candidate(graph);
-    for _ in 0..500 {
-        if shell.pending_resource_preparation.is_none() && shell.pending_profile_switch.is_none() {
-            break;
-        }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while shell.pending_resource_preparation.is_some() || shell.pending_profile_switch.is_some() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "activation did not finish preparing resources and committing within 10 seconds"
+        );
         std::thread::sleep(std::time::Duration::from_millis(1));
         shell.poll_pending_resource_preparation();
     }

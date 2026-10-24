@@ -100,6 +100,11 @@ fn assert_full_parity(
 
 #[test]
 fn scene_preparation_records_only_changed_nodes() {
+    if crate::isolate_resource_state_test(
+        "prepared_scene::retained_tests::scene_preparation_records_only_changed_nodes",
+    ) {
+        return;
+    }
     let _guard = crate::resource_state_test_lock();
     let engine = FrontendRenderEngine::new();
     for size in [16, 1024] {
@@ -147,6 +152,11 @@ fn scene_preparation_records_only_changed_nodes() {
 
 #[test]
 fn scene_cache_invalidates_external_paint_inputs() {
+    if crate::isolate_resource_state_test(
+        "prepared_scene::retained_tests::scene_cache_invalidates_external_paint_inputs",
+    ) {
+        return;
+    }
     let _guard = crate::resource_state_test_lock();
     let engine = FrontendRenderEngine::new();
     let mut list = RetainedDisplayList::default();

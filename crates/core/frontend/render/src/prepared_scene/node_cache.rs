@@ -178,6 +178,11 @@ mod tests {
 
     #[test]
     fn scene_node_cache_bounds_shared_resources_and_rejects_inflight_results() {
+        if crate::isolate_resource_state_test(
+            "prepared_scene::node_cache::tests::scene_node_cache_bounds_shared_resources_and_rejects_inflight_results",
+        ) {
+            return;
+        }
         let _guard = crate::resource_state_test_lock();
         let mut node = mesh_core_elements::WidgetNode::new("box");
         node.computed_style.background_color = mesh_core_elements::Color::WHITE;

@@ -289,6 +289,11 @@ end
 /// retained tree match a full rebuild every frame.
 #[test]
 fn geometry_patch_frames_scale_with_the_change() {
+    if crate::shell::component::tests::common::isolate_frame_test(
+        "shell::component::tests::invalidation::sparse_geometry::geometry_patch_frames_scale_with_the_change",
+    ) {
+        return;
+    }
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(320, 1100);
     for case in ["clean_column", "text_width", "box_width", "box_height_last"] {

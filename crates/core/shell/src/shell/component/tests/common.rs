@@ -1184,9 +1184,8 @@ pub(super) fn real_frontend_module_component(
             .into_iter()
             .flatten()
         {
-            let compiled =
-                compile_frontend_entrypoint(&manifest, &widget_dir, &contribution.entry)
-                    .expect("navigation item contribution should compile");
+            let compiled = compile_frontend_entrypoint(&manifest, &widget_dir, &contribution.entry)
+                .expect("navigation item contribution should compile");
             catalog.extension_point_entries.insert(
                 contribution_entry_key(&widget_id, &contribution.id),
                 compiled.into(),
@@ -1651,4 +1650,23 @@ impl<T: ShellComponent + ?Sized> PaintRaster for T {
         );
         result
     }
+}
+
+/// Resource revisions and asynchronous glyph completions can invalidate a frame
+/// between paints even when the fixture itself changes no resource state.
+pub(super) fn isolate_frame_test(test_name: &str) -> bool {
+    const CHILD_TEST: &str = "MESH_FRAME_TEST_CHILD";
+    if std::env::var(CHILD_TEST).as_deref() == Ok(test_name) {
+        return false;
+    }
+    let status = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test_name, "--nocapture"])
+        .env(CHILD_TEST, test_name)
+        .status()
+        .expect("run frame test in a child process");
+    assert!(
+        status.success(),
+        "isolated test {test_name} failed: {status}"
+    );
+    true
 }

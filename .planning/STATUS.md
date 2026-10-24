@@ -7,6 +7,10 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Backlog reliability batch complete.** Activation-test deadlines and process
+  isolation for cache/keyed-hover/geometry/text regressions pass parallel shell
+  and renderer suites. Live replay first-paint and commit accounting are next.
+
 - **Popup/dashboard frame isolation.** Tooltip and popover redraw isolation,
   timer patches during child lifecycle, transform-based meters/history/spectrum,
   and selective service fallback are implemented. Three release GPU captures
@@ -45,6 +49,4 @@ measurements live in [`log/`](log/README.md).
 
 - CPU glass dashboard open remains over budget; the dock gate remains noisy at
   its edge. Neither budget was changed by this work.
-- Parallel renderer/keyed-hover fixture isolation remains open; the suites above
-  ran serially. NVIDIA as compositor main device and other compositor imports
-  remain unchecked live.
+- NVIDIA as compositor main device and other compositor imports remain unchecked live.

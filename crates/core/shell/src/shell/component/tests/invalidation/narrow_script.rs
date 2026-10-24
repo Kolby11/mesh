@@ -534,6 +534,11 @@ fn service_template_with_inert_effect_still_patches_bindings() {
 
 #[test]
 fn equal_size_service_text_patches_skip_layout_and_match_full_paint() {
+    if crate::shell::component::tests::common::isolate_frame_test(
+        "shell::component::tests::invalidation::narrow_script::equal_size_service_text_patches_skip_layout_and_match_full_paint",
+    ) {
+        return;
+    }
     let theme = default_theme();
     for siblings in [16, 1024] {
         let mut patched = direct_audio_service_component(siblings, false, false);
