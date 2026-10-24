@@ -5,6 +5,43 @@ use mesh_core_elements::HandlerTarget;
 use mesh_core_elements::Prop;
 
 #[test]
+fn normalized_slider_numbers_do_not_patch_equivalent_text() {
+    for tag in ["slider", "input"] {
+        let component = mesh_core_component::parse_component(&format!(
+            "<template><{tag} value={{amount}} /></template>"
+        ))
+        .unwrap();
+        let store = MapStore(
+            [("amount".into(), serde_json::json!(1.5))]
+                .into_iter()
+                .collect(),
+        );
+        let mut tree = build_widget_tree_from_component(
+            &component,
+            &test_manifest(),
+            &mesh_core_theme::default_theme(),
+            240.0,
+            80.0,
+            None,
+            "root",
+            Some(&store),
+            &[],
+        );
+        let node = &mut tree.children[0];
+        node.attributes.insert(Prop::Value, "1.5000".into());
+        let patch = patch_template_bindings(node, &store, None);
+        assert_eq!(patch.changed(), tag != "slider");
+        let changed = MapStore(
+            [("amount".into(), serde_json::json!(0.25))]
+                .into_iter()
+                .collect(),
+        );
+        assert!(patch_template_bindings(node, &changed, None).changed());
+        assert_eq!(node.attributes.number(Prop::Value), Some(0.25));
+    }
+}
+
+#[test]
 fn event_handler_call_attrs_store_typed_args_not_json_handler_string() {
     let attrs = vec![Attribute {
         name: "onclick".into(),

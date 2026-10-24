@@ -10,7 +10,7 @@
         <text class="artist">{artist}</text>
         <row class="spectrum" aria-hidden="true">
             {#for bar in bars key={bar.key}}
-                <box class="spectrum-bar" style:height={bar.height} />
+                <box class="spectrum-bar" style:transform={bar.transform} />
             {/for}
         </row>
         <row class="progress">
@@ -88,7 +88,7 @@ effect(function()
         local level = math.clamp(tonumber(levels[index]) or 0, 0, 1)
         list[index] = {
             key = index,
-            height = tostring(math.max(4, math.floor(SPECTRUM_HEIGHT * level + 0.5))) .. "px",
+            transform = string.format("scaleY(%.6f)", math.max(4, math.floor(SPECTRUM_HEIGHT * level + 0.5)) / SPECTRUM_HEIGHT),
         }
     end
     bars = list
@@ -188,6 +188,9 @@ function onNext() media.next() end
 
     .spectrum-bar {
         width: 7px;
+        height: 44px;
+        transform-origin: 50% 100%;
+        transition: none;
         border-radius: 999px;
         background-image: var(--glass-meter-bar);
     }

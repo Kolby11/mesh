@@ -8,7 +8,7 @@
                         <text class="tile-value">{gauge.value}</text>
                     </row>
                     <column class="meter">
-                        <box class={"meter-fill meter-" .. gauge.id} style:height={gauge.fill} />
+                        <box class={"meter-fill meter-" .. gauge.id} style:transform={gauge.transform} />
                     </column>
                     <text class="tile-label">{gauge.label}</text>
                 </column>
@@ -21,7 +21,7 @@
             </row>
             <row class="history-bars" aria-hidden="true">
                 {#for bar in history key={bar.key}}
-                    <box class="history-bar" style:height={bar.height} />
+                    <box class="history-bar" style:transform={bar.transform} />
                 {/for}
             </row>
         </column>
@@ -66,7 +66,7 @@ local function meter(id, glyph, label, value, fraction)
         glyph = glyph,
         label = label,
         value = value,
-        fill = tostring(math.floor(METER_HEIGHT * math.clamp(fraction, 0, 1) + 0.5)) .. "px",
+        transform = string.format("scaleY(%.6f)", math.floor(METER_HEIGHT * math.clamp(fraction, 0, 1) + 0.5) / METER_HEIGHT),
     }
 end
 
@@ -94,7 +94,7 @@ effect(function()
         local sample = samples[#samples - HISTORY_POINTS + index] or 0
         points[index] = {
             key = index,
-            height = tostring(math.max(3, math.floor(HISTORY_HEIGHT * sample / 100 + 0.5))) .. "px",
+            transform = string.format("scaleY(%.6f)", math.max(3, math.floor(HISTORY_HEIGHT * math.clamp(sample / 100, 0, 1) + 0.5)) / HISTORY_HEIGHT),
         }
     end
     history = points
@@ -159,9 +159,11 @@ end)
 
     .meter-fill {
         width: 26px;
+        height: 92px;
+        transform-origin: 50% 100%;
         flex-shrink: 0;
         border-radius: 999px;
-        transition: height var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate);
+        transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate);
     }
 
     .meter-cpu { background-image: var(--glass-meter-cpu); }
@@ -204,11 +206,13 @@ end)
     }
 
     .history-bar {
+        height: 54px;
+        transform-origin: 50% 100%;
         flex-grow: 1;
         flex-basis: 0;
         border-radius: 3px;
         background-image: var(--glass-meter-bar);
-        transition: height var(--animation-duration-medium) var(--animation-curves-bezier-standard);
+        transition: transform var(--animation-duration-medium) var(--animation-curves-bezier-standard);
     }
 
     .unavailable {

@@ -138,6 +138,20 @@ compositor size replies resize content while preserving those paint reserves. Sm
 menus are embeddable `ui` modules with no surface geometry; only
 true top-level surfaces own `mesh.surface` placement.
 
+Tooltips that do not fit inside their owning surface are promoted to a child
+popup. Their enter animation repaints that popup independently; it does not
+invalidate the parent surface. Inline tooltips repaint their owning surface.
+The final animation sample is applied even when a tick arrives after its deadline.
+Promoted popover animation advances the shared component tree, but frames with
+no parent damage preserve the parent's pixels and complete GPU scene. Changes
+to the trigger or other parent content still repaint the parent normally.
+Covered binding writes, including timer updates, continue to patch retained nodes
+during child enter/exit transitions; lifecycle classes are restored and reapplied
+without forcing a template rebuild. Shape-stable service updates that miss
+binding coverage may reuse unaffected authored branches during child lifecycle;
+these fallback frames keep conservative retained reconciliation. Structural
+writes retain the rebuild path.
+
 ## 2. Sizing — CSS is the engine
 
 **Status: shipped.** Every surface and component is sized by CSS measurement

@@ -947,6 +947,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// The hovered tooltip while it is promoted to a popup rather than painted
     /// into this surface.
     tooltip_popup: Option<tooltip::TooltipPopup>,
+    tooltip_popup_handled_generation: Cell<Option<u64>>,
     /// An empty display list for the tooltip popup's frame: its paint pass
     /// clears the buffer and overlays the tooltip on that frame plan.
     tooltip_popup_display_list: RefCell<RetainedDisplayList>,
@@ -1454,6 +1455,7 @@ impl FrontendSurfaceComponent {
             tooltip_appeared_at: None,
             last_tooltip_damage: None,
             tooltip_popup: None,
+            tooltip_popup_handled_generation: Cell::new(None),
             tooltip_popup_display_list: RefCell::new(RetainedDisplayList::default()),
             runtimes: Arc::new(Mutex::new(HashMap::new())),
             instance_keys: RefCell::new(InstanceKeyInterner::default()),

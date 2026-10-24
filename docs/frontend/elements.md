@@ -125,6 +125,10 @@ Text inputs support `value`, `placeholder`, `disabled`, `readonly`, `required`, 
 <number-input value="{limit}" min="1" max="20" step="1" onchange={on_limit_change} />
 ```
 
+Numeric slider bindings treat an unchanged numeric value as a no-op even when
+its spelling differs, such as `0` and `0.0`. Text-input bindings retain their
+text comparison semantics.
+
 ## Choice Controls And Menus
 
 Phase 89 adds native behavior for the choice/menu controls that need distinct value or focus semantics: `select`, `checkbox`, `switch`, `radio-group`/`radio`, and `menu`. `segmented-control`, `menu-item`, `command-item`, `separator`, and `preference-row` remain configured source elements over existing runtime primitives until they need separate rendering or value behavior.
@@ -215,12 +219,17 @@ Both managed modes also:
 - close on Escape while focus is on the trigger or inside the popup, returning
   focus to the trigger;
 - close on a press outside trigger and popup, and when Tab moves focus out of
-  both while the pointer is not over them.
+  both while the pointer is not over them;
+- close when the compositor dismisses the popup (for example, when a grab ends),
+  so the next trigger press opens it again.
+
+A press is matched against the trigger at the press position, even when no
+pointer motion came before it.
 
 The controller never keeps its own copy of `open`. It writes a bare
 `open={variable}` binding in the owning component, then dispatches
 `openchange` with `{ open, reason }`, where `reason` is one of `hover`, `leave`,
-`trigger`, `keyboard`, `escape`, `outside` or `focus`. Any other `open`
+`trigger`, `keyboard`, `escape`, `outside`, `focus` or `dismiss`. Any other `open`
 expression is left alone, so `onopenchange` is then the only channel. Scripts
 may still write `open` directly; the controller picks the change up on the next
 frame.

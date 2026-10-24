@@ -185,6 +185,21 @@ impl Shell {
             {
                 continue;
             }
+            if visible && !self.components[index].component.wants_parent_render() {
+                let scale = self.presentation_engine.surface_scale(&surface_id);
+                match self.reconcile_child_surface_requests(index, &surface_id, &surface_id, scale)
+                {
+                    Ok(presented) => {
+                        any_component_presented |= presented;
+                        rendered_ready_component |= presented;
+                    }
+                    Err(ShellRunError::Component(error)) => {
+                        self.contain_component_failure(index, "build", &error);
+                    }
+                    Err(error) => return Err(error),
+                }
+                continue;
+            }
             let child_ready = self.components[index].children.iter().any(|child| {
                 let id = child.target.surface_id.as_str();
                 self.surface_is_effectively_visible(id)
@@ -1087,6 +1102,16 @@ impl Shell {
     /// repaint the whole surface.
     fn reconcile_scene_completions(&mut self) {
         for completion in self.presentation_engine.take_scene_completions() {
+            #[cfg(test)]
+            if let Some(capture) = self.profiling.capture.as_mut() {
+                capture.push(
+                    crate::shell::runtime::profiling::CapturedRecord::SceneCompletion {
+                        at: std::time::Instant::now(),
+                        surface_id: completion.surface_id.clone(),
+                        presented: completion.presented,
+                    },
+                );
+            }
             if completion.presented {
                 continue;
             }
@@ -1113,6 +1138,20 @@ impl Shell {
                                 && self.keyboard_focus_surface.as_deref()
                                     == Some(surface_id.as_str());
                             self.destroy_child_surface_at(index, child_index);
+                            if kind == ChildSurfaceKind::Popover {
+                                match self.components[index]
+                                    .component
+                                    .child_surface_dismissed(&node_key)
+                                {
+                                    Ok(emitted) => {
+                                        let origin = self.components[index].effect_origin();
+                                        self.enqueue_effects(origin.attribute(emitted));
+                                    }
+                                    Err(error) => {
+                                        self.contain_component_failure(index, "callback", &error);
+                                    }
+                                }
+                            }
                             if let Some(runtime) = self.components.get_mut(index) {
                                 if kind == ChildSurfaceKind::Popover {
                                     runtime.dismissed_child_surfaces.insert((kind, node_key));

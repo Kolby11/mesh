@@ -30,6 +30,8 @@ pub(super) enum DisclosureReason {
     Outside,
     /// Keyboard focus moved outside both trigger and popup.
     Focus,
+    /// The compositor dismissed the popup surface.
+    Dismiss,
 }
 
 impl DisclosureReason {
@@ -42,6 +44,7 @@ impl DisclosureReason {
             Self::Escape => "escape",
             Self::Outside => "outside",
             Self::Focus => "focus",
+            Self::Dismiss => "dismiss",
         }
     }
 }
@@ -469,6 +472,31 @@ impl FrontendSurfaceComponent {
             )?);
         }
         Ok(requests)
+    }
+
+    /// The compositor dismissed the child surface showing `node_key` (a
+    /// popover or its promoted wrapper); propose closing its popover so the next trigger
+    /// press opens it again instead of toggling a popup that is already gone.
+    pub(in crate::shell::component) fn disclosure_child_dismissed(
+        &mut self,
+        tree: &WidgetNode,
+        node_key: &str,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(popover_key) = find_node_by_key(tree, node_key)
+            .and_then(|node| {
+                if source_element_tag(node) == "popover" {
+                    Some(node)
+                } else {
+                    node.children.first()
+                }
+            })
+            .filter(|popover| source_element_tag(popover) == "popover" && popover_is_open(popover))
+            .and_then(WidgetNode::mesh_key)
+            .map(str::to_owned)
+        else {
+            return Ok(Vec::new());
+        };
+        self.set_disclosure_open(tree, &popover_key, false, DisclosureReason::Dismiss)
     }
 
     /// Close popovers whose hover intent expired.

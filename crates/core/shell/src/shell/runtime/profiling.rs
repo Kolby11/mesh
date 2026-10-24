@@ -236,6 +236,11 @@ struct BackendAccumulator {
 #[cfg(test)]
 #[derive(Debug, Clone)]
 pub(crate) enum CapturedRecord {
+    SceneCompletion {
+        at: Instant,
+        surface_id: String,
+        presented: bool,
+    },
     Stage {
         at: Instant,
         surface_id: String,

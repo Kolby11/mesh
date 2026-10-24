@@ -547,11 +547,11 @@ impl FrontendSurfaceComponent {
         height: u32,
         surface_css_props: &SurfaceCssProps,
     ) -> WidgetNode {
-        let previous = self.last_tree.take();
+        let mut previous = self.last_tree.take();
         let pending_service_nodes = self.pending_service_template_nodes.take();
         self.pending_service_binding_readers.clear();
-        let scope_is_safe = !self.surface_exiting
-            && !self.surface_entering
+        let root_lifecycle_settled = !self.surface_exiting && !self.surface_entering;
+        let scope_is_safe = root_lifecycle_settled
             && self.closing_child_keys.is_empty()
             && self.entering_child_keys.is_empty();
         let mut selective_rebuild_nodes = pending_service_nodes.clone().unwrap_or_default();
@@ -563,7 +563,7 @@ impl FrontendSurfaceComponent {
         // them before taking the dirty flags). Only a hook that actually wrote
         // a template input can invalidate nodes outside the service-derived
         // set, so gate on what the hooks did rather than on their existence.
-        let can_selectively_build = scope_is_safe
+        let can_selectively_build = root_lifecycle_settled
             && !self.template_patch_recovery_pending.get()
             && !selective_rebuild_nodes.is_empty()
             && self.selective_service_build_supported
@@ -571,6 +571,15 @@ impl FrontendSurfaceComponent {
         #[cfg(test)]
         let can_selectively_build = can_selectively_build && !self.force_full_template_build;
         let tree = if can_selectively_build {
+            // Reused branches carry the last frame's lifecycle markers. Rebuild
+            // finalization must capture their authored classes before reapplying them.
+            if !scope_is_safe && let Some(previous) = previous.as_mut() {
+                restore_lifecycle_classes(
+                    previous,
+                    self.last_frame_snapshot.as_ref(),
+                    &mut self.lifecycle_base_classes,
+                );
+            }
             self.build_tree_with_surface_css_props_inner(
                 theme,
                 width,

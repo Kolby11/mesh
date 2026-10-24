@@ -81,6 +81,9 @@ October log.
 
 ## Glass shell follow-ups (found 2026-10-20)
 
+- [ ] Gate shared-tree popup animation preparation by the targets that can
+      present; a ready but unchanged parent currently outruns child callbacks.
+
 - [ ] **Paint-time effects cannot reach the shell:** `mesh.shell.*` and published events
       from effects that settle during paint are lowered only by the next handler call.
 - [ ] **`corner-shape: scoop` gaps:** borders are not stroked along a scoop's curve, and

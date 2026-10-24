@@ -855,3 +855,105 @@ function render() label = "legacy" end
     assert!(rendered_text(&component).iter().any(|text| text == "setup"));
     assert!(!component.has_reactive_effects());
 }
+
+#[test]
+fn selective_service_fallback_preserves_child_lifecycle() {
+    let static_nodes = (0..128)
+        .map(|index| format!("<text>static {index}</text>"))
+        .collect::<String>();
+    let source = format!(
+        r#"
+<template><column><text>{{require('mesh.audio@>=1.0').percent}}</text>
+<popover open="true"><box class="panel"><text>Popup</text></box></popover>
+{static_nodes}</column></template>
+<style>
+.panel {{ width: 80px; height: 40px; }}
+.panel.mesh-surface-entering, .panel.mesh-surface-exiting {{ opacity: 0.4; }}
+</style>
+"#
+    );
+    let theme = default_theme();
+    let mut total_reused = 0;
+    for entering in [true, false] {
+        let make = || {
+            test_frontend_component_with_catalog(
+                &source,
+                audio_network_catalog(),
+                &["service.audio.read"],
+            )
+        };
+        let mut selective = make();
+        let mut full = make();
+        full.force_full_template_build = true;
+        let mut selective_pixels = PixelBuffer::new(640, 160);
+        let mut full_pixels = PixelBuffer::new(640, 160);
+        for (component, pixels) in [
+            (&mut selective, &mut selective_pixels),
+            (&mut full, &mut full_pixels),
+        ] {
+            let mut settings = component.settings.clone();
+            Arc::make_mut(&mut settings)
+                .set_namespace("shell", serde_json::json!({"motion":{"reduced":true}}));
+            component.apply_settings(&settings).unwrap();
+            prime_audio_component(component, &theme, pixels);
+            let key = component.child_surface_requests().remove(0).node_key;
+            if entering {
+                component.set_entering_child_keys([key].into_iter().collect());
+            } else {
+                component.set_closing_child_keys([key].into_iter().collect());
+            }
+            component
+                .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), pixels, 1.0)
+                .unwrap();
+            component.set_profiling_enabled(true);
+        }
+        for percent in [20, 21, 22] {
+            for (component, pixels) in [
+                (&mut selective, &mut selective_pixels),
+                (&mut full, &mut full_pixels),
+            ] {
+                // Exercise a coverage miss on every update, even after a build reseeds the index.
+                component.template_binding_index = Default::default();
+                component.last_template_build_reused_nodes = 0;
+                apply_audio_update(component, percent, false);
+                assert!(component.pending_service_template_nodes.is_some());
+                component
+                    .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), pixels, 1.0)
+                    .unwrap();
+            }
+            assert_eq!(selective_pixels.data(), full_pixels.data());
+            assert_eq!(rendered_text(&selective), rendered_text(&full));
+            let panel =
+                first_node_by_class(selective.last_tree.as_ref().unwrap(), "panel").unwrap();
+            assert_eq!(panel.computed_style.opacity, 0.4);
+            assert!(panel.class_tokens().iter().any(|class| class
+                == if entering {
+                    "mesh-surface-entering"
+                } else {
+                    "mesh-surface-exiting"
+                }));
+            total_reused += selective.last_template_build_reused_nodes;
+        }
+        for (component, pixels) in [
+            (&mut selective, &mut selective_pixels),
+            (&mut full, &mut full_pixels),
+        ] {
+            component.set_entering_child_keys(Default::default());
+            component.set_closing_child_keys(Default::default());
+            component
+                .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), pixels, 1.0)
+                .unwrap();
+            let panel =
+                first_node_by_class(component.last_tree.as_ref().unwrap(), "panel").unwrap();
+            assert!(
+                !panel
+                    .class_tokens()
+                    .iter()
+                    .any(|class| class.starts_with("mesh-surface-"))
+            );
+        }
+        assert_eq!(selective_pixels.data(), full_pixels.data());
+    }
+    eprintln!("MESH_PERF fallback updates=6 reused_authored_nodes={total_reused}");
+    assert!(total_reused >= 128 * 6);
+}

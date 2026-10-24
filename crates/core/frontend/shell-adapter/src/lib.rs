@@ -1656,6 +1656,12 @@ pub trait ShellComponent: Send {
     }
     fn tick(&mut self) -> Result<Vec<CoreRequest>, ComponentError>;
     fn wants_render(&self) -> bool;
+    /// Whether the parent surface needs painting, independently of child work.
+    fn wants_parent_render(&self) -> bool {
+        self.wants_render()
+    }
+    /// Discard child-only paint work when its target is unsupported or dismissed.
+    fn discard_child_surface_paint(&mut self, _node_key: &str) {}
     /// A paint-only frame, implying no script, layout, or style change.
     fn request_paint(&mut self) {}
     /// The shell drew pixels the component did not paint (debug overlays)
@@ -1919,6 +1925,14 @@ pub trait ShellComponent: Send {
     /// so the popover's own CSS transition resolves and advances through the
     /// normal per-node transition engine instead of a one-shot style snap.
     fn set_closing_child_keys(&mut self, _keys: std::collections::HashSet<String>) {}
+    /// The compositor dismissed the child surface for `node_key`. A component
+    /// owning an `open` state for it should propose closing it.
+    fn child_surface_dismissed(
+        &mut self,
+        _node_key: &str,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        Ok(Vec::new())
+    }
     /// Borrowed variant for hot reconciliation paths. Implementations can
     /// compare against their existing state before allocating an owned set.
     fn set_closing_child_keys_from_slice(&mut self, keys: &[&str]) {

@@ -147,7 +147,12 @@ impl GlassCatalog {
             .unwrap(),
         );
         let mut locale = mesh_core_locale::LocaleEngine::new("en");
-        for module in ["glass-bar", "glass-dock", "glass-dashboard", "glass-wallpapers"] {
+        for module in [
+            "glass-bar",
+            "glass-dock",
+            "glass-dashboard",
+            "glass-wallpapers",
+        ] {
             let path = root()
                 .join("modules/frontend")
                 .join(module)
@@ -669,7 +674,12 @@ fn picker_geometry_is_stable(width: u32, height: u32) {
     );
     for &(step, other_picker, other_focused) in &geometry[1..] {
         assert_eq!(
-            (other_picker.x, other_picker.y, other_picker.width, other_picker.height),
+            (
+                other_picker.x,
+                other_picker.y,
+                other_picker.width,
+                other_picker.height
+            ),
             (picker.x, picker.y, picker.width, picker.height),
             "{width}: picker geometry changed at step {step}"
         );
@@ -1467,7 +1477,11 @@ fn glass_first_open_profile() {
     let extent = SurfaceExtent::unpadded(width, height);
     let mut pixels = PixelBuffer::new(width, height);
     let mut component = catalog.mount("glass-dock");
-    update(&mut component, "mesh.apps", glass_apps_payload(10, installed));
+    update(
+        &mut component,
+        "mesh.apps",
+        glass_apps_payload(10, installed),
+    );
     settle_dock(&mut component, &theme, extent, &mut pixels);
     eprintln!(
         "glass-dock: {installed} installed apps, {} nodes",
@@ -1781,4 +1795,227 @@ fn prewarmed_glass_surface_first_show_paints_once() {
         "a prewarm presents nothing"
     );
     assert_eq!(harness.show(), RETAINED_SHOW);
+}
+
+#[test]
+fn glass_popup_animation_preserves_parent_scene() {
+    let theme = theme();
+    let extent = SurfaceExtent::unpadded(1920, 100);
+    let scale = mesh_core_render::FractionalScale::identity();
+    let mut total_parent_recordings = 0;
+    for trigger in ["glassCalendar", "glassControls"] {
+        let mut component = host("glass-bar");
+        component.set_profiling_enabled(true);
+        let mut canvas = SurfaceCanvas::Scene(
+            mesh_core_render::prepared_scene::SceneCanvas::new(1920, 100).unwrap(),
+        );
+        component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+        // Finish the bar's own startup keyframes before opening a popup.
+        for animation in component.keyframe_animations.values_mut() {
+            animation.started_at = Instant::now() - Duration::from_secs(2);
+        }
+        component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+        component.focused_key = Some(reference(&component, trigger));
+        component
+            .handle_input(
+                &theme,
+                1920,
+                100,
+                ComponentInput::KeyPressed {
+                    key: "Enter".into(),
+                    modifiers: Default::default(),
+                },
+            )
+            .unwrap();
+        component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+        let request = component.child_surface_requests().remove(0);
+        component.set_entering_child_keys([request.node_key.clone()].into_iter().collect());
+        component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+        component.set_entering_child_keys(Default::default());
+        component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+        // Trigger feedback lasts 180 ms; popup motion lasts 420 ms.
+        std::thread::sleep(Duration::from_millis(200));
+        component.request_paint();
+        component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+        component.take_present_damage();
+        let SurfaceCanvas::Scene(recording) = &mut canvas else {
+            unreachable!()
+        };
+        let mut previous = recording.snapshot(scale).unwrap();
+        let mut child_pixels =
+            PixelBuffer::new(request.content_size.0 + 40, request.content_size.1 + 40);
+        let mut previous_child = component.child_surface_paint_generation(&request.node_key);
+        let mut changed_child_frames = 0;
+        let mut parent_recordings = 0;
+        component.take_profiling_records();
+        for _ in 0..21 {
+            component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+            assert!(
+                component.take_present_damage().is_empty(),
+                "{trigger}: parent damage"
+            );
+            let SurfaceCanvas::Scene(recording) = &mut canvas else {
+                unreachable!()
+            };
+            let current = recording.snapshot(scale).unwrap();
+            parent_recordings +=
+                usize::from(!std::ptr::eq(previous.resources(), current.resources()));
+            previous = current;
+            let child = component.child_surface_paint_generation(&request.node_key);
+            changed_child_frames += usize::from(child != previous_child);
+            previous_child = child;
+        }
+        let paint_records = component
+            .take_profiling_records()
+            .into_iter()
+            .filter(|record| record.stage == mesh_core_debug::ProfilingStage::Paint)
+            .count();
+        assert_eq!(paint_records, parent_recordings);
+        component
+            .paint_child_surface_raster(&request.node_key, &mut child_pixels, 1.0, (20, 20), false)
+            .unwrap();
+        assert!(child_pixels.data().iter().any(|byte| *byte != 0));
+        assert!(
+            changed_child_frames > 0,
+            "{trigger}: popup must still animate"
+        );
+        eprintln!(
+            "MESH_PERF trigger={trigger} frames=21 parent_recordings={parent_recordings} changed_child_frames={changed_child_frames}"
+        );
+        total_parent_recordings += parent_recordings;
+        component.request_paint();
+        component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+        assert!(!component.take_present_damage().is_empty());
+        let SurfaceCanvas::Scene(recording) = &mut canvas else {
+            unreachable!()
+        };
+        assert!(!std::ptr::eq(
+            previous.resources(),
+            recording.snapshot(scale).unwrap().resources()
+        ));
+    }
+    assert_eq!(
+        total_parent_recordings, 0,
+        "child-only animation must preserve the parent's complete scene"
+    );
+}
+
+#[test]
+fn dashboard_meter_animation_preserves_layout() {
+    let theme = theme();
+    let set_motion = |component: &mut FrontendSurfaceComponent, reduced: bool| {
+        let mut settings = component.settings.clone();
+        Arc::make_mut(&mut settings)
+            .set_namespace("shell", serde_json::json!({"motion":{"reduced":reduced}}));
+        component.apply_settings(&settings).unwrap();
+    };
+    let mut component = host("glass-dashboard");
+    let extent = SurfaceExtent::unpadded(1920, 1080);
+    let mut canvas = SurfaceCanvas::Scene(
+        mesh_core_render::prepared_scene::SceneCanvas::new(1920, 1080).unwrap(),
+    );
+    set_motion(&mut component, true);
+    let payload = |value: u32| {
+        serde_json::json!({
+            "available":true, "cpu":value, "cpu_history":vec![value; 30],
+            "memory_used":20, "memory_total":100, "disk_used":20, "disk_total":100,
+            "temperature":40, "net_rx":0, "net_tx":0, "uptime":100,
+        })
+    };
+    update(&mut component, "mesh.system", payload(20));
+    component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+    set_motion(&mut component, false);
+    component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+    update(&mut component, "mesh.system", payload(80));
+    component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+    assert!(!component.transitions.is_empty(), "meter must animate");
+    component.set_profiling_enabled(true);
+    let mut layout_frames = 0;
+    for _ in 0..21 {
+        component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+        let snapshot = component.take_invalidation_snapshot().unwrap();
+        let tree = component.last_tree.as_ref().unwrap();
+        assert_eq!(
+            first_node_by_class(tree, "meter-cpu")
+                .unwrap()
+                .layout
+                .height,
+            92.0
+        );
+        assert_eq!(
+            first_node_by_class(tree, "history-bar")
+                .unwrap()
+                .layout
+                .height,
+            54.0
+        );
+        layout_frames += usize::from(
+            snapshot.node_visits["layout_sync"] > 0 || snapshot.node_visits["layout_write"] > 0,
+        );
+    }
+    eprintln!("MESH_PERF dashboard_meter frames=21 layout_frames={layout_frames}");
+    assert_eq!(
+        layout_frames, 0,
+        "meter animation must only change paint transforms"
+    );
+    set_motion(&mut component, true);
+    component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+    let tree = component.last_tree.as_ref().unwrap();
+    for (class, expected) in [("meter-cpu", 74.0 / 92.0), ("history-bar", 43.0 / 54.0)] {
+        let node = first_node_by_class(tree, class).unwrap();
+        assert!(
+            (node.computed_style.transform.scale_y - expected).abs() < 0.00001,
+            "{class}: {} != {expected}",
+            node.computed_style.transform.scale_y
+        );
+        assert_eq!(
+            node.computed_style.transform_origin.y,
+            mesh_core_elements::style::TransformOriginValue::Percent(100.0)
+        );
+    }
+}
+
+#[test]
+fn dashboard_spectrum_updates_preserve_layout() {
+    let theme = theme();
+    let mut component = host("glass-dashboard");
+    let mut settings = component.settings.clone();
+    Arc::make_mut(&mut settings)
+        .set_namespace("shell", serde_json::json!({"motion":{"reduced":true}}));
+    component.apply_settings(&settings).unwrap();
+    let extent = SurfaceExtent::unpadded(1920, 1080);
+    let mut canvas = SurfaceCanvas::Scene(
+        mesh_core_render::prepared_scene::SceneCanvas::new(1920, 1080).unwrap(),
+    );
+    update(
+        &mut component,
+        "mesh.visualizer",
+        serde_json::json!({"available":true,"active":true,"bars":vec![0.2;32]}),
+    );
+    component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+    component.set_profiling_enabled(true);
+    let mut layout_frames = 0;
+    for index in 0..21 {
+        let value = if index % 2 == 0 { 0.8 } else { 0.2 };
+        update(
+            &mut component,
+            "mesh.visualizer",
+            serde_json::json!({"available":true,"active":true,"bars":vec![value;32]}),
+        );
+        component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+        let snapshot = component.take_invalidation_snapshot().unwrap();
+
+        layout_frames += usize::from(
+            snapshot.node_visits["layout_sync"] > 0 || snapshot.node_visits["layout_write"] > 0,
+        );
+    }
+    eprintln!("MESH_PERF spectrum updates=21 layout_frames={layout_frames}");
+    assert_eq!(layout_frames, 0);
+    let bar = first_node_by_class(component.last_tree.as_ref().unwrap(), "spectrum-bar").unwrap();
+    assert_eq!(bar.layout.height, 44.0);
+    assert!((bar.computed_style.transform.scale_y - 35.0 / 44.0).abs() < 0.00001);
+    assert_eq!(
+        bar.computed_style.transform_origin.y,
+        mesh_core_elements::style::TransformOriginValue::Percent(100.0)
+    );
 }

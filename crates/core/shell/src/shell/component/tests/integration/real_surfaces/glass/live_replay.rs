@@ -3,10 +3,10 @@
 //! state. See "Live glass replay" in `docs/performance-profiling.md`.
 
 use super::*;
+use crate::shell::CoreRequest;
 use crate::shell::Shell;
 use crate::shell::replay_hooks::{ReplayHarness, ReplayStep};
 use crate::shell::runtime::profiling::CapturedRecord;
-use crate::shell::CoreRequest;
 use mesh_core_debug::ProfilingStage;
 use mesh_core_interaction::find_scrollable_at_with_limits;
 use mesh_core_presentation::WindowEvent;
@@ -412,7 +412,8 @@ impl Replay {
                         let Some((left, top, right, bottom)) = bounds else {
                             let found = first_node_with_ref(tree, &format!("app-{index}"));
                             fn refs(node: &WidgetNode, out: &mut Vec<String>) {
-                                if let Some(r) = node.attributes.get(mesh_core_elements::Prop::Ref) {
+                                if let Some(r) = node.attributes.get(mesh_core_elements::Prop::Ref)
+                                {
                                     out.push(r.to_string());
                                 }
                                 node.children.iter().for_each(|c| refs(c, out));
@@ -496,7 +497,8 @@ impl Replay {
                 }
             }
             Phase::DashboardClose => {
-                let payload = serde_json::json!({"available":true,"active":false,"bars":spectrum_bars(0)});
+                let payload =
+                    serde_json::json!({"available":true,"active":false,"bars":spectrum_bars(0)});
                 if !self.inject(shell, "mesh.visualizer", payload) {
                     return ReplayStep { wake_at: None };
                 }
@@ -966,3 +968,5 @@ fn live_glass_replay() {
         "live dock frames visited nodes outside the CPU fixture's frame classes"
     );
 }
+
+mod popup_validation;

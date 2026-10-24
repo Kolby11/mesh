@@ -158,8 +158,6 @@ impl FrontendSurfaceComponent {
             && self.pending_service_binding_readers.is_empty())
             || self.surface_exiting
             || self.surface_entering
-            || !self.closing_child_keys.is_empty()
-            || !self.entering_child_keys.is_empty()
             || self.template_patch_recovery_pending.get()
         {
             return false;

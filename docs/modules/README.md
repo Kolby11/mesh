@@ -42,7 +42,11 @@ a month calendar; the rightmost status button opens quick
 controls; the dock's search button opens the application launcher. The bar's
 dashboard and wallpaper buttons toggle those overlays, which close with Escape,
 their close button or a click outside the panel. The media card grows a
-spectrum strip while audio plays. Popups
+spectrum strip while audio plays. Dashboard system meters and CPU history bars
+keep fixed layout boxes and animate their bottom-anchored vertical scale, so
+fill motion does not require layout on each frame. The dashboard's 24 spectrum
+bars also keep fixed 44 px boxes and apply bottom-anchored scale directly from
+audio samples, retaining the 4 px minimum without queued height transitions. Popups
 support keyboard opening, Escape and outside dismissal through core disclosure.
 Control labels are available in English and Slovak. Audio and brightness use
 capability-gated providers; unavailable controls stay disabled. The full Settings

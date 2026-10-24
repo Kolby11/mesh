@@ -1403,7 +1403,17 @@ pub fn patch_template_bindings(
             &bindings.instance_key,
             composition,
         );
-        if !node.attributes.matches_value(target, &value) {
+        // Slider annotation canonicalizes numeric values to text. JSON's
+        // equivalent floating-point spelling must not manufacture a layout write.
+        let normalized_slider_value = node.tag == "slider"
+            && target.prop() == Some(Prop::Value)
+            && value.as_f64().is_some_and(|value| {
+                node.attributes
+                    .text(Prop::Value)
+                    .and_then(|stored| stored.parse::<f64>().ok())
+                    == Some(value)
+            });
+        if !normalized_slider_value && !node.attributes.matches_value(target, &value) {
             patch.change |= node.attributes.set_value(target.clone(), value);
         }
     }

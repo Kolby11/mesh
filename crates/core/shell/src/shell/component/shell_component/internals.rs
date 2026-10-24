@@ -517,6 +517,8 @@ impl FrontendSurfaceComponent {
             false,
             Some(&context),
         );
+        self.tooltip_popup_handled_generation
+            .set(Some(popup.paint_generation()));
         true
     }
 }

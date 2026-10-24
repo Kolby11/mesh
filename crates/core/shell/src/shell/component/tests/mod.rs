@@ -422,3 +422,168 @@ fn child_settings_resolution_workload() {
         }
     }
 }
+
+#[test]
+fn promoted_tooltip_fade_keeps_parent_clean_and_paints_final_frame() {
+    let mut component = common::test_frontend_component("<template><box /></template>");
+    component.take_dirty_for_paint();
+    let mut theme = mesh_core_theme::default_theme();
+    theme
+        .defaults_mut()
+        .components
+        .entry("tooltip".into())
+        .or_default()
+        .insert("animation".into(), "fade 200ms linear".into());
+    theme.keyframes.insert(
+        "fade".into(),
+        vec![
+            mesh_core_theme::ThemeKeyframeStop {
+                offset: 0.0,
+                easing: None,
+                declarations: [("opacity".into(), "0".into())].into_iter().collect(),
+            },
+            mesh_core_theme::ThemeKeyframeStop {
+                offset: 1.0,
+                easing: None,
+                declarations: [("opacity".into(), "1".into())].into_iter().collect(),
+            },
+        ],
+    );
+    component.tooltip_animation = tooltip::tooltip_animation_from_theme(&theme);
+    component.tooltip_visible = true;
+    component.tooltip_popup = Some(tooltip::TooltipPopup {
+        text: Arc::from("Firefox"),
+        element: (100.0, 30.0, 164.0, 94.0),
+        side: tooltip::PlacedSide::Top,
+        size: (120.0, 26.0),
+        gap: 8.0,
+        style: mesh_core_render::TooltipPaintStyle::DEFAULT_DARK,
+        font_family: "Inter".into(),
+        opacity: 0.0,
+        scale: 1.0,
+    });
+    let mut canvas = SurfaceCanvas::from(PixelBuffer::new(160, 60));
+    let key = tooltip::TOOLTIP_CHILD_KEY;
+    component
+        .paint_child_surface(key, &mut canvas, 1.0, (10, 10), false)
+        .unwrap();
+    assert!(!component.wants_render());
+    for elapsed in [50, 100, 250] {
+        component.tooltip_appeared_at = Some(Instant::now() - Duration::from_millis(elapsed));
+        assert!(component.wants_tick());
+        component.tick().unwrap();
+        assert!(component.wants_render());
+        assert!(!component.wants_parent_render());
+        let popup = component.tooltip_popup.as_ref().unwrap();
+        if elapsed < 200 {
+            assert!(popup.opacity > 0.0 && popup.opacity < 1.0);
+        } else {
+            assert_eq!(popup.opacity, 1.0);
+            assert!(!component.wants_tick());
+        }
+        component
+            .paint_child_surface(key, &mut canvas, 1.0, (10, 10), false)
+            .unwrap();
+        assert!(!component.wants_render());
+    }
+    component.tooltip_popup.as_mut().unwrap().opacity = 0.5;
+    assert!(component.wants_render());
+    component.discard_child_surface_paint(key);
+    assert!(!component.wants_render());
+    component.request_paint();
+    assert!(component.wants_parent_render());
+}
+
+#[test]
+fn inline_tooltip_fade_still_invalidates_parent() {
+    let mut component = common::test_frontend_component("<template><box /></template>");
+    component.take_dirty_for_paint();
+    component.tooltip_visible = true;
+    component.tooltip_appeared_at = Some(Instant::now() - Duration::from_secs(1));
+    component.tick().unwrap();
+    assert!(component.wants_parent_render());
+    assert!(!component.wants_tick());
+}
+
+#[test]
+fn timer_binding_patches_survive_child_popover_lifecycle() {
+    let mut rebuilds = 0;
+    for entering in [true, false] {
+        let mut component = common::test_frontend_component(
+            r#"
+<template><box><text>{counter}</text><popover open="true"><box class={"panel tick-" .. counter}><text>{counter}</text></box></popover></box></template>
+<script lang="luau">
+counter = 0
+task.spawn(function()
+    while true do
+        task.sleep(1000)
+        counter += 1
+    end
+end)
+</script>
+<style>
+box { width: 200px; height: 60px; }
+.panel { width: 80px; height: 40px; transition: opacity 1s linear; }
+.panel.mesh-surface-entering, .panel.mesh-surface-exiting { opacity: 0; }
+</style>
+"#,
+        );
+        let theme = mesh_core_theme::default_theme();
+        let extent = SurfaceExtent::unpadded(300, 100);
+        let mut canvas = SurfaceCanvas::from(PixelBuffer::new(300, 100));
+        component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+        let key = component.child_surface_requests().remove(0).node_key;
+        if entering {
+            component.set_entering_child_keys([key].into_iter().collect());
+        } else {
+            component.set_closing_child_keys([key].into_iter().collect());
+        }
+        component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+        component.set_profiling_enabled(true);
+        let mut phase_rebuilds = 0;
+        for tick in 1..=3 {
+            let due = component.next_script_task_deadline().unwrap();
+            component.run_due_script_tasks(due).unwrap();
+            component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+            let snapshot = component.take_invalidation_snapshot().unwrap();
+            let rebuilt = snapshot.node_visits["validation"] > 0;
+            phase_rebuilds += usize::from(rebuilt);
+            let panel = common::first_node_by_class(component.last_tree.as_ref().unwrap(), "panel")
+                .unwrap();
+            assert!(
+                panel
+                    .class_tokens()
+                    .iter()
+                    .any(|class| class == &format!("tick-{tick}"))
+            );
+            assert!(panel.class_tokens().iter().any(|class| class
+                == if entering {
+                    "mesh-surface-entering"
+                } else {
+                    "mesh-surface-exiting"
+                }));
+            if !rebuilt {
+                assert_eq!(snapshot.node_visits["validation"], 0);
+                assert_eq!(snapshot.patched_node_count, 3);
+            }
+        }
+        eprintln!("MESH_PERF entering={entering} ticks=3 rebuilds={phase_rebuilds}");
+        rebuilds += phase_rebuilds;
+        component.set_entering_child_keys(Default::default());
+        component.set_closing_child_keys(Default::default());
+        component.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+        let panel =
+            common::first_node_by_class(component.last_tree.as_ref().unwrap(), "panel").unwrap();
+        assert!(panel.class_tokens().iter().any(|class| class == "tick-3"));
+        assert!(
+            !panel
+                .class_tokens()
+                .iter()
+                .any(|class| class.starts_with("mesh-surface-"))
+        );
+    }
+    assert_eq!(
+        rebuilds, 0,
+        "bound timer writes must patch during child lifecycle"
+    );
+}

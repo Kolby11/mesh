@@ -8533,3 +8533,171 @@ counts above, passes after). Not measured live; no wall times were taken.
 
 **Validation.** Shell suite, serial: 1000 passed / 35 ignored; serial with
 `MESH_VERIFY_RETAINED=1`: 1003 passed / 35 ignored.
+
+## 2026-10-24 — isolate promoted tooltip fade redraws
+
+Area: shell component ticks and child-surface presentation.
+
+Promoted tooltip ticks sample opacity/scale into the retained popup and request
+child-only painting. The shell reconciles child targets without painting the
+parent when it has no other work. Inline tooltips continue to invalidate their
+owning surface. A terminal tick is retained past the animation deadline so the
+last sample cannot be stranded; unsupported/dismissed targets discard their
+pending paint generation. Existing user edits were preserved.
+
+**Validation.** Test profile (unoptimized + debuginfo), CPU raster: a 120×26
+tooltip in a 160×60 canvas, themed 200 ms opacity animation, sampled at 50, 100
+and 250 ms. `promoted_tooltip_fade_keeps_parent_clean_and_paints_final_frame`
+checks zero parent invalidations across those three ticks, pending child paint
+until each sample is drawn, and no remaining render/tick work after the final
+sample. It also checks discarded child work and independent parent resource
+invalidation. `inline_tooltip_fade_still_invalidates_parent` checks the inline
+path. Targeted tooltip and render suites passed. No before/after wall-time or
+live-compositor measurement was made; this records redraw correctness, not a
+measured latency speedup.
+
+## 2026-10-24 — preserve the bar scene during popup-only animation
+
+Area: component paint and prepared GPU scenes.
+
+Shared-tree popover animation already reports empty parent damage once the
+bar's own startup and trigger feedback settle. The scene path nevertheless
+started a fresh complete recording and replayed the whole parent selection on
+every frame. Empty-damage frames now open no canvas session, retain the complete
+parent scene, and emit no parent Paint profiling record. Style/layout, retained
+state, child requests and the popup animation still advance; explicit parent
+repaint, resource invalidation and nonempty damage retain complete recordings.
+
+**Measured structural work.** Test profile (unoptimized + debuginfo; scene
+identity/count proof, not a timing claim), shipped violet-glass calendar and
+controls on a 1920×100 glass bar, 58 parent display entries, 21 frames per popup.
+Startup keyframes are finished before opening; a 200 ms wait lets the trigger's
+180 ms feedback settle while the popup's 420 ms transition continues. Three
+baseline runs temporarily restoring unconditional scene recording each produced
+21–21 fresh parent scenes per popup despite zero parent damage. Three fixed
+runs produced 0–0, with changed child paint generations and nonempty child raster
+output. Gate: `glass_popup_animation_preserves_parent_scene`; it also asserts
+parent Paint-record counts and that explicit parent repaint replaces the scene.
+No GPU worker timing or live-compositor capture was taken.
+
+**Validation.** Glass integration, interaction/reflow (including fractional-scale
+scene/raster parity and explicit repaint), and shell render suites; touched Rust
+files pass rustfmt.
+
+## 2026-10-24 — timer patches through popover lifecycle; transform-based meters
+
+Area: retained template binding updates; shipped glass-dashboard stats.
+
+Covered binding writes no longer reject the patch path just because a child
+is entering or exiting. Retained restyle already restores authored classes and
+reapplies lifecycle markers, including when a binding overwrites a class. Root
+surface lifecycle, recovery and structural/uncovered expression guards remain.
+Dashboard system-meter fills and CPU-history bars now have fixed 92 px / 54 px
+layout boxes and bottom-anchored `scaleY` transitions. Value rounding, meter
+clamping and the history's 3 px minimum remain in the module.
+
+**Structural measurements.** Test profile (unoptimized + debuginfo; operation
+counts, not wall-time speedup claims), three runs before and after:
+
+- `timer_binding_patches_survive_child_popover_lifecycle`: real Luau sleeping
+  task, 300×100 surface, two bound text nodes and a bound popup-panel class,
+  three ticks each with child entering and child exiting keys. Before: 3–3
+  rebuild frames per phase; after: 0–0, three patched nodes per tick, zero
+  structural validation visits. Rebuild counts use validation work rather than
+  the nominal full-rebuild flag: the old fallback kept SCRIPT_NARROW while
+  rebuilding. Both phases preserve new authored classes, apply their lifecycle
+  marker, and remove it cleanly when the phase ends.
+- `dashboard_meter_animation_preserves_layout`: shipped dashboard with violet
+  glass, 1920×1080 scene canvas, CPU 20→80 and thirty history samples 20→80;
+  stable memory/disk/temperature values, 21 frames after the update paint.
+  Before: 21–21 frames with layout sync/write; after: 0–0. The gate verifies
+  fixed meter/history heights and bottom transform origin, and applies reduced
+  motion through the settings API to check the final quantized scales.
+
+**Validation.** Invalidation and disclosure suites, glass integration, targeted
+regressions and rustfmt for touched Rust files. No live-compositor or GPU-worker
+timing measured.
+
+## 2026-10-24 — spectrum transforms, selective popup fallback and live GPU proof
+
+Area: glass dashboard Player, frontend binding patches, child-lifecycle service
+fallback and the live replay harness.
+
+The 24 spectrum bars now retain 44 px layout boxes and set bottom-anchored
+`scaleY` directly from each sample, preserving their quantized 4 px minimum.
+There is no queued height transition. Conversion alone still performed layout
+on every sample: the Player's unchanged seek slider was rebound from its
+annotation-canonicalized `0` to the equivalent JSON numeric spelling `0.0`.
+Binding patches now compare numeric slider values numerically before writing;
+text inputs retain their text semantics. The frontend regression covers an
+equivalent numeric spelling and a real changed value.
+
+A shape-stable service fallback can now reuse unaffected authored branches
+while a child enters/exits. Prior lifecycle markers are stripped before reused
+branches reach rebuild finalization, which captures authored classes and
+reapplies the current markers. Root lifecycle, expression recovery, dynamic
+structure and conservative retained synchronization guards remain.
+`selective_service_fallback_preserves_child_lifecycle` forces a coverage miss on
+every service update and compares pixels, text, lifecycle opacity/classes and
+marker cleanup against forced full builds.
+
+**Structural A/B, three runs each.** Test profile (unoptimized + debuginfo;
+operation counts, not wall-time claims):
+
+- `dashboard_spectrum_updates_preserve_layout`: shipped dashboard, 1920×1080
+  scene canvas, 32 source values / 24 visible spectrum bars, 21 alternating
+  0.2/0.8 audio updates. Before: 21–21 layout frames; after: 0–0. The gate also
+  verifies fixed 44 px geometry, bottom origin and the final quantized scale.
+- `selective_service_fallback_preserves_child_lifecycle`: 640×160 raster,
+  128 static siblings and a popup, three updates per enter/exit phase. Before:
+  0–0 authored nodes reused across six updates; after: 786–786 (131 per update),
+  with full-build pixel and lifecycle parity. This narrows authored evaluation;
+  fallback finalization/retained reconciliation remains conservative.
+
+**Live GPU validation.** Release with `gpu`, thin LTO, one codegen unit,
+Hyprland eDP-1 2880×1800 at scale 1 / 120 Hz; AMD vendor 0x1002, device 0x15bf,
+renderD129 (0xe281), dmabuf format 0x34324241. Three fresh isolated processes:
+`profiles/popup-live/1706244`, `1715003`, `1718751` (the summary records the
+exact capture paths). Each opens/closes calendar and controls near bar timer
+deadlines, observes 2.2 s of idle clock ticks, injects six CPU updates 500 ms
+apart, then thirty spectrum updates at 33 ms. Config, IPC and state are private;
+layer namespaces use `.mesh-replay`. The focused harness waits for actual
+worker completions, captured independently of accepted scene submission.
+
+| Window / target | Render frames per run | Validation frames | Layout frames |
+| --- | --- | --- | --- |
+| Calendar opening / bar | 158–170 | 0–0 | 5–5 |
+| Calendar closing / bar | 22–26 | 0–0 | 4–4 |
+| Controls opening / bar | 139–156 | 0–0 | 5–5 |
+| Controls closing / bar | 25–26 | 0–0 | 4–4 |
+| Idle clock / bar | 2–2 | 0–0 | 2–2 |
+| Six CPU updates / dashboard | 231–239 | 0–0 | 6–6 |
+| Thirty spectrum updates / dashboard | 30–30 | 0–0 | 0–0 |
+
+There were 461–541 successful GPU worker commits per run, including commits
+from both child popups. Raw records and the checked aggregate are in
+`profiles/popup-live/summary.json`. These are final-path observations, not a
+live A/B latency speedup. The first probe ran outside the Nix shell and fell
+back because `libEGL.so` was unavailable; rerunning inside `nix develop`
+resolved the runtime library path. The earlier GPU probe after only the module
+transform conversion still had 30 spectrum layout frames; the numeric slider
+comparison removed those in all final captures.
+
+**Remaining finding.** A ready unchanged parent still advances shared-tree
+animation preparation while its child waits for a frame callback: calendar
+opening prepared the bar 158–170 times for 40–41 child commits, controls opening
+139–156 times for 39–44. Parent paints/commits are separate counts; focus/trigger
+feedback and clock changes legitimately paint the bar. Callback-aware shared-tree
+preparation is a new backlog item, not a claim of a completely idle parent.
+
+**Validation.** Invalidation (85), glass integration (16), interaction/reflow
+(18), frontend attribute tests (12), structural A/B gates and three successful
+live GPU replays. Touched Rust files pass rustfmt.
+
+## 2026-10-24 — capture-directory correction
+
+Area: evidence paths for the preceding spectrum/popup/live-GPU entry.
+
+The third final capture directory is `profiles/popup-live/1723245`, replacing
+`1718751` in that entry. `profiles/popup-live/summary.json` already contains all
+three correct paths. The measurements and validation results are unchanged.

@@ -693,10 +693,8 @@ impl ShellComponent for FrontendSurfaceComponent {
 
     fn wants_tick(&self) -> bool {
         let tooltip_delay_pending = self.hover_start.is_some() && !self.tooltip_visible;
-        let tooltip_fade_pending = self.tooltip_visible
-            && self
-                .tooltip_appeared_at
-                .is_some_and(|appeared| appeared.elapsed() < self.tooltip_fade_duration());
+        // The terminal sample still needs a tick if the deadline passed between wakes.
+        let tooltip_fade_pending = self.tooltip_visible && self.tooltip_appeared_at.is_some();
         tooltip_delay_pending
             || tooltip_fade_pending
             || self.next_script_task_deadline().is_some()
@@ -748,9 +746,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             const TOOLTIP_FADE_FRAME_INTERVAL: Duration = Duration::from_millis(16);
             let now = std::time::Instant::now();
             let fade_until = appeared + self.tooltip_fade_duration();
-            if fade_until > now {
-                return Some((now + TOOLTIP_FADE_FRAME_INTERVAL).min(fade_until));
-            }
+            return Some((now + TOOLTIP_FADE_FRAME_INTERVAL).min(fade_until));
         }
 
         None
@@ -802,10 +798,22 @@ impl ShellComponent for FrontendSurfaceComponent {
                 }
             }
         }
-        // Keep repainting while the tooltip is fading in.
-        if let Some(appeared) = self.tooltip_appeared_at {
-            if self.tooltip_visible && appeared.elapsed() < tooltip_fade_duration {
+        if let Some(appeared) = self.tooltip_appeared_at
+            && self.tooltip_visible
+        {
+            let elapsed = appeared.elapsed();
+            let sample = match &self.tooltip_animation {
+                Some(animation) if !self.motion_policy.reduced_motion => animation.sample(elapsed),
+                _ => tooltip::TooltipAnimationSample::FINISHED,
+            };
+            if let Some(popup) = self.tooltip_popup.as_mut() {
+                popup.opacity = sample.opacity;
+                popup.scale = sample.scale;
+            } else {
                 self.invalidate_paint();
+            }
+            if elapsed >= tooltip_fade_duration {
+                self.tooltip_appeared_at = None;
             }
         }
 
@@ -827,6 +835,14 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn wants_render(&self) -> bool {
+        self.wants_parent_render()
+            || (self.tooltip_visible
+                && self.tooltip_popup.as_ref().is_some_and(|popup| {
+                    self.tooltip_popup_handled_generation.get() != Some(popup.paint_generation())
+                }))
+    }
+
+    fn wants_parent_render(&self) -> bool {
         self.dirty
             || self.style_only_dirty
             || ((!self.transitions.is_empty() || self.has_active_keyframe_animation)
@@ -835,6 +851,16 @@ impl ShellComponent for FrontendSurfaceComponent {
             || !self.scroll_inertia.is_empty()
             || !self.closing_child_keys.is_empty()
             || !self.entering_child_keys.is_empty()
+    }
+
+    fn discard_child_surface_paint(&mut self, node_key: &str) {
+        if node_key == tooltip::TOOLTIP_CHILD_KEY {
+            self.tooltip_popup_handled_generation.set(
+                self.tooltip_popup
+                    .as_ref()
+                    .map(tooltip::TooltipPopup::paint_generation),
+            );
+        }
     }
 
     fn request_paint(&mut self) {
@@ -1375,7 +1401,8 @@ impl ShellComponent for FrontendSurfaceComponent {
             effective_damage.rect = bounding_damage_rect(&effective_damage.rects, surface_damage);
         }
         let complete_scene = canvas.is_scene();
-        if let SurfaceCanvas::Scene(scene) = canvas {
+        let has_parent_damage = !effective_damage.rects.is_empty();
+        if has_parent_damage && let SurfaceCanvas::Scene(scene) = canvas {
             let mut plan = self.retained_display_list.frame_paint_plan().clone();
             plan.inputs.surface_size = Some((paint_width, paint_height));
             plan.damage.logical = effective_damage.rects.clone().into();
@@ -1384,16 +1411,20 @@ impl ShellComponent for FrontendSurfaceComponent {
             plan.damage.full_surface = effective_damage.full_surface;
             scene.begin(&plan);
         }
-        let mut session = canvas.session();
+        // Shared-tree animation can change only a promoted child. Keep the
+        // parent's pixels and complete GPU scene when its damage is empty.
+        let mut session = has_parent_damage.then(|| canvas.session());
         let present_override = if complete_scene {
             None
         } else {
-            self.shift_scrolled_viewports(
-                &mut effective_damage,
-                &mut session,
-                scale,
-                current_tooltip_damage,
-            )
+            session.as_mut().and_then(|session| {
+                self.shift_scrolled_viewports(
+                    &mut effective_damage,
+                    session,
+                    scale,
+                    current_tooltip_damage,
+                )
+            })
         };
         let _paint_damage = if effective_damage.full_surface {
             Some(surface_damage)
@@ -1522,7 +1553,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let paint_started = std::time::Instant::now();
         let full_selection;
         let full_damage;
-        let (record_selection, record_damage) = if complete_scene {
+        let (record_selection, record_damage) = if complete_scene && has_parent_damage {
             full_selection = self
                 .retained_display_list
                 .select_paint_commands(Some(surface_damage), DisplayListRepaintPolicy::FullSurface);
@@ -1536,16 +1567,21 @@ impl ShellComponent for FrontendSurfaceComponent {
         } else {
             (&selected_paint, &effective_damage)
         };
-        let paint_metrics = self.paint_pixel_regions(
-            theme,
-            &mut session,
-            scale,
-            record_selection,
-            record_damage,
-            paint_bounding_rect,
-            tooltip.as_ref(),
-            current_tooltip_damage,
-        );
+        let paint_metrics = session
+            .as_mut()
+            .map(|session| {
+                self.paint_pixel_regions(
+                    theme,
+                    session,
+                    scale,
+                    record_selection,
+                    record_damage,
+                    paint_bounding_rect,
+                    tooltip.as_ref(),
+                    current_tooltip_damage,
+                )
+            })
+            .unwrap_or_default();
         self.advance_interaction_frame(mesh_core_interaction::InteractionFramePhase::PaintReady);
         self.retained_display_list.mark_painted();
         if effective_damage.full_surface {
@@ -1615,7 +1651,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             snapshot.paint.skia_glyph_cache_entries = paint_metrics.skia_glyph_cache_entries;
             snapshot.paint.skia_glyph_cache_capacity = paint_metrics.skia_glyph_cache_capacity;
         }
-        if self.profiling_enabled {
+        if self.profiling_enabled && has_parent_damage {
             mesh_core_debug::allocation::with_tracking_suspended(|| {
                 self.profiling_records
                     .borrow_mut()
@@ -2069,6 +2105,14 @@ impl ShellComponent for FrontendSurfaceComponent {
         let Some(node) = find_node_by_key(tree, node_key) else {
             return Ok(Vec::new());
         };
+        // Parent and popup share one hover path. A popup leave that arrives
+        // after the parent surface reported the pointer (a deferred hover
+        // bridge, or protocol events reordered around a grab) must not clear it.
+        if matches!(input, ComponentInput::PointerLeave)
+            && !self.hovered_event_path.iter().any(|key| key == node_key)
+        {
+            return Ok(Vec::new());
+        }
         let bounds = promoted_child_origin(node);
         // The promoted popover is laid out in-flow under its trigger (often extending
         // off the parent surface), but presented as a separate popup. Hit-testing the
@@ -2448,6 +2492,20 @@ impl ShellComponent for FrontendSurfaceComponent {
         }
         self.closing_child_keys = keys;
         self.invalidate_interaction_restyle();
+    }
+
+    fn child_surface_dismissed(
+        &mut self,
+        node_key: &str,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(tree) = self.last_tree.take() else {
+            return Ok(Vec::new());
+        };
+        let held = self.begin_held_tree_dispatch();
+        let result = self.disclosure_child_dismissed(&tree, node_key);
+        self.last_tree = Some(tree);
+        self.end_held_tree_dispatch(held);
+        result.map(|requests| self.record_frontend_host_effects(requests))
     }
 
     fn set_closing_child_keys_from_slice(&mut self, keys: &[&str]) {

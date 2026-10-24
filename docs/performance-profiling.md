@@ -205,6 +205,23 @@ patching/selective template builds in the spectrum profile for comparison.
 Use profiling-disabled runs for timing claims about
 instrumentation overhead.
 
+## Focused live GPU popup validation
+
+```bash
+nix develop -c cargo test -p mesh-core-shell --release --features gpu --lib live_gpu_popup_validation -- --ignored --nocapture --test-threads=1
+```
+
+This opt-in test requires a reachable compositor and the GPU scene worker. It
+uses the live replay's private config, state and IPC socket and separate layer
+namespace. Calendar and controls open and close near bar timer deadlines, then
+an idle clock window, six CPU updates and thirty spectrum updates are captured.
+The test waits for actual worker completions before leaving popup/dashboard
+opening phases. Raw stage, node-visit and scene-completion records plus window
+timestamps are written to ignored `profiles/popup-live/<pid>/capture.json`.
+A successful scene-completion record means the worker frame reached the
+compositor; `PresentCommit` timing alone can also describe accepted submission.
+Run the test inside `nix develop` so EGL can find the host vendor drivers.
+
 ## Live glass replay
 
 ```bash

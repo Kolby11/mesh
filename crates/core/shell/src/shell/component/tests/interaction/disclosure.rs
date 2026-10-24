@@ -327,6 +327,83 @@ fn click_mode_toggles_on_the_trigger_and_closes_on_an_outside_press() {
     assert_eq!(last_reason(&component), "outside");
 }
 
+fn click_at(component: &mut FrontendSurfaceComponent, (x, y): (f32, f32)) {
+    for pressed in [true, false] {
+        input(
+            component,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+                pressed,
+            },
+        );
+    }
+}
+
+/// A compositor can deliver a press without a preceding motion, e.g. after a
+/// popup grab ends with the pointer resting on the trigger.
+#[test]
+fn a_trigger_press_without_prior_motion_still_toggles() {
+    let mut component = host(&disclosure_popover("click"));
+    let trigger = center_of(&component, "trigger");
+    hover(&mut component, "trigger");
+    input(&mut component, ComponentInput::PointerLeave);
+
+    click_at(&mut component, trigger);
+    assert!(is_open(&component));
+    assert_eq!(last_reason(&component), "trigger");
+}
+
+/// The popup and its parent share one hover path; a late leave from the
+/// popup must not erase the hover the parent surface reported since.
+#[test]
+fn a_popup_leave_keeps_the_parent_hover_path() {
+    let mut component = host(&disclosure_popover("click"));
+    let trigger = center_of(&component, "trigger");
+    hover(&mut component, "trigger");
+    click_at(&mut component, trigger);
+    assert!(is_open(&component));
+
+    let inner = popup_center_of(&component, "inner");
+    popup_input(
+        &mut component,
+        ComponentInput::PointerMove {
+            x: inner.0,
+            y: inner.1,
+        },
+    );
+    hover(&mut component, "trigger");
+    popup_input(&mut component, ComponentInput::PointerLeave);
+    let trigger_key = class_key(&component, "trigger");
+    assert!(
+        component.hovered_event_path.contains(&trigger_key),
+        "{:?}",
+        component.hovered_event_path
+    );
+}
+
+#[test]
+fn a_compositor_dismissal_closes_the_disclosure() {
+    let mut component = host(&disclosure_popover("click"));
+    let trigger = center_of(&component, "trigger");
+    hover(&mut component, "trigger");
+    click_at(&mut component, trigger);
+    let node_key = component.child_surface_requests()[0].node_key.clone();
+
+    component.child_surface_dismissed(&node_key).unwrap();
+    repaint(&mut component);
+    assert!(!is_open(&component));
+    assert_eq!(
+        script_value(&component, "open"),
+        Some(serde_json::json!(false))
+    );
+    assert_eq!(last_reason(&component), "dismiss");
+
+    click_at(&mut component, trigger);
+    assert!(is_open(&component), "the next trigger press reopens it");
+}
+
 #[test]
 fn an_open_popover_expands_its_trigger_and_hides_its_tooltip() {
     let mut component = host(&disclosure_popover("hover"));

@@ -7,6 +7,14 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Popup/dashboard frame isolation.** Tooltip and popover redraw isolation,
+  timer patches during child lifecycle, transform-based meters/history/spectrum,
+  and selective service fallback are implemented. Three release GPU captures
+  confirm zero bar validation during popup/timer windows, zero spectrum layout,
+  and six layout frames for six CPU updates. Evidence in
+  `profiles/popup-live/summary.json` and the performance log. Live captures also
+  found shared-tree preparation outrunning child callbacks; it is in the backlog.
+
 - **Glass first open.** File icons and thumbnails no longer rasterize on the
   frame; GPU scenes draw shadows and rounded gradients natively; showing a
   hidden surface restyles its retained tree and paints once, after configure;
@@ -28,7 +36,8 @@ measurements live in [`log/`](log/README.md).
 - P2 remainder: layout write-back and overflow annotation still visit every child
   of a re-laid-out parent; fold `seed_projection` into full writes.
 - D1: handler sync still converts every compound global (~1 ms for 1,024 items).
-- Correct live replay injection, namespace isolation and GPU first-commit timing.
+- Correct first-state injection and GPU first-commit timing in the full replay;
+  the focused popup replay records actual worker completions.
 - Measure glass first open live (picker over IPC, launcher by hand).
 - Continue glass raster work and the in-surface blur engine after frame-pipeline work.
 

@@ -115,12 +115,18 @@ impl Shell {
         let mut any_presented = false;
         for request in &requests {
             if !child_kind_supported(request.kind, popup_supported, window_supported) {
+                self.components[index]
+                    .component
+                    .discard_child_surface_paint(&request.node_key);
                 continue;
             }
             if self.components[index]
                 .dismissed_child_surfaces
                 .contains(&(request.kind, request.node_key.clone()))
             {
+                self.components[index]
+                    .component
+                    .discard_child_surface_paint(&request.node_key);
                 continue;
             }
             let existing_child = self.components[index]

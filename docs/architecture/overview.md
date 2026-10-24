@@ -90,7 +90,12 @@ reconcile the full retained tree before publishing the frame.
 Retained restyles sample the exact restyled and registered animation nodes;
 previous transition values come from immutable frame records. Child lifecycle
 markers retain and restore their base classes, including when bindings write
-before paint. Display ancestors use retained paths, walking a shared path
+before paint. Child enter/exit transitions leave covered binding writes on the
+patch path, so timer ticks do not rebuild the owning surface. A shape-stable
+service update that misses binding coverage may still reuse clean authored
+branches during child lifecycle. Reuse strips prior lifecycle markers before
+rebuild finalization captures the authored classes; retained synchronization
+remains conservative on these fallback frames. Display ancestors use retained paths, walking a shared path
 prefix once. Stable text, semantic and local geometry changes replace
 ordinary node commands through a bounded persistent command tree, without
 rebuilding sibling lists, and re-collect only their own display entries.
@@ -102,6 +107,12 @@ that define a descendant's clip or transform use subtree rebuilds.
 Text-only binding patches also retain focus scopes, disclosures and interaction
 targets when all dirty paths preserve styles, state, geometry and non-text
 attributes. Other input changes keep the ordinary reconciliation path.
+Promoted tooltip animation ticks update only their popup paint generation;
+child-only render work reconciles and paints child targets without painting the
+parent. Inline tooltip animation still invalidates the parent surface.
+Shared-tree popover animation still advances style and layout; when its parent
+damage is empty, painting opens no canvas session and retains the parent's
+complete GPU scene. Only damaged targets record and draw pixels.
 Child-surface requests
 retain dependencies on trigger geometry, ancestor policy and descendant paint
 extents, and refresh from the finalized dirty set. Identity/element validation
@@ -115,7 +126,8 @@ behind them serve CPU raster only.
 An icon lookup whose job also finds nothing is remembered for the resource
 revision and repaints nothing.
 Showing a hidden surface restyles its retained tree rather than rebuilding it,
-and a frame requested with nothing dirty repaints from the retained tree.
+and a frame requested with nothing dirty reuses the retained tree, drawing
+only when there is pixel damage.
 A re-shown layer surface whose content is already measured sends its configure
 at once and paints a single frame after the compositor answers; top-level
 surfaces open straight into their resting styles, while promoted popups play

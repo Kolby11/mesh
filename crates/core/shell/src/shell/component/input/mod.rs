@@ -197,14 +197,32 @@ impl FrontendSurfaceComponent {
         tree: &WidgetNode,
         input: ComponentInput,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
-        if let Some(requests) = self.primitive_input(tree, &input)? {
+        let mut requests = Vec::new();
+        // Compositors may deliver a press with no motion since the surface
+        // regained pointer focus (a popup grab ending under a resting
+        // pointer). Hover-driven state such as the disclosure trigger must
+        // then follow the press position rather than the last motion.
+        if let ComponentInput::PointerButton {
+            x,
+            y,
+            pressed: true,
+            ..
+        } = input
+            && (self.hovered_event_path.is_empty() || self.hovered_pos != (x, y))
+        {
+            requests.extend(
+                self.handle_component_input_with_tree(tree, ComponentInput::PointerMove { x, y })?,
+            );
+        }
+        if let Some(primitive) = self.primitive_input(tree, &input)? {
+            requests.extend(primitive);
             return Ok(requests);
         }
         if !self.disclosures.has_entries() {
-            return self.dispatch_component_input_with_tree(tree, input);
+            requests.extend(self.dispatch_component_input_with_tree(tree, input)?);
+            return Ok(requests);
         }
         let primary = mesh_core_presentation::PRIMARY_POINTER_BUTTON;
-        let mut requests = Vec::new();
         let mut moved_focus = false;
         match &input {
             ComponentInput::PointerButton {
