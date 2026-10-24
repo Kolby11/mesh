@@ -76,9 +76,6 @@ October log.
       `overflow: hidden` clips descendants to the rounded shape, not the scooped one ([04 §12.1](spec/04-styling.md#121-corner-shapes-corner-shape)).
 - [ ] **Retire the tooltip overlay reserve:** tooltips that leave their surface are now
       `xdg_popup`s, so the 352×200 reserve every layer surface paints could go; measure buffer/damage savings first.
-- [ ] **Component styles leak across a surface:** every component's `<style>` joins one
-      source-ordered cascade, so a parent's or sibling's `.pill` overrode `status.mesh`'s
-      `.pill.battery`. Decide per-component scoping (and migrate modules) or document the global model.
 - [ ] **Settings theme switch may not repaint:** reported 2026-10-21 as needing a tab change; not
       reproduced on `1d50170a` (layer and window roles, file and click paths). Capture a repro.
 - [ ] **First paint answers container queries against the 1px stand-in:** the glass bar starts

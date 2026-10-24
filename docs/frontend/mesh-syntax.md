@@ -1004,6 +1004,15 @@ standard easing keywords plus `cubic-bezier(...)`. `transform` parses
 `translate(...)`, `scale(...)`, and `rotate(...)`, but only translation is
 painted and hit-tested today.
 
+Component `<style>` selectors share one cascade across the surface's component
+tree, including local/imported components and extension-point contributions.
+They can match sibling and parent nodes. Prefix internal classes with a component
+or module name (for example `.glass-status-battery`) instead of reusing generic
+names such as `.pill`. Adding selector atoms does not increase priority: MESH
+applies matching rules in source order without CSS specificity. A popup promoted
+from this tree keeps the same stylesheet rules. See the
+[stylesheet boundary](../spec/04-styling.md#61-selector-support--cascade-order).
+
 Theme-driven component defaults resolve before local stylesheet rules. The
 effective order is documented in [`../spec/04-styling.md`](../spec/04-styling.md).
 

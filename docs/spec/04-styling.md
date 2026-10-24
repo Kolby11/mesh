@@ -345,6 +345,21 @@ patches, including hover-handler writes, target the changed binding nodes throug
 retained paths; unrelated items do not add style-resolution work. Runtime style
 diagnostics reuse the resolved set even across intervening animation frames.
 
+**Shipped stylesheet boundary:** component `<style>` rules share the owning
+surface's cascade. Rules collected from the root, local components, imported
+component modules and extension-point contributions can match any node in that
+surface's component tree. A `.mesh` file does not introduce an automatic selector
+scope. Promoting part of the same tree to a popup keeps that cascade.
+
+Use component- or module-prefixed class names on the target elements, such as
+`.glass-status-battery`, to keep internal rules distinct. A generic `.pill` in
+one component can restyle a sibling's `.pill`; `.pill.battery` offers no
+specificity protection against a later matching rule. Component boundaries and
+import order should not be used to contain a selector. Shared visual overrides
+should use the declared theme hooks (§4) or props. Module theme defaults retain
+their declared module scope; the shared boundary here describes authored
+`<style>` selectors.
+
 **Shipped:** component memo entries retain pre-animation styles. Reuse checks
 the theme, rule-index revision, component props, container dimensions, inherited
 values and annotated node inputs before skipping a clean subtree. Lifecycle
