@@ -8701,3 +8701,30 @@ Area: evidence paths for the preceding spectrum/popup/live-GPU entry.
 The third final capture directory is `profiles/popup-live/1723245`, replacing
 `1718751` in that entry. `profiles/popup-live/summary.json` already contains all
 three correct paths. The measurements and validation results are unchanged.
+
+## 2026-10-24 — Align live replay and CPU fixture animation timing
+
+On main after `d4604548` · area: replay gate methodology
+
+The embedded CPU fixture previously slept 16 ms after each paint, stretching
+tile dwells by raster time, while live input crossed tiles roughly every 100 ms.
+It measured only a warmed second sweep against the live shell's first sweep.
+Both now use one absolute-time schedule: ten pinned apps / 150 installed apps,
+20 tile crossings over two seconds, six pointer positions per 100 ms dwell,
+and the same out-and-back route. Late input samples coalesce to the current
+position. CPU sampling uses absolute 16 ms ticks; live paint follows compositor
+callbacks. Both warm up, leave and settle before measuring.
+
+**Validated.** Release, GPU-feature shell binary, three fresh live GPU processes
+and three fresh forced-CPU processes on the available Wayland compositor. All
+six pass the unchanged per-class/per-pass maximum comparison with zero
+`live_dock_visit_outliers`. GPU windows contain 217–239 measured frames; CPU
+windows contain 154–156. The aligned CPU envelope samples seven overlapping
+animation nodes instead of six. The previous single-process capture after
+`202fbb9a` recorded 51 outliers; earlier repeated failures are in the October 21
+live-attribution entry. No runtime speedup or latency comparison is claimed,
+and no D9 budget was changed.
+
+The pure schedule test covers late samples, dwell deadlines, turnaround and end
+bounds. Debug GPU-feature shell suite: 1,017 passed / 36 ignored. Raw logs are
+under ignored `profiles/backlog-2026-10-24/aligned-*`.

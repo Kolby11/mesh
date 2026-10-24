@@ -31,8 +31,6 @@ other performance work. Evidence, the Qt Quick / GTK4 comparison, exit
 criteria and the items folded in here:
 [design](../.planning/todos/pending/2026-10-21-change-proportional-pipeline.md).
 
-- [ ] GPU-enabled live replay exceeds the CPU fixture's animation visit envelope; align the
-      workloads' animation timing before treating that envelope as a GPU structural gate.
 - [ ] **P2:** Geometry patches still visit every child of a re-laid-out parent in layout
       write-back and overflow annotation (the order of Taffy's flex pass); display patches
       rebuild under layer/scrollbar ancestors, scroll viewports and boxes that clip or scale children.
@@ -111,8 +109,6 @@ tracking, validation and scheduling.
       import bound for the whole surface, so a service update invalidates every
       memoized sibling component; settings keeps `pcall(require)` on
       `mesh.audio` and `mesh.debug` to avoid it. Bind imports per component.
-- [ ] Plain `.luau` libraries shareable between modules (`require` of a library
-      export); helpers such as volume-icon thresholds exist in three copies.
 - [ ] `self` at script top level, plus event forwarding in markup
       (`onpointerenter={self.PopoverEnter}`), replacing `init` captures and
       one-line forwarding handlers.

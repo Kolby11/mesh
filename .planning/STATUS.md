@@ -7,6 +7,12 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Replay timing alignment complete.** CPU and live dock sweeps share absolute
+  input deadlines and a warm-up/leave/settle sequence. Three GPU and three CPU
+  release replays pass with zero visit outliers.
+- **Full-layout projection in flight.** The write records fit extents and cached
+  geometry in one traversal; correctness checks pass, controlled timings pending.
+
 - **Backlog reliability batch complete.** Activation-test deadlines and process
   isolation for cache/keyed-hover/geometry/text regressions pass parallel shell
   and renderer suites. Replay boot-state and successful GPU commit accounting
@@ -42,8 +48,6 @@ measurements live in [`log/`](log/README.md).
 - P2 remainder: layout write-back and overflow annotation still visit every child
   of a re-laid-out parent; fold `seed_projection` into full writes.
 - D1: handler sync still converts every compound global (~1 ms for 1,024 items).
-- Align GPU live replay animation timing with the CPU structural envelope; the
-  latest release GPU replay reached commits but still failed that envelope.
 - Measure glass first open live (picker over IPC, launcher by hand).
 - Continue glass raster work and the in-surface blur engine after frame-pipeline work.
 

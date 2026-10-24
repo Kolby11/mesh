@@ -25,6 +25,55 @@ const DOCK_TILE_MOVES: u32 = 6;
 const DOCK_TILE_DWELL: Duration = Duration::from_millis(100);
 const DOCK_SWEEP_TILES: u32 = 20;
 const MOVE_INTERVAL: Duration = Duration::from_millis(16);
+const DOCK_SWEEP_DURATION: Duration = DOCK_TILE_DWELL.saturating_mul(DOCK_SWEEP_TILES);
+
+struct DockMotion {
+    index: u32,
+    tile: usize,
+    jitter: f32,
+    next_at: Duration,
+}
+
+fn dock_motion(elapsed: Duration) -> Option<DockMotion> {
+    if elapsed >= DOCK_SWEEP_DURATION {
+        return None;
+    }
+    let tile_step = (elapsed.as_nanos() / DOCK_TILE_DWELL.as_nanos()) as u32;
+    let within_tile = elapsed - DOCK_TILE_DWELL * tile_step;
+    let move_step =
+        ((within_tile.as_nanos() / MOVE_INTERVAL.as_nanos()) as u32).min(DOCK_TILE_MOVES - 1);
+    let index = tile_step * DOCK_TILE_MOVES + move_step;
+    let step = tile_step as usize % 18;
+    let tile = if step < 10 { step } else { 18 - step };
+    let next_at = if move_step + 1 == DOCK_TILE_MOVES {
+        DOCK_TILE_DWELL * (tile_step + 1)
+    } else {
+        DOCK_TILE_DWELL * tile_step + MOVE_INTERVAL * (move_step + 1)
+    };
+    Some(DockMotion {
+        index,
+        tile,
+        jitter: move_step as f32 * 0.5,
+        next_at,
+    })
+}
+
+#[test]
+fn dock_motion_keeps_absolute_dwell_and_coalesces_late_moves() {
+    let start = dock_motion(Duration::ZERO).unwrap();
+    assert_eq!((start.index, start.tile, start.jitter), (0, 0, 0.0));
+    let late = dock_motion(Duration::from_millis(175)).unwrap();
+    assert_eq!((late.index, late.tile, late.jitter), (10, 1, 2.0));
+    assert_eq!(late.next_at, Duration::from_millis(180));
+    let turnaround = dock_motion(Duration::from_millis(1050)).unwrap();
+    assert_eq!(turnaround.tile, 8);
+    assert_eq!(
+        dock_motion(Duration::from_millis(1999)).unwrap().next_at,
+        DOCK_SWEEP_DURATION
+    );
+    assert!(dock_motion(DOCK_SWEEP_DURATION).is_none());
+}
+
 const SPECTRUM_INTERVAL: Duration = Duration::from_millis(33);
 const SPECTRUM_UPDATES: u32 = 120;
 const SCROLL_FRAMES: u32 = 60;
@@ -218,6 +267,8 @@ fn scroll_point(tree: &mesh_core_elements::WidgetNode) -> Option<(f32, f32)> {
 enum Phase {
     Boot,
     Clock,
+    DockWarmup,
+    DockSettle,
     DockSweep,
     DashboardOpen,
     DashboardSpectrum,
@@ -468,38 +519,60 @@ impl Replay {
                         tiles.push(((left + right) / 2.0, (top + bottom) / 2.0));
                     }
                     self.tiles = tiles;
-                    self.enter(Phase::DockSweep, now + GAP);
+                    self.enter(Phase::DockWarmup, now + GAP);
                 }
             }
-            Phase::DockSweep => {
-                if self.counter >= DOCK_SWEEP_TILES * DOCK_TILE_MOVES {
+            Phase::DockWarmup | Phase::DockSweep => {
+                if let Some(motion) = dock_motion(now - self.phase_started) {
+                    if self.counter <= motion.index {
+                        let (x, y) = self.tiles[motion.tile];
+                        shell
+                            .pending_wayland_events
+                            .push_back(WindowEvent::PointerMove {
+                                surface_id: self.surface("glass-dock"),
+                                x: x + motion.jitter,
+                                y,
+                            });
+                        self.counter = motion.index + 1;
+                    }
+                    self.next_at = self.phase_started + motion.next_at;
+                } else {
                     shell
                         .pending_wayland_events
                         .push_back(WindowEvent::PointerLeave {
                             surface_id: self.surface("glass-dock"),
                         });
-                    self.close_window("dock_hover", now);
-                    self.enter(Phase::DashboardOpen, now + GAP);
-                } else if now >= self.next_at {
-                    // Out and back across the ten pinned tiles, crossing to a
-                    // neighbor every sixth move like the CPU fixture.
-                    let step = (self.counter / DOCK_TILE_MOVES) as usize % 18;
-                    let tile = if step < 10 { step } else { 18 - step };
-                    let (x, y) = self.tiles[tile.min(9)];
-                    let jitter = (self.counter % DOCK_TILE_MOVES) as f32 * 0.5;
-                    shell
-                        .pending_wayland_events
-                        .push_back(WindowEvent::PointerMove {
-                            surface_id: self.surface("glass-dock"),
-                            x: x + jitter,
-                            y,
-                        });
-                    self.counter += 1;
-                    self.next_at = if self.counter % DOCK_TILE_MOVES == 0 {
-                        now + DOCK_TILE_DWELL.saturating_sub(MOVE_INTERVAL * (DOCK_TILE_MOVES - 1))
+                    if self.phase == Phase::DockWarmup {
+                        self.enter(Phase::DockSettle, now);
+                        self.next_at = now + QUIET;
                     } else {
-                        now + MOVE_INTERVAL
-                    };
+                        self.close_window("dock_hover", now);
+                        self.enter(Phase::DashboardOpen, now + GAP);
+                    }
+                }
+            }
+            Phase::DockSettle => {
+                let surface = &self.surface_ids["glass-dock"];
+                let last_paint = self
+                    .records(shell)
+                    .iter()
+                    .rev()
+                    .find_map(|record| match record {
+                        CapturedRecord::Stage {
+                            at,
+                            surface_id,
+                            stage: ProfilingStage::TotalSurfaceRender,
+                            ..
+                        } if surface_id == surface => Some(*at),
+                        _ => None,
+                    })
+                    .unwrap_or(self.phase_started);
+                if now.saturating_duration_since(last_paint) >= QUIET {
+                    self.enter(Phase::DockSweep, now + GAP);
+                } else if now - self.phase_started > BOOT_LIMIT {
+                    return self.fail(shell, "dock warm-up did not settle".into());
+                } else {
+                    self.next_at = last_paint + QUIET;
                 }
             }
             Phase::DashboardOpen => {
@@ -858,42 +931,39 @@ fn envelope(frames: &[BTreeMap<String, u64>]) -> Envelope {
     envelope
 }
 
-/// The CPU `glass_dock_hover_animation_profile` workload: per-paint visit maps
-/// of the steady second run, the frames the live replay must stay within.
+/// CPU counterpart of the live sweep, with the same wall-clock input deadlines.
+/// Raster work may drop sampling frames, but it cannot stretch the tile dwell.
 fn cpu_dock_fixture_visits() -> Vec<BTreeMap<String, u64>> {
     const WIDTH: u32 = 2880;
     const HEIGHT: u32 = 180;
-    const FRAMES: u32 = 60;
     let theme = theme();
     let mut component = host("glass-dock");
     update(&mut component, "mesh.apps", glass_apps_payload(10, 150));
     let extent = SurfaceExtent::unpadded(WIDTH, HEIGHT);
     let mut pixels = PixelBuffer::new(WIDTH, HEIGHT);
-    component
-        .paint_raster(&theme, extent, &mut pixels, 1.0)
-        .unwrap();
     let tiles = settled_dock_tiles(&mut component, &theme, extent, &mut pixels);
     let mut steady = Vec::new();
     for run in 0..2 {
         leave_dock(&mut component, &theme, extent, &mut pixels);
         component.set_profiling_enabled(true);
         let _ = component.take_profiling_records();
-        steady.clear();
-        for step in 0..FRAMES {
-            std::thread::sleep(MOVE_INTERVAL);
-            let (left, top, right, bottom) = tiles[(step as usize / 6) % tiles.len()];
-            if step % 6 == 0 {
+        let started = Instant::now();
+        let mut previous_move = None;
+        while let Some(motion) = dock_motion(started.elapsed()) {
+            if previous_move != Some(motion.index) {
+                let (left, top, right, bottom) = tiles[motion.tile];
                 component
                     .handle_input(
                         &theme,
                         WIDTH,
                         HEIGHT,
                         ComponentInput::PointerMove {
-                            x: (left + right) / 2.0,
+                            x: (left + right) / 2.0 + motion.jitter,
                             y: (top + bottom) / 2.0,
                         },
                     )
                     .unwrap();
+                previous_move = Some(motion.index);
             }
             if component.wants_render() {
                 component
@@ -906,6 +976,13 @@ fn cpu_dock_fixture_visits() -> Vec<BTreeMap<String, u64>> {
                     steady.push(snapshot.node_visits);
                 }
             }
+            let elapsed = started.elapsed();
+            let next_tick =
+                MOVE_INTERVAL * ((elapsed.as_nanos() / MOVE_INTERVAL.as_nanos()) as u32 + 1);
+            std::thread::sleep(
+                (started + next_tick.min(DOCK_SWEEP_DURATION))
+                    .saturating_duration_since(Instant::now()),
+            );
         }
         component.set_profiling_enabled(false);
     }

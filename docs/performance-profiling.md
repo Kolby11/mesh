@@ -255,11 +255,13 @@ the worker result is committed to the Wayland surface; submission alone and
 unpresented completions do not count. This measures commit, not physical display.
 Timings are for visibility; the only failure is structural: every live dock
 hover frame must stay within the per-pass maxima of the same frame class
-(hover change or animation only) in the CPU fixture `glass_dock_hover_animation_profile`.
-Like the live sweep, the fixture takes tile bounds after the shelf's entrance
-animation, enters the dock from outside on each run and paints at 16 ms pacing,
-so its envelope includes hover script patches and the dock's own `:hover`
-transition.
+(hover change or animation only) in the CPU counterpart embedded in the replay.
+Both use the same absolute-time schedule: 20 tile crossings, a 100 ms dwell,
+six pointer positions per tile and the same out-and-back route. Slow raster
+paints skip overdue sampling ticks instead of extending the dwell. Both run an
+unmeasured warm-up sweep, leave the dock and settle its transitions before the
+measured sweep. Tile bounds come from the settled shelf. The fixture samples
+at 16 ms deadlines; live animation paints follow compositor callbacks.
 Replay surfaces appear on the compositor for about a minute under the shipped
 module ids with a `.mesh-replay` suffix as layer namespaces (before any `:blur`
 marker), so they can be told apart from a running desktop shell's surfaces; the
