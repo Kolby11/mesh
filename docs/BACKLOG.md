@@ -349,6 +349,10 @@ From the 2026-10-20 live `glass` captures; evidence in the
 - [ ] Measure glass first open live (the 2026-10-24 changes are only measured
       offline, where icons rasterize synchronously and glass draws on the CPU):
       picker over IPC, launcher by hand since no IPC can open it.
+- [ ] Re-capture Settings scroll live after the 2026-10-24 size-flip fix.
+- [ ] The glass bar repaints ~4/s over a mostly idle session and ~47/s while another surface
+      scrolls: animation ticks (`animation.rs` keyframe path) walk ~1,400 nodes
+      in `animation_lookup`, and unsourced interaction restyles scan ~390.
 - [ ] Hide waits for the root's longest opacity transition (280 ms on the glass
       dashboard and picker) while their panels fade in `--animation-duration-fast`;
       unmap when the exit transitions actually settle.

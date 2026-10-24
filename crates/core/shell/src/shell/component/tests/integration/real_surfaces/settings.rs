@@ -556,7 +556,7 @@ fn clicking_a_theme_card_repaints_settings_in_the_new_theme_in_one_frame() {
     );
 }
 
-fn settings_material_theme(pack: &mesh_core_theme::Theme) -> mesh_core_theme::Theme {
+pub(super) fn settings_material_theme(pack: &mesh_core_theme::Theme) -> mesh_core_theme::Theme {
     use mesh_core_theme::{Theme, ThemeModule, ThemeModuleLayer};
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")

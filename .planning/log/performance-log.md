@@ -8402,3 +8402,43 @@ identically at `7ce4d1ba` and pass alone. New:
 `prewarmed_glass_surface_first_show_paints_once`,
 `rejected_requests_repaint_after_the_next_settled_job`. Not checked in a live
 shell; that measurement is the remaining backlog item.
+
+## 2026-10-24 — Settings scroll: every frame restyled the page twice
+
+`eae4dd10` + working tree · area: shell render loop, surface size observation
+
+**Live symptom.** Scrolling Settings → Appearance (glass profile, release
+`profiling` build, Hyprland, eDP 2880×1800 at scale 1, 120 Hz, GPU scene
+worker) lagged. `profiles/session/20261024-125601`: during 171 presented
+Settings frames, `total_surface_render` was 34.0 ms p50 / 40.6 ms p90 / 94.9 ms
+max. There were 342 paints (two per frame), and each pass walked all ~624 nodes through
+restyle (4.7 ms mean), layout (1.9 ms), animation sampling, annotation,
+accessibility and retained sync.
+
+**Cause.** A second capture logged the call site of every STYLE/LAYOUT
+invalidation (`profiles/session/20261024-132147`, temporary instrumentation,
+since removed). Each frame called `observe_surface_size` twice from the render
+loop. The top of the loop read the shell's surface record, which is already
+content-sized (920×700), and passed it through `content_size_for_target`,
+which subtracts the tooltip overlay reserve as if it were the compositor's
+padded size (920×500). The configure path later in the loop restored 920×700.
+Each change invalidated STYLE|LAYOUT|PAINT|METRICS, and the dirt the first
+pass left asked for an immediate second pass. Any surface with both axes
+measured and a reserve was affected. Spanning surfaces (width 0) took the
+compositor branch and were not.
+
+**Fix.** Only the compositor's size is converted to content size.
+
+**Offline evidence.** The existing `d9_settings_scroll_frame_gate` drives the
+component directly and could not see this. The testing presentation backend
+now reports acked configure sizes when asked (`testing_report_configured_sizes`),
+as Wayland does. `settings_scroll_frames_through_the_shell_stay_paint_only`
+scrolls Settings through the shell runtime and fails before the fix (a
+relayout on every frame) and passes after (at most the first frame's
+scroll-ownership relayout; one paint per presented frame). The gate also takes
+`MESH_SCROLL_GLASS=1`. With the glass material, offline CPU-raster scroll frames
+are paint-only but cost 30–40 ms in release, dominated by glass
+raster. That is not the live GPU path. Live after-numbers are not yet captured.
+
+**Validation.** Shell suite, serial with `MESH_VERIFY_RETAINED=1`: 998 passed /
+35 ignored. Presentation tests pass.

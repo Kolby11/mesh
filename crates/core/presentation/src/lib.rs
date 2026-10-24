@@ -395,6 +395,16 @@ struct TestingBackend {
     text_input_state: Option<(String, TextInputState)>,
     text_input_surface: Option<String>,
     text_input_pending: TestingPendingTextInput,
+    report_configured_sizes: bool,
+}
+
+impl TestingBackend {
+    fn configured_size(&self, surface_id: &str) -> Option<(u32, u32)> {
+        (self.report_configured_sizes && !self.unconfigured_surfaces.contains(surface_id))
+            .then(|| self.surface_configs.get(surface_id))
+            .flatten()
+            .map(SurfaceConfig::surface_size)
+    }
 }
 
 #[derive(Default)]
@@ -531,6 +541,15 @@ impl PresentationEngine {
     pub fn testing_set_window_states(&mut self, surface_id: &str, states: WindowStates) {
         if let Backend::Testing(backend) = &mut self.backend {
             backend.window_states.insert(surface_id.to_string(), states);
+        }
+    }
+
+    /// Report each configured layer surface's size back as the compositor's
+    /// answer, as the Wayland backend does once a configure is acked.
+    #[doc(hidden)]
+    pub fn testing_report_configured_sizes(&mut self) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            backend.report_configured_sizes = true;
         }
     }
 
@@ -1548,7 +1567,7 @@ impl PresentationEngine {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.surface_size(surface_id),
             Backend::DevWindow(_) => Ok(None),
-            Backend::Testing(_) => Ok(None),
+            Backend::Testing(backend) => Ok(backend.configured_size(surface_id)),
         }
     }
 
@@ -1556,7 +1575,7 @@ impl PresentationEngine {
         match &self.backend {
             Backend::WaylandSurface(bridge) => bridge.surface_size_if_known(surface_id),
             Backend::DevWindow(_) => None,
-            Backend::Testing(_) => None,
+            Backend::Testing(backend) => backend.configured_size(surface_id),
         }
     }
 

@@ -238,14 +238,16 @@ impl Shell {
                     .get(&surface_id)
                     .ok_or_else(|| ShellRunError::MissingSurface(surface_id.clone()))?;
                 if surface.width == 0 || surface.height == 0 {
-                    self.presentation_engine.surface_size(&surface_id)?
+                    // The compositor's size includes the tooltip overlay
+                    // reserve; the shell record is already content-sized.
+                    self.presentation_engine
+                        .surface_size(&surface_id)?
+                        .map(|size| self.content_size_for_target(index, TargetRef::Parent, size))
                 } else {
                     Some((surface.width.max(1), surface.height.max(1)))
                 }
             };
-            if let Some(surface_size) = surface_size {
-                let resolved_size =
-                    self.content_size_for_target(index, TargetRef::Parent, surface_size);
+            if let Some(resolved_size) = surface_size {
                 if self.components[index].parent.known_surface_size != Some(resolved_size) {
                     self.components[index].parent.known_surface_size = Some(resolved_size);
                     self.components[index]
