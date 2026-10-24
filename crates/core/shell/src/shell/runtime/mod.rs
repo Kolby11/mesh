@@ -269,6 +269,7 @@ impl Shell {
     ) -> Duration {
         let render_ready = self.components_have_ready_render_work();
         if shell_message_backlog_likely
+            || self.effect_scheduler.has_pending()
             || !self.pending_wayland_events.is_empty()
             || (render_ready && !self.render_stalled)
         {
@@ -489,7 +490,10 @@ impl Shell {
             wake: wake.clone(),
         });
         #[cfg(test)]
-        let spawn_backends = !self.replay.as_ref().is_some_and(|replay| replay.suppress_backends);
+        let spawn_backends = !self
+            .replay
+            .as_ref()
+            .is_some_and(|replay| replay.suppress_backends);
         #[cfg(not(test))]
         let spawn_backends = true;
         if spawn_backends {
@@ -578,7 +582,9 @@ impl Shell {
                     && loop_started >= prewarm_after
                     && self.prewarm_hidden_surface()?
                 {
-                    deadline = deadline.min(SURFACE_PREWARM_IDLE);
+                    deadline = self
+                        .next_runtime_sleep(shell_message_backlog_likely)
+                        .min(SURFACE_PREWARM_IDLE);
                 }
                 #[cfg(test)]
                 let deadline = self.clamp_to_replay_wake(deadline);

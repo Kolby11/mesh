@@ -1001,6 +1001,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// effects have been assembled from one completed paint boundary.
     last_frontend_frame: Option<FrontendFrame>,
     pending_frontend_effects: FrontendFrameEffects,
+    pending_paint_requests: Vec<CoreRequest>,
     intrinsic_layout_cache: IntrinsicLayoutCache,
     layout_state: PerSurfaceLayoutState,
     pub(in crate::shell::component) retained_tree: RetainedWidgetTree,
@@ -1484,6 +1485,7 @@ impl FrontendSurfaceComponent {
             frame_revision: 0,
             last_frontend_frame: None,
             pending_frontend_effects: FrontendFrameEffects::default(),
+            pending_paint_requests: Vec::new(),
             intrinsic_layout_cache: IntrinsicLayoutCache::default(),
             layout_state: PerSurfaceLayoutState::default(),
             retained_tree: RetainedWidgetTree::default(),

@@ -130,6 +130,10 @@ impl Default for EffectScheduler {
 }
 
 impl EffectScheduler {
+    pub(in crate::shell) fn has_pending(&self) -> bool {
+        !self.ready_sources.is_empty() || !self.deferred.is_empty()
+    }
+
     fn next_transaction_id(&mut self) -> u64 {
         let transaction_id = self.next_transaction_id;
         self.next_transaction_id = self.next_transaction_id.wrapping_add(1).max(1);

@@ -92,8 +92,10 @@ scheduled.
 The script body runs once as setup. Templates and lexical helpers derive
 presentation; `effect(fn)` runs reactive side effects with tracked public scalar
 and service-field reads, conservative compound-input invalidation, per-callback
-budgets, and bounded settling. A returned cleanup runs before replacement and
-on reload or unmount; the returned handle supports idempotent `cancel()`.
+budgets, and bounded settling. Host requests and published events produced by
+paint-time effects are queued at that paint boundary with the component's
+origin; the shell schedules immediate work instead of waiting for another input
+handler. A returned cleanup runs before replacement and on reload or unmount; the returned handle supports idempotent `cancel()`.
 `render(self)` is no longer scheduled and compiled components receive a
 migration diagnostic. Finer structural reconciliation remains a **target**.
 

@@ -1634,6 +1634,11 @@ pub trait ShellComponent: Send {
     fn settle_effects_offscreen(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
         Ok(Vec::new())
     }
+    /// Take host requests produced by a completed paint. Each request is
+    /// returned once; the shell queues it with this component's effect origin.
+    fn take_paint_requests(&mut self) -> Vec<CoreRequest> {
+        Vec::new()
+    }
     /// Record a payload for a declared-but-unread service without the full
     /// update path. A surface with no tree yet reads no field, so it is not a
     /// delivery target, but the payload must still seed its runtime later.

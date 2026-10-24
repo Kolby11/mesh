@@ -884,6 +884,9 @@ impl Shell {
                     Some(mesh_core_resources::resource_revision());
                 runtime.painted = true;
                 component_stage_records.extend(runtime.component.take_profiling_records());
+                let requests = runtime.component.take_paint_requests();
+                let origin = runtime.effect_origin();
+                self.enqueue_effects(origin.attribute(requests));
 
                 // When popup creation was deferred to measure the content, the
                 // paint above has now populated `measured_size`; force one more
@@ -1685,6 +1688,10 @@ impl Shell {
         self.components[index].parent.last_paint_resource_revision =
             Some(mesh_core_resources::resource_revision());
         self.components[index].painted = true;
+        let runtime = &mut self.components[index];
+        let requests = runtime.component.take_paint_requests();
+        let origin = runtime.effect_origin();
+        self.enqueue_effects(origin.attribute(requests));
         tracing::debug!(
             surface_id,
             elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,

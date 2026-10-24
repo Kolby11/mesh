@@ -739,3 +739,127 @@ end)
         "{requests:?}"
     );
 }
+
+#[test]
+fn effect_shell_requests_settled_during_paint_reach_the_shell_in_that_frame() {
+    let component = test_frontend_component_with_catalog(
+        r#"
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+seen_percent = -1
+effect(function()
+    seen_percent = audio.percent or -1
+    if seen_percent > 50 then
+        mesh.shell.hide_surface("@test/reactive-surface")
+    end
+end)
+</script>
+<template><column style="width: 160px; height: 60px"><text>{audio.percent}</text><text>{seen_percent}</text></column></template>
+<style>* { transition: none; }</style>
+"#,
+        audio_network_catalog(),
+        &["service.audio.read", "shell.surface"],
+    );
+    let mut shell = crate::shell::Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(component));
+    shell
+        .core
+        .surfaces
+        .get_mut("@test/reactive-surface")
+        .unwrap()
+        .visible = true;
+    shell.render_components().unwrap();
+    assert!(shell.core.surfaces["@test/reactive-surface"].visible);
+    let requests = shell
+        .broadcast_service_event(ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({"available": true, "percent": 64, "muted": false}),
+        })
+        .unwrap();
+    assert!(
+        !requests
+            .iter()
+            .any(|request| matches!(request.request, CoreRequest::HideSurface { .. })),
+        "the effect must settle during paint"
+    );
+    shell.enqueue_effects(requests);
+    shell.render_components().unwrap();
+    assert!(
+        !shell.core.surfaces["@test/reactive-surface"].visible,
+        "paint-time effect must not wait for another input handler"
+    );
+}
+
+#[test]
+fn paint_effect_requests_include_service_calls_and_are_taken_once() {
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+seen_percent = -1
+effect(function()
+    seen_percent = audio.percent or -1
+    if seen_percent > 50 then
+        mesh.shell.show_surface("@test/target")
+        audio.set_volume("default", 33)
+    end
+end)
+function noop() end
+</script>
+<template><column><text>{audio.percent}</text><text>{seen_percent}</text></column></template>
+<style>* { transition: none; }</style>
+"#,
+        audio_network_catalog(),
+        &[
+            "service.audio.read",
+            "service.audio.control",
+            "shell.surface",
+        ],
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(160, 60);
+    let mut pixels = PixelBuffer::new(160, 60);
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    assert!(component.take_paint_requests().is_empty());
+    let requests = component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({"available": true, "percent": 64, "muted": false}),
+        })
+        .unwrap();
+    assert!(
+        requests.is_empty(),
+        "effect must settle during paint: {requests:?}"
+    );
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    let requests = component.take_paint_requests();
+    assert_eq!(requests.len(), 2, "{requests:?}");
+    assert!(requests.iter().any(|request| matches!(request,
+        CoreRequest::ShowSurface { surface_id } if surface_id == "@test/target")));
+    assert!(requests.iter().any(|request| matches!(request,
+        CoreRequest::ServiceCall { command, .. } if command == "set_volume")));
+    assert_eq!(
+        component
+            .frontend_frame()
+            .unwrap()
+            .effects()
+            .host_requests()
+            .len(),
+        2
+    );
+    assert!(component.take_paint_requests().is_empty());
+    assert!(
+        component
+            .call_namespaced_handler("noop", &[])
+            .unwrap()
+            .is_empty()
+    );
+}

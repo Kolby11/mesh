@@ -368,3 +368,16 @@ fn scheduler_uses_frame_callback_escape_for_dirty_visible_targets() {
         .visible = false;
     assert!(shell.next_runtime_sleep(false) >= Duration::from_secs(30));
 }
+
+#[test]
+fn scheduler_wakes_for_host_requests_queued_after_paint() {
+    let mut shell = Shell::new();
+    park_reload_deadlines(&mut shell);
+    assert!(shell.next_runtime_sleep(false) > Duration::ZERO);
+    shell.enqueue_effects([CoreRequest::PublishDiagnostics {
+        message: "paint-time effect".into(),
+    }]);
+    assert_eq!(shell.next_runtime_sleep(false), Duration::ZERO);
+    shell.process_effects();
+    assert!(shell.next_runtime_sleep(false) > Duration::ZERO);
+}

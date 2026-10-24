@@ -72,8 +72,6 @@ October log.
 - [ ] Gate shared-tree popup animation preparation by the targets that can
       present; a ready but unchanged parent currently outruns child callbacks.
 
-- [ ] **Paint-time effects cannot reach the shell:** `mesh.shell.*` and published events
-      from effects that settle during paint are lowered only by the next handler call.
 - [ ] **`corner-shape: scoop` gaps:** borders are not stroked along a scoop's curve, and
       `overflow: hidden` clips descendants to the rounded shape, not the scooped one ([04 §12.1](spec/04-styling.md#121-corner-shapes-corner-shape)).
 - [ ] **Retire the tooltip overlay reserve:** tooltips that leave their surface are now
@@ -314,8 +312,6 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
       drops descendants of reused subtrees (`build.rs:433`) — add a regression.
 - [ ] Hit testing visits the whole tree without bounds culling and clones a clip
       `Vec` per node on pointer move; hover keys are re-parsed to `NodeId`s.
-- [ ] Effects queued during render wait for the next wakeup; settle them or
-      schedule immediate work after painting.
 
 ### Scroll and animation frames
 

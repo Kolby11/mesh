@@ -229,6 +229,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn isolate_runtime_failure(&mut self, phase: &str, message: &str) -> bool {
+        self.pending_paint_requests.clear();
         let message = self.record_frontend_runtime_issue(phase, self.root_instance_key(), message);
         *self.runtime_failure.borrow_mut() = Some(message);
         // A failed callback may have left state or a retained tree half
@@ -245,6 +246,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn unmount(&mut self) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.pending_paint_requests.clear();
         self.unmount_runtimes()?;
         Ok(self.record_frontend_host_effects(Vec::new()))
     }
@@ -635,6 +637,10 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.run_pending_effects();
         let requests = self.drain_effect_side_channels();
         Ok(self.record_frontend_host_effects(requests))
+    }
+
+    fn take_paint_requests(&mut self) -> Vec<CoreRequest> {
+        std::mem::take(&mut self.pending_paint_requests)
     }
 
     fn observes_service_event(&self, event: &ServiceEvent) -> bool {
@@ -1035,6 +1041,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // that does invalidate lands in this frame rather than costing an
         // extra one, and so the path decision below can see whether the effects
         // changed anything a template reads.
+        let paint_ran_effects = self.reactive_effects_pending;
         self.run_pending_effects();
         self.wake_due_animation_hold(std::time::Instant::now());
         let animation_only_frame = std::mem::take(&mut self.animation_only_dirty);
@@ -1703,6 +1710,11 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.last_tooltip_damage = current_tooltip_damage;
         self.surface_pixels_invalid = false;
         self.clear_runtime_dirty_states();
+        if paint_ran_effects || tree_was_rebuilt || bindings_patched {
+            let requests = self.drain_effect_side_channels();
+            let requests = self.record_frontend_host_effects(requests);
+            self.pending_paint_requests.extend(requests);
+        }
         self.publish_frontend_frame();
         if self.reactive_binding_pending.replace(false) {
             self.reactive_effects_pending = true;
