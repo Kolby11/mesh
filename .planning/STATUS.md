@@ -9,7 +9,8 @@ measurements live in [`log/`](log/README.md).
 
 - **Backlog reliability batch complete.** Activation-test deadlines and process
   isolation for cache/keyed-hover/geometry/text regressions pass parallel shell
-  and renderer suites. Live replay first-paint and commit accounting are next.
+  and renderer suites. Replay boot-state and successful GPU commit accounting
+  are covered; the GPU-feature submission/completion CI gate also passes.
 
 - **Popup/dashboard frame isolation.** Tooltip and popover redraw isolation,
   timer patches during child lifecycle, transform-based meters/history/spectrum,
@@ -40,8 +41,8 @@ measurements live in [`log/`](log/README.md).
 - P2 remainder: layout write-back and overflow annotation still visit every child
   of a re-laid-out parent; fold `seed_projection` into full writes.
 - D1: handler sync still converts every compound global (~1 ms for 1,024 items).
-- Correct first-state injection and GPU first-commit timing in the full replay;
-  the focused popup replay records actual worker completions.
+- Align GPU live replay animation timing with the CPU structural envelope.
+- Drain shell requests from effects settled during paint.
 - Measure glass first open live (picker over IPC, launcher by hand).
 - Continue glass raster work and the in-surface blur engine after frame-pipeline work.
 

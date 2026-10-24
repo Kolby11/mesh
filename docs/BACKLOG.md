@@ -40,8 +40,6 @@ criteria and the items folded in here:
 - [ ] **P3 / D1:** Handler sync converts every compound global to JSON (~1 ms for a 1,024-item
       list) and keyed item deltas come from that comparison; record table writes instead.
       Lists read through anything but a plain member still compare every item.
-- [ ] Shell tests build without the `gpu` feature, so nothing in the shell suite exercises
-      `PresentStatus::Submitted` or `reconcile_scene_completions`; add a GPU-feature shell gate.
 - [ ] A scene frame that completes unpresented because the compositor holds every dmabuf slot
       is repainted in full; retry on buffer release, keeping damage, instead.
 

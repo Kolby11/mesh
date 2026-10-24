@@ -362,6 +362,12 @@ enum Backend {
 
 #[derive(Default)]
 struct TestingBackend {
+    #[cfg(feature = "gpu")]
+    async_scenes: bool,
+    #[cfg(feature = "gpu")]
+    submitted_scenes: HashMap<String, Vec<DamageRect>>,
+    #[cfg(feature = "gpu")]
+    scene_completions: Vec<SceneCompletion>,
     popup_supported: bool,
     configure_error: Option<String>,
     popup_configure_error: Option<String>,
@@ -461,6 +467,13 @@ fn clear_testing_presentation_waits(backend: &mut TestingBackend, surface_id: &s
 
 fn clear_testing_surface_runtime_state(backend: &mut TestingBackend, surface_id: &str) {
     clear_testing_presentation_waits(backend, surface_id);
+    #[cfg(feature = "gpu")]
+    if backend.submitted_scenes.remove(surface_id).is_some() {
+        backend.scene_completions.push(SceneCompletion {
+            surface_id: surface_id.to_string(),
+            presented: false,
+        });
+    }
     backend.surface_scales.remove(surface_id);
     backend.full_redraw_surfaces.remove(surface_id);
     backend.surface_outputs.remove(surface_id);
@@ -533,6 +546,39 @@ impl PresentationEngine {
                 ..TestingBackend::default()
             })),
         }
+    }
+
+    /// Defer testing-backend frames until `testing_complete_scene` supplies
+    /// their outcome, following the asynchronous scene presentation contract.
+    #[cfg(feature = "gpu")]
+    #[doc(hidden)]
+    pub fn testing_set_async_scenes(&mut self, enabled: bool) {
+        if let Backend::Testing(backend) = &mut self.backend {
+            backend.async_scenes = enabled;
+        }
+    }
+
+    #[cfg(feature = "gpu")]
+    #[doc(hidden)]
+    pub fn testing_complete_scene(&mut self, surface_id: &str, presented: bool) -> bool {
+        let Backend::Testing(backend) = &mut self.backend else {
+            return false;
+        };
+        let Some(damage) = backend.submitted_scenes.remove(surface_id) else {
+            return false;
+        };
+        backend.frame_pending_surfaces.remove(surface_id);
+        if presented {
+            backend.presented.push(surface_id.to_string());
+            backend
+                .presented_damage
+                .push((surface_id.to_string(), damage));
+        }
+        backend.scene_completions.push(SceneCompletion {
+            surface_id: surface_id.to_string(),
+            presented,
+        });
+        true
     }
 
     /// Stand in for a compositor configure that put a window into the given
@@ -1312,6 +1358,8 @@ impl PresentationEngine {
     pub fn take_scene_completions(&mut self) -> Vec<SceneCompletion> {
         match &mut self.backend {
             Backend::WaylandSurface(bridge) => bridge.take_scene_completions(),
+            #[cfg(feature = "gpu")]
+            Backend::Testing(backend) => std::mem::take(&mut backend.scene_completions),
             _ => Vec::new(),
         }
     }
@@ -1398,6 +1446,16 @@ impl PresentationEngine {
                         || backend.buffer_backpressured_surfaces.contains(surface_id))
                 {
                     return Ok(PresentStatus::NotReady);
+                }
+                #[cfg(feature = "gpu")]
+                if visible && backend.async_scenes {
+                    backend
+                        .submitted_scenes
+                        .insert(surface_id.to_string(), damage.to_vec());
+                    backend
+                        .frame_pending_surfaces
+                        .insert(surface_id.to_string());
+                    return Ok(PresentStatus::Submitted);
                 }
                 if visible {
                     backend.presented.push(surface_id.to_string());
@@ -2530,6 +2588,48 @@ mod tests {
             .expect("settings text-input state should be accepted");
         engine.testing_push_connection_lost("compositor exited");
         assert!(engine.testing_text_input_state().is_none());
+    }
+
+    #[cfg(feature = "gpu")]
+    #[test]
+    fn scene_submission_testing_backend_retires_destroyed_frames_once() {
+        let mut engine = PresentationEngine::testing_with_popup_support(false);
+        engine.testing_set_async_scenes(true);
+        engine.configure("panel", SurfaceConfig::default()).unwrap();
+        let mut canvas = SurfaceCanvas::from(PixelBuffer::new(4, 4));
+        assert_eq!(
+            engine.present("panel", "Panel", true, &mut canvas).unwrap(),
+            PresentStatus::Submitted
+        );
+        assert_eq!(
+            engine.present("panel", "Panel", true, &mut canvas).unwrap(),
+            PresentStatus::NotReady
+        );
+        assert!(engine.testing_presented_surfaces().is_empty());
+        engine.destroy_surface("panel");
+        assert_eq!(
+            engine.take_scene_completions(),
+            [SceneCompletion {
+                surface_id: "panel".into(),
+                presented: false,
+            }]
+        );
+        assert!(!engine.testing_complete_scene("panel", true));
+        assert!(engine.take_scene_completions().is_empty());
+        engine.configure("panel", SurfaceConfig::default()).unwrap();
+        assert_eq!(
+            engine.present("panel", "Panel", true, &mut canvas).unwrap(),
+            PresentStatus::Submitted
+        );
+        assert!(engine.testing_complete_scene("panel", true));
+        assert_eq!(
+            engine.take_scene_completions(),
+            [SceneCompletion {
+                surface_id: "panel".into(),
+                presented: true,
+            }]
+        );
+        assert_eq!(engine.testing_presented_surfaces(), ["panel"]);
     }
 
     #[test]

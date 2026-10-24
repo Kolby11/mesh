@@ -469,3 +469,85 @@ fn surface_totals_exclude_other_surfaces_preparation() {
         "fast surface must exclude the slow surface's preparation: {totals:?}"
     );
 }
+
+#[cfg(feature = "gpu")]
+#[test]
+fn scene_submission_waits_for_completion_and_retries_unpresented_frames() {
+    let (mut shell, _) = solid_surface_shell(&[Color::WHITE, Color::BLACK]);
+    shell.presentation_engine.testing_set_async_scenes(true);
+    shell.profiling.capture = Some(Vec::new());
+    shell.render_components().unwrap();
+    assert!(
+        shell
+            .presentation_engine
+            .testing_presented_surfaces()
+            .is_empty()
+    );
+    for runtime in &shell.components {
+        assert!(
+            !runtime.component.wants_render(),
+            "submission consumed paint work"
+        );
+        assert!(!runtime.parent.force_full_present);
+    }
+    let success = shell.components[0].surface_id.clone();
+    let failed = shell.components[1].surface_id.clone();
+    assert!(
+        shell
+            .presentation_engine
+            .testing_complete_scene(&success, true)
+    );
+    assert!(
+        shell
+            .presentation_engine
+            .testing_complete_scene(&failed, false)
+    );
+    assert!(
+        !shell
+            .presentation_engine
+            .testing_complete_scene(&failed, true)
+    );
+    shell.reconcile_scene_completions();
+    assert!(!shell.components[0].component.wants_render());
+    assert!(!shell.components[0].parent.force_full_present);
+    assert!(shell.components[1].component.wants_render());
+    assert!(shell.components[1].parent.force_full_present);
+    assert_eq!(
+        shell.presentation_engine.testing_presented_surfaces(),
+        [success.as_str()]
+    );
+    let completions = shell
+        .profiling
+        .capture
+        .as_ref()
+        .unwrap()
+        .iter()
+        .filter(|record| {
+            matches!(
+                record,
+                crate::shell::runtime::profiling::CapturedRecord::SceneCompletion { .. }
+            )
+        })
+        .count();
+    assert_eq!(completions, 2);
+    shell.reconcile_scene_completions();
+    assert!(
+        shell
+            .presentation_engine
+            .take_scene_completions()
+            .is_empty()
+    );
+    shell.render_components().unwrap();
+    assert!(!shell.components[1].component.wants_render());
+    assert!(
+        shell
+            .presentation_engine
+            .testing_complete_scene(&failed, true)
+    );
+    shell.reconcile_scene_completions();
+    assert!(!shell.components[1].component.wants_render());
+    assert_eq!(
+        shell.presentation_engine.testing_presented_surfaces(),
+        [success, failed]
+    );
+}

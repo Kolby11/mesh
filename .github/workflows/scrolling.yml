@@ -26,6 +26,8 @@ jobs:
         run: nix develop -c cargo test -p mesh-core-shell --features gpu --lib scroll_contract
       - name: Check padded launcher clipping, geometry and momentum
         run: nix develop -c cargo test -p mesh-core-shell --features gpu --lib liquid_glass_launcher_keeps_results_viewport_with_many_apps
+      - name: Check asynchronous scene submission and completion recovery
+        run: nix develop -c cargo test -p mesh-core-shell --features gpu --lib scene_submission
       - name: Check popup progress while its parent is blocked
         run: nix develop -c cargo test -p mesh-core-shell --features gpu --lib ready_child_keeps_painting_while_parent_waits_for_compositor
       - name: Check clipped bounds and fixed descendants

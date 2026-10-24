@@ -64,7 +64,10 @@ and touchpad input across all three scroll tags, horizontal and vertical axes,
 three display scales, boundary reversal, padded launcher pixels and geometry,
 momentum, popup progress while its parent is blocked, and clipped visual bounds.
 The shell checks compile with `gpu` enabled and use headless raster fixtures;
-hardware GPU workload coverage remains in the performance workflow.
+the same workflow also checks asynchronous scene submission and completion
+recovery with the deterministic presentation backend. The gate covers successful
+commits, failed-frame repaint requests and completion draining without a GPU or
+compositor. Hardware GPU workload coverage remains in the performance workflow.
 
 Run the generic handler-free input matrix locally:
 
