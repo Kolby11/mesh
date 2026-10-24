@@ -31,12 +31,8 @@ other performance work. Evidence, the Qt Quick / GTK4 comparison, exit
 criteria and the items folded in here:
 [design](../.planning/todos/pending/2026-10-21-change-proportional-pipeline.md).
 
-- [ ] The live replay's first `mesh.apps` injection before the dock's first paint is lost.
 - [ ] GPU-enabled live replay exceeds the CPU fixture's animation visit envelope; align the
       workloads' animation timing before treating that envelope as a GPU structural gate.
-- [ ] Live replay counts GPU submission as first present; record completion/commit before
-      using its GPU open latency as time to visible content.
-- [ ] Give the live replay its own layer-namespace suffix so it can run beside a desktop shell.
 - [ ] **P2:** Geometry patches still visit every child of a re-laid-out parent in layout
       write-back and overflow annotation (the order of Taffy's flex pass); display patches
       rebuild under layer/scrollbar ancestors, scroll viewports and boxes that clip or scale children.

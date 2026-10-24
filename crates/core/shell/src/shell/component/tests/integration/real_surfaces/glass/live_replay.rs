@@ -117,6 +117,29 @@ fn service(interface: &str, payload: serde_json::Value) -> ServiceEvent {
     }
 }
 
+#[test]
+fn replay_apps_injection_before_first_dock_paint_populates_tiles() {
+    let component = host("glass-dock");
+    let id = component.surface_id().to_owned();
+    assert!(component.last_widget_tree().is_none());
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(component));
+    let requests = shell
+        .broadcast_service_event(service("mesh.apps", glass_apps_payload(10, 150)))
+        .unwrap();
+    shell.enqueue_effects(requests);
+    shell.render_components().unwrap();
+    let tree = shell.components[0].component.last_widget_tree().unwrap();
+    for index in 0..10 {
+        assert!(
+            first_node_with_ref(tree, &format!("app-{index}")).is_some(),
+            "{id}: injected application {index} is missing on first paint"
+        );
+    }
+}
+
 fn spectrum_bars(index: u32) -> Vec<f64> {
     (0..32)
         .map(|bar| f64::from((index * 7 + bar * 13) % 100) / 100.0)
@@ -278,11 +301,13 @@ impl Replay {
 
     fn presented_since(&self, shell: &Shell, short: &str, since: Instant) -> bool {
         let surface = &self.surface_ids[short];
-        self.records(shell).iter().any(|record| {
-            matches!(record, CapturedRecord::Stage {
-                at, surface_id, stage: ProfilingStage::PresentCommit, ..
-            } if *at >= since && surface_id == surface)
-        })
+        first_present_after(
+            &self.records(shell),
+            surface,
+            since,
+            self.outcome.borrow().gpu,
+        )
+        .is_some()
     }
 
     fn tree<'a>(&self, shell: &'a Shell, short: &str) -> Option<&'a WidgetNode> {
@@ -742,6 +767,65 @@ fn first_after(
     })
 }
 
+fn first_present_after(
+    records: &[CapturedRecord],
+    surface: &str,
+    since: Instant,
+    gpu: bool,
+) -> Option<Instant> {
+    if !gpu {
+        return first_after(records, surface, ProfilingStage::PresentCommit, since);
+    }
+    records.iter().find_map(|record| match record {
+        CapturedRecord::SceneCompletion {
+            at,
+            surface_id,
+            presented: true,
+        } if surface_id == surface && *at >= since => Some(*at),
+        _ => None,
+    })
+}
+
+#[test]
+fn replay_first_present_waits_for_a_successful_gpu_commit() {
+    let requested = Instant::now();
+    let submitted = requested + Duration::from_millis(1);
+    let committed = requested + Duration::from_millis(5);
+    let mut records = vec![CapturedRecord::Stage {
+        at: submitted,
+        surface_id: "dock".into(),
+        stage: ProfilingStage::PresentCommit,
+        micros: 1,
+        trigger: None,
+    }];
+    assert_eq!(
+        first_present_after(&records, "dock", requested, false),
+        Some(submitted)
+    );
+    assert_eq!(first_present_after(&records, "dock", requested, true), None);
+    for (surface, at, presented) in [
+        ("dock", requested - Duration::from_millis(1), true),
+        ("other", submitted, true),
+        ("dock", submitted, false),
+    ] {
+        records.push(CapturedRecord::SceneCompletion {
+            at,
+            surface_id: surface.into(),
+            presented,
+        });
+    }
+    assert_eq!(first_present_after(&records, "dock", requested, true), None);
+    records.push(CapturedRecord::SceneCompletion {
+        at: committed,
+        surface_id: "dock".into(),
+        presented: true,
+    });
+    assert_eq!(
+        first_present_after(&records, "dock", requested, true),
+        Some(committed)
+    );
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum FrameClass {
     HoverChange,
@@ -901,7 +985,7 @@ fn live_glass_replay() {
     boot_surfaces.sort_unstable();
     boot_surfaces.dedup();
     for surface in boot_surfaces {
-        if let Some(at) = first_after(&records, surface, ProfilingStage::PresentCommit, started) {
+        if let Some(at) = first_present_after(&records, surface, started, outcome.gpu) {
             metric(
                 &format!("live_boot_{}_first_present_ms", slug(surface)),
                 (at - started).as_secs_f64() * 1000.0,
@@ -914,7 +998,12 @@ fn live_glass_replay() {
             (ProfilingStage::PresentCommit, "first_present"),
             (ProfilingStage::TotalSurfaceRender, "first_render"),
         ] {
-            if let Some(at) = first_after(&records, &surface, stage, *requested) {
+            let at = if stage == ProfilingStage::PresentCommit {
+                first_present_after(&records, &surface, *requested, outcome.gpu)
+            } else {
+                first_after(&records, &surface, stage, *requested)
+            };
+            if let Some(at) = at {
                 metric(
                     &format!("live_open_{}_{label}_ms", slug(&surface)),
                     (at - *requested).as_secs_f64() * 1000.0,

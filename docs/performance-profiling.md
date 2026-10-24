@@ -250,8 +250,9 @@ to match the CLI's default feature; the report prints the presentation engine's
 render-path reason. Set `MESH_RENDER_GPU=0` with that same GPU-enabled binary
 for a forced-CPU comparison. GPU paint and presentation timings measure scene
 recording and submission on the calling thread; they exclude asynchronous GPU
-work and compositor display latency. In GPU runs, `first_present` currently
-marks accepted submission rather than the later compositor commit.
+work and compositor display latency. In GPU runs, `first_present` waits for a successful scene completion after
+the worker result is committed to the Wayland surface; submission alone and
+unpresented completions do not count. This measures commit, not physical display.
 Timings are for visibility; the only failure is structural: every live dock
 hover frame must stay within the per-pass maxima of the same frame class
 (hover change or animation only) in the CPU fixture `glass_dock_hover_animation_profile`.
