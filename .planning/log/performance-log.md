@@ -8728,3 +8728,36 @@ and no D9 budget was changed.
 The pure schedule test covers late samples, dwell deadlines, turnaround and end
 bounds. Debug GPU-feature shell suite: 1,017 passed / 36 ignored. Raw logs are
 under ignored `profiles/backlog-2026-10-24/aligned-*`.
+
+## 2026-10-24 — Fold full-layout projection into geometry write-back
+
+On main after `d89e9b0b` · area: retained full layout
+
+Fresh, structural and full retained passes now use the existing sparse writer
+with reuse disabled. It rounds/project rects top-down, aggregates clipped fit
+extents bottom-up, records visibility/projection entries, and reports geometry
+changes in that traversal. The separate `seed_projection` walk is deleted.
+Unknown/changed topology still reports an incomplete geometry delta; retained
+sparse passes keep their branch reuse.
+
+**Measured.** Standard release (thin LTO, one codegen unit), CPU 6, unchanged
+`d4604548` checkout versus candidate. `full_layout_projection_profile`: a
+1,365-node four-way/depth-five tree, percentage-width root, fixed-size box
+descendants, no text measurer, retained resize between 1200/1201 × 800, 500
+layouts per sample. Three alternating before/after process pairs, three samples
+each (nine per side): 448.657–533.846 ms before versus 424.933–526.684 ms after;
+medians 458.445 versus 440.602 ms. Timing ranges overlap; the deterministic
+result is the removed sweep, not an end-to-end shell speedup claim.
+
+Per resize, `layout_extents` falls from 2,730 to 1,365; `layout_write`,
+`layout_fit` and `layout_sync` remain 1,365. Gate
+`full_layout_write_records_projection_in_one_visit` requires one extent/fit/write
+visit per node and compares geometry with stateless full layout across resizes,
+including absolute fit contents, clipped overflow and a hidden subtree.
+
+**Validation.** Elements: 314 passed / eight ignored. GPU-feature shell suite:
+1,017 passed / 36 ignored. After avoiding unused fresh-tree change-set entries,
+the full-layout/geometry-change regressions and complete elements suite pass
+again. Formatting and diff checks pass. The older unpinned exploratory samples
+were affected by concurrent compilation and are not used for the timing claim.
+Raw final logs: ignored `profiles/backlog-2026-10-24/layout-pinned-*`.

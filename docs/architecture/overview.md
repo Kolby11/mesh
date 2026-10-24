@@ -82,8 +82,9 @@ would, so Taffy's own whole-tree rounding pass is disabled. Text-only leaf patch
 intrinsic width constraints used by retained layout. When every result and the
 layout style are unchanged, they retain Taffy geometry and report no geometry
 changes. Changed measurements, incomplete probe history, resizing and text
-resource revisions use layout. Full layout passes also report geometry changes while updating
-their projection. Stable frames synchronize producer-reported nodes and subtrees
+resource revisions use layout. Full layout passes report geometry changes and
+update their projection during the same bottom-up write, including fit extents
+and visibility. Stable frames synchronize producer-reported nodes and subtrees
 through snapshot paths, including scroll metadata and sampled style writes;
 retained fingerprint discovery is test-only. Rebuilds and mismatched topology
 reconcile the full retained tree before publishing the frame.

@@ -2261,3 +2261,72 @@ fn write_back_rounding_matches_taffy_rounding() {
         "fixture must exercise rounding"
     );
 }
+
+#[test]
+#[ignore = "release-only full retained layout projection workload"]
+fn full_layout_projection_profile() {
+    use std::hint::black_box;
+    use std::time::Instant;
+    assert!(!cfg!(debug_assertions), "run with --release");
+    let mut root = broad_retained_fixture(4, 5);
+    root.computed_style.width = Dimension::Percent(100.0);
+    let mut state = PerSurfaceLayoutState::default();
+    let mut cache = IntrinsicLayoutCache::default();
+    LayoutEngine::compute_incremental(
+        &mut root, &mut state, 1200.0, 800.0, true, true, &mut cache, None,
+    );
+    for sample in 0..3 {
+        let started = Instant::now();
+        for turn in 0..500 {
+            LayoutEngine::compute_incremental(
+                black_box(&mut root),
+                &mut state,
+                1200.0 + (turn % 2) as f32,
+                800.0,
+                true,
+                false,
+                &mut cache,
+                None,
+            );
+        }
+        eprintln!(
+            "full_layout_projection sample={sample} nodes={} iterations=500 ms={:.3}",
+            state.node_map.len(),
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+    let scope = crate::frame_work::Scope::new(true);
+    LayoutEngine::compute_incremental(
+        &mut root, &mut state, 1200.0, 800.0, true, false, &mut cache, None,
+    );
+    eprintln!("full_layout_projection visits={:?}", scope.snapshot());
+}
+
+#[test]
+fn full_layout_write_records_projection_in_one_visit() {
+    let mut root = broad_retained_fixture(3, 3);
+    root.computed_style.width = Dimension::Percent(100.0);
+    root.children[0].computed_style.width = Dimension::Fit;
+    root.children[0].children[0].computed_style.position = Position::Absolute;
+    root.children[0].children[0].computed_style.inset_left = Some(40.5);
+    root.children[1].computed_style.overflow_x = Overflow::Hidden;
+    root.children[1].children[0].computed_style.width = Dimension::Px(180.0);
+    root.children[2].computed_style.display = Display::None;
+    let mut state = PerSurfaceLayoutState::default();
+    let mut cache = IntrinsicLayoutCache::default();
+    for width in [200.0, 240.0, 190.0] {
+        let mut reference = root.clone();
+        LayoutEngine::compute(&mut reference, width, 100.0);
+        let scope = crate::frame_work::Scope::new(true);
+        LayoutEngine::compute_incremental(
+            &mut root, &mut state, width, 100.0, true, false, &mut cache, None,
+        );
+        let visits = scope.snapshot();
+        drop(scope);
+        let nodes = state.node_map.len() as u64;
+        assert_eq!(visits["layout_write"], nodes);
+        assert_eq!(visits["layout_fit"], nodes);
+        assert_eq!(visits["layout_extents"], nodes);
+        assert_layout_maps_eq(&keyed_layouts(&root), &keyed_layouts(&reference));
+    }
+}

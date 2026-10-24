@@ -1,6 +1,5 @@
-//! Layout write-back for stable-tree patches. After a full pass,
-//! [`seed_projection`] records each node's Taffy rect and fit extents;
-//! [`write_sparse_layout`] then rewrites only the dirty branches and the
+//! Layout write-back records each node's Taffy rect and fit extents while
+//! projecting its geometry. [`write_sparse_layout`] rewrites dirty branches and
 //! subtrees whose projected rect or visibility changed, and returns the nodes
 //! whose final geometry differs.
 
@@ -16,89 +15,29 @@ pub(super) struct LayoutProjection {
     pub(super) hidden_ancestor: bool,
 }
 
-pub(super) fn seed_projection(root: &WidgetNode, state: &mut PerSurfaceLayoutState) {
-    fn seed(
-        node: &WidgetNode,
-        state: &mut PerSurfaceLayoutState,
-        parent: Option<(&WidgetNode, bool)>,
-        parent_cumulative: (f32, f32),
-        changed: &mut HashSet<NodeId>,
-        complete: &mut bool,
-    ) -> (f32, f32) {
-        crate::frame_work::visit(crate::frame_work::Pass::LayoutExtents);
-        match state.projection.get(&node.id) {
-            Some(previous) if previous.final_layout != node.layout => {
-                changed.insert(node.id);
-            }
-            None => *complete = false,
-            _ => {}
-        }
-        let hidden_ancestor = parent.is_some_and(|(_, hidden)| hidden);
-        let hidden = hidden_ancestor
-            || node.computed_style.display == Display::None
-            || node.is_closed_container();
-        let (x, y, padding) = parent.map_or((0.0, 0.0, None), |(parent, _)| {
-            if node.computed_style.position == Position::Fixed {
-                (0.0, 0.0, None)
-            } else {
-                (
-                    parent.layout.x,
-                    parent.layout.y,
-                    Some(parent.computed_style.padding),
-                )
-            }
-        });
-        let (raw, cumulative) = if hidden {
-            (LayoutRect::default(), parent_cumulative)
-        } else {
-            projected_taffy_rect(
-                node,
-                &state.tree,
-                &state.node_map,
-                padding,
-                x,
-                y,
-                parent_cumulative,
-                state.last_available.0,
-                state.last_available.1,
-            )
-        };
-        let mut extents = (
-            node.layout.x + node.layout.width,
-            node.layout.y + node.layout.height,
-        );
-        for child in &node.children {
-            let child_extents = seed(
-                child,
-                state,
-                Some((node, hidden)),
-                cumulative,
-                changed,
-                complete,
-            );
-            if !child.is_promoted_popover() && child.computed_style.position != Position::Fixed {
-                extents.0 = extents.0.max(child_extents.0);
-                extents.1 = extents.1.max(child_extents.1);
-            }
-        }
-        let extents = super::lowering::clip_layout_extents(node, extents);
-        state.projection.insert(
-            node.id,
-            LayoutProjection {
-                raw,
-                cumulative,
-                final_layout: node.layout,
-                extents,
-                hidden,
-                hidden_ancestor,
-            },
-        );
-        extents
-    }
+pub(super) fn write_full_layout(
+    root: &mut WidgetNode,
+    state: &mut PerSurfaceLayoutState,
+    width: f32,
+    height: f32,
+) {
     let previous_len = state.projection.len();
     let mut changed = HashSet::new();
     let mut complete = true;
-    seed(root, state, None, (0.0, 0.0), &mut changed, &mut complete);
+    write(
+        root,
+        state,
+        None,
+        None,
+        0.0,
+        0.0,
+        (0.0, 0.0),
+        false,
+        width,
+        height,
+        &mut changed,
+        &mut complete,
+    );
     if !complete || previous_len != state.node_map.len() {
         state
             .projection
@@ -125,10 +64,11 @@ pub(super) fn write_sparse_layout(
         }
     }
     let mut changed = HashSet::new();
+    let mut complete = true;
     write(
         root,
         state,
-        &branches,
+        Some(&branches),
         None,
         0.0,
         0.0,
@@ -137,6 +77,7 @@ pub(super) fn write_sparse_layout(
         width,
         height,
         &mut changed,
+        &mut complete,
     );
     changed
 }
@@ -145,7 +86,7 @@ pub(super) fn write_sparse_layout(
 fn write(
     node: &mut WidgetNode,
     state: &mut PerSurfaceLayoutState,
-    branches: &HashSet<TaffyNodeId>,
+    branches: Option<&HashSet<TaffyNodeId>>,
     parent_padding: Option<Edges>,
     parent_x: f32,
     parent_y: f32,
@@ -154,6 +95,7 @@ fn write(
     width: f32,
     height: f32,
     changed: &mut HashSet<NodeId>,
+    complete: &mut bool,
 ) -> (f32, f32) {
     crate::frame_work::visit(crate::frame_work::Pass::LayoutWrite);
     let hidden = hidden_ancestor
@@ -174,10 +116,12 @@ fn write(
             height,
         )
     };
-    let dirty_branch = state
-        .node_map
-        .get(&node.id)
-        .is_some_and(|id| branches.contains(id));
+    let dirty_branch = branches.is_none_or(|branches| {
+        state
+            .node_map
+            .get(&node.id)
+            .is_some_and(|id| branches.contains(id))
+    });
     if !dirty_branch
         && let Some(old) = state.projection.get(&node.id)
         && old.raw == raw
@@ -187,7 +131,17 @@ fn write(
     {
         return old.extents;
     }
-    let previous = node.layout;
+    let previous = if branches.is_none() {
+        match state.projection.get(&node.id) {
+            Some(old) => Some(old.final_layout),
+            None => {
+                *complete = false;
+                None
+            }
+        }
+    } else {
+        Some(node.layout)
+    };
     node.layout = raw;
     let mut extents = (raw.x + raw.width, raw.y + raw.height);
     for child in &mut node.children {
@@ -199,6 +153,7 @@ fn write(
         };
         let child_extents = write(
             child, state, branches, padding, x, y, cumulative, hidden, width, height, changed,
+            complete,
         );
         if !child.is_promoted_popover() && !fixed {
             extents.0 = extents.0.max(child_extents.0);
@@ -216,7 +171,7 @@ fn write(
         }
     }
     let extents = super::lowering::clip_layout_extents(node, extents);
-    if node.layout != previous {
+    if previous.is_some_and(|previous| node.layout != previous) {
         changed.insert(node.id);
     }
     state.projection.insert(

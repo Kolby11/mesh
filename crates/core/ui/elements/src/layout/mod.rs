@@ -753,15 +753,7 @@ impl LayoutEngine {
                         available_height,
                     ));
                 } else {
-                    write_taffy_layout(
-                        root,
-                        &state.tree,
-                        &state.node_map,
-                        available_width,
-                        available_height,
-                    );
-                    state.last_available = (available_width, available_height);
-                    sparse::seed_projection(root, state);
+                    sparse::write_full_layout(root, state, available_width, available_height);
                 }
                 state.last_available = (available_width, available_height);
                 state.text_measure_revisions = text_measure_revisions;

@@ -34,7 +34,6 @@ criteria and the items folded in here:
 - [ ] **P2:** Geometry patches still visit every child of a re-laid-out parent in layout
       write-back and overflow annotation (the order of Taffy's flex pass); display patches
       rebuild under layer/scrollbar ancestors, scroll viewports and boxes that clip or scale children.
-- [ ] **P2:** Full layout passes pay a `seed_projection` walk that could fold into the write.
 - [ ] **P3 / D1:** Handler sync converts every compound global to JSON (~1 ms for a 1,024-item
       list) and keyed item deltas come from that comparison; record table writes instead.
       Lists read through anything but a plain member still compare every item.
