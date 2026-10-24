@@ -8502,3 +8502,34 @@ in a GPU shader and is not affected.
 
 **Validation.** Shell suite, serial with `MESH_VERIFY_RETAINED=1`: 999 passed /
 35 ignored. Render suite, serial: 340 passed / 13 ignored.
+
+## 2026-10-24 — glass bar recording ticks: clean frames no longer rebuild
+
+`71d2bf0d` + working tree · area: component paint path selection
+
+Backlog item: while recording, the glass bar's 1 s `elapsed` update was
+reported to rebuild and relay out the whole bar (~920 validation and 184 layout
+visits offline). Reproduced in-process with the real `glass-bar` module, a
+`mesh.recorder` payload with `recording = true`, and a 16 ms frame loop that
+runs due script tasks and paints only when `wants_render()` holds (as
+`Shell::render_components` does):
+
+- The timer tick itself was already sparse: one patched text node, retained
+  path, 0 `validation`, 0 `layout_build` visits.
+- The whole-bar work came from a paint with nothing dirty. `take_dirty_for_paint`
+  only allowed the retained path when some dirty flag was set, so a clean frame
+  fell through to a full template build: 1,005 `validation`, 184 `layout_build`,
+  184 `annotation`, 207 `style_resolve` visits (debug build; visit counts do not
+  depend on the build profile). The offline profile that produced the backlog
+  numbers painted every tick, and the bar's clock and recorder tasks run on
+  separate 1 s deadlines, so every other paint was clean. Live, a clean frame
+  can reach `paint` when `wants_render` holds only because of a live animation,
+  scroll or child-surface lifecycle; how often that happens was not measured.
+
+Now a clean frame takes the retained path as a paint-only frame: 0 `validation`,
+0 `layout_build`. Regression:
+`glass_bar_recording_ticks_stay_off_the_rebuild_path` (fails before with the
+counts above, passes after). Not measured live; no wall times were taken.
+
+**Validation.** Shell suite, serial: 1000 passed / 35 ignored; serial with
+`MESH_VERIFY_RETAINED=1`: 1003 passed / 35 ignored.

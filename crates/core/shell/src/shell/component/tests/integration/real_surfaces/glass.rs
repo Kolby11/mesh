@@ -1129,6 +1129,78 @@ fn d9_glass_bar_clock_tick() {
     d9_report("d9_glass_clock_tick_p90_ms", samples);
 }
 
+/// While a recording runs, the bar's 1 s `elapsed` tick patches its text node
+/// in place, and frames with nothing dirty (the pulsing dot keeps the frame
+/// loop alive) reuse the retained tree: no rebuild, no structural validation,
+/// no whole-bar layout.
+#[test]
+fn glass_bar_recording_ticks_stay_off_the_rebuild_path() {
+    fn assert_sparse(component: &mut FrontendSurfaceComponent, label: &str) -> u64 {
+        let snapshot = component.take_invalidation_snapshot().expect("frame");
+        let counts = &snapshot.node_visits;
+        assert!(!snapshot.full_rebuild, "{label}: {snapshot:?}");
+        assert!(snapshot.retained_path, "{label}: {snapshot:?}");
+        assert_eq!(counts["validation"], 0, "{label}: {counts:?}");
+        assert_eq!(counts["layout_build"], 0, "{label}: {counts:?}");
+        snapshot.patched_node_count
+    }
+    let theme = theme();
+    let mut component = host("glass-bar");
+    let extent = SurfaceExtent::unpadded(2880, 100);
+    let mut pixels = PixelBuffer::new(2880, 100);
+    let started_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64()
+        - 5.0;
+    update(
+        &mut component,
+        "mesh.recorder",
+        serde_json::json!({
+            "available": true, "recording": true, "started_at": started_at, "output": "",
+        }),
+    );
+    for _ in 0..3 {
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+    }
+    component.set_profiling_enabled(true);
+    let _ = component.take_invalidation_snapshot();
+    let mut patched_frames = 0;
+    let finish = std::time::Instant::now() + Duration::from_millis(2200);
+    while std::time::Instant::now() < finish {
+        std::thread::sleep(Duration::from_millis(16));
+        let now = std::time::Instant::now();
+        if component
+            .next_script_task_deadline()
+            .is_some_and(|due| due <= now)
+        {
+            component.run_due_script_tasks(now).unwrap();
+        }
+        if component.wants_render() {
+            component
+                .paint_raster(&theme, extent, &mut pixels, 1.0)
+                .unwrap();
+            patched_frames += usize::from(assert_sparse(&mut component, "frame") > 0);
+        }
+    }
+    assert!(
+        patched_frames >= 2,
+        "the timer patched {patched_frames} frames"
+    );
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    assert_eq!(assert_sparse(&mut component, "clean frame"), 0);
+    let mut elapsed = Vec::new();
+    collect_text_content(
+        first_node_by_class(component.last_tree.as_ref().unwrap(), "elapsed").unwrap(),
+        &mut elapsed,
+    );
+    assert!(elapsed.concat().starts_with("00:0"), "{elapsed:?}");
+}
+
 fn launcher_wrapper(component: &FrontendSurfaceComponent) -> &WidgetNode {
     fn find(node: &WidgetNode) -> Option<&WidgetNode> {
         if node.is_promoted_popover()

@@ -349,8 +349,6 @@ From the 2026-10-20 live `glass` captures; evidence in the
 - [ ] Measure glass first open live (the 2026-10-24 changes are only measured
       offline, where icons rasterize synchronously and glass draws on the CPU):
       picker over IPC, launcher by hand since no IPC can open it.
-- [ ] While recording, the glass bar's 1 s `elapsed` label update rebuilds and relays out the
-      whole bar (~920 validation and 184 layout visits offline) instead of patching one text node.
 - [ ] Hide waits for the root's longest opacity transition (280 ms on the glass
       dashboard and picker) while their panels fade in `--animation-duration-fast`;
       unmap when the exit transitions actually settle.

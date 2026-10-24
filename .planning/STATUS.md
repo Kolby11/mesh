@@ -13,6 +13,10 @@ measurements live in [`log/`](log/README.md).
   idle prewarm paints never-shown hidden surfaces; the launcher builds only its
   active view (dock 1,877 → 676 nodes). Offline numbers in the
   [performance log](log/performance-log.md); a live measurement is still due.
+- **Clean frames repaint from the retained tree.** A paint with nothing dirty
+  took a full template build (1,005 validation / 184 layout visits on the glass
+  bar); the recording timer's own tick was already a one-node patch. Not
+  measured live.
 - Earlier today: sparse text, geometry and keyed-list patches (committed in
   `a163218a`). D9 CPU-raster wall times move with code placement, not work.
 - Live Settings scroll re-captured after the size-flip fix (2.8 / 4.8 ms

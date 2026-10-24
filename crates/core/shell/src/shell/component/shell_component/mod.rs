@@ -1030,9 +1030,19 @@ impl ShellComponent for FrontendSurfaceComponent {
         {
             self.apply_pending_auto_focus(&tree);
         }
+        // `wants_render` also holds for live animations and child-surface
+        // lifecycles, so a frame can arrive with nothing dirty. The retained
+        // tree is current as it stands: such a frame repaints, it does not
+        // rebuild every node.
+        let clean_frame = !self.dirty && !self.style_only_dirty && self.dirty_types.is_empty();
         let (requires_tree_rebuild, can_use_retained_path, dirty_types, _) =
             self.take_dirty_for_paint();
         self.record_component_frame_dirty(dirty_types);
+        let dirty_types = if clean_frame {
+            ComponentDirtyFlags::PAINT
+        } else {
+            dirty_types
+        };
         let paint_width = extent.padded_width().max(content_width).max(1);
         let paint_height = extent.padded_height().max(content_height).max(1);
         // The paint buffer's physical size tracks `paint_width`/`paint_height`
@@ -1060,7 +1070,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             .contains(ComponentDirtyFlags::SCRIPT_NARROW)
             && dirty_types.contains(ComponentDirtyFlags::STATE);
         let use_retained_style_path = !requires_tree_rebuild
-            && can_use_retained_path
+            && (can_use_retained_path || clean_frame)
             && self.last_tree.is_some()
             && !self.reactive_effects_pending
             && !combined_script_and_interaction_update;

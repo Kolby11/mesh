@@ -114,7 +114,8 @@ scenes draw box shadows and rounded gradients natively; the cached CPU images
 behind them serve CPU raster only.
 An icon lookup whose job also finds nothing is remembered for the resource
 revision and repaints nothing.
-Showing a hidden surface restyles its retained tree rather than rebuilding it.
+Showing a hidden surface restyles its retained tree rather than rebuilding it,
+and a frame requested with nothing dirty repaints from the retained tree.
 A re-shown layer surface whose content is already measured sends its configure
 at once and paints a single frame after the compositor answers; top-level
 surfaces open straight into their resting styles, while promoted popups play
