@@ -14,6 +14,9 @@ fn bool_attribute(node: &WidgetNode, name: Prop, default: bool) -> bool {
 /// Visible dialog, sheet and explicit focus scopes in paint order.
 pub fn open_focus_scopes(tree: &WidgetNode) -> Vec<&WidgetNode> {
     fn visit<'a>(node: &'a WidgetNode, policy: NodeEligibility, out: &mut Vec<&'a WidgetNode>) {
+        mesh_core_elements::frame_work::visit(
+            mesh_core_elements::frame_work::Pass::FocusScopeRefresh,
+        );
         let policy = policy.child(node);
         if !policy.allows(InteractionTarget::Focus) {
             return;

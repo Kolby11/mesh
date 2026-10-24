@@ -996,6 +996,12 @@ impl ShellComponent for FrontendSurfaceComponent {
             requested_width == 0 && !extent.content_width_known(),
             requested_height == 0 && !extent.content_height_known(),
         );
+        if !self.unmeasured_root_axes.0 {
+            self.last_definite_root_size.0 = Some(content_width);
+        }
+        if !self.unmeasured_root_axes.1 {
+            self.last_definite_root_size.1 = Some(content_height);
+        }
         // Observe the content size BEFORE snapshotting dirty flags: a size
         // change raises STYLE|LAYOUT|PAINT|METRICS, and this very paint is the
         // one that rebuilds at the new size — snapshotting first would leave
@@ -1109,11 +1115,24 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.effects_changed_templates = false;
         self.apply_pending_auto_focus(&tree);
         self.apply_pending_embedded_popover_focus(&tree);
-        if tree_was_rebuilt || bindings_patched || self.primitives_need_focus_refresh() {
+        let stable_interaction_inputs = !tree_was_rebuilt
+            && bindings_patched
+            && self
+                .layout_state
+                .changed_nodes
+                .as_ref()
+                .is_some_and(HashSet::is_empty)
+            && self.text_patch_preserves_interaction_targets(&tree);
+        if tree_was_rebuilt
+            || (bindings_patched && !stable_interaction_inputs)
+            || self.primitives_need_focus_refresh()
+        {
             self.refresh_focus_scopes(&tree);
         }
-        self.prune_stale_interaction_targets(&tree);
-        if tree_was_rebuilt || bindings_patched {
+        if !stable_interaction_inputs {
+            self.prune_stale_interaction_targets(&tree);
+        }
+        if tree_was_rebuilt || (bindings_patched && !stable_interaction_inputs) {
             self.refresh_disclosures(&tree);
         }
         #[cfg(test)]

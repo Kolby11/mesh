@@ -124,7 +124,8 @@ struct NodeLocation {
     /// Child indices from the root, for direct descent to the live node.
     path: Box<[usize]>,
     /// The node's parent transform at the last rebuild. Valid only while the
-    /// dirty summary reports no transform or geometry change.
+    /// dirty summary reports no transform change and geometry changes satisfy
+    /// [`BatchIndex::dirty_geometry_is_local`].
     parent_transform: AffineTransform,
     /// Index of this node's first slot leaf.
     start: usize,
@@ -154,6 +155,10 @@ pub(super) struct BatchIndex {
 }
 
 impl BatchIndex {
+    pub(super) fn node_path(&self, id: NodeId) -> Option<&[usize]> {
+        self.nodes.get(&id).map(|location| location.path.as_ref())
+    }
+
     /// Whether this index still describes `root` and can be patched rather than
     /// rebuilt. The caller is responsible for the dirty-summary conditions.
     pub(super) fn matches_root(&self, root: &WidgetNode) -> bool {
@@ -220,6 +225,53 @@ impl BatchIndex {
         }
     }
 
+    /// Resolve `ids` through retained paths in path order, stepping through
+    /// shared prefixes once. `ancestor` receives each node above a target
+    /// once; `None` when an ID is unknown or a path no longer matches.
+    fn live_locations<'s, 't>(
+        &'s self,
+        root: &'t WidgetNode,
+        ids: &HashSet<NodeId>,
+        mut visit: impl FnMut(),
+        mut ancestor: impl FnMut(&'t WidgetNode),
+    ) -> Option<Vec<(&'s NodeLocation, &'t WidgetNode)>> {
+        let mut targets = ids
+            .iter()
+            .map(|id| self.nodes.get(id).map(|location| (location, *id)))
+            .collect::<Option<Vec<_>>>()?;
+        targets.sort_unstable_by(|left, right| left.0.path.cmp(&right.0.path));
+        if !targets.is_empty() {
+            visit();
+        }
+        let mut stack = vec![root];
+        let mut previous: &[usize] = &[];
+        let mut located = Vec::with_capacity(targets.len());
+        for (location, id) in targets {
+            let path = location.path.as_ref();
+            let shared = previous
+                .iter()
+                .zip(path)
+                .take_while(|(left, right)| left == right)
+                .count();
+            stack.truncate(shared + 1);
+            for &index in &path[shared..] {
+                visit();
+                let child = stack.last()?.children.get(index)?;
+                stack.push(child);
+            }
+            for node in &stack[shared..path.len()] {
+                ancestor(node);
+            }
+            let node = *stack.last()?;
+            if node.id != id {
+                return None;
+            }
+            located.push((location, node));
+            previous = path;
+        }
+        Some(located)
+    }
+
     /// Resolve dirty ancestors through retained paths. Invalid paths leave
     /// the caller on the conservative topology-discovery path.
     pub(super) fn collect_dirty_ancestors(
@@ -228,32 +280,41 @@ impl BatchIndex {
         dirty: &HashSet<NodeId>,
         ancestors: &mut HashSet<NodeId>,
     ) -> bool {
-        if !self.matches_root(root) {
-            return false;
-        }
-        for id in dirty {
-            let Some(location) = self.nodes.get(id) else {
-                return false;
-            };
-            let mut node = root;
-            for &index in &location.path {
-                mesh_core_elements::frame_work::visit(
-                    mesh_core_elements::frame_work::Pass::DisplayAncestors,
-                );
-                ancestors.insert(node.id);
-                let Some(child) = node.children.get(index) else {
-                    return false;
-                };
-                node = child;
-            }
-            mesh_core_elements::frame_work::visit(
-                mesh_core_elements::frame_work::Pass::DisplayAncestors,
-            );
-            if node.id != *id {
-                return false;
-            }
-        }
-        true
+        self.matches_root(root)
+            && self
+                .live_locations(
+                    root,
+                    dirty,
+                    || {
+                        mesh_core_elements::frame_work::visit(
+                            mesh_core_elements::frame_work::Pass::DisplayAncestors,
+                        )
+                    },
+                    |node| {
+                        ancestors.insert(node.id);
+                    },
+                )
+                .is_some()
+    }
+
+    /// Whether geometry changes among `dirty` leave every clean node's entries
+    /// and recorded parent transform valid: a changed node with children must
+    /// have a size-independent CSS transform, so its children's coordinate
+    /// space does not depend on its box.
+    pub(super) fn dirty_geometry_is_local(
+        &self,
+        root: &WidgetNode,
+        dirty: &HashSet<NodeId>,
+    ) -> bool {
+        self.matches_root(root)
+            && self
+                .live_locations(root, dirty, || {}, |_| {})
+                .is_some_and(|located| {
+                    located.iter().all(|(_, node)| {
+                        node.children.is_empty()
+                            || size_independent_transform(node.computed_style.transform)
+                    })
+                })
     }
 
     /// Re-collect display entries for `dirty` alone, descending to each node by
@@ -277,20 +338,10 @@ impl BatchIndex {
         next: &mut HashMap<DisplayListKey, DisplayListEntry>,
         fingerprints: Option<&super::RetainedFingerprintLookup<'_>>,
     ) -> bool {
-        for node_id in dirty {
-            let Some(location) = self.nodes.get(node_id) else {
-                return false;
-            };
-            let mut node = root;
-            for index in location.path.iter() {
-                let Some(child) = node.children.get(*index) else {
-                    return false;
-                };
-                node = child;
-            }
-            if node.id != *node_id {
-                return false;
-            }
+        let Some(located) = self.live_locations(root, dirty, || {}, |_| {}) else {
+            return false;
+        };
+        for (location, node) in located {
             // An ancestor's `hidden` is folded into `visible`, so a node that
             // is itself visible under a hidden ancestor also takes the
             // fallback rather than emitting entries nothing paints.
@@ -347,6 +398,11 @@ impl BatchIndex {
             ..Default::default()
         }
     }
+}
+
+/// Scale and rotation pivot on the node's box; translation alone does not.
+pub(super) fn size_independent_transform(transform: mesh_core_elements::Transform2D) -> bool {
+    transform.scale_x == 1.0 && transform.scale_y == 1.0 && transform.rotation == 0.0
 }
 
 fn material(

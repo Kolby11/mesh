@@ -165,7 +165,16 @@ in-place item write patches one node with both 8 and 256 list items and emits
 no tree-build stage. The companion keyed-list tests compare forced-rebuild
 pixels and verify structural fallbacks. Binding targets retain typed setters
 and indexed paths. Plain item-field keys reuse validation when their dependencies
-are unchanged; collection snapshots still require item comparisons.
+are unchanged. `keyed_list_item_writes_compare_only_written_items` checks that a
+list read directly from a script member compares and key-checks only the items
+its writes changed, at 16 and 1,024 items, with forced-rebuild pixel parity;
+a list read through any other expression still compares every item.
+`geometry_patch_frames_scale_with_the_change` gates geometry-changing patches
+(text growth, width, last-item height, and a change beside a separate
+1,024-node column): display entries (release), display builds, retained and
+layout synchronization and keyed compares stay equal at 16 and 1,024 siblings,
+with rect, pixel and retained-tree parity. Layout write-back still visits every
+child of a re-laid-out parent, the same order as Taffy's own flex pass.
 The W3 gates compare 16 and 1,024 clean siblings:
 `display_ancestors_visit_only_retained_paths`,
 `transition_and_lifecycle_frames_visit_only_changed_nodes`,

@@ -82,7 +82,7 @@ pub use tree::{
     InputPreedit, KeyedTemplateItem, KeyedTemplateList, NodeId, NodeState, OpenBinding,
     PaintOrderChildren, TemplateBindings, TemplateHandlerBinding, TextSelection, WidgetNode,
     WidgetScrollMetrics, WidgetTreeValidationError, WindowSurfaceState, children_in_paint_order,
-    paint_order_child_indices, validate_widget_tree,
+    for_each_node_at_paths_mut, paint_order_child_indices, validate_widget_tree,
 };
 
 /// Abstraction over the source of variable values for template evaluation.

@@ -903,7 +903,7 @@ pub(super) fn should_preclip_child_subtree(
 /// here made the build O(nodes × depth). The walk stops as soon as the growing
 /// union reaches the clip — the union only grows, so the answer is the same —
 /// and a visible child usually reaches it on its own box.
-fn should_preclip_child_subtree_with_transform(
+pub(super) fn should_preclip_child_subtree_with_transform(
     child: &WidgetNode,
     parent_transform: AffineTransform,
     clip: DisplayListClip,

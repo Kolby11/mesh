@@ -97,6 +97,10 @@ pub struct ScriptContext {
     /// Public members whose values changed during the most recent Lua sync.
     /// Reuses its allocation across handler calls.
     pub(super) changed_public_members: Vec<String>,
+    /// Per changed array member, the indices of the items that changed, or
+    /// `None` once any write to it was not item-local (a resize, a type
+    /// change, or a write recorded without comparison).
+    pub(super) changed_list_items: HashMap<String, Option<Vec<usize>>>,
     /// Set after the first template evaluation. Before it, an empty dependency
     /// table means "unknown", not "expression-free", so writes stay conservative.
     pub(super) template_dependencies_ready: bool,
@@ -354,6 +358,7 @@ impl ScriptContext {
             assigned_global_keys: Arc::new(Mutex::new(HashSet::new())),
             pending_assigned_global_keys: Arc::new(AtomicBool::new(false)),
             changed_public_members: Vec::new(),
+            changed_list_items: HashMap::new(),
             template_dependencies_ready: false,
             template_expression_cache: Mutex::new(TemplateExpressionCache::default()),
             tracked_service_fields: Arc::new(Mutex::new(HashMap::new())),

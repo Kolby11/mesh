@@ -193,10 +193,42 @@ impl ScriptContext {
         Some((readers, self.changed_public_members.clone()))
     }
 
+    /// The indices of the items of array member `name` that changed since the
+    /// template last consumed this instance's state, when every such write
+    /// kept the array's length. `None` when the member is unchanged or a write
+    /// was not item-local.
+    pub fn changed_list_items(&self, name: &str) -> Option<&[usize]> {
+        self.changed_public_members
+            .iter()
+            .any(|changed| changed == name)
+            .then(|| self.changed_list_items.get(name)?.as_deref())
+            .flatten()
+    }
+
     /// Mark the pending public-member writes as applied without a template
     /// rebuild, after the caller re-evaluated every expression that reads them.
     pub fn consume_template_changes(&mut self) {
+        // A list patched from its item delta was not re-evaluated, so a
+        // memoized value of any expression reading it is stale.
+        if self.changed_list_items.values().any(Option::is_some) {
+            let cache = self.template_expression_cache.get_mut().unwrap();
+            let TemplateExpressionCache {
+                member_reads,
+                values,
+                ..
+            } = &mut *cache;
+            values.retain(|source, _| {
+                member_reads.get(source).is_none_or(|reads| {
+                    !reads.iter().any(|read| {
+                        self.changed_list_items
+                            .get(read)
+                            .is_some_and(Option::is_some)
+                    })
+                })
+            });
+        }
         self.changed_public_members.clear();
+        self.changed_list_items.clear();
         self.state.clear_dirty();
     }
 
@@ -255,6 +287,7 @@ impl ScriptContext {
     pub fn mark_template_dependencies_ready(&mut self) {
         self.template_dependencies_ready = true;
         self.changed_public_members.clear();
+        self.changed_list_items.clear();
     }
 
     /// Drop memoized pure public-member expression values. Normal script and

@@ -178,6 +178,21 @@ impl ScriptState {
         {
             return;
         }
+        self.insert_changed(name, value);
+    }
+
+    /// Store a value the caller has already found to differ from the current
+    /// one, marking state as dirty. Proxied names keep using [`Self::set`].
+    pub fn set_changed(&mut self, name: impl Into<String>, value: Value) {
+        let name = name.into();
+        if self.proxies.contains_key(&name) {
+            self.set(name, value);
+            return;
+        }
+        self.insert_changed(name, value);
+    }
+
+    fn insert_changed(&mut self, name: String, value: Value) {
         self.host_value_fingerprints.remove(&name);
         self.variables.insert(name, Arc::new(value));
         self.dirty = true;

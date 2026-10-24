@@ -2,7 +2,7 @@ use super::*;
 use mesh_core_elements::VariableStore;
 use mlua::{LuaSerdeExt, Value as LuaValue};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 
 /// Record a changed public member for the template-dependency gate.
@@ -16,6 +16,44 @@ fn record_changed_public_member(changed: &mut Vec<String>, name: &str) {
         return;
     }
     changed.push(name.to_owned());
+}
+
+/// Merge one write's item delta into a member's pending delta. A write
+/// without one leaves the member with no item-local delta until consumed.
+fn record_changed_items(
+    changed: &mut HashMap<String, Option<Vec<usize>>>,
+    name: &str,
+    delta: Option<Vec<usize>>,
+) {
+    match (changed.get_mut(name), delta) {
+        (Some(Some(pending)), Some(delta)) => {
+            pending.extend(delta);
+            pending.sort_unstable();
+            pending.dedup();
+        }
+        (Some(pending), None) => *pending = None,
+        (Some(None), Some(_)) => {}
+        (None, delta) => {
+            changed.insert(name.to_owned(), delta);
+        }
+    }
+}
+
+/// The indices at which two equal-length arrays differ; `None` for any other
+/// pair of values.
+fn array_item_delta(previous: &Value, next: &Value) -> Option<Vec<usize>> {
+    let (Value::Array(previous), Value::Array(next)) = (previous, next) else {
+        return None;
+    };
+    (previous.len() == next.len()).then(|| {
+        previous
+            .iter()
+            .zip(next)
+            .enumerate()
+            .filter(|(_, (previous, next))| previous != next)
+            .map(|(index, _)| index)
+            .collect()
+    })
 }
 
 impl ScriptContext {
@@ -66,6 +104,7 @@ impl ScriptContext {
                     if matches!(lua_value, LuaValue::Nil) {
                         if self.state.remove(key) {
                             record_changed_public_member(&mut self.changed_public_members, key);
+                            record_changed_items(&mut self.changed_list_items, key, None);
                         }
                         continue;
                     }
@@ -81,10 +120,22 @@ impl ScriptContext {
                             continue;
                         }
                         if let Ok(value) = self.lua().from_value::<Value>(lua_value) {
+                            let delta = self
+                                .state
+                                .get_ref(key)
+                                .and_then(|previous| array_item_delta(previous, &value));
+                            if delta.as_ref().is_some_and(Vec::is_empty) {
+                                continue;
+                            }
                             let generation = self.state.mutation_generation();
-                            self.state.set(key.clone(), value);
+                            if delta.is_some() {
+                                self.state.set_changed(key.clone(), value);
+                            } else {
+                                self.state.set(key.clone(), value);
+                            }
                             if self.state.mutation_generation() != generation {
                                 record_changed_public_member(&mut self.changed_public_members, key);
+                                record_changed_items(&mut self.changed_list_items, key, delta);
                             }
                         }
                     }
@@ -120,6 +171,7 @@ impl ScriptContext {
                                         &mut self.changed_public_members,
                                         &name,
                                     );
+                                    record_changed_items(&mut self.changed_list_items, &name, None);
                                 }
                             } else if is_proxyable_lua_scalar(&lua_value) {
                                 if !self.state.get_ref(&name).is_some_and(|current| {
@@ -131,6 +183,7 @@ impl ScriptContext {
                                         &mut self.changed_public_members,
                                         &name,
                                     );
+                                    record_changed_items(&mut self.changed_list_items, &name, None);
                                 }
                             } else {
                                 let value_for_env = lua_value.clone();
@@ -143,6 +196,7 @@ impl ScriptContext {
                                         &mut self.changed_public_members,
                                         &name,
                                     );
+                                    record_changed_items(&mut self.changed_list_items, &name, None);
                                 }
                             }
                         }
@@ -156,6 +210,7 @@ impl ScriptContext {
                     {
                         self.state.set(name.clone(), value);
                         record_changed_public_member(&mut self.changed_public_members, &name);
+                        record_changed_items(&mut self.changed_list_items, &name, None);
                         if is_proxyable_lua_scalar(&lua_value) {
                             let _ = self.proxy_scalar_global(&name, lua_value);
                         }

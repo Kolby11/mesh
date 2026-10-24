@@ -599,17 +599,15 @@ pub(in crate::shell::component) fn annotate_runtime_nodes(
     let Some(scrolled) = snapshot.live_paths(tree, &scroll_ids, visit) else {
         return false;
     };
-    for path in projected {
-        let node = node_at_path_mut(tree, path);
+    mesh_core_elements::for_each_node_at_paths_mut(tree, &projected, |_, node| {
         let Some(key) = node.mesh_key().map(str::to_owned) else {
-            continue;
+            return;
         };
         let node_id = node.id;
         context.changed.insert(node_id);
         project_runtime_node(node, &key, node_id, context);
-    }
-    for path in scrolled {
-        let node = node_at_path_mut(tree, path);
+    });
+    mesh_core_elements::for_each_node_at_paths_mut(tree, &scrolled, |_, node| {
         if (node.computed_style.overflow_x.is_scrollable()
             || node.computed_style.overflow_y.is_scrollable())
             && let Some(metrics) = node.scroll_metrics.as_mut()
@@ -624,15 +622,8 @@ pub(in crate::shell::component) fn annotate_runtime_nodes(
                 context.changed.insert(node.id);
             }
         }
-    }
+    });
     true
-}
-
-fn node_at_path_mut<'a>(mut node: &'a mut WidgetNode, path: &[usize]) -> &'a mut WidgetNode {
-    for &index in path {
-        node = &mut node.children[index];
-    }
-    node
 }
 
 /// Loop identities embed their own `/` (`"key"/child/fragment`) and authored

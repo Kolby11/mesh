@@ -968,6 +968,10 @@ pub(super) struct FrontendSurfaceComponent {
     /// the synthetic surface root is laid out `auto` on that axis and the
     /// content measures itself. Written by `paint`, read by `finalize_tree`.
     unmeasured_root_axes: (bool, bool),
+    /// Per axis, the last size a paint actually had for the surface. Container
+    /// queries read it while that axis is a stand-in; see
+    /// `root_style_container`.
+    last_definite_root_size: (Option<u32>, Option<u32>),
     last_surface_size: Option<(u32, u32)>,
     /// The compositor's toplevel states for this surface, projected onto every
     /// node at annotation time so `:fullscreen`, `:maximized`, `:activated`,
@@ -1455,6 +1459,7 @@ impl FrontendSurfaceComponent {
             active_theme_stale: Cell::new(true),
             measured_size: None,
             unmeasured_root_axes: (false, false),
+            last_definite_root_size: (None, None),
             last_surface_size: None,
             // A surface declared `role: "window"` is windowed from its first
             // frame; only role changes flip it later.

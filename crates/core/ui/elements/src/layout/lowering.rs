@@ -2,7 +2,15 @@ use super::*;
 use crate::Prop;
 
 #[derive(Clone)]
+pub(super) struct TextMeasureProbe {
+    pub(super) max_width: Option<f32>,
+    pub(super) known_dimensions: TaffySize<Option<f32>>,
+    pub(super) size: (f32, f32),
+}
+
+#[derive(Clone)]
 pub(super) struct TextMeasureData {
+    pub(super) probes: std::cell::RefCell<Option<Vec<TextMeasureProbe>>>,
     pub(super) content: Arc<str>,
     pub(super) font_family: Arc<str>,
     pub(super) font_size: f32,
@@ -19,6 +27,7 @@ pub(super) struct TextMeasureData {
 impl TextMeasureData {
     pub(super) fn from_node(node: &WidgetNode) -> Self {
         Self {
+            probes: std::cell::RefCell::new(Some(Vec::new())),
             content: node
                 .attributes
                 .get(Prop::Content)
@@ -389,13 +398,29 @@ pub(super) fn measure_taffy_node(
         };
 
     // Layout rounds boxes to whole pixels, and the painter wraps at the
-    // rounded width. A fractional measurement rounded down (94.3 -> 94) makes
-    // the painter break the last word onto a line the box has no room for, so
-    // the intrinsic width always rounds up to contain the shaped line.
-    TaffySize {
+    // rounded width. Round intrinsic width up so the shaped line still fits.
+    let size = TaffySize {
         width: known_dimensions.width.unwrap_or(measured_width.ceil()),
         height: known_dimensions.height.unwrap_or(measured_height),
+    };
+    let mut probes = text.probes.borrow_mut();
+    if let Some(entries) = probes.as_mut() {
+        if let Some(entry) = entries.iter_mut().find(|entry| {
+            entry.max_width == max_width && entry.known_dimensions == known_dimensions
+        }) {
+            entry.size = (size.width, size.height);
+        } else if entries.len() < 16 {
+            entries.push(TextMeasureProbe {
+                max_width,
+                known_dimensions,
+                size: (size.width, size.height),
+            });
+        } else {
+            // An incomplete constraint history cannot prove retained cache validity.
+            *probes = None;
+        }
     }
+    size
 }
 
 pub(super) fn available_space_to_option(value: TaffyAvailableSpace) -> Option<f32> {
@@ -412,7 +437,17 @@ pub(super) fn write_taffy_layout(
     viewport_w: f32,
     viewport_h: f32,
 ) {
-    write_taffy_layout_with_parent(node, tree, node_map, None, 0.0, 0.0, viewport_w, viewport_h);
+    write_taffy_layout_with_parent(
+        node,
+        tree,
+        node_map,
+        None,
+        0.0,
+        0.0,
+        (0.0, 0.0),
+        viewport_w,
+        viewport_h,
+    );
     resolve_fit_sizing(node);
 }
 
@@ -473,6 +508,7 @@ pub(super) fn write_taffy_layout_with_parent(
     parent_padding: Option<Edges>,
     parent_x: f32,
     parent_y: f32,
+    parent_cumulative: (f32, f32),
     viewport_w: f32,
     viewport_h: f32,
 ) {
@@ -482,16 +518,18 @@ pub(super) fn write_taffy_layout_with_parent(
         return;
     }
 
-    node.layout = projected_taffy_rect(
+    let (layout, cumulative) = projected_taffy_rect(
         node,
         tree,
         node_map,
         parent_padding,
         parent_x,
         parent_y,
+        parent_cumulative,
         viewport_w,
         viewport_h,
     );
+    node.layout = layout;
 
     let padding = node.computed_style.padding;
     for child in &mut node.children {
@@ -509,12 +547,29 @@ pub(super) fn write_taffy_layout_with_parent(
             child_parent_padding,
             child_parent_x,
             child_parent_y,
+            cumulative,
             viewport_w,
             viewport_h,
         );
     }
 }
 
+/// Layout trees skip Taffy's rounding pass, which visits every node on each
+/// layout; write-back rounds only the nodes it projects.
+pub(super) fn unrounded_taffy_tree() -> TaffyTree<NodeId> {
+    let mut tree = TaffyTree::new();
+    tree.disable_rounding();
+    tree
+}
+
+fn round_layout_value(value: f32) -> f32 {
+    (value + 0.5).floor()
+}
+
+/// The node's absolute rect and its unrounded Taffy-tree origin, which its
+/// children need. Rounding matches Taffy's own pass: locations round relative
+/// to the parent, sizes round at their cumulative unrounded edges.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn projected_taffy_rect(
     node: &WidgetNode,
     tree: &TaffyTree<NodeId>,
@@ -522,18 +577,25 @@ pub(super) fn projected_taffy_rect(
     parent_padding: Option<Edges>,
     parent_x: f32,
     parent_y: f32,
+    parent_cumulative: (f32, f32),
     viewport_w: f32,
     viewport_h: f32,
-) -> LayoutRect {
+) -> (LayoutRect, (f32, f32)) {
     let mut rect = node.layout;
-    if let Some(taffy_node) = node_map.get(&node.id)
-        && let Ok(layout) = tree.layout(*taffy_node)
-    {
+    let mut cumulative = parent_cumulative;
+    if let Some(taffy_node) = node_map.get(&node.id) {
+        let layout = tree.unrounded_layout(*taffy_node);
+        cumulative = (
+            parent_cumulative.0 + layout.location.x,
+            parent_cumulative.1 + layout.location.y,
+        );
         rect = LayoutRect {
-            x: parent_x + layout.location.x,
-            y: parent_y + layout.location.y,
-            width: layout.size.width,
-            height: layout.size.height,
+            x: parent_x + round_layout_value(layout.location.x),
+            y: parent_y + round_layout_value(layout.location.y),
+            width: round_layout_value(cumulative.0 + layout.size.width)
+                - round_layout_value(cumulative.0),
+            height: round_layout_value(cumulative.1 + layout.size.height)
+                - round_layout_value(cumulative.1),
         };
 
         if node.computed_style.position == Position::Absolute
@@ -582,7 +644,7 @@ pub(super) fn projected_taffy_rect(
         }
     }
 
-    rect
+    (rect, cumulative)
 }
 
 pub(super) fn zero_layout_subtree(node: &mut WidgetNode) {

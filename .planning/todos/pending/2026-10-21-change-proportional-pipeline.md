@@ -245,6 +245,13 @@ layout structural gate checks constant retained sync at 16 and 1,024 clean
 siblings plus full retained verification and pixel parity. See the performance
 log; shared path-prefix resolution remains open in the backlog.
 
+**2026-10-24:** geometry-changing patches reuse sparse display entries and
+patch commands and ancestor coverage in place; write-back rounding replaces
+Taffy's whole-tree pass; dirty paths share prefixes; keyed lists read from a
+member take item deltas from the handler's state sync. Remaining sibling work,
+the `seed_projection` fold and write-time table tracking (D1) are in the
+backlog. Measurements: the 2026-10-24 entry in the performance log.
+
 ### Workstreams
 
 **W6 implemented 2026-10-22:** per-surface node recordings key on retained

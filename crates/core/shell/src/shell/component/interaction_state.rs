@@ -1,8 +1,57 @@
 use super::*;
+use mesh_core_elements::Prop;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 impl FrontendSurfaceComponent {
+    /// On stable structure, text content alone may change accessible names
+    /// without changing target eligibility, scope ownership or anchor references.
+    pub(super) fn text_patch_preserves_interaction_targets(&self, tree: &WidgetNode) -> bool {
+        let Some(snapshot) = &self.last_frame_snapshot else {
+            return false;
+        };
+        let ids: HashSet<_> = self
+            .frame_dirty
+            .iter()
+            .map(|(id, _)| id)
+            .chain(self.patched_binding_nodes.iter().copied())
+            .collect();
+        if ids.is_empty() {
+            return false;
+        }
+        let Some(nodes) = snapshot
+            .live_nodes(tree, &ids, || {
+                mesh_core_elements::frame_work::visit(
+                    mesh_core_elements::frame_work::Pass::InteractionLookup,
+                );
+            })
+            .filter(|nodes| nodes.len() == ids.len())
+        else {
+            return false;
+        };
+        nodes.into_iter().all(|(_, node)| {
+            let Some(old) = snapshot.node_by_id(node.id) else {
+                return false;
+            };
+            if old.tag() != node.tag
+                || old.style() != &node.computed_style
+                || old.state() != node.state
+                || old.layout() != node.layout
+            {
+                return false;
+            }
+            let text_leaf = node.tag == "text" && node.children.is_empty();
+            node.attributes
+                .iter()
+                .filter(|(key, _)| {
+                    !text_leaf || !matches!(key.prop(), Some(Prop::Content | Prop::Text))
+                })
+                .eq(old.attributes().iter().filter(|(key, _)| {
+                    !text_leaf || !matches!(key.prop(), Some(Prop::Content | Prop::Text))
+                }))
+        })
+    }
+
     pub(super) fn prepare_interaction_frame(&mut self) {
         self.interaction_frame.prepare_for_paint(
             self.frame_revision.saturating_add(1),
@@ -713,6 +762,9 @@ impl FrontendSurfaceComponent {
     /// state caches rather than target ownership and are reconciled when a node
     /// becomes eligible again.
     pub(super) fn prune_stale_interaction_targets(&mut self, tree: &WidgetNode) {
+        mesh_core_elements::frame_work::visit(
+            mesh_core_elements::frame_work::Pass::InteractionReconcile,
+        );
         self.reconcile_interaction_state(tree);
         if let Some(key) = &self.focused_key {
             if !node_can_receive_interaction(tree, key, InteractionTarget::Focus) {

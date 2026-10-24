@@ -300,6 +300,7 @@ impl ScriptContext {
         if changed {
             self.state.invalidate_function_binding();
             self.changed_public_members.clear();
+            self.changed_list_items.clear();
         }
     }
 

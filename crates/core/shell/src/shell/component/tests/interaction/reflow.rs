@@ -1429,3 +1429,59 @@ fn complete_scene_frames_match_raster_at_fractional_scale() {
         }
     }
 }
+
+/// Live symptom: the glass bar's `@container (max-width: 1500px)` margin rule
+/// matched the 1px stand-in painted while a geometry change awaited the
+/// compositor's ack, so every margin change reconfigured the surface into the
+/// next one and the whole screen bounced.
+#[test]
+fn stand_in_paint_keeps_container_queries_on_the_last_real_size() {
+    let mut component = test_frontend_component(
+        r#"
+<style>
+.bar {
+  width: 100%;
+  height: 20px;
+  margin: 10px 18px 0;
+}
+@container (max-width: 1500px) {
+  .bar { margin: 8px 10px 0; }
+}
+</style>
+<template>
+  <row class="bar" />
+</template>
+"#,
+    );
+    let theme = default_theme();
+    let bar_margin_right = |component: &FrontendSurfaceComponent| {
+        node_by_mesh_key(component.last_tree.as_ref().unwrap(), "root/0")
+            .computed_style
+            .margin
+            .right
+    };
+
+    let mut buffer = PixelBuffer::new(2000, 20);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(2000, 20), &mut buffer, 1.0)
+        .unwrap();
+    assert_eq!(bar_margin_right(&component), 18.0);
+
+    // A reconfigure drops every known size until the compositor acks it.
+    component.surface_size_changed(1, 1);
+    let mut stand_in = PixelBuffer::new(1, 1);
+    component
+        .paint_raster(&theme, SurfaceExtent::padded((0, 0), (1, 1)), &mut stand_in, 1.0)
+        .unwrap();
+    assert_eq!(
+        bar_margin_right(&component),
+        18.0,
+        "a stand-in axis must not satisfy the container query"
+    );
+
+    let mut narrow = PixelBuffer::new(1200, 20);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(1200, 20), &mut narrow, 1.0)
+        .unwrap();
+    assert_eq!(bar_margin_right(&component), 10.0);
+}

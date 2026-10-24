@@ -988,31 +988,55 @@ impl FrameSnapshot {
             .map(|&index| self.0.paths[index].as_ref())
     }
 
-    /// Paths of `targets` in `root`, checked against the live tree. Targets
-    /// absent from this snapshot are skipped; `None` when any path no longer
-    /// leads to its target. `visit` runs once per node stepped through.
+    /// Paths of `targets` in `root`, checked against the live tree, in path
+    /// order. Targets absent from this snapshot are skipped; `None` when any
+    /// path no longer leads to its target. `visit` runs once per node stepped
+    /// through; shared path prefixes are stepped through once.
     pub fn live_paths<'a, 's>(
         &'s self,
         root: &WidgetNode,
         targets: impl IntoIterator<Item = &'a NodeId>,
-        mut visit: impl FnMut(),
+        visit: impl FnMut(),
     ) -> Option<Vec<&'s [usize]>> {
-        let mut paths = Vec::new();
-        for &id in targets {
-            let Some(path) = self.node_path(id) else {
-                continue;
-            };
-            let mut node = root;
-            for &index in path {
+        self.live_nodes(root, targets, visit)
+            .map(|nodes| nodes.into_iter().map(|(path, _)| path).collect())
+    }
+
+    /// [`Self::live_paths`] together with the live node each path reaches.
+    pub fn live_nodes<'a, 's, 't>(
+        &'s self,
+        root: &'t WidgetNode,
+        targets: impl IntoIterator<Item = &'a NodeId>,
+        mut visit: impl FnMut(),
+    ) -> Option<Vec<(&'s [usize], &'t WidgetNode)>> {
+        let mut paths: Vec<_> = targets
+            .into_iter()
+            .filter_map(|&id| self.node_path(id).map(|path| (path, id)))
+            .collect();
+        paths.sort_unstable_by(|left, right| left.0.cmp(right.0));
+        let mut stack = vec![root];
+        let mut previous: &[usize] = &[];
+        let mut nodes = Vec::with_capacity(paths.len());
+        for (path, id) in paths {
+            let shared = previous
+                .iter()
+                .zip(path)
+                .take_while(|(left, right)| left == right)
+                .count();
+            stack.truncate(shared + 1);
+            for &index in &path[shared..] {
                 visit();
-                node = node.children.get(index)?;
+                let child = stack.last()?.children.get(index)?;
+                stack.push(child);
             }
+            let node = *stack.last()?;
             if node.id != id {
                 return None;
             }
-            paths.push(path);
+            nodes.push((path, node));
+            previous = path;
         }
-        Some(paths)
+        Some(nodes)
     }
 
     pub fn semantic_nodes(&self) -> impl Iterator<Item = &FrameNode> {
@@ -1379,6 +1403,85 @@ mod tests {
                 .wrapping_add(1_442_695_040_888_963_407);
             self.0
         }
+    }
+
+    /// Targets in one branch share their walk from the root; the mutable
+    /// walker reaches parents before descendants.
+    #[test]
+    fn live_paths_step_through_shared_prefixes_once() {
+        let mut root = WidgetNode::new("box");
+        root.id = 1;
+        root.set_mesh_key("root");
+        let mut next_id = 2;
+        let mut chain = |depth: usize| {
+            let mut node = WidgetNode::new("box");
+            node.id = next_id;
+            node.set_mesh_key(format!("n{next_id}"));
+            next_id += 1;
+            for _ in 0..depth {
+                let mut parent = WidgetNode::new("box");
+                parent.id = next_id;
+                parent.set_mesh_key(format!("n{next_id}"));
+                next_id += 1;
+                parent.children.push(node);
+                node = parent;
+            }
+            node
+        };
+        let mut branch = chain(5);
+        let mut deepest = &mut branch;
+        while !deepest.children.is_empty() {
+            deepest = &mut deepest.children[0];
+        }
+        for _ in 0..4 {
+            deepest.children.push(chain(0));
+        }
+        root.children.push(chain(2));
+        root.children.push(branch);
+        let snapshot =
+            FrameSnapshot::capture(&root, 1, FramePhaseStamps::complete(1), None).unwrap();
+        let mut leaf = &root.children[1];
+        while !leaf.children.is_empty() {
+            leaf = &leaf.children[0];
+        }
+        let parent = snapshot
+            .node_path(leaf.id)
+            .map(|path| path[..path.len() - 1].to_vec())
+            .unwrap();
+        let mut targets = vec![];
+        let mut node = &root;
+        for &index in &parent {
+            node = &node.children[index];
+        }
+        targets.push(node.id);
+        targets.extend(node.children.iter().map(|child| child.id));
+
+        let mut visits = 0;
+        let paths = snapshot
+            .live_paths(&root, &targets, || visits += 1)
+            .unwrap();
+        // Six steps reach the parent; each of its four children is one more.
+        assert_eq!(parent.len(), 6);
+        assert_eq!(visits, 6 + 4);
+        assert!(paths.is_sorted());
+        assert_eq!(paths.len(), 5);
+
+        let mut tree = root.clone();
+        let mut seen = Vec::new();
+        crate::for_each_node_at_paths_mut(&mut tree, &paths, |path, node| {
+            seen.push((path.to_vec(), node.id));
+        });
+        let expected: Vec<_> = paths
+            .iter()
+            .map(|path| {
+                let mut node = &root;
+                for &index in *path {
+                    node = &node.children[index];
+                }
+                (path.to_vec(), node.id)
+            })
+            .collect();
+        assert_eq!(seen, expected);
     }
 
     fn generated_tree(seed: u64) -> WidgetNode {

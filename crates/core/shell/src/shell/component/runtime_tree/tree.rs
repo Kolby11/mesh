@@ -319,17 +319,16 @@ impl RetainedWidgetTree {
             .map(|(id, _)| id)
             .chain(subtrees.iter().copied())
             .collect();
-        let Some(mut paths) = snapshot.live_paths(root, &ids, || {
+        let Some(nodes) = snapshot.live_nodes(root, &ids, || {
             mesh_core_elements::frame_work::visit(
                 mesh_core_elements::frame_work::Pass::RetainedLookup,
             );
         }) else {
             return self.synchronize_rebuilt_tree(root);
         };
-        if paths.len() != ids.len() {
+        if nodes.len() != ids.len() {
             return self.synchronize_rebuilt_tree(root);
         }
-        paths.sort_unstable();
         let mut selected = Vec::new();
         let mut subtree_path: Option<&[usize]> = None;
         fn select<'a>(node: &'a WidgetNode, selected: &mut Vec<(&'a WidgetNode, bool)>) {
@@ -338,16 +337,12 @@ impl RetainedWidgetTree {
                 select(child, selected);
             }
         }
-        for path in paths {
+        for (path, node) in nodes {
             if subtree_path
                 .as_ref()
                 .is_some_and(|parent| path.starts_with(parent))
             {
                 continue;
-            }
-            let mut node = root;
-            for &index in path {
-                node = &node.children[index];
             }
             if subtrees.contains(&node.id) {
                 select(node, &mut selected);

@@ -8,6 +8,8 @@ use super::*;
 
 pub(super) struct LayoutProjection {
     raw: LayoutRect,
+    /// Unrounded Taffy-tree origin; descendants round their sizes against it.
+    cumulative: (f32, f32),
     final_layout: LayoutRect,
     extents: (f32, f32),
     pub(super) hidden: bool,
@@ -19,6 +21,7 @@ pub(super) fn seed_projection(root: &WidgetNode, state: &mut PerSurfaceLayoutSta
         node: &WidgetNode,
         state: &mut PerSurfaceLayoutState,
         parent: Option<(&WidgetNode, bool)>,
+        parent_cumulative: (f32, f32),
         changed: &mut HashSet<NodeId>,
         complete: &mut bool,
     ) -> (f32, f32) {
@@ -45,8 +48,8 @@ pub(super) fn seed_projection(root: &WidgetNode, state: &mut PerSurfaceLayoutSta
                 )
             }
         });
-        let raw = if hidden {
-            LayoutRect::default()
+        let (raw, cumulative) = if hidden {
+            (LayoutRect::default(), parent_cumulative)
         } else {
             projected_taffy_rect(
                 node,
@@ -55,6 +58,7 @@ pub(super) fn seed_projection(root: &WidgetNode, state: &mut PerSurfaceLayoutSta
                 padding,
                 x,
                 y,
+                parent_cumulative,
                 state.last_available.0,
                 state.last_available.1,
             )
@@ -64,7 +68,14 @@ pub(super) fn seed_projection(root: &WidgetNode, state: &mut PerSurfaceLayoutSta
             node.layout.y + node.layout.height,
         );
         for child in &node.children {
-            let child_extents = seed(child, state, Some((node, hidden)), changed, complete);
+            let child_extents = seed(
+                child,
+                state,
+                Some((node, hidden)),
+                cumulative,
+                changed,
+                complete,
+            );
             if !child.is_promoted_popover() && child.computed_style.position != Position::Fixed {
                 extents.0 = extents.0.max(child_extents.0);
                 extents.1 = extents.1.max(child_extents.1);
@@ -75,6 +86,7 @@ pub(super) fn seed_projection(root: &WidgetNode, state: &mut PerSurfaceLayoutSta
             node.id,
             LayoutProjection {
                 raw,
+                cumulative,
                 final_layout: node.layout,
                 extents,
                 hidden,
@@ -86,7 +98,7 @@ pub(super) fn seed_projection(root: &WidgetNode, state: &mut PerSurfaceLayoutSta
     let previous_len = state.projection.len();
     let mut changed = HashSet::new();
     let mut complete = true;
-    seed(root, state, None, &mut changed, &mut complete);
+    seed(root, state, None, (0.0, 0.0), &mut changed, &mut complete);
     if !complete || previous_len != state.node_map.len() {
         state
             .projection
@@ -120,6 +132,7 @@ pub(super) fn write_sparse_layout(
         None,
         0.0,
         0.0,
+        (0.0, 0.0),
         false,
         width,
         height,
@@ -136,6 +149,7 @@ fn write(
     parent_padding: Option<Edges>,
     parent_x: f32,
     parent_y: f32,
+    parent_cumulative: (f32, f32),
     hidden_ancestor: bool,
     width: f32,
     height: f32,
@@ -145,8 +159,8 @@ fn write(
     let hidden = hidden_ancestor
         || node.computed_style.display == Display::None
         || node.is_closed_container();
-    let raw = if hidden {
-        LayoutRect::default()
+    let (raw, cumulative) = if hidden {
+        (LayoutRect::default(), parent_cumulative)
     } else {
         projected_taffy_rect(
             node,
@@ -155,6 +169,7 @@ fn write(
             parent_padding,
             parent_x,
             parent_y,
+            parent_cumulative,
             width,
             height,
         )
@@ -166,6 +181,7 @@ fn write(
     if !dirty_branch
         && let Some(old) = state.projection.get(&node.id)
         && old.raw == raw
+        && old.cumulative == cumulative
         && old.hidden == hidden
         && old.hidden_ancestor == hidden_ancestor
     {
@@ -182,7 +198,7 @@ fn write(
             (raw.x, raw.y, Some(node.computed_style.padding))
         };
         let child_extents = write(
-            child, state, branches, padding, x, y, hidden, width, height, changed,
+            child, state, branches, padding, x, y, cumulative, hidden, width, height, changed,
         );
         if !child.is_promoted_popover() && !fixed {
             extents.0 = extents.0.max(child_extents.0);
@@ -207,6 +223,7 @@ fn write(
         node.id,
         LayoutProjection {
             raw,
+            cumulative,
             final_layout: node.layout,
             extents,
             hidden,

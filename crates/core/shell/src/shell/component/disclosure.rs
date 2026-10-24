@@ -187,6 +187,7 @@ fn subtree_contains_key(node: &WidgetNode, key: &str) -> bool {
 }
 
 fn collect_popovers<'a>(node: &'a WidgetNode, out: &mut Vec<&'a WidgetNode>) {
+    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::DisclosureRefresh);
     if source_element_tag(node) == "popover" && node.mesh_key().is_some() {
         out.push(node);
     }

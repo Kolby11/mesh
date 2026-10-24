@@ -16,6 +16,7 @@ mod scroll;
 mod scroll_shift;
 mod sequence;
 mod signature;
+mod sparse;
 pub use sequence::PaintSequence;
 mod spans;
 mod subtree;
@@ -337,9 +338,8 @@ impl RetainedDisplayList {
             && self.surface_size == Some((surface.width, surface.height))
             && self.paint_origin == paint_origin
             && dirty_summary_preserves_blur_metadata(dirty_summary);
-        let patch_sparse_entries = !resource_revision_changed
+        let sparse_inputs_valid = !resource_revision_changed
             && !caller_lineage_changed
-            && (!cfg!(debug_assertions) || cfg!(test))
             && self.can_patch_sparse_entries(
                 root,
                 dirty_summary,
@@ -347,6 +347,7 @@ impl RetainedDisplayList {
                 surface.width,
                 surface.height,
             );
+        let patch_sparse_entries = sparse_inputs_valid && (!cfg!(debug_assertions) || cfg!(test));
 
         let mut next = std::mem::take(&mut self.next_entries_scratch);
         next.clear();
@@ -357,10 +358,7 @@ impl RetainedDisplayList {
         // index cannot answer falls back to the tree walk below, which reseeds
         // it from the reconciled map.
         let patch_batch_index = patch_sparse_entries
-            && !self
-                .subtrees
-                .values()
-                .any(|subtree| subtree.scroll_viewport.is_some())
+            && !self.sparse_paint_index.has_scroll_viewports
             && self.batch_index.matches_root(root)
             && self.batch_index.collect_dirty_entries_with_fingerprints(
                 root,
@@ -410,6 +408,22 @@ impl RetainedDisplayList {
                 surface.height,
             )
         };
+        let sparse_patch = (sparse_inputs_valid
+            && has_authoritative_dirty_summary
+            && !self.sparse_paint_index.has_scroll_viewports
+            && self.batch_index.matches_root(root)
+            && matches!(decision, LocalReuseDecision::RebuildDirtySubtrees)
+            && dirty_summary_allows_command_patch(dirty_summary))
+        .then(|| {
+            self.patch_stable_commands(
+                root,
+                dirty_node_ids,
+                surface_clip(surface),
+                (offset_x, offset_y),
+            )
+        })
+        .flatten();
+        let patched_commands = sparse_patch.is_some();
         let (
             paint_commands,
             command_kinds,
@@ -418,105 +432,118 @@ impl RetainedDisplayList {
             pruning,
             subtrees,
             local_metrics,
-        ) = match decision {
-            LocalReuseDecision::RebuildDirtySubtrees => {
-                let mut rebuild_ancestors = std::mem::take(&mut self.dirty_ancestors_scratch);
-                rebuild_ancestors.clear();
-                let mut ancestor_path = std::mem::take(&mut self.ancestor_path_scratch);
-                ancestor_path.clear();
-                if !self.batch_index.collect_dirty_ancestors(
-                    root,
-                    dirty_node_ids,
-                    &mut rebuild_ancestors,
-                ) {
+        ) = if let Some(patch) = sparse_patch {
+            let subtree = &patch.subtrees[&root.id];
+            (
+                Arc::clone(&subtree.commands),
+                Arc::clone(&subtree.kinds),
+                Arc::clone(&subtree.spans),
+                subtree.effect_overflow_count,
+                subtree.pruning,
+                patch.subtrees,
+                patch.metrics,
+            )
+        } else {
+            match decision {
+                LocalReuseDecision::RebuildDirtySubtrees => {
+                    let mut rebuild_ancestors = std::mem::take(&mut self.dirty_ancestors_scratch);
                     rebuild_ancestors.clear();
-                    collect_dirty_ancestor_ids_into(
+                    let mut ancestor_path = std::mem::take(&mut self.ancestor_path_scratch);
+                    ancestor_path.clear();
+                    if !self.batch_index.collect_dirty_ancestors(
                         root,
                         dirty_node_ids,
-                        &mut ancestor_path,
                         &mut rebuild_ancestors,
+                    ) {
+                        rebuild_ancestors.clear();
+                        collect_dirty_ancestor_ids_into(
+                            root,
+                            dirty_node_ids,
+                            &mut ancestor_path,
+                            &mut rebuild_ancestors,
+                        );
+                    }
+                    let mut next_subtrees = std::mem::take(&mut self.next_subtrees_scratch);
+                    next_subtrees.clear();
+                    let mut local_metrics = LocalReuseMetrics::default();
+                    let vclip = surface_clip(surface);
+                    // A transform or overflow-clip change changes every
+                    // descendant's cumulative affine geometry even when their
+                    // own layout/material slots are clean. Reusing those child
+                    // subtrees would retain stale world transforms and clip
+                    // stacks.
+                    let allow_clean_descendant_reuse = (changed_layout_count(dirty_summary) == 0
+                        || scroll_only)
+                        && dirty_summary.transform == 0
+                        && dirty_summary.clip == 0;
+                    let subtree = build_paint_subtree(
+                        root,
+                        offset_x,
+                        offset_y,
+                        vclip,
+                        vclip,
+                        false,
+                        allow_clean_descendant_reuse,
+                        dirty_node_ids,
+                        &rebuild_ancestors,
+                        &self.subtrees,
+                        &mut next_subtrees,
+                        &mut local_metrics,
+                        self.backdrop_blur_policy,
+                        self.refraction_source,
+                        scroll_only,
                     );
+                    self.dirty_ancestors_scratch = rebuild_ancestors;
+                    self.ancestor_path_scratch = ancestor_path;
+                    let command_spans = build_command_spans(root, &next_subtrees);
+                    (
+                        Arc::clone(&subtree.commands),
+                        Arc::clone(&subtree.kinds),
+                        command_spans,
+                        subtree.effect_overflow_count,
+                        subtree.pruning,
+                        next_subtrees,
+                        local_metrics,
+                    )
                 }
-                let mut next_subtrees = std::mem::take(&mut self.next_subtrees_scratch);
-                next_subtrees.clear();
-                let mut local_metrics = LocalReuseMetrics::default();
-                let vclip = surface_clip(surface);
-                // A transform or overflow-clip change changes every
-                // descendant's cumulative affine geometry even when their
-                // own layout/material slots are clean. Reusing those child
-                // subtrees would retain stale world transforms and clip
-                // stacks.
-                let allow_clean_descendant_reuse = (changed_layout_count(dirty_summary) == 0
-                    || scroll_only)
-                    && dirty_summary.transform == 0
-                    && dirty_summary.clip == 0;
-                let subtree = build_paint_subtree(
-                    root,
-                    offset_x,
-                    offset_y,
-                    vclip,
-                    vclip,
-                    false,
-                    allow_clean_descendant_reuse,
-                    dirty_node_ids,
-                    &rebuild_ancestors,
-                    &self.subtrees,
-                    &mut next_subtrees,
-                    &mut local_metrics,
-                    self.backdrop_blur_policy,
-                    self.refraction_source,
-                    scroll_only,
-                );
-                self.dirty_ancestors_scratch = rebuild_ancestors;
-                self.ancestor_path_scratch = ancestor_path;
-                let command_spans = build_command_spans(root, &next_subtrees);
-                (
-                    Arc::clone(&subtree.commands),
-                    Arc::clone(&subtree.kinds),
-                    command_spans,
-                    subtree.effect_overflow_count,
-                    subtree.pruning,
-                    next_subtrees,
-                    local_metrics,
-                )
-            }
-            LocalReuseDecision::FallbackFull { .. } => {
-                let mut next_subtrees = std::mem::take(&mut self.next_subtrees_scratch);
-                next_subtrees.clear();
-                let mut local_metrics = LocalReuseMetrics::default();
-                let vclip = surface_clip(surface);
-                let subtree = build_paint_subtree(
-                    root,
-                    offset_x,
-                    offset_y,
-                    vclip,
-                    vclip,
-                    true,
-                    false,
-                    dirty_node_ids,
-                    &HashSet::new(),
-                    &HashMap::new(),
-                    &mut next_subtrees,
-                    &mut local_metrics,
-                    self.backdrop_blur_policy,
-                    self.refraction_source,
-                    false,
-                );
-                let command_spans = build_command_spans(root, &next_subtrees);
-                (
-                    Arc::clone(&subtree.commands),
-                    Arc::clone(&subtree.kinds),
-                    command_spans,
-                    subtree.effect_overflow_count,
-                    subtree.pruning,
-                    next_subtrees,
-                    local_metrics,
-                )
+                LocalReuseDecision::FallbackFull { .. } => {
+                    let mut next_subtrees = std::mem::take(&mut self.next_subtrees_scratch);
+                    next_subtrees.clear();
+                    let mut local_metrics = LocalReuseMetrics::default();
+                    let vclip = surface_clip(surface);
+                    let subtree = build_paint_subtree(
+                        root,
+                        offset_x,
+                        offset_y,
+                        vclip,
+                        vclip,
+                        true,
+                        false,
+                        dirty_node_ids,
+                        &HashSet::new(),
+                        &HashMap::new(),
+                        &mut next_subtrees,
+                        &mut local_metrics,
+                        self.backdrop_blur_policy,
+                        self.refraction_source,
+                        false,
+                    );
+                    let command_spans = build_command_spans(root, &next_subtrees);
+                    (
+                        Arc::clone(&subtree.commands),
+                        Arc::clone(&subtree.kinds),
+                        command_spans,
+                        subtree.effect_overflow_count,
+                        subtree.pruning,
+                        next_subtrees,
+                        local_metrics,
+                    )
+                }
             }
         };
 
-        let topology_changed =
-            paint_topology_changed(self.paint_commands.as_ref(), paint_commands.as_ref());
+        let topology_changed = !patched_commands
+            && paint_topology_changed(self.paint_commands.as_ref(), paint_commands.as_ref());
 
         let (mut damage, mut damage_rects, reused, rebuilt, removed) = if scroll_only {
             (None, Vec::new(), self.entries.len() as u64, 0, 0)
@@ -527,7 +554,9 @@ impl RetainedDisplayList {
         // anchored viewport explicitly when its owner's subtree was rebuilt;
         // viewports a layout change did not reach keep their pixels.
         let scoped_geometry_change = changed_layout_count(dirty_summary) > 0;
-        if scoped_geometry_change {
+        // A command patch admits no scroll viewports, and its subtree map
+        // holds only the replaced subtrees.
+        if scoped_geometry_change && !patched_commands {
             for viewport in changed_scroll_viewports(&self.subtrees, &subtrees) {
                 damage = union_damage(damage, viewport);
                 push_sparse_damage_rect(&mut damage_rects, viewport, surface);
@@ -537,8 +566,10 @@ impl RetainedDisplayList {
         // A text change can share a frame with a visibility annotation the
         // summary does not classify as primitive; the command count catches
         // that topology change before blur regions are preserved.
+        // A command patch replaces only single-command nodes whose boxes do
+        // not define a descendant's clip, so no blur node or its clip changed.
         let can_reuse_blur_metadata = !resource_revision_changed
-            && blur_metadata_reuse_candidate
+            && (blur_metadata_reuse_candidate || patched_commands)
             && removed == 0
             && self.paint_commands.len() == paint_commands.len()
             && !policy_changed;
@@ -639,16 +670,23 @@ impl RetainedDisplayList {
             } else {
                 SmallVec::new()
             };
-        let mut previous_subtrees = std::mem::replace(&mut self.subtrees, subtrees);
-        previous_subtrees.clear();
-        self.next_subtrees_scratch = previous_subtrees;
+        if patched_commands {
+            self.subtrees.extend(subtrees);
+        } else {
+            let mut previous_subtrees = std::mem::replace(&mut self.subtrees, subtrees);
+            previous_subtrees.clear();
+            self.next_subtrees_scratch = previous_subtrees;
+            self.sparse_paint_index.rebuild(&paint_commands);
+        }
         self.command_spans = command_spans;
         self.paint_commands = paint_commands;
         self.command_kinds = command_kinds;
         self.resource_revision = resource_revision;
         self.built_backdrop_blur_policy = self.backdrop_blur_policy;
         self.built_refraction_source = self.refraction_source;
-        self.layer_scopes = collect_layer_scopes(self.paint_commands.as_ref());
+        if !patched_commands {
+            self.layer_scopes = collect_layer_scopes(self.paint_commands.as_ref());
+        }
         if let Some((backdrop_regions, blur_regions)) = updated_blur_metadata {
             self.backdrop_regions = backdrop_regions;
             self.blur_regions = blur_regions;
@@ -669,8 +707,10 @@ impl RetainedDisplayList {
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
         self.scroll_shifts = shifts;
-        self.filter_layer_regions =
-            filter_layer_regions(self.paint_commands.as_ref(), &self.layer_scopes, surface);
+        if !patched_commands {
+            self.filter_layer_regions =
+                filter_layer_regions(self.paint_commands.as_ref(), &self.layer_scopes, surface);
+        }
         self.root_id = Some(root.id);
         self.retained_tree_generation = retained_tree_generation;
         #[cfg(debug_assertions)]
@@ -722,7 +762,22 @@ impl RetainedDisplayList {
             barriers: batch_metrics.barriers,
         };
         self.last_damage_rects = damage_rects;
-        self.refresh_frame_plan(surface);
+        if patched_commands {
+            let mut plan = (*self.frame_plan).clone();
+            plan.inputs.retained_tree_generation = self.retained_tree_generation;
+            plan.topology.generation = self.generation;
+            plan.topology.commands = Arc::clone(&self.paint_commands);
+            plan.damage = FramePaintDamage {
+                logical: self.last_damage_rects.clone().into(),
+                logical_bounds: self.last_metrics.damage_rect,
+                surface,
+                full_surface: self.last_metrics.full_surface_damage,
+                partial_present_supported,
+            };
+            self.frame_plan = Arc::new(plan);
+        } else {
+            self.refresh_frame_plan(surface);
+        }
         self.last_metrics
     }
 
@@ -1401,9 +1456,12 @@ impl RetainedDisplayList {
             && dirty_summary.removed == 0
             && dirty_summary.reordered == 0
             && dirty_summary.transform == 0
-            && dirty_summary.clip == 0
             && dirty_summary.opacity == 0
-            && dirty_summary.geometry == 0
+            && (dirty_summary.geometry == 0 && dirty_summary.clip == 0
+                || (!self.sparse_paint_index.has_scroll_viewports
+                    && self
+                        .batch_index
+                        .dirty_geometry_is_local(root, dirty_node_ids)))
             && (dirty_summary.scroll == 0
                 || dirty_node_ids.iter().all(|id| {
                     self.subtrees

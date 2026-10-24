@@ -136,6 +136,43 @@ pub enum WidgetTreeValidationError {
     },
 }
 
+/// Call `visit` with the node at each of `paths`, which must be sorted and
+/// valid in `root`. Parents are visited before their descendants, and each
+/// shared prefix is descended once.
+///
+/// # Panics
+/// When a path does not lead to a node.
+pub fn for_each_node_at_paths_mut(
+    root: &mut WidgetNode,
+    paths: &[&[usize]],
+    mut visit: impl FnMut(&[usize], &mut WidgetNode),
+) {
+    fn walk(
+        node: &mut WidgetNode,
+        mut paths: &[&[usize]],
+        depth: usize,
+        visit: &mut dyn FnMut(&[usize], &mut WidgetNode),
+    ) {
+        while let Some((path, rest)) = paths.split_first()
+            && path.len() == depth
+        {
+            visit(path, node);
+            paths = rest;
+        }
+        while let Some(first) = paths.first() {
+            let index = first[depth];
+            let end = paths
+                .iter()
+                .position(|path| path[depth] != index)
+                .unwrap_or(paths.len());
+            walk(&mut node.children[index], &paths[..end], depth + 1, visit);
+            paths = &paths[end..];
+        }
+    }
+    debug_assert!(paths.is_sorted(), "paths must be sorted");
+    walk(root, paths, 0, &mut visit);
+}
+
 /// Validate the identity and element-definition invariants of a live tree.
 ///
 /// `WidgetNode::Clone` intentionally preserves ids so memoized subtrees can

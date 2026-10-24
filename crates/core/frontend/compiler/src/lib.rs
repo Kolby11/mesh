@@ -32,8 +32,9 @@ pub use render::{
     PreparedComponentStyleRules, TemplateBindingPatch, build_embedded_widget_tree_from_component,
     build_embedded_widget_tree_from_component_with_prepared_styles,
     build_embedded_widget_tree_from_component_with_prepared_styles_and_owner,
-    build_widget_tree_from_component, patch_template_bindings, props_settings_schema,
-    refresh_keyed_template_list, resolve_css_props,
+    build_widget_tree_from_component, keyed_template_list_member, patch_template_bindings,
+    props_settings_schema, refresh_keyed_template_items, refresh_keyed_template_list,
+    resolve_css_props,
 };
 pub use tags::UiTag;
 

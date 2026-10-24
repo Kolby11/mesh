@@ -108,18 +108,27 @@ if ! "$workloads_only"; then
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib closed_child_surface_requests_skip_clean_descendants
   cargo test -p mesh-core-shell --release --lib lifecycle_classes_restore_without_overwriting_binding_writes
   cargo test -p mesh-core-render --release --lib display_ancestors_visit_only_retained_paths
+  cargo test -p mesh-core-render --release --lib text_command_patches_skip_siblings_and_preserve_effect_coverage
+  cargo test -p mesh-core-render --release --lib geometry_command_patches_skip_siblings_and_match_full_build
+  cargo test -p mesh-core-render --release --lib display_list_rebuilds_descendants_only_when_a_moved_parent_defines_their_space
+  cargo test -p mesh-core-elements --release --lib write_back_rounding_matches_taffy_rounding
+  cargo test -p mesh-core-elements --release --lib live_paths_step_through_shared_prefixes_once
   cargo test -p mesh-core-elements --release --lib retained_layout_validates_only_structure_changes
+  cargo test -p mesh-core-elements --release --lib stable_text_patches_preserve_geometry_only_for_equal_intrinsic_probes
   cargo test -p mesh-core-elements --release --lib semantic_reindex_reuses_validated_structure
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib hover_frame_visits_scale_with_the_hovered_item_not_the_tree
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib keyed_list_hover_restyle_visits_scale_with_affected_items
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib patched_frame_restyle_visits_scale_with_the_patch_not_the_tree
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib patched_frame_layout_visits_scale_with_the_patch
+  MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib equal_size_service_text_patches_skip_layout_and_match_full_paint
+  MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib geometry_patch_frames_scale_with_the_change
+  cargo test -p mesh-core-shell --release --lib text_patch_interaction_reuse_rejects_eligibility_and_reference_changes
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib retained_change_paths_cover_geometry_and_overlapping_subtrees
   cargo test -p mesh-core-shell --release --lib retained_completeness_verifier_detects_an_omitted_layout_change
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-shell --release --lib animation_reports_clamped_radius_even_when_the_effective_sample_is_unchanged
   cargo test -p mesh-core-shell --release --lib template_patching
   cargo test -p mesh-core-shell --release --lib service_field_update_patches
-  cargo test -p mesh-core-shell --release --lib service_fields_patch_keyed
+  cargo test -p mesh-core-shell --release --lib service_fields_patch_
   cargo test -p mesh-core-shell --release --lib service_binding_failure
   cargo test -p mesh-core-shell --release --lib keyed_list_
   cargo test -p mesh-core-shell --release --lib typed_binding_setters_preserve_values_and_change_classes

@@ -11,7 +11,7 @@ pub(super) fn compute_fresh_retained_layout(
 ) {
     let mut report = TaffyLayoutReport::default();
 
-    state.tree = TaffyTree::<NodeId>::new();
+    state.tree = unrounded_taffy_tree();
     state.node_map.clear();
     state.stable_node_ids.clear();
     state.text_nodes.clear();
@@ -338,6 +338,7 @@ pub(super) fn update_text_context(
             text_nodes.insert(
                 node.id,
                 TextMeasureData {
+                    probes: std::cell::RefCell::new(Some(Vec::new())),
                     content: Arc::from(content),
                     font_family: node.computed_style.font_family.clone(),
                     font_size: node.computed_style.font_size,
@@ -359,6 +360,9 @@ pub(super) fn update_text_context(
                         .unwrap_or_default(),
                 },
             );
+            // Taffy caches the old measurement until the node is dirtied;
+            // structural reconciliation keeps the node and its context ID.
+            tree.mark_dirty(taffy_id)?;
         }
         if tree.get_node_context(taffy_id) != Some(&node.id) {
             tree.set_node_context(taffy_id, Some(node.id))?;
@@ -367,4 +371,69 @@ pub(super) fn update_text_context(
         tree.set_node_context(taffy_id, None)?;
     }
     Ok(())
+}
+
+/// Retain Taffy's cached geometry only when every previously queried intrinsic
+/// size is unchanged. The final box alone is insufficient for wrapped or
+/// flex-shrunk text: ancestors also cache unconstrained measurement results.
+pub(super) fn preserve_text_patch_geometry(
+    state: &mut PerSurfaceLayoutState,
+    nodes: &[WidgetNode],
+    cache: &mut IntrinsicLayoutCache,
+    measurer: &dyn TextMeasurer,
+) -> bool {
+    let revisions = measurer.revisions();
+    let mut replacements = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        let Some(id) = retained_taffy_id(node, state) else {
+            return false;
+        };
+        if node.tag != "text" || !node.children.is_empty() {
+            return false;
+        }
+        let mut report = TaffyLayoutReport::default();
+        if state.tree.style(id).ok() != Some(&taffy_style_for_node(node, &mut report)) {
+            return false;
+        }
+        let Some(old) = state.text_nodes.get(&node.id) else {
+            return false;
+        };
+        let next = TextMeasureData::from_node(node);
+        // Content alone may change; font, language and shaping changes use layout.
+        if old.measure_key(None, revisions) != {
+            let mut key = next.measure_key(None, revisions);
+            key.content = old.content.clone();
+            key
+        } {
+            return false;
+        }
+        let probes = old.probes.borrow();
+        let Some(entries) = probes.as_ref().filter(|entries| !entries.is_empty()) else {
+            return false;
+        };
+        for probe in entries {
+            let width = probe.max_width;
+            let previous = probe.size;
+            let key = next.measure_key(width, revisions);
+            let measured = if let Some(value) = cache.get_text_measurement(&key) {
+                value
+            } else {
+                let value = measurer.measure_text(&next.context(width, revisions));
+                cache.insert_text_measurement(key, value);
+                value
+            };
+            let size = (
+                probe.known_dimensions.width.unwrap_or(measured.0.ceil()),
+                probe.known_dimensions.height.unwrap_or(measured.1),
+            );
+            if !size.0.is_finite() || !size.1.is_finite() || size != previous {
+                return false;
+            }
+        }
+        *next.probes.borrow_mut() = Some(entries.clone());
+        replacements.push((node.id, next));
+    }
+    state.text_nodes.extend(replacements);
+    state.changed_nodes = Some(HashSet::new());
+    true
 }

@@ -397,6 +397,23 @@ impl FrontendSurfaceComponent {
         mesh_core_frontend::resolve_css_props(self.compiled.component.props.as_ref(), Some(&bound))
     }
 
+    /// Container-query size for the component root. An axis this paint has
+    /// no size for is laid out against a 1px stand-in, and querying that would
+    /// match every `max-*` condition: after each geometry-changing configure,
+    /// while the compositor's ack is pending, a rule changing the root's
+    /// margin or size would flip and reconfigure the surface again, forever.
+    /// Such an axis keeps the last size the surface really had instead.
+    pub(super) fn root_style_container(&self, width: u32, height: u32) -> StyleContext {
+        let (width_unmeasured, height_unmeasured) = self.unmeasured_root_axes;
+        let (last_width, last_height) = self.last_definite_root_size;
+        let width = last_width.filter(|_| width_unmeasured).unwrap_or(width);
+        let height = last_height.filter(|_| height_unmeasured).unwrap_or(height);
+        StyleContext {
+            container_width: width as f32,
+            container_height: height as f32,
+        }
+    }
+
     pub(super) fn build_tree(&mut self, theme: &Theme, width: u32, height: u32) -> WidgetNode {
         let surface_css_props = self.surface_css_props();
         self.build_tree_with_surface_css_props(theme, width, height, &surface_css_props)
@@ -813,10 +830,7 @@ impl FrontendSurfaceComponent {
             .with_borrowed_props(surface_css_props)
             .with_finalized_memo_styles(cache_finalization)
             .with_incremental_matching();
-        let context = StyleContext {
-            container_width: width as f32,
-            container_height: height as f32,
-        };
+        let context = self.root_style_container(width, height);
         let restyle_started = std::time::Instant::now();
         let collect_style_attribution = self.profiling_enabled && self.style_rule_attribution;
         let restyle_rules = self
@@ -1681,10 +1695,7 @@ impl FrontendSurfaceComponent {
             self.runtime_style_diagnostic_fingerprint = None;
             return;
         }
-        let context = StyleContext {
-            container_width: width as f32,
-            container_height: height as f32,
-        };
+        let context = self.root_style_container(width, height);
         let fingerprint = RuntimeStyleDiagnosticFingerprint {
             rules_generation: self.style_rules_generation,
             retained_tree_generation,
@@ -1736,11 +1747,7 @@ impl FrontendSurfaceComponent {
             .expect("style index cache populated during tree finalization");
         if scoped {
             if let Some(paths) = restyled_paths {
-                for path in paths {
-                    let mut node = &mut *tree;
-                    for &child in path {
-                        node = &mut node.children[child];
-                    }
+                mesh_core_elements::for_each_node_at_paths_mut(tree, &paths, |_, node| {
                     self.record_runtime_style_diagnostics_for_single_node(
                         node,
                         restyle_rules,
@@ -1748,7 +1755,7 @@ impl FrontendSurfaceComponent {
                         &resolver,
                         context,
                     );
-                }
+                });
                 return;
             }
             self.record_runtime_style_diagnostics_for_dirty_nodes(

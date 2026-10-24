@@ -387,6 +387,45 @@ items = {{id = "a"}, {id = "b"}}
 }
 
 #[test]
+fn service_fields_patch_parent_and_child_in_one_transaction() {
+    let mut component = test_frontend_component_with_catalog(
+        r#"<script lang="luau">local audio = require('mesh.audio@>=1.0')</script>
+<template><column data-percent={audio.percent}><text>{audio.percent}</text></column></template>"#,
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+    let theme = default_theme();
+    let mut pixels = PixelBuffer::new(640, 160);
+    prime_audio_component(&mut component, &theme, &mut pixels);
+    apply_audio_update(&mut component, 20, false);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), &mut pixels, 1.0)
+        .unwrap();
+    let column = &component.last_tree.as_ref().unwrap().children[0];
+    assert_eq!(
+        column
+            .attributes
+            .get_by_name("data-percent")
+            .map(String::as_str),
+        Some("20")
+    );
+    assert_eq!(
+        column.children[0]
+            .attributes
+            .get(Prop::Content)
+            .map(String::as_str),
+        Some("20")
+    );
+    assert_eq!(
+        component
+            .take_invalidation_snapshot()
+            .unwrap()
+            .patched_node_count,
+        2
+    );
+}
+
+#[test]
 fn service_binding_failure_does_not_publish_partial_patches() {
     let source = r#"
 <script lang="luau">
@@ -491,6 +530,147 @@ fn service_template_with_inert_effect_still_patches_bindings() {
     let snapshot = component.take_invalidation_snapshot().unwrap();
     assert_eq!(snapshot.patched_node_count, 1);
     assert_eq!(snapshot.component.script_narrow, 0);
+}
+
+#[test]
+fn equal_size_service_text_patches_skip_layout_and_match_full_paint() {
+    let theme = default_theme();
+    for siblings in [16, 1024] {
+        let mut patched = direct_audio_service_component(siblings, false, false);
+        let mut full = direct_audio_service_component(siblings, false, false);
+        full.force_full_template_build = true;
+        let mut pixels = PixelBuffer::new(640, 160);
+        let mut expected = PixelBuffer::new(640, 160);
+        prime_audio_component(&mut patched, &theme, &mut pixels);
+        prime_audio_component(&mut full, &theme, &mut expected);
+        apply_audio_update(&mut patched, 20, false);
+        apply_audio_update(&mut full, 20, false);
+        patched
+            .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), &mut pixels, 1.0)
+            .unwrap();
+        full.paint_raster(
+            &theme,
+            SurfaceExtent::unpadded(640, 160),
+            &mut expected,
+            1.0,
+        )
+        .unwrap();
+        patched.set_profiling_enabled(true);
+        let children = patched.last_tree.as_ref().unwrap().children[0]
+            .children
+            .as_ptr();
+        for percent in [21, 20, 21, 20] {
+            apply_audio_update(&mut patched, percent, false);
+            apply_audio_update(&mut full, percent, false);
+            patched
+                .paint_raster(&theme, SurfaceExtent::unpadded(640, 160), &mut pixels, 1.0)
+                .unwrap();
+            full.paint_raster(
+                &theme,
+                SurfaceExtent::unpadded(640, 160),
+                &mut expected,
+                1.0,
+            )
+            .unwrap();
+            let snapshot = patched.take_invalidation_snapshot().unwrap();
+            assert_eq!(snapshot.patched_node_count, 1);
+            assert_eq!(
+                patched.last_tree.as_ref().unwrap().children[0]
+                    .children
+                    .as_ptr(),
+                children
+            );
+            assert!(
+                snapshot.node_visits["display_build"] <= 3,
+                "{siblings}: {snapshot:?}"
+            );
+            for pass in [
+                "layout_write",
+                "layout_fit",
+                "layout_extents",
+                "focus_scope_refresh",
+                "disclosure_refresh",
+                "interaction_reconcile",
+            ] {
+                assert_eq!(snapshot.node_visits[pass], 0, "{siblings}: {snapshot:?}");
+            }
+            patched
+                .retained_tree
+                .assert_complete(patched.last_tree.as_ref().unwrap());
+            assert_eq!(pixels.data(), expected.data());
+        }
+    }
+}
+
+#[test]
+fn text_patch_interaction_reuse_rejects_eligibility_and_reference_changes() {
+    let mut component = direct_audio_service_component(16, false, false);
+    let theme = default_theme();
+    let mut pixels = PixelBuffer::new(640, 160);
+    prime_audio_component(&mut component, &theme, &mut pixels);
+    let id = *component
+        .node_service_field_deps
+        .nodes_reading_field("audio", "percent")
+        .iter()
+        .next()
+        .unwrap();
+    let path = component
+        .last_frame_snapshot
+        .as_ref()
+        .unwrap()
+        .node_path(id)
+        .unwrap()
+        .to_vec();
+    let original = component.last_tree.as_ref().unwrap().clone();
+    for mutation in [
+        "content", "disabled", "id", "state", "style", "geometry", "ancestor",
+    ] {
+        let mut tree = original.clone();
+        component.frame_dirty.clear();
+        component
+            .frame_dirty
+            .mark(id, mesh_core_elements::ChangeClass::PAINT);
+        let mut target = &mut tree;
+        for &index in &path {
+            target = &mut target.children[index];
+        }
+        target
+            .attributes
+            .insert(mesh_core_elements::Prop::Content, "21".into());
+        match mutation {
+            "disabled" => {
+                target
+                    .attributes
+                    .insert(mesh_core_elements::Prop::Disabled, "true".into());
+            }
+            "id" => {
+                target
+                    .attributes
+                    .insert(mesh_core_elements::Prop::Id, "another-target".into());
+            }
+            "state" => {
+                target.state.insert(mesh_core_elements::NodeState::DISABLED);
+            }
+            "style" => {
+                target.computed_style.opacity = 0.0;
+            }
+            "geometry" => {
+                target.layout.width += 1.0;
+            }
+            "ancestor" => {
+                tree.computed_style.opacity = 0.0;
+                component
+                    .frame_dirty
+                    .mark(tree.id, mesh_core_elements::ChangeClass::STYLE);
+            }
+            _ => {}
+        }
+        assert_eq!(
+            component.text_patch_preserves_interaction_targets(&tree),
+            mutation == "content",
+            "{mutation}"
+        );
+    }
 }
 
 // cargo test -p mesh-core-shell --release -- affected_template_eval_beats_full_rebuild --ignored --nocapture

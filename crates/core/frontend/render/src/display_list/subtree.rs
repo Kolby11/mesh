@@ -42,6 +42,9 @@ impl Default for RetainedPaintSubtree {
 pub(super) struct RetainedSubtreeSpan {
     pub(super) bounds: DamageRect,
     pub(super) local_bounds: DamageRect,
+    /// Union of the children's bounds, so one child's change can update
+    /// `bounds` without visiting its siblings.
+    pub(super) child_bounds: DamageRect,
     pub(super) includes_scrollbars: bool,
     pub(super) local_includes_scrollbars: bool,
 }
@@ -228,6 +231,7 @@ impl PaintSubtreeBuilder {
             Some(RetainedSubtreeSpan {
                 bounds: self.bounds,
                 local_bounds: self.local_bounds,
+                child_bounds: self.child_bounds,
                 includes_scrollbars: self.includes_scrollbars,
                 local_includes_scrollbars: self.local_includes_scrollbars,
             })

@@ -143,6 +143,7 @@ impl TextMeasurer for RevisionedMeasurer {
 #[test]
 fn text_measure_key_includes_all_shaping_inputs_and_revisions() {
     let mut data = TextMeasureData {
+        probes: std::cell::RefCell::new(Some(Vec::new())),
         content: Arc::from("shaped"),
         font_family: Arc::from("Inter"),
         font_size: 14.0,
@@ -2063,4 +2064,200 @@ fn retained_layout_validates_only_structure_changes() {
         assert!(scope.snapshot()["validation"] > 0);
         assert!(!state.valid);
     }
+}
+
+#[test]
+fn stable_text_patches_preserve_geometry_only_for_equal_intrinsic_probes() {
+    struct WrappingMeasurer;
+    impl TextMeasurer for WrappingMeasurer {
+        fn measure_text(&self, context: &TextMeasureContext<'_>) -> (f32, f32) {
+            let natural = context.text.len() as f32 * 8.0
+                + match context.text {
+                    "x" => 0.1,
+                    "y" => 0.9,
+                    _ => 0.0,
+                };
+            if context.white_space == WhiteSpace::Nowrap {
+                return (natural, 16.0);
+            }
+            let width = context.max_width.unwrap_or(natural).max(1.0);
+            (natural.min(width), (natural / width).ceil() * 16.0)
+        }
+    }
+    for count in [16, 1024] {
+        for mode in ["natural", "wrap", "shrink", "nowrap"] {
+            let mut root = keyed_node("root", "row", Dimension::Px(200.0), Dimension::Px(100.0));
+            root.computed_style.direction = FlexDirection::Row;
+            let mut text = keyed_node("root/text", "text", Dimension::Auto, Dimension::Auto);
+            text.attributes.insert(Prop::Content, "20%".into());
+            if mode == "wrap" {
+                text.computed_style.width = Dimension::Px(16.0);
+            } else if mode == "nowrap" {
+                text.computed_style.white_space = WhiteSpace::Nowrap;
+            }
+            root.children.push(text);
+            for index in 0..count {
+                let mut sibling = keyed_node(
+                    &format!("root/{index}"),
+                    "box",
+                    Dimension::Px(4.0),
+                    Dimension::Px(10.0),
+                );
+                if mode != "shrink" {
+                    sibling.computed_style.flex_shrink = 0.0;
+                }
+                root.children.push(sibling);
+            }
+            let mut state = PerSurfaceLayoutState::new();
+            let mut cache = IntrinsicLayoutCache::default();
+            LayoutEngine::compute_incremental(
+                &mut root,
+                &mut state,
+                200.0,
+                100.0,
+                true,
+                true,
+                &mut cache,
+                Some(&WrappingMeasurer),
+            );
+            for (turn, content) in ["21%", "longer wrapped text", "x", "y"]
+                .into_iter()
+                .enumerate()
+            {
+                let snapshot = crate::FrameSnapshot::complete(&root, turn as u64, None).unwrap();
+                root.children[0]
+                    .attributes
+                    .insert(Prop::Content, content.into());
+                let id = root.children[0].id;
+                let work = crate::frame_work::Scope::new(true);
+                LayoutEngine::compute_incremental_for_stable_tree(
+                    &mut root,
+                    &mut state,
+                    &snapshot,
+                    &HashSet::from([id]),
+                    200.0,
+                    100.0,
+                    &mut cache,
+                    Some(&WrappingMeasurer),
+                );
+                if turn == 0 || turn == 3 {
+                    assert_eq!(work.snapshot()["layout_write"], 0, "{mode}, {count}");
+                    assert!(state.changed_nodes.as_ref().unwrap().is_empty());
+                    assert!(!state.tree.dirty(state.node_map[&root.id]).unwrap());
+                }
+                drop(work);
+                let mut full = root.clone();
+                LayoutEngine::compute_with_measurer(
+                    &mut full,
+                    200.0,
+                    100.0,
+                    Some(&WrappingMeasurer),
+                );
+                assert_layout_maps_eq(&keyed_layouts(&root), &keyed_layouts(&full));
+            }
+            // A later ancestor resize must use the most recently patched content.
+            root.computed_style.width = Dimension::Px(120.0);
+            let mut full = root.clone();
+            LayoutEngine::compute_with_measurer(&mut full, 120.0, 100.0, Some(&WrappingMeasurer));
+            LayoutEngine::compute_incremental(
+                &mut root,
+                &mut state,
+                120.0,
+                100.0,
+                true,
+                false,
+                &mut cache,
+                Some(&WrappingMeasurer),
+            );
+            assert_layout_maps_eq(&keyed_layouts(&root), &keyed_layouts(&full));
+        }
+    }
+}
+
+/// Write-back rounds exactly as Taffy's own pass would: relative locations,
+/// and sizes at cumulative unrounded edges, including fractional padding.
+#[test]
+fn write_back_rounding_matches_taffy_rounding() {
+    fn tree() -> WidgetNode {
+        let mut root = keyed_node("root", "row", Dimension::Px(101.0), Dimension::Px(47.0));
+        root.computed_style.direction = FlexDirection::Row;
+        root.computed_style.padding = Edges {
+            top: 0.5,
+            right: 0.25,
+            bottom: 0.5,
+            left: 0.75,
+        };
+        for index in 0..3 {
+            let mut column = keyed_node(
+                &format!("c{index}"),
+                "column",
+                Dimension::Auto,
+                Dimension::Auto,
+            );
+            column.computed_style.flex_grow = 1.0;
+            column.computed_style.padding = Edges::all(0.3);
+            for row in 0..3 {
+                column.children.push(keyed_node(
+                    &format!("c{index}/{row}"),
+                    "box",
+                    Dimension::Px(7.7),
+                    Dimension::Px(10.35),
+                ));
+            }
+            root.children.push(column);
+        }
+        root
+    }
+    fn absolute(
+        node: &WidgetNode,
+        tree: &TaffyTree<NodeId>,
+        node_map: &HashMap<NodeId, TaffyNodeId>,
+        parent: (f32, f32),
+        out: &mut Vec<LayoutRect>,
+    ) {
+        let layout = tree.layout(node_map[&node.id]).unwrap();
+        let rect = LayoutRect {
+            x: parent.0 + layout.location.x,
+            y: parent.1 + layout.location.y,
+            width: layout.size.width,
+            height: layout.size.height,
+        };
+        out.push(rect);
+        for child in &node.children {
+            absolute(child, tree, node_map, (rect.x, rect.y), out);
+        }
+    }
+    fn collect(node: &WidgetNode, out: &mut Vec<LayoutRect>) {
+        out.push(node.layout);
+        node.children.iter().for_each(|child| collect(child, out));
+    }
+
+    let mut written = tree();
+    LayoutEngine::compute(&mut written, 101.0, 47.0);
+    let mut actual = Vec::new();
+    collect(&written, &mut actual);
+
+    let reference = tree();
+    let mut rounded = TaffyTree::<NodeId>::new();
+    let (mut node_map, mut text_nodes) = (HashMap::new(), HashMap::new());
+    let root = build_taffy_tree(
+        &reference,
+        &mut rounded,
+        &mut node_map,
+        &mut text_nodes,
+        &mut TaffyLayoutReport::default(),
+    )
+    .unwrap();
+    rounded
+        .compute_layout(root, taffy_available_space(101.0, 47.0))
+        .unwrap();
+    let mut expected = Vec::new();
+    absolute(&reference, &rounded, &node_map, (0.0, 0.0), &mut expected);
+    assert_eq!(actual, expected);
+    assert!(
+        expected
+            .iter()
+            .any(|rect| rect.width.fract() == 0.0 && rect.width != 7.7),
+        "fixture must exercise rounding"
+    );
 }

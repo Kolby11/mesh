@@ -6,3 +6,4 @@ mod basic;
 mod narrow_script;
 mod profiling;
 mod service_fanout;
+mod sparse_geometry;

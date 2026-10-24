@@ -361,35 +361,51 @@ fn display_list_reuses_clean_descendants_for_paint_only_dirty_parent() {
 }
 
 #[test]
-fn display_list_rebuilds_descendants_for_layout_dirty_parent() {
-    let mut root = node(1, "row", 0.0, 0.0, 160.0, 40.0);
-    let mut panel = node(2, "box", 0.0, 0.0, 120.0, 40.0);
-    panel.children.push(node(3, "text", 4.0, 4.0, 20.0, 12.0));
-    panel.children.push(node(4, "text", 30.0, 4.0, 20.0, 12.0));
-    root.children.push(panel);
+fn display_list_rebuilds_descendants_only_when_a_moved_parent_defines_their_space() {
+    for scaled in [false, true] {
+        let mut root = node(1, "row", 0.0, 0.0, 160.0, 40.0);
+        let mut panel = node(2, "box", 0.0, 0.0, 120.0, 40.0);
+        if scaled {
+            panel.computed_style.transform.scale_x = 1.5;
+        }
+        panel.children.push(node(3, "text", 4.0, 4.0, 20.0, 12.0));
+        panel.children.push(node(4, "text", 30.0, 4.0, 20.0, 12.0));
+        root.children.push(panel);
 
-    let mut list = RetainedDisplayList::default();
-    list.update(&root, 160, 40, false, true);
+        let mut list = RetainedDisplayList::default();
+        list.update(&root, 160, 40, false, true);
 
-    root.children[0].layout.x = 8.0;
-    let metrics = list.update_with_dirty_nodes(
-        &root,
-        RenderObjectDirtySummary {
-            geometry: 1,
-            ..Default::default()
-        },
-        &HashSet::from([2]),
-        160,
-        40,
-        false,
-        true,
-    );
+        root.children[0].layout.x = 8.0;
+        root.children[0].layout.width = 112.0;
+        let metrics = list.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                geometry: 1,
+                ..Default::default()
+            },
+            &HashSet::from([2]),
+            160,
+            40,
+            false,
+            true,
+        );
 
-    assert_eq!(
-        metrics.subtree_segments_reused, 0,
-        "layout dirty parent must rebuild descendants because offsets changed"
-    );
-    assert_eq!(metrics.subtree_commands_rebuilt, 4);
+        // Absolute layout keeps unscaled children in their parent's parent
+        // space; a scale pivots on the parent's box and moves them.
+        assert_eq!(
+            metrics.subtree_commands_rebuilt,
+            if scaled { 4 } else { 1 },
+            "scaled: {scaled}"
+        );
+        let mut full = RetainedDisplayList::default();
+        full.update(&root, 160, 40, false, true);
+        assert_eq!(
+            format!("{:?}", list.paint_commands()),
+            format!("{:?}", full.paint_commands()),
+            "scaled: {scaled}"
+        );
+        assert_eq!(list.command_spans, full.command_spans, "scaled: {scaled}");
+    }
 }
 
 #[test]
@@ -738,4 +754,187 @@ fn subtree_visual_bounds_keep_fixed_descendants_outside_scroll_clip() {
     assert_eq!(bounds.y, 0.0);
     assert_eq!(bounds.x + bounds.width, 310.0);
     assert_eq!(bounds.y + bounds.height, 410.0);
+}
+
+#[test]
+fn text_command_patches_skip_siblings_and_preserve_effect_coverage() {
+    for count in [16, 1024] {
+        for effect in ["plain", "clip", "opacity", "filter"] {
+            let mut root = node(1, "column", 0.0, 0.0, 200.0, 100.0);
+            match effect {
+                "clip" => {
+                    root.computed_style.overflow_y = Overflow::Hidden;
+                    root.computed_style.border_radius = mesh_core_elements::Corners::all(8.0);
+                }
+                "opacity" => root.computed_style.opacity = 0.5,
+                "filter" => root.computed_style.filter.blur_radius = 3.0,
+                _ => {}
+            }
+            let mut branch = node(2, "column", 0.0, 0.0, 200.0, 100.0);
+            for index in 0..count {
+                let mut text = node(3 + index, "text", 4.0, 4.0, 40.0, 20.0);
+                text.attributes.insert(Prop::Content, "20%".into());
+                branch.children.push(text);
+            }
+            root.children.push(branch);
+            let mut objects = crate::RenderObjectTree::default();
+            objects.update(&root);
+            let mut list = RetainedDisplayList::default();
+            list.update(&root, 200, 100, false, true);
+            let original = list.paint_commands_snapshot();
+            let original_debug = format!("{original:?}");
+            for turn in 0..4 {
+                let index = if turn % 2 == 0 { 0 } else { count as usize - 1 };
+                root.children[0].children[index]
+                    .attributes
+                    .insert(Prop::Content, format!("{}%", 21 + turn));
+                if turn == 2 {
+                    root.children[0].children[count as usize - 1]
+                        .attributes
+                        .insert(Prop::Content, "second".into());
+                }
+                let dirty = objects.update(&root);
+                let work = mesh_core_elements::frame_work::Scope::new(true);
+                list.update_with_dirty_nodes(
+                    &root,
+                    dirty,
+                    objects.dirty_node_ids(),
+                    200,
+                    100,
+                    false,
+                    true,
+                );
+                assert_eq!(
+                    work.snapshot()["display_build"],
+                    if turn == 2 { 2 } else { 1 },
+                    "{effect}, {count}"
+                );
+                drop(work);
+                let mut full = RetainedDisplayList::default();
+                full.update(&root, 200, 100, false, true);
+                assert_eq!(
+                    format!("{:?}", list.paint_commands()),
+                    format!("{:?}", full.paint_commands()),
+                    "{effect}, {count}"
+                );
+                assert_eq!(list.command_spans, full.command_spans);
+                assert_eq!(list.layer_scopes, full.layer_scopes);
+                assert_eq!(list.filter_layer_regions, full.filter_layer_regions);
+                assert_eq!(format!("{original:?}"), original_debug);
+            }
+            // Rebuilding an ancestor must retain the previously patched leaves.
+            root.children[0].computed_style.background_color.r = 200;
+            let dirty = objects.update(&root);
+            list.update_with_dirty_nodes(
+                &root,
+                dirty,
+                objects.dirty_node_ids(),
+                200,
+                100,
+                false,
+                true,
+            );
+            let mut full = RetainedDisplayList::default();
+            full.update(&root, 200, 100, false, true);
+            assert_eq!(
+                format!("{:?}", list.paint_commands()),
+                format!("{:?}", full.paint_commands())
+            );
+        }
+    }
+}
+
+/// Geometry-changing patches replace the changed commands and update ancestor
+/// coverage without rebuilding siblings, and match a full build exactly.
+#[test]
+fn geometry_command_patches_skip_siblings_and_match_full_build() {
+    let mut by_count = Vec::new();
+    for count in [16, 1024] {
+        for effect in ["plain", "clip", "opacity"] {
+            let mut root = node(1, "column", 0.0, 0.0, 200.0, 100.0);
+            match effect {
+                "clip" => root.computed_style.overflow_y = Overflow::Hidden,
+                "opacity" => root.computed_style.opacity = 0.5,
+                _ => {}
+            }
+            let mut branch = node(2, "column", 0.0, 0.0, 200.0, 100.0);
+            for index in 0..count {
+                let y = (index % 25) as f32 * 4.0;
+                branch
+                    .children
+                    .push(node(3 + index, "box", 0.0, y, 10.0, 2.0));
+            }
+            root.children.push(branch);
+            let mut objects = crate::RenderObjectTree::default();
+            objects.update(&root);
+            let mut list = RetainedDisplayList::default();
+            list.update(&root, 200, 100, false, true);
+            let middle = count as usize / 2;
+            let mut visits = Vec::new();
+            for turn in 0..6 {
+                let item = &mut root.children[0].children[middle];
+                match turn % 3 {
+                    0 => item.layout.width = 40.0,
+                    1 => item.layout.width = 10.0,
+                    _ => item.layout.height = 3.0 - item.layout.height + 2.0,
+                }
+                let dirty = objects.update(&root);
+                let work = mesh_core_elements::frame_work::Scope::new(true);
+                let metrics = list.update_with_dirty_nodes(
+                    &root,
+                    dirty,
+                    objects.dirty_node_ids(),
+                    200,
+                    100,
+                    false,
+                    true,
+                );
+                let counts = work.snapshot();
+                drop(work);
+                let mut full = RetainedDisplayList::default();
+                full.update(&root, 200, 100, false, true);
+                assert_eq!(
+                    format!("{:?}", list.paint_commands()),
+                    format!("{:?}", full.paint_commands()),
+                    "{effect}, {count}, {turn}"
+                );
+                assert_eq!(
+                    list.command_spans, full.command_spans,
+                    "{effect}, {count}, {turn}"
+                );
+                assert_eq!(list.layer_scopes, full.layer_scopes);
+                assert_eq!(list.filter_layer_regions, full.filter_layer_regions);
+                for id in [1, 2, 3 + middle as u64] {
+                    let (patched, rebuilt) = (
+                        list.subtrees[&id].command_span.unwrap(),
+                        full.subtrees[&id].command_span.unwrap(),
+                    );
+                    assert_eq!(
+                        patched.bounds, rebuilt.bounds,
+                        "{effect}, {count}, {turn}, {id}"
+                    );
+                    assert_eq!(patched.local_bounds, rebuilt.local_bounds);
+                    assert_eq!(patched.child_bounds, rebuilt.child_bounds);
+                }
+                assert!(metrics.damage_rect.width > 0, "{effect}, {count}, {turn}");
+                if effect == "plain" {
+                    assert_eq!(counts["display_build"], 1, "{count}, {turn}: {counts:?}");
+                    assert_eq!(counts["display_entries"], 0, "{count}, {turn}: {counts:?}");
+                    visits.push((turn, counts["display_ancestors"]));
+                }
+            }
+            if effect == "plain" {
+                by_count.push(visits);
+            }
+        }
+    }
+    // Growth and edge-free changes are constant; only a shrink of the edge
+    // that defined the parent's union re-unions that parent's children.
+    for (small, large) in by_count[0].iter().zip(&by_count[1]) {
+        if small.0 % 3 == 1 {
+            assert!(large.1 > small.1, "{small:?} {large:?}");
+        } else {
+            assert_eq!(small, large);
+        }
+    }
 }

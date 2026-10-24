@@ -23,9 +23,8 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 - [ ] `d9_glass_dock_frame_p90_ms` straddles its 16.7 ms budget run to run (16.0–20.1 ms at
       639d4dd7, 17.4–19.7 ms at ca8b18d1); the CPU dock animation fixture needs headroom.
-- [ ] Two `tools/check-performance` gates fail: glass dashboard open p90 ~90–131 ms (CPU
-      glass raster is 42–44 ms of a warm 57 ms open), and affected-template speedup ~2.2×
-      (full rebuilds got 6× faster, so the ratio no longer tracks the patch path; see P2 layout).
+- [ ] The CPU glass dashboard open gate remains over budget; its raster drawing
+      needs attention.
 
 - [ ] Isolate renderer node-cache and keyed-hover regression state; cache tests
       and the keyed-hover frame snapshot fail intermittently in parallel suites.
@@ -44,13 +43,13 @@ criteria and the items folded in here:
 - [ ] Live replay counts GPU submission as first present; record completion/commit before
       using its GPU open latency as time to visible content.
 - [ ] Give the live replay its own layer-namespace suffix so it can run beside a desktop shell.
-- [ ] **P2:** A size-preserving text patch still relays out its whole parent in Taffy, and
-      sparse layout write and display build visit every sibling of each dirty ancestor.
-- [ ] **P2:** Stable-tree layout and retained synchronization resolve each dirty node's
-      path from the root; share path prefixes. Full layout passes also pay a
-      `seed_projection` walk that could fold into the write.
-- [ ] **P3 / D4:** Replace collection snapshot comparisons with write-time item deltas;
-      fixed-shape keyed lists still compare their snapshots to find changed items.
+- [ ] **P2:** Geometry patches still visit every child of a re-laid-out parent in layout
+      write-back and overflow annotation (the order of Taffy's flex pass); display patches
+      rebuild under layer/scrollbar ancestors, scroll viewports and boxes that clip or scale children.
+- [ ] **P2:** Full layout passes pay a `seed_projection` walk that could fold into the write.
+- [ ] **P3 / D1:** Handler sync converts every compound global to JSON (~1 ms for a 1,024-item
+      list) and keyed item deltas come from that comparison; record table writes instead.
+      Lists read through anything but a plain member still compare every item.
 - [ ] Shell tests build without the `gpu` feature, so nothing in the shell suite exercises
       `PresentStatus::Submitted` or `reconcile_scene_completions`; add a GPU-feature shell gate.
 - [ ] A scene frame that completes unpresented because the compositor holds every dmabuf slot
@@ -93,6 +92,9 @@ October log.
       `.pill.battery`. Decide per-component scoping (and migrate modules) or document the global model.
 - [ ] **Settings theme switch may not repaint:** reported 2026-10-21 as needing a tab change; not
       reproduced on `1d50170a` (layer and window roles, file and click paths). Capture a repro.
+- [ ] **First paint answers container queries against the 1px stand-in:** the glass bar starts
+      in its `max-width: 1500px` variant and shifts windows once at startup. Seed the first
+      query from the output size; later stand-ins already use the last real size.
 
 ## Glass shell core gaps (found 2026-10-17)
 

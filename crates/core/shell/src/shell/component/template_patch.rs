@@ -90,6 +90,24 @@ impl TemplateBindingIndex {
     }
 }
 
+impl IndexedTemplateList {
+    /// Whether an enclosing loop binds `member` as a local, so the list's
+    /// source is that local rather than the state member.
+    fn shadows_member(&self, tree: &WidgetNode, member: &str) -> bool {
+        let Some(path) = self.items.iter().flatten().next() else {
+            return true;
+        };
+        node_at_path(tree, path)
+            .and_then(WidgetNode::template_bindings)
+            .and_then(|bindings| bindings.locals.as_ref())
+            .is_none_or(|locals| {
+                locals
+                    .keys()
+                    .any(|name| name == member && *name != self.list.item_name)
+            })
+    }
+}
+
 impl FrontendSurfaceComponent {
     /// Start a dispatch that moves the retained tree out of `last_tree`.
     /// Handler writes during it cannot be patched against a missing tree, so
@@ -265,17 +283,43 @@ impl FrontendSurfaceComponent {
                 self.locale.module_translator(module_id),
                 self.localized_misses_handle(instance),
             );
-            let Some(items) = mesh_core_frontend::refresh_keyed_template_list(
-                &list.list,
-                &bound,
-                instance,
-                Some(&*self),
-                &list.values,
-            ) else {
+            // A list read straight from a member whose writes were all
+            // item-local visits only the written items.
+            let item_delta = mesh_core_frontend::keyed_template_list_member(&list.list)
+                .filter(|member| !list.shadows_member(tree, member))
+                .and_then(|member| {
+                    let runtimes = self.runtimes.lock().unwrap();
+                    let changed = runtimes
+                        .get(instance)?
+                        .script_ctx
+                        .changed_list_items(member)?
+                        .to_vec();
+                    Some(changed)
+                });
+            let changed_items = match item_delta {
+                Some(changed) => mesh_core_frontend::refresh_keyed_template_items(
+                    &list.list,
+                    &bound,
+                    instance,
+                    Some(&*self),
+                    &list.values,
+                    &changed,
+                ),
+                None => mesh_core_frontend::refresh_keyed_template_list(
+                    &list.list,
+                    &bound,
+                    instance,
+                    Some(&*self),
+                    &list.values,
+                )
+                .map(|items| items.into_iter().enumerate().collect()),
+            };
+            let Some(changed_items) = changed_items else {
                 return false;
             };
-            for (index, value) in items.iter().enumerate() {
-                if list.values[index] == *value {
+            let mut changes = Vec::new();
+            for (index, value) in changed_items {
+                if list.values[index] == value {
                     continue;
                 }
                 for path in &list.items[index] {
@@ -291,8 +335,9 @@ impl FrontendSurfaceComponent {
                     refreshed_bindings.insert(path.clone(), Arc::new(next));
                     targets.push(path.clone());
                 }
+                changes.push((index, value));
             }
-            refreshed_lists.push((list_index, items));
+            refreshed_lists.push((list_index, changes));
         }
         if readers
             .keys()
@@ -304,16 +349,14 @@ impl FrontendSurfaceComponent {
         targets.dedup();
 
         let mut tree = self.last_tree.take().expect("checked above");
-        // Children are shared copy-on-write, so this keeps the last good
-        // tree for a failed expression at the cost of the patched paths.
-        let original = tree.clone();
+        let mut staged = Vec::with_capacity(targets.len());
         let mut states: HashMap<String, Arc<mesh_core_scripting::ScriptState>> = HashMap::new();
         let mut patched = HashSet::new();
         let mut changes = mesh_core_elements::FrameDirty::default();
         let mut dependencies_changed = false;
         let mut evaluated_instances = HashSet::new();
         for path in &targets {
-            let Some(node) = node_at_path_mut(&mut tree, path) else {
+            let Some(mut node) = node_at_path(&tree, path).cloned() else {
                 continue;
             };
             if let Some(bindings) = refreshed_bindings.get(path) {
@@ -330,7 +373,7 @@ impl FrontendSurfaceComponent {
                 Some(state) => Arc::clone(state),
                 None => {
                     let Some(state) = self.runtime_state(&instance_key) else {
-                        self.last_tree = Some(original);
+                        self.last_tree = Some(tree);
                         return false;
                     };
                     states.insert(instance_key.clone(), Arc::clone(&state));
@@ -340,7 +383,7 @@ impl FrontendSurfaceComponent {
             if !module_ids.contains_key(&instance_key) {
                 let runtimes = self.runtimes.lock().unwrap();
                 let Some(runtime) = runtimes.get(instance_key.as_str()) else {
-                    self.last_tree = Some(original);
+                    self.last_tree = Some(tree);
                     return false;
                 };
                 module_ids.insert(instance_key.clone(), runtime.module_id.clone());
@@ -351,12 +394,14 @@ impl FrontendSurfaceComponent {
                 self.locale.module_translator(module_id),
                 self.localized_misses_handle(&instance_key),
             );
-            let patch = mesh_core_frontend::patch_template_bindings(node, &bound, Some(&*self));
+            let patch =
+                mesh_core_frontend::patch_template_bindings(&mut node, &bound, Some(&*self));
             dependencies_changed |= patch.dependencies_changed;
             if patch.changed() {
                 patched.insert(node.id);
                 changes.mark(node.id, patch.change);
             }
+            staged.push((path, node));
         }
         // A failing expression must not publish a partially evaluated tree;
         // the narrow rebuild owns failure handling and its diagnostics.
@@ -364,14 +409,27 @@ impl FrontendSurfaceComponent {
             .iter()
             .any(|instance_key| self.has_template_expression_failure_for(instance_key));
         if failed {
-            self.last_tree = Some(original);
+            self.last_tree = Some(tree);
             return false;
         }
+        // Sorted paths put parents before descendants, so a staged parent
+        // cannot overwrite a child that was committed earlier in this batch.
+        let (paths, nodes): (Vec<&[usize]>, Vec<WidgetNode>) = staged
+            .into_iter()
+            .map(|(path, node)| (path.as_slice(), node))
+            .unzip();
+        let mut nodes = nodes.into_iter();
+        mesh_core_elements::for_each_node_at_paths_mut(&mut tree, &paths, |_, node| {
+            *node = nodes.next().expect("one staged node per path");
+        });
         if dependencies_changed {
             self.node_service_field_deps = NodeServiceFieldDependencies::build(&tree);
         }
-        for (index, values) in refreshed_lists {
-            self.template_binding_index.lists[index].values = values;
+        for (list_index, changes) in refreshed_lists {
+            let values = &mut self.template_binding_index.lists[list_index].values;
+            for (index, value) in changes {
+                values[index] = value;
+            }
         }
         self.last_tree = Some(tree);
         self.pending_service_template_nodes = None;
@@ -408,17 +466,6 @@ fn node_at_path<'tree>(root: &'tree WidgetNode, path: &[usize]) -> Option<&'tree
     let mut node = root;
     for &index in path {
         node = node.children.get(index)?;
-    }
-    Some(node)
-}
-
-fn node_at_path_mut<'tree>(
-    root: &'tree mut WidgetNode,
-    path: &[usize],
-) -> Option<&'tree mut WidgetNode> {
-    let mut node = root;
-    for &index in path {
-        node = node.children.get_mut(index)?;
     }
     Some(node)
 }

@@ -273,7 +273,7 @@ impl PerSurfaceLayoutState {
     /// Construct a fresh, invalid state (equivalent to `Default`).
     pub fn new() -> Self {
         Self {
-            tree: TaffyTree::new(),
+            tree: lowering::unrounded_taffy_tree(),
             node_map: HashMap::new(),
             stable_node_ids: HashSet::new(),
             text_nodes: HashMap::new(),
@@ -362,7 +362,7 @@ impl LayoutEngine {
     ) {
         let _span = tracing::debug_span!("layout").entered();
         let mut report = TaffyLayoutReport::default();
-        let mut tree = TaffyTree::<NodeId>::new();
+        let mut tree = lowering::unrounded_taffy_tree();
         let mut node_map = HashMap::new();
         let mut text_nodes = HashMap::new();
 
@@ -528,19 +528,24 @@ impl LayoutEngine {
         measurer: Option<&dyn TextMeasurer>,
     ) {
         let snapshots = snapshot
-            .live_paths(root, dirty_nodes, || {
+            .live_nodes(root, dirty_nodes, || {
                 crate::frame_work::visit(crate::frame_work::Pass::LayoutSync);
             })
-            .filter(|paths| paths.len() == dirty_nodes.len())
-            .map(|paths| {
-                paths
+            .filter(|nodes| nodes.len() == dirty_nodes.len())
+            .map(|nodes| {
+                nodes
                     .into_iter()
-                    .map(|path| {
-                        let mut node = &*root;
-                        for &index in path {
-                            node = &node.children[index];
-                        }
-                        node.clone()
+                    .map(|(_, node)| node.clone())
+                    .filter(|node| {
+                        // Surface sizing includes the root even when its inputs
+                        // are unchanged; that synthetic dirt needs no synchronization.
+                        node.id != root.id
+                            || node.tag == "text"
+                            || !snapshot.node_by_id(node.id).is_some_and(|old| {
+                                old.tag() == node.tag
+                                    && old.style() == &node.computed_style
+                                    && old.attributes() == &node.attributes
+                            })
                     })
                     .collect::<Vec<_>>()
             });
@@ -649,6 +654,15 @@ impl LayoutEngine {
         // This avoids rebuilding two maps, converting every ComputedStyle,
         // and calling set_style for every node on animation/repaint frames.
         if !available_changed && !dirty_layout && !measurement_changed {
+            return;
+        }
+
+        if stable_tree
+            && !available_changed
+            && !measurement_changed
+            && let (Some(nodes), Some(measurer)) = (dirty_node_snapshots, measurer)
+            && preserve_text_patch_geometry(state, nodes, intrinsic_cache, measurer)
+        {
             return;
         }
 

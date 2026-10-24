@@ -10,7 +10,7 @@ pub struct PaintSequence<T> {
     flat: OnceLock<Vec<T>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum PaintPart<T> {
     Leaf(Vec<T>),
     Branch(Arc<PaintSequence<T>>),
@@ -85,15 +85,71 @@ impl<T> PaintSequence<T> {
             parts.push(PaintPart::Leaf(leaf));
             ends.push(len);
         }
-        Self {
-            parts,
-            ends,
-            len,
-            flat: OnceLock::new(),
+        Self::balanced(parts, ends, len)
+    }
+
+    fn balanced(parts: Vec<PaintPart<T>>, ends: Vec<usize>, len: usize) -> Self {
+        const FANOUT: usize = 16;
+        if parts.len() <= FANOUT {
+            return Self {
+                parts,
+                ends,
+                len,
+                flat: OnceLock::new(),
+            };
         }
+        let mut groups = Vec::new();
+        let mut group_ends = Vec::new();
+        let mut total = 0;
+        let mut parts = parts.into_iter();
+        loop {
+            let chunk: Vec<_> = parts.by_ref().take(FANOUT).collect();
+            if chunk.is_empty() {
+                break;
+            }
+            let mut chunk_ends = Vec::with_capacity(chunk.len());
+            let mut chunk_len = 0;
+            for part in &chunk {
+                chunk_len += match part {
+                    PaintPart::Leaf(items) => items.len(),
+                    PaintPart::Branch(child) => child.len(),
+                };
+                chunk_ends.push(chunk_len);
+            }
+            total += chunk_len;
+            groups.push(PaintPart::Branch(Arc::new(Self {
+                parts: chunk,
+                ends: chunk_ends,
+                len: chunk_len,
+                flat: OnceLock::new(),
+            })));
+            group_ends.push(total);
+        }
+        Self::balanced(groups, group_ends, len)
     }
 }
 impl<T: Clone> PaintSequence<T> {
+    /// Copy only the bounded command-storage path; older frame snapshots retain
+    /// their original leaves and repeated replacements do not grow the tree.
+    pub(super) fn replaced(&self, index: usize, value: T) -> Option<Self> {
+        if index >= self.len {
+            return None;
+        }
+        let part = self.ends.partition_point(|end| *end <= index);
+        let offset = if part == 0 { 0 } else { self.ends[part - 1] };
+        let mut parts = self.parts.clone();
+        match &mut parts[part] {
+            PaintPart::Leaf(items) => items[index - offset] = value,
+            PaintPart::Branch(child) => *child = Arc::new(child.replaced(index - offset, value)?),
+        }
+        Some(Self {
+            parts,
+            ends: self.ends.clone(),
+            len: self.len,
+            flat: OnceLock::new(),
+        })
+    }
+
     /// Compatibility for inspection APIs; never used by retained replay.
     pub fn as_slice(&self) -> &[T] {
         self.flat.get_or_init(|| self.iter().cloned().collect())
@@ -132,5 +188,37 @@ impl<T> std::ops::Index<usize> for PaintSequence<T> {
     type Output = T;
     fn index(&self, index: usize) -> &T {
         self.get(index).expect("paint sequence index")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replacements_share_clean_branches_and_preserve_old_snapshots() {
+        let children = (0..4096)
+            .map(|index| (0, Arc::new(PaintSequence::from(vec![index]))))
+            .collect();
+        let original = Arc::new(PaintSequence::assemble(Vec::new(), children));
+        let mut current = Arc::clone(&original);
+        for turn in 0..128 {
+            let index = turn * 31 % 1024;
+            current = Arc::new(current.replaced(index, 10_000 + turn).unwrap());
+            assert_eq!(current[index], 10_000 + turn);
+            assert_eq!(original[index], index);
+        }
+        assert!(current.replaced(current.len(), 0).is_none());
+        assert!(original.parts.len() <= 16);
+        assert_eq!(current.parts.len(), original.parts.len());
+        let shared = current.parts.iter().zip(&original.parts).filter(|(a, b)| {
+            matches!((a, b), (PaintPart::Branch(a), PaintPart::Branch(b)) if Arc::ptr_eq(a, b))
+        }).count();
+        assert!(shared > 0);
+        let flattened: Vec<_> = current.iter().copied().collect();
+        assert_eq!(flattened.len(), original.len());
+        for (index, item) in flattened.into_iter().enumerate() {
+            assert_eq!(current[index], item);
+        }
     }
 }

@@ -447,6 +447,19 @@ pub(super) fn dirty_summary_preserves_blur_metadata(dirty: RenderObjectDirtySumm
         && dirty.primitive == 0
 }
 
+/// Text, semantic, clip and geometry changes keep command topology; the
+/// command patch checks each node's own eligibility.
+pub(super) fn dirty_summary_allows_command_patch(dirty: RenderObjectDirtySummary) -> bool {
+    dirty.inserted == 0
+        && dirty.removed == 0
+        && dirty.reordered == 0
+        && dirty.transform == 0
+        && dirty.opacity == 0
+        && dirty.scroll == 0
+        && dirty.material == 0
+        && dirty.primitive == 0
+}
+
 pub(super) fn changed_paint_count(dirty_summary: RenderObjectDirtySummary) -> u64 {
     [
         dirty_summary.opacity,

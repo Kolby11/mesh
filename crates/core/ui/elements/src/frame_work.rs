@@ -38,6 +38,10 @@ passes! {
     DisplayAncestors => "display_ancestors",
     DisplayBuild => "display_build",
     ChildSurfaceRequests => "child_surface_requests",
+    FocusScopeRefresh => "focus_scope_refresh",
+    DisclosureRefresh => "disclosure_refresh",
+    InteractionReconcile => "interaction_reconcile",
+    InteractionLookup => "interaction_lookup",
 }
 
 #[derive(Clone, Copy)]

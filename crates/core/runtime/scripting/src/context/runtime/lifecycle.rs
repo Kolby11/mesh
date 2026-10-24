@@ -201,6 +201,7 @@ impl ScriptContext {
             *self.callbacks.get_mut().unwrap() = super::callbacks::CallbackCache::default();
             self.state.invalidate_function_binding();
             self.changed_public_members.clear();
+            self.changed_list_items.clear();
             self.clear_reactive_effects();
             // Storage must be durable even when authored teardown fails part
             // way through. The outer shell also invokes this explicitly so

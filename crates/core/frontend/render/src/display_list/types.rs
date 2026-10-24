@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use mesh_core_elements::style::{
-    BackgroundPaint, BlendMode, Color, CornerShapes, Corners, Edges, FontStyle, Overflow, TextAlign,
-    TextDirection, TextOverflow, WhiteSpace,
+    BackgroundPaint, BlendMode, Color, CornerShapes, Corners, Edges, FontStyle, Overflow,
+    TextAlign, TextDirection, TextOverflow, WhiteSpace,
 };
 use mesh_core_elements::{AffineClip, AffineTransform, BoxShadow, VisualFilter};
 use mesh_core_elements::{LayoutRect, NodeId};
@@ -461,6 +461,7 @@ pub struct RetainedDisplayList {
     /// Retained batch-material summaries, patched on sparse frames instead of
     /// rebuilt from a full ordered walk.
     pub(super) batch_index: super::batch_index::BatchIndex,
+    pub(super) sparse_paint_index: super::sparse::SparsePaintIndex,
     pub(super) next_entries_scratch: HashMap<DisplayListKey, DisplayListEntry>,
     pub(super) next_subtrees_scratch: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     pub(super) dirty_ancestors_scratch: HashSet<NodeId>,
@@ -510,6 +511,7 @@ impl Default for RetainedDisplayList {
             entries: HashMap::new(),
             subtrees: HashMap::new(),
             batch_index: super::batch_index::BatchIndex::default(),
+            sparse_paint_index: super::sparse::SparsePaintIndex::default(),
             next_entries_scratch: HashMap::new(),
             next_subtrees_scratch: HashMap::new(),
             dirty_ancestors_scratch: HashSet::new(),

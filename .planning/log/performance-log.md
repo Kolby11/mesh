@@ -8063,3 +8063,229 @@ regression: `d9_glass_dock_animation`, release, three runs each, 639d4dd7
 16.0–20.1 ms versus ca8b18d1 (before today's animation and annotation changes)
 17.4–19.7 ms; the morning run passed at 15.8.
 
+
+
+## 2026-10-23 — P2: preserve layout for equal-size text patches
+
+`working tree after 8e8b85f5` · area: retained text measurement, sparse layout
+
+**Change.** Each retained text context records at most 16 measurement probes,
+including width constraints, known dimensions and the exact size returned to
+Taffy. Stable-tree text-only leaf patches replay those probes with the new
+content before invalidating Taffy. Equal outputs preserve its caches and live
+geometry, while publishing the new text context for subsequent layout. Font,
+language or shaping changes, changed layout styles, changed measurements,
+incomplete probe history, resizing and resource revisions use normal layout.
+The synthetic unchanged surface-root snapshot is omitted from synchronization.
+The initial raw-shaping-size comparison was too conservative: known dimensions
+and intrinsic-width ceiling can make Taffy's outputs equal despite different
+raw widths. The final comparison uses those exact outputs.
+
+**Measured.** AMD Ryzen 7 7840HS, default-feature release with thin LTO and one
+codegen unit, desktop compositor running. `affected_template_eval_beats_full_rebuild`:
+100 alternating one-field audio updates over 1,027 authored nodes (1,028 including
+the surface root), 640×160 CPU paint. Three interleaved before/after samples,
+using the default-feature executable saved before editing; no builds or other
+tests ran during these samples. The fixture also alternates selective/control
+ordering within each sample and checks final pixel parity.
+
+| | before | after |
+| --- | --- | --- |
+| selective total / 100 updates | 552.864–578.760 ms | 308.418–317.769 ms |
+| full-template control / 100 updates | 1,198.879–1,227.000 ms | 1,158.253–1,237.959 ms |
+| `affected_template_eval_speedup` | 2.071–2.219× | 3.645–3.999× |
+
+The existing 4.5× gate **still fails**; its baseline and tolerance are unchanged.
+Layout writes/extents/fit visits are zero for steady equal-size patches at both
+16 and 1,024 siblings. Display building still examines siblings; that and
+sparse geometry-changing write-back remain in the P2 backlog. The glass dock
+and dashboard budgets were not changed.
+
+**Validation.** Elements: 311 passed / 7 ignored. Full default-feature debug
+shell suite, serial with `MESH_VERIFY_RETAINED=1`: 989 passed / 32 ignored.
+The new shell regression also passes in release and checks each frame's pixels
+against a full rebuild. Element parity covers natural, wrapping, flex-shrunk and
+nowrap text at both sibling counts, growth and shrinkage, fractional widths
+with equal rounded sizes, and a later ancestor resize. Both regressions are
+included in `tools/check-performance`. Elements clippy completed with existing
+warnings and no findings in the new implementation. Live UI inspection was
+unavailable because no MESH shell was running in the session.
+
+
+## 2026-10-24 — P2: sparse command updates and transactional binding patches clear the template gate
+
+`working tree after 8e8b85f5` · area: retained display storage, interaction reuse,
+template patch transactions
+
+**Changes.** Stable text/semantic frames replace ordinary node commands through
+retained paths and a persistent command tree with fanout bounded at 16. All
+changed nodes must own a single ordinary command and preserve visual bounds;
+scroll scopes and other command shapes retain the conservative rebuild path.
+Ancestor sequences are patched coherently, clean subtree caches remain present,
+and unchanged coverage, effect metadata and immutable frame snapshots are shared.
+Text-only binding frames also skip focus-scope discovery, disclosure discovery
+and interaction reconciliation after checking every reported dirty path for
+unchanged style, state, geometry and non-text attributes. Pending menu focus
+still requests its refresh.
+
+These changes alone were not accepted as a reliable gate pass: an earlier
+three-run check of the pre-staging version ranged 4.364–4.675× against 4.5×.
+A CPU-clock profile then showed `try_patch_template_writes` copying sibling
+`WidgetNode`/`ComputedStyle` data through `SharedWidgetChildren::deref_mut`.
+Its rollback tree clone made each ancestor child vector shared before mutation.
+The final transaction evaluates bindings on clones of only the target nodes,
+checks all expression failures before publication, then commits sorted parent
+paths before descendants. Failure leaves the live tree untouched. Genuine
+external tree sharing keeps its existing copy-on-write semantics.
+The profile is under ignored `profiles/2026-10-23-text-patch/` (1,999 Hz
+`cpu-clock:u`, DWARF call graph, 3,489 samples); it was diagnostic, not a timing
+sample in the table below.
+
+**Measured.** AMD Ryzen 7 7840HS, default-feature release, thin LTO and one codegen
+unit, desktop compositor running. `affected_template_eval_beats_full_rebuild`:
+100 alternating one-field audio updates (20/21), 1,027 authored nodes in a column
+(1,028 including the surface root), 640×160 CPU paint. Three round-robin samples
+of each saved intermediate executable and the final executable, with no builds
+or other tests running. Each fixture also alternates selective/control order
+within a sample and checks final pixel parity.
+
+| Version | selective / 100 updates | full control / 100 updates | `affected_template_eval_speedup` |
+| --- | --- | --- | --- |
+| equal-size layout reuse, before this continuation | 312.242–344.314 ms | 1,184.503–1,254.401 ms | 3.440–4.017× |
+| plus sparse display commands | 251.003–273.928 ms | 1,148.770–1,170.011 ms | 4.194–4.601× |
+| plus interaction-input reuse | 238.922–250.203 ms | 1,133.595–1,158.149 ms | 4.531–4.847× |
+| plus staged binding transaction | 90.483–94.535 ms | 1,105.574–1,139.434 ms | 11.695–12.363× |
+
+All three final samples pass the unchanged `affected_template_eval_speedup`
+threshold: baseline 6.0, tolerance 25%, minimum 4.5×. This is an absolute reduction
+in selective update cost; the full-template control also gets slightly faster.
+The glass dock/dashboard budgets and `config/performance-baseline.tsv` were not
+changed. The full glass workload sweep was not rerun.
+
+**Structural checks.** At 16 and 1,024 siblings, repeated equal-size service
+updates write no layout geometry, rebuild at most three display nodes (text and
+semantic ancestors), preserve the parent's child-vector allocation, and perform
+zero focus-scope/disclosure refreshes or interaction reconciliations. The
+standalone renderer checks one/two changed text leaves with clipping, opacity
+and blur ancestors, exact full-command/coverage parity, retained old snapshots,
+and a later ancestor rebuild. Persistent sequence replacements preserve clean
+branches and do not grow storage depth across repeated updates. Safety checks
+reject disabled/reference/style/state/geometry/ancestor-policy changes from the
+interaction reuse path. Parent-and-child bindings and expression-failure
+atomicity have separate regressions. Structural/safety checks are included in
+`tools/check-performance`.
+
+**Validation.** Full default-feature debug shell suite, serial with
+`MESH_VERIFY_RETAINED=1`: 991 passed / 32 ignored. Renderer: 337 passed / 13
+ignored; interaction: 51 passed. Release narrow-script group with retained
+verification: 20 passed / 1 ignored, including pixel parity, transactional
+failure and parent/child commits. Renderer clippy completed with existing
+warnings and no findings in the new implementation; touched Rust formatting and
+`git diff --check` are clean. Live UI inspection remains pending.
+
+**Left open.** Geometry-changing sparse layout write-back, other display command
+shapes, shared dirty-path prefixes and write-time keyed-list deltas remain in the
+single backlog. The broader pipeline design stays linked there.
+
+
+## 2026-10-24 — P2/P3: geometry patches, shared path prefixes, sync-time keyed deltas
+
+`working tree after 8e8b85f5` (on top of the uncommitted 2026-10-23/24 P2 work)
+· area: sparse layout write-back, display entries and commands, path
+resolution, keyed lists
+
+**Changes.**
+- *Geometry-changing patches.* Taffy's rounding pass visited every node on each
+  layout; trees now disable it and write-back rounds only the nodes it projects,
+  matching Taffy exactly (relative locations; sizes at cumulative unrounded
+  edges, carried in the projection). Sparse display entries accept geometry
+  and clip changes when no changed node with children has a scaling or rotating
+  transform, so clean entries and recorded parent transforms stay valid. The
+  sparse command patch now replaces moved single-command nodes too, deriving
+  each world transform and clip from frames along the retained path. When
+  bounds move, it updates ancestor coverage, child unions and spans in place;
+  this requires single-command ancestors. A shrink that gives up an edge of
+  its parent's child union re-unions that parent's children, skipping
+  pre-clipped children. Boxes that clip or scale children, layer/scrollbar
+  ancestors, scroll viewports and pruning transitions keep the rebuild.
+- *Shared prefixes.* `FrameSnapshot::live_nodes`/`live_paths`, the batch
+  index and the command patch sort targets and step through each shared prefix
+  once; `for_each_node_at_paths_mut` does the same for mutable callers
+  (annotation, diagnostics, binding commits).
+- *Keyed deltas.* State sync already converts and compares each compound
+  global; it now records which array items differ when the length is kept.
+  Lists whose source is a plain member, not shadowed by an enclosing loop local,
+  read the member from state and compare and key-check only those items.
+  Consuming a delta drops memoized values of expressions reading the member;
+  without that, a later rebuild painted first-render colors (caught by the new
+  regression before landing).
+
+**Workloads.** New `geometry_patch_frame_timing_profile`: 200 handler+paint
+iterations per case, 320×100 CPU paint, keyed column of N items (`clean_column`:
+4-item column beside an N-item column; `text_width`: middle text grows
+2→12 chars; `box_width`: middle box 10↔20px; `box_height_last`: last box
+1↔3px; `box_height_first`: first box 1↔3px, so every sibling moves). Most of
+the 1,024 items are pre-clipped below the 100px surface in this shape.
+AMD Ryzen 7 7840HS, default-feature release (thin LTO, one codegen unit),
+`taskset -c 2`, desktop compositor running. Three interleaved runs per side;
+the before binary is the saved build of the tree at session start (same probe).
+
+| N = 1,024 (mean µs) | handler before | handler after | paint before | paint after |
+| --- | --- | --- | --- | --- |
+| `clean_column` | 138–235 | 138–142 | 817–1,186 | 232–243 |
+| `text_width` | 2,396–2,472 | 1,041–1,094 | 3,284–3,499 | 2,320–2,372 |
+| `box_width` | 2,306–2,336 | 1,005–1,047 | 2,037–2,116 | 1,222–1,303 |
+| `box_height_last` | 2,353–2,489 | 1,000–1,018 | 2,129–2,366 | 1,205–1,274 |
+| `box_height_first` | 2,974–3,054 | 1,350–1,400 | 11,768–12,240 | 11,378–11,447 |
+
+At N = 16 handlers drop 73–83 → 57–59 µs and paints are unchanged
+(`clean_column` 155–310 → 143–153). Per-paint visits at N = 1,024, before → after:
+display entries 1,027–1,032 → 0 in every case except `box_height_first`;
+keyed item compares 1,024 → 1; annotation steps 4,103 → 2,055 when every
+sibling moves; `clean_column` display ancestors 15 → 10 and builds 8 → 4.
+Layout write-back (1,027) and overflow annotation (~1,032) still visit every
+child of the re-laid-out parent, and handler sync still converts the whole list
+(~1 ms): both are in the backlog. With every item on screen
+(`MESH_GEOMETRY_VISIBLE=1`, 320×1100, after only), paint means at 16 → 1,024 are
+`clean_column` 142–293 → 240–370, `box_width` 140–144 → 1,502–1,576 and
+`text_width` 217–294 → 2,278–2,383 µs. The remaining growth is Taffy's flex pass
+over the parent's children, text remeasurement as the column width changes,
+write-back and annotation; display work is constant (gate below).
+
+**Existing gates.** `affected_template_eval_speedup` 11.44–11.72× → 11.64–12.44×
+(3 interleaved runs; threshold 4.5×). D9, 10 alternating rounds, p90 metric
+range (median): dashboard open 55.4–83.6 (64.0) → 66.8–92.0 (73.2) ms; dock frame
+14.4–20.7 (16.0) → 15.8–19.3 (17.0) ms; bar clock tick 4.54–5.52 (4.82) →
+5.00–6.11 (5.48) ms. Service update, hover and popover open overlap (5 rounds).
+**This wall-time increase is not added work:** dashboard open executes
+4.595 G user instructions in both binaries, and clock tick goes 2.648 G → 2.437 G.
+User cycles rise 2.55–2.70 G → 2.95–3.02 G, all of it inside unchanged Skia
+raster-pipeline stages (`copy_2_slots_unmasked` 11.7% → 15.8% of samples). In
+both rebuilt binaries those stage functions sit 32 bytes off their previous
+64-byte alignment. A build with temporary diagnostic env toggles had the same
+alignment and cycles. Treat CPU-raster D9 differences of this size between
+relinked binaries as code-placement noise unless instruction counts move.
+Budgets and `config/performance-baseline.tsv` are unchanged.
+
+**Structural gates** (added to `tools/check-performance`):
+`geometry_patch_frames_scale_with_the_change` (16 vs 1,024 visible siblings;
+display entries 0 in release, equal display builds, retained/layout sync and
+keyed compares, rect/pixel/retained parity with a full-rebuild twin);
+`keyed_list_item_writes_compare_only_written_items` (compares 1/2/1 for one,
+two and reassigned items at both sizes; key change and resize rebuild; a later
+structural rebuild must not read a stale memoized list);
+`geometry_command_patches_skip_siblings_and_match_full_build` (commands, spans,
+layers and subtree coverage equal a full build under plain, clip and opacity
+roots); `display_list_rebuilds_descendants_only_when_a_moved_parent_defines_their_space`
+(replaces `display_list_rebuilds_descendants_for_layout_dirty_parent`, which
+asserted rebuilding unscaled children whose commands are unchanged);
+`write_back_rounding_matches_taffy_rounding`; `live_paths_step_through_shared_prefixes_once`.
+
+**Validation.** Shell release suite with `MESH_VERIFY_RETAINED=1`: 992 passed before
+and after (identical failure sets, none). Full debug shell suite, serial, retained
+verification: 994 passed / 34 ignored. Render 337, elements 313, scripting 364,
+frontend 92, interaction 51. All 46 `cargo test` gate lines in
+`tools/check-performance` pass. Clippy reports no findings in the new code.
+The probe also found the stale structural text measurement recorded in
+[October](2026-10.md). Profiles are under ignored `profiles/2026-10-24-geometry/`.
+Not checked in a live shell.

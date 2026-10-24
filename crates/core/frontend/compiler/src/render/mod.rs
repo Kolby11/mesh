@@ -1258,44 +1258,109 @@ pub fn refresh_keyed_template_list(
         return None;
     }
     for ((item, previous), previous_key) in items.iter().zip(previous_items).zip(list.keys.iter()) {
-        mesh_core_elements::frame_work::visit(
-            mesh_core_elements::frame_work::Pass::KeyedItemCompare,
-        );
-        // Only plain item-field keys have a complete local dependency proof.
-        // Calls and dynamic keys continue through the real runtime every time.
-        if let Some(path) = &list.key_path {
-            fn field<'a>(
-                mut value: &'a serde_json::Value,
-                path: &[String],
-            ) -> Option<&'a serde_json::Value> {
-                for name in path {
-                    value = value.as_object()?.get(name)?;
-                }
-                Some(value)
-            }
-            if let (Some(next), Some(old)) = (field(item, path), field(previous, path))
-                && next == old
-            {
-                continue;
-            }
-        }
-        mesh_core_elements::frame_work::visit(
-            mesh_core_elements::frame_work::Pass::KeyedKeyValidation,
-        );
-        let item_store = LayeredStore {
-            base: state,
-            item_name: &list.item_name,
-            item_value: item,
-            loop_identity: None,
-            keyed_item: None,
-        };
-        let key =
-            evaluate_template_expression(&list.key, Some(&item_store), instance_key, composition);
-        if &key != previous_key {
+        if !keyed_item_keeps_key(
+            list,
+            state,
+            instance_key,
+            composition,
+            item,
+            previous,
+            previous_key,
+        ) {
             return None;
         }
     }
     Some(items)
+}
+
+/// [`refresh_keyed_template_list`] for a list whose source is a plain state
+/// member with a write-time item delta: only `changed` items are read and
+/// key-checked. Returns each changed index with its new item.
+pub fn refresh_keyed_template_items(
+    list: &KeyedTemplateList,
+    state: &dyn VariableStore,
+    instance_key: &str,
+    composition: Option<&dyn FrontendCompositionResolver>,
+    previous_items: &[serde_json::Value],
+    changed: &[usize],
+) -> Option<Vec<(usize, serde_json::Value)>> {
+    if !list.valid_keys {
+        return None;
+    }
+    let serde_json::Value::Array(items) = state.get_ref(list.source.trim())? else {
+        return None;
+    };
+    if items.len() != list.keys.len() || items.len() != previous_items.len() {
+        return None;
+    }
+    changed
+        .iter()
+        .map(|&index| {
+            let item = items.get(index)?;
+            keyed_item_keeps_key(
+                list,
+                state,
+                instance_key,
+                composition,
+                item,
+                &previous_items[index],
+                &list.keys[index],
+            )
+            .then(|| (index, item.clone()))
+        })
+        .collect()
+}
+
+/// Whether `list.source` names a state member directly, so the member's
+/// value is the list without evaluating an expression.
+pub fn keyed_template_list_member(list: &KeyedTemplateList) -> Option<&str> {
+    let source = list.source.trim();
+    let mut chars = source.chars();
+    (chars
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|next| next.is_ascii_alphanumeric() || next == '_'))
+    .then_some(source)
+}
+
+fn keyed_item_keeps_key(
+    list: &KeyedTemplateList,
+    state: &dyn VariableStore,
+    instance_key: &str,
+    composition: Option<&dyn FrontendCompositionResolver>,
+    item: &serde_json::Value,
+    previous: &serde_json::Value,
+    previous_key: &serde_json::Value,
+) -> bool {
+    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::KeyedItemCompare);
+    // Only plain item-field keys have a complete local dependency proof.
+    // Calls and dynamic keys continue through the real runtime every time.
+    if let Some(path) = &list.key_path {
+        fn field<'a>(
+            mut value: &'a serde_json::Value,
+            path: &[String],
+        ) -> Option<&'a serde_json::Value> {
+            for name in path {
+                value = value.as_object()?.get(name)?;
+            }
+            Some(value)
+        }
+        if let (Some(next), Some(old)) = (field(item, path), field(previous, path))
+            && next == old
+        {
+            return true;
+        }
+    }
+    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::KeyedKeyValidation);
+    let item_store = LayeredStore {
+        base: state,
+        item_name: &list.item_name,
+        item_value: item,
+        loop_identity: None,
+        keyed_item: None,
+    };
+    let key = evaluate_template_expression(&list.key, Some(&item_store), instance_key, composition);
+    &key == previous_key
 }
 
 /// What [`patch_template_bindings`] changed on a node.

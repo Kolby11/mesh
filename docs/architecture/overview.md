@@ -67,13 +67,22 @@ reused geometry project only the nodes whose annotation inputs changed and
 restyle their state-changed nodes through the same paths; with no selector
 combinators, only inherited values reach other nodes. The exact restyled set
 drives semantics and retained updates. Fixed-shape keyed native lists validate ordered keys and refresh only changed
-items' captured binding locals and handlers. Their property writes feed the same frame dirty
+items' captured binding locals and handlers. A list read directly from a script member
+takes its changed items from the state sync, which records which array items differ
+when it stores the member, so only those items are compared and key-checked. Their property writes feed the same frame dirty
 set and restyle targets, including writes made by hover handlers. Inherited-value
-changes alone propagate beyond those targets. Style diagnostics reuse that exact
+changes alone propagate beyond those targets. Binding writes stage only their target nodes, then commit parents before children
+after all expressions succeed; failure leaves the live tree untouched without
+sharing its whole child vectors for rollback. Style diagnostics reuse that exact
 set across intervening animation frames. Structural list changes retain the rebuild
 path. Layout-class patches lay
 out only the patched branch from the restyled set and report the nodes whose
-geometry changed. Full layout passes also report geometry changes while updating
+geometry changed. Write-back rounds the nodes it projects exactly as Taffy
+would, so Taffy's own whole-tree rounding pass is disabled. Text-only leaf patches first remeasure the bounded set of
+intrinsic width constraints used by retained layout. When every result and the
+layout style are unchanged, they retain Taffy geometry and report no geometry
+changes. Changed measurements, incomplete probe history, resizing and text
+resource revisions use layout. Full layout passes also report geometry changes while updating
 their projection. Stable frames synchronize producer-reported nodes and subtrees
 through snapshot paths, including scroll metadata and sampled style writes;
 retained fingerprint discovery is test-only. Rebuilds and mismatched topology
@@ -81,7 +90,19 @@ reconcile the full retained tree before publishing the frame.
 Retained restyles sample the exact restyled and registered animation nodes;
 previous transition values come from immutable frame records. Child lifecycle
 markers retain and restore their base classes, including when bindings write
-before paint. Display ancestors use retained paths. Child-surface requests
+before paint. Display ancestors use retained paths, walking a shared path
+prefix once. Stable text, semantic and local geometry changes replace
+ordinary node commands through a bounded persistent command tree, without
+rebuilding sibling lists, and re-collect only their own display entries.
+Equal visual bounds preserve ancestor coverage and effect metadata. Moved
+bounds update ancestor coverage and spans in place when every ancestor owns one
+command; a shrink that gives up its parent's coverage edge re-unions that
+parent's children. Other command shapes, layers above a moved node, and boxes
+that define a descendant's clip or transform use subtree rebuilds.
+Text-only binding patches also retain focus scopes, disclosures and interaction
+targets when all dirty paths preserve styles, state, geometry and non-text
+attributes. Other input changes keep the ordinary reconciliation path.
+Child-surface requests
 retain dependencies on trigger geometry, ancestor policy and descendant paint
 extents, and refresh from the finalized dirty set. Identity/element validation
 runs on structural changes; semantic reindexing reuses validated structure.
