@@ -2295,6 +2295,9 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn child_surface_blur_regions(&self, node_key: &str) -> Vec<DamageRect> {
+        if self.closing_child_keys.contains(node_key) {
+            return Vec::new();
+        }
         let Some(tree) = self.last_tree.as_ref() else {
             return Vec::new();
         };
@@ -2588,6 +2591,11 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn display_list_blur_regions(&self) -> &[DamageRect] {
+        // Compositor blur cannot fade with the exit transition; kept, it would
+        // show as an empty frosted panel after the content has faded out.
+        if self.surface_exiting {
+            return &[];
+        }
         self.retained_display_list.blur_regions()
     }
 

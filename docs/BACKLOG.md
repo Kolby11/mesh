@@ -346,8 +346,26 @@ of payoff.
 From the 2026-10-20 live `glass` captures; evidence in the
 [performance log](../.planning/log/performance-log.md).
 
-- [ ] First open of a glass surface costs 100–160 ms (tree build plus first GPU
-      frame); prewarm hidden surfaces or split the first frame.
+- [ ] First open of a glass surface is far over a few-ms budget (2026-10-24
+      investigation in the performance log); the items below remove its parts.
+- [ ] File images and icons (thumbnails, app SVG/PNG icons) are decoded,
+      Lanczos-resized and copied per pixel on the UI thread on first paint
+      (`resolve_file_variant_async` → `raster_file_variant_on_render_thread`).
+      Draw from the worker result or a bounded placeholder instead.
+- [ ] Rounded gradients and blurred box shadows rasterize CPU images on the UI
+      thread, keyed by exact pixel size, even for GPU frames; draw them natively
+      in the Skia scene (gradient shader + rrect clip, mask blur) or on a worker.
+- [ ] Showing a hidden surface renders it fully twice, at the pre-configure size
+      and after configure, and each render builds the tree twice; render once at
+      the known output size.
+- [ ] Show forces `TREE_REBUILD` though the hidden tree is still valid; keep it
+      and repaint, and prewarm hidden surfaces' resources at idle after startup.
+- [ ] Hide waits for the root's longest opacity transition (280 ms on the glass
+      dashboard and picker) while their panels fade in `--animation-duration-fast`;
+      unmap when the exit transitions actually settle.
+- [ ] Measure the launcher popover live (no IPC can open it); its open wakes
+      ~1,680 dormant nodes and both the grid and the hidden list per app. Build
+      only the active view.
 
 ### Style
 

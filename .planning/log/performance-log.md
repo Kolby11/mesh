@@ -8289,3 +8289,46 @@ frontend 92, interaction 51. All 46 `cargo test` gate lines in
 The probe also found the stale structural text measurement recorded in
 [October](2026-10.md). Profiles are under ignored `profiles/2026-10-24-geometry/`.
 Not checked in a live shell.
+
+## 2026-10-24 — glass first-open investigation (wallpaper picker, launcher)
+
+`a163218a` + uncommitted `glass_first_open_profile` · area: surface show, first paint
+
+**Report.** Opening the app launcher or the wallpaper picker took ~2 s.
+
+**Method.** Live `tools/profile-shell session` capture of the `glass` profile
+(Hyprland, AMD 780M, eDP 2880×1800 at scale 1, GPU scene worker), toggling
+`@mesh/glass-wallpapers` 4× over IPC 1.5 s apart:
+`profiles/session/20261024-105446` (`profiling` build). The same IPC script ran
+against `target/debug/mesh-shell` (what `cargo run` builds), with the log kept
+only in scratch. Times run from the IPC `toggle_surface` to the surface's
+first pointer enter (mapped). Single sessions, so the numbers are indicative.
+
+| Build | First open | Later opens |
+| --- | --- | --- |
+| debug | 1.28 s (renders 684 + 531 ms) | ~80 ms |
+| profiling (release opt) | ~125 ms (renders 48 + 44 ms) | ~30 ms (16 ms render + ~10 ms GPU scene) |
+
+Most of the reported 2 s is the debug build. In release the first open is
+still 125 ms. Sampling the UI thread during the first release open gives
+34 samples at 499 Hz (~68 ms):
+`draw_box_shadow_impl` 8, `draw_linear_gradient_command` 8 (rounded-gradient
+image cache), `raster_bitmap_variant` via
+`raster_file_variant_on_render_thread` 7 (synchronous decode + Lanczos3 resize
++ per-pixel copy of the card thumbnails), and the rest in style/tree build.
+The `icon_image_raster` stage (24 + 20 ms release, 956 + 737 ms debug) is that
+synchronous file raster path. Each show renders twice, at the pre-configure
+size and again after configure, and each render runs `tree_build` twice
+(~3 + ~2 ms on later opens).
+
+*Rejected hypothesis:* icon-font glyph rasterization. A scratch bench
+(release, Material Symbols Rounded 15 MB, 8 glyphs at 20 px with four axes)
+takes 0.03–0.05 ms per batch. Hinting off and a shared `ScaleContext` save
+~0.01 ms. `rasterize()` with the cache cold takes 0.2 ms. It is not the cost.
+
+`glass_first_open_profile` (offline, release, CPU raster, 5 rounds): launcher
+open 41–74 ms with 150 apps (1,877 nodes), picker open 71–104 ms at 2880×1800,
+almost all glass primitives in CPU raster. That does not represent the GPU live
+path, so treat it only as a harness for the synchronous stages. The launcher
+was not opened live, because no IPC command can open it. Follow-ups are in
+the backlog under "Live glass session".

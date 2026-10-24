@@ -1364,3 +1364,174 @@ fn glass_bar_pill_hover_is_stable_at_its_lifted_edge() {
         "leaving the resting box still un-hovers"
     );
 }
+
+fn first_open_report(label: &str, samples: &mut [Duration]) {
+    samples.sort();
+    eprintln!(
+        "{label}: n={} min {:.3}ms p50 {:.3}ms max {:.3}ms",
+        samples.len(),
+        samples[0].as_secs_f64() * 1000.0,
+        samples[samples.len() / 2].as_secs_f64() * 1000.0,
+        samples[samples.len() - 1].as_secs_f64() * 1000.0,
+    );
+}
+
+// Synchronous work between the user's open and the first painted frame of
+// the launcher popover and the wallpaper picker. Resource decoding stays on
+// the broker's workers and is not included.
+// cargo test -p mesh-core-shell --release --lib glass_first_open_profile -- --ignored --nocapture
+#[test]
+#[ignore = "release-only glass launcher and wallpaper-picker first-open profile"]
+fn glass_first_open_profile() {
+    const ROUNDS: usize = 5;
+    let installed = std::env::var("MESH_BENCH_APPS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(150);
+    let theme = theme();
+    let catalog = GlassCatalog::new();
+
+    let (width, height) = (2880, 180);
+    let extent = SurfaceExtent::unpadded(width, height);
+    let mut pixels = PixelBuffer::new(width, height);
+    let mut component = catalog.mount("glass-dock");
+    update(&mut component, "mesh.apps", glass_apps_payload(10, installed));
+    settle_dock(&mut component, &theme, extent, &mut pixels);
+    eprintln!(
+        "glass-dock: {installed} installed apps, {} nodes",
+        count_nodes(component.last_tree.as_ref().unwrap())
+    );
+    let mut samples = Vec::new();
+    for round in 0..ROUNDS {
+        component.set_profiling_enabled(round == ROUNDS - 1);
+        let _ = component.take_profiling_records();
+        let started = std::time::Instant::now();
+        component.focused_key = Some(reference(&component, "glassLauncher"));
+        component
+            .handle_input(
+                &theme,
+                width,
+                height,
+                ComponentInput::KeyPressed {
+                    key: "Enter".into(),
+                    modifiers: Default::default(),
+                },
+            )
+            .unwrap();
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+        let request = component
+            .child_surface_requests()
+            .into_iter()
+            .next()
+            .expect("launcher popup");
+        let (w, h) = request.content_size;
+        let mut popup = PixelBuffer::new(w, h);
+        component
+            .paint_child_surface_raster(&request.node_key, &mut popup, 1.0, (0, 0), false)
+            .unwrap();
+        samples.push(started.elapsed());
+        if round == ROUNDS - 1 {
+            super::navigation_profile::dump_stages(
+                "launcher open",
+                component.take_profiling_records(),
+                1,
+            );
+        }
+        component
+            .handle_input(
+                &theme,
+                width,
+                height,
+                ComponentInput::KeyPressed {
+                    key: "Escape".into(),
+                    modifiers: Default::default(),
+                },
+            )
+            .unwrap();
+        settle_dock(&mut component, &theme, extent, &mut pixels);
+    }
+    first_open_report("launcher open", &mut samples);
+
+    let (width, height) = (2880, 1800);
+    let extent = SurfaceExtent::unpadded(width, height);
+    let mut pixels = PixelBuffer::new(width, height);
+    let mut component = catalog.mount("glass-wallpapers");
+    let wallpapers: Vec<_> = (0..6)
+        .map(|index| {
+            serde_json::json!({
+                "path": format!("/walls/{index}.png"),
+                "name": format!("wall {index}"),
+                "thumbnail": "",
+                "color": "#334455",
+            })
+        })
+        .collect();
+    update(
+        &mut component,
+        "mesh.wallpapers",
+        serde_json::json!({"available": true, "directory": "/walls", "wallpapers": wallpapers}),
+    );
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    let id = "@mesh/glass-wallpapers".to_owned();
+    let mut samples = Vec::new();
+    for round in 0..ROUNDS {
+        component
+            .handle_core_event(&CoreEvent::SurfaceVisibilityChanged {
+                surface_id: id.clone(),
+                visible: false,
+            })
+            .unwrap();
+        component.set_profiling_enabled(round == ROUNDS - 1);
+        let _ = component.take_profiling_records();
+        let started = std::time::Instant::now();
+        component
+            .handle_core_event(&CoreEvent::SurfaceVisibilityChanged {
+                surface_id: id.clone(),
+                visible: true,
+            })
+            .unwrap();
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+        samples.push(started.elapsed());
+        if round == ROUNDS - 1 {
+            super::navigation_profile::dump_stages(
+                "wallpaper picker open",
+                component.take_profiling_records(),
+                1,
+            );
+        }
+    }
+    first_open_report("wallpaper picker open", &mut samples);
+}
+
+#[test]
+fn exiting_glass_surface_stops_exporting_compositor_blur() {
+    let theme = theme();
+    let mut component = host("glass-dashboard");
+    let extent = SurfaceExtent::unpadded(1920, 1080);
+    let mut pixels = PixelBuffer::new(1920, 1080);
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    assert!(!component.display_list_blur_regions().is_empty());
+
+    component.set_surface_exiting(true);
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    assert!(
+        component.display_list_blur_regions().is_empty(),
+        "compositor blur cannot fade with the content"
+    );
+
+    component.set_surface_exiting(false);
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    assert!(!component.display_list_blur_regions().is_empty());
+}
