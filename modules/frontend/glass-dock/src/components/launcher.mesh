@@ -15,26 +15,35 @@
             <input class="search" value={query} oninput={onSearch} placeholder={t("launcher.placeholder")} aria-label={t("launcher.search")} />
             <scroll class="results">
                 <column class="result-body">
-                <column class="app-list" hidden={grid}>
-                    {#for app in filtered key={app.id}}
-                        <button class="app" onclick={onLaunch(app.id)}>
-                            <image class="app-art" src={app.icon} alt="" hidden={not app.has_file} />
-                            <icon class="app-art" name="application-x-executable" size="28" hidden={app.has_file} />
-                            <column class="app-copy"><text class="app-name">{app.name}</text><text class="app-status">{app.status}</text></column>
-                            <box class="running" hidden={not app.running} />
-                        </button>
-                    {/for}
-                </column>
-                <row class="app-grid" hidden={not grid}>
+                {#if grid}
+                <row class="app-grid">
                     {#for app in filtered key={app.id}}
                         <button class="cell" onclick={onLaunch(app.id)} aria-label={app.name} title={app.name}>
-                            <image class="cell-art" src={app.icon} alt="" hidden={not app.has_file} />
-                            <icon class="cell-art" name="application-x-executable" size="40" hidden={app.has_file} />
+                            {#if app.has_file}
+                            <image class="cell-art" src={app.icon} alt="" />
+                            {:else}
+                            <icon class="cell-art" name="application-x-executable" size="40" />
+                            {/if}
                             <text class="cell-name">{app.name}</text>
                             <box class="cell-dot" class:cell-dot-on={app.running} />
                         </button>
                     {/for}
                 </row>
+                {:else}
+                <column class="app-list">
+                    {#for app in filtered key={app.id}}
+                        <button class="app" onclick={onLaunch(app.id)}>
+                            {#if app.has_file}
+                            <image class="app-art" src={app.icon} alt="" />
+                            {:else}
+                            <icon class="app-art" name="application-x-executable" size="28" />
+                            {/if}
+                            <column class="app-copy"><text class="app-name">{app.name}</text><text class="app-status">{app.status}</text></column>
+                            <box class="running" hidden={not app.running} />
+                        </button>
+                    {/for}
+                </column>
+                {/if}
                 <text class="empty" hidden={has_results}>{empty_label}</text>
                 </column>
             </scroll>

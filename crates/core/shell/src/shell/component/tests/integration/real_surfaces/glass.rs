@@ -1418,9 +1418,11 @@ fn glass_first_open_profile() {
                 },
             )
             .unwrap();
+        let input_done = started.elapsed();
         component
             .paint_raster(&theme, extent, &mut pixels, 1.0)
             .unwrap();
+        let dock_done = started.elapsed();
         let request = component
             .child_surface_requests()
             .into_iter()
@@ -1432,6 +1434,12 @@ fn glass_first_open_profile() {
             .paint_child_surface_raster(&request.node_key, &mut popup, 1.0, (0, 0), false)
             .unwrap();
         samples.push(started.elapsed());
+        eprintln!(
+            "launcher round {round}: input {:.3}ms, dock paint {:.3}ms, popup paint {:.3}ms",
+            input_done.as_secs_f64() * 1000.0,
+            (dock_done - input_done).as_secs_f64() * 1000.0,
+            (started.elapsed() - dock_done).as_secs_f64() * 1000.0,
+        );
         if round == ROUNDS - 1 {
             super::navigation_profile::dump_stages(
                 "launcher open",
@@ -1494,9 +1502,19 @@ fn glass_first_open_profile() {
                 visible: true,
             })
             .unwrap();
-        component
-            .paint_raster(&theme, extent, &mut pixels, 1.0)
-            .unwrap();
+        // Until the first frame in resting styles, without the entrance pose.
+        loop {
+            component
+                .paint_raster(&theme, extent, &mut pixels, 1.0)
+                .unwrap();
+            let entering = component.last_tree.as_ref().is_some_and(|tree| {
+                tree.state
+                    .contains(mesh_core_elements::NodeState::SURFACE_ENTERING)
+            });
+            if !entering {
+                break;
+            }
+        }
         samples.push(started.elapsed());
         if round == ROUNDS - 1 {
             super::navigation_profile::dump_stages(
@@ -1534,4 +1552,161 @@ fn exiting_glass_surface_stops_exporting_compositor_blur() {
         .paint_raster(&theme, extent, &mut pixels, 1.0)
         .unwrap();
     assert!(!component.display_list_blur_regions().is_empty());
+}
+
+/// Drives one real glass surface through the shell runtime against the
+/// testing presentation backend.
+struct ShownSurfaceHarness {
+    shell: crate::shell::Shell,
+    id: String,
+}
+
+impl ShownSurfaceHarness {
+    fn wallpapers() -> Self {
+        let mut component = GlassCatalog::new().mount("glass-wallpapers");
+        let wallpapers: Vec<_> = (0..6)
+            .map(|index| {
+                serde_json::json!({
+                    "path": format!("/walls/{index}.png"),
+                    "name": format!("wall {index}"),
+                    "thumbnail": "",
+                    "color": "#334455",
+                })
+            })
+            .collect();
+        update(
+            &mut component,
+            "mesh.wallpapers",
+            serde_json::json!({"available": true, "directory": "/walls", "wallpapers": wallpapers}),
+        );
+        let id = component.surface_id().to_owned();
+        let mut shell = crate::shell::Shell::new();
+        shell.presentation_engine =
+            mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+        shell.register_component(Box::new(component));
+        shell.debug.profiling_enabled = true;
+        let mut harness = Self { shell, id };
+        harness.set_visible(false);
+        harness
+    }
+
+    fn set_visible(&mut self, visible: bool) {
+        let surface_id = self.id.clone();
+        let request = if visible {
+            CoreRequest::ShowSurface { surface_id }
+        } else {
+            CoreRequest::HideSurface { surface_id }
+        };
+        let mut emitted = self.shell.apply_request(request).unwrap();
+        self.shell.drain_requests(&mut emitted).unwrap();
+        if let Some(state) = self.shell.core.surfaces.get_mut(&self.id)
+            && state.closing_until.is_some()
+        {
+            state.closing_until = Some(std::time::Instant::now());
+            let mut emitted = self.shell.complete_due_surface_transitions().unwrap();
+            self.shell.drain_requests(&mut emitted).unwrap();
+        }
+        self.shell.render_components().unwrap();
+        if !visible {
+            // The hiding present unmaps the surface; it must be configured
+            // again before it can take another buffer.
+            self.shell
+                .presentation_engine
+                .testing_set_surface_configured(&self.id, false);
+        }
+    }
+
+    fn configures(&self) -> usize {
+        self.shell
+            .presentation_engine
+            .testing_surface_config_history()
+            .iter()
+            .filter(|(surface, _)| *surface == self.id)
+            .count()
+    }
+
+    /// Show the surface, answer its configure, and count what that took.
+    fn show(&mut self) -> ShowCost {
+        use crate::shell::runtime::profiling::CapturedRecord;
+        use mesh_core_debug::ProfilingStage;
+
+        self.shell.profiling.capture = Some(Vec::new());
+        let configures_before = self.configures();
+        self.set_visible(true);
+        let configures = self.configures() - configures_before;
+        self.shell
+            .presentation_engine
+            .testing_set_surface_configured(&self.id, true);
+        self.shell.render_components().unwrap();
+        let records = self.shell.profiling.capture.take().unwrap();
+        let count = |stage: ProfilingStage, trigger: Option<&str>| {
+            records
+                .iter()
+                .filter(|record| {
+                    matches!(record, CapturedRecord::Stage { surface_id, stage: s, trigger: t, .. }
+                        if *surface_id == self.id && *s == stage
+                            && trigger.is_none_or(|trigger| t.as_deref() == Some(trigger)))
+                })
+                .count()
+        };
+        ShowCost {
+            configures,
+            rebuilds: count(ProfilingStage::TreeBuild, Some("rebuild")),
+            renders: count(ProfilingStage::TotalSurfaceRender, None),
+            paints: count(ProfilingStage::Paint, None),
+            presents: count(ProfilingStage::PresentCommit, None),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq)]
+struct ShowCost {
+    configures: usize,
+    rebuilds: usize,
+    renders: usize,
+    paints: usize,
+    presents: usize,
+}
+
+/// One configure, then one paint at the size the compositor grants, from the
+/// retained tree.
+const RETAINED_SHOW: ShowCost = ShowCost {
+    configures: 1,
+    rebuilds: 0,
+    renders: 1,
+    paints: 1,
+    presents: 1,
+};
+
+/// Re-showing a hidden surface reuses its retained tree and paints once, at
+/// the size the compositor configures, instead of painting an unconfigured
+/// pass and rebuilding the tree for each.
+#[test]
+fn reshown_glass_surface_reuses_its_tree_and_paints_once() {
+    let mut harness = ShownSurfaceHarness::wallpapers();
+    harness.show();
+    harness.set_visible(false);
+    assert_eq!(harness.show(), RETAINED_SHOW);
+}
+
+/// An idle prewarm gives a never-shown surface the retained tree a re-shown
+/// one has, so its first show costs the same.
+#[test]
+fn prewarmed_glass_surface_first_show_paints_once() {
+    let mut harness = ShownSurfaceHarness::wallpapers();
+    assert!(harness.shell.prewarm_hidden_surface().unwrap());
+    assert!(
+        !harness.shell.prewarm_hidden_surface().unwrap(),
+        "each hidden surface is prewarmed once"
+    );
+    assert_eq!(harness.configures(), 0, "a prewarm configures nothing");
+    assert!(
+        harness
+            .shell
+            .presentation_engine
+            .testing_presented_surfaces()
+            .is_empty(),
+        "a prewarm presents nothing"
+    );
+    assert_eq!(harness.show(), RETAINED_SHOW);
 }

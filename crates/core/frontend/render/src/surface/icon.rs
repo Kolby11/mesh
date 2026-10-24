@@ -1304,16 +1304,19 @@ fn raster_bitmap_variant(
 ) -> Option<RasterVariant> {
     let pixel_bytes = icon_raster_bytes(width, height)?;
     let img = get_or_load_sync(path)?;
-    let scaled = image::imageops::resize(img.as_ref(), width, height, FilterType::Lanczos3);
+    // For reductions of 2x and more (wallpaper thumbnails), area averaging is
+    // within ~1/255 per channel of Lanczos3 at about a seventh of the cost.
+    let scaled = if img.width() >= width * 2 && img.height() >= height * 2 {
+        image::imageops::thumbnail(img.as_ref(), width, height)
+    } else {
+        image::imageops::resize(img.as_ref(), width, height, FilterType::Lanczos3)
+    };
     let mut pixels = Vec::with_capacity(pixel_bytes);
-    for y in 0..height {
-        for x in 0..width {
-            let p = scaled.get_pixel(x, y);
-            if multicolor {
-                pixels.extend_from_slice(&[p[2], p[1], p[0], p[3]]);
-            } else {
-                pixels.extend_from_slice(&[tint.b, tint.g, tint.r, p[3]]);
-            }
+    for p in scaled.as_raw().chunks_exact(4) {
+        if multicolor {
+            pixels.extend_from_slice(&[p[2], p[1], p[0], p[3]]);
+        } else {
+            pixels.extend_from_slice(&[tint.b, tint.g, tint.r, p[3]]);
         }
     }
     Some(variant_from_bgra(width, height, pixels))
@@ -1424,7 +1427,9 @@ pub fn draw_icon_from_path_with_options(
     tint: Color,
     multicolor: bool,
 ) {
-    if let Some(variant) = resolve_file_variant(path, dest_w, dest_h, tint, multicolor) {
+    if let FileVariant::Ready(variant) =
+        resolve_file_variant(path, dest_w, dest_h, tint, multicolor)
+    {
         blit_variant(buffer, &variant, dest_x, dest_y);
     }
 }
@@ -1442,9 +1447,13 @@ pub fn draw_icon_from_path_with_options_on_canvas(
     let raster_scale = canvas_raster_scale(canvas);
     let raster_w = (dest_w as f32 * raster_scale).ceil() as i32;
     let raster_h = (dest_h as f32 * raster_scale).ceil() as i32;
-    let Some(variant) = resolve_file_variant(path, raster_w, raster_h, tint, multicolor) else {
-        draw_missing_icon_fallback_on_canvas(canvas, dest_x, dest_y, dest_w, dest_h, tint);
-        return;
+    let variant = match resolve_file_variant(path, raster_w, raster_h, tint, multicolor) {
+        FileVariant::Ready(variant) => variant,
+        FileVariant::Pending => return,
+        FileVariant::Unavailable => {
+            draw_missing_icon_fallback_on_canvas(canvas, dest_x, dest_y, dest_w, dest_h, tint);
+            return;
+        }
     };
     if raster_scale == 1.0 {
         blit_variant_on_canvas(canvas, &variant, dest_x, dest_y);
@@ -1459,6 +1468,14 @@ pub fn draw_icon_from_path_with_options_on_canvas(
     }
 }
 
+enum FileVariant {
+    Ready(RasterVariant),
+    /// A worker is preparing the variant and repaints the requesting consumer.
+    #[cfg_attr(test, allow(dead_code))]
+    Pending,
+    Unavailable,
+}
+
 /// Resolve a file-backed icon to a (possibly cached) `RasterVariant`,
 /// recording cache hit/miss/bypass metrics. Used by both the buffer and
 /// canvas blit paths so they share one rasterizer and cache.
@@ -1468,11 +1485,12 @@ fn resolve_file_variant(
     dest_h: i32,
     tint: Color,
     multicolor: bool,
-) -> Option<RasterVariant> {
+) -> FileVariant {
     drain_icon_raster_jobs();
     #[cfg(test)]
     {
         resolve_file_variant_sync(path, dest_w, dest_h, tint, multicolor)
+            .map_or(FileVariant::Unavailable, FileVariant::Ready)
     }
     #[cfg(not(test))]
     {
@@ -1548,45 +1566,62 @@ fn resolve_file_variant_async(
     dest_h: i32,
     tint: Color,
     multicolor: bool,
-) -> Option<RasterVariant> {
-    let kind = icon_file_kind(path)?;
-    let (width, height) = icon_dimensions(dest_w, dest_h)?;
-    let freshness = file_freshness(path)?;
+) -> FileVariant {
+    let (Some(kind), Some((width, height)), Some(freshness)) = (
+        icon_file_kind(path),
+        icon_dimensions(dest_w, dest_h),
+        file_freshness(path),
+    ) else {
+        return FileVariant::Unavailable;
+    };
     let key = raster_file_key_with_freshness(path, width, height, tint, multicolor, freshness);
 
     if let Some(variant) = take_ready_variant(&key) {
-        return Some(variant);
+        return FileVariant::Ready(variant);
     }
 
     if let Some(variant) = cached_variant(&key) {
         profiling::record_raster_cache_hit(variant.fully_opaque);
-        return Some(variant);
+        return FileVariant::Ready(variant);
     }
 
-    match schedule_icon_raster_job(key.clone(), path, kind, width, height, tint, multicolor) {
-        Some(true) | Some(false) => {}
-        None => {}
+    let repaint_pending =
+        match schedule_icon_raster_job(key.clone(), path, kind, width, height, tint, multicolor) {
+            Some(true) => true,
+            Some(false) => {
+                icon_raster_job_pending(&key)
+                    || ResourceBroker::global()
+                        .is_some_and(ResourceBroker::retry_after_next_completion)
+            }
+            None => false,
+        };
+    // The consumer repaints when the worker publishes; painting nothing until
+    // then keeps decode and resampling off the frame. Only when no worker can
+    // ever wake it is the file rasterized here.
+    if repaint_pending {
+        return FileVariant::Pending;
     }
-
-    // A missing first-frame file icon is user-visible and particularly
-    // confusing for shell controls: the resolver found a real asset, but the
-    // asynchronous worker has not published its pixels yet, so the canvas
-    // would otherwise draw the crossed-box marker. System icon files are
-    // already bounded by the same dimensions/source checks as the worker;
-    // rasterize this small first request synchronously and keep the worker as
-    // the normal path for subsequent uncached variants.
     let started = std::time::Instant::now();
     let (variant, cacheable) =
         raster_file_variant_on_render_thread(path, kind, width, height, tint, multicolor);
     profiling::record_icon_image_raster(started.elapsed());
-    let variant = variant?;
+    let Some(variant) = variant else {
+        return FileVariant::Unavailable;
+    };
     if cacheable {
         profiling::record_raster_cache_miss();
         store_variant(key, variant.clone());
     } else {
         profiling::record_raster_cache_bypass();
     }
-    Some(variant)
+    FileVariant::Ready(variant)
+}
+
+#[cfg(not(test))]
+fn icon_raster_job_pending(key: &RasterCacheKey) -> bool {
+    icon_raster_queue()
+        .lock()
+        .is_ok_and(|queue| queue.pending.contains(key))
 }
 
 #[cfg(not(test))]

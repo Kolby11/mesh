@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Weak;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 thread_local! {
     static PAINT_CONSUMER: RefCell<Option<Weak<AtomicBool>>> = const { RefCell::new(None) };
@@ -96,6 +96,11 @@ impl<K: Eq + Hash> PendingResourceConsumers<K> {
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    #[cfg_attr(test, allow(dead_code))]
+    pub(crate) fn contains(&self, key: &K) -> bool {
+        self.0.contains_key(key)
+    }
 }
 
 const RESOURCE_BROKER_QUEUE_CAPACITY: usize = 128;
@@ -153,6 +158,12 @@ struct ActiveGeneration {
 struct ResourceBrokerState {
     active: Mutex<ActiveGeneration>,
     budget: ResourceByteBudget,
+    /// Jobs accepted but not yet settled. A rejected submission with work in
+    /// flight is retried after the next completion; with none, it never would be.
+    in_flight: AtomicUsize,
+    /// Consumers whose requests were rejected while work was in flight. The
+    /// next settled job repaints them so they resubmit.
+    rejected: Mutex<ResourceWaiters>,
 }
 
 /// Shared execution and admission boundary for derived render resources.
@@ -206,6 +217,8 @@ impl ResourceBroker {
                 token: ResourcePreparationToken::new(),
             }),
             budget: ResourceByteBudget::new(RESOURCE_BROKER_MAX_BYTES),
+            in_flight: AtomicUsize::new(0),
+            rejected: Mutex::new(ResourceWaiters::default()),
         });
         let (sender, receiver) = mpsc::sync_channel(RESOURCE_BROKER_QUEUE_CAPACITY);
         let worker_state = Arc::clone(&state);
@@ -238,11 +251,34 @@ impl ResourceBroker {
             work: Box::new(work),
             cancellation: Box::new(cancellation),
         };
+        self.state.in_flight.fetch_add(1, Ordering::AcqRel);
         match self.sender.try_send(job) {
             Ok(()) => Some(true),
-            Err(mpsc::TrySendError::Full(_)) => Some(false),
-            Err(mpsc::TrySendError::Disconnected(_)) => None,
+            Err(error) => {
+                self.state.in_flight.fetch_sub(1, Ordering::AcqRel);
+                match error {
+                    mpsc::TrySendError::Full(_) => Some(false),
+                    mpsc::TrySendError::Disconnected(_) => None,
+                }
+            }
         }
+    }
+
+    /// After a rejected [`submit`](Self::submit), subscribe the painting
+    /// consumer to the next settled job so it repaints and resubmits. Returns
+    /// `false` when nothing is in flight to wake it; the caller must then
+    /// prepare the resource itself or accept that it stays unpainted.
+    pub(crate) fn retry_after_next_completion(&self) -> bool {
+        let mut rejected = self
+            .state
+            .rejected
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.state.in_flight.load(Ordering::Acquire) == 0 {
+            return false;
+        }
+        rejected.subscribe_current();
+        true
     }
 
     fn refresh_generation(&self) -> ActiveGeneration {
@@ -292,7 +328,7 @@ fn resource_worker(state: Arc<ResourceBrokerState>, receiver: mpsc::Receiver<Res
         } = job;
         if !is_current_generation(&state, generation, &token) {
             cancellation(reservation);
-            wake_after_completion();
+            settle_job(&state);
             continue;
         }
         let context = ResourceBrokerContext {
@@ -303,8 +339,23 @@ fn resource_worker(state: Arc<ResourceBrokerState>, receiver: mpsc::Receiver<Res
             cancellation: Some(cancellation),
         };
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(context)));
-        wake_after_completion();
+        settle_job(&state);
     }
+}
+
+fn settle_job(state: &ResourceBrokerState) {
+    let rejected = {
+        let mut rejected = state
+            .rejected
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.in_flight.fetch_sub(1, Ordering::AcqRel);
+        std::mem::take(&mut *rejected)
+    };
+    if !rejected.0.is_empty() {
+        rejected.notify();
+    }
+    wake_after_completion();
 }
 
 #[cfg(test)]
@@ -418,6 +469,58 @@ mod tests {
         finished_receiver
             .recv_timeout(Duration::from_secs(1))
             .expect("broker worker did not finish");
+    }
+
+    #[test]
+    fn rejected_requests_repaint_after_the_next_settled_job() {
+        let _guard = crate::resource_state_test_lock();
+        let broker = ResourceBroker::new().expect("test worker should start");
+        let consumer = super::ResourcePaintConsumer::default();
+        {
+            let _scope = consumer.enter();
+            assert!(
+                !broker.retry_after_next_completion(),
+                "with nothing in flight no completion would wake the consumer"
+            );
+        }
+
+        let (started_sender, started_receiver) = mpsc::sync_channel(1);
+        let (release_sender, release_receiver) = mpsc::sync_channel(1);
+        assert_eq!(
+            broker.submit(
+                RESOURCE_BROKER_MAX_BYTES,
+                move |context| {
+                    started_sender.send(()).unwrap();
+                    release_receiver.recv().unwrap();
+                    drop(context.into_reservation());
+                },
+                |_reservation| {},
+            ),
+            Some(true)
+        );
+        started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("broker worker did not start");
+        assert_eq!(
+            broker.submit(1, |_context| {}, |_reservation| {}),
+            Some(false)
+        );
+        {
+            let _scope = consumer.enter();
+            assert!(broker.retry_after_next_completion());
+        }
+        assert!(!consumer.is_ready());
+
+        release_sender.send(()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while !consumer.is_ready() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the settled job must repaint the rejected consumer"
+            );
+            std::thread::yield_now();
+        }
+        assert!(consumer.take_ready());
     }
 
     #[test]

@@ -505,7 +505,15 @@ impl Shell {
                 let unmeasured_configure = !is_popup
                     && (!configure_size_resolved
                         || self.components[index].component.needs_content_measure());
-                let defer_first_layer_configure = first_layer_configure && rerender_attempts == 0;
+                // A surface shown again keeps the measurement of its retained
+                // tree, so its first configure needs no corrective pass.
+                let measured_reconfigure = first_layer_configure
+                    && rerender_attempts == 0
+                    && self.components[index].painted
+                    && configure_size_resolved
+                    && !self.components[index].component.needs_content_measure();
+                let defer_first_layer_configure =
+                    first_layer_configure && rerender_attempts == 0 && !measured_reconfigure;
                 if config_changed
                     && !is_popup
                     && !defer_first_layer_configure
@@ -552,6 +560,22 @@ impl Shell {
                     // with the parent cache so the next reconcile recreates
                     // the child object and repaints its retained content.
                     parent_reconfigured = true;
+                }
+
+                // Until the compositor answers that configure, any paint would
+                // be at a size it has not granted and could not be presented;
+                // the surface paints once, at the configured size.
+                if measured_reconfigure
+                    && self.components[index].parent.last_surface_config.is_some()
+                    && !self
+                        .presentation_engine
+                        .surface_ready_to_present(&surface_id)
+                {
+                    self.components[index].component.request_paint();
+                    if parent_reconfigured {
+                        self.invalidate_child_surface_targets_after_parent_configure(index);
+                    }
+                    continue 'component;
                 }
 
                 let inner_requested_width = surface.width;
@@ -841,6 +865,7 @@ impl Shell {
                 }
                 runtime.parent.last_paint_resource_revision =
                     Some(mesh_core_resources::resource_revision());
+                runtime.painted = true;
                 component_stage_records.extend(runtime.component.take_profiling_records());
 
                 // When popup creation was deferred to measure the content, the
@@ -1540,6 +1565,91 @@ impl Shell {
             || self.debug.show_layout_bounds
             || self.debug.inspected_element.is_some())
             && self.presentation_engine.gpu_canvas_available()
+    }
+
+    /// Paint one hidden layer surface that has never been shown into a canvas
+    /// that is never presented. Its first show then restyles a retained,
+    /// measured tree, and the icons and images it requested were prepared
+    /// while the shell was idle. Each surface is tried once; returns `false`
+    /// when none is left to try.
+    pub(in crate::shell) fn prewarm_hidden_surface(&mut self) -> Result<bool, ShellRunError> {
+        let Some(index) = (0..self.components.len()).find(|&index| {
+            let runtime = &self.components[index];
+            !runtime.prewarmed
+                && !runtime.quarantined
+                && runtime.parent.paint_buffer.is_none()
+                && runtime.parent.popup_config.is_none()
+                && self
+                    .surfaces
+                    .get(&runtime.surface_id)
+                    .is_some_and(|surface| surface.role == SurfaceRole::Layer)
+                && !self.surface_is_effectively_visible(&runtime.surface_id)
+        }) else {
+            return Ok(false);
+        };
+        self.components[index].prewarmed = true;
+        let surface_id = self.components[index].surface_id.clone();
+        // The surface has no output until it is mapped; any shown surface's
+        // output stands in, so content laid out against it is painted and
+        // requests its resources.
+        let output = self
+            .components
+            .iter()
+            .find_map(|runtime| {
+                self.presentation_engine
+                    .output_logical_size(&runtime.surface_id)
+            })
+            .unwrap_or((1920, 1080));
+        let (requested_width, requested_height) = self
+            .surfaces
+            .get(&surface_id)
+            .map(|surface| (surface.width, surface.height))
+            .unwrap_or_default();
+        let content = (
+            requested_width.min(output.0),
+            requested_height.min(output.1),
+        );
+        let extent = SurfaceExtent::padded(content, output);
+        let scale = self
+            .components
+            .iter()
+            .map(|runtime| self.presentation_engine.surface_scale(&runtime.surface_id))
+            .fold(1.0_f32, f32::max);
+        let scale_policy = mesh_core_render::FractionalScale::new(scale);
+        let gpu = self.gpu_canvas_wanted();
+        let Some(mut canvas) = self.presentation_engine.allocate_canvas(
+            scale_policy.physical_extent(output.0),
+            scale_policy.physical_extent(output.1),
+            gpu,
+        ) else {
+            return Ok(true);
+        };
+        // A raster canvas only records: replay is what rasterizes, and this
+        // paint is never replayed.
+        canvas.set_deferred_raster(true);
+        let module_id = self.components[index].component.id().to_string();
+        mesh_core_render::set_font_aliases(
+            self.font_registry.reference_aliases_for_module(&module_id),
+        );
+        let started = std::time::Instant::now();
+        let _resource_scope = self.components[index].resource_paints.enter();
+        let result =
+            self.components[index]
+                .component
+                .paint(self.theme.active(), extent, &mut canvas, scale);
+        if let Err(error) = result {
+            self.contain_component_failure(index, "build", &error);
+            return Ok(true);
+        }
+        self.components[index].parent.last_paint_resource_revision =
+            Some(mesh_core_resources::resource_revision());
+        self.components[index].painted = true;
+        tracing::debug!(
+            surface_id,
+            elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
+            "prewarmed hidden surface"
+        );
+        Ok(true)
     }
 
     fn resolve_dynamic_surface_size(

@@ -1318,6 +1318,78 @@ impl SkiaPaintBackend {
         });
     }
 
+    fn cached_shadow_image(
+        &self,
+        radii: Corners,
+        shadow: BoxShadow,
+        shadow_rect: ClipRect,
+        shadow_bounds: ClipRect,
+        blur_pad: i32,
+    ) -> Option<skia_safe::Image> {
+        let shadow_radii = add_corner_radius(radii, shadow.spread_radius);
+        let key = (
+            shadow_rect.width,
+            shadow_rect.height,
+            [
+                shadow_radii.top_left.to_bits(),
+                shadow_radii.top_right.to_bits(),
+                shadow_radii.bottom_right.to_bits(),
+                shadow_radii.bottom_left.to_bits(),
+            ],
+            shadow.blur_radius.to_bits(),
+            u32::from_be_bytes([
+                shadow.color.r,
+                shadow.color.g,
+                shadow.color.b,
+                shadow.color.a,
+            ]),
+        );
+        SHADOW_RASTER_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if let Some(image) = cache.get(&key) {
+                return Some(image.clone());
+            }
+            let width = shadow_bounds.width;
+            let height = shadow_bounds.height;
+            if width > MAX_SKIA_IMAGE_DIMENSION as i32 || height > MAX_SKIA_IMAGE_DIMENSION as i32 {
+                return None;
+            }
+            let info = ImageInfo::new(
+                (width, height),
+                skia_safe::ColorType::RGBA8888,
+                skia_safe::AlphaType::Premul,
+                None,
+            );
+            let mut surface = skia_safe::surfaces::raster(&info, None, None)?;
+            let mut paint = skia_paint(shadow.color, true);
+            if shadow.blur_radius > 0.0 {
+                paint.set_mask_filter(MaskFilter::blur(
+                    BlurStyle::Normal,
+                    blur_radius_to_sigma(shadow.blur_radius),
+                    Some(false),
+                ));
+            }
+            let rect = Rect::from_xywh(
+                blur_pad as f32,
+                blur_pad as f32,
+                shadow_rect.width as f32,
+                shadow_rect.height as f32,
+            );
+            surface
+                .canvas()
+                .draw_rrect(rrect_from_corners(rect, shadow_radii), &paint);
+            let image = surface.image_snapshot();
+            cache.insert(
+                key,
+                image.clone(),
+                (width as usize)
+                    .saturating_mul(height as usize)
+                    .saturating_mul(4),
+            );
+            Some(image)
+        })
+    }
+
     fn draw_box_shadow_impl(
         &self,
         canvas: &Canvas,
@@ -1381,68 +1453,13 @@ impl SkiaPaintBackend {
             return;
         }
 
-        let shadow_radii = add_corner_radius(radii, shadow.spread_radius);
-        let key = (
-            shadow_rect.width,
-            shadow_rect.height,
-            [
-                shadow_radii.top_left.to_bits(),
-                shadow_radii.top_right.to_bits(),
-                shadow_radii.bottom_right.to_bits(),
-                shadow_radii.bottom_left.to_bits(),
-            ],
-            shadow.blur_radius.to_bits(),
-            u32::from_be_bytes([
-                shadow.color.r,
-                shadow.color.g,
-                shadow.color.b,
-                shadow.color.a,
-            ]),
-        );
-        let image = SHADOW_RASTER_CACHE.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            if let Some(image) = cache.get(&key) {
-                return Some(image.clone());
-            }
-            let width = shadow_bounds.width;
-            let height = shadow_bounds.height;
-            if width > MAX_SKIA_IMAGE_DIMENSION as i32 || height > MAX_SKIA_IMAGE_DIMENSION as i32 {
-                return None;
-            }
-            let info = ImageInfo::new(
-                (width, height),
-                skia_safe::ColorType::RGBA8888,
-                skia_safe::AlphaType::Premul,
-                None,
-            );
-            let mut surface = skia_safe::surfaces::raster(&info, None, None)?;
-            let mut paint = skia_paint(shadow.color, true);
-            if shadow.blur_radius > 0.0 {
-                paint.set_mask_filter(MaskFilter::blur(
-                    BlurStyle::Normal,
-                    blur_radius_to_sigma(shadow.blur_radius),
-                    Some(false),
-                ));
-            }
-            let rect = Rect::from_xywh(
-                blur_pad as f32,
-                blur_pad as f32,
-                shadow_rect.width as f32,
-                shadow_rect.height as f32,
-            );
-            surface
-                .canvas()
-                .draw_rrect(rrect_from_corners(rect, shadow_radii), &paint);
-            let image = surface.image_snapshot();
-            cache.insert(
-                key,
-                image.clone(),
-                (width as usize)
-                    .saturating_mul(height as usize)
-                    .saturating_mul(4),
-            );
-            Some(image)
-        });
+        // GPU scenes blur the shape natively. The image cache exists for CPU
+        // raster, where a mask blur per paint would dominate the frame.
+        let image = if crate::prepared_scene::recording_images() {
+            None
+        } else {
+            self.cached_shadow_image(radii, shadow, shadow_rect, shadow_bounds, blur_pad)
+        };
         if let Some(image) = image {
             crate::prepared_scene::retain_image(&image);
             let save_count = canvas.save();
@@ -1742,6 +1759,21 @@ impl SkiaPaintBackend {
             rect.width,
             rect.height,
         );
+        if corners_have_radius(radii) && crate::prepared_scene::recording_images() {
+            // GPU scenes clip the gradient with an anti-aliased rounded rect;
+            // the image cache below exists for CPU damage-clip determinism.
+            let save = canvas.save();
+            let bounds = Rect::from_xywh(
+                rect.x as f32,
+                rect.y as f32,
+                rect.width as f32,
+                rect.height as f32,
+            );
+            canvas.clip_rrect(rrect_from_corners(bounds, radii), None, true);
+            self.draw_linear_gradient_command(canvas, gradient, rect, Corners::zero(), clip);
+            canvas.restore_to_count(save);
+            return;
+        }
         if corners_have_radius(radii)
             && rect.width <= MAX_SKIA_IMAGE_DIMENSION as i32
             && rect.height <= MAX_SKIA_IMAGE_DIMENSION as i32

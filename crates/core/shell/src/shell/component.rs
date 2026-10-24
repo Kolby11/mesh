@@ -776,6 +776,10 @@ pub(super) struct FrontendSurfaceComponent {
     pub(super) visible: bool,
     surface_exiting: bool,
     surface_entering: bool,
+    /// The next style pass starts no transitions from the retained tree: a
+    /// re-shown top-level surface snaps to its resting styles rather than
+    /// animating from the pose it was hidden in.
+    snap_transitions_once: bool,
     /// `_mesh_key`s of in-tree child popovers currently playing their exit
     /// transition. `finalize_tree` appends `mesh-surface-exiting` scoped to
     /// just these subtrees (not the whole tree, unlike `surface_exiting`) so
@@ -1376,6 +1380,7 @@ impl FrontendSurfaceComponent {
             visible: settings_state.layout.visible_on_start,
             surface_exiting: false,
             surface_entering: false,
+            snap_transitions_once: false,
             closing_child_keys: HashSet::new(),
             promoted_window_keys: HashSet::new(),
             entering_child_keys: HashSet::new(),

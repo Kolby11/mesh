@@ -8332,3 +8332,73 @@ almost all glass primitives in CPU raster. That does not represent the GPU live
 path, so treat it only as a harness for the synchronous stages. The launcher
 was not opened live, because no IPC command can open it. Follow-ups are in
 the backlog under "Live glass session".
+
+## 2026-10-24 — glass first open: off-thread file icons, GPU-native glass primitives, single-render show
+
+`7ce4d1ba` + working tree · area: resource broker, Skia backend, surface show,
+idle prewarm, glass launcher. Follows the first-open investigation above.
+
+**Changes.**
+- *File icons and images.* A cache miss no longer decodes, resizes and copies
+  on the frame (`raster_file_variant_on_render_thread`). It queues the worker
+  job and paints nothing; the job's completion repaints the requesting
+  component. A submission the broker rejects (queue or byte budget full)
+  subscribes the consumer to the next settled job, so 150 launcher icons
+  against a 128-job queue still all arrive. Only when no worker can ever run
+  the job is the file rasterized on the frame. Bitmap reductions of 2x and
+  more use `imageops::thumbnail` instead of Lanczos3.
+- *GPU-native glass primitives.* While recording a GPU scene, blurred box
+  shadows draw as a mask-blurred rrect and rounded gradients as the gradient
+  under an anti-aliased rrect clip. The per-size CPU image caches remain for
+  CPU raster, where they keep damage-clip determinism and blur cost bounded.
+- *Show renders once.* Showing a hidden surface restyles its retained tree
+  (`INTERACTION_RESTYLE`) instead of `TREE_REBUILD`. A layer surface that has
+  painted before (shown or prewarmed) sends its configure on the first pass
+  and paints only after the compositor answers. Top-level surfaces no longer
+  paint an entering frame: the follow-up frame already dropped the transition
+  bootstrap and snapped to rest, so the entering frame was rebuilt, painted at
+  an unconfigured size and never presented. A one-shot flag keeps that snap.
+  Promoted popups keep their entering frame; their settle frame restyles
+  instead of rebuilding. Auto-focus is seeded from the retained tree before the
+  style pass, so it no longer raises a second pass.
+- *Idle prewarm.* One second after startup, whenever the loop expects to sleep
+  at least 50 ms, one never-shown hidden layer surface is painted into a canvas
+  that is never presented (CPU canvases only record; replay is skipped). Its
+  first show then takes the retained path, and its icons and thumbnails were
+  queued while idle.
+- *Launcher.* `{#if grid}` builds only the active view and `{#if app.has_file}`
+  only one art node per app.
+
+**Measured.** AMD Ryzen 7 7840HS, release (thin LTO, one codegen unit),
+`taskset -c 2`, desktop compositor running. Baseline is a worktree of
+`7ce4d1ba` with the same test-only harness changes; three interleaved runs
+of each binary.
+
+| Workload | Before | After |
+| --- | --- | --- |
+| glass dock nodes with 150 apps (launcher closed) | 1,877 | 676 |
+| launcher open: dock paint (rounds 1–4) | 2.6–3.7 ms | 1.1–2.4 ms |
+| launcher open p50, `glass_first_open_profile` | 63.9–68.0 ms | 50.0–69.8 ms |
+| picker open to first resting frame, p50 | 80.0–86.5 ms | 75.2–91.0 ms |
+| picker open stages: tree_build / style / layout | 1.47 / 0.20 / 0.063 ms | 0 / 0.002 / 0.012 ms |
+| re-show through the shell (testing backend): configures / rebuilds / renders / paints | 1 / 2 / 2 / 3 | 1 / 0 / 1 / 1 |
+| `d9_glass_dashboard_open` p90, 5 interleaved runs | 57.3–83.0 ms | 63.9–88.0 ms |
+| bitmap thumbnail, 2560×1440 PNG and 3840×2160 JPEG → 264×165 | Lanczos3 41.7–89.5 ms | `thumbnail` 5.5–12.0 ms |
+
+The thumbnail diff is a mean of 0.81–1.42/255 per channel. Open totals in the
+offline harness are dominated by CPU glass raster (launcher popup paint
+36–81 ms) and overlap. That harness rasterizes icons synchronously (`cfg(test)`)
+and never records a GPU scene, so it cannot show the first two changes; the
+investigation attributed 7 + 8 + 8 of 34 first-open UI-thread samples to them.
+The re-show row is from `reshown_glass_surface_reuses_its_tree_and_paints_once`
+(before: the same probe on the old path). D9 differences are within the CPU
+raster code-placement noise noted earlier this month. Budgets and
+`config/performance-baseline.tsv` are unchanged.
+
+**Validation.** Full default-feature debug shell suite, serial with
+`MESH_VERIFY_RETAINED=1`: 997 passed / 35 ignored. Renderer: 337 passed; the
+two `prepared_scene` cache tests that fail under parallel execution fail
+identically at `7ce4d1ba` and pass alone. New:
+`prewarmed_glass_surface_first_show_paints_once`,
+`rejected_requests_repaint_after_the_next_settled_job`. Not checked in a live
+shell; that measurement is the remaining backlog item.

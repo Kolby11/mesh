@@ -164,6 +164,11 @@ pub(super) struct ComponentRuntime {
     /// or explicit activation replacement succeeds.
     pub(super) failure_count: u32,
     pub(super) quarantined: bool,
+    /// Whether an idle prewarm has already painted this hidden surface.
+    pub(super) prewarmed: bool,
+    /// Whether the parent surface has painted at least once, shown or
+    /// prewarmed, so its content measurement comes from a retained tree.
+    pub(super) painted: bool,
 }
 
 #[derive(Debug)]
@@ -293,6 +298,8 @@ impl ComponentRuntime {
             mounted: false,
             failure_count: 0,
             quarantined: false,
+            prewarmed: false,
+            painted: false,
         }
     }
 

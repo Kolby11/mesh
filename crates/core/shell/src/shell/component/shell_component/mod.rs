@@ -351,16 +351,14 @@ impl ShellComponent for FrontendSurfaceComponent {
                     self.last_tap = None;
                 } else if !was_visible {
                     self.surface_exiting = false;
+                    // Hiding replaces the paint buffer with a 1x1 placeholder
+                    // and clears `known_surface_size` (see runtime/render), so
+                    // the first shown frame repaints every pixel. The retained
+                    // tree stays valid while hidden: script and service changes
+                    // keep accumulating their own invalidation, so showing only
+                    // restyles away the exit pose and lays out at the new size.
                     self.surface_pixels_invalid = true;
-                    // Hiding shrinks the paint buffer to 1x1 and clears
-                    // `known_surface_size` (see runtime/render.rs). A style-only
-                    // repaint would reuse that stale 1x1 tree/buffer, so a
-                    // surface re-shown without any intervening script change
-                    // (e.g. a static language/theme popover with no service
-                    // polling to dirty it) would present nothing on its first
-                    // frame. Force a full tree rebuild + pixel repaint so the
-                    // first shown frame is painted at the real surface size.
-                    self.invalidate(ComponentDirtyFlags::TREE_REBUILD);
+                    self.invalidate(ComponentDirtyFlags::INTERACTION_RESTYLE);
                     if self.surface_layout.keyboard_mode != KeyboardMode::None {
                         self.pending_auto_focus = true;
                     }
@@ -1014,6 +1012,24 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.run_pending_effects();
         self.wake_due_animation_hold(std::time::Instant::now());
         let animation_only_frame = std::mem::take(&mut self.animation_only_dirty);
+        if self.surface_entering && !self.popup_promoted {
+            // A top-level surface reopens straight into its resting styles.
+            // Animating from an entering pose would let global width/height
+            // transitions squash the first settled frame of drawers like the
+            // debug inspector, so it has no entering frame to paint.
+            self.surface_entering = false;
+            self.snap_transitions_once = true;
+        }
+        let snap_transitions = std::mem::take(&mut self.snap_transitions_once);
+        // Seeding focus from the retained tree lets this paint's restyle
+        // include it, rather than raising a second pass after the build.
+        if self.pending_auto_focus
+            && self.focused_key.is_none()
+            && let Some(tree) = self.last_tree.clone()
+            && next_focus_target(&tree, None, false).is_some()
+        {
+            self.apply_pending_auto_focus(&tree);
+        }
         let (requires_tree_rebuild, can_use_retained_path, dirty_types, _) =
             self.take_dirty_for_paint();
         self.record_component_frame_dirty(dirty_types);
@@ -1056,11 +1072,13 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .difference(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS)
                 .is_empty();
         let run_style_animation_pass = self.should_run_style_animation_pass(styles_unchanged);
-        let previous_animation_snapshot = (run_style_animation_pass && use_retained_style_path)
-            .then(|| self.last_frame_snapshot.clone())
-            .flatten();
+        let previous_animation_snapshot =
+            (run_style_animation_pass && use_retained_style_path && !snap_transitions)
+                .then(|| self.last_frame_snapshot.clone())
+                .flatten();
         let previous_visual_styles = if previous_animation_snapshot.is_none()
             && run_style_animation_pass
+            && !snap_transitions
             && self.last_tree.is_some()
         {
             self.take_previous_visual_styles()
@@ -1645,22 +1663,10 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.invalidate_script_state_narrow();
         }
         if self.surface_entering {
+            // A promoted popup's second frame transitions from the entering
+            // pose into place, restyling the marker away.
             self.surface_entering = false;
-            // A top-level layer surface reopens with one controlled entering
-            // frame, then immediately repaints without the marker. Reusing
-            // that transient tree as the "previous visual style" bootstrap
-            // source lets global width/height transitions animate from the
-            // entering frame's temporary geometry, which visibly squashes the
-            // first settled frame of drawers like the debug inspector. Drop
-            // the snapshot for the follow-up repaint so it snaps straight to
-            // the resting layout. Promoted popups keep the snapshot because
-            // their second frame intentionally transitions from the entering
-            // pose into place.
-            if !self.popup_promoted {
-                self.last_tree = None;
-                self.last_frame_snapshot = None;
-            }
-            self.invalidate_script_state();
+            self.invalidate_interaction_restyle();
         }
 
         Ok(())

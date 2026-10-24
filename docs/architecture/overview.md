@@ -108,8 +108,19 @@ extents, and refresh from the finalized dirty set. Identity/element validation
 runs on structural changes; semantic reindexing reuses validated structure.
 Asynchronous icon, glyph and image jobs track their requesting component instances,
 including promoted child targets, and repaint only those consumers on completion.
+A file icon or image whose pixels are not ready paints nothing until its job
+publishes; it is rasterized on the frame only when no worker can run it. GPU
+scenes draw box shadows and rounded gradients natively; the cached CPU images
+behind them serve CPU raster only.
 An icon lookup whose job also finds nothing is remembered for the resource
 revision and repaints nothing.
+Showing a hidden surface restyles its retained tree rather than rebuilding it.
+A re-shown layer surface whose content is already measured sends its configure
+at once and paints a single frame after the compositor answers; top-level
+surfaces open straight into their resting styles, while promoted popups play
+their entering frame. Once startup is idle, each never-shown hidden layer
+surface is painted once into an unpresented canvas so its first show takes the
+same path and its resources are already prepared.
 The event loop includes input-repeat, temporary focus-grab and pending-frame
 escape deadlines alongside component ticks and reload maintenance.
 

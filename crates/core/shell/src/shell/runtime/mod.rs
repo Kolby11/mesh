@@ -36,6 +36,10 @@ pub(in crate::shell) struct PendingProfileWrite {
 const MAX_SHELL_MESSAGE_DRAIN_PER_FRAME: usize = 256;
 const DEV_WINDOW_POLL_SLEEP: Duration = Duration::from_millis(16);
 const NO_PROGRESS_RENDER_RETRY: Duration = Duration::from_millis(16);
+/// Hidden surfaces are prewarmed only once startup has settled, and only when
+/// the loop expects to sleep at least this long.
+const SURFACE_PREWARM_DELAY: Duration = Duration::from_secs(1);
+const SURFACE_PREWARM_IDLE: Duration = Duration::from_millis(50);
 
 impl Shell {
     /// Contain one component's failure at the shell boundary. Component
@@ -525,6 +529,7 @@ impl Shell {
                 self.components.len()
             );
 
+            let prewarm_after = std::time::Instant::now() + SURFACE_PREWARM_DELAY;
             while !self.core.shutting_down {
                 let loop_started = std::time::Instant::now();
                 if loop_started >= self.next_watch_reconcile {
@@ -566,7 +571,15 @@ impl Shell {
                     .map_err(ShellRunError::Presentation)?;
                 self.flush_wayland()?;
 
-                let deadline = self.next_runtime_sleep(shell_message_backlog_likely);
+                let mut deadline = self.next_runtime_sleep(shell_message_backlog_likely);
+                // One hidden surface per idle turn, so input arriving meanwhile
+                // waits for at most one paint.
+                if deadline >= SURFACE_PREWARM_IDLE
+                    && loop_started >= prewarm_after
+                    && self.prewarm_hidden_surface()?
+                {
+                    deadline = deadline.min(SURFACE_PREWARM_IDLE);
+                }
                 #[cfg(test)]
                 let deadline = self.clamp_to_replay_wake(deadline);
                 if self.presentation_engine.supports_blocking_dispatch() {

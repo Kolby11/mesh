@@ -646,7 +646,18 @@ fn icon_reliability_core_surfaces_proof() {
         width: 12.0,
         height: 10.0,
     };
+    // A file icon paints nothing until the resource worker publishes it.
     let mut raster_buffer = mesh_core_render::PixelBuffer::new(20, 20);
+    mesh_core_render::paint_frontend_tree(&raster_node, &mut raster_buffer, 1.0, None);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while mesh_core_render::icon_raster_jobs_pending() {
+        mesh_core_render::poll_icon_raster_jobs();
+        assert!(
+            std::time::Instant::now() < deadline,
+            "icon raster job never settled"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
     mesh_core_render::paint_frontend_tree(&raster_node, &mut raster_buffer, 1.0, None);
     assert!(raster_buffer.data().chunks_exact(4).any(|px| px[3] > 0));
 
