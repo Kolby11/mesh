@@ -50,6 +50,39 @@ pub fn scope_contains(scope: &WidgetNode, key: &str) -> bool {
     find_node_by_key(scope, key).is_some()
 }
 
+/// Where focus starts when `scope` opens, in its Tab order: the first element
+/// marked `autofocus`, else the first editable text field, else the first
+/// stop. `autofocus="false"` on the scope itself opts out and yields `None`.
+pub fn initial_focus_target(tree: &WidgetNode, scope: &WidgetNode) -> Option<String> {
+    if scope
+        .attributes
+        .get(Prop::Autofocus)
+        .is_some_and(|value| value == "false")
+    {
+        return None;
+    }
+    // Order within the scope alone: a promoted popover's content lies
+    // outside its parent surface's clip, so the whole tree's order omits it.
+    let traversal = collect_focus_traversal(scope);
+    let marked = |key: &&String| {
+        find_node_by_key(scope, key).is_some_and(|node| {
+            node.attributes
+                .get(Prop::Autofocus)
+                .is_some_and(|value| value != "false")
+        })
+    };
+    traversal
+        .iter()
+        .find(marked)
+        .or_else(|| {
+            traversal
+                .iter()
+                .find(|key| crate::hit_test::is_editable_input_key(tree, key))
+        })
+        .or_else(|| traversal.first())
+        .cloned()
+}
+
 /// Preserve the tree's transformed visual order while restricting it to a scope.
 pub fn scope_focus_traversal(tree: &WidgetNode, scope: &WidgetNode) -> Vec<String> {
     collect_focus_traversal(tree)

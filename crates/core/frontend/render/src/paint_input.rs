@@ -94,6 +94,11 @@ fn hash_material(style: &ComputedStyle) -> u64 {
             hash_box_shadow(*shadow, &mut hasher);
         }
     }
+    if !style.outline.is_none() {
+        style.outline.width.to_bits().hash(&mut hasher);
+        style.outline.offset.to_bits().hash(&mut hasher);
+        hash_color(style.outline.color, &mut hasher);
+    }
     style.filter.blur_radius.to_bits().hash(&mut hasher);
     let backdrop = style.backdrop_filter;
     backdrop.blur_radius.to_bits().hash(&mut hasher);

@@ -72,6 +72,7 @@ pub use pseudo_state::{
 };
 pub use style::{
     AlignContent, AlignItems, AlignSelf, BlendMode, BoxShadow, Color, ComputedStyle, CornerShape,
+    Outline,
     CornerShapes, Corners, Dimension, Display, Edges, FlexDirection, FlexWrap, FontStyle,
     JustifyContent, Overflow, Position, StepPosition, StyleContext, StyleResolver, StyleRuleIndex,
     TextAlign, TextDirection, TextOverflow, Transform2D, TransitionEasing, TransitionProperties,

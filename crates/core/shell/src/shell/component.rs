@@ -846,10 +846,11 @@ pub(super) struct FrontendSurfaceComponent {
     /// element. Lets a popover work with keyboard immediately after opening
     /// without the user needing to click inside it first.
     pending_auto_focus: bool,
-    /// Keyboard activation of an `aria-haspopup` button may reveal an embedded
-    /// `<popover>` inside this same component. On the following paint, focus
-    /// the first control in that promoted subtree.
-    pending_embedded_popover_focus: bool,
+    /// An embedded `<popover>` opened by a press or a key, or revealed by an
+    /// `aria-haspopup` button. On the following paint, focus moves to its
+    /// initial target; the flag says whether that focus shows its ring,
+    /// which it does only when the keyboard opened it.
+    pending_embedded_popover_focus: Option<bool>,
     /// Trigger key to restore after Escape closes an embedded popover.
     embedded_popover_return_focus: Option<String>,
     /// Set by Escape and consumed after the close state reaches the next tree.
@@ -1418,7 +1419,7 @@ impl FrontendSurfaceComponent {
             keyboard_button_press_activations: HashSet::new(),
             pending_auto_focus: settings_state.layout.visible_on_start
                 && settings_state.layout.keyboard_mode != KeyboardMode::None,
-            pending_embedded_popover_focus: false,
+            pending_embedded_popover_focus: None,
             embedded_popover_return_focus: None,
             pending_embedded_popover_focus_restore: false,
             disclosures: DisclosureRegistry::default(),

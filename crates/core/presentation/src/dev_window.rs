@@ -14,6 +14,10 @@ pub enum DevWindowEvent {
     PointerLeave {
         surface_id: Arc<str>,
     },
+    /// The compositor gave this surface keyboard focus (`wl_keyboard.enter`).
+    KeyboardEnter {
+        surface_id: Arc<str>,
+    },
     PointerButton {
         surface_id: Arc<str>,
         x: f32,

@@ -446,7 +446,7 @@ impl FrontendSurfaceComponent {
             .get(Prop::AriaHaspopup)
             .is_some_and(|value| value == "true" || value == "menu")
         {
-            self.pending_embedded_popover_focus = true;
+            self.pending_embedded_popover_focus = Some(true);
         }
         self.call_resolved_node_handler(target.node, "click", &[event])
     }

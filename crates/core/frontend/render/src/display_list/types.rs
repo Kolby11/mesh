@@ -6,7 +6,7 @@ use mesh_core_elements::style::{
     BackgroundPaint, BlendMode, Color, CornerShapes, Corners, Edges, FontStyle, Overflow,
     TextAlign, TextDirection, TextOverflow, WhiteSpace,
 };
-use mesh_core_elements::{AffineClip, AffineTransform, BoxShadow, VisualFilter};
+use mesh_core_elements::{AffineClip, AffineTransform, BoxShadow, Outline, VisualFilter};
 use mesh_core_elements::{LayoutRect, NodeId};
 
 use crate::fractional_scale::{DeviceRect, FractionalScale};
@@ -633,6 +633,7 @@ pub struct DisplayPaintStyle {
     pub opacity: f32,
     pub box_shadow: BoxShadow,
     pub additional_box_shadows: Vec<BoxShadow>,
+    pub outline: Outline,
     pub filter: VisualFilter,
     pub backdrop_filter: VisualFilter,
     pub mix_blend_mode: BlendMode,

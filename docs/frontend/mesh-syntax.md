@@ -692,6 +692,8 @@ keeps native scrolling and other gesture events are ignored.
 - `Tab` and `Shift+Tab` move through the final rendered visual order by default.
 - `tabindex` is supported as an override path for keyboard traversal.
 - `tabindex="0"` keeps an element in normal traversal, positive values sort before visual-order defaults, and `tabindex="-1"` keeps the element pointer/script focusable but removes it from normal `Tab` traversal.
+- `autofocus` marks where focus starts when the enclosing surface, dialog, sheet or popover opens. Without it, focus starts at the first editable text field, else the first `Tab` stop; `autofocus="false"` on a dialog, sheet or popover keeps focus where it was ([10 §3](../spec/10-keyboard.md#3-surface-keyboard-policy-keyboard_mode)).
+- Keyboard focus is visible by default: the platform draws a `:focus-visible` outline beneath all styles. Restyle it with `outline`, or remove it with `outline: none` ([04](../spec/04-styling.md)).
 - `onkeydown` and `onkeyup` fire only for the currently focused element. They are not surface-global handlers.
 - Focused-surface shortcuts are configured separately through surface settings and only run while that surface owns keyboard focus.
 

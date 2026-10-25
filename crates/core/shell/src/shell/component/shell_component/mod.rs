@@ -350,7 +350,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                     self.focused_id = None;
                     self.focus_visible_id = None;
                     self.pending_auto_focus = false;
-                    self.pending_embedded_popover_focus = false;
+                    self.pending_embedded_popover_focus = None;
                     self.embedded_popover_return_focus = None;
                     self.pending_embedded_popover_focus_restore = false;
                     self.return_focus = None;

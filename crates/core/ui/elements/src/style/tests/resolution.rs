@@ -931,6 +931,52 @@ fn focus_visible_requires_focus_visible_state() {
 }
 
 #[test]
+fn focus_visible_draws_the_platform_outline_unless_a_rule_removes_it() {
+    use mesh_core_component::style::{Declaration, Selector};
+
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let ring = resolver.resolve_node_style(
+        &[],
+        "button",
+        &[],
+        None,
+        StyleContext::default(),
+        NodeState::FOCUSED | NodeState::FOCUS_VISIBLE,
+    );
+    assert_eq!(ring.outline.width, 2.0);
+    assert_eq!(ring.outline.offset, 2.0);
+    assert!(!ring.outline.is_none(), "{:?}", ring.outline);
+
+    let pointer_focus = resolver.resolve_node_style(
+        &[],
+        "button",
+        &[],
+        None,
+        StyleContext::default(),
+        NodeState::FOCUSED,
+    );
+    assert!(pointer_focus.outline.is_none());
+
+    let opted_out = resolver.resolve_node_style(
+        &[StyleRule {
+            selector: Selector::State("button".to_string(), "focus-visible".to_string()),
+            declarations: vec![Declaration {
+                property: "outline".to_string(),
+                value: StyleValue::Literal("none".to_string()),
+            }],
+            container_query: None,
+        }],
+        "button",
+        &[],
+        None,
+        StyleContext::default(),
+        NodeState::FOCUSED | NodeState::FOCUS_VISIBLE,
+    );
+    assert!(opted_out.outline.is_none());
+}
+
+#[test]
 fn a_later_rules_custom_property_applies_to_the_same_nodes_var() {
     let theme = mesh_core_theme::default_theme();
     let resolver = StyleResolver::new(&theme);

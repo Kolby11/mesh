@@ -407,9 +407,6 @@ impl FrontendSurfaceComponent {
         } else {
             return Ok(None);
         };
-        if next {
-            self.pending_embedded_popover_focus = true;
-        }
         self.set_disclosure_open(tree, &popover_key, next, DisclosureReason::Keyboard)
             .map(Some)
     }
@@ -550,6 +547,15 @@ impl FrontendSurfaceComponent {
             if open {
                 let trigger_key = disclosure.trigger_key.clone();
                 self.hide_trigger_tooltip(&trigger_key);
+            }
+        }
+        // A popover the user opens takes focus however they opened it; one
+        // that hover reveals leaves focus where it is.
+        if open {
+            match reason {
+                DisclosureReason::Trigger => self.pending_embedded_popover_focus = Some(false),
+                DisclosureReason::Keyboard => self.pending_embedded_popover_focus = Some(true),
+                _ => {}
             }
         }
         self.sync_expanded_triggers();

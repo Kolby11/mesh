@@ -12,8 +12,8 @@ mod scroll;
 mod transaction;
 
 pub use scope::{
-    active_modal_scope, menu_for_key, menu_items, menu_label, nested_menu, open_focus_scopes,
-    parent_menu_trigger, scope_contains, scope_focus_traversal,
+    active_modal_scope, initial_focus_target, menu_for_key, menu_items, menu_label, nested_menu,
+    open_focus_scopes, parent_menu_trigger, scope_contains, scope_focus_traversal,
 };
 
 pub use focus::{collect_focus_traversal, find_focusable_at, next_focus_target};

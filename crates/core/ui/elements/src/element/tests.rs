@@ -629,3 +629,12 @@ fn element_diagnostic_unsupported_event_reports_author_action() {
 fn element_diagnostic_known_common_attribute_does_not_report_diagnostic() {
     assert!(validate_element_attribute("button", "disabled", "true").is_none());
 }
+
+#[test]
+fn focus_attributes_are_accepted_on_every_element() {
+    for tag in ["button", "input", "box", "dialog"] {
+        for name in ["tabindex", "autofocus"] {
+            assert_eq!(validate_element_attribute(tag, name, "0"), None, "{name} on <{tag}>");
+        }
+    }
+}

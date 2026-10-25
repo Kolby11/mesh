@@ -91,6 +91,7 @@ impl WaylandSurfaceBackend {
             pinch_seats: HashMap::new(),
             hold_seats: HashMap::new(),
             focus_grab_seats: HashMap::new(),
+            pending_keyboard_focus: std::collections::HashSet::new(),
             events: Vec::new(),
             xdg_shell,
             lifecycle_events: Vec::new(),
@@ -141,6 +142,14 @@ impl WaylandSurfaceBackend {
                 tracing::debug!("layer_shell: failed to update cursor icon: {error}");
             }
         }
+    }
+
+    /// Ask the compositor to focus `surface_id` now or as soon as it exists.
+    /// Exclusive surfaces are focused by the compositor as they map, and an
+    /// `on_demand` one is focused through the same temporary focus grab a
+    /// pointer press uses; `none` surfaces never take the keyboard.
+    pub fn request_keyboard_focus(&mut self, surface_id: &str) {
+        self.state.request_keyboard_focus(surface_id);
     }
 
     /// Publish the shell's current editable-text state to every seat's

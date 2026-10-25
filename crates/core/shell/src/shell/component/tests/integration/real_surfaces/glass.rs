@@ -372,6 +372,41 @@ fn liquid_glass_calendar_and_controls_are_promoted_local_popovers() {
     }
 }
 
+/// Opening the launcher with the pointer puts focus in its search field, so
+/// typing searches at once; the ring stays hidden until a key is pressed.
+#[test]
+fn pointer_opened_launcher_focuses_its_search_field() {
+    let mut component = host("glass-dock");
+    paint(&mut component, 1920, 180);
+    let tree = component.last_tree.as_ref().unwrap();
+    let launcher = first_node_with_ref(tree, "glassLauncher").unwrap().layout;
+    let (x, y) = (
+        launcher.x + launcher.width / 2.0,
+        launcher.y + launcher.height / 2.0,
+    );
+    for pressed in [true, false] {
+        component
+            .handle_input(
+                &theme(),
+                1920,
+                180,
+                ComponentInput::PointerButton {
+                    x,
+                    y,
+                    button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+                    pressed,
+                },
+            )
+            .unwrap();
+        paint(&mut component, 1920, 180);
+    }
+    paint(&mut component, 1920, 180);
+    let tree = component.last_tree.as_ref().unwrap();
+    let search = first_node_by_class(tree, "search").unwrap();
+    assert_eq!(component.focused_key.as_deref(), search.mesh_key());
+    assert_eq!(component.focus_visible_key, None);
+}
+
 #[test]
 fn liquid_glass_launcher_keeps_results_viewport_with_many_apps() {
     let mut component = host("glass-dock");
@@ -1971,10 +2006,10 @@ impl ShownSurfaceHarness {
     }
 }
 
-/// Clicking the bar claims the keyboard for it. Showing an exclusive surface
-/// from that click must move the shell's key routing along with the
-/// compositor's focus, and a press outside the exclusive surface (which the
-/// compositor still delivers to it) dismisses it.
+/// Clicking the bar claims the keyboard for it. When the compositor then
+/// focuses an exclusive surface as it maps, key routing follows, and a press
+/// outside the exclusive surface (which the compositor still delivers to it)
+/// dismisses it.
 #[test]
 fn exclusive_surface_takes_key_routing_and_dismisses_on_outside_press() {
     let catalog = GlassCatalog::new();
@@ -2007,6 +2042,12 @@ fn exclusive_surface_takes_key_routing_and_dismisses_on_outside_press() {
         })
         .unwrap();
     shell.drain_requests(&mut emitted).unwrap();
+    shell
+        .pending_wayland_events
+        .push_back(mesh_core_presentation::WindowEvent::KeyboardEnter {
+            surface_id: carousel_id.as_str().into(),
+        });
+    shell.dispatch_wayland().unwrap();
     assert_eq!(
         shell.keyboard_focus_surface.as_deref(),
         Some(carousel_id.as_str())
@@ -2103,6 +2144,62 @@ fn key_release_after_opening_exclusive_surface_stays_with_the_opener() {
     assert!(
         state.visible && state.closing_until.is_none(),
         "the opening key's release must not close the dashboard"
+    );
+    assert_eq!(
+        shell.presentation_engine.testing_keyboard_focus_requests(),
+        [dashboard_id.clone()],
+        "a surface the user opens asks the compositor for the keyboard"
+    );
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::HideSurface {
+            surface_id: dashboard_id.clone(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    assert_eq!(shell.keyboard_focus_surface.as_deref(), Some(bar_id.as_str()));
+    assert_eq!(
+        shell.presentation_engine.testing_keyboard_focus_requests(),
+        [dashboard_id.clone(), bar_id.clone()],
+        "hiding it hands the keyboard back to the surface that opened it"
+    );
+}
+
+/// A surface shown without a user gesture, such as a notification a service
+/// raises, leaves the keyboard where it is.
+#[test]
+fn surface_shown_without_user_gesture_leaves_the_keyboard() {
+    let catalog = GlassCatalog::new();
+    let bar = catalog.mount("glass-bar");
+    let dashboard = catalog.mount("glass-dashboard");
+    let bar_id = bar.surface_id().to_owned();
+    let dashboard_id = dashboard.surface_id().to_owned();
+    let mut shell = crate::shell::Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(bar));
+    shell.register_component(Box::new(dashboard));
+    let mut emitted = shell
+        .apply_request(CoreRequest::HideSurface {
+            surface_id: dashboard_id.clone(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+    shell.claim_keyboard_focus_for_surface(&bar_id);
+
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: dashboard_id.clone(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    assert_eq!(shell.keyboard_focus_surface.as_deref(), Some(bar_id.as_str()));
+    assert!(
+        shell
+            .presentation_engine
+            .testing_keyboard_focus_requests()
+            .is_empty()
     );
 }
 

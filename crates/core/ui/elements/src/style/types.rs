@@ -592,6 +592,31 @@ const STYLE_PROFILE_PROPERTIES: &[StyleProfileProperty] = &[
         status: StyleProfileStatus::Implemented,
     },
     StyleProfileProperty {
+        property: "outline",
+        category: "outline",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "outline-width",
+        category: "outline",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "outline-color",
+        category: "outline",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "outline-offset",
+        category: "outline",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "outline-style",
+        category: "outline",
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
         property: "filter",
         category: "filter",
         status: StyleProfileStatus::Implemented,
@@ -860,6 +885,7 @@ pub struct ComputedStyle {
     pub box_shadow: BoxShadow,
     /// Shadows after the first, in CSS front-to-back order.
     pub additional_box_shadows: Vec<BoxShadow>,
+    pub outline: Outline,
     pub filter: VisualFilter,
     pub backdrop_filter: VisualFilter,
     pub mix_blend_mode: BlendMode,
@@ -948,6 +974,7 @@ impl ComputedStyle {
         probe.transform_origin = self.transform_origin;
         probe.box_shadow = self.box_shadow;
         probe.additional_box_shadows = self.additional_box_shadows.clone();
+        probe.outline = self.outline;
         probe.filter = self.filter.clone();
         probe.backdrop_filter = self.backdrop_filter.clone();
         probe.mix_blend_mode = self.mix_blend_mode;
@@ -990,6 +1017,7 @@ impl Default for ComputedStyle {
             transform_origin: TransformOrigin::default(),
             box_shadow: BoxShadow::NONE,
             additional_box_shadows: Vec::new(),
+            outline: Outline::NONE,
             filter: VisualFilter::NONE,
             backdrop_filter: VisualFilter::NONE,
             mix_blend_mode: BlendMode::Normal,
@@ -1662,6 +1690,42 @@ impl BoxShadow {
 }
 
 impl Default for BoxShadow {
+    fn default() -> Self {
+        Self::NONE
+    }
+}
+
+/// CSS `outline`: a solid ring `offset` outside the border box. It never
+/// affects layout and follows the border radius, grown by the offset.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Outline {
+    pub width: f32,
+    pub offset: f32,
+    pub color: Color,
+}
+
+impl Outline {
+    pub const NONE: Self = Self {
+        width: 0.0,
+        offset: 0.0,
+        color: Color::TRANSPARENT,
+    };
+
+    pub fn is_none(self) -> bool {
+        self.width <= 0.0 || self.color.a == 0
+    }
+
+    /// How far the ring reaches outside the border box.
+    pub fn extent(self) -> f32 {
+        if self.is_none() {
+            0.0
+        } else {
+            (self.offset + self.width).max(0.0)
+        }
+    }
+}
+
+impl Default for Outline {
     fn default() -> Self {
         Self::NONE
     }

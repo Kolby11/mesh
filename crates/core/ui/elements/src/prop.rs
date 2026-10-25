@@ -118,6 +118,7 @@ props! {
     AriaValuemax = "aria-valuemax": Number, A11Y;
     AriaValuemin = "aria-valuemin": Number, A11Y;
     AriaValuenow = "aria-valuenow": Number, STYLE | A11Y;
+    Autofocus = "autofocus": Bool, HIT;
     Busy = "busy": Bool, STYLE | A11Y;
     Checked = "checked": Bool, STYLE | PAINT | A11Y;
     Class = "class": Text, STYLE;

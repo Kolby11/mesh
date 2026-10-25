@@ -2160,6 +2160,8 @@ impl Shell {
             active_key_modifiers: KeyModifiers::default(),
             keyboard_focus_surface: None,
             held_key_surfaces: HashMap::new(),
+            user_activation: None,
+            surface_openers: HashMap::new(),
             pending_wayland_events: VecDeque::new(),
             pending_popup_grab: None,
             transfer_owned_keyboard_modes: HashMap::new(),

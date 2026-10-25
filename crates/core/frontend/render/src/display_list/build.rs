@@ -1039,6 +1039,7 @@ fn node_visual_bounds_at_with_transform(
                 },
                 style.box_shadow,
                 &style.additional_box_shadows,
+                style.outline.extent(),
                 style.filter.blur_radius,
                 style.backdrop_filter.blur_radius,
             );
@@ -1095,6 +1096,7 @@ pub(super) fn visual_clip_for(node: &DisplayPaintNode) -> DisplayListClip {
         node.local_layout,
         node.style.box_shadow,
         &node.style.additional_box_shadows,
+        node.style.outline.extent(),
         node.style.filter.blur_radius,
         node.style.backdrop_filter.blur_radius,
     )
@@ -1105,6 +1107,7 @@ fn visual_clip_from_parts(
     local_layout: LayoutRect,
     shadow: BoxShadow,
     additional_shadows: &[BoxShadow],
+    outline_extent: f32,
     filter_blur_radius: f32,
     backdrop_blur_radius: f32,
 ) -> DisplayListClip {
@@ -1113,6 +1116,7 @@ fn visual_clip_from_parts(
         local_layout,
         shadow,
         additional_shadows,
+        outline_extent,
         filter_blur_radius,
         backdrop_blur_radius,
     ))
@@ -1123,10 +1127,20 @@ pub(super) fn visual_layout_from_parts(
     local_layout: LayoutRect,
     shadow: BoxShadow,
     additional_shadows: &[BoxShadow],
+    outline_extent: f32,
     filter_blur_radius: f32,
     backdrop_blur_radius: f32,
 ) -> LayoutRect {
     let mut layout = transform.transform_rect(local_layout);
+    if outline_extent > 0.0 {
+        let outline_layout = transform.transform_rect(LayoutRect {
+            x: -outline_extent,
+            y: -outline_extent,
+            width: local_layout.width + outline_extent * 2.0,
+            height: local_layout.height + outline_extent * 2.0,
+        });
+        layout = union_layout_rect(layout, outline_layout);
+    }
     for shadow in std::iter::once(&shadow).chain(additional_shadows) {
         if !shadow.is_none() && !shadow.inset {
             let pad = shadow.spread_radius + shadow.blur_radius * 3.0;

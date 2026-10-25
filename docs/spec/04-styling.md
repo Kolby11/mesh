@@ -712,6 +712,21 @@ All stops and shadows participate in retained paint signatures; all outer shadow
 extents participate in damage bounds. Rounded gradients preserve exact pixels
 between full and partial repainting.
 
+`outline` draws a solid ring `outline-offset` outside the border box, following
+the border radius grown by that offset. It never affects layout, and its extent
+participates in damage bounds like an outer shadow. The shorthand takes a width,
+a style and a color in any order (width defaults to 3px, color to `color`);
+`outline-width`, `outline-color`, `outline-offset` and `outline-style` set one
+part. `none` and `hidden` remove it; every other style draws solid. Outlines are
+not animated.
+
+**Platform focus ring.** Beneath every theme pack, module stylesheet and user
+stylesheet, the core applies
+`:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 2px; }`,
+so keyboard focus is visible on every element without styling. Later rules win
+as usual; `outline: none` in a `:focus-visible` rule removes the ring for a
+control that draws its own indicator.
+
 ## 12.1 Corner shapes (`corner-shape`)
 
 **Status: shipped (subset).** `corner-shape` selects the curve drawn for each

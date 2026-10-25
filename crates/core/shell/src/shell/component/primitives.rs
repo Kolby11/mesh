@@ -1,8 +1,8 @@
 use super::*;
 use mesh_core_elements::Prop;
 use mesh_core_interaction::{
-    active_modal_scope, menu_for_key, menu_items, menu_label, nested_menu, open_focus_scopes,
-    parent_menu_trigger, scope_contains, scope_focus_traversal,
+    active_modal_scope, initial_focus_target, menu_for_key, menu_items, menu_label, nested_menu,
+    open_focus_scopes, parent_menu_trigger, scope_contains,
 };
 
 #[derive(Debug, Default)]
@@ -46,11 +46,8 @@ impl FrontendSurfaceComponent {
                 .map(|(_, key)| key.clone())
                 .unwrap_or_else(|| self.focused_key.clone());
             self.primitives.scopes.push((key.to_owned(), return_key));
-            if saved.is_none() {
-                let target = scope_focus_traversal(tree, scope)
-                    .into_iter()
-                    .next()
-                    .or_else(|| Some(key.to_owned()));
+            if saved.is_none() && scope_allows_initial_focus(scope) {
+                let target = initial_focus_target(tree, scope).or_else(|| Some(key.to_owned()));
                 self.apply_primitive_focus(target);
             }
         }
@@ -66,9 +63,7 @@ impl FrontendSurfaceComponent {
                 .as_deref()
                 .is_some_and(|key| scope_contains(scope, key))
         {
-            let target = scope_focus_traversal(tree, scope)
-                .into_iter()
-                .next()
+            let target = initial_focus_target(tree, scope)
                 .or_else(|| scope.mesh_key().map(str::to_owned));
             self.apply_primitive_focus(target);
         }
@@ -351,4 +346,12 @@ impl FrontendSurfaceComponent {
         self.invalidate_interaction_restyle();
         Ok(Some(requests))
     }
+}
+
+/// `autofocus="false"` on a scope keeps focus where it was when it opens.
+fn scope_allows_initial_focus(scope: &WidgetNode) -> bool {
+    scope
+        .attributes
+        .get(mesh_core_elements::Prop::Autofocus)
+        .is_none_or(|value| value != "false")
 }

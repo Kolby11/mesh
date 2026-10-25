@@ -239,6 +239,9 @@ pub(super) fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher)
         hash_color(shadow.color, hasher);
         shadow.inset.hash(hasher);
     }
+    style.outline.width.to_bits().hash(hasher);
+    style.outline.offset.to_bits().hash(hasher);
+    hash_color(style.outline.color, hasher);
     style.filter.blur_radius.to_bits().hash(hasher);
     style.backdrop_filter.blur_radius.to_bits().hash(hasher);
     style.backdrop_filter.refract.hash(hasher);

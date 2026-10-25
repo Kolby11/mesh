@@ -235,6 +235,7 @@ mod tests {
             opacity: 1.0,
             box_shadow: BoxShadow::NONE,
             additional_box_shadows: Vec::new(),
+            outline: mesh_core_elements::Outline::NONE,
             filter: VisualFilter::NONE,
             backdrop_filter: VisualFilter::NONE,
             mix_blend_mode: BlendMode::Normal,

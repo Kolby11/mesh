@@ -46,6 +46,24 @@ pub(in crate::shell) struct EffectSource {
 
 const CORE_EFFECT_MODULE: &str = "@mesh/shell";
 
+/// How long a press or key press counts as the user asking for what its
+/// handlers do next, like a browser's transient user activation.
+const USER_ACTIVATION_WINDOW: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// The most recent user gesture: a primary press or key press handled by a
+/// surface, or an IPC command to show one.
+#[derive(Debug, Clone)]
+pub(in crate::shell) struct UserActivation {
+    pub(in crate::shell) source: UserActivationSource,
+    pub(in crate::shell) at: std::time::Instant,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::shell) enum UserActivationSource {
+    Surface(SurfaceId),
+    Ipc,
+}
+
 impl EffectSource {
     /// Effects the shell issues for itself. Over budget they are deferred,
     /// never counted toward quarantine: dropping them would stop core.
@@ -3027,6 +3045,87 @@ impl Shell {
         }
     }
 
+    /// The surface whose user gesture is showing `surface_id`, or `Some(None)`
+    /// for an IPC command. `None` when nothing the user did asked for it, such
+    /// as a notification shown by a service event.
+    fn user_opener_for_shown_surface(&mut self, surface_id: &str) -> Option<Option<SurfaceId>> {
+        let activation = self.user_activation.as_ref()?;
+        if activation.at.elapsed() > USER_ACTIVATION_WINDOW {
+            return None;
+        }
+        match &activation.source {
+            UserActivationSource::Ipc => {
+                self.user_activation = None;
+                Some(None)
+            }
+            UserActivationSource::Surface(source) => {
+                let context = self.effect_scheduler.active_context()?;
+                (context.source.runtime_id == *source && source != surface_id)
+                    .then(|| Some(source.clone()))
+            }
+        }
+    }
+
+    /// A surface the user opens takes the keyboard, whatever its keyboard
+    /// mode asks the compositor for on map: routing moves now, and an
+    /// `on_demand` surface asks the compositor for focus as a press would.
+    /// Hiding it later returns the keyboard to `opener`.
+    fn give_user_opened_surface_the_keyboard(
+        &mut self,
+        surface_id: &str,
+        opener: Option<SurfaceId>,
+    ) {
+        let Some(index) = self.component_index_for_surface(surface_id) else {
+            return;
+        };
+        if self.components[index].component.surface_keyboard_mode()
+            == mesh_core_wayland::KeyboardMode::None
+        {
+            return;
+        }
+        self.claim_keyboard_focus_for_surface(surface_id);
+        self.presentation_engine.request_keyboard_focus(surface_id);
+        match opener {
+            Some(opener) => {
+                self.surface_openers.insert(surface_id.to_string(), opener);
+            }
+            None => {
+                self.surface_openers.remove(surface_id);
+            }
+        }
+    }
+
+    /// Hiding a surface the user opened hands the keyboard back to the
+    /// surface that opened it, if the keyboard is still on the hidden one.
+    fn return_keyboard_to_opener(&mut self, surface_id: &str) {
+        let Some(opener) = self.surface_openers.remove(surface_id) else {
+            return;
+        };
+        if self
+            .keyboard_focus_surface
+            .as_deref()
+            .is_some_and(|focused| focused != surface_id)
+        {
+            return;
+        }
+        let opener_visible = self
+            .core
+            .surfaces
+            .get(&opener)
+            .is_some_and(|state| state.visible && state.closing_until.is_none());
+        let Some(index) = self.component_index_for_surface(&opener) else {
+            return;
+        };
+        if !opener_visible
+            || self.components[index].component.surface_keyboard_mode()
+                == mesh_core_wayland::KeyboardMode::None
+        {
+            return;
+        }
+        self.claim_keyboard_focus_for_surface(&opener);
+        self.presentation_engine.request_keyboard_focus(&opener);
+    }
+
     fn set_surface_visibility(
         &mut self,
         surface_id: SurfaceId,
@@ -3080,23 +3179,15 @@ impl Shell {
             {
                 runtime.component.set_surface_exiting(false);
             }
-            // The compositor hands the keyboard to an exclusive layer as it
-            // maps. Keys are routed by `keyboard_focus_surface`, so it must
-            // follow, or they keep going to the surface clicked to open this
-            // one even though the compositor now delivers them here.
-            let takes_keyboard = self
-                .component_index_for_surface(&surface_id)
-                .is_some_and(|index| {
-                    self.components[index].component.surface_keyboard_mode()
-                        == mesh_core_wayland::KeyboardMode::Exclusive
-                });
+            let opener = self.user_opener_for_shown_surface(&surface_id);
             let effects = self.set_surface_visibility_now(surface_id.clone(), true)?;
-            if takes_keyboard {
-                self.claim_keyboard_focus_for_surface(&surface_id);
+            if let Some(opener) = opener {
+                self.give_user_opened_surface_the_keyboard(&surface_id, opener);
             }
             return Ok(effects);
         }
 
+        self.return_keyboard_to_opener(&surface_id);
         let hide_transition = self
             .components
             .iter()

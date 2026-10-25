@@ -402,6 +402,7 @@ struct TestingBackend {
     text_input_surface: Option<String>,
     text_input_pending: TestingPendingTextInput,
     report_configured_sizes: bool,
+    keyboard_focus_requests: Vec<String>,
 }
 
 impl TestingBackend {
@@ -1805,6 +1806,27 @@ impl PresentationEngine {
     /// Publish the focused component's text-input-v3 surrounding-text
     /// snapshot. Non-Wayland backends accept the state so shell behavior stays
     /// backend-neutral, while only the Wayland backend sends protocol requests.
+    /// Ask the compositor to give `surface_id` keyboard focus, as a pointer
+    /// press on it would. Use it when the user opens a surface from another
+    /// one, so the keyboard follows what they just opened.
+    pub fn request_keyboard_focus(&mut self, surface_id: &str) {
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.request_keyboard_focus(surface_id),
+            Backend::DevWindow(_) => {}
+            Backend::Testing(backend) => backend
+                .keyboard_focus_requests
+                .push(surface_id.to_string()),
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn testing_keyboard_focus_requests(&self) -> &[String] {
+        match &self.backend {
+            Backend::Testing(backend) => &backend.keyboard_focus_requests,
+            _ => &[],
+        }
+    }
+
     pub fn set_text_input_state(
         &mut self,
         surface_id: Option<&str>,
@@ -2179,6 +2201,7 @@ pub fn event_surface_id(event: &WindowEvent) -> &str {
     match event {
         WindowEvent::PointerMove { surface_id, .. }
         | WindowEvent::PointerLeave { surface_id }
+        | WindowEvent::KeyboardEnter { surface_id }
         | WindowEvent::PointerButton { surface_id, .. }
         | WindowEvent::PointerButtonWithIdentity { surface_id, .. }
         | WindowEvent::Scroll { surface_id, .. }

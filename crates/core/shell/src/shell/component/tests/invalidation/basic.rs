@@ -864,8 +864,6 @@ fn selector_dependencies_filter_unrelated_interaction_changes() {
     );
     assert!(component.module_styles_have_state_rules());
     component.interaction_snapshot_valid = true;
-    component.previous_focused_key = Some(runtime_node_id_for_key("root/old"));
-    component.focused_key = Some("root/new".into());
     component.previous_active_key = Some(runtime_node_id_for_key("root/pressed"));
     component.pointer_down_id = None;
     component
@@ -880,7 +878,18 @@ fn selector_dependencies_filter_unrelated_interaction_changes() {
             .collect_interaction_changed_node_ids()
             .affected
             .is_empty(),
-        "focus, active, and checked changes cannot affect hover-only rules"
+        "active and checked changes cannot affect hover-only rules"
+    );
+
+    // The platform focus ring is a `:focus-visible` rule beneath every
+    // theme, so a focus change restyles even where modules only use hover.
+    component.previous_focused_key = Some(runtime_node_id_for_key("root/old"));
+    component.focused_key = Some("root/new".into());
+    assert!(
+        !component
+            .collect_interaction_changed_node_ids()
+            .affected
+            .is_empty()
     );
 }
 

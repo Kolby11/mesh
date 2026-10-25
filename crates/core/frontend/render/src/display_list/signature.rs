@@ -137,6 +137,7 @@ pub(super) fn visual_bounds_for_node_with_transform(
         },
         node.computed_style.box_shadow,
         &node.computed_style.additional_box_shadows,
+        node.computed_style.outline.extent(),
         node.computed_style.filter.blur_radius,
         node.computed_style.backdrop_filter.blur_radius,
     )
@@ -344,6 +345,7 @@ pub(super) fn batch_barrier(
     }
     if !node.computed_style.additional_box_shadows.is_empty()
         || !node.computed_style.box_shadow.is_none()
+        || !node.computed_style.outline.is_none()
         || !node.computed_style.filter.is_none()
         || !node.computed_style.backdrop_filter.is_none()
     {

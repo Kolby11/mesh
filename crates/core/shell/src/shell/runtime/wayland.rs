@@ -97,6 +97,10 @@ impl Shell {
             let Some(event) = self.pending_wayland_events.pop_front() else {
                 break;
             };
+            if let WindowEvent::KeyboardEnter { surface_id } = &event {
+                self.follow_compositor_keyboard_focus(surface_id);
+                continue;
+            }
 
             let input_started = self.profiling_enabled().then(std::time::Instant::now);
             let trigger_kind = profiling_trigger_for_event(&event);
@@ -147,6 +151,12 @@ impl Shell {
             };
 
             if let RoutedWindowEvent::KeyPressed { key, .. } = &event {
+                tracing::debug!(
+                    physical = &*physical_surface_id,
+                    routed = route_surface_id,
+                    key,
+                    "[focus] key routed"
+                );
                 self.held_key_surfaces
                     .insert(key.clone(), route_surface_id.to_string());
             }
@@ -393,6 +403,23 @@ impl Shell {
                 continue;
             }
 
+            let is_user_gesture = match &event {
+                RoutedWindowEvent::PointerButton { button, pressed: true, .. }
+                | RoutedWindowEvent::PointerButtonWithIdentity { button, pressed: true, .. } => {
+                    *button == mesh_core_presentation::PRIMARY_POINTER_BUTTON
+                }
+                RoutedWindowEvent::KeyPressed { .. } | RoutedWindowEvent::TouchDown { .. } => true,
+                _ => false,
+            };
+            if is_user_gesture {
+                self.user_activation = Some(crate::shell::runtime::UserActivation {
+                    source: crate::shell::runtime::UserActivationSource::Surface(
+                        self.components[index].surface_id.clone(),
+                    ),
+                    at: std::time::Instant::now(),
+                });
+            }
+
             let input = match event {
                 RoutedWindowEvent::PointerButtonWithIdentity {
                     x,
@@ -624,6 +651,29 @@ impl Shell {
             );
         }
         Ok(())
+    }
+}
+
+impl Shell {
+    /// Key routing follows the compositor whenever it moves keyboard focus:
+    /// a surface it focuses on map, by click or by a focus grab owns the
+    /// keys from then on, until the shell itself transfers them (Tab into a
+    /// popover) or the compositor moves focus again.
+    fn follow_compositor_keyboard_focus(&mut self, surface_id: &str) {
+        let Some((index, target)) = self.component_target_for_surface(surface_id) else {
+            return;
+        };
+        if let TargetRef::Child(child_index) = target
+            && self.components[index].children[child_index].kind
+                == crate::shell::types::ChildSurfaceKind::Tooltip
+        {
+            return;
+        }
+        let owner = child_focus_owner_surface(self, index, target, surface_id);
+        if self.keyboard_focus_surface.as_deref() != Some(owner.as_str()) {
+            tracing::debug!(surface_id = owner, "[focus] key routing follows compositor focus");
+            self.claim_keyboard_focus_for_surface(&owner);
+        }
     }
 }
 
@@ -875,6 +925,9 @@ fn split_window_event(event: WindowEvent) -> (std::sync::Arc<str>, RoutedWindowE
             (surface_id, RoutedWindowEvent::PointerMove { x, y })
         }
         WindowEvent::PointerLeave { surface_id } => (surface_id, RoutedWindowEvent::PointerLeave),
+        WindowEvent::KeyboardEnter { .. } => {
+            unreachable!("keyboard enter is consumed before routing")
+        }
         WindowEvent::PointerButton {
             surface_id,
             x,
@@ -1032,6 +1085,7 @@ fn profiling_trigger_for_event(event: &WindowEvent) -> &'static str {
     match event {
         WindowEvent::PointerMove { .. } => "pointer_move",
         WindowEvent::PointerLeave { .. } => "pointer_leave",
+        WindowEvent::KeyboardEnter { .. } => "keyboard_enter",
         WindowEvent::PointerButton { .. } => "pointer_button",
         WindowEvent::PointerButtonWithIdentity { .. } => "pointer_button",
         WindowEvent::Scroll { .. } => "scroll",

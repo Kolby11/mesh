@@ -320,6 +320,7 @@ pub(super) fn display_command_paints_pixels(command: &DisplayPaintCommand) -> bo
             .additional_box_shadows
             .iter()
             .any(|shadow| !shadow.is_none() && !shadow.inset)
+        || !style.outline.is_none()
         || style.backdrop_filter.blur_radius > 0.0
         || style.backdrop_filter.has_refraction()
 }

@@ -116,14 +116,31 @@ is *policy*; the shell owns actual focus state.
 | `on_demand` | Focus only when the user engages the surface — preferred for keyboardable shell chrome. |
 | `exclusive` | Dedicated keyboard sink while focused (launcher-style). |
 
-An `exclusive` surface owns the keyboard from the moment it is shown, the
-way a compositor focuses an exclusive layer as it maps: the shell routes keys
-to it even when the click that opened it gave another surface the keyboard.
-Because the compositor also delivers every pointer event to an exclusive
-layer, a primary press outside its bounds dismisses it instead of reaching
-its content.
-A key release goes to the surface that received its press, so the Enter or
-Space that opens such a surface cannot also activate its focused control.
+**Key routing follows the compositor.** Whenever the compositor gives a MESH
+surface keyboard focus (`wl_keyboard.enter`), keys route to that surface until
+the shell transfers focus itself (Tab into a popover) or the compositor moves
+it again. A key release goes to the surface that received its press, so the
+Enter or Space that opens a surface cannot also activate its focused control.
+
+**A surface the user opens takes the keyboard.** A surface shown by a press or
+key press handled in another surface, within one second, or by an IPC
+`show`/`toggle` command, receives key routing at once, and an `on_demand`
+surface asks the compositor for focus as a press on it would (through the
+same temporary focus grab). Hiding it hands the keyboard back to the surface
+that opened it while that surface is visible. A surface shown without a user
+gesture, such as a notification raised by a service, leaves the keyboard where
+it is. `none` surfaces never take it.
+
+Because the compositor delivers every pointer event to an exclusive layer, a
+primary press outside an exclusive surface's bounds dismisses it instead of
+reaching its content.
+
+**Initial focus.** When a surface is shown, a dialog or sheet opens, or a
+popover opens by press or key, focus starts at the first element in Tab order
+marked `autofocus`, else the first editable text field, else the first Tab
+stop. `autofocus="false"` on the dialog, sheet or popover keeps focus where it
+was. A hover-opened popover does not take focus. Focus that a press opened
+shows no ring until the next key press; focus that a key opened shows it.
 
 Popover focus ownership: activation may transfer focus into the promoted
 popover (`options.focus`), the shell records return focus as

@@ -245,6 +245,9 @@ pub(super) struct State {
     pub(super) pinch_seats: HashMap<ObjectId, SeatId>,
     pub(super) hold_seats: HashMap<ObjectId, SeatId>,
     pub(super) focus_grab_seats: HashMap<ObjectId, SeatId>,
+    /// Surfaces asked to take keyboard focus before their compositor object
+    /// existed; the request runs when the surface is installed.
+    pub(super) pending_keyboard_focus: std::collections::HashSet<String>,
     pub(super) events: Vec<QueuedInputEvent>,
     /// `xdg_shell` (`xdg_wm_base`) global, bound when available. Required to
     /// create `xdg_positioner`/`xdg_popup` objects for promoted `<popover>`s.
@@ -543,6 +546,25 @@ impl State {
         self.request_surface_activation(seat_id, surface_id, event);
     }
 
+    /// Ask the compositor to give an `on_demand` surface keyboard focus on
+    /// every seat with a keyboard, as a pointer press on it would.
+    pub(super) fn request_keyboard_focus(&mut self, surface_id: &str) {
+        if !self.surfaces.contains_key(surface_id) {
+            self.pending_keyboard_focus.insert(surface_id.to_string());
+            return;
+        }
+        let seat_ids = self.input_seat_order.clone();
+        for seat_id in seat_ids {
+            if self
+                .input_seats
+                .get(&seat_id)
+                .is_some_and(|seat| seat.keyboard.is_some())
+            {
+                self.request_surface_focus_grab(&seat_id, surface_id);
+            }
+        }
+    }
+
     fn request_surface_focus_grab(&mut self, seat_id: &SeatId, surface_id: &str) -> bool {
         let Some(manager) = self.focus_grab_manager.as_ref() else {
             return false;
@@ -756,6 +778,9 @@ impl State {
         if let Some(previous) = self.surfaces.insert(surface_id.clone(), entry) {
             self.surface_ids_by_wl_id
                 .remove(&previous.wl_surface().id());
+        }
+        if self.pending_keyboard_focus.remove(&surface_id) {
+            self.request_keyboard_focus(&surface_id);
         }
         self.surface_ids_by_wl_id
             .insert(wl_id, Arc::from(surface_id));
@@ -985,6 +1010,7 @@ impl State {
         self.hold_seats.clear();
         self.text_input_seats.clear();
         self.focus_grab_seats.clear();
+        self.pending_keyboard_focus.clear();
         self.close_requests.clear();
 
         let mut surface_ids = self.surfaces.keys().cloned().collect::<Vec<_>>();

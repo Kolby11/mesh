@@ -369,6 +369,8 @@ macro_rules! attribute_profile {
             attr("title", ElementAttributeType::String, "Accessible title"),
             attr("focus-scope", ElementAttributeType::Boolean, "Own focus entry and return"),
             attr("modal", ElementAttributeType::Boolean, "Trap focus inside a focus scope"),
+            attr("tabindex", ElementAttributeType::Number, "Tab order; -1 removes the element from Tab"),
+            attr("autofocus", ElementAttributeType::Boolean, "Initial focus when the enclosing surface, dialog or popover opens; false on a scope keeps focus where it was"),
             $($extra),*
         ]
     };

@@ -6,7 +6,7 @@ use crate::display_list::{
     RetainedDisplayList, SelectedDisplayListPaint,
 };
 use mesh_core_elements::AffineTransform;
-use mesh_core_elements::style::{Corners, Edges};
+use mesh_core_elements::style::{Corners, Edges, Outline};
 use smallvec::SmallVec;
 
 use super::*;
@@ -1360,6 +1360,52 @@ fn push_box_commands(
         node_clip,
     );
     close_scoop_clip(commands, scooped, mark);
+    push_outline_command(commands, bounds, paint_radii, style.outline, scale, clip);
+}
+
+/// The outline ring sits outside the border box like a shadow, so it uses
+/// the shadow clip rather than the node's own.
+fn push_outline_command(
+    commands: &mut Vec<PainterCommand>,
+    bounds: ClipRect,
+    radii: Corners,
+    outline: Outline,
+    scale: f32,
+    clip: ClipRect,
+) {
+    if outline.is_none() {
+        return;
+    }
+    let width = outline.width * scale;
+    let reach = (outline.extent() * scale).round() as i32;
+    let rect = ClipRect {
+        x: bounds.x - reach,
+        y: bounds.y - reach,
+        width: bounds.width + reach * 2,
+        height: bounds.height + reach * 2,
+    };
+    if rect.width <= 0 || rect.height <= 0 {
+        return;
+    }
+    let grow = |radius: f32| {
+        if radius > 0.0 {
+            radius + reach as f32
+        } else {
+            0.0
+        }
+    };
+    commands.push(PainterCommand::DrawBorder {
+        rect,
+        radii: Corners {
+            top_left: grow(radii.top_left),
+            top_right: grow(radii.top_right),
+            bottom_right: grow(radii.bottom_right),
+            bottom_left: grow(radii.bottom_left),
+        },
+        widths: Edges::all(width),
+        paint: PainterPaint::fill(outline.color),
+        clip,
+    });
 }
 
 /// Pop the scoop clip pushed at `mark`, or drop it when nothing was drawn

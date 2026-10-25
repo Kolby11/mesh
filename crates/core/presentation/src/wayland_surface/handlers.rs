@@ -855,6 +855,10 @@ impl KeyboardHandler for State {
         if let Some(input) = self.input_seats.get_mut(&seat_id) {
             input.keyboard_focus = focused.clone();
         }
+        if let Some(surface_id) = focused.clone() {
+            tracing::debug!("[focus] layer_shell: keyboard enter surface_id={surface_id}");
+            self.queue_event(&seat_id, DevWindowEvent::KeyboardEnter { surface_id });
+        }
         if let Some(surface_id) = focused
             && grabbed
         {

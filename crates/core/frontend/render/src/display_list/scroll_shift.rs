@@ -268,6 +268,7 @@ fn beneath_varying_parts(
     let style = &command.node.style;
     let layout = command.node.layout;
     if !style.additional_box_shadows.is_empty()
+        || !style.outline.is_none()
         || !matches!(style.background_paint, BackgroundPaint::None)
         || layout.x > viewport.x as f32
         || layout.y > viewport.y as f32

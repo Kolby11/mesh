@@ -170,6 +170,39 @@ fn empty_modal_keeps_focus_and_tab_inside_scope() {
     assert_focus(&component, "empty");
 }
 
+#[test]
+fn opening_dialog_focuses_its_first_text_field_before_earlier_buttons() {
+    let component = host(
+        r#"<dialog class="panel" open="true" aria-label="Search">
+  <button ref="close"/>
+  <input ref="search" class="item" aria-label="Search"/>
+</dialog>"#,
+        "",
+    );
+    assert_focus(&component, "search");
+}
+
+#[test]
+fn autofocus_wins_over_text_fields_and_false_opts_the_scope_out() {
+    let component = host(
+        r#"<dialog class="panel" open="true" aria-label="Pick">
+  <input ref="search" class="item" aria-label="Search"/>
+  <button ref="ok" autofocus="true"/>
+</dialog>"#,
+        "",
+    );
+    assert_focus(&component, "ok");
+
+    let component = host(
+        r#"<button ref="away"/>
+<dialog class="panel" open="true" aria-label="Quiet" modal="false" autofocus="false">
+  <button ref="inside"/>
+</dialog>"#,
+        "",
+    );
+    assert_ne!(component.focused_key, Some(key_for(&component, "inside")));
+}
+
 const MENU: &str = r#"
 <menu class="panel" ref="menu" aria-label="Commands">
   <menu-item class="item" ref="alpha" aria-label="Alpha"/>

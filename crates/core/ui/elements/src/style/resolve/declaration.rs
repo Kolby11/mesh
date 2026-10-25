@@ -956,6 +956,25 @@ fn apply_declaration_with_context(
             style.transform =
                 resolver.with_resolved_str(value, variables, |resolved| parse_transform(resolved))
         }
+        "outline" => resolver.with_resolved_str(value, variables, |resolved| {
+            apply_outline_shorthand(style, resolved)
+        }),
+        "outline-width" => {
+            style.outline.width = resolver
+                .resolve_number_with_variables(value, variables)
+                .max(0.0)
+        }
+        "outline-offset" => {
+            style.outline.offset = resolver.resolve_number_with_variables(value, variables)
+        }
+        "outline-color" => {
+            style.outline.color = resolver.with_resolved_str(value, variables, |resolved| {
+                parse_border_color_shorthand(resolved)
+            })
+        }
+        "outline-style" => resolver.with_resolved_str(value, variables, |resolved| {
+            apply_outline_style(style, resolved)
+        }),
         "box-shadow" => {
             let mut shadows = resolver.with_resolved_str(value, variables, parse_box_shadows);
             style.box_shadow = if shadows.is_empty() { BoxShadow::NONE } else { shadows.remove(0) };

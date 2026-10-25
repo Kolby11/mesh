@@ -1741,6 +1741,13 @@ fn embedded_default_theme() -> Theme {
         include_str!("../../../../../modules/themes/tokyo-night/theme.css"),
     )
     .expect("embedded default theme css must be valid");
+    let platform = parse_theme_css(
+        "platform",
+        "Platform defaults",
+        include_str!("platform-defaults.css"),
+    )
+    .expect("platform default css must be valid");
+    theme.rules.splice(0..0, platform.rules);
     for (token, default) in semantic_token_defaults() {
         theme
             .tokens

@@ -18,23 +18,32 @@ impl FrontendSurfaceComponent {
             }
             return;
         }
-        if !self.pending_embedded_popover_focus {
+        let Some(visible) = self.pending_embedded_popover_focus.take() else {
             if !contains_open_popover(tree) {
                 self.embedded_popover_return_focus = None;
             }
             return;
-        }
-        self.pending_embedded_popover_focus = false;
+        };
 
-        if let Some(key) = first_focusable_in_open_popover(tree) {
+        let Some(popover) = open_popover(tree) else {
+            return;
+        };
+        // A promoted popover's content becomes focusable only once its popup
+        // surface is configured, which can be a paint after it opens; keep
+        // the request until then rather than leaving focus on the trigger.
+        let Some(key) = mesh_core_interaction::initial_focus_target(tree, popover) else {
+            self.pending_embedded_popover_focus = Some(visible);
+            return;
+        };
+        {
             self.embedded_popover_return_focus = self.focused_key.clone();
             let mut transaction = self.interaction_state.begin();
-            transaction.focus(Some(runtime_node_id_for_key(&key)), true);
+            transaction.focus(Some(runtime_node_id_for_key(&key)), visible);
             self.commit_interaction_delta(transaction);
             self.focused_key = Some(key.clone());
-            self.focus_visible_key = Some(key);
-            self.focused_id = self.focused_key.as_deref().map(runtime_node_id_for_key);
-            self.focus_visible_id = self.focused_id;
+            self.focus_visible_key = visible.then(|| key.clone());
+            self.focused_id = Some(runtime_node_id_for_key(&key));
+            self.focus_visible_id = visible.then_some(self.focused_id).flatten();
             self.invalidate_interaction_restyle();
         }
     }
@@ -523,25 +532,14 @@ impl FrontendSurfaceComponent {
     }
 }
 
-pub(super) fn first_focusable_in_open_popover(node: &WidgetNode) -> Option<String> {
+pub(super) fn open_popover(node: &WidgetNode) -> Option<&WidgetNode> {
     if source_element_tag(node) == "popover" && popover_is_open(node) {
-        return node.children.iter().find_map(first_focusable_descendant);
+        return Some(node);
     }
-    node.children
-        .iter()
-        .find_map(first_focusable_in_open_popover)
+    node.children.iter().find_map(open_popover)
 }
 
 pub(super) fn contains_open_popover(node: &WidgetNode) -> bool {
     (source_element_tag(node) == "popover" && popover_is_open(node))
         || node.children.iter().any(contains_open_popover)
-}
-
-pub(super) fn first_focusable_descendant(node: &WidgetNode) -> Option<String> {
-    if node.accessibility.focusable
-        && let Some(key) = node.mesh_key()
-    {
-        return Some(key.to_string());
-    }
-    node.children.iter().find_map(first_focusable_descendant)
 }

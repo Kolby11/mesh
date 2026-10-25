@@ -1,0 +1,8 @@
+/* Platform rules beneath every theme pack and module stylesheet. They hold
+   the standards each element must meet even when nothing else styles it;
+   any later rule overrides them, and `outline: none` opts out. */
+
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}

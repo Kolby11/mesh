@@ -265,10 +265,10 @@ impl FrontendSurfaceComponent {
         }]))
     }
 
-    /// If `pending_auto_focus` is set (a popover just became visible), seed
-    /// `focused_key` with the first tabbable element so keyboard works
+    /// If `pending_auto_focus` is set (the surface just became visible), seed
+    /// `focused_key` with its initial focus target so keyboard works
     /// immediately, with no need to click into the surface first. No-op if
-    /// nothing is tabbable or if focus was already established (e.g. the
+    /// nothing is focusable or if focus was already established (e.g. the
     /// user clicked something in the same paint frame).
     pub(in crate::shell::component) fn apply_pending_auto_focus(&mut self, tree: &WidgetNode) {
         if !self.pending_auto_focus {
@@ -281,7 +281,8 @@ impl FrontendSurfaceComponent {
         // Focus without a ring: a surface shown by a pointer click or at
         // startup must not paint one. The first key press makes it visible,
         // and keyboard-driven entry (Tab transfer) sets visibility itself.
-        if let Some(first) = next_focus_target(tree, None, false) {
+        let scope = mesh_core_interaction::active_modal_scope(tree).unwrap_or(tree);
+        if let Some(first) = mesh_core_interaction::initial_focus_target(tree, scope) {
             self.input_preedits.clear();
             let node_id = find_node_by_key(tree, &first).map(|node| node.id);
             let mut transaction = self.interaction_state.begin();

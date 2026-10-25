@@ -14,7 +14,9 @@ mod theme;
 mod wayland;
 
 pub(in crate::shell) use debug::DebugSnapshotCache;
-pub(in crate::shell) use request::{EffectScheduler, ScheduledEffect};
+pub(in crate::shell) use request::{
+    EffectScheduler, ScheduledEffect, UserActivation, UserActivationSource,
+};
 pub(in crate::shell) use theme::ControlPlaneSettingsCommit;
 
 pub(in crate::shell) struct PendingControlPlaneCommit {
@@ -1069,6 +1071,15 @@ impl Shell {
                 }
             }
             ShellMessage::Ipc(request) => {
+                if matches!(
+                    request,
+                    CoreRequest::ShowSurface { .. } | CoreRequest::ToggleSurface { .. }
+                ) {
+                    self.user_activation = Some(UserActivation {
+                        source: UserActivationSource::Ipc,
+                        at: std::time::Instant::now(),
+                    });
+                }
                 pending.push_back(request.into());
             }
             ShellMessage::IpcProfileSwitch {

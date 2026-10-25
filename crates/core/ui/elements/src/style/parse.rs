@@ -164,6 +164,30 @@ pub(super) fn apply_border_shorthand(style: &mut ComputedStyle, value: &str) {
     }
 }
 
+/// `outline: [<width>] [<style>] [<color>]` in any order. `none` and
+/// `hidden` remove the ring; every other style draws it solid.
+pub(super) fn apply_outline_shorthand(style: &mut ComputedStyle, value: &str) {
+    style.outline.width = 3.0;
+    style.outline.color = style.color;
+    for token in value.split_whitespace() {
+        if token == "none" || token == "hidden" {
+            style.outline.width = 0.0;
+        } else if token.ends_with("px") || token.parse::<f32>().is_ok() {
+            style.outline.width = parse_px(token).max(0.0);
+        } else if let Some(color) = Color::from_hex(token) {
+            style.outline.color = color;
+        }
+    }
+}
+
+pub(super) fn apply_outline_style(style: &mut ComputedStyle, value: &str) {
+    if matches!(value.trim(), "none" | "hidden") {
+        style.outline.width = 0.0;
+    } else if style.outline.width <= 0.0 {
+        style.outline.width = 3.0;
+    }
+}
+
 pub(super) fn apply_flex_shorthand(style: &mut ComputedStyle, value: &str) {
     let mut parts = value.split_whitespace();
     let (Some(grow), Some(shrink), Some(basis)) = (parts.next(), parts.next(), parts.next()) else {
