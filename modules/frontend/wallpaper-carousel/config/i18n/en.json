@@ -1,6 +1,5 @@
 {
   "carousel.title": "Wallpapers",
-  "carousel.close": "Close wallpaper carousel",
   "carousel.empty": "No images found in {directory}",
   "carousel.unavailable": "The wallpaper folder could not be read",
   "carousel.use": "Use {name} as wallpaper",
@@ -8,6 +7,7 @@
   "prop.side_cards": "Cards on each side",
   "prop.parallax": "Picture shift per card",
   "prop.close_on_apply": "Close after choosing a wallpaper",
+  "prop.offset_top": "Distance below the bar",
   "keybind.close": "Close wallpaper carousel",
   "keybind.previous": "Previous wallpaper",
   "keybind.next": "Next wallpaper",

@@ -33,7 +33,7 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/glass-notifications` | surface | `src/main.mesh` | Glass notification toasts under the bar; shows itself while a notification is popped up |
 | `@mesh/glass-dashboard` | surface | `src/main.mesh` | Overlay with system meters and history, the current track with a live spectrum, notifications and weather |
 | `@mesh/glass-wallpapers` | surface | `src/main.mesh` | Overlay wallpaper picker: tilted carousel and colour strip; applies through `mesh.theme.set_backdrop_image`; not in the glass composition |
-| `@mesh/wallpaper-carousel` | surface | `src/main.mesh` | Full-screen wallpaper selector: endless strip of tall cards that slide, shrink with distance and pan across `mesh.wallpapers` panoramas; the glass composition's wallpaper selector |
+| `@mesh/wallpaper-carousel` | surface | `src/main.mesh` | Wallpaper selector widget under the bar: endless strip of tall cards that slide, shrink with distance and pan across `mesh.wallpapers` panoramas; the glass composition's wallpaper selector |
 | `@mesh/profile-switcher` | embedded | `src/main.mesh` | Shell switcher trigger; also a `mesh.navigation.item` contribution |
 | `@mesh/profile-menu` | embedded | `src/main.mesh` | Popover listing profiles; selecting one switches live via `mesh.packages` |
 
@@ -42,8 +42,10 @@ light rims, refracted translucent cards and raised dock lenses. The clock opens
 a month calendar; the rightmost status button opens quick
 controls; the dock's search button opens the application launcher. The bar's
 dashboard and wallpaper buttons toggle those overlays. The dashboard closes with
-Escape, its close button or a click outside the panel; the wallpaper carousel
-closes with Escape, a click beside the cards, or once a wallpaper is applied.
+Escape, its close button or a click outside the panel. The wallpaper carousel
+is a widget under the bar, centred horizontally, driven by arrows,
+PageUp/PageDown and the wheel; it closes with Escape or once a wallpaper is
+applied.
 The media card grows a
 spectrum strip while audio plays. Dashboard system meters and CPU history bars
 keep fixed layout boxes and animate their bottom-anchored vertical scale, so

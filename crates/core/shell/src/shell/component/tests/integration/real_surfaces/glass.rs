@@ -815,6 +815,71 @@ fn wallpaper_carousel_centres_the_selection_and_slides_its_cards() {
     assert!(card_label(first_node_by_class(&stage, "card-selected").unwrap()).contains("forest"));
 }
 
+fn carousel_selection(component: &FrontendSurfaceComponent) -> String {
+    let (stage, _) = carousel_state(component);
+    card_label(first_node_by_class(&stage, "card-selected").unwrap())
+}
+
+#[test]
+fn wallpaper_carousel_is_a_top_widget_driven_by_the_keyboard() {
+    let (width, height) = (1920, 1080);
+    let mut component = host("wallpaper-carousel");
+    let wallpapers: Vec<_> = (0..12)
+        .map(|index| {
+            serde_json::json!({
+                "path": format!("/walls/w{index:02}.png"),
+                "name": format!("w{index:02}"),
+                "thumbnail": "",
+                "panorama": "",
+                "color": "",
+            })
+        })
+        .collect();
+    update(
+        &mut component,
+        "mesh.wallpapers",
+        serde_json::json!({"available": true, "directory": "/walls", "wallpapers": wallpapers}),
+    );
+    paint(&mut component, width, height);
+
+    // Content-sized rather than a full-screen overlay; layer-shell anchors
+    // it to the top edge, so it fits the upper half of a 1080p output.
+    let root = component.last_tree.as_ref().unwrap();
+    let widget = first_node_by_class(root, "widget").unwrap().layout;
+    assert!(
+        widget.width < width as f32 && widget.height < height as f32 / 2.0,
+        "widget is content-sized: {widget:?}"
+    );
+
+    // Surface keybinds reach the strip with nothing focused.
+    let key = |component: &mut FrontendSurfaceComponent, name: &str| {
+        component
+            .handle_input(
+                &theme(),
+                width,
+                height,
+                ComponentInput::KeyPressed {
+                    key: name.into(),
+                    modifiers: Default::default(),
+                },
+            )
+            .unwrap();
+        paint(component, width, height);
+    };
+    key(&mut component, "ArrowRight");
+    key(&mut component, "ArrowRight");
+    assert!(carousel_selection(&component).contains("w02"));
+    key(&mut component, "ArrowLeft");
+    key(&mut component, "ArrowLeft");
+    key(&mut component, "ArrowLeft");
+    assert!(carousel_selection(&component).contains("w11"));
+    // A page is the seven visible cards.
+    key(&mut component, "PageDown");
+    assert!(carousel_selection(&component).contains("w06"));
+    key(&mut component, "PageUp");
+    assert!(carousel_selection(&component).contains("w11"));
+}
+
 #[test]
 fn liquid_glass_desktop_cards_fit_laptop_and_large_outputs() {
     for width in [640, 800, 960, 1200, 1440, 1920, 2880] {

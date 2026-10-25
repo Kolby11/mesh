@@ -1,6 +1,5 @@
 {
   "carousel.title": "Tapety",
-  "carousel.close": "Zavrieť karusel tapiet",
   "carousel.empty": "V {directory} nie sú žiadne obrázky",
   "carousel.unavailable": "Priečinok s tapetami sa nedá prečítať",
   "carousel.use": "Použiť {name} ako tapetu",
@@ -8,6 +7,7 @@
   "prop.side_cards": "Karty na každej strane",
   "prop.parallax": "Posun obrázka na kartu",
   "prop.close_on_apply": "Zavrieť po výbere tapety",
+  "prop.offset_top": "Vzdialenosť pod panelom",
   "keybind.close": "Zavrieť karusel tapiet",
   "keybind.previous": "Predchádzajúca tapeta",
   "keybind.next": "Ďalšia tapeta",

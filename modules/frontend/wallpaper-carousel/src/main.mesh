@@ -1,15 +1,15 @@
 <props>
 {
     side_cards = { type = "int", default = 3, min = 1, max = 5, label = t("prop.side_cards", "Cards on each side") },
-    parallax = { type = "number", default = 60, min = 0, max = 120, unit = "px", label = t("prop.parallax", "Picture shift per card") },
+    parallax = { type = "number", default = 50, min = 0, max = 100, unit = "px", label = t("prop.parallax", "Picture shift per card") },
+    offset_top = { type = "size", default = "40px", label = t("prop.offset_top", "Distance below the bar") },
     close_on_apply = { type = "bool", default = true, label = t("prop.close_on_apply", "Close after choosing a wallpaper") },
 }
 </props>
 
 <template>
-    <box class="overlay" keybind="close" onkeybind={onClose} onscroll={onScroll}>
-        <button class="scrim" onclick={onClose} aria-label={t("carousel.close")} tabindex="-1" />
-        <column class="carousel" hidden={not has_wallpapers} aria-label={t("carousel.title")} keybind="apply" onkeybind={onApply}>
+    <column class="widget" aria-label={t("carousel.title")} keybind="close" onkeybind={onClose} onscroll={onScroll}>
+        <box class="track" hidden={not has_wallpapers} keybind="apply" onkeybind={onApply}>
             <box class="track" keybind="page_previous" onkeybind={onPagePrevious}>
                 <box class="track" keybind="page_next" onkeybind={onPageNext}>
                     <box class="track" keybind="previous" onkeybind={onPrevious}>
@@ -32,10 +32,10 @@
                     </box>
                 </box>
             </box>
-            <text class="caption">{focused_name}</text>
-        </column>
-        <text class="empty" hidden={has_wallpapers}>{empty_label}</text>
-    </box>
+        </box>
+        <text class="caption" hidden={not has_wallpapers}>{focused_name}</text>
+        <text class="caption" hidden={has_wallpapers}>{empty_label}</text>
+    </column>
 </template>
 
 <script lang="luau">
@@ -44,13 +44,13 @@ local theme = require("mesh.theme")
 local wallpapers = require("mesh.wallpapers")
 
 local SURFACE = "@mesh/wallpaper-carousel"
-local CARD_WIDTH = 220
+local CARD_WIDTH = 170
 -- Centre-to-centre distance between full-size cards.
-local SPACING = 262
+local SPACING = 204
 local SCALE_FLOOR = 0.7
 local SCALE_STEP = 0.07
--- Cards past the visible ones on each side, laid out but transparent, so a
--- card entering the strip slides and fades in instead of appearing.
+-- Cards past the visible ones on each side, transparent and outside the
+-- stage, so a card entering the strip slides and fades in instead of appearing.
 local BUFFER = 1
 local TWO_FINGER_NOTCH = 40
 
@@ -96,7 +96,7 @@ local function side_count(count)
 end
 
 local function stage_centre()
-    return math.ceil(offset_at(props.side_cards + BUFFER))
+    return math.ceil(offset_at(props.side_cards))
 end
 
 effect(function()
@@ -240,42 +240,23 @@ end
 </script>
 
 <style>
-    .overlay {
-        position: relative;
-        width: 100%;
-        height: 100%;
-        justify-content: center;
-        align-items: center;
-        exclusive-zone: ignore;
-        background: transparent;
-    }
-
-    .scrim {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        padding: 0;
-        border-radius: 0;
-        background: rgba(0, 0, 0, 0.45);
-        backdrop-filter: blur(28px);
-        opacity: 1;
-        transition: opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard);
-    }
-
-    .scrim.mesh-surface-entering, .scrim.mesh-surface-exiting { opacity: 0; }
-
-    .carousel {
-        align-items: center;
+    /* Content-sized and anchored to the top edge, so the compositor centres
+    it horizontally and windows stay usable around it. */
+    .widget {
+        width: fit;
+        margin-top: prop(offset_top);
+        padding: 12px 24px 28px;
         gap: 14px;
+        align-items: center;
+        exclusive-zone: none;
+        background: transparent;
         opacity: 1;
         transform: translateY(0px) scale(1);
         transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
     }
 
-    .carousel.mesh-surface-entering { opacity: 0; transform: translateY(40px) scale(0.9); }
-    .carousel.mesh-surface-exiting { opacity: 0; transform: translateY(20px) scale(0.95); transition-duration: var(--animation-duration-fast); }
+    .widget.mesh-surface-entering { opacity: 0; transform: translateY(-24px) scale(0.94); }
+    .widget.mesh-surface-exiting { opacity: 0; transform: translateY(-12px) scale(0.97); transition-duration: var(--animation-duration-fast); }
 
     .track {
         align-items: center;
@@ -285,7 +266,7 @@ end
     /* Every card starts at the stage's left edge; its transform places it. */
     .stage {
         position: relative;
-        height: 440px;
+        height: 320px;
         flex-shrink: 0;
     }
 
@@ -293,13 +274,13 @@ end
         position: absolute;
         top: 0;
         left: 0;
-        width: 220px;
-        height: 440px;
+        width: 170px;
+        height: 320px;
         padding: 0;
-        border-radius: 18px;
+        border-radius: 16px;
         border: 2px solid transparent;
         background: var(--color-surface-container);
-        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+        box-shadow: 0 12px 28px var(--color-shadow);
         overflow: hidden;
         opacity: 1;
         transition-property: transform, opacity, border-color;
@@ -320,24 +301,21 @@ end
     .panorama {
         position: absolute;
         top: 0;
-        left: -281px;
-        width: 782px;
-        height: 440px;
+        left: -200px;
+        width: 570px;
+        height: 320px;
         transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate);
     }
 
     .caption {
-        height: 20px;
+        height: 26px;
+        padding: 0 14px;
+        border-radius: var(--radius-full);
+        background: var(--color-surface-container-high);
         font-size: 13px;
-        letter-spacing: 0.4px;
-        color: rgba(255, 255, 255, 0.85);
+        line-height: 26px;
+        color: var(--color-on-surface);
         text-overflow: ellipsis;
-    }
-
-    .empty {
-        height: 20px;
-        font-size: 14px;
-        color: rgba(255, 255, 255, 0.85);
     }
 
     .card:hover {
