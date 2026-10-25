@@ -353,6 +353,28 @@ impl Shell {
                 continue;
             }
 
+            // A compositor gives an exclusive layer every pointer event, even
+            // ones outside it, so a press beyond its bounds is the user
+            // clicking away: dismiss it instead of delivering a click that
+            // hits nothing.
+            if matches!(target, TargetRef::Parent)
+                && let RoutedWindowEvent::PointerButton { x, y, button, pressed: true }
+                | RoutedWindowEvent::PointerButtonWithIdentity { x, y, button, pressed: true, .. } =
+                    &event
+                && *button == mesh_core_presentation::PRIMARY_POINTER_BUTTON
+                && self.components[index].component.surface_keyboard_mode()
+                    == mesh_core_wayland::KeyboardMode::Exclusive
+                && (*x < 0.0
+                    || *y < 0.0
+                    || *x >= component_surface_size.0 as f32
+                    || *y >= component_surface_size.1 as f32)
+            {
+                self.enqueue_effects(std::iter::once(CoreRequest::HideSurface {
+                    surface_id: target_surface_id.to_string(),
+                }));
+                continue;
+            }
+
             let input = match event {
                 RoutedWindowEvent::PointerButtonWithIdentity {
                     x,

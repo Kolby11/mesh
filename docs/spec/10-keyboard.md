@@ -116,6 +116,13 @@ is *policy*; the shell owns actual focus state.
 | `on_demand` | Focus only when the user engages the surface — preferred for keyboardable shell chrome. |
 | `exclusive` | Dedicated keyboard sink while focused (launcher-style). |
 
+An `exclusive` surface owns the keyboard from the moment it is shown, the
+way a compositor focuses an exclusive layer as it maps: the shell routes keys
+to it even when the click that opened it gave another surface the keyboard.
+Because the compositor also delivers every pointer event to an exclusive
+layer, a primary press outside its bounds dismisses it instead of reaching
+its content.
+
 Popover focus ownership: activation may transfer focus into the promoted
 popover (`options.focus`), the shell records return focus as
 `(trigger_surface, trigger_key)`, closes on focus leave, and restores focus

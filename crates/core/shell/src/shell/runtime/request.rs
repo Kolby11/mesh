@@ -3080,7 +3080,21 @@ impl Shell {
             {
                 runtime.component.set_surface_exiting(false);
             }
-            return self.set_surface_visibility_now(surface_id, true);
+            // The compositor hands the keyboard to an exclusive layer as it
+            // maps. Keys are routed by `keyboard_focus_surface`, so it must
+            // follow, or they keep going to the surface clicked to open this
+            // one even though the compositor now delivers them here.
+            let takes_keyboard = self
+                .component_index_for_surface(&surface_id)
+                .is_some_and(|index| {
+                    self.components[index].component.surface_keyboard_mode()
+                        == mesh_core_wayland::KeyboardMode::Exclusive
+                });
+            let effects = self.set_surface_visibility_now(surface_id.clone(), true)?;
+            if takes_keyboard {
+                self.claim_keyboard_focus_for_surface(&surface_id);
+            }
+            return Ok(effects);
         }
 
         let hide_transition = self

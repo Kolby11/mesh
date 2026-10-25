@@ -950,6 +950,11 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.surface_layout.role
     }
 
+    fn surface_keyboard_mode(&self) -> KeyboardMode {
+        self.keyboard_mode_override
+            .unwrap_or(self.surface_layout.keyboard_mode)
+    }
+
     fn surface_promotable(&self) -> bool {
         self.surface_layout.promotable
     }

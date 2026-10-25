@@ -1690,6 +1690,11 @@ pub trait ShellComponent: Send {
     fn surface_role(&self) -> mesh_core_wayland::SurfaceRole {
         mesh_core_wayland::SurfaceRole::Layer
     }
+    /// The keyboard interactivity this surface asks the compositor for,
+    /// including any runtime override. Known before the first render.
+    fn surface_keyboard_mode(&self) -> mesh_core_wayland::KeyboardMode {
+        mesh_core_wayland::KeyboardMode::None
+    }
     /// Whether [`CoreRequest::SetSurfaceRole`] applies to this surface.
     fn surface_promotable(&self) -> bool {
         false

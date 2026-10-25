@@ -1971,6 +1971,67 @@ impl ShownSurfaceHarness {
     }
 }
 
+/// Clicking the bar claims the keyboard for it. Showing an exclusive surface
+/// from that click must move the shell's key routing along with the
+/// compositor's focus, and a press outside the exclusive surface (which the
+/// compositor still delivers to it) dismisses it.
+#[test]
+fn exclusive_surface_takes_key_routing_and_dismisses_on_outside_press() {
+    let catalog = GlassCatalog::new();
+    let bar = catalog.mount("glass-bar");
+    let mut carousel = catalog.mount("wallpaper-carousel");
+    update(
+        &mut carousel,
+        "mesh.wallpapers",
+        serde_json::json!({"available": true, "directory": "/walls", "wallpapers": []}),
+    );
+    let bar_id = bar.surface_id().to_owned();
+    let carousel_id = carousel.surface_id().to_owned();
+    let mut shell = crate::shell::Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(bar));
+    shell.register_component(Box::new(carousel));
+    let mut emitted = shell
+        .apply_request(CoreRequest::HideSurface {
+            surface_id: carousel_id.clone(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+
+    shell.claim_keyboard_focus_for_surface(&bar_id);
+    let mut emitted = shell
+        .apply_request(CoreRequest::ShowSurface {
+            surface_id: carousel_id.clone(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    assert_eq!(
+        shell.keyboard_focus_surface.as_deref(),
+        Some(carousel_id.as_str())
+    );
+
+    shell.render_components().unwrap();
+    shell
+        .presentation_engine
+        .testing_set_surface_configured(&carousel_id, true);
+    shell.render_components().unwrap();
+    shell.pending_wayland_events.push_back(mesh_core_presentation::WindowEvent::PointerButton {
+        surface_id: carousel_id.as_str().into(),
+        x: 10.0,
+        y: 5000.0,
+        button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+        pressed: true,
+    });
+    shell.dispatch_wayland().unwrap();
+    let state = &shell.core.surfaces[&carousel_id];
+    assert!(
+        !state.visible || state.closing_until.is_some(),
+        "an outside press dismisses the exclusive surface"
+    );
+}
+
 #[derive(Debug, PartialEq)]
 struct ShowCost {
     configures: usize,
