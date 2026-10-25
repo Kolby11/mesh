@@ -27,7 +27,7 @@
     },
     "entry": "src/main.mesh",
     "surface": {
-      "anchor": "top",
+      "anchor": "left",
       "layer": "overlay",
       "keyboard_mode": "on_demand",
       "visible_on_start": false

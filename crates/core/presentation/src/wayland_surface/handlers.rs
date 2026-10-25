@@ -1064,7 +1064,6 @@ fn normalize_keysym_name(name: &'static str) -> Cow<'static, str> {
         "Down" | "KP_Down" => Cow::Borrowed("ArrowDown"),
         "Prior" => Cow::Borrowed("PageUp"),
         "Next" => Cow::Borrowed("PageDown"),
-        "Escape" => Cow::Borrowed("Esc"),
         other => Cow::Borrowed(other),
     }
 }
@@ -1728,7 +1727,7 @@ mod tests {
         assert_eq!(normalize_keysym_name("space"), "Space");
         assert_eq!(normalize_keysym_name("ISO_Left_Tab"), "Tab");
         assert_eq!(normalize_keysym_name("BackSpace"), "Backspace");
-        assert_eq!(normalize_keysym_name("Escape"), "Esc");
+        assert_eq!(normalize_keysym_name("Escape"), "Escape");
         assert_eq!(normalize_keysym_name("Left"), "ArrowLeft");
         assert_eq!(normalize_keysym_name("Right"), "ArrowRight");
         assert_eq!(normalize_keysym_name("Up"), "ArrowUp");

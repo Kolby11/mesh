@@ -44,8 +44,9 @@ controls; the dock's search button opens the application launcher. The bar's
 dashboard and wallpaper buttons toggle those overlays. The dashboard closes with
 Escape, its close button or a click outside the panel. The wallpaper carousel
 is a widget under the bar, centred horizontally, driven by arrows,
-PageUp/PageDown and the wheel; it closes with Escape or once a wallpaper is
-applied.
+PageUp/PageDown and the wheel; Enter, Space or a click on the centre card
+applies the wallpaper and closes it, and Escape closes it. Notification toasts
+anchor to the left edge so they sit under the bar's start islands.
 The media card grows a
 spectrum strip while audio plays. Dashboard system meters and CPU history bars
 keep fixed layout boxes and animate their bottom-anchored vertical scale, so

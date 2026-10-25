@@ -743,6 +743,10 @@ pub(super) struct FrontendSurfaceComponent {
     /// The root asked for the whole output (`height: 100%` on a top/bottom
     /// surface), so the layer request spans both axes.
     pub(super) surface_fills_output: bool,
+    /// The root spans its anchored top/bottom edge (`width: auto` or `100%`);
+    /// otherwise the layer request carries the measured width and the
+    /// compositor centres it.
+    pub(super) surface_spans_width: bool,
     /// The normalized settings policy and its accepted monotonic generation.
     surface_policy: SurfacePolicySnapshot,
     surface_policy_generation: SurfacePolicyGenerator,
@@ -1368,6 +1372,7 @@ impl FrontendSurfaceComponent {
             settings_diagnostics: settings_state.diagnostics,
             surface_layout: settings_state.layout.clone(),
             surface_fills_output: false,
+            surface_spans_width: true,
             surface_policy,
             surface_policy_generation,
             pending_surface_role_change: None,

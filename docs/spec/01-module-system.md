@@ -273,7 +273,10 @@ role)` is the explicit role form. Closing the promoted window demotes the widget
 
 Surface **sizing is CSS**: the laid-out box of the component root
 (`width: 100%` spans the anchored edge, `fit-content` shrinks to content,
-`min-*`/`max-*` clamp), measured by `measure_content_size()`. The show/hide
+`min-*`/`max-*` clamp), measured by `measure_content_size()`. A top or bottom
+root whose width is `auto` or `100%` requests the protocol's spanning width;
+a fit or fixed width is requested as measured, and the compositor centres it
+along that edge. The show/hide
 transition is a CSS `transition` on the root. There are no manifest sizing
 fields and no compatibility aliases. See [03 — Components](03-components.md).
 

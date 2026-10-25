@@ -1,7 +1,7 @@
 {
   "name": "@mesh/wallpaper-carousel",
   "version": "0.1.0",
-  "description": "Wallpaper selector widget under the bar: an endless strip of tall cards that slide, shrink with distance and pan across their pictures; Enter applies the centred one.",
+  "description": "Wallpaper selector widget centred under the bar: an endless strip of tall cards that slide, shrink with distance and pan across their pictures; arrows or scrolling browse, Enter, Space or a click applies.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "ui",
@@ -75,6 +75,11 @@
           "label": { "t": "keybind.apply", "fallback": "Use this wallpaper" },
           "category": { "t": "keybind.category", "fallback": "Wallpapers" },
           "trigger": { "kind": "shortcut", "key": "Enter" }
+        },
+        "select": {
+          "label": { "t": "keybind.select", "fallback": "Use this wallpaper" },
+          "category": { "t": "keybind.category", "fallback": "Wallpapers" },
+          "trigger": { "kind": "shortcut", "key": "Space" }
         }
       }
     }

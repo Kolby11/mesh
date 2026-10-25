@@ -10,6 +10,7 @@
 <template>
     <column class="widget" aria-label={t("carousel.title")} keybind="close" onkeybind={onClose} onscroll={onScroll}>
         <box class="track" hidden={not has_wallpapers} keybind="apply" onkeybind={onApply}>
+            <box class="track" keybind="select" onkeybind={onApply}>
             <box class="track" keybind="page_previous" onkeybind={onPagePrevious}>
                 <box class="track" keybind="page_next" onkeybind={onPageNext}>
                     <box class="track" keybind="previous" onkeybind={onPrevious}>
@@ -32,9 +33,14 @@
                     </box>
                 </box>
             </box>
+            </box>
         </box>
-        <text class="caption" hidden={not has_wallpapers}>{focused_name}</text>
-        <text class="caption" hidden={has_wallpapers}>{empty_label}</text>
+        <box class="caption" hidden={not has_wallpapers}>
+            <text class="caption-text">{focused_name}</text>
+        </box>
+        <box class="caption" hidden={has_wallpapers}>
+            <text class="caption-text">{empty_label}</text>
+        </box>
     </column>
 </template>
 
@@ -308,12 +314,17 @@ end
     }
 
     .caption {
-        height: 26px;
+        height: 28px;
+        max-width: 420px;
         padding: 0 14px;
+        align-items: center;
         border-radius: var(--radius-full);
         background: var(--color-surface-container-high);
+    }
+
+    .caption-text {
+        height: 18px;
         font-size: 13px;
-        line-height: 26px;
         color: var(--color-on-surface);
         text-overflow: ellipsis;
     }

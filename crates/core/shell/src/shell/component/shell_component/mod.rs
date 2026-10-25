@@ -107,6 +107,7 @@ struct MeasuredSurfaceGeometry {
     margins: [i32; 4],
     exclusive_zone: i32,
     fills_output: bool,
+    spans_width: bool,
 }
 
 fn measured_surface_geometry(
@@ -133,6 +134,14 @@ fn measured_surface_geometry(
     // wallpaper or full-output backdrop.
     let fills_output = matches!(edge, Edge::Top | Edge::Bottom)
         && matches!(root.computed_style.height, mesh_core_elements::Dimension::Percent(p) if p >= 100.0);
+    // `width: 100%` (or the block default) spans the anchored edge; a fit or
+    // fixed width is the root's own size (01 §surface sizing).
+    let spans_width = matches!(edge, Edge::Top | Edge::Bottom)
+        && match root.computed_style.width {
+            mesh_core_elements::Dimension::Auto => true,
+            mesh_core_elements::Dimension::Percent(p) => p >= 100.0,
+            _ => false,
+        };
     let margins = [
         css_edge_to_i32(root.computed_style.margin.top),
         css_edge_to_i32(root.computed_style.margin.right),
@@ -156,6 +165,7 @@ fn measured_surface_geometry(
         margins,
         exclusive_zone,
         fills_output,
+        spans_width,
     }
 }
 
@@ -1459,8 +1469,11 @@ impl ShellComponent for FrontendSurfaceComponent {
                     self.invalidate_surface_config();
                 }
             }
-            if self.surface_fills_output != measured_geometry.fills_output {
+            if self.surface_fills_output != measured_geometry.fills_output
+                || self.surface_spans_width != measured_geometry.spans_width
+            {
                 self.surface_fills_output = measured_geometry.fills_output;
+                self.surface_spans_width = measured_geometry.spans_width;
                 self.invalidate_surface_config();
             }
             if self.surface_layout.exclusive_zone != measured_geometry.exclusive_zone

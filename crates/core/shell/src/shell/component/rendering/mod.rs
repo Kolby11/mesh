@@ -305,17 +305,17 @@ impl FrontendSurfaceComponent {
         surface.set_layer(self.surface_layout.layer);
         let (measured_width, measured_height) = self.requested_layout_size();
         // In layer-shell, zero is the protocol spelling for "span the output"
-        // when the surface is anchored to both opposing edges. A CSS root can
-        // correctly measure its own content width after the first paint, but
-        // feeding that measurement back as a top/bottom surface's protocol
-        // width turns a spanning bar into a fixed-width surface. Some
-        // compositors center that fixed-width surface, leaving gaps on both
-        // sides. Keep the spanning axis dynamic; the cross axis remains
-        // content-measured.
+        // when the surface is anchored to both opposing edges. A spanning
+        // root's measured width is the output's, but feeding it back would
+        // turn a spanning bar into a fixed-width surface that some compositors
+        // centre with gaps on both sides, so that axis stays dynamic. A fit or
+        // fixed-width root sends its measured width, which the compositor
+        // centres along the edge.
         let (width, height) = layer_surface_request_size(
             self.surface_layout.edge,
             self.surface_layout.exclusive_zone,
             self.surface_fills_output,
+            self.surface_spans_width,
             (measured_width, measured_height),
         );
         // Content size only — the tooltip overlay reserve is added at the
@@ -1844,11 +1844,15 @@ fn layer_surface_request_size(
     edge: mesh_core_wayland::Edge,
     exclusive_zone: i32,
     fills_output: bool,
+    spans_width: bool,
     measured_size: (u32, u32),
 ) -> (u32, u32) {
     match edge {
         mesh_core_wayland::Edge::Top | mesh_core_wayland::Edge::Bottom if fills_output => (0, 0),
-        mesh_core_wayland::Edge::Top | mesh_core_wayland::Edge::Bottom => (0, measured_size.1),
+        mesh_core_wayland::Edge::Top | mesh_core_wayland::Edge::Bottom if spans_width => {
+            (0, measured_size.1)
+        }
+        mesh_core_wayland::Edge::Top | mesh_core_wayland::Edge::Bottom => measured_size,
         // Only a docked side rail is anchored to both vertical edges. A
         // floating left/right surface needs its measured height; sending zero
         // would turn it into a full-height input surface.

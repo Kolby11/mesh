@@ -4,8 +4,24 @@ use mesh_core_wayland::Edge;
 #[test]
 fn floating_side_surface_keeps_its_measured_height() {
     assert_eq!(
-        layer_surface_request_size(Edge::Right, 0, false, (380, 220)),
+        layer_surface_request_size(Edge::Right, 0, false, true, (380, 220)),
         (380, 220)
+    );
+}
+
+#[test]
+fn top_surface_spans_only_when_its_root_does() {
+    assert_eq!(
+        layer_surface_request_size(Edge::Top, 48, false, true, (1920, 48)),
+        (0, 48)
+    );
+    assert_eq!(
+        layer_surface_request_size(Edge::Top, 0, false, false, (1336, 400)),
+        (1336, 400)
+    );
+    assert_eq!(
+        layer_surface_request_size(Edge::Bottom, 0, true, false, (1336, 400)),
+        (0, 0)
     );
 }
 

@@ -764,19 +764,18 @@ fn wallpaper_carousel_centres_the_selection_and_slides_its_cards() {
         .collect();
     assert!(ranks[3] > ranks[2] && ranks[2] > ranks[1], "{ranks:?}");
 
-    // Clicking the next card selects it; its node slides into the centre
+    // Stepping selects the next card; its node slides into the centre
     // rather than being replaced.
     let next = cards[4].mesh_key().unwrap().to_owned();
     let start_x = cards[4].computed_style.transform.translate_x;
     let rest_x = cards[3].computed_style.transform.translate_x;
-    component.focused_key = Some(next.clone());
     component
         .handle_input(
             &theme(),
             width,
             height,
             ComponentInput::KeyPressed {
-                key: "Space".into(),
+                key: "ArrowRight".into(),
                 modifiers: Default::default(),
             },
         )
@@ -796,15 +795,13 @@ fn wallpaper_carousel_centres_the_selection_and_slides_its_cards() {
 
     // Wrapping: four more steps forward lands back on the first wallpaper.
     for _ in 0..4 {
-        let (_, cards) = carousel_state(&component);
-        component.focused_key = Some(cards[4].mesh_key().unwrap().to_owned());
         component
             .handle_input(
                 &theme(),
                 width,
                 height,
                 ComponentInput::KeyPressed {
-                    key: "Space".into(),
+                    key: "ArrowRight".into(),
                     modifiers: Default::default(),
                 },
             )
@@ -878,6 +875,46 @@ fn wallpaper_carousel_is_a_top_widget_driven_by_the_keyboard() {
     assert!(carousel_selection(&component).contains("w06"));
     key(&mut component, "PageUp");
     assert!(carousel_selection(&component).contains("w11"));
+
+    // Enter and Space both apply the centred wallpaper and close the widget.
+    for submit in ["Enter", "Space"] {
+        let requests = component
+            .handle_input(
+                &theme(),
+                width,
+                height,
+                ComponentInput::KeyPressed {
+                    key: submit.into(),
+                    modifiers: Default::default(),
+                },
+            )
+            .unwrap();
+        let requests = format!("{requests:?}");
+        assert!(
+            requests.contains("set_backdrop_image") && requests.contains("w11.png"),
+            "{submit} applies: {requests}"
+        );
+        assert!(
+            requests.contains("wallpaper-carousel"),
+            "{submit} closes: {requests}"
+        );
+    }
+    let requests = component
+        .handle_input(
+            &theme(),
+            width,
+            height,
+            ComponentInput::KeyPressed {
+                key: "Escape".into(),
+                modifiers: Default::default(),
+            },
+        )
+        .unwrap();
+    let requests = format!("{requests:?}");
+    assert!(
+        requests.contains("wallpaper-carousel") && !requests.contains("set_backdrop_image"),
+        "Escape only closes: {requests}"
+    );
 }
 
 #[test]
