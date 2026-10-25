@@ -2477,3 +2477,96 @@ fn dashboard_spectrum_updates_preserve_layout() {
         mesh_core_elements::style::TransformOriginValue::Percent(100.0)
     );
 }
+
+/// The bar's volume chip toggles mute on activation and steps the volume
+/// with the arrow keys, as its scroll wheel does.
+#[test]
+fn glass_bar_volume_chip_steps_volume_with_arrow_keys() {
+    let mut component = host("glass-bar");
+    update(
+        &mut component,
+        "mesh.audio",
+        serde_json::json!({"available":true,"percent":50,"muted":false}),
+    );
+    paint(&mut component, 1920, 100);
+    let tree = component.last_tree.as_ref().unwrap();
+    let chip = first_node_by_class(tree, "status-chip-btn").unwrap();
+    component.focused_key = chip.mesh_key().map(str::to_owned);
+    for (arrow, command) in [
+        ("ArrowUp", "volume_up"),
+        ("ArrowRight", "volume_up"),
+        ("ArrowDown", "volume_down"),
+        ("ArrowLeft", "volume_down"),
+    ] {
+        let requests = component
+            .handle_input(
+                &theme(),
+                1920,
+                100,
+                ComponentInput::KeyPressed {
+                    key: arrow.into(),
+                    modifiers: Default::default(),
+                },
+            )
+            .unwrap();
+        let calls: Vec<_> = requests.iter().filter_map(service_request_parts).collect();
+        assert!(
+            calls
+                .iter()
+                .any(|(service, method, _)| *service == "mesh.audio" && *method == command),
+            "{arrow}: {calls:?}"
+        );
+        paint(&mut component, 1920, 100);
+    }
+}
+
+/// A focused launcher cell scales up and draws the platform focus outline;
+/// both must stay inside the results viewport, which clips its content, so
+/// the grid keeps five cells per row with an inset for them.
+#[test]
+fn launcher_cells_leave_room_for_their_focus_outline() {
+    let mut component = host("glass-dock");
+    let installed: Vec<_> = (0..12)
+        .map(|index| {
+            serde_json::json!({
+                "id": format!("app-{index}"), "name": format!("Application {index}"),
+                "icon": "", "pinned": false, "running": false, "focused": false, "windows": 0
+            })
+        })
+        .collect();
+    update(
+        &mut component,
+        "mesh.apps",
+        serde_json::json!({"available": true, "installed": installed, "apps": []}),
+    );
+    paint(&mut component, 1920, 180);
+    press(&mut component, "glassLauncher", 1920, 180);
+    paint(&mut component, 1920, 180);
+    let tree = component.last_tree.as_ref().unwrap();
+    let results = first_node_by_class(tree, "results").unwrap().layout;
+    let mut cells = Vec::new();
+    fn collect(node: &WidgetNode, out: &mut Vec<mesh_core_elements::LayoutRect>) {
+        if node
+            .attributes
+            .get(Prop::Class)
+            .is_some_and(|class| class.split_whitespace().any(|part| part == "cell"))
+        {
+            out.push(node.layout);
+        }
+        node.children.iter().for_each(|child| collect(child, out));
+    }
+    collect(tree, &mut cells);
+    assert_eq!(cells.len(), 12);
+    let first_row = cells.iter().filter(|cell| cell.y == cells[0].y).count();
+    assert_eq!(first_row, 5, "five cells per row");
+    // 2px outline + 2px offset, plus each side's share of the 1.04 hover scale.
+    let reach = 4.0 + cells[0].width * 0.02;
+    for cell in &cells {
+        assert!(
+            cell.x - reach >= results.x
+                && cell.x + cell.width + reach <= results.x + results.width
+                && cell.y - reach >= results.y,
+            "cell {cell:?} leaves no room for its outline in {results:?}"
+        );
+    }
+}

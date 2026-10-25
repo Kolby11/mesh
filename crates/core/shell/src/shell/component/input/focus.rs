@@ -113,8 +113,9 @@ impl FrontendSurfaceComponent {
         if mesh_core_interaction::active_modal_scope(tree).is_some() {
             return self.advance_keyboard_focus(tree, backward);
         }
-        let traversal = collect_focus_traversal(tree);
         let current = self.focused_key.clone();
+        let traversal =
+            mesh_core_interaction::collect_focus_traversal_from(tree, current.as_deref());
 
         // Forward Tab on a key that triggered an open popover → transfer
         // into that popover. The mapping is registered when the click

@@ -1577,6 +1577,16 @@ impl PresentationEngine {
         }
     }
 
+    /// Initial container-query hint: the surface's output size, or the common
+    /// logical size of all advertised outputs before placement. Returns `None`
+    /// for ambiguous or unavailable geometry. This does not constrain buffers.
+    pub fn initial_style_container_size(&self, surface_id: &str) -> Option<(u32, u32)> {
+        match &self.backend {
+            Backend::WaylandSurface(bridge) => bridge.initial_style_container_size(surface_id),
+            Backend::DevWindow(_) | Backend::Testing(_) => None,
+        }
+    }
+
     pub fn input_region(&self, surface_id: &str) -> Option<DamageRect> {
         match &self.backend {
             Backend::WaylandSurface(bridge) => bridge.input_region(surface_id),

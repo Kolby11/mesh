@@ -788,6 +788,18 @@ impl WaylandSurfaceBackend {
         Self::logical_size_of(&self.state.output_state, output)
     }
 
+    pub(crate) fn initial_style_container_size(&self, surface_id: &str) -> Option<(u32, u32)> {
+        self.output_logical_size_for_surface(surface_id)
+            .or_else(|| {
+                common_output_size(
+                    self.state
+                        .output_state
+                        .outputs()
+                        .map(|output| Self::logical_size_of(&self.state.output_state, &output)),
+                )
+            })
+    }
+
     fn logical_size_of(
         output_state: &OutputState,
         output: &wl_output::WlOutput,
@@ -838,4 +850,35 @@ fn negotiated_capabilities(
         version("zwp_pointer_gestures_v1"),
         version("zwp_text_input_manager_v3"),
     )
+}
+
+fn common_output_size(sizes: impl IntoIterator<Item = Option<(u32, u32)>>) -> Option<(u32, u32)> {
+    let mut sizes = sizes.into_iter();
+    let first = sizes.next()??;
+    if first.0 == 0 || first.1 == 0 {
+        return None;
+    }
+    sizes.all(|size| size == Some(first)).then_some(first)
+}
+
+#[cfg(test)]
+mod initial_style_tests {
+    use super::common_output_size;
+
+    #[test]
+    fn initial_style_size_requires_unambiguous_output_geometry() {
+        assert_eq!(common_output_size([]), None);
+        assert_eq!(common_output_size([None]), None);
+        assert_eq!(common_output_size([Some((0, 1080))]), None);
+        assert_eq!(common_output_size([Some((1920, 1080))]), Some((1920, 1080)));
+        assert_eq!(
+            common_output_size([Some((1920, 1080)); 2]),
+            Some((1920, 1080))
+        );
+        assert_eq!(common_output_size([Some((1920, 1080)), None]), None);
+        assert_eq!(
+            common_output_size([Some((1920, 1080)), Some((2880, 1800))]),
+            None
+        );
+    }
 }

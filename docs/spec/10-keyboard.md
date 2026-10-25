@@ -14,6 +14,12 @@ surface** (`keyboard_mode` + runtime focus transfers, shell-owned).
 - `Tab` / `Shift+Tab` move through the final rendered visual order.
   `tabindex` overrides: `0` = normal order, positive sorts earlier, `-1` =
   pointer/script-focusable but skipped by Tab.
+- A `tabs` group is one Tab stop: the focused tab while focus is inside the
+  group, otherwise its `selected` tab, otherwise its first. Arrow keys on
+  either axis move to the previous/next enabled tab with wrapping (left and
+  right swap for RTL), `Home`/`End` move to the first/last, and the tab that
+  receives focus is activated, so its panel follows the keyboard. Tab then
+  moves on into the shown content; Shift+Tab returns to the selected tab.
 - Menus and menu items support roving `ArrowUp`/`ArrowDown` between
   siblings, Tab transfer, `Escape`, and return focus to the trigger — the
   same traversal works across promoted popover surfaces

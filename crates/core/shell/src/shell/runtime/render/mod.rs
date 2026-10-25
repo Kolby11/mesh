@@ -247,6 +247,14 @@ impl Shell {
                 continue;
             }
             rendered_ready_component = true;
+            if let Some(size) = self
+                .presentation_engine
+                .initial_style_container_size(&surface_id)
+            {
+                self.components[index]
+                    .component
+                    .set_initial_style_container_size(size);
+            }
             let surface_size = {
                 let surface = self
                     .surfaces
@@ -403,12 +411,14 @@ impl Shell {
                 // component sees) stay content-sized, and `configured_padding`
                 // travels with the inflated size so the presentation layer can
                 // confine pointer input back to the content rect.
+                let spans = (surface.width == 0, surface.height == 0);
                 let (requested_width, requested_height, _) = surface_geometry_with_overlay_reserve(
                     &surface_id,
                     surface.role,
                     surface.edge,
                     surface.width,
                     surface.height,
+                    spans,
                 );
                 // `render()` may have just completed a measurement by updating
                 // the shell-side surface record, while `width`/`height` still
@@ -435,6 +445,7 @@ impl Shell {
                     surface.edge,
                     content.width(),
                     content.height(),
+                    spans,
                 );
                 let extent =
                     ConfiguredSurfaceExtent::from_content_and_padding(content, configured_padding)
@@ -780,10 +791,16 @@ impl Shell {
                         SurfaceExtent::padded(extent_content, (width, height))
                     }
                 } else {
-                    let (role, edge) = self
+                    let (role, edge, spans) = self
                         .surfaces
                         .get(&surface_id)
-                        .map(|surface| (surface.role, surface.edge))
+                        .map(|surface| {
+                            (
+                                surface.role,
+                                surface.edge,
+                                (surface.width == 0, surface.height == 0),
+                            )
+                        })
                         .unwrap_or_default();
                     let (padded_width, padded_height, _) = surface_geometry_with_overlay_reserve(
                         &surface_id,
@@ -791,6 +808,7 @@ impl Shell {
                         edge,
                         width,
                         height,
+                        spans,
                     );
                     let (padded_width, padded_height) = match configured_layer_buffer {
                         Some((buffer_width, buffer_height)) => (
@@ -1633,6 +1651,14 @@ impl Shell {
         };
         self.components[index].prewarmed = true;
         let surface_id = self.components[index].surface_id.clone();
+        if let Some(size) = self
+            .presentation_engine
+            .initial_style_container_size(&surface_id)
+        {
+            self.components[index]
+                .component
+                .set_initial_style_container_size(size);
+        }
         // The surface has no output until it is mapped; any shown surface's
         // output stands in, so content laid out against it is painted and
         // requests its resources.

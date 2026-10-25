@@ -1,5 +1,5 @@
 use super::*;
-use mesh_core_elements::Prop;
+use mesh_core_elements::{NodeId, Prop};
 
 #[derive(Debug, Clone)]
 struct FocusTraversalTarget {
@@ -9,6 +9,9 @@ struct FocusTraversalTarget {
     top: f32,
     bottom: f32,
     discovery_index: usize,
+    /// The nearest enclosing `tabs` group of a `tab` target.
+    tab_group: Option<NodeId>,
+    selected: bool,
 }
 
 pub fn find_focusable_at(node: &WidgetNode, x: f32, y: f32) -> Option<String> {
@@ -22,22 +25,104 @@ pub fn find_focusable_at(node: &WidgetNode, x: f32, y: f32) -> Option<String> {
 }
 
 pub fn collect_focus_traversal(node: &WidgetNode) -> Vec<String> {
+    collect_focus_traversal_from(node, None)
+}
+
+/// Tab order as seen from the focused `current` element. Each `tabs` group is
+/// one stop, as in the WAI-ARIA tabs pattern: the focused tab when focus is
+/// inside the group, otherwise its selected tab, otherwise its first tab.
+pub fn collect_focus_traversal_from(node: &WidgetNode, current: Option<&str>) -> Vec<String> {
     let mut targets = Vec::new();
     collect_focus_traversal_with_transform(
         node,
         root_transform(0.0, 0.0),
         &AffineClipStack::default(),
         NodeEligibility::ROOT,
+        None,
         &mut targets,
     );
 
     order_focus_targets(&mut targets);
     let scope = crate::active_modal_scope(node);
-    targets
-        .into_iter()
-        .map(|target| target.key)
-        .filter(|key| scope.is_none_or(|scope| crate::scope_contains(scope, key)))
-        .collect()
+    targets.retain(|target| scope.is_none_or(|scope| crate::scope_contains(scope, &target.key)));
+    collapse_tab_groups(&mut targets, current);
+    targets.into_iter().map(|target| target.key).collect()
+}
+
+fn collapse_tab_groups(targets: &mut Vec<FocusTraversalTarget>, current: Option<&str>) {
+    let rank = |target: &FocusTraversalTarget| {
+        if current == Some(target.key.as_str()) {
+            0
+        } else if target.selected {
+            1
+        } else {
+            2
+        }
+    };
+    let mut stops: Vec<(NodeId, usize)> = Vec::new();
+    for (index, target) in targets.iter().enumerate() {
+        let Some(group) = target.tab_group else {
+            continue;
+        };
+        match stops.iter_mut().find(|(id, _)| *id == group) {
+            Some((_, stop)) if rank(target) < rank(&targets[*stop]) => *stop = index,
+            Some(_) => {}
+            None => stops.push((group, index)),
+        }
+    }
+    if stops.is_empty() {
+        return;
+    }
+    let mut index = 0;
+    targets.retain(|target| {
+        let keep = target
+            .tab_group
+            .is_none_or(|group| stops.contains(&(group, index)));
+        index += 1;
+        keep
+    });
+}
+
+/// The enabled tabs of the `tabs` group that owns `key`, in tree order, with
+/// the position of `key` among them. Tabs inside a nested group belong to it.
+pub fn tab_group_items(tree: &WidgetNode, key: &str) -> Option<(Vec<String>, usize)> {
+    fn path_to<'a>(node: &'a WidgetNode, key: &str, path: &mut Vec<&'a WidgetNode>) -> bool {
+        path.push(node);
+        if node.mesh_key() == Some(key)
+            || node.children.iter().any(|child| path_to(child, key, path))
+        {
+            return true;
+        }
+        path.pop();
+        false
+    }
+    let mut path = Vec::new();
+    if !path_to(tree, key, &mut path) {
+        return None;
+    }
+    let group = path
+        .iter()
+        .rev()
+        .skip(1)
+        .find(|node| crate::node_is_source(node, &["tabs"]))?;
+    fn collect(node: &WidgetNode, tabs: &mut Vec<String>) {
+        for child in &node.children {
+            if !node_allows(child, InteractionTarget::Focus) {
+                continue;
+            }
+            if crate::node_is_source(child, &["tab"]) {
+                if let Some(key) = child.mesh_key() {
+                    tabs.push(key.to_owned());
+                }
+            } else if !crate::node_is_source(child, &["tabs"]) {
+                collect(child, tabs);
+            }
+        }
+    }
+    let mut tabs = Vec::new();
+    collect(group, &mut tabs);
+    let index = tabs.iter().position(|candidate| candidate == key)?;
+    Some((tabs, index))
 }
 
 pub fn next_focus_target(
@@ -45,7 +130,7 @@ pub fn next_focus_target(
     current: Option<&str>,
     backward: bool,
 ) -> Option<String> {
-    let traversal = collect_focus_traversal(node);
+    let traversal = collect_focus_traversal_from(node, current);
     if traversal.is_empty() {
         return None;
     }
@@ -110,6 +195,7 @@ fn collect_focus_traversal_with_transform(
     parent_transform: AffineTransform,
     clips: &AffineClipStack,
     parent_policy: NodeEligibility,
+    tab_group: Option<NodeId>,
     targets: &mut Vec<FocusTraversalTarget>,
 ) {
     let policy = parent_policy.child(node);
@@ -147,11 +233,18 @@ fn collect_focus_traversal_with_transform(
             top,
             bottom,
             discovery_index: targets.len(),
+            tab_group: tab_group.filter(|_| crate::node_is_source(node, &["tab"])),
+            selected: node.accessibility.state.selected,
         });
     }
 
     let child_transform = child_world_transform(world, node);
     let child_clips = push_node_clip(clips, node, world);
+    let child_group = if crate::node_is_source(node, &["tabs"]) {
+        Some(node.id)
+    } else {
+        tab_group
+    };
 
     for child in &node.children {
         collect_focus_traversal_with_transform(
@@ -159,6 +252,7 @@ fn collect_focus_traversal_with_transform(
             child_transform,
             &child_clips,
             policy,
+            child_group,
             targets,
         );
     }
@@ -268,6 +362,8 @@ mod tests {
             top,
             bottom,
             discovery_index: index,
+            tab_group: None,
+            selected: false,
         }
     }
 

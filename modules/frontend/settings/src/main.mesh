@@ -12,50 +12,50 @@
                     </column>
                 </row>
 
-                <column class="settings-navigation" aria-label={t('settings.categories')}>
-                    <button class="settings-nav-item" class:settings-nav-item-active={active_page == "wifi"} onclick={showWifi} title={t('nav.wifi.tooltip')}>
+                <tabs class="settings-navigation" aria-label={t('settings.categories')} aria-orientation="vertical">
+                    <tab class="settings-nav-item" selected={active_page == "wifi"} onactivate={showWifi} title={t('nav.wifi.tooltip')}>
                         <icon class="nav-icon" name="wifi" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.wifi')}</text>
                             <text class="nav-subtitle">{t('nav.wifi.subtitle')}</text>
                         </column>
-                    </button>
-                    <button class="settings-nav-item" class:settings-nav-item-active={active_page == "audio"} onclick={showAudio} title={t('nav.audio.tooltip')}>
+                    </tab>
+                    <tab class="settings-nav-item" selected={active_page == "audio"} onactivate={showAudio} title={t('nav.audio.tooltip')}>
                         <icon class="nav-icon" name="audio-volume-high" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.audio')}</text>
                             <text class="nav-subtitle">{t('nav.audio.subtitle')}</text>
                         </column>
-                    </button>
-                    <button class="settings-nav-item" class:settings-nav-item-active={active_page == "bluetooth"} onclick={showBluetooth} title={t('nav.bluetooth.tooltip')}>
+                    </tab>
+                    <tab class="settings-nav-item" selected={active_page == "bluetooth"} onactivate={showBluetooth} title={t('nav.bluetooth.tooltip')}>
                         <icon class="nav-icon" name="bluetooth" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.bluetooth')}</text>
                             <text class="nav-subtitle">{t('nav.bluetooth.subtitle')}</text>
                         </column>
-                    </button>
-                    <button class="settings-nav-item" class:settings-nav-item-active={active_page == "appearance"} onclick={showAppearance} title={t('nav.appearance.tooltip')}>
+                    </tab>
+                    <tab class="settings-nav-item" selected={active_page == "appearance"} onactivate={showAppearance} title={t('nav.appearance.tooltip')}>
                         <icon class="nav-icon" name="applications-graphics" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.appearance')}</text>
                             <text class="nav-subtitle">{t('nav.appearance.subtitle')}</text>
                         </column>
-                    </button>
-                    <button class="settings-nav-item" class:settings-nav-item-active={active_page == "device"} onclick={showDevice} title={t('nav.device.tooltip')}>
+                    </tab>
+                    <tab class="settings-nav-item" selected={active_page == "device"} onactivate={showDevice} title={t('nav.device.tooltip')}>
                         <icon class="nav-icon" name="computer" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.device')}</text>
                             <text class="nav-subtitle">{t('nav.device.subtitle')}</text>
                         </column>
-                    </button>
-                    <button class="settings-nav-item" class:settings-nav-item-active={active_page == "advanced"} onclick={showAdvanced} title={t('nav.advanced.tooltip')}>
+                    </tab>
+                    <tab class="settings-nav-item" selected={active_page == "advanced"} onactivate={showAdvanced} title={t('nav.advanced.tooltip')}>
                         <icon class="nav-icon" name="settings" size="18" />
                         <column class="nav-copy">
                             <text class="nav-title">{t('nav.advanced')}</text>
                             <text class="nav-subtitle">{t('nav.advanced.subtitle')}</text>
                         </column>
-                    </button>
-                </column>
+                    </tab>
+                </tabs>
 
                 <spacer />
 
@@ -302,10 +302,12 @@ end
 
     .settings-navigation {
         width: 100%;
+        flex-direction: column;
         gap: var(--spacing-xs);
     }
 
     .settings-nav-item {
+        flex-direction: row;
         width: 100%;
         min-height: 56px;
         align-items: center;
@@ -327,7 +329,7 @@ end
         color: var(--color-on-surface);
     }
 
-    .settings-nav-item-active {
+    .settings-nav-item:selected {
         background: transparent;
         background-image: var(--glass-surface-control);
         color: var(--glass-text-strong);

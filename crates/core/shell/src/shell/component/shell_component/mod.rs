@@ -891,6 +891,17 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.buffer_overlaid = true;
     }
 
+    fn set_initial_style_container_size(&mut self, size: (u32, u32)) {
+        if self.initial_style_container_size != Some(size) {
+            self.initial_style_container_size = Some(size);
+            if (self.unmeasured_root_axes.0 && self.last_definite_root_size.0.is_none())
+                || (self.unmeasured_root_axes.1 && self.last_definite_root_size.1.is_none())
+            {
+                self.invalidate_style_path(ComponentDirtyFlags::STYLE_RELAYOUT);
+            }
+        }
+    }
+
     fn surface_size_changed(&mut self, width: u32, height: u32) -> bool {
         self.observe_surface_size(width, height)
     }

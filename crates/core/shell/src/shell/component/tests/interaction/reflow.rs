@@ -1485,3 +1485,57 @@ fn stand_in_paint_keeps_container_queries_on_the_last_real_size() {
         .unwrap();
     assert_eq!(bar_margin_right(&component), 10.0);
 }
+
+#[test]
+fn first_stand_in_paint_queries_output_without_measuring_it_as_content() {
+    for (output, expected) in [((2000, 1000), 18.0), ((1200, 800), 10.0)] {
+        let mut component = test_frontend_component(
+            r#"
+<style>
+.bar { height: 20px; margin-right: 18px; }
+@container (max-width: 1500px) { .bar { margin-right: 10px; } }
+@container (max-height: 500px) { .bar { height: 40px; } }
+</style>
+<template><row class="bar" /></template>
+"#,
+        );
+        component.set_initial_style_container_size(output);
+        let mut buffer = PixelBuffer::new(1, 1);
+        component
+            .paint_raster(
+                &default_theme(),
+                SurfaceExtent::padded((0, 0), (1, 1)),
+                &mut buffer,
+                1.0,
+            )
+            .unwrap();
+        let bar = node_by_mesh_key(component.last_tree.as_ref().unwrap(), "root/0");
+        assert_eq!(bar.computed_style.margin.right, expected);
+        assert_eq!(bar.layout.height, 20.0);
+        assert_eq!(component.last_definite_root_size, (None, None));
+        assert_eq!(component.measured_size.unwrap().1, 20);
+
+        let mut narrow = PixelBuffer::new(1000, 80);
+        component
+            .paint_raster(
+                &default_theme(),
+                SurfaceExtent::unpadded(1000, 80),
+                &mut narrow,
+                1.0,
+            )
+            .unwrap();
+        component.set_initial_style_container_size((3000, 2000));
+        component.surface_size_changed(1, 1);
+        component
+            .paint_raster(
+                &default_theme(),
+                SurfaceExtent::padded((0, 0), (1, 1)),
+                &mut buffer,
+                1.0,
+            )
+            .unwrap();
+        let bar = node_by_mesh_key(component.last_tree.as_ref().unwrap(), "root/0");
+        assert_eq!(bar.computed_style.margin.right, 10.0);
+        assert_eq!(bar.layout.height, 40.0);
+    }
+}

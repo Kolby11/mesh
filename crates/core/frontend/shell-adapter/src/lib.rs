@@ -1673,6 +1673,9 @@ pub trait ShellComponent: Send {
     /// into its paint buffer, so retained pixels must not be moved in place
     /// until the next full repaint replaces them.
     fn buffer_overlaid(&mut self) {}
+    /// Seed queries on axes that have no content size yet. The hint neither
+    /// measures content nor overrides a previously configured query size.
+    fn set_initial_style_container_size(&mut self, _size: (u32, u32)) {}
     fn surface_size_changed(&mut self, _width: u32, _height: u32) -> bool {
         false
     }

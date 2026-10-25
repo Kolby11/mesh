@@ -11,6 +11,7 @@
             class="status-pill status-chip status-chip-btn"
             onclick={onToggleMute}
             onscroll={onVolumeScroll}
+            onkeydown={onVolumeKey}
             title={volume_label}
             aria-label={volume_label}
         >
@@ -97,6 +98,17 @@ end)
 
 function onToggleMute()
     audio.toggle_mute()
+end
+
+-- The chip toggles mute on activation; the arrow keys step the volume the
+-- way the scroll wheel does.
+function onVolumeKey(event)
+    local key = event and event.key
+    if key == "ArrowUp" or key == "ArrowRight" then
+        audio.volume_up()
+    elseif key == "ArrowDown" or key == "ArrowLeft" then
+        audio.volume_down()
+    end
 end
 
 function onVolumeScroll(event)

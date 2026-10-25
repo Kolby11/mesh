@@ -251,6 +251,11 @@ Tabs are an activatable group:
 </tabs>
 ```
 
+The group is a single Tab stop. Arrow keys, `Home` and `End` move between its
+tabs and activate the one they land on; a pointer press activates too, so
+`onactivate` is the only handler a tab needs. Style the shown tab with
+`:selected` ([10 §1](../spec/10-keyboard.md#1-focus-traversal--activation)).
+
 Collections start with `list` and `list-item`. List items can expose `selected`, `active`, `disabled`, `onclick`, and `onactivate`. `table`, `cell`, `tree`, and `empty-state` carry semantic metadata and style hooks, but rich table/tree keyboard models are deferred.
 
 ```xml

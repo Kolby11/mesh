@@ -1,11 +1,25 @@
 # Status
 
-**Updated:** 2026-10-24
+**Updated:** 2026-10-25
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and
 measurements live in [`log/`](log/README.md).
 
 ## Now
+
+- **Glass bug batch committed.** Tabs are one Tab stop with arrow roving
+  (core); the dashboard scrim covers the output (overlay reserve dropped on
+  spanning axes); bar ring, launcher outlines and volume-chip arrows fixed in
+  modules. The launcher click loss on Hyprland remains open in the backlog.
+
+- **Bubble-options authoring cleanup complete.** A pure item projection carries
+  rotation and arrival classes into the template. Ten shipped popup transition
+  and selection tests pass; the backlog item is removed.
+
+- **Initial container-query sizing complete for unambiguous outputs.** First
+  queries use logical output geometry without changing intrinsic measurement;
+  configured content sizes take precedence. GPU-feature shell: 1,018 passed;
+  presentation: 116 passed. Differing outputs before placement remain open.
 
 - **Scene-buffer retry complete.** Transient export failures wait for dmabuf
   release and resume without another raster. Three required-GPU release runs

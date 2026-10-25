@@ -362,10 +362,13 @@ fn settings_navigation_classes_and_language_options_derive_from_template_state()
         .unwrap();
     let active_handler = |settings: &FrontendSurfaceComponent| {
         let tree = settings.last_tree.as_ref().expect("settings tree");
-        assert_eq!(count_class_token(tree, "settings-nav-item-active"), 1);
-        first_node_with_class_token(tree, "settings-nav-item-active")
-            .and_then(|node| node.event_handlers.get("click").cloned())
-            .expect("active nav item handler")
+        let selected = selected_nav_tabs(tree);
+        assert_eq!(selected.len(), 1);
+        selected[0]
+            .event_handlers
+            .get("activate")
+            .cloned()
+            .expect("selected nav tab handler")
     };
     assert!(active_handler(&settings).contains("showWifi"));
 
@@ -655,4 +658,119 @@ fn settings_glass_surfaces_follow_the_active_theme_palette() {
         surfaces[0], surfaces[1],
         "settings must follow the selected palette"
     );
+}
+
+fn is_nav_tab(node: &WidgetNode) -> bool {
+    node.attributes.get(Prop::Class).is_some_and(|class| {
+        class
+            .split_whitespace()
+            .any(|part| part == "settings-nav-item")
+    })
+}
+
+fn selected_nav_tabs(tree: &WidgetNode) -> Vec<&WidgetNode> {
+    fn collect<'a>(node: &'a WidgetNode, out: &mut Vec<&'a WidgetNode>) {
+        if is_nav_tab(node) && node.accessibility.state.selected {
+            out.push(node);
+        }
+        for child in &node.children {
+            collect(child, out);
+        }
+    }
+    let mut out = Vec::new();
+    collect(tree, &mut out);
+    out
+}
+
+/// The navigation is one Tab stop: arrows move between its tabs and show
+/// each page, Tab leaves it for the page, and Shift+Tab comes back to the
+/// page's own tab.
+#[test]
+fn settings_navigation_is_one_tab_stop_with_arrow_keys_inside() {
+    let theme = default_theme();
+    let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+    let mut paint = |settings: &mut FrontendSurfaceComponent| {
+        settings
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .unwrap();
+    };
+    let key_theme = default_theme();
+    let key = |settings: &mut FrontendSurfaceComponent, key: &str, shift: bool| {
+        settings
+            .handle_input(
+                &key_theme,
+                920,
+                900,
+                ComponentInput::KeyPressed {
+                    key: key.into(),
+                    modifiers: KeyModifiers {
+                        shift,
+                        ..Default::default()
+                    },
+                },
+            )
+            .unwrap();
+    };
+    let focused_class = |settings: &FrontendSurfaceComponent| {
+        let tree = settings.last_tree.as_ref().unwrap();
+        let key = settings.focused_key.as_deref().expect("focus");
+        let node = mesh_core_interaction::find_node_by_key(tree, key).unwrap();
+        (
+            node.attributes
+                .get(Prop::Class)
+                .cloned()
+                .unwrap_or_default(),
+            node.tag.clone(),
+        )
+    };
+    let active_page = |settings: &FrontendSurfaceComponent| {
+        let tree = settings.last_tree.as_ref().unwrap();
+        let selected = selected_nav_tabs(tree);
+        assert_eq!(selected.len(), 1);
+        selected[0].event_handlers["activate"].clone()
+    };
+    paint(&mut settings);
+    let tree = settings.last_tree.as_ref().unwrap();
+    let traversal = mesh_core_interaction::collect_focus_traversal(tree);
+    let nav_stops = traversal
+        .iter()
+        .filter(|key| {
+            mesh_core_interaction::find_node_by_key(tree, key).is_some_and(|node| is_nav_tab(node))
+        })
+        .count();
+    assert_eq!(
+        nav_stops, 1,
+        "the navigation is one Tab stop: {traversal:?}"
+    );
+
+    let wifi = selected_nav_tabs(tree)[0].mesh_key().unwrap().to_owned();
+    settings.focused_key = Some(wifi);
+    key(&mut settings, "ArrowDown", false);
+    paint(&mut settings);
+    assert!(active_page(&settings).contains("showAudio"));
+    assert!(focused_class(&settings).0.contains("settings-nav-item"));
+    let audio_tab = settings.focused_key.clone();
+
+    key(&mut settings, "Tab", false);
+    paint(&mut settings);
+    let (class, tag) = focused_class(&settings);
+    assert!(
+        !class.contains("settings-nav-item"),
+        "Tab leaves the navigation for the page, got {tag} {class:?}"
+    );
+
+    key(&mut settings, "Tab", true);
+    paint(&mut settings);
+    assert_eq!(
+        settings.focused_key, audio_tab,
+        "Shift+Tab returns to the shown page's tab"
+    );
+
+    key(&mut settings, "End", false);
+    paint(&mut settings);
+    assert!(active_page(&settings).contains("showAdvanced"));
+    key(&mut settings, "ArrowDown", false);
+    paint(&mut settings);
+    assert!(active_page(&settings).contains("showWifi"), "arrows wrap");
 }

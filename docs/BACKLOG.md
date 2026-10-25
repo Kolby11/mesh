@@ -83,11 +83,15 @@ October log.
       after a press on it. Add an IPC/CLI command that focuses a surface, for a compositor keybind.
 - [ ] **Launcher search paints one keystroke late:** in the promoted dock launcher popup the
       last typed character appears only on the next input event; reproduced on `d02ba382`.
+- [ ] **Clicks lost after a grabbed popover is dismissed (Hyprland):** the dock apps button
+      ignores clicks after the launcher closes until the pointer moves; no `wl_pointer.enter`
+      follows the popup's destruction. Try `hyprland_focus_grab` instead of an `xdg_popup` grab for
+      click-open popovers (dismiss on `cleared`). Trace in the 2026-10-25 October log.
 - [ ] **Module focus styles duplicate the platform ring:** shipped glass and widget modules recolour
       borders on `:focus-visible` and now also draw the default outline; keep one per module.
-- [ ] **First paint answers container queries against the 1px stand-in:** the glass bar starts
-      in its `max-width: 1500px` variant and shifts windows once at startup. Seed the first
-      query from the output size; later stand-ins already use the last real size.
+- [ ] **Initial queries on differing outputs:** before Wayland reports placement,
+      a new surface has no unambiguous output-size hint. Resolve first-paint
+      container queries without guessing an output or sizing content from a placeholder.
 
 ## Glass shell core gaps (found 2026-10-17)
 
@@ -107,8 +111,6 @@ Goal: components written as plain Luau, with the framework owning dependency
 tracking, validation and scheduling.
 [Review and evidence](../.planning/todos/pending/2026-10-10-authoring-model.md).
 
-- [ ] Bubble-options builds rotation class names in functions; move them to
-      per-item data when next touched.
 - [ ] Narrow compound public inputs and captured template-helper dependencies;
       tables and function calls still use conservative invalidation.
 - [ ] Optimistic pending values on proxy methods, reconciled with emitted state

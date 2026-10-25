@@ -289,7 +289,9 @@ component author must know before setting `role: "window"`:
   then the content lays out into what is left, and pointer input follows the
   same geometry. A root with a definite `width`/`height` keeps requesting that
   size, so pairing it with `max-width: 100%` / `max-height: 100%` lets it fit
-  a small output and grow back on a larger one.
+  a small output and grow back on a larger one. On an axis the root spans
+  (`width`/`height: 100%`), the content takes the whole configured size; the
+  tooltip overlay reserve applies only to fixed axes.
 - A **window** is *told* its size by the compositor's configure — tiling
   layout, maximize, fullscreen, interactive resize — and content lays out into
   it. The measured size is only the initial request. A component with a rigid

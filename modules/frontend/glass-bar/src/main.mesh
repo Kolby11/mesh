@@ -55,11 +55,15 @@ end
 
 <style>
     /* The bar itself is clear: only the pills are glass, so the wallpaper
-    shows between clusters as in a floating island layout. */
+    shows between clusters as in a floating island layout. The root margin
+    becomes the layer-shell margin and the surface ends at the border box, so
+    part of the inset is padding: focus outlines and pill shadows at the ends
+    would otherwise fall outside the buffer. */
     .bar {
         width: 100%;
         height: 48px;
-        margin: 10px 18px 0;
+        margin: 10px 12px 0;
+        padding-inline: 6px;
         justify-content: space-between;
         align-items: center;
         gap: 11px;
@@ -169,7 +173,7 @@ end
         to { opacity: 1; transform: translateY(0px) scale(1); }
     }
     @container (max-width: 1500px) {
-        .bar { gap: 6px; margin: 8px 10px 0; }
+        .bar { gap: 6px; margin: 8px 4px 0; }
         .cluster { gap: 5px; }
     }
     @container (max-width: 1100px) {

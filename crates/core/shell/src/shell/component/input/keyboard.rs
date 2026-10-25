@@ -195,6 +195,16 @@ impl FrontendSurfaceComponent {
                 return Ok(requests);
             }
 
+            if let Some(next_key) = tab_roving_target(tree, &focused_key, &key) {
+                self.clear_selection();
+                requests.extend(self.set_focus_target(tree, Some(next_key.clone()), true)?);
+                // Automatic activation: the focused tab is the shown one.
+                let click_event = self.build_click_event(tree, &next_key, 0.0, 0.0);
+                requests.extend(self.dispatch_activation_handlers(tree, &next_key, click_event)?);
+                self.invalidate_interaction_restyle();
+                return Ok(requests);
+            }
+
             if matches!(key.as_str(), "ArrowDown" | "ArrowUp")
                 && let Some(next_key) =
                     self.rove_focus_within_parent(tree, &focused_key, key == "ArrowUp")
@@ -1167,4 +1177,36 @@ fn is_modifier_key(key: &str) -> bool {
     ];
     PREFIXES.iter().any(|prefix| key.starts_with(prefix))
         || matches!(key, "Caps_Lock" | "Num_Lock" | "Scroll_Lock")
+}
+
+/// The tab that an arrow, `Home` or `End` key moves to from the focused tab,
+/// wrapping at the ends. Both arrow axes rove, so the group works whatever
+/// way it is laid out; left and right swap in a right-to-left group.
+fn tab_roving_target(tree: &WidgetNode, focused_key: &str, key: &str) -> Option<String> {
+    if !matches!(
+        key,
+        "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown" | "Home" | "End"
+    ) {
+        return None;
+    }
+    let focused = find_node_by_key(tree, focused_key)?;
+    if !node_is_source(focused, &["tab"]) {
+        return None;
+    }
+    let (tabs, index) = mesh_core_interaction::tab_group_items(tree, focused_key)?;
+    let rtl =
+        focused.computed_style.text_direction == mesh_core_elements::style::TextDirection::Rtl;
+    let backward = match key {
+        "ArrowUp" => true,
+        "ArrowLeft" => !rtl,
+        "ArrowRight" => rtl,
+        _ => false,
+    };
+    let next = match key {
+        "Home" => 0,
+        "End" => tabs.len() - 1,
+        _ if backward => (index + tabs.len() - 1) % tabs.len(),
+        _ => (index + 1) % tabs.len(),
+    };
+    (next != index).then(|| tabs[next].clone())
 }

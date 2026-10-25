@@ -20,19 +20,28 @@ use super::*;
 ///
 /// The reserve is trailing (content at the buffer origin), so it is dropped on
 /// the axis of a bottom or right anchor: there it would sit between the content
-/// and the screen edge and push a dock off that edge by the reserve.
+/// and the screen edge and push a dock off that edge by the reserve. It is also
+/// dropped on an axis the surface `spans` (its size there is whatever the
+/// compositor configures): the configure already covers the output, so the
+/// reserve could only come out of the content, leaving a full-screen overlay
+/// short of the screen edge by the reserve.
 pub(super) fn surface_geometry_with_overlay_reserve(
     surface_id: &str,
     role: SurfaceRole,
     edge: Option<mesh_core_wayland::Edge>,
     width: u32,
     height: u32,
+    spans: (bool, bool),
 ) -> (u32, u32, SurfacePadding) {
     let (extra_w, extra_h) =
         if surface_id == DEBUG_INSPECTOR_SURFACE_ID || role == SurfaceRole::Window {
             (0, 0)
         } else {
             let (extra_w, extra_h) = component::tooltip_overlay_extra_for_content(width, height);
+            let (extra_w, extra_h) = (
+                if spans.0 { 0 } else { extra_w },
+                if spans.1 { 0 } else { extra_h },
+            );
             match edge {
                 Some(mesh_core_wayland::Edge::Bottom) => (extra_w, 0),
                 Some(mesh_core_wayland::Edge::Right) => (0, extra_h),
@@ -138,6 +147,7 @@ mod overlay_reserve_tests {
                 edge,
                 120,
                 80,
+                (false, false),
             );
             (w, h, padding.right, padding.bottom)
         };
@@ -165,5 +175,32 @@ mod overlay_reserve_tests {
             "a right panel must sit on the right edge"
         );
         assert!(right_bottom > 0);
+    }
+
+    #[test]
+    fn reserve_is_dropped_on_an_axis_the_surface_spans() {
+        let (_, height, padding) = surface_geometry_with_overlay_reserve(
+            "@test/dashboard",
+            SurfaceRole::Layer,
+            Some(Edge::Top),
+            2880,
+            1800,
+            (true, true),
+        );
+        assert_eq!(
+            (height, padding.bottom),
+            (1800, 0),
+            "a full-output overlay keeps the whole configure for its content"
+        );
+        let (width, _, padding) = surface_geometry_with_overlay_reserve(
+            "@test/narrow",
+            SurfaceRole::Layer,
+            Some(Edge::Top),
+            100,
+            40,
+            (true, false),
+        );
+        assert_eq!((width, padding.right), (100, 0));
+        assert!(padding.bottom > 0, "a fixed height keeps its reserve");
     }
 }

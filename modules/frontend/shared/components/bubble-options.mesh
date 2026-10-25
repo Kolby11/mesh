@@ -16,9 +16,9 @@
         ontwofingerscroll={onscroll}
         aria-label={label}
     >
-        {#for item in items}
+        {#for item in bubbleOptions()}
             <button
-                class={bubbleOptionClass(item.id)}
+                class={item.option_class}
                 style:left={bubbleOptionLeft(item.id) .. "px"}
                 style:top={bubbleOptionTop(item.id) .. "px"}
                 role="menuitemradio"
@@ -32,7 +32,7 @@
                 title={item.title}
                 aria-label={item.title}
             >
-                <box class={bubbleMotionClass(item.id)}>
+                <box class={item.motion_class}>
                     <box class={item.core_class} class:bubble-option-core-blur={props.blur_enabled}>
                         <icon class={item.icon_class} name={item.icon} size="14" />
                         <text class={item.text_class}>{item.text}</text>
@@ -127,47 +127,31 @@ local function rotationStep()
     return direction, (tonumber(tick) or 0) % 2 == 0 and "a" or "b"
 end
 
--- One step slides every bubble along the arc into the slot ahead of it, so the
--- row reads as a ring turning rather than a conveyor: each bubble starts at the
--- position of the neighbour it is replacing, which for the middle slot means
--- coming from higher up and for the outer slots from lower down.
---
--- Turning "next" moves content left, so slot 1 inherits slot 2's bubble, slot 2
--- inherits slot 3's, and slot 3 is where a new one appears; "prev" mirrors it.
--- Slots 1 and 3 sit at the same height, so they share one travel variant and
--- only the middle slot needs its own.
-local function rotationClass(index)
+function bubbleOptions()
     local direction, phase = rotationStep()
-    if direction == nil or #items ~= 3 then
-        return ""
-    end
-    local variant = index == 2 and "center" or "outer"
-    return " bubble-options-rotate-" .. direction .. "-" .. variant .. "-" .. phase
-end
-
-function bubbleMotionClass(id)
-    local index = itemIndex(id)
-    if #items ~= 3 then
-        return "bubble-options-motion"
-    end
+    local three_slots = #items == 3
     local variants = { "left", "center", "right" }
-    return "bubble-options-motion bubble-options-motion-" .. variants[index] .. rotationClass(index)
-end
-
--- The bubble arriving from off the ring fades in; the one it displaced has
--- already left the item list, so the pair reads as one appearing and one
--- disappearing. The fade rides the button so the travel animation keeps the
--- motion box and the idle float keeps the core.
-function bubbleOptionClass(id)
-    local direction, phase = rotationStep()
-    if direction == nil or #items ~= 3 then
-        return "bubble-option"
+    local next_items = {}
+    for index, item in items do
+        local option = table.clone(item)
+        option.option_class = "bubble-option"
+        option.motion_class = "bubble-options-motion"
+        if three_slots then
+            option.motion_class ..= " bubble-options-motion-" .. variants[index]
+            if direction ~= nil then
+                -- The middle slot travels the opposite arc leg to the outer two.
+                local variant = index == 2 and "center" or "outer"
+                option.motion_class ..= " bubble-options-rotate-" .. direction .. "-" .. variant .. "-" .. phase
+                -- The new bubble enters at the trailing edge of the turning ring.
+                local entering = direction == "next" and 3 or 1
+                if index == entering then
+                    option.option_class ..= " bubble-option-arriving-" .. phase
+                end
+            end
+        end
+        next_items[index] = option
     end
-    local entering = direction == "next" and 3 or 1
-    if itemIndex(id) ~= entering then
-        return "bubble-option"
-    end
-    return "bubble-option bubble-option-arriving-" .. phase
+    return next_items
 end
 </script>
 

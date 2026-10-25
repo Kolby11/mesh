@@ -407,12 +407,19 @@ impl FrontendSurfaceComponent {
     /// match every `max-*` condition: after each geometry-changing configure,
     /// while the compositor's ack is pending, a rule changing the root's
     /// margin or size would flip and reconfigure the surface again, forever.
-    /// Such an axis keeps the last size the surface really had instead.
+    /// Such an axis keeps the last size the surface really had instead, or
+    /// the initial output hint before the first definite paint.
     pub(super) fn root_style_container(&self, width: u32, height: u32) -> StyleContext {
         let (width_unmeasured, height_unmeasured) = self.unmeasured_root_axes;
         let (last_width, last_height) = self.last_definite_root_size;
-        let width = last_width.filter(|_| width_unmeasured).unwrap_or(width);
-        let height = last_height.filter(|_| height_unmeasured).unwrap_or(height);
+        let width = last_width
+            .or(self.initial_style_container_size.map(|size| size.0))
+            .filter(|_| width_unmeasured)
+            .unwrap_or(width);
+        let height = last_height
+            .or(self.initial_style_container_size.map(|size| size.1))
+            .filter(|_| height_unmeasured)
+            .unwrap_or(height);
         StyleContext {
             container_width: width as f32,
             container_height: height as f32,

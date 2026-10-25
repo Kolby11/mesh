@@ -16,7 +16,10 @@ pub use scope::{
     open_focus_scopes, parent_menu_trigger, scope_contains, scope_focus_traversal,
 };
 
-pub use focus::{collect_focus_traversal, find_focusable_at, next_focus_target};
+pub use focus::{
+    collect_focus_traversal, collect_focus_traversal_from, find_focusable_at, next_focus_target,
+    tab_group_items,
+};
 pub use frame::{
     InteractionFrame, InteractionFrameError, InteractionFramePhase, InteractionPhaseStamp,
     InteractionStateSnapshot,

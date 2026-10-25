@@ -982,6 +982,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// queries read it while that axis is a stand-in; see
     /// `root_style_container`.
     last_definite_root_size: (Option<u32>, Option<u32>),
+    initial_style_container_size: Option<(u32, u32)>,
     last_surface_size: Option<(u32, u32)>,
     /// The compositor's toplevel states for this surface, projected onto every
     /// node at annotation time so `:fullscreen`, `:maximized`, `:activated`,
@@ -1474,6 +1475,7 @@ impl FrontendSurfaceComponent {
             measured_size: None,
             unmeasured_root_axes: (false, false),
             last_definite_root_size: (None, None),
+            initial_style_container_size: None,
             last_surface_size: None,
             // A surface declared `role: "window"` is windowed from its first
             // frame; only role changes flip it later.

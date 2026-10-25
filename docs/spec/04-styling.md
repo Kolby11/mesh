@@ -443,6 +443,14 @@ last declaration wins, regardless of selector shape (`#id` does not beat
 `@container` queries only gate whether a rule matches — they do not reorder
 it.
 
+Root container queries use the content size. While an axis is unmeasured,
+queries retain its last definite size. Before that first definite size, the
+shell seeds queries from the surface's logical output size, or the common
+logical size of all advertised outputs when placement is still unknown.
+Unavailable or differing output geometries provide no initial hint. The hint
+does not size content or constrain the compositor's buffers; a configured or
+measured content axis takes precedence.
+
 ## 7. Theme coherence enforcement
 
 **Status: shipped.** Token-based theming only works ecosystem-wide if modules
