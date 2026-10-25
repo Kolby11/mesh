@@ -327,9 +327,9 @@ of payoff.
 From the 2026-10-20 live `glass` captures; evidence in the
 [performance log](../.planning/log/performance-log.md).
 
-- [ ] Measure glass first open live (the 2026-10-24 changes are only measured
-      offline, where icons rasterize synchronously and glass draws on the CPU):
-      picker over IPC, launcher by hand since no IPC can open it.
+- [ ] Attribute the launcher's first child-surface preparation (canvas setup,
+      backdrop preparation and command recording); live first open remains much
+      slower than reopening. [Measurement](../.planning/log/performance-log.md#2026-10-25--live-glass-first-open-after-popup-readiness-gating).
 - [ ] Hide waits for the root's longest opacity transition (280 ms on the glass
       dashboard and picker) while their panels fade in `--animation-duration-fast`;
       unmap when the exit transitions actually settle.

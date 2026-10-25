@@ -7,6 +7,11 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Live glass first-open measurement complete.** Three fresh release processes
+  on the main Hyprland compositor: picker first buffer commit 43–45 ms, launcher
+  305–490 ms; later opens 10–18 / 42–66 ms. First launcher child preparation
+  dominates; attribution is the follow-up in the backlog and performance log.
+
 - **Popup animation readiness complete.** Animation-only shared-tree work waits
   for an affected popup's presentation slot; parent/input/resource changes keep
   the conservative path. Release GPU-feature shell: 1,024 passed; the blocked
@@ -35,7 +40,7 @@ measurements live in [`log/`](log/README.md).
   scopes.
 - D1: record compound table writes instead of converting every compound global
   during handler sync; indirect list reads still compare every item.
-- Measure glass first open live (picker over IPC, launcher by hand).
+- Attribute the launcher's first child-surface preparation before optimizing it.
 - Continue glass raster work and the in-surface blur engine after pipeline work.
 
 ## Blocked / known baselines

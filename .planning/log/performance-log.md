@@ -8831,3 +8831,74 @@ ready-child/blocked-parent case, missing paths and completed parent keyframes.
 The ignored release preparation benchmark also passes. Source and measurement
 artifacts are isolated from the main checkout; scratch evidence is under
 `/tmp/mesh-popup-glass/` (`shell-tests.log`, `popup-benchmark.log`).
+
+## 2026-10-25 — live glass first open after popup readiness gating
+
+Measured `e012da95`, normal **release** GPU build (thin LTO), separate branch
+`codex/handler-popup-glass`; no additional runtime change in this measurement.
+Binary SHA-256:
+`e721e06a0fc84caee934df95969d5c868befa25676740d9f5eb8e3c25e1fb86e`.
+
+**Environment and workload.** Main Hyprland 0.56.2 compositor, `wayland-1`,
+2880×1800 at scale 1 / 120 Hz, AMD render node `renderD129` (PCI 1002:15bf).
+The runtime reports GPU device `0xe281`, dmabuf format `0x34324241`, modifier
+`0xffffffffffffff`; no CPU fallback or protocol error in the selected runs.
+The desktop remains in normal use, with the existing quickshell shell present;
+these are not pinned or otherwise isolated idle-machine latency guarantees.
+The launcher indexes 68 listed desktop entries and requests a 596×512 popup;
+the wallpaper directory contains five images. Shared OS/image caches are warm;
+"first" means first show in a fresh MESH process, not cold disk caches.
+
+A private copy of config/settings/profile/state and a private IPC socket keep
+all profile changes out of the checkout and the user's saved configuration.
+The hand-built test profile copies the shipped glass composition's roots and
+resources and explicitly adds `@mesh/glass-wallpapers`: the current shipped
+composition selects the newer `@mesh/wallpaper-carousel`, while this backlog
+item follows the original picker investigated on 2026-10-24. Hidden-layer
+prewarming is enabled and finishes before the selected first opens.
+
+**Method.** Three fresh processes (scratch captures **2, 6, 8**), four opens of
+each target per process. Picker: `shell:show_surface:@mesh/glass-wallpapers`
+over its private IPC socket, followed by hide between opens. Launcher: actual
+Wayland virtual-pointer clicks on its dock trigger, followed by an outside
+click to dismiss; no synthetic application launch or template-state injection.
+Stage profiling and `WAYLAND_DEBUG=1` are enabled throughout. Picker time starts
+immediately before the IPC send; launcher time starts at the logged native
+pointer press. The endpoint is the first non-null `wl_buffer` attachment and
+following `wl_surface.commit` for that target, correlated through its layer role
+or `get_xdg_surface` / `get_popup` requests. Protocol lines are timestamped on
+receipt by the local collector, so small pipe/collector overhead is included.
+This includes asynchronous GPU scene completion up to buffer commit, but is
+not compositor presentation feedback or a measurement of physical scanout.
+
+| Target | First open, 3 fresh processes | Later opens, 9 samples |
+| --- | ---: | ---: |
+| Original glass wallpaper picker | **42.541–45.403 ms** | **9.980–17.861 ms** |
+| Dock launcher | **304.658–490.097 ms** | **42.209–66.410 ms** |
+
+A separate build overlapped trial captures 3, 4 and 7; those samples are
+excluded from the table. Compiler absence was checked after capture 2; captures
+6 and 8 additionally sampled `rustc` activity every 0.5 s and recorded zero
+processes throughout. Trial 1 used Escape for dismissal, which did not reliably
+close the launcher; trial 5 was stopped by another shell runner's SIGTERM.
+Both trials are excluded. Later probes use a distinct executable process name
+and outside-click dismissal. No competing process was stopped for this work.
+
+**Finding.** The first launcher child `total_surface_render` records are
+322.453, 259.051 and 444.790 ms in the three selected runs, accounting for most
+of the first-open delay. That synchronous timer covers canvas allocation,
+backdrop preparation, child display-list/scene recording and present submission.
+It does not establish which of those operations is responsible, so no shader,
+font or icon attribution is claimed. The backlog now asks for that attribution;
+the live-measurement item itself is complete. This is a current-behavior
+measurement, not an A/B speedup claim for the preceding popup gate.
+
+**Evidence and reproduction.** `/tmp/mesh-popup-glass/` retains `capture.py`,
+`analyze.py`, the private `config/`, `monitors.json`, `workload.json`,
+`run-{2,6,8}.log` / `.jsonl`, `marks-{2,6,8}.json`, `load-{6,8}.json` and
+`results.json`. The collector runs inside `nix develop` with `MESH_BACKEND`,
+`MESH_MODULE_GRAPH_PATH`, `MESH_SETTINGS_PATH`, `MESH_HOME`, `XDG_STATE_HOME` and
+`MESH_IPC_SOCKET` explicitly scoped to the probe. The picker uses ordinary IPC;
+the launcher uses `wlrctl pointer move/click`. The probes shut down after each
+run. The popup implementation's release suite remains 1,024 passed / 37 ignored;
+this commit changes only the backlog, status and this measurement record.
