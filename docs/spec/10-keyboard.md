@@ -122,6 +122,8 @@ to it even when the click that opened it gave another surface the keyboard.
 Because the compositor also delivers every pointer event to an exclusive
 layer, a primary press outside its bounds dismisses it instead of reaching
 its content.
+A key release goes to the surface that received its press, so the Enter or
+Space that opens such a surface cannot also activate its focused control.
 
 Popover focus ownership: activation may transfer focus into the promoted
 popover (`options.focus`), the shell records return focus as

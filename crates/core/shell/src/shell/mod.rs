@@ -733,6 +733,9 @@ pub struct Shell {
     debug_overlay: DebugOverlay,
     active_key_modifiers: KeyModifiers,
     keyboard_focus_surface: Option<SurfaceId>,
+    /// The surface each held key's press went to. Its repeats and release
+    /// follow it there even if key routing moves while it is held.
+    held_key_surfaces: HashMap<String, SurfaceId>,
     pending_wayland_events: VecDeque<WindowEvent>,
     /// Consumed when a popup is created; never reused for repositioning.
     pending_popup_grab: Option<PendingPopupGrab>,

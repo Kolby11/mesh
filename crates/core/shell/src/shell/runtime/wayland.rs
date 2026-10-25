@@ -111,7 +111,20 @@ impl Shell {
             } else {
                 None
             };
-            let route_surface_id = if is_keyboard_event {
+            // A key that opens a surface which takes the keyboard moves
+            // routing between its press and its release. Delivering that
+            // release to the new surface would activate whatever it focuses,
+            // so a release goes to the surface that saw the press.
+            let release_surface = match &event {
+                RoutedWindowEvent::KeyReleased { key } => self
+                    .held_key_surfaces
+                    .remove(key)
+                    .filter(|surface_id| self.component_index_for_surface(surface_id).is_some()),
+                _ => None,
+            };
+            let route_surface_id = if let Some(surface_id) = release_surface.as_deref() {
+                surface_id
+            } else if is_keyboard_event {
                 if let Some(surface_id) = keyboard_focus_surface.as_deref() {
                     let focused_surface_visible = self
                         .core
@@ -132,6 +145,11 @@ impl Shell {
             } else {
                 &physical_surface_id
             };
+
+            if let RoutedWindowEvent::KeyPressed { key, .. } = &event {
+                self.held_key_surfaces
+                    .insert(key.clone(), route_surface_id.to_string());
+            }
 
             let Some((index, target)) = self.component_target_for_surface(route_surface_id) else {
                 tracing::debug!(

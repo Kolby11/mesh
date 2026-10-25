@@ -2032,6 +2032,80 @@ fn exclusive_surface_takes_key_routing_and_dismisses_on_outside_press() {
     );
 }
 
+/// Enter on the bar's dashboard button shows the dashboard, which takes key
+/// routing. The Enter release that follows must stay with the bar: delivered
+/// to the dashboard it activates the dashboard's focused close button.
+#[test]
+fn key_release_after_opening_exclusive_surface_stays_with_the_opener() {
+    let catalog = GlassCatalog::new();
+    let mut bar = catalog.mount("glass-bar");
+    paint(&mut bar, 1920, 64);
+    bar.focused_key = Some(
+        first_node_with_attr(bar.last_tree.as_ref().unwrap(), "aria-label", "Dashboard")
+            .expect("dashboard button")
+            .mesh_key()
+            .unwrap()
+            .to_owned(),
+    );
+    // Closing the dashboard with its close button leaves that button focused
+    // for the next open.
+    let mut dashboard = catalog.mount("glass-dashboard");
+    paint(&mut dashboard, 1920, 1080);
+    dashboard.focused_key = Some(
+        first_node_with_attr(dashboard.last_tree.as_ref().unwrap(), "aria-label", "Close dashboard")
+            .expect("close button")
+            .mesh_key()
+            .unwrap()
+            .to_owned(),
+    );
+    let bar_id = bar.surface_id().to_owned();
+    let dashboard_id = dashboard.surface_id().to_owned();
+    let mut shell = crate::shell::Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(bar));
+    shell.register_component(Box::new(dashboard));
+    let mut emitted = shell
+        .apply_request(CoreRequest::HideSurface {
+            surface_id: dashboard_id.clone(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+    shell.claim_keyboard_focus_for_surface(&bar_id);
+
+    let key = |surface_id: &str, event| mesh_core_presentation::WindowEvent::Key {
+        surface_id: surface_id.into(),
+        event,
+    };
+    shell.pending_wayland_events.push_back(key(
+        &bar_id,
+        mesh_core_presentation::WindowKeyEvent::Pressed("Enter".into(), Default::default()),
+    ));
+    shell.dispatch_wayland().unwrap();
+    shell.render_components().unwrap();
+    assert_eq!(
+        shell.keyboard_focus_surface.as_deref(),
+        Some(dashboard_id.as_str())
+    );
+    shell
+        .presentation_engine
+        .testing_set_surface_configured(&dashboard_id, true);
+    shell.render_components().unwrap();
+
+    shell.pending_wayland_events.push_back(key(
+        &dashboard_id,
+        mesh_core_presentation::WindowKeyEvent::Released("Enter".into()),
+    ));
+    shell.dispatch_wayland().unwrap();
+    shell.render_components().unwrap();
+    let state = &shell.core.surfaces[&dashboard_id];
+    assert!(
+        state.visible && state.closing_until.is_none(),
+        "the opening key's release must not close the dashboard"
+    );
+}
+
 #[derive(Debug, PartialEq)]
 struct ShowCost {
     configures: usize,
