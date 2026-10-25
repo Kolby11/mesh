@@ -1,0 +1,83 @@
+{
+  "name": "@mesh/wallpaper-carousel",
+  "version": "0.1.0",
+  "description": "Full-screen wallpaper selector: an endless strip of tall cards that slide, shrink with distance and pan across their pictures; Enter applies the centred one.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "interfaces": {
+        "mesh.theme": ">=1.0",
+        "mesh.wallpapers": ">=1.1"
+      },
+      "capabilities": [
+        "shell.surface",
+        "theme.read",
+        "locale.read",
+        "service.theme.control",
+        "service.wallpapers.read"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "top",
+      "layer": "overlay",
+      "keyboard_mode": "exclusive",
+      "visible_on_start": false,
+      "blur": true
+    },
+    "provides": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Wallpaper carousel"
+        }
+      ]
+    },
+    "accessibility": {
+      "role": "dialog"
+    },
+    "i18n": {
+      "defaultLocale": "en"
+    },
+    "contributes": {
+      "i18n": [
+        { "id": "en", "locale": "en", "path": "config/i18n/en.json" },
+        { "id": "sk", "locale": "sk", "path": "config/i18n/sk.json" }
+      ],
+      "keybinds": {
+        "close": {
+          "label": { "t": "keybind.close", "fallback": "Close wallpaper carousel" },
+          "category": { "t": "keybind.category", "fallback": "Wallpapers" },
+          "trigger": { "kind": "shortcut", "key": "Escape" }
+        },
+        "previous": {
+          "label": { "t": "keybind.previous", "fallback": "Previous wallpaper" },
+          "category": { "t": "keybind.category", "fallback": "Wallpapers" },
+          "trigger": { "kind": "shortcut", "key": "ArrowLeft" }
+        },
+        "next": {
+          "label": { "t": "keybind.next", "fallback": "Next wallpaper" },
+          "category": { "t": "keybind.category", "fallback": "Wallpapers" },
+          "trigger": { "kind": "shortcut", "key": "ArrowRight" }
+        },
+        "page_previous": {
+          "label": { "t": "keybind.page_previous", "fallback": "Jump back a page" },
+          "category": { "t": "keybind.category", "fallback": "Wallpapers" },
+          "trigger": { "kind": "shortcut", "key": "PageUp" }
+        },
+        "page_next": {
+          "label": { "t": "keybind.page_next", "fallback": "Jump ahead a page" },
+          "category": { "t": "keybind.category", "fallback": "Wallpapers" },
+          "trigger": { "kind": "shortcut", "key": "PageDown" }
+        },
+        "apply": {
+          "label": { "t": "keybind.apply", "fallback": "Use this wallpaper" },
+          "category": { "t": "keybind.category", "fallback": "Wallpapers" },
+          "trigger": { "kind": "shortcut", "key": "Enter" }
+        }
+      }
+    }
+  }
+}

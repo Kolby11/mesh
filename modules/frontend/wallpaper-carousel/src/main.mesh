@@ -1,0 +1,350 @@
+<props>
+{
+    side_cards = { type = "int", default = 3, min = 1, max = 5, label = t("prop.side_cards", "Cards on each side") },
+    parallax = { type = "number", default = 60, min = 0, max = 120, unit = "px", label = t("prop.parallax", "Picture shift per card") },
+    close_on_apply = { type = "bool", default = true, label = t("prop.close_on_apply", "Close after choosing a wallpaper") },
+}
+</props>
+
+<template>
+    <box class="overlay" keybind="close" onkeybind={onClose} onscroll={onScroll}>
+        <button class="scrim" onclick={onClose} aria-label={t("carousel.close")} tabindex="-1" />
+        <column class="carousel" hidden={not has_wallpapers} aria-label={t("carousel.title")} keybind="apply" onkeybind={onApply}>
+            <box class="track" keybind="page_previous" onkeybind={onPagePrevious}>
+                <box class="track" keybind="page_next" onkeybind={onPageNext}>
+                    <box class="track" keybind="previous" onkeybind={onPrevious}>
+                        <box class="stage" style:width={stage_width} keybind="next" onkeybind={onNext}>
+                            {#for card in cards key={card.key}}
+                                <button
+                                    class="card"
+                                    class:card-selected={card.selected}
+                                    class:card-buffer={card.buffer}
+                                    style:transform={card.transform}
+                                    onclick={onCard(card.rank)}
+                                    aria-label={card.label}
+                                    aria-pressed={card.current}
+                                    tabindex="-1"
+                                >
+                                    <image class="panorama" src={card.panorama} alt="" style:transform={card.pan} />
+                                </button>
+                            {/for}
+                        </box>
+                    </box>
+                </box>
+            </box>
+            <text class="caption">{focused_name}</text>
+        </column>
+        <text class="empty" hidden={has_wallpapers}>{empty_label}</text>
+    </box>
+</template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local theme = require("mesh.theme")
+local wallpapers = require("mesh.wallpapers")
+
+local SURFACE = "@mesh/wallpaper-carousel"
+local CARD_WIDTH = 220
+-- Centre-to-centre distance between full-size cards.
+local SPACING = 262
+local SCALE_FLOOR = 0.7
+local SCALE_STEP = 0.07
+-- Cards past the visible ones on each side, laid out but transparent, so a
+-- card entering the strip slides and fades in instead of appearing.
+local BUFFER = 1
+local TWO_FINGER_NOTCH = 40
+
+-- The centred card's position in an endless strip; it wraps onto the list.
+step = 1
+cards = {}
+has_wallpapers = false
+stage_width = "0px"
+focused_name = ""
+empty_label = ""
+
+local two_finger_travel = 0
+
+local function list()
+    return wallpapers.wallpapers or {}
+end
+
+local function wrap(position, count)
+    return (position - 1) % count + 1
+end
+
+local function scale_at(distance)
+    return math.max(SCALE_FLOOR, 1 - distance * SCALE_STEP)
+end
+
+-- Centre offset of the card `distance` places from the middle. Cards shrink
+-- around their own centres, so plain `distance * SPACING` would open wider
+-- gaps further out; summing each pair's scaled half-widths keeps every gap at
+-- the full-size one.
+local function offset_at(distance)
+    local offset = 0
+    for k = 0, distance - 1 do
+        offset += SPACING - CARD_WIDTH + CARD_WIDTH * (scale_at(k) + scale_at(k + 1)) / 2
+    end
+    return offset
+end
+
+local function side_count(count)
+    if count < 2 then
+        return 0
+    end
+    return math.clamp(math.floor((count - 1) / 2), 1, props.side_cards)
+end
+
+local function stage_centre()
+    return math.ceil(offset_at(props.side_cards + BUFFER))
+end
+
+effect(function()
+    stage_width = (2 * stage_centre() + CARD_WIDTH) .. "px"
+end)
+
+-- Follow the wallpaper in use when it changes, by the shortest way round, so
+-- previews arriving later do not pull the strip back while browsing.
+local followed = nil
+effect(function()
+    local current = theme.backdrop_image
+    local items = list()
+    local count = #items
+    if current == followed or count == 0 then
+        return
+    end
+    for index, wallpaper in items do
+        if wallpaper.path == current then
+            followed = current
+            local delta = (index - wrap(step, count)) % count
+            if delta > count / 2 then
+                delta -= count
+            end
+            step += delta
+            return
+        end
+    end
+end)
+
+effect(function()
+    local items = list()
+    local count = #items
+    local current = theme.backdrop_image or ""
+    local parallax = props.parallax
+    has_wallpapers = count > 0
+    empty_label = wallpapers.available
+        and t("carousel.empty", { directory = wallpapers.directory or "" })
+        or t("carousel.unavailable")
+    if count == 0 then
+        cards = {}
+        focused_name = ""
+        return
+    end
+
+    local side = side_count(count)
+    local span = side + BUFFER
+    local centre = stage_centre()
+    local visible = {}
+    for rank = -span, span do
+        local distance = math.abs(rank)
+        local wallpaper = items[wrap(step + rank, count)]
+        local x = centre + (rank < 0 and -1 or 1) * offset_at(distance)
+        local is_current = wallpaper.path == current
+        visible[#visible + 1] = {
+            key = step + rank,
+            rank = rank,
+            panorama = wallpaper.panorama ~= nil and wallpaper.panorama ~= "" and wallpaper.panorama or wallpaper.path,
+            transform = string.format("translateX(%.1fpx) scale(%.3f)", x, scale_at(distance)),
+            pan = string.format("translateX(%.1fpx)", -rank * parallax),
+            selected = rank == 0,
+            buffer = distance > side,
+            current = is_current,
+            label = is_current and t("carousel.current", { name = wallpaper.name })
+                or t("carousel.use", { name = wallpaper.name }),
+        }
+    end
+    cards = visible
+    focused_name = items[wrap(step, count)].name
+end)
+
+local function move(delta)
+    if #list() > 0 and delta ~= 0 then
+        step += delta
+    end
+end
+
+local function apply()
+    local items = list()
+    if #items == 0 then
+        return
+    end
+    theme.set_backdrop_image(items[wrap(step, #items)].path)
+    if props.close_on_apply then
+        mesh.shell.hide_surface(SURFACE)
+    end
+end
+
+-- A wheel sends one event per notch; a trackpad streams small deltas, which
+-- are banked and spent one notch at a time so the strip does not spin.
+local function scroll_step(event)
+    local delta = event and event.delta or {}
+    local dx = tonumber(delta.x) or 0
+    local dy = tonumber(delta.y) or 0
+    local d = math.abs(dx) > math.abs(dy) and dx or dy
+    if event ~= nil and event.type == "twofingerscroll" then
+        if d == 0 then
+            return 0
+        end
+        if (d > 0) ~= (two_finger_travel > 0) then
+            two_finger_travel = 0
+        end
+        two_finger_travel += d
+        if math.abs(two_finger_travel) < TWO_FINGER_NOTCH then
+            return 0
+        end
+        local notch = two_finger_travel > 0 and 1 or -1
+        two_finger_travel -= notch * TWO_FINGER_NOTCH
+        return notch
+    end
+    return d >= 0 and 1 or -1
+end
+
+local function page()
+    return 2 * side_count(#list()) + 1
+end
+
+function onPrevious() move(-1) end
+function onNext() move(1) end
+function onPagePrevious() move(-page()) end
+function onPageNext() move(page()) end
+function onApply() apply() end
+
+function onCard(rank)
+    if math.abs(rank) > side_count(#list()) then
+        return
+    end
+    if rank == 0 then
+        apply()
+    else
+        move(rank)
+    end
+end
+
+function onScroll(event)
+    move(scroll_step(event))
+end
+
+function onClose()
+    mesh.shell.hide_surface(SURFACE)
+end
+</script>
+
+<style>
+    .overlay {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        justify-content: center;
+        align-items: center;
+        exclusive-zone: ignore;
+        background: transparent;
+    }
+
+    .scrim {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        border-radius: 0;
+        background: rgba(0, 0, 0, 0.45);
+        backdrop-filter: blur(28px);
+        opacity: 1;
+        transition: opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard);
+    }
+
+    .scrim.mesh-surface-entering, .scrim.mesh-surface-exiting { opacity: 0; }
+
+    .carousel {
+        align-items: center;
+        gap: 14px;
+        opacity: 1;
+        transform: translateY(0px) scale(1);
+        transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .carousel.mesh-surface-entering { opacity: 0; transform: translateY(40px) scale(0.9); }
+    .carousel.mesh-surface-exiting { opacity: 0; transform: translateY(20px) scale(0.95); transition-duration: var(--animation-duration-fast); }
+
+    .track {
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Every card starts at the stage's left edge; its transform places it. */
+    .stage {
+        position: relative;
+        height: 440px;
+        flex-shrink: 0;
+    }
+
+    .card {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 220px;
+        height: 440px;
+        padding: 0;
+        border-radius: 18px;
+        border: 2px solid transparent;
+        background: var(--color-surface-container);
+        box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+        overflow: hidden;
+        opacity: 1;
+        transition-property: transform, opacity, border-color;
+        transition-duration: var(--animation-duration-long);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .card-selected {
+        border-color: var(--color-primary);
+    }
+
+    .card-buffer {
+        opacity: 0;
+    }
+
+    /* 16:9 at card height, centred in the card: the card is a window onto
+    the middle of the picture and the parallax pans it. */
+    .panorama {
+        position: absolute;
+        top: 0;
+        left: -281px;
+        width: 782px;
+        height: 440px;
+        transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .caption {
+        height: 20px;
+        font-size: 13px;
+        letter-spacing: 0.4px;
+        color: rgba(255, 255, 255, 0.85);
+        text-overflow: ellipsis;
+    }
+
+    .empty {
+        height: 20px;
+        font-size: 14px;
+        color: rgba(255, 255, 255, 0.85);
+    }
+
+    .card:hover {
+        border-color: var(--color-outline);
+    }
+
+    .card-selected:hover {
+        border-color: var(--color-primary);
+    }
+</style>

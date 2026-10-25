@@ -50,12 +50,13 @@ fn theme() -> Theme {
     .unwrap()
 }
 
-const GLASS_MODULES: [&str; 7] = [
+const GLASS_MODULES: [&str; 8] = [
     "glass-bar",
     "glass-widgets",
     "glass-dock",
     "glass-dashboard",
     "glass-wallpapers",
+    "wallpaper-carousel",
     "profile-switcher",
     "profile-menu",
 ];
@@ -152,6 +153,7 @@ impl GlassCatalog {
             "glass-dock",
             "glass-dashboard",
             "glass-wallpapers",
+            "wallpaper-carousel",
         ] {
             let path = root()
                 .join("modules/frontend")
@@ -689,6 +691,128 @@ fn picker_geometry_is_stable(width: u32, height: u32) {
             "{width}: focused card moved at step {step}"
         );
     }
+}
+
+fn carousel_cards(node: &WidgetNode, cards: &mut Vec<WidgetNode>) {
+    if first_node_by_class(node, "card").is_some_and(|card| std::ptr::eq(card, node)) {
+        cards.push(node.clone());
+        return;
+    }
+    for child in &node.children {
+        carousel_cards(child, cards);
+    }
+}
+
+fn carousel_state(component: &FrontendSurfaceComponent) -> (WidgetNode, Vec<WidgetNode>) {
+    let tree = component.last_tree.as_ref().unwrap();
+    let stage = first_node_by_class(tree, "stage").unwrap().clone();
+    let mut cards = Vec::new();
+    carousel_cards(&stage, &mut cards);
+    (stage, cards)
+}
+
+fn card_label(card: &WidgetNode) -> String {
+    card.attributes
+        .get(Prop::AriaLabel)
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[test]
+fn wallpaper_carousel_centres_the_selection_and_slides_its_cards() {
+    let (width, height) = (1920, 1080);
+    let mut component = host("wallpaper-carousel");
+    let wallpapers: Vec<_> = ["forest", "tree", "lake", "dusk", "night"]
+        .iter()
+        .map(|name| {
+            serde_json::json!({
+                "path": format!("/walls/{name}.png"),
+                "name": name,
+                "thumbnail": "",
+                "panorama": "",
+                "color": "",
+            })
+        })
+        .collect();
+    update(
+        &mut component,
+        "mesh.wallpapers",
+        serde_json::json!({"available": true, "directory": "/walls", "wallpapers": wallpapers}),
+    );
+    paint(&mut component, width, height);
+    let (stage, cards) = carousel_state(&component);
+    // Five wallpapers: two visible cards each side plus one transparent buffer.
+    assert_eq!(
+        cards.len(),
+        7,
+        "{:?}",
+        cards.iter().map(card_label).collect::<Vec<_>>()
+    );
+    let selected = first_node_by_class(&stage, "card-selected").unwrap();
+    let centre = selected.layout.x
+        + selected.computed_style.transform.translate_x
+        + selected.layout.width / 2.0;
+    assert!(
+        (centre - (stage.layout.x + stage.layout.width / 2.0)).abs() < 1.0,
+        "selected card is centred: {centre} in {:?}",
+        stage.layout
+    );
+    assert!(card_label(selected).contains("forest"));
+    let ranks: Vec<f32> = cards
+        .iter()
+        .map(|card| card.computed_style.transform.scale_x)
+        .collect();
+    assert!(ranks[3] > ranks[2] && ranks[2] > ranks[1], "{ranks:?}");
+
+    // Clicking the next card selects it; its node slides into the centre
+    // rather than being replaced.
+    let next = cards[4].mesh_key().unwrap().to_owned();
+    let start_x = cards[4].computed_style.transform.translate_x;
+    let rest_x = cards[3].computed_style.transform.translate_x;
+    component.focused_key = Some(next.clone());
+    component
+        .handle_input(
+            &theme(),
+            width,
+            height,
+            ComponentInput::KeyPressed {
+                key: "Space".into(),
+                modifiers: Default::default(),
+            },
+        )
+        .unwrap();
+    paint(&mut component, width, height);
+    let (stage, cards) = carousel_state(&component);
+    let selected = first_node_by_class(&stage, "card-selected").unwrap();
+    assert_eq!(selected.mesh_key(), Some(next.as_str()));
+    assert!(card_label(selected).contains("tree"));
+    assert_eq!(cards.len(), 7);
+    assert!(!component.transitions.is_empty(), "the strip must animate");
+    let mid_x = selected.computed_style.transform.translate_x;
+    assert!(
+        (mid_x - start_x).abs() < (rest_x - start_x).abs() / 2.0,
+        "first frame is near the old position: {start_x} -> {mid_x} (rest {rest_x})"
+    );
+
+    // Wrapping: four more steps forward lands back on the first wallpaper.
+    for _ in 0..4 {
+        let (_, cards) = carousel_state(&component);
+        component.focused_key = Some(cards[4].mesh_key().unwrap().to_owned());
+        component
+            .handle_input(
+                &theme(),
+                width,
+                height,
+                ComponentInput::KeyPressed {
+                    key: "Space".into(),
+                    modifiers: Default::default(),
+                },
+            )
+            .unwrap();
+        paint(&mut component, width, height);
+    }
+    let (stage, _) = carousel_state(&component);
+    assert!(card_label(first_node_by_class(&stage, "card-selected").unwrap()).contains("forest"));
 }
 
 #[test]

@@ -32,7 +32,8 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/glass-dock` | surface | `src/main.mesh` | Glass shelf with neighboring-icon magnification and a searchable launcher with grid and list views of installed applications |
 | `@mesh/glass-notifications` | surface | `src/main.mesh` | Glass notification toasts under the bar; shows itself while a notification is popped up |
 | `@mesh/glass-dashboard` | surface | `src/main.mesh` | Overlay with system meters and history, the current track with a live spectrum, notifications and weather |
-| `@mesh/glass-wallpapers` | surface | `src/main.mesh` | Overlay wallpaper picker: tilted carousel and colour strip; applies through `mesh.theme.set_backdrop_image` |
+| `@mesh/glass-wallpapers` | surface | `src/main.mesh` | Overlay wallpaper picker: tilted carousel and colour strip; applies through `mesh.theme.set_backdrop_image`; not in the glass composition |
+| `@mesh/wallpaper-carousel` | surface | `src/main.mesh` | Full-screen wallpaper selector: endless strip of tall cards that slide, shrink with distance and pan across `mesh.wallpapers` panoramas; the glass composition's wallpaper selector |
 | `@mesh/profile-switcher` | embedded | `src/main.mesh` | Shell switcher trigger; also a `mesh.navigation.item` contribution |
 | `@mesh/profile-menu` | embedded | `src/main.mesh` | Popover listing profiles; selecting one switches live via `mesh.packages` |
 
@@ -40,8 +41,10 @@ The glass composition follows the liquid-glass showcase's floating islands,
 light rims, refracted translucent cards and raised dock lenses. The clock opens
 a month calendar; the rightmost status button opens quick
 controls; the dock's search button opens the application launcher. The bar's
-dashboard and wallpaper buttons toggle those overlays, which close with Escape,
-their close button or a click outside the panel. The media card grows a
+dashboard and wallpaper buttons toggle those overlays. The dashboard closes with
+Escape, its close button or a click outside the panel; the wallpaper carousel
+closes with Escape, a click beside the cards, or once a wallpaper is applied.
+The media card grows a
 spectrum strip while audio plays. Dashboard system meters and CPU history bars
 keep fixed layout boxes and animate their bottom-anchored vertical scale, so
 fill motion does not require layout on each frame. The dashboard's 24 spectrum
@@ -76,7 +79,7 @@ and easing, with separate entrance animations for islands, cards and popups.
 | `@mesh/freedesktop-notifications` | backend | `src/main.luau` | `mesh.notifications`: owns `org.freedesktop.Notifications` through `mesh.dbus_serve` |
 | `@mesh/proc-system` | backend | `src/main.luau` | `mesh.system` from `/proc`, hwmon and `df` |
 | `@mesh/cava-visualizer` | backend | `src/main.luau` | `mesh.visualizer` spectrum bars from `cava` |
-| `@mesh/wallpaper-directory` | backend | `src/main.luau` | `mesh.wallpapers` from one directory, with ImageMagick previews |
+| `@mesh/wallpaper-directory` | backend | `src/main.luau` | `mesh.wallpapers` from one directory, with ImageMagick thumbnails and 16:9 panoramas |
 
 ## Interfaces and resource packs
 
@@ -111,7 +114,7 @@ desktop layout. See [module-system §5](../spec/01-module-system.md).
 
 | Module | Kind | Contribution |
 | --- | --- | --- |
-| `@mesh/glass` | composition | Liquid-glass desktop: glass bar, desktop cards, dock, notification toasts, dashboard and wallpaper picker; recommends the violet glass theme |
+| `@mesh/glass` | composition | Liquid-glass desktop: glass bar, desktop cards, dock, notification toasts, dashboard and wallpaper carousel; recommends the violet glass theme |
 | `@mesh/desk` | composition | The default desktop: a top navigation bar and a settings window, bound to the PipeWire and backlight providers |
 
 ## Module anatomy

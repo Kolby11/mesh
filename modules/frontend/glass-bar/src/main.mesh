@@ -48,7 +48,7 @@ function onDashboard()
 end
 
 function onWallpapers()
-    mesh.shell.toggle_surface("@mesh/glass-wallpapers")
+    mesh.shell.toggle_surface("@mesh/wallpaper-carousel")
 end
 
 </script>

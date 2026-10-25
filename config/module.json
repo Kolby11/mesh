@@ -265,9 +265,17 @@
         "service.audio.control",
         "service.audio.read"
       ],
+      "@mesh/wallpaper-carousel": [
+        "locale.read",
+        "service.theme.control",
+        "service.wallpapers.read",
+        "shell.surface",
+        "theme.read"
+      ],
       "@mesh/wallpaper-directory": [
         "exec.argv:sh:[\"-c\",\"d=\\\"$1\\\"; [ \\\"$d\\\" = \\\"~\\\" ] && d=\\\"$HOME\\\"; [ \\\"${d#\\\"~/\\\"}\\\" != \\\"$d\\\" ] && d=\\\"$HOME/${d#\\\"~/\\\"}\\\"; [ -d \\\"$d\\\" ] || exit 1; printf '%s\\\\n' \\\"$d\\\"; find \\\"$d\\\" -maxdepth 1 -type f\",\"sh\",\"*\"]",
-        "exec.argv:sh:[\"-c\",\"f=\\\"$1\\\"; t=\\\"${XDG_CACHE_HOME:-$HOME/.cache}/mesh/wallpaper-thumbs\\\"; mkdir -p \\\"$t\\\" || exit 1; k=\\\"$(printf %s \\\"$f\\\" | cksum | cut -d' ' -f1)-$(stat -c %Y \\\"$f\\\")\\\"; [ -f \\\"$t/$k.jpg\\\" ] || magick \\\"$f[0]\\\" -thumbnail 640x400^ -gravity center -extent 640x400 -quality 82 \\\"$t/$k.jpg\\\" || exit 1; [ -f \\\"$t/$k.color\\\" ] || magick \\\"$t/$k.jpg\\\" -resize 1x1! -format '%[hex:p{0,0}]' info: > \\\"$t/$k.color\\\"; printf '%s\\\\t%s' \\\"$t/$k.jpg\\\" \\\"$(cut -c1-6 \\\"$t/$k.color\\\")\\\"\",\"sh\",\"*\"]"
+        "exec.argv:sh:[\"-c\",\"f=\\\"$1\\\"; t=\\\"${XDG_CACHE_HOME:-$HOME/.cache}/mesh/wallpaper-thumbs\\\"; mkdir -p \\\"$t\\\" || exit 1; k=\\\"$(printf %s \\\"$f\\\" | cksum | cut -d' ' -f1)-$(stat -c %Y \\\"$f\\\")\\\"; [ -f \\\"$t/$k.jpg\\\" ] || magick \\\"$f[0]\\\" -thumbnail 640x400^ -gravity center -extent 640x400 -quality 82 \\\"$t/$k.jpg\\\" || exit 1; [ -f \\\"$t/$k.color\\\" ] || magick \\\"$t/$k.jpg\\\" -resize 1x1! -format '%[hex:p{0,0}]' info: > \\\"$t/$k.color\\\"; printf '%s\\\\t%s' \\\"$t/$k.jpg\\\" \\\"$(cut -c1-6 \\\"$t/$k.color\\\")\\\"\",\"sh\",\"*\"]",
+        "exec.argv:sh:[\"-c\",\"f=\\\"$1\\\"; t=\\\"${XDG_CACHE_HOME:-$HOME/.cache}/mesh/wallpaper-panoramas\\\"; mkdir -p \\\"$t\\\" || exit 1; k=\\\"$(printf %s \\\"$f\\\" | cksum | cut -d' ' -f1)-$(stat -c %Y \\\"$f\\\")\\\"; [ -f \\\"$t/$k.jpg\\\" ] || magick \\\"$f[0]\\\" -thumbnail 1600x900^ -gravity center -extent 1600x900 -quality 84 \\\"$t/$k.jpg\\\" || exit 1; printf '%s' \\\"$t/$k.jpg\\\"\",\"sh\",\"*\"]"
       ],
       "@mesh/wf-recorder": [
         "exec.argv:pgrep:[\"-x\",\"wf-recorder\"]",

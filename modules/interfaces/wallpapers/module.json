@@ -1,13 +1,13 @@
 {
   "name": "@mesh/wallpapers-interface",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Wallpaper library contract: the images a picker offers. Selecting one is mesh.theme.set_backdrop_image.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "interface",
     "interface": {
       "name": "mesh.wallpapers",
-      "version": "1.0",
+      "version": "1.1",
       "domain": "wallpapers",
       "relationship": "base",
       "contract": {
@@ -48,6 +48,10 @@
               },
               {
                 "name": "thumbnail",
+                "type": "string"
+              },
+              {
+                "name": "panorama",
                 "type": "string"
               },
               {

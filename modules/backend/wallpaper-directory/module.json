@@ -1,7 +1,7 @@
 {
   "name": "@mesh/wallpaper-directory",
   "version": "0.1.0",
-  "description": "Wallpaper library from one directory, with cached thumbnails and average colours made by ImageMagick.",
+  "description": "Wallpaper library from one directory, with cached thumbnails, panoramas and average colours made by ImageMagick.",
   "private": true,
   "mesh": {
     "apiVersion": "0.1",
@@ -11,7 +11,8 @@
         "exec.argv:sh:[\"-c\",\"d=\\\"$1\\\"; [ \\\"$d\\\" = \\\"~\\\" ] && d=\\\"$HOME\\\"; [ \\\"${d#\\\"~/\\\"}\\\" != \\\"$d\\\" ] && d=\\\"$HOME/${d#\\\"~/\\\"}\\\"; [ -d \\\"$d\\\" ] || exit 1; printf '%s\\\\n' \\\"$d\\\"; find \\\"$d\\\" -maxdepth 1 -type f\",\"sh\",\"*\"]"
       ],
       "optionalCapabilities": [
-        "exec.argv:sh:[\"-c\",\"f=\\\"$1\\\"; t=\\\"${XDG_CACHE_HOME:-$HOME/.cache}/mesh/wallpaper-thumbs\\\"; mkdir -p \\\"$t\\\" || exit 1; k=\\\"$(printf %s \\\"$f\\\" | cksum | cut -d' ' -f1)-$(stat -c %Y \\\"$f\\\")\\\"; [ -f \\\"$t/$k.jpg\\\" ] || magick \\\"$f[0]\\\" -thumbnail 640x400^ -gravity center -extent 640x400 -quality 82 \\\"$t/$k.jpg\\\" || exit 1; [ -f \\\"$t/$k.color\\\" ] || magick \\\"$t/$k.jpg\\\" -resize 1x1! -format '%[hex:p{0,0}]' info: > \\\"$t/$k.color\\\"; printf '%s\\\\t%s' \\\"$t/$k.jpg\\\" \\\"$(cut -c1-6 \\\"$t/$k.color\\\")\\\"\",\"sh\",\"*\"]"
+        "exec.argv:sh:[\"-c\",\"f=\\\"$1\\\"; t=\\\"${XDG_CACHE_HOME:-$HOME/.cache}/mesh/wallpaper-thumbs\\\"; mkdir -p \\\"$t\\\" || exit 1; k=\\\"$(printf %s \\\"$f\\\" | cksum | cut -d' ' -f1)-$(stat -c %Y \\\"$f\\\")\\\"; [ -f \\\"$t/$k.jpg\\\" ] || magick \\\"$f[0]\\\" -thumbnail 640x400^ -gravity center -extent 640x400 -quality 82 \\\"$t/$k.jpg\\\" || exit 1; [ -f \\\"$t/$k.color\\\" ] || magick \\\"$t/$k.jpg\\\" -resize 1x1! -format '%[hex:p{0,0}]' info: > \\\"$t/$k.color\\\"; printf '%s\\\\t%s' \\\"$t/$k.jpg\\\" \\\"$(cut -c1-6 \\\"$t/$k.color\\\")\\\"\",\"sh\",\"*\"]",
+        "exec.argv:sh:[\"-c\",\"f=\\\"$1\\\"; t=\\\"${XDG_CACHE_HOME:-$HOME/.cache}/mesh/wallpaper-panoramas\\\"; mkdir -p \\\"$t\\\" || exit 1; k=\\\"$(printf %s \\\"$f\\\" | cksum | cut -d' ' -f1)-$(stat -c %Y \\\"$f\\\")\\\"; [ -f \\\"$t/$k.jpg\\\" ] || magick \\\"$f[0]\\\" -thumbnail 1600x900^ -gravity center -extent 1600x900 -quality 84 \\\"$t/$k.jpg\\\" || exit 1; printf '%s' \\\"$t/$k.jpg\\\"\",\"sh\",\"*\"]"
       ],
       "binaries": [
         {
@@ -27,14 +28,14 @@
         }
       ],
       "modules": {
-        "@mesh/wallpapers-interface": "^1.0.0"
+        "@mesh/wallpapers-interface": "^1.1.0"
       }
     },
     "entry": "src/main.luau",
     "implements": [
       {
         "interface": "mesh.wallpapers",
-        "version": "1.0",
+        "version": "1.1",
         "provider": "directory",
         "label": "Wallpaper directory",
         "priority": 100

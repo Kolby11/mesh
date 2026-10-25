@@ -1,7 +1,7 @@
 {
   "name": "@mesh/glass",
   "version": "0.1.0",
-  "description": "Liquid-glass desktop: floating top bar of glass pills, desktop player with spectrum and weather cards, a bottom dock with an app grid, notification toasts, a dashboard and a wallpaper picker, in the violet glass theme.",
+  "description": "Liquid-glass desktop: floating top bar of glass pills, desktop player with spectrum and weather cards, a bottom dock with an app grid, notification toasts, a dashboard and a wallpaper carousel, in the violet glass theme.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "composition",
@@ -16,7 +16,7 @@
         "@mesh/glass-material": ">=0.1.0",
         "@mesh/glass-notifications": ">=0.1.0",
         "@mesh/glass-dashboard": ">=0.1.0",
-        "@mesh/glass-wallpapers": ">=0.1.0"
+        "@mesh/wallpaper-carousel": ">=0.1.0"
       }
     },
     "compose": {
@@ -56,8 +56,8 @@
           "entrypoint": "main",
           "active": true
         },
-        "@mesh/glass-wallpapers#default": {
-          "module": "@mesh/glass-wallpapers",
+        "@mesh/wallpaper-carousel#default": {
+          "module": "@mesh/wallpaper-carousel",
           "entrypoint": "main",
           "active": true
         }

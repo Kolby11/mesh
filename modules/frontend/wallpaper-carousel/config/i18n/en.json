@@ -1,0 +1,18 @@
+{
+  "carousel.title": "Wallpapers",
+  "carousel.close": "Close wallpaper carousel",
+  "carousel.empty": "No images found in {directory}",
+  "carousel.unavailable": "The wallpaper folder could not be read",
+  "carousel.use": "Use {name} as wallpaper",
+  "carousel.current": "{name}, current wallpaper",
+  "prop.side_cards": "Cards on each side",
+  "prop.parallax": "Picture shift per card",
+  "prop.close_on_apply": "Close after choosing a wallpaper",
+  "keybind.close": "Close wallpaper carousel",
+  "keybind.previous": "Previous wallpaper",
+  "keybind.next": "Next wallpaper",
+  "keybind.page_previous": "Jump back a page",
+  "keybind.page_next": "Jump ahead a page",
+  "keybind.apply": "Use this wallpaper",
+  "keybind.category": "Wallpapers"
+}
