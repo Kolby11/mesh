@@ -1,11 +1,18 @@
 # Status
 
-**Updated:** 2026-10-24
+**Updated:** 2026-10-25
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and
 measurements live in [`log/`](log/README.md).
 
 ## Now
+
+- **Popup animation readiness complete.** Animation-only shared-tree work waits
+  for an affected popup's presentation slot; parent/input/resource changes keep
+  the conservative path. Release GPU-feature shell: 1,024 passed; the blocked
+  popup preparation gate passes three runs.
+- Compound-table write tracking is deferred for this branch pending a supported
+  runtime observation mechanism; existing-key writes bypass `__newindex`.
 
 - **Scene-buffer retry complete.** Transient export failures wait for dmabuf
   release and resume without another raster. Three required-GPU release runs
@@ -28,7 +35,6 @@ measurements live in [`log/`](log/README.md).
   scopes.
 - D1: record compound table writes instead of converting every compound global
   during handler sync; indirect list reads still compare every item.
-- Gate shared-tree popup animation preparation by targets that can present.
 - Measure glass first open live (picker over IPC, launcher by hand).
 - Continue glass raster work and the in-surface blur engine after pipeline work.
 

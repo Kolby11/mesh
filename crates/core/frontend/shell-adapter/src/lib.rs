@@ -1665,6 +1665,12 @@ pub trait ShellComponent: Send {
     fn wants_parent_render(&self) -> bool {
         self.wants_render()
     }
+    /// Restrict an animation-only frame to the realized child targets it affects.
+    /// `None` keeps the conservative parent/child readiness gate, including
+    /// input, script, resource, and geometry changes with unknown coverage.
+    fn animation_child_render_targets(&self, _child_node_keys: &[&str]) -> Option<Vec<String>> {
+        None
+    }
     /// Discard child-only paint work when its target is unsupported or dismissed.
     fn discard_child_surface_paint(&mut self, _node_key: &str) {}
     /// A paint-only frame, implying no script, layout, or style change.

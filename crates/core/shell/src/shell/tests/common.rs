@@ -954,6 +954,8 @@ pub(super) struct PopoverHarnessState {
     pub(super) placement: mesh_core_elements::PopoverPlacement,
     pub(super) popover_trigger: Option<super::types::PopoverTriggerReference>,
     pub(super) painted_nodes: Vec<String>,
+    pub(super) animation_child_only: bool,
+    pub(super) render_calls: usize,
     pub(super) exiting_paints: Vec<bool>,
     /// The closing child keys the shell last handed the component.
     pub(super) closing_keys: Vec<String>,
@@ -977,6 +979,8 @@ impl Default for PopoverHarnessState {
             placement: mesh_core_elements::PopoverPlacement::default(),
             popover_trigger: None,
             painted_nodes: Vec::new(),
+            animation_child_only: false,
+            render_calls: 0,
             exiting_paints: Vec::new(),
             closing_keys: Vec::new(),
             child_inputs: Vec::new(),
@@ -1045,6 +1049,13 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
         true
     }
 
+    fn animation_child_render_targets(&self, _: &[&str]) -> Option<Vec<String>> {
+        let state = self.state.lock().unwrap();
+        state
+            .animation_child_only
+            .then(|| vec![state.node_key.clone()])
+    }
+
     fn wants_immediate_rerender(&self) -> bool {
         false
     }
@@ -1053,6 +1064,7 @@ impl super::types::ShellComponent for PopoverHarnessComponent {
         &mut self,
         surface: &mut dyn mesh_core_wayland::ShellSurface,
     ) -> Result<(), super::types::ComponentError> {
+        self.state.lock().unwrap().render_calls += 1;
         surface.set_size(120, 36);
         Ok(())
     }

@@ -185,6 +185,12 @@ impl Shell {
             {
                 continue;
             }
+            if visible
+                && self.components[index].parent.last_surface_config.is_some()
+                && self.animation_children_ready(&self.components[index]) == Some(false)
+            {
+                continue;
+            }
             if visible && !self.components[index].component.wants_parent_render() {
                 let scale = self.presentation_engine.surface_scale(&surface_id);
                 match self.reconcile_child_surface_requests(index, &surface_id, &surface_id, scale)

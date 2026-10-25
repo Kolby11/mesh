@@ -1179,3 +1179,77 @@ fn ready_child_keeps_painting_while_parent_waits_for_compositor() {
         }
     }
 }
+
+#[test]
+fn popup_animation_waits_for_its_target_even_when_parent_is_ready() {
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+    shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+    render_components_until_child_popup(&mut shell);
+    let child_id = shell.components[0].children[0].target.surface_id.clone();
+    for buffer_blocked in [false, true] {
+        shell
+            .presentation_engine
+            .testing_set_surface_frame_pending(&child_id, !buffer_blocked);
+        shell
+            .presentation_engine
+            .testing_set_surface_buffer_backpressured(&child_id, buffer_blocked);
+        state.lock().unwrap().animation_child_only = true;
+        let before = state.lock().unwrap().render_calls;
+        for _ in 0..4 {
+            assert!(!shell.components_have_ready_render_work());
+            shell.render_components().unwrap();
+        }
+        assert_eq!(state.lock().unwrap().render_calls, before);
+        // New input/script dirt must still prepare the tree and reconcile children.
+        state.lock().unwrap().animation_child_only = false;
+        assert!(shell.components_have_ready_render_work());
+        shell.render_components().unwrap();
+        assert!(state.lock().unwrap().render_calls > before);
+        state.lock().unwrap().animation_child_only = true;
+        shell
+            .presentation_engine
+            .testing_set_surface_frame_pending(&child_id, false);
+        shell
+            .presentation_engine
+            .testing_set_surface_buffer_backpressured(&child_id, false);
+        assert!(shell.components_have_ready_render_work());
+        let painted = state.lock().unwrap().painted_nodes.len();
+        shell.render_components().unwrap();
+        assert_eq!(state.lock().unwrap().painted_nodes.len(), painted + 1);
+    }
+}
+
+#[test]
+#[ignore = "release-only blocked popup preparation benchmark"]
+fn blocked_popup_animation_preparation_profile() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    for run in 0..3 {
+        for gated in [false, true] {
+            let mut shell = Shell::new();
+            shell.presentation_engine =
+                mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+            let state = Arc::new(Mutex::new(PopoverHarnessState::default()));
+            shell.register_component(Box::new(PopoverHarnessComponent::new(state.clone())));
+            render_components_until_child_popup(&mut shell);
+            let child_id = shell.components[0].children[0].target.surface_id.clone();
+            shell
+                .presentation_engine
+                .testing_set_surface_frame_pending(&child_id, true);
+            state.lock().unwrap().animation_child_only = gated;
+            let before = state.lock().unwrap().render_calls;
+            let started = Instant::now();
+            for _ in 0..100 {
+                shell.render_components().unwrap();
+            }
+            let elapsed = started.elapsed();
+            let calls = state.lock().unwrap().render_calls - before;
+            assert_eq!(calls, if gated { 0 } else { 100 });
+            eprintln!(
+                "blocked popup: run={run} gated={gated} 100 frames {elapsed:?} preparations={calls}"
+            );
+        }
+    }
+}

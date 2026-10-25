@@ -2630,3 +2630,70 @@ end
         assert!(component.scoped_annotation_inputs.is_some(), "the next frame stays scoped");
     }
 }
+
+#[test]
+fn animation_target_coverage_requires_every_node_to_be_in_a_realized_popup() {
+    let mut component = test_frontend_component("<template><box /></template>");
+    let popup_key = "root/popup";
+    let animated_key = "root/popup/animated";
+    let mut animated = event_node("box", animated_key, 0.0, 0.0, 20.0, 20.0, &[]);
+    animated.id = runtime_node_id_for_key(animated_key);
+    let animated_id = animated.id;
+    let mut popup = event_node("box", popup_key, 0.0, 0.0, 40.0, 40.0, &[]);
+    popup.id = runtime_node_id_for_key(popup_key);
+    popup.children = vec![animated].into();
+    let mut tree = root_with(vec![popup]);
+    tree.id = runtime_node_id_for_key("root");
+    component.last_frame_snapshot =
+        Some(mesh_core_elements::FrameSnapshot::complete(&tree, 1, None).unwrap());
+    component.animation_only_dirty = true;
+    component
+        .entering_child_keys
+        .insert(animated_key.to_owned());
+    assert_eq!(
+        component.animation_child_render_targets(&[popup_key]),
+        Some(vec![popup_key.to_owned()])
+    );
+    // A completed parent animation with forwards fill remains registered.
+    // Its retained final value must not make the parent an animation target.
+    let parent_slot = (tree.id, 0);
+    component.keyframe_animation_slots.insert(
+        parent_slot,
+        mesh_core_animation::AnimationInstanceId::new(tree.id, 0, 1),
+    );
+    component.keyframe_animation_lifecycles.insert(
+        parent_slot,
+        mesh_core_animation::AnimationLifecycle::Completed,
+    );
+    assert_eq!(
+        component.animation_child_render_targets(&[popup_key]),
+        Some(vec![popup_key.to_owned()])
+    );
+    component.keyframe_animation_lifecycles.insert(
+        parent_slot,
+        mesh_core_animation::AnimationLifecycle::Continued,
+    );
+    assert_eq!(component.animation_child_render_targets(&[popup_key]), None);
+    component.keyframe_animation_slots.remove(&parent_slot);
+    component.keyframe_animation_lifecycles.remove(&parent_slot);
+    assert_eq!(component.animation_child_render_targets(&[]), None);
+    component.entering_child_keys.insert("missing".to_owned());
+    assert_eq!(component.animation_child_render_targets(&[popup_key]), None);
+    component.entering_child_keys.remove("missing");
+    component.entering_child_keys.insert("root".to_owned());
+    assert_eq!(component.animation_child_render_targets(&[popup_key]), None);
+    component.entering_child_keys.remove("root");
+    component.surface_exiting = true;
+    assert_eq!(component.animation_child_render_targets(&[popup_key]), None);
+    component.surface_exiting = false;
+    component.animation_only_dirty = false;
+    assert_eq!(component.animation_child_render_targets(&[popup_key]), None);
+    assert!(
+        component
+            .last_frame_snapshot
+            .as_ref()
+            .unwrap()
+            .node_by_id(animated_id)
+            .is_some()
+    );
+}

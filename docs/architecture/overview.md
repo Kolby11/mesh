@@ -111,9 +111,12 @@ attributes. Other input changes keep the ordinary reconciliation path.
 Promoted tooltip animation ticks update only their popup paint generation;
 child-only render work reconciles and paints child targets without painting the
 parent. Inline tooltip animation still invalidates the parent surface.
-Shared-tree popover animation still advances style and layout; when its parent
-damage is empty, painting opens no canvas session and retains the parent's
-complete GPU scene. Only damaged targets record and draw pixels.
+Shared-tree popover animation advances style and layout only when an affected
+popup has a presentation slot. A ready, unchanged parent does not bypass a
+popup's frame callback or buffer backpressure. Input, script and resource
+changes keep the conservative readiness path. When parent damage is empty,
+painting opens no canvas session and retains the parent's complete GPU scene.
+Only damaged targets record and draw pixels.
 Child-surface requests
 retain dependencies on trigger geometry, ancestor policy and descendant paint
 extents, and refresh from the finalized dirty set. Identity/element validation

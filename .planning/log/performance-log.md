@@ -8800,3 +8800,34 @@ its panel recorded-scene parity failure reproduces identically on the unchanged
 `f6a68c5a` checkout (38 of 19,200 pixels, worst channel delta 36). It remains in
 the backlog; no tolerance was changed. Raw logs are under ignored
 `profiles/backlog-2026-10-24/scene-retry/`.
+
+## 2026-10-25 — gate shared-tree popup preparation by affected targets
+
+Base `d02ba382`, isolated branch `codex/handler-popup-glass`. Reviewed the
+rejected-experiments table and the preceding parent-scene preservation entry.
+
+Animation-only frontend frames report their affected realized popovers through
+retained snapshot paths. The scheduler and render loop wait when all of those
+popovers lack a presentation slot, even if the parent is ready. Finished parent
+keyframes retained for forwards fill do not widen that target set. Unknown or
+parent animation paths, input/script/resource invalidation, initial configure
+work and non-popover children keep conservative preparation. A ready child can
+still advance while its parent waits for a callback or buffer release.
+
+**Release measurement.** `blocked_popup_animation_preparation_profile`,
+GPU-feature shell test binary, optimized with thin LTO; synthetic 120×36 parent
+and 72×32 popup, parent ready, popup callback pending, 100 render attempts per
+sample. Three interleaved broad-gate / target-gate pairs in one process:
+preparation calls **100–100 → 0–0**; elapsed **1.135–1.178 ms → 0.030–0.037 ms**
+per 100 attempts. The broad-gate control returns no target restriction and
+therefore executes the pre-change readiness path. This fixture measures shell
+preparation dispatch, not a real popup's tree/layout cost or GPU frame latency.
+The gate asserts the preparation counts rather than a noisy timing ratio.
+
+**Validation.** `cargo test --release -p mesh-core-shell --features gpu --lib --
+--test-threads=1`: **1,024 passed, 37 ignored, zero failures**. Regressions cover
+callback and buffer backpressure, input/script fallback, resumption, the inverse
+ready-child/blocked-parent case, missing paths and completed parent keyframes.
+The ignored release preparation benchmark also passes. Source and measurement
+artifacts are isolated from the main checkout; scratch evidence is under
+`/tmp/mesh-popup-glass/` (`shell-tests.log`, `popup-benchmark.log`).
