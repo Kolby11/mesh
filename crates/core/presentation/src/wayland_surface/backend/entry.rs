@@ -686,17 +686,6 @@ impl SurfaceEntry {
         self.opaque_region_dirty = false;
     }
 
-    pub(super) fn hide(&mut self) {
-        self.generations.clear_pending_frame();
-        self.frame_pending_since = None;
-        self.buffer_backpressured = false;
-        let wl_surface = self.role.wl_surface();
-        wl_surface.attach(None, 0, 0);
-        wl_surface.commit();
-        // Wait for a fresh configure before attaching a buffer again after remap.
-        self.configured = false;
-    }
-
     pub(super) fn copy_into_shm_buffer(
         &mut self,
         pool: &mut SlotPool,

@@ -37,41 +37,20 @@ impl WaylandSurfaceBackend {
             #[cfg(feature = "gpu")]
             self.cancel_scene(surface_id);
             self.state.release_surface_focus_grab(surface_id);
-            // A hidden window is *destroyed*, not detached. Detaching a buffer
-            // unmaps an `xdg_toplevel`, and remapping it requires a fresh
-            // configure the compositor is under no obligation to send for a
-            // commit that carries no new state — measured on Hyprland 0.56, a
-            // re-shown window waits out the configure deadline every frame and
-            // never reappears. Recreating on the next `configure()` is the same
-            // lifecycle promoted popovers already use, and it costs nothing
-            // above the presentation layer: the component VM, retained tree,
-            // and Lua state are untouched.
-            if self
-                .state
-                .surfaces
-                .get(surface_id)
-                .is_some_and(|entry| entry.role.is_window())
-            {
-                self.destroy_surface(surface_id);
-                return Ok(PresentStatus::Presented);
-            }
-            // Only detach a buffer (to hide) if the compositor has already configured this
-            // surface. Before the first configure event the surface has no buffer attached
-            // and is already invisible; committing a null buffer before configure arrives
-            // triggers a Wayland protocol error.
-            if let Some(entry) = self.state.surfaces.get_mut(surface_id)
-                && entry.configured
-            {
-                // Clear compositor blur before hiding.
-                if let Some(object) = entry.blur_object.take() {
-                    let wl_surface = entry.wl_surface().clone();
-                    object.release(&self.state.blur_protocols, &wl_surface);
-                }
-                entry.blur_committed = false;
-                entry.blur_region_dirty = false;
-                entry.blur_regions.clear();
-                entry.hide();
-            }
+            // A hidden layer surface or window is *destroyed*, not detached;
+            // the next `configure()` recreates it, and nothing above the
+            // presentation layer (component VM, retained tree, Lua state)
+            // changes. Detaching fails on both roles:
+            //
+            // - An unmapped `xdg_toplevel` needs a fresh configure to remap,
+            //   which the compositor need not send for a commit with no new
+            //   state; on Hyprland 0.56 a re-shown window waited out the
+            //   configure deadline every frame and never reappeared.
+            // - A null-buffer commit makes wlroots discard a layer surface's
+            //   pending configures, but one already in flight still reaches the
+            //   client and sctk acks it; sway then kills the client with
+            //   `wrong configure serial`. A destroyed role receives nothing.
+            self.destroy_surface(surface_id);
             return Ok(PresentStatus::Presented);
         }
 

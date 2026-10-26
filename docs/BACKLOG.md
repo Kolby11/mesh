@@ -63,11 +63,6 @@ October log.
 
 ## Glass shell follow-ups (found 2026-10-20)
 
-- [ ] **Layer unmap races configures on wlroots:** sctk acks every configure, so a configure sent
-      just before a hidden surface's null-buffer commit is acked after wlroots discarded it
-      (`wrong configure serial`, shell exits on sway). Destroy and recreate the layer role on hide.
-      Trigger: a waiting background surface re-sends identical layer config each frame.
-
 - [ ] **`corner-shape: scoop` gaps:** borders are not stroked along a scoop's curve, and
       `overflow: hidden` clips descendants to the rounded shape, not the scooped one ([04 §12.1](spec/04-styling.md#121-corner-shapes-corner-shape)).
 - [ ] **Retire the tooltip overlay reserve:** tooltips that leave their surface are now

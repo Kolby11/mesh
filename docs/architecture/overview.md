@@ -161,6 +161,9 @@ same path and its resources are already prepared.
 A hiding surface stays mapped while its `mesh-surface-exiting` styles animate
 and unmaps once it has painted them with no transition or keyframe animation
 still running; its root's opacity transition duration bounds the wait.
+Unmapping destroys the layer or window role rather than committing a null
+buffer, and showing recreates it: a configure already in flight when wlroots
+unmaps a layer would otherwise be acked after the compositor discarded it.
 The event loop includes input-repeat, temporary focus-grab and pending-frame
 escape deadlines alongside component ticks and reload maintenance.
 
