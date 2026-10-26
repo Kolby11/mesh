@@ -20,6 +20,7 @@ mod signature;
 mod sparse;
 pub use sequence::PaintSequence;
 mod spans;
+pub use spans::PaintSpanSequence;
 mod subtree;
 mod types;
 
@@ -772,6 +773,10 @@ impl RetainedDisplayList {
             plan.inputs.retained_tree_generation = self.retained_tree_generation;
             plan.topology.generation = self.generation;
             plan.topology.commands = Arc::clone(&self.paint_commands);
+            plan.replay.spans = Arc::clone(&self.command_spans);
+            if plan.effects.filter_layer_regions.as_ref() != self.filter_layer_regions.as_slice() {
+                plan.effects.filter_layer_regions = self.filter_layer_regions.clone().into();
+            }
             plan.damage = FramePaintDamage {
                 logical: self.last_damage_rects.clone().into(),
                 logical_bounds: self.last_metrics.damage_rect,
@@ -981,19 +986,7 @@ impl RetainedDisplayList {
     }
 
     fn refresh_frame_plan(&mut self, surface: DamageRect) {
-        let spans = self
-            .command_spans
-            .iter()
-            .map(|span| FramePaintReplaySpan {
-                owner: span.owner,
-                start: span.start,
-                end: span.end,
-                bounds: span.bounds,
-                command_count: span.command_count,
-                includes_scrollbars: span.includes_scrollbars,
-            })
-            .collect::<Vec<_>>()
-            .into();
+        let spans = Arc::clone(&self.command_spans);
         let damage = FramePaintDamage {
             logical: self.last_damage_rects.clone().into(),
             logical_bounds: self.last_metrics.damage_rect,

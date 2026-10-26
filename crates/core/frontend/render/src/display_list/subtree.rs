@@ -6,6 +6,7 @@ use super::blur::*;
 use super::build::*;
 use super::paint_node::*;
 use super::sequence::PaintSequence;
+use super::spans::{PaintSpanSequence, SpanLink};
 use super::types::*;
 
 #[derive(Debug, Clone)]
@@ -17,7 +18,7 @@ pub(super) struct RetainedPaintSubtree {
     pub(super) pruning: PruningMetrics,
     pub(super) command_span: Option<RetainedSubtreeSpan>,
     pub(super) child_coverage: super::coverage::ChildCoverage,
-    pub(super) spans: Arc<[RetainedCommandSpan]>,
+    pub(super) spans: Arc<PaintSpanSequence>,
     pub(super) scroll_viewport: Option<DamageRect>,
     /// The owner's scroll offset when `scroll_viewport` is set.
     pub(super) scroll_offset: (f32, f32),
@@ -33,7 +34,7 @@ impl Default for RetainedPaintSubtree {
             pruning: PruningMetrics::default(),
             command_span: None,
             child_coverage: Default::default(),
-            spans: Vec::new().into(),
+            spans: Arc::new(PaintSpanSequence::default()),
             scroll_viewport: None,
             scroll_offset: (0.0, 0.0),
         }
@@ -69,7 +70,7 @@ pub(super) struct PaintSubtreeBuilder {
     pub(super) includes_scrollbars: bool,
     pub(super) local_includes_scrollbars: bool,
     pub(super) local_command_count: usize,
-    pub(super) child_spans: Vec<RetainedCommandSpan>,
+    pub(super) child_spans: Vec<SpanLink>,
     child_coverage: Vec<(NodeId, DamageRect)>,
 }
 
@@ -124,13 +125,8 @@ impl PaintSubtreeBuilder {
         }
 
         let child_offset = self.commands.len() + self.child_command_count;
-        self.child_spans.reserve(child_subtree.spans.len());
-        for span in child_subtree.spans.iter() {
-            self.child_spans.push(RetainedCommandSpan {
-                start: span.start.saturating_add(child_offset),
-                end: span.end.saturating_add(child_offset),
-                ..*span
-            });
+        if let Some(link) = child_subtree.spans.child_link(child_offset) {
+            self.child_spans.push(link);
         }
         self.command_children
             .push((self.commands.len(), Arc::clone(&child_subtree.commands)));
@@ -227,7 +223,7 @@ impl PaintSubtreeBuilder {
     }
 
     pub(super) fn into_retained(
-        mut self,
+        self,
         generation: u64,
         layer_scope: bool,
         owner: NodeId,
@@ -245,6 +241,7 @@ impl PaintSubtreeBuilder {
                 local_includes_scrollbars: self.local_includes_scrollbars,
             })
         };
+        let mut trailing = Vec::new();
         let spans = match command_span {
             Some(span) if layer_scope => vec![RetainedCommandSpan {
                 owner,
@@ -258,7 +255,7 @@ impl PaintSubtreeBuilder {
                 let has_children = subtree_end > command_count;
                 let leading =
                     command_count.saturating_sub(usize::from(span.local_includes_scrollbars));
-                let mut spans = Vec::with_capacity(self.child_spans.len() + 2);
+                let mut spans = Vec::with_capacity(1);
                 if !has_children {
                     spans.push(RetainedCommandSpan {
                         owner,
@@ -279,7 +276,7 @@ impl PaintSubtreeBuilder {
                     });
                     if span.local_includes_scrollbars {
                         let scrollbar_index = subtree_end.saturating_sub(1);
-                        spans.push(RetainedCommandSpan {
+                        trailing.push(RetainedCommandSpan {
                             owner,
                             start: scrollbar_index,
                             end: subtree_end,
@@ -289,10 +286,14 @@ impl PaintSubtreeBuilder {
                         });
                     }
                 }
-                spans.append(&mut self.child_spans);
                 spans
             }
-            None => std::mem::take(&mut self.child_spans),
+            None => Vec::new(),
+        };
+        let children = if layer_scope {
+            Vec::new()
+        } else {
+            self.child_spans
         };
         RetainedPaintSubtree {
             generation,
@@ -305,22 +306,14 @@ impl PaintSubtreeBuilder {
             pruning: self.pruning,
             command_span,
             child_coverage: super::coverage::ChildCoverage::new(self.child_coverage),
-            spans: spans.into(),
+            spans: Arc::new(PaintSpanSequence::compose_links(spans, children, trailing)),
             scroll_viewport: None,
             scroll_offset: (0.0, 0.0),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct RetainedCommandSpan {
-    pub(super) owner: NodeId,
-    pub(super) start: usize,
-    pub(super) end: usize,
-    pub(super) bounds: DamageRect,
-    pub(super) command_count: usize,
-    pub(super) includes_scrollbars: bool,
-}
+pub(super) type RetainedCommandSpan = FramePaintReplaySpan;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct SelectedCommandSpan {

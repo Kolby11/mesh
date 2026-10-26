@@ -278,7 +278,7 @@ fn display_list_select_paint_commands_for_rects_matches_expected_commands() {
     drop(selected_right);
     drop(selected_left);
     let mut plan = list.frame_paint_plan().clone();
-    plan.replay.spans = Vec::new().into();
+    plan.replay.spans = Arc::new(PaintSpanSequence::default());
     list.frame_plan = Arc::new(plan);
     let fallback = list.select_paint_commands_for_rects(
         &[

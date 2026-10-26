@@ -32,7 +32,8 @@ pub use display_list::{
     BackdropBlurPolicy, DamageRect, DisplayBatchBarrierCounts, DisplayListClip, DisplayListMetrics,
     DisplayListRepaintPolicy, DisplayPaintCommand, DisplayPaintCommandKind, FramePaintDamage,
     FramePaintEffects, FramePaintInputs, FramePaintPlan, FramePaintReplay, FramePaintReplaySpan,
-    FramePaintTopology, FramePaintTransform, RetainedDisplayList, SelectedDisplayListPaint,
+    FramePaintTopology, FramePaintTransform, PaintSpanSequence, RetainedDisplayList,
+    SelectedDisplayListPaint,
 };
 pub use fractional_scale::{DeviceRect, FractionalScale};
 pub use library_adapters::{

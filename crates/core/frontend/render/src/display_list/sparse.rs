@@ -483,7 +483,7 @@ impl RetainedDisplayList {
             let old = previous.command_span?;
             let next = next.command_span?;
             let scope =
-                previous.spans.len() == 1 && previous.spans[0].end == previous.commands.len();
+                previous.spans.len() == 1 && previous.spans.get(0)?.end == previous.commands.len();
             let (old, new) = if scope {
                 (old.bounds, next.bounds)
             } else {
@@ -495,44 +495,18 @@ impl RetainedDisplayList {
         }
         for (&id, subtree) in updated.iter_mut() {
             let start = self.sparse_paint_index.starts.get(&id)?.start;
-            let mut replacements = Vec::new();
-            if subtree.command_span?.includes_scrollbars {
-                for (index, span) in subtree.spans.iter().enumerate() {
-                    if let Some((_, bounds)) =
-                        changes.iter().find(|(owner, _)| *owner == span.owner)
-                    {
-                        replacements.push((index, *bounds));
-                    }
-                }
-            } else {
-                // Without trailing scrollbar spans, paint spans are ordered by
-                // command offset; covered descendants have no separate span.
-                for &(owner, bounds) in &changes {
-                    let Some(relative) = self
-                        .sparse_paint_index
-                        .starts
-                        .get(&owner)?
-                        .start
-                        .checked_sub(start)
-                    else {
+            for &(owner, bounds) in &changes {
+                for &position in &self.sparse_paint_index.starts.get(&owner)?.positions {
+                    let Some(relative) = position.checked_sub(start) else {
                         continue;
                     };
-                    let index = subtree.spans.partition_point(|span| span.start < relative);
-                    if subtree
-                        .spans
-                        .get(index)
-                        .is_some_and(|span| span.owner == owner && span.start == relative)
-                    {
-                        replacements.push((index, bounds));
+                    if relative >= subtree.commands.len() {
+                        continue;
+                    }
+                    if let Some(spans) = subtree.spans.with_bounds(owner, relative, bounds) {
+                        subtree.spans = Arc::new(spans);
                     }
                 }
-            }
-            if !replacements.is_empty() {
-                let mut spans = subtree.spans.to_vec();
-                for (index, bounds) in replacements {
-                    spans[index].bounds = bounds;
-                }
-                subtree.spans = spans.into();
             }
         }
         Some(())

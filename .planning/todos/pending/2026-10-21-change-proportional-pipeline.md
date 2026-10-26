@@ -115,9 +115,11 @@ the plan below is kept as the design record.
 ### P2. One frame dirty set drives every pass
 
 Geometry producer deltas and retained overflow unions landed 2026-10-26; the
-display-scope command patches and indexed shrinking display coverage also landed.
-Retained span-array copying and repair remain in `docs/BACKLOG.md`. Measurement
-and parity evidence are in the performance log. The prototype account below is historical.
+display-scope command patches, indexed shrinking display coverage and persistent
+replay spans also landed. Sparse span repair no longer scans or copies unrelated
+entries, including scrollbar spans. Measurement and command/frame-plan/pixel
+parity evidence are in the performance log. P3/D1 write tracking remains deferred
+pending a runtime observation mechanism. The prototype account below is historical.
 
 **Prototype measured 2026-10-21; exit not met.** `FrameDirty` coalesces typed
 binding writes, interaction annotation changes and animation buckets. Only

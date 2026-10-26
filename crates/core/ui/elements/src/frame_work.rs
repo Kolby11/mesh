@@ -40,6 +40,8 @@ passes! {
     DisplayEntries => "display_entries",
     DisplayAncestors => "display_ancestors",
     DisplayBuild => "display_build",
+    DisplaySpanLookup => "display_span_lookup",
+    DisplaySpanCopy => "display_span_copy",
     ChildSurfaceRequests => "child_surface_requests",
     FocusScopeRefresh => "focus_scope_refresh",
     DisclosureRefresh => "disclosure_refresh",

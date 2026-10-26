@@ -7,6 +7,13 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **P2 retained display spans complete.** Persistent span branches replace
+  full-array copies and scrollbar repair scans. Ancestor rebuilds share offset
+  child spans; frame plans publish the repaired immutable metadata. Repeated
+  moves, all scope variants and old snapshots pass command/frame-plan/pixel
+  parity. Release renderer: 343 passed; release GPU-feature shell: 1,034 passed.
+  Sparse timings and conservative-control tradeoffs are in the performance log.
+
 - **P2 shrinking display coverage complete.** Persistent child bounds replace
   sibling union scans, preserving retained snapshots. Command/coverage and
   full/partial pixel parity pass at 16/1,024 siblings; ancestor visits stay
@@ -67,11 +74,9 @@ measurements live in [`log/`](log/README.md).
 
 ## Next
 
-- P2 retained display spans: arrays still copy and repair unrelated entries,
-  including scrollbar-containing span repair.
-- D1: record compound table writes instead of converting every compound global
-  during handler sync; indirect list reads still compare every item.
 - Attribute the launcher's first child-surface preparation before optimizing it.
+- D1 remains deferred pending supported runtime table-write tracking; indirect
+  list reads still compare every item.
 - Continue glass raster work and the in-surface blur engine after pipeline work.
 
 ## Blocked / known baselines

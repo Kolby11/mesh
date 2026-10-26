@@ -12,6 +12,7 @@ use mesh_core_elements::{LayoutRect, NodeId};
 use crate::fractional_scale::{DeviceRect, FractionalScale};
 
 use super::build::*;
+use super::spans::PaintSpanSequence;
 use super::subtree::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -279,7 +280,7 @@ impl FramePaintPlan {
                 filter_layer_regions: Vec::new().into(),
             },
             FramePaintReplay {
-                spans: Vec::new().into(),
+                spans: Arc::new(PaintSpanSequence::default()),
                 layer_scopes: Vec::new().into(),
             },
             FramePaintDamage {
@@ -347,7 +348,7 @@ pub struct FramePaintReplaySpan {
 
 #[derive(Debug, Clone, Default)]
 pub struct FramePaintReplay {
-    pub spans: Arc<[FramePaintReplaySpan]>,
+    pub spans: Arc<PaintSpanSequence>,
     pub layer_scopes: Arc<[(usize, usize)]>,
 }
 
@@ -466,7 +467,7 @@ pub struct RetainedDisplayList {
     pub(super) next_subtrees_scratch: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     pub(super) dirty_ancestors_scratch: HashSet<NodeId>,
     pub(super) ancestor_path_scratch: Vec<NodeId>,
-    pub(super) command_spans: Arc<[RetainedCommandSpan]>,
+    pub(super) command_spans: Arc<PaintSpanSequence>,
     pub(super) paint_commands: Arc<PaintSequence<DisplayPaintCommand>>,
     pub(super) command_kinds: Arc<PaintSequence<DisplayPaintCommandKind>>,
     /// In-surface read regions available to the renderer fallback.
@@ -516,7 +517,7 @@ impl Default for RetainedDisplayList {
             next_subtrees_scratch: HashMap::new(),
             dirty_ancestors_scratch: HashSet::new(),
             ancestor_path_scratch: Vec::new(),
-            command_spans: Vec::new().into(),
+            command_spans: Arc::new(PaintSpanSequence::default()),
             paint_commands: Arc::new(PaintSequence::default()),
             command_kinds: Arc::new(PaintSequence::default()),
             backdrop_regions: Vec::new(),

@@ -9198,3 +9198,114 @@ and candidate executables, `bench.py`, `timings.json`, six raw benchmark process
 logs, the summary and build/test logs. Run
 `cargo test --release -p mesh-core-render --lib shrinking_display_coverage_profile -- --ignored --nocapture --test-threads=1`
 inside `nix develop`. No live compositor or hardware replay is claimed.
+
+## 2026-10-26 — persistent replay spans and indexed scrollbar repairs
+
+Baseline `0d2943a0`. This completes the P2 retained span-array item; P3/D1 stays
+deferred pending runtime write observation. Reviewed the rejected-experiments
+table and the previous display-scope and shrinking-coverage records first.
+
+**Implementation.** Retained subtrees and frame plans now share a persistent
+`PaintSpanSequence`. Leaves contain at most 16 spans; branches contain at most
+16 child links. Links retain command offsets, so rebuilding an ancestor reuses
+clean child span storage without shifting/copying every descendant entry.
+Construction moves child links into the balanced tree without redundant Arc
+increments. Leading spans, child branches and trailing scrollbar spans are in
+command order. Sparse coverage repair uses retained command positions to look
+up exact owner ranges, including trailing scrollbars, and copies only touched
+leaves and branch metadata. Diagnostic `as_slice()` materializes only on demand;
+preparation and replay use branch storage.
+
+The parity gate exposed stale published metadata: sparse updates repaired the
+retained spans but left the frame plan's replay spans at the prior generation.
+The sparse publication path now shares the repaired sequence and refreshes
+changed filter-layer regions. The full publication path also shares spans
+instead of converting the complete retained span array. Commands, damage and
+published replay metadata now advance together.
+
+**A/B method.** Normal release profile (thin LTO, one codegen unit), builds/tests
+inside `nix develop`, `CARGO_BUILD_JOBS=4`, `/tmp/mesh-p2-target`. The saved baseline
+adds only `retained_display_span_profile` and its timing output to the unchanged
+runtime. Three alternating baseline/candidate process pairs pinned to CPU 2;
+no rustc process is active during timings. Each process runs three rounds of
+100 measured updates after three initialization updates. Ranges below cover
+nine round samples per side. The desktop remains active; timer quantization
+and run-to-run noise are visible in microsecond samples.
+
+Fixture: 16 or 1,024 direct box children in a 320×1100 surface. Clean children
+are 80×1 px; the middle child alternates 160↔120 px width. Scopes are plain,
+retained scroll with scrollbars, and an unretained scroll owner with 0.95 scale
+and scrollbars. Explicit scroll metrics have a 100 px range and 5.5 px offset.
+The timed interval is `update_with_dirty_nodes`, excluding dirty classification,
+layout, replay selection and raster. These are display preparation timings,
+not whole-frame, live GPU or launcher latency results.
+
+| Scope | Siblings | Baseline mean, ms | Candidate mean, ms | Baseline p50, ms | Candidate p50, ms | Baseline p90, ms | Candidate p90, ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `plain` | 16 | 0.004797–0.005165 | 0.005189–0.007943 | 0.004749–0.004749 | 0.004749–0.008311 | 0.005936–0.005937 | 0.005937–0.008311 |
+| `plain` | 1,024 | 0.011291–0.014722 | 0.009035–0.010508 | 0.010686–0.013060 | 0.008311–0.009499 | 0.011873–0.022559 | 0.009499–0.018996 |
+| `scrollbar` | 16 | 0.005390–0.006851 | 0.005224–0.006589 | 0.004750–0.007124 | 0.004749–0.005936 | 0.005937–0.007124 | 0.005937–0.008311 |
+| `scrollbar` | 1,024 | 0.008857–0.010104 | 0.008762–0.011766 | 0.008311–0.009498 | 0.008311–0.010686 | 0.009498–0.013060 | 0.009499–0.018996 |
+| `unretained-scrollbar` | 16 | 0.004975–0.007088 | 0.005272–0.007622 | 0.004749–0.004750 | 0.004749–0.007124 | 0.005936–0.014247 | 0.005937–0.015435 |
+| `unretained-scrollbar` | 1,024 | 0.013262–0.018142 | 0.009617–0.013559 | 0.011873–0.015435 | 0.009498–0.013060 | 0.015435–0.024933 | 0.010686–0.020184 |
+
+The measured plain and unretained-scrollbar sparse frames copy exactly **2 span
+entries** at both sizes; retained scroll copies **1**. Lookup visits are **4 / 5**
+for plain, **3 / 5** for unretained scrollbars, and **2 / 2** for retained scroll.
+Build visits remain one and entry visits zero. The baseline has no new span
+counters; its full retained array copy and scrollbar scan are identified by the
+old code, rather than presented as instrumented baseline counts. No speedup is
+claimed for retained-scroll sparse updates or the small fixtures.
+
+**Conservative controls and limits.** The harness also forces the existing
+conservative path with a material-dirty summary, leaving live trees and dirty
+IDs identical. Those updates still rebuild commands and traverse child lists;
+this change does not claim proportionality for that path.
+
+| Scope | Siblings | Baseline conservative p50, ms | Candidate conservative p50, ms |
+| --- | ---: | ---: | ---: |
+| `plain` | 16 | 0.010686–0.014248 | 0.010686–0.016623 |
+| `plain` | 1,024 | 0.479668–0.560405 | 0.478481–0.522411 |
+| `scrollbar` | 16 | 0.018997–0.028495 | 0.018997–0.020184 |
+| `scrollbar` | 1,024 | 1.146931–1.485310 | 1.127934–1.355896 |
+| `unretained-scrollbar` | 16 | 0.009499–0.010686 | 0.010685–0.014248 |
+| `unretained-scrollbar` | 1,024 | 0.478482–0.544970 | 0.506977–0.593649 |
+
+Large plain and retained-scroll control ranges overlap. Unretained-scrollbar
+controls remain slower in some runs (paired process median p50 changes: about
++9%, +16%, then unchanged); no universal preparation improvement is claimed.
+The metadata allocation/reference-count tradeoff remains visible on this
+conservative workload. Replay selection still scans replay spans;
+opaque retained-scroll replay remains a separate backlog item.
+
+**Measured iterations.** A binary branch tree passed parity but made conservative
+rebuild controls slower: the large plain p50 range was 0.529536–0.752749 ms vs
+0.490356–0.530723 ms baseline. Switching to 16-way branches removed most branch
+allocations; moving child links rather than cloning their references then
+brought the plain control into the final overlapping ranges above. Raw sample
+JSON, summaries and executables for both intermediate candidates are retained
+under `binary-branches/` and `multiway-initial/` in the evidence directory.
+The initial flat chunking approach was replaced before benchmarking so ancestor
+rebuilds could share clean spans too.
+
+**Validation.** Release baseline renderer: **342 passed**, 16 ignored, zero
+failures; final renderer: **343 passed**, 16 ignored, zero failures. The expanded
+`geometry_command_patches_skip_siblings_and_match_full_build` gate covers
+16/1,024 siblings, first/middle/last growth, shrink and repeated moves, plain,
+clip, scale, opacity/filter layers, retained scroll/scrollbar and unretained
+scrollbar scopes. It compares commands, entries, subtree bounds, replay spans,
+published frame spans/filter regions, full raster and partial-repaint pixels
+against full rebuilds. It requires bounded span-copy/lookup work, ordered spans,
+shared publication storage and immutable old snapshots. The new
+`offset_span_branches_preserve_snapshots_and_bound_repairs` gate requires exactly
+one copied leaf entry at both sizes, logarithmic lookup visits, correct nested
+offsets and distinct leading/trailing owner spans; it is in
+`tools/check-performance` alongside the existing geometry gate.
+Release GPU-feature shell suite: **1,034 passed**, 37 ignored, zero failures.
+Formatting, shell-script syntax and diff checks pass.
+
+**Evidence/reproduction.** `/tmp/mesh-span-evidence/` contains baseline/candidate
+executables, `bench.py`, `timings.json` (216 rows including controls), six process
+logs, summary and build/test logs. Run
+`cargo test --release -p mesh-core-render --lib retained_display_span_profile -- --ignored --nocapture --test-threads=1`
+inside `nix develop`. No live compositor or hardware replay is claimed.

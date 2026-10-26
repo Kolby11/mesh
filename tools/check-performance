@@ -110,6 +110,7 @@ if ! "$workloads_only"; then
   cargo test -p mesh-core-render --release --lib display_ancestors_visit_only_retained_paths
   cargo test -p mesh-core-render --release --lib text_command_patches_skip_siblings_and_preserve_effect_coverage
   cargo test -p mesh-core-render --release --lib geometry_command_patches_skip_siblings_and_match_full_build
+  cargo test -p mesh-core-render --release --lib offset_span_branches_preserve_snapshots_and_bound_repairs
   cargo test -p mesh-core-render --release --lib display_list_rebuilds_descendants_only_when_a_moved_parent_defines_their_space
   cargo test -p mesh-core-elements --release --lib write_back_rounding_matches_taffy_rounding
   cargo test -p mesh-core-elements --release --lib live_paths_step_through_shared_prefixes_once

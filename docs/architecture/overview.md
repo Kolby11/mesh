@@ -116,7 +116,11 @@ changes and retained scroll offsets patch the existing owner, scrollbar and
 scroll-scope commands while preserving content snapshots. Scope topology changes, moved viewports and boxes that change a
 descendant's clip or transform keep the conservative rebuild. Persistent child
 coverage indexes repair shrinking ancestor unions along changed branches without
-scanning siblings. Retained span arrays still copy and repair unrelated entries.
+scanning siblings. Replay spans use persistent branches in command order,
+including trailing scrollbar spans. Repairs find owner ranges through retained
+command positions and copy only touched leaves. Ancestor rebuilds offset and
+share clean child branches, and immutable frame plans share the repaired span
+storage directly.
 Text-only binding patches also retain focus scopes, disclosures and interaction
 targets when all dirty paths preserve styles, state, geometry and non-text
 attributes. Other input changes keep the ordinary reconciliation path.

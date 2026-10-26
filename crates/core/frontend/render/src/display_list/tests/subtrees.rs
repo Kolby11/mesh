@@ -861,6 +861,7 @@ fn geometry_command_patches_skip_siblings_and_match_full_build() {
             "scale",
             "scroll",
             "scrollbar",
+            "unretained-scrollbar",
         ] {
             let mut root = node(1, "column", 0.0, 0.0, 200.0, 100.0);
             match effect {
@@ -869,6 +870,11 @@ fn geometry_command_patches_skip_siblings_and_match_full_build() {
                 "filter" => root.computed_style.filter.blur_radius = 2.0,
                 "scale" => {
                     root.computed_style.transform.scale_x = 0.9;
+                    root.computed_style.transform.scale_y = 0.95;
+                }
+                "unretained-scrollbar" => {
+                    root.computed_style.overflow_y = Overflow::Scroll;
+                    root.computed_style.transform.scale_x = 0.95;
                     root.computed_style.transform.scale_y = 0.95;
                 }
                 "scroll" | "scrollbar" => {
@@ -905,6 +911,8 @@ fn geometry_command_patches_skip_siblings_and_match_full_build() {
             objects.update(&root);
             let mut list = RetainedDisplayList::default();
             list.update(&root, 200, 100, false, true);
+            let original_plan = list.frame_paint_plan().clone();
+            let original_spans: Vec<_> = original_plan.replay.spans.iter().collect();
             let engine = crate::FrontendRenderEngine::new();
             let mut partial = crate::PixelBuffer::new(200, 100);
             engine.render_tree(&root, &mut partial, 1.0);
@@ -915,7 +923,10 @@ fn geometry_command_patches_skip_siblings_and_match_full_build() {
                 match turn % 3 {
                     0 => item.layout.width = 40.0,
                     1 => item.layout.width = 10.0,
-                    _ => item.layout.height = 3.0 - item.layout.height + 2.0,
+                    _ => {
+                        item.layout.height = 3.0 - item.layout.height + 2.0;
+                        item.layout.x = if turn % 2 == 0 { 60.0 } else { 120.0 };
+                    }
                 }
                 if matches!(effect, "opacity" | "filter") {
                     root.layout.width = if turn % 2 == 0 { 12.0 } else { 18.0 };
@@ -951,6 +962,14 @@ fn geometry_command_patches_skip_siblings_and_match_full_build() {
                 );
                 assert_eq!(list.layer_scopes, full.layer_scopes);
                 assert_eq!(list.filter_layer_regions, full.filter_layer_regions);
+                assert_eq!(
+                    list.frame_paint_plan().replay.spans,
+                    full.frame_paint_plan().replay.spans
+                );
+                assert_eq!(
+                    list.frame_paint_plan().effects.filter_layer_regions,
+                    full.frame_paint_plan().effects.filter_layer_regions
+                );
                 for id in [1, 2, 3 + middle as u64] {
                     let (patched, rebuilt) = (
                         list.subtrees[&id].command_span.unwrap(),
@@ -975,6 +994,28 @@ fn geometry_command_patches_skip_siblings_and_match_full_build() {
                     "{effect}, {count}, {turn}: {counts:?}"
                 );
                 assert_eq!(counts["display_entries"], 0, "{count}, {turn}: {counts:?}");
+                assert!(
+                    counts["display_span_copy"] <= 64,
+                    "{effect}, {count}, {turn}: {counts:?}"
+                );
+                assert!(
+                    counts["display_span_lookup"] <= 128,
+                    "{effect}, {count}, {turn}: {counts:?}"
+                );
+                assert!(Arc::ptr_eq(
+                    &list.frame_paint_plan().replay.spans,
+                    &list.command_spans
+                ));
+                assert_eq!(
+                    original_plan.replay.spans.iter().collect::<Vec<_>>(),
+                    original_spans
+                );
+                assert!(
+                    list.command_spans
+                        .iter()
+                        .zip(list.command_spans.iter().skip(1))
+                        .all(|(a, b)| a.start < b.start)
+                );
                 assert_eq!(
                     counts["display_ancestors"], 3,
                     "{effect}, {count}, {turn}: {counts:?}"
@@ -1039,16 +1080,22 @@ fn geometry_command_patches_skip_siblings_and_match_full_build() {
 #[test]
 #[ignore = "release-only scoped display patch profile"]
 fn scoped_display_patch_profile() {
-    display_patch_profile(false);
+    display_patch_profile(false, false);
 }
 
 #[test]
 #[ignore = "release-only shrinking display coverage profile"]
 fn shrinking_display_coverage_profile() {
-    display_patch_profile(true);
+    display_patch_profile(true, false);
 }
 
-fn display_patch_profile(shrinking: bool) {
+#[test]
+#[ignore = "release-only retained display span profile"]
+fn retained_display_span_profile() {
+    display_patch_profile(true, true);
+}
+
+fn display_patch_profile(shrinking: bool, spans: bool) {
     use std::time::Instant;
     for effect in [
         "plain",
@@ -1058,7 +1105,14 @@ fn display_patch_profile(shrinking: bool) {
         "filter",
         "scroll",
         "scrollbar",
+        "unretained-scrollbar",
     ] {
+        if spans && !matches!(effect, "plain" | "scrollbar" | "unretained-scrollbar") {
+            continue;
+        }
+        if effect == "unretained-scrollbar" && !spans {
+            continue;
+        }
         if effect == "plain" && !shrinking {
             continue;
         }
@@ -1080,6 +1134,10 @@ fn display_patch_profile(shrinking: bool) {
                         "opacity" => root.computed_style.opacity = 0.7,
                         "filter" => root.computed_style.filter.blur_radius = 2.0,
                         _ => {
+                            if effect == "unretained-scrollbar" {
+                                root.computed_style.transform.scale_x = 0.95;
+                                root.computed_style.transform.scale_y = 0.95;
+                            }
                             root.computed_style.overflow_y = if effect == "scroll" {
                                 Overflow::Hidden
                             } else {
@@ -1139,14 +1197,18 @@ fn display_patch_profile(shrinking: bool) {
                         }
                     }
                     samples.sort_unstable_by(f64::total_cmp);
-                    let profile = if shrinking {
+                    let profile = if spans {
+                        "span_profile"
+                    } else if shrinking {
                         "shrink_profile"
                     } else {
                         "scope_profile"
                     };
                     eprintln!(
-                        "{profile} effect={effect} count={count} round={round} conservative={conservative} p50_ms={:.6} visits={:?}",
+                        "{profile} effect={effect} count={count} round={round} conservative={conservative} mean_ms={:.6} p50_ms={:.6} p90_ms={:.6} visits={:?}",
+                        samples.iter().sum::<f64>() / samples.len() as f64,
                         samples[samples.len() / 2],
+                        samples[samples.len() * 9 / 10],
                         visits.unwrap()
                     );
                 }
