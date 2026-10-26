@@ -119,10 +119,6 @@ end
         background: var(--color-surface-container-high);
     }
 
-    .row:focus-visible {
-        border-color: var(--color-primary);
-    }
-
     .row:active {
         transform: scale(var(--animation-scale-press));
         transition-duration: var(--animation-duration-fast);

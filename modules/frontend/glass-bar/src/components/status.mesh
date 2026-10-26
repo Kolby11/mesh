@@ -149,7 +149,6 @@ end
     }
 
     .control-trigger { padding: 0; background-color: transparent; }
-    .control-trigger:focus-visible { border-color: var(--color-focus-ring); }
     .control-trigger:active { transform: scale(var(--animation-scale-press)); }
 
 
@@ -219,7 +218,6 @@ end
     }
 
     .status-chip-btn:focus-visible {
-        border-color: var(--color-focus-ring);
         transform: scale(var(--animation-scale-hover));
     }
 

@@ -64,7 +64,6 @@ end)
     }
 
     .trigger:focus-visible {
-        border-color: var(--color-primary);
         transform: scale(var(--animation-scale-hover));
     }
 

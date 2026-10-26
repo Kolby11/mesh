@@ -93,5 +93,4 @@ function onToday() month_offset = 0 end
     .day-today { border-radius: 999px; background-image: var(--glass-surface-active); color: var(--glass-text-on-accent); font-weight: 700; }
     .nav:hover { background: var(--glass-hover); }
     .nav:active { transform: scale(var(--animation-scale-press)); }
-    .nav:focus-visible { border: 1px solid var(--color-focus-ring); }
 </style>

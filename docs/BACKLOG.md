@@ -81,8 +81,6 @@ October log.
       ignores clicks after the launcher closes until the pointer moves; no `wl_pointer.enter`
       follows the popup's destruction. Try `hyprland_focus_grab` instead of an `xdg_popup` grab for
       click-open popovers (dismiss on `cleared`). Trace in the 2026-10-25 October log.
-- [ ] **Module focus styles duplicate the platform ring:** shipped glass and widget modules recolour
-      borders on `:focus-visible` and now also draw the default outline; keep one per module.
 - [ ] **Initial queries on differing outputs:** before Wayland reports placement,
       a new surface has no unambiguous output-size hint. Resolve first-paint
       container queries without guessing an output or sizing content from a placeholder.

@@ -256,10 +256,6 @@ function onNext() media.next() end
         transform: scale(var(--animation-scale-hover));
     }
 
-    .control:focus-visible {
-        border-color: var(--color-focus-ring);
-    }
-
     .control:active {
         transform: scale(var(--animation-scale-press));
         transition-duration: var(--animation-duration-fast);

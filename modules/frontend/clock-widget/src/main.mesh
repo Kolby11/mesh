@@ -72,7 +72,6 @@ end
 
 .clock-btn:focus-visible {
     color: var(--color-on-surface);
-    border-color: var(--color-primary);
 }
 
 .clock-btn:active {

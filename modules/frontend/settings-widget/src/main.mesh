@@ -72,7 +72,6 @@ end
 so clicking leaves no ring behind — only tabbing to the control does. */
 .nav-button:focus-visible {
     color: var(--color-on-surface);
-    border-color: var(--color-primary);
 }
 
 .nav-button:active {

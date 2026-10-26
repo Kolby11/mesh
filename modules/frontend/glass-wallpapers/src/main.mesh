@@ -501,10 +501,6 @@ end
         border-color: var(--glass-rim-hover);
     }
 
-    .round:focus-visible, .arrow:focus-visible, .card:focus-visible, .swatch:focus-visible, .apply:focus-visible {
-        border: 1px solid var(--color-focus-ring);
-    }
-
     .round:active, .apply:active {
         transform: scale(var(--animation-scale-press));
     }

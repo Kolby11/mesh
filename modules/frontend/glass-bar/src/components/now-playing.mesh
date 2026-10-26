@@ -186,7 +186,6 @@ end
     }
 
     .ctl:focus-visible {
-        border-color: var(--color-focus-ring);
         transform: scale(var(--animation-scale-hover));
     }
 

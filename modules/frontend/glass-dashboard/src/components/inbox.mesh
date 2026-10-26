@@ -372,10 +372,6 @@ end
         background-color: var(--glass-hover);
     }
 
-    .chip:focus-visible, .item-copy:focus-visible, .item-dismiss:focus-visible {
-        border: 1px solid var(--color-focus-ring);
-    }
-
     .chip:active, .item-dismiss:active {
         transform: scale(var(--animation-scale-press));
     }

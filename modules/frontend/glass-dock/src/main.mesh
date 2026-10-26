@@ -216,7 +216,6 @@ end
     }
 
     .tile:focus-visible {
-        border-color: var(--color-focus-ring);
         transform: translateY(-12px) scale(1.22);
     }
 

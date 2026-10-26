@@ -153,7 +153,6 @@ changing, so the whole row feels like one moving surface. */
 
 .ws-btn:focus-visible {
     color: var(--color-on-surface);
-    border-color: var(--color-primary);
 }
 
 .ws-btn:active {

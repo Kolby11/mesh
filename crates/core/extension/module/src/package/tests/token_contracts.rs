@@ -590,3 +590,49 @@ fn doctor_reports_removed_parts_but_retains_uninstalled_targets() {
     );
     fs::remove_dir_all(dir).unwrap();
 }
+
+/// The core's `:focus-visible` outline is the one focus ring
+/// ([04 §12](../../../../../../docs/spec/04-styling.md)); a shipped module that
+/// also recolours a border on focus draws two.
+#[test]
+fn shipped_modules_leave_the_focus_ring_to_the_platform_outline() {
+    fn mesh_files(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        for entry in fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                mesh_files(&path, files);
+            } else if path.extension().is_some_and(|ext| ext == "mesh") {
+                files.push(path);
+            }
+        }
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let mut files = Vec::new();
+    mesh_files(&root.join("modules/frontend"), &mut files);
+    let mut duplicates = Vec::new();
+    for path in files {
+        let source = fs::read_to_string(&path).unwrap();
+        let mut rest = source.as_str();
+        while let Some(open) = rest.find('{') {
+            let selector = rest[..open].rsplit(['}', '\n']).next().unwrap_or_default();
+            let Some(close) = rest[open..].find('}') else {
+                break;
+            };
+            let body = &rest[open + 1..open + close];
+            if selector.contains(":focus-visible")
+                && !body.contains('{')
+                && body
+                    .split(';')
+                    .map(str::trim_start)
+                    .any(|declaration| {
+                        declaration.starts_with("border")
+                            && !declaration.starts_with("border-radius")
+                    })
+            {
+                duplicates.push(format!("{}: {}", path.display(), selector.trim()));
+            }
+            rest = &rest[open + 1..];
+        }
+    }
+    assert!(duplicates.is_empty(), "{duplicates:#?}");
+}

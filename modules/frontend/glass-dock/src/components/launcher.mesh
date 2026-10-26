@@ -101,7 +101,6 @@ end
     .view-on { border-color: var(--glass-rim-accent); background-image: var(--glass-surface-control); }
     .view-glyph { width: 16px; height: 16px; color: var(--glass-text-strong); }
     .view:hover { background-color: var(--glass-hover); }
-    .view:focus-visible { border-color: var(--color-focus-ring); }
     .launcher-grid { width: 560px; }
     /* Room inside the scroll viewport for a focused row's or cell's hover scale
     and focus outline, which the viewport would otherwise clip at its edges. */
@@ -109,7 +108,6 @@ end
     .app-grid { width: 100%; flex-wrap: wrap; gap: 6px; }
     .cell { flex-direction: column; width: 95px; height: 104px; padding: 10px 4px 6px; gap: 6px; align-items: center; border-radius: 18px; background: transparent; transform: scale(1); transition: transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate); }
     .cell:hover, .cell:focus-visible { background: var(--glass-hover); transform: scale(var(--animation-scale-hover)); }
-    .cell:focus-visible { border: 1px solid var(--color-focus-ring); }
     .cell:active { transform: scale(var(--animation-scale-press)); }
     .cell-art { width: 44px; height: 44px; flex-shrink: 0; }
     .cell-name { width: 87px; height: 16px; font-size: 11px; text-align: center; color: var(--glass-text-heading); text-overflow: ellipsis; }
@@ -118,12 +116,10 @@ end
     .title { height: 28px; font-size: 20px; font-weight: 600; color: var(--glass-text-heading); }
     .count { height: 22px; font-size: 12px; color: var(--glass-text-muted); }
     .search { width: 100%; height: 44px; padding: 12px; border-radius: 16px; border: 1px solid var(--glass-rim-inset); background: var(--glass-fill-inset); color: var(--glass-text); }
-    .search:focus-visible { border-color: var(--color-focus-ring); }
     .results { width: 100%; height: 320px; overflow-y: auto; }
     .app-list { width: 100%; gap: 6px; }
     .app { width: 100%; height: 60px; padding: 10px 12px; gap: 12px; align-items: center; border-radius: 16px; background: transparent; }
     .app:hover, .app:focus-visible { background: var(--glass-hover); }
-    .app:focus-visible { border: 1px solid var(--color-focus-ring); }
     .app:active { transform: scale(0.98); }
     .app-art { width: 34px; height: 34px; flex-shrink: 0; }
     .app-copy { flex-grow: 1; min-width: 0; gap: 2px; }

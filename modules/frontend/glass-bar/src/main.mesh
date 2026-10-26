@@ -157,7 +157,6 @@ end
     }
 
     .glyph-btn:focus-visible {
-        border-color: var(--color-focus-ring);
         transform: scale(var(--animation-scale-hover));
     }
 

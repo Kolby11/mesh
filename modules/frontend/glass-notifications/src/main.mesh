@@ -252,10 +252,6 @@ end
         background-color: var(--glass-hover);
     }
 
-    .toast-copy:focus-visible, .toast-action:focus-visible, .toast-close:focus-visible {
-        border: 1px solid var(--color-focus-ring);
-    }
-
     .toast-action:active, .toast-close:active {
         transform: scale(var(--animation-scale-press));
     }
