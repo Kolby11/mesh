@@ -9118,3 +9118,83 @@ are `/tmp/mesh-display-final-debug.log` and
 `/tmp/mesh-display-final-shell.log`. Builds use `/tmp/mesh-p2-target`, leaving
 main-checkout build artifacts and the user's profile edits untouched. Temporary
 implementation and baseline worktrees are removed after committing/integration.
+
+## 2026-10-26 — indexed shrinking display coverage
+
+Baseline `4005afb4`. The prior display-scope command work was already complete;
+this change finishes the separate sibling-union scan item. Retained span-array
+copying and scrollbar span repair remain in the backlog. Reviewed the rejected
+experiments before implementation.
+
+**Implementation.** Each built paint subtree retains a balanced child-coverage
+index keyed by direct-child NodeId. Sparse updates replace only the changed
+leaf and its ancestor index branches, preserving prior retained snapshots and
+sharing clean branches. Inner-to-outer repair updates exact child unions even
+when a child gives up an extremum; no live sibling walk or preclip recheck is
+needed. A parent whose coverage is unchanged stops bounds propagation. Full or
+structural rebuilds reconstruct the index from built children; omitted children
+remain omitted. Layer/filter clips still repair from these exact bounds, and
+retained scroll content still propagates its anchored viewport.
+
+**A/B method.** Normal release profile (thin LTO, one codegen unit), built in
+`nix develop` with `CARGO_BUILD_JOBS=4` and `/tmp/mesh-p2-target`. The saved
+baseline executable adds only the ignored shrink-profile fixture, with no
+runtime changes. Three alternating baseline/candidate pairs, pinned to CPU 2,
+with no active rustc process during timing. Each executable runs three rounds
+of 100 measured updates after three initialization updates, with an additional
+conservative material-dirty control. The table excludes that control and gives
+ranges across nine per-round p50 samples on each side.
+
+The fixture has 16 or 1,024 direct box children in a 320×1100 surface. Clean
+children are 80×1 px; the middle child alternates 160↔120 px width, uniquely
+defining the child union's right edge. Half the measured updates therefore
+shrink that union. Scopes are plain, clip, 0.95 scale, 0.7 opacity, 2 px foreground
+blur, retained hidden-overflow scroll, and retained scroll with scrollbars.
+Explicit scroll metrics have a 100 px range and 5.5 px offset. Timings cover
+`update_with_dirty_nodes` only, excluding dirty classification, layout and raster.
+Timer quantization is visible; these are preparation timings, not live frame
+or launcher first-open results.
+
+| Scope | Siblings | Baseline preparation p50, ms | Candidate preparation p50, ms |
+| --- | ---: | ---: | ---: |
+| `plain` | 16 | 0.004749–0.008311 | 0.004750–0.005936 |
+| `plain` | 1,024 | 0.040368–0.043931 | 0.010686–0.016622 |
+| `clip` | 16 | 0.004749–0.005937 | 0.004749–0.005936 |
+| `clip` | 1,024 | 0.041555–0.047492 | 0.010686–0.011873 |
+| `scale` | 16 | 0.004749–0.007123 | 0.004749–0.005936 |
+| `scale` | 1,024 | 0.041555–0.045118 | 0.010686–0.013061 |
+| `opacity` | 16 | 0.005936–0.007124 | 0.005936–0.007124 |
+| `opacity` | 1,024 | 0.039181–0.043930 | 0.008311–0.009499 |
+| `filter` | 16 | 0.005936–0.005937 | 0.004750–0.005936 |
+| `filter` | 1,024 | 0.039181–0.040369 | 0.008311–0.009499 |
+| `scroll` | 16 | 0.004750–0.005936 | 0.004749–0.007123 |
+| `scroll` | 1,024 | 0.007124–0.008311 | 0.008311–0.009498 |
+| `scrollbar` | 16 | 0.004750–0.005936 | 0.004749–0.005936 |
+| `scrollbar` | 1,024 | 0.008311–0.009498 | 0.008311–0.009499 |
+
+For plain/clip/scale/opacity/filter shrink updates, ancestor visits are
+**18 → 2** at 16 siblings and **1,026 → 2** at 1,024 siblings; display-build
+visits remain **1** and display-entry visits **0**. Bounds-index visits are
+**5 / 11**, respectively: logarithmic branch repair rather than a sibling scan.
+Retained scroll already bounded ancestor visits at two; its index bookkeeping
+adds roughly 1–2 µs in the large fixture, with no scroll speedup claimed.
+Flat span copying remains visible in the large ordinary cases.
+
+**Validation.** The existing
+`geometry_command_patches_skip_siblings_and_match_full_build` performance gate
+(already run by `tools/check-performance`) now requires exactly three ancestor
+visits at both 16 and 1,024 siblings for every tested scope and update, including
+shrinks. It also bounds index visits logarithmically. First/middle/last growth
+and shrink compare complete commands, entries, subtree bounds, replay spans,
+layer/filter metadata, full raster and partial-repaint pixels against full
+rebuilds. The index regression covers tied extrema, empty bounds, nonmonotonic
+IDs, all-axis growth/shrink and immutable prior snapshots at 1/3/16/1,024 leaves.
+Release baseline renderer suite: 341 passed, zero failures; candidate: 342
+passed, zero failures. Release GPU-feature shell suite: **1,034 passed**,
+37 ignored, zero failures. Formatting and diff checks pass.
+
+**Evidence/reproduction.** `/tmp/mesh-coverage-evidence/` contains saved baseline
+and candidate executables, `bench.py`, `timings.json`, six raw benchmark process
+logs, the summary and build/test logs. Run
+`cargo test --release -p mesh-core-render --lib shrinking_display_coverage_profile -- --ignored --nocapture --test-threads=1`
+inside `nix develop`. No live compositor or hardware replay is claimed.

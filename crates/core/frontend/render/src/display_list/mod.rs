@@ -11,6 +11,7 @@ use crate::render_object::caller_lineage_fingerprint;
 mod batch_index;
 mod blur;
 mod build;
+mod coverage;
 mod paint_node;
 mod scroll;
 mod scroll_shift;

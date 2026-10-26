@@ -7,8 +7,14 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
-- **P2 display-scope command patches complete.** Stable geometry/text patches
-  retain layer, scrollbar, clip, scale and scroll ancestors. Layer clips and
+- **P2 shrinking display coverage complete.** Persistent child bounds replace
+  sibling union scans, preserving retained snapshots. Command/coverage and
+  full/partial pixel parity pass at 16/1,024 siblings; ancestor visits stay
+  constant and index repair is logarithmic. Release renderer: 342 passed;
+  release GPU-feature shell: 1,034 passed. Timings are in the performance log.
+
+- **P2 display-scope command patches complete (`4005afb4`).** Stable geometry
+  and text patches retain layer, scrollbar, clip, scale and scroll ancestors. Layer clips and
   filter regions repair from retained bounds; retained scroll offsets replace
   owner commands without visiting content. First/middle/last, growth/shrink,
   full-command/entry/coverage and partial-pixel parity pass at 16/1,024 siblings.
@@ -61,8 +67,8 @@ measurements live in [`log/`](log/README.md).
 
 ## Next
 
-- P2 display coverage: shrinking ancestor coverage still re-unions children;
-  retained span arrays copy and repair unrelated entries.
+- P2 retained display spans: arrays still copy and repair unrelated entries,
+  including scrollbar-containing span repair.
 - D1: record compound table writes instead of converting every compound global
   during handler sync; indirect list reads still compare every item.
 - Attribute the launcher's first child-surface preparation before optimizing it.

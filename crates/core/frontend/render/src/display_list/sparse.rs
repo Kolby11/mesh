@@ -8,9 +8,7 @@ use mesh_core_elements::{
 };
 
 use super::blur::command_has_effect_overflow;
-use super::build::{
-    command_bounds, node_clip_for, should_preclip_child_subtree_with_transform, visual_clip_for,
-};
+use super::build::{command_bounds, node_clip_for, visual_clip_for};
 use super::paint_node::{
     build_paint_node_with_previous_transform_and_clips, intersect_display_clip,
 };
@@ -132,9 +130,7 @@ impl RetainedDisplayList {
         };
         let mut updated: HashMap<NodeId, RetainedPaintSubtree> = HashMap::new();
         let mut moved = Vec::new();
-        // What each path node passes its children, for re-unioning coverage.
-        let mut child_spaces: HashMap<NodeId, (AffineTransform, DisplayListClip, DisplayListClip)> =
-            HashMap::new();
+        let mut incoming_clips: HashMap<NodeId, DisplayListClip> = HashMap::new();
         let mut stack: Vec<PathFrame<'_>> = Vec::new();
         let mut previous: &[usize] = &[];
         for (path, id) in targets {
@@ -316,14 +312,11 @@ impl RetainedDisplayList {
                 subtree.scroll_viewport.is_some(),
             );
             for frame in &stack {
-                child_spaces.insert(
-                    frame.node.id,
-                    (frame.child_space, frame.child_clip, frame.clip),
-                );
+                incoming_clips.insert(frame.node.id, frame.clip);
             }
         }
         if !moved.is_empty() {
-            self.update_moved_coverage(root, &moved, &child_spaces, surface_clip, &mut updated)?;
+            self.update_moved_coverage(&moved, &incoming_clips, &mut updated)?;
         }
         let metrics = LocalReuseMetrics {
             rebuilt_commands: dirty
@@ -372,16 +365,12 @@ impl RetainedDisplayList {
         })
     }
 
-    /// Recompute bounds and span coverage innermost first. A child whose new
-    /// bounds still reach every edge of its parent's child union that its old
-    /// bounds reached updates that union directly; otherwise the parent
-    /// re-unions its children.
+    /// Repair child unions and scope coverage innermost first, sharing every
+    /// unaffected bounds-index branch with the previous retained snapshot.
     fn update_moved_coverage(
         &self,
-        root: &WidgetNode,
         moved: &[MovedCommand],
-        child_spaces: &HashMap<NodeId, (AffineTransform, DisplayListClip, DisplayListClip)>,
-        surface_clip: DisplayListClip,
+        incoming_clips: &HashMap<NodeId, DisplayListClip>,
         updated: &mut HashMap<NodeId, RetainedPaintSubtree>,
     ) -> Option<()> {
         let mut depth_of: HashMap<NodeId, (usize, Option<NodeId>)> = HashMap::new();
@@ -398,52 +387,16 @@ impl RetainedDisplayList {
             .map(|(id, (depth, _))| (*depth, *id))
             .collect();
         order.sort_unstable_by(|left, right| right.cmp(left));
-        // Per parent: the (old, new) bounds of children that changed.
-        let mut changed_children: HashMap<NodeId, Vec<(DamageRect, DamageRect)>> = HashMap::new();
+        // Per parent: the IDs and new bounds of children that changed.
+        let mut changed_children: HashMap<NodeId, Vec<(NodeId, DamageRect)>> = HashMap::new();
         for (_, id) in order {
             let subtree = updated.get_mut(&id)?;
             let span = subtree.command_span?;
             let local_bounds = local.get(&id).copied().unwrap_or(span.local_bounds);
-            let mut child_bounds = span.child_bounds;
-            let mut rescan = false;
-            for (old, new) in changed_children.remove(&id).unwrap_or_default() {
-                if !shrinks_union(old, new, child_bounds) {
-                    child_bounds = child_bounds.union(new);
-                } else {
-                    rescan = true;
-                }
+            for (child, bounds) in changed_children.remove(&id).unwrap_or_default() {
+                subtree.child_coverage.set(child, bounds)?;
             }
-            if rescan && self.subtrees.get(&id)?.scroll_viewport.is_none() {
-                let node = self.live_node(root, id)?;
-                let &(space, clip, _) = child_spaces.get(&id)?;
-                child_bounds = DamageRect::default();
-                for child in &node.children {
-                    frame_work::visit(frame_work::Pass::DisplayAncestors);
-                    let child_span = match updated.get(&child.id) {
-                        Some(subtree) => subtree.command_span,
-                        None => match self.subtrees.get(&child.id) {
-                            Some(subtree) => subtree.command_span,
-                            // A pre-clipped child was never built.
-                            None => {
-                                let (space, clip) =
-                                    if child.computed_style.position == Position::Fixed {
-                                        (root_transform(0.0, 0.0), surface_clip)
-                                    } else {
-                                        (space, clip)
-                                    };
-                                if !should_preclip_child_subtree_with_transform(child, space, clip)
-                                {
-                                    return None;
-                                }
-                                None
-                            }
-                        },
-                    };
-                    if let Some(child_span) = child_span {
-                        child_bounds = child_bounds.union(child_span.bounds);
-                    }
-                }
-            }
+            let mut child_bounds = subtree.child_coverage.bounds();
             let start = self.sparse_paint_index.starts.get(&id)?.start;
             let previous = self.subtrees.get(&id)?;
             let mut bounds = local_bounds.union(child_bounds);
@@ -455,7 +408,7 @@ impl RetainedDisplayList {
                 let index = position.checked_sub(start)?;
                 local_commands.push((index, updated.get(&id)?.commands.get(index)?.clone()));
             }
-            let incoming = child_spaces.get(&id)?.2;
+            let incoming = *incoming_clips.get(&id)?;
             let filter = local_commands
                 .iter()
                 .any(|(_, c)| c.kind == DisplayPaintCommandKind::PushFilterLayer);
@@ -517,11 +470,11 @@ impl RetainedDisplayList {
                 child_bounds,
                 ..span
             });
-            if let Some(parent) = depth_of[&id].1 {
+            if let Some(parent) = depth_of[&id].1.filter(|_| span.bounds != bounds) {
                 changed_children
                     .entry(parent)
                     .or_default()
-                    .push((span.bounds, bounds));
+                    .push((id, bounds));
             }
         }
         let mut changes = Vec::new();
@@ -623,25 +576,4 @@ impl RetainedDisplayList {
         }
         (node.id == id).then_some(node)
     }
-}
-
-fn is_empty(rect: DamageRect) -> bool {
-    rect.width == 0 || rect.height == 0
-}
-
-/// Whether replacing `old` by `new` can shrink `union`: some edge of the
-/// union is reached by `old` but not by `new`.
-fn shrinks_union(old: DamageRect, new: DamageRect, union: DamageRect) -> bool {
-    if is_empty(old) {
-        return false;
-    }
-    if is_empty(new) || is_empty(union) {
-        return true;
-    }
-    let right = |rect: DamageRect| rect.x + rect.width;
-    let bottom = |rect: DamageRect| rect.y + rect.height;
-    (old.x <= union.x && new.x > union.x)
-        || (old.y <= union.y && new.y > union.y)
-        || (right(old) >= right(union) && right(new) < right(union))
-        || (bottom(old) >= bottom(union) && bottom(new) < bottom(union))
 }

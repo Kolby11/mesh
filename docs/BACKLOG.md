@@ -33,8 +33,8 @@ other performance work. Evidence, the Qt Quick / GTK4 comparison, exit
 criteria and the items folded in here:
 [design](../.planning/todos/pending/2026-10-21-change-proportional-pipeline.md).
 
-- [ ] **P2 display coverage:** Shrinking ancestor coverage still re-unions
-      siblings; retained span arrays also copy and repair unrelated entries.
+- [ ] **P2 retained display spans:** Retained span arrays still copy and repair
+      unrelated entries, including scrollbar-containing span repair.
 - [ ] **P3 / D1:** Handler sync converts every compound global to JSON (~1 ms for a 1,024-item
       list) and keyed item deltas come from that comparison; record table writes instead.
       Lists read through anything but a plain member still compare every item.

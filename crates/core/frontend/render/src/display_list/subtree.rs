@@ -16,6 +16,7 @@ pub(super) struct RetainedPaintSubtree {
     pub(super) effect_overflow_count: u64,
     pub(super) pruning: PruningMetrics,
     pub(super) command_span: Option<RetainedSubtreeSpan>,
+    pub(super) child_coverage: super::coverage::ChildCoverage,
     pub(super) spans: Arc<[RetainedCommandSpan]>,
     pub(super) scroll_viewport: Option<DamageRect>,
     /// The owner's scroll offset when `scroll_viewport` is set.
@@ -31,6 +32,7 @@ impl Default for RetainedPaintSubtree {
             effect_overflow_count: 0,
             pruning: PruningMetrics::default(),
             command_span: None,
+            child_coverage: Default::default(),
             spans: Vec::new().into(),
             scroll_viewport: None,
             scroll_offset: (0.0, 0.0),
@@ -68,6 +70,7 @@ pub(super) struct PaintSubtreeBuilder {
     pub(super) local_includes_scrollbars: bool,
     pub(super) local_command_count: usize,
     pub(super) child_spans: Vec<RetainedCommandSpan>,
+    child_coverage: Vec<(NodeId, DamageRect)>,
 }
 
 impl PaintSubtreeBuilder {
@@ -96,7 +99,13 @@ impl PaintSubtreeBuilder {
         self.kinds.push(kind);
     }
 
-    pub(super) fn append_child(&mut self, child_subtree: &RetainedPaintSubtree) {
+    pub(super) fn append_child(&mut self, id: NodeId, child_subtree: &RetainedPaintSubtree) {
+        self.child_coverage.push((
+            id,
+            child_subtree
+                .command_span
+                .map_or(DamageRect::default(), |span| span.bounds),
+        ));
         self.effect_overflow_count = self
             .effect_overflow_count
             .saturating_add(child_subtree.effect_overflow_count);
@@ -295,6 +304,7 @@ impl PaintSubtreeBuilder {
             effect_overflow_count: self.effect_overflow_count,
             pruning: self.pruning,
             command_span,
+            child_coverage: super::coverage::ChildCoverage::new(self.child_coverage),
             spans: spans.into(),
             scroll_viewport: None,
             scroll_offset: (0.0, 0.0),

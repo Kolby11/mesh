@@ -975,6 +975,14 @@ fn geometry_command_patches_skip_siblings_and_match_full_build() {
                     "{effect}, {count}, {turn}: {counts:?}"
                 );
                 assert_eq!(counts["display_entries"], 0, "{count}, {turn}: {counts:?}");
+                assert_eq!(
+                    counts["display_ancestors"], 3,
+                    "{effect}, {count}, {turn}: {counts:?}"
+                );
+                assert!(
+                    counts["bounds_index"] <= count.next_power_of_two().ilog2() as u64 + 2,
+                    "{effect}, {count}, {turn}: {counts:?}"
+                );
                 if effect == "plain" && turn < 6 {
                     visits.push((turn, counts["display_ancestors"]));
                 }
@@ -1025,22 +1033,35 @@ fn geometry_command_patches_skip_siblings_and_match_full_build() {
             }
         }
     }
-    // Growth and edge-free changes are constant; only a shrink of the edge
-    // that defined the parent's union re-unions that parent's children.
-    for (small, large) in by_count[0].iter().zip(&by_count[1]) {
-        if small.0 % 3 == 1 {
-            assert!(large.1 > small.1, "{small:?} {large:?}");
-        } else {
-            assert_eq!(small, large);
-        }
-    }
+    assert_eq!(by_count[0], by_count[1]);
 }
 
 #[test]
 #[ignore = "release-only scoped display patch profile"]
 fn scoped_display_patch_profile() {
+    display_patch_profile(false);
+}
+
+#[test]
+#[ignore = "release-only shrinking display coverage profile"]
+fn shrinking_display_coverage_profile() {
+    display_patch_profile(true);
+}
+
+fn display_patch_profile(shrinking: bool) {
     use std::time::Instant;
-    for effect in ["clip", "scale", "opacity", "filter", "scroll", "scrollbar"] {
+    for effect in [
+        "plain",
+        "clip",
+        "scale",
+        "opacity",
+        "filter",
+        "scroll",
+        "scrollbar",
+    ] {
+        if effect == "plain" && !shrinking {
+            continue;
+        }
         for count in [16, 1024] {
             for round in 0..3 {
                 for conservative in if round % 2 == 0 {
@@ -1050,6 +1071,7 @@ fn scoped_display_patch_profile() {
                 } {
                     let mut root = node(1, "column", 0.0, 0.0, 320.0, 1100.0);
                     match effect {
+                        "plain" => {}
                         "clip" => root.computed_style.overflow_y = Overflow::Hidden,
                         "scale" => {
                             root.computed_style.transform.scale_x = 0.95;
@@ -1083,8 +1105,13 @@ fn scoped_display_patch_profile() {
                     let mut samples = Vec::new();
                     let mut visits = None;
                     for turn in 0..103 {
-                        root.children[count as usize / 2].layout.width =
-                            if turn % 2 == 0 { 20.0 } else { 40.0 };
+                        root.children[count as usize / 2].layout.width = if shrinking {
+                            if turn % 2 == 0 { 160.0 } else { 120.0 }
+                        } else if turn % 2 == 0 {
+                            20.0
+                        } else {
+                            40.0
+                        };
                         let mut dirty = objects.update(&root);
                         // A material change deliberately selects the conservative
                         // rebuild path; the live tree and dirty IDs are identical.
@@ -1112,8 +1139,13 @@ fn scoped_display_patch_profile() {
                         }
                     }
                     samples.sort_unstable_by(f64::total_cmp);
+                    let profile = if shrinking {
+                        "shrink_profile"
+                    } else {
+                        "scope_profile"
+                    };
                     eprintln!(
-                        "scope_profile effect={effect} count={count} round={round} conservative={conservative} p50_ms={:.6} visits={:?}",
+                        "{profile} effect={effect} count={count} round={round} conservative={conservative} p50_ms={:.6} visits={:?}",
                         samples[samples.len() / 2],
                         visits.unwrap()
                     );

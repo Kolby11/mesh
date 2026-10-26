@@ -857,7 +857,7 @@ pub(super) fn append_child_paint_subtree(
         in_scroll_content,
         scroll_only,
     );
-    subtree.append_child(&child_subtree);
+    subtree.append_child(child.id, &child_subtree);
     subtree.append_pruning(&child_subtree);
 }
 
