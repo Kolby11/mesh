@@ -860,7 +860,8 @@ Open hover menus with the default `grab="hover"` behavior. Hover popovers cannot
 take an `xdg_popup` grab because the compositor requires a recent click serial;
 the shell hover bridge owns dismissal as the pointer crosses from trigger to
 popup. Use `grab="click"` only for click-open popovers that should dismiss on
-outside click through the compositor grab.
+outside click through the compositor grab (a `hyprland_focus_grab_v1` on
+Hyprland; see the [elements guide](elements.md)).
 
 Popover promotion assumes the same compositor boundary as the rest of the MESH
 Wayland shell: `wlr-layer-shell-v1` plus `xdg_popup` support through

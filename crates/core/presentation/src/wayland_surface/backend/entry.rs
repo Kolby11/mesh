@@ -178,6 +178,20 @@ pub(in crate::wayland_surface) struct PopupRole {
     pub(in crate::wayland_surface) position: (i32, i32),
     pub(in crate::wayland_surface) next_reposition_token: u32,
     pub(in crate::wayland_surface) pending_reposition_token: Option<u32>,
+    /// Hyprland focus grab standing in for the `xdg_popup` grab of a
+    /// click-opened popup; see [`PopupFocusGrab`].
+    pub(in crate::wayland_surface) focus_grab: Option<HyprlandFocusGrabV1>,
+}
+
+/// User data of a popup's Hyprland focus grab. Hyprland moves pointer focus
+/// to a popup holding an `xdg_popup` grab and sends no `wl_pointer.enter`
+/// back to the parent when the popup is destroyed, so presses on the parent
+/// reach no client until the pointer moves. A focus grab whitelisting the
+/// popup and its parent leaves pointer focus where the pointer is and still
+/// reports a press elsewhere as `cleared`, which dismisses the popup.
+#[derive(Debug)]
+pub(in crate::wayland_surface) struct PopupFocusGrab {
+    pub(in crate::wayland_surface) surface_id: Arc<str>,
 }
 
 pub(super) fn next_popup_reposition_token(previous: u32) -> Option<u32> {
@@ -421,6 +435,13 @@ impl SurfaceEntry {
         }
         if let Some(blur) = self.blur_object.as_ref() {
             blur.destroy();
+        }
+        if let WaylandRole::Popup(PopupRole {
+            focus_grab: Some(grab),
+            ..
+        }) = &self.role
+        {
+            grab.destroy();
         }
     }
 

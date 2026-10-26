@@ -77,10 +77,6 @@ October log.
 - [ ] **Launcher search paints one keystroke late:** in the promoted dock launcher popup the
       last typed character appears only on the next input event; reproduced on `d02ba382`, not
       reliably at `f9a5dac4` (nested Hyprland, CPU). Needs a GPU repro on the user's session.
-- [ ] **Clicks lost after a grabbed popover is dismissed (Hyprland):** the dock apps button
-      ignores clicks after the launcher closes until the pointer moves; no `wl_pointer.enter`
-      follows the popup's destruction. Try `hyprland_focus_grab` instead of an `xdg_popup` grab for
-      click-open popovers (dismiss on `cleared`). Trace in the 2026-10-25 October log.
 - [ ] **Initial queries on differing outputs:** before Wayland reports placement,
       a new surface has no unambiguous output-size hint. Resolve first-paint
       container queries without guessing an output or sizing content from a placeholder.
@@ -263,6 +259,10 @@ gate where the win is structural.
 The items below are local fixes. The large wins are the
 [change-proportional frame pipeline](#change-proportional-frame-pipeline--next-implementation-priority)
 at the top of this file; prefer it over further single-pass scoping.
+
+- [ ] Add opt-in recycling/virtualized lists for vertical and horizontal scrolling (`axis`), initially with fixed item sizes.
+      Instantiate visible items plus overscan and reuse keyed rows, preserving full scroll extent, item state, focus and accessibility; lists currently instantiate every item.
+      Benchmark launcher and Settings resource lists; defer variable-size items and two-axis grids.
 
 ### Render sweep findings
 

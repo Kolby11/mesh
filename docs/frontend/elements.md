@@ -238,7 +238,7 @@ While any popover anchored to it is open, a trigger matches `:expanded`, its
 accessible `expanded` state is true, and its tooltip is suppressed. Triggers do
 not maintain `aria-expanded` or `data-tooltip-disabled` themselves.
 
-Use `grab="hover"` or omit `grab` for hover-open menus. Hover popovers do not take a compositor grab because an `xdg_popup` grab requires a recent click serial; `open-on="hover"` handles dismissal while the pointer crosses from trigger to popup. Use `grab="click"` only for click-open popovers that should use compositor outside-click dismissal and keyboard focus ownership.
+Use `grab="hover"` or omit `grab` for hover-open menus. Hover popovers do not take a compositor grab because an `xdg_popup` grab requires a recent click serial; `open-on="hover"` handles dismissal while the pointer crosses from trigger to popup. Use `grab="click"` only for click-open popovers that should use compositor outside-click dismissal and keyboard focus ownership. On Hyprland the grab is a `hyprland_focus_grab_v1` whitelisting the popup and its parent rather than an `xdg_popup` grab: Hyprland does not return pointer focus to the parent after a grabbed popup closes, so the next click on the trigger would be lost. A press outside both surfaces dismisses the popup; presses on the parent reach it, and the core closes the popover as for any outside press.
 
 Popover promotion depends on the compositor protocols MESH already targets: `wlr-layer-shell-v1` plus `xdg_popup` support via layer-shell `get_popup`. This is expected on wlroots-family compositors, KDE, and Hyprland. GNOME does not expose layer-shell as a stable target, so GNOME support remains outside the current shell compatibility boundary rather than a separate popover fallback requirement.
 

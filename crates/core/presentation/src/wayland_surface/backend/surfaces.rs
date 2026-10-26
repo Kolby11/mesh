@@ -466,13 +466,17 @@ impl WaylandSurfaceBackend {
                 )));
             }
         };
-        let parent_object_generation = self
-            .state
-            .surfaces
-            .get(&config.parent_surface_id)
-            .expect("popup parent was validated above")
-            .surface_generation()
-            .object;
+        let (parent_object_generation, parent_wl_surface) = {
+            let parent_entry = self
+                .state
+                .surfaces
+                .get(&config.parent_surface_id)
+                .expect("popup parent was validated above");
+            (
+                parent_entry.surface_generation().object,
+                parent_entry.wl_surface().clone(),
+            )
+        };
 
         let qh = self.state.qh.clone();
         // `XdgShell` is not `Clone`, so create the popup while holding an
@@ -509,7 +513,23 @@ impl WaylandSurfaceBackend {
             // A grab is only valid in response to a recent input serial from
             // the exact seat that delivered the triggering press. Hover-open
             // popovers pass `grab = false` and rely on the core hover-bridge.
-            if config.grab {
+            let focus_grab = if config.grab {
+                self.state.focus_grab_manager.as_ref().map(|manager| {
+                    let grab = manager.create_grab(
+                        &qh,
+                        PopupFocusGrab {
+                            surface_id: Arc::from(surface_id),
+                        },
+                    );
+                    grab.add_surface(popup.wl_surface());
+                    grab.add_surface(&parent_wl_surface);
+                    grab.commit();
+                    grab
+                })
+            } else {
+                None
+            };
+            if config.grab && focus_grab.is_none() {
                 let grab = config.grab_identity.and_then(|identity| {
                     if identity.serial == 0 {
                         return None;
@@ -539,8 +559,9 @@ impl WaylandSurfaceBackend {
             // Initial commit (no buffer) maps the popup role and prompts the
             // compositor's first configure.
             popup.wl_surface().commit();
-            popup
+            (popup, focus_grab)
         };
+        let (popup, focus_grab) = popup;
 
         let surface = ContentExtent::from_size(config.placement.size)
             .and_then(|surface| SurfaceExtent::from_surface_and_padding(surface, config.padding))
@@ -564,6 +585,7 @@ impl WaylandSurfaceBackend {
                 position: (0, 0),
                 next_reposition_token: 0,
                 pending_reposition_token: None,
+                focus_grab,
             }),
             cfg,
             KeyboardMode::None,

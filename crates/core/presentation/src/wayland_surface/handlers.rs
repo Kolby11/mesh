@@ -1,4 +1,4 @@
-use super::backend::WaylandRole;
+use super::backend::{PopupFocusGrab, WaylandRole};
 use super::state::{FrameCallbackData, GestureKind};
 use super::state::{PendingTextInput, clear_text_input_for_surface};
 use super::*;
@@ -781,6 +781,30 @@ impl Dispatch<HyprlandFocusGrabV1, (), State> for State {
             if let Some(surface_id) = surface_id {
                 state.reapply_surface_config(&surface_id);
             }
+        }
+    }
+}
+
+impl Dispatch<HyprlandFocusGrabV1, PopupFocusGrab, State> for State {
+    fn event(
+        state: &mut State,
+        _: &HyprlandFocusGrabV1,
+        event: hyprland_focus_grab_v1::Event,
+        grab: &PopupFocusGrab,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        let hyprland_focus_grab_v1::Event::Cleared = event else {
+            return;
+        };
+        let surface_id = grab.surface_id.as_ref();
+        tracing::debug!(
+            "[popover] layer_shell: compositor cleared popup focus grab surface_id={surface_id}"
+        );
+        if state.teardown_surface_after_compositor_event(surface_id) {
+            state.lifecycle_events.push(SurfaceLifecycleEvent::Dismissed {
+                surface_id: surface_id.to_string(),
+            });
         }
     }
 }
