@@ -7,6 +7,15 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Glass backlog batch (2026-10-26).** Committed and pushed: `mesh-shell focus
+  <id>` for keyboard-only chrome entry; one platform focus ring in shipped
+  modules; Hyprland focus grab for click-open popovers (lost trigger clicks);
+  hidden layers destroyed instead of null-buffer unmapped (sway `wrong configure
+  serial`); `mesh.launch_app` plus contract-only service-call authorization (dock
+  activation was always denied); no tooltip overlay reserve when popups exist
+  (bar layer 1272×248 → 1272×48). Each was checked live in a nested Hyprland
+  or headless sway; see the October and performance logs.
+
 - **Hiding surfaces unmap when their exit settles (`f9a5dac4`).** The root's
   opacity duration is now only the bound; glass dashboard and picker exits
   settle in 115–117 ms instead of 280 ms. Release GPU-feature shell: 1,036
