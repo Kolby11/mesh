@@ -78,11 +78,12 @@ October log.
 
 ## Glass shell core gaps (found 2026-10-17)
 
-- [ ] **Full-colour icons:** XDG/hicolor resolutions and `<icon src>` are always
-      `multicolor: false`; `<image>` has no paint arm and `url()` rejects absolute paths, so docks cannot show app icons in colour.
-- [ ] **Host APIs:** `net.http` and `exec.launch-app` are catalogued but unimplemented
-      (providers shell out to `curl` / `hyprctl dispatch`). A StatusNotifier tray still needs
-      a watcher/host provider; `mesh.dbus_serve` now owns names and exports one object each.
+- [ ] **Full-colour XDG icons by name:** `<icon name>` XDG/hicolor resolutions and `<icon src>`
+      always tint (`multicolor: false`); docks use `<image src>` instead. Deciding which theme files
+      keep their colours (e.g. all but `-symbolic`) changes semantic glyphs that fall back to XDG.
+- [ ] **Host APIs:** `net.http` is catalogued but unimplemented (providers shell out to `curl`).
+      A StatusNotifier tray still needs a watcher/host provider; `mesh.dbus_serve` now owns names
+      and exports one object each.
 - [ ] **Backdrop placement beyond MESH:** refraction on background/bottom-layer surfaces predicts origins from MESH's own
       surfaces; another client's exclusive zone (e.g. a quickshell bar) misaligns it. Multi-output backdrops are untested.
       A foreign wallpaper layer above MESH's (`quickshell:background`) makes glass refract a different

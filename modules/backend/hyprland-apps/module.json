@@ -1,7 +1,7 @@
 {
   "name": "@mesh/hyprland-apps",
   "version": "0.1.0",
-  "description": "Pinned, running and installed applications for docks and launchers: XDG desktop entries joined with Hyprland clients, launched and focused through hyprctl.",
+  "description": "Pinned, running and installed applications for docks and launchers: XDG desktop entries joined with Hyprland clients, launched as desktop entries and focused through hyprctl.",
   "private": true,
   "mesh": {
     "apiVersion": "0.1",
@@ -9,9 +9,9 @@
     "uses": {
       "capabilities": [
         "fs.read:/**/applications/*.desktop",
+        "exec.launch-app",
         "exec.argv:hyprctl:[\"clients\",\"-j\"]",
         "exec.argv:hyprctl:[\"activewindow\",\"-j\"]",
-        "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.exec_cmd(\\\"*\\\")\"]",
         "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.focus({ window = \\\"address:*\\\" })\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_DATA_HOME:-$HOME/.local/share}:$HOME/.nix-profile/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\\\"\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$HYPRLAND_INSTANCE_SIGNATURE\\\"\"]",
@@ -25,7 +25,7 @@
       "binaries": [
         {
           "name": "hyprctl",
-          "reason": "List clients, focus windows and launch applications.",
+          "reason": "List clients and focus windows.",
           "packages": {
             "arch": "hyprland",
             "nixos": "hyprland"

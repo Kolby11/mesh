@@ -131,13 +131,13 @@
       "@mesh/hyprland-apps": [
         "exec.argv:hyprctl:[\"activewindow\",\"-j\"]",
         "exec.argv:hyprctl:[\"clients\",\"-j\"]",
-        "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.exec_cmd(\\\"*\\\")\"]",
         "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.focus({ window = \\\"address:*\\\" })\"]",
         "exec.argv:sh:[\"-c\", \"for b in \\\"${XDG_DATA_HOME:-$HOME/.local/share}\\\" \\\"$HOME/.nix-profile/share\\\" $(printf %s \\\"${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\\\" | tr : \\\" \\\"); do for t in Papirus-Light Papirus Papirus-Dark Adwaita hicolor; do for s in scalable 256x256 128x128 96x96 64x64 48x48; do for c in apps categories; do for e in svg png; do f=\\\"$b/icons/$t/$s/$c/$1.$e\\\"; [ -f \\\"$f\\\" ] && { printf %s \\\"$f\\\"; exit 0; }; done; done; done; done; for e in svg png; do f=\\\"$b/pixmaps/$1.$e\\\"; [ -f \\\"$f\\\" ] && { printf %s \\\"$f\\\"; exit 0; }; done; done; exit 1\", \"sh\", \"*\"]",
         "exec.argv:sh:[\"-c\",\"for d in \\\"${XDG_DATA_HOME:-$HOME/.local/share}\\\" \\\"$HOME/.nix-profile/share\\\" $(printf %s \\\"${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\\\" | tr : \\\" \\\"); do [ -d \\\"$d/applications\\\" ] && ls \\\"$d/applications\\\"; done; exit 0\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$HYPRLAND_INSTANCE_SIGNATURE\\\"\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_DATA_HOME:-$HOME/.local/share}:$HOME/.nix-profile/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}\\\"\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\\\"\"]",
+        "exec.launch-app",
         "fs.read:/**/applications/*.desktop",
         "net.socket"
       ],

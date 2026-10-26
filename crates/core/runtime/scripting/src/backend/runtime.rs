@@ -1569,6 +1569,32 @@ impl BackendScriptContext {
             )?,
         )?;
 
+        if self.capabilities.contains("exec.launch-app") {
+            let module_id = self.module_id.clone();
+            let started = Arc::clone(&self.host_side_effects_enabled);
+            mesh.set(
+                "launch_app",
+                self.lua_ref()?
+                    .create_function(move |lua, desktop_id: String| {
+                        require_started(&started)?;
+                        let result = lua.create_table()?;
+                        match super::launch_app::launch(&desktop_id) {
+                            Ok(()) => result.set("ok", true)?,
+                            Err(error) => {
+                                tracing::warn!(
+                                    module_id = %module_id,
+                                    desktop_id = %desktop_id,
+                                    "launch_app failed: {error}"
+                                );
+                                result.set("ok", false)?;
+                                result.set("error", error)?;
+                            }
+                        }
+                        Ok(result)
+                    })?,
+            )?;
+        }
+
         let blocking: Function = mesh.get("exec")?;
         let policy = self.exec_policy.clone();
         let resources = self.policy.budget();

@@ -7,6 +7,7 @@ mod exec;
 mod exec_stream;
 mod host_events;
 mod host_sources;
+mod launch_app;
 mod logging;
 mod pipewire_source;
 mod runtime;

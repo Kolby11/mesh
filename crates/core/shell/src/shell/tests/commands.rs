@@ -584,6 +584,34 @@ fn a_core_provided_command_without_its_capability_is_denied() {
     );
 }
 
+/// Package management is authorized at dispatch by its contract; neither a
+/// module id nor an unrelated grant reaches it.
+#[test]
+fn package_commands_without_their_capability_are_denied_at_dispatch() {
+    let mut shell = Shell::new();
+    for (command, payload, module_id) in [
+        (
+            "set_provider",
+            serde_json::json!({ "interface": "mesh.audio", "provider_id": "@mesh/pulseaudio-audio" }),
+            "@mesh/navigation-bar",
+        ),
+        (
+            "set_module_enabled",
+            serde_json::json!({ "module_id": "@mesh/audio-popover", "enabled": false }),
+            "@mesh/settings",
+        ),
+    ] {
+        let result = shell.dispatch_service_command(
+            "mesh.packages",
+            command,
+            &payload,
+            module_id,
+            &mesh_core_capability::CapabilitySet::from_ids(["service.apps.launch"]),
+        );
+        assert_eq!(result["error"], serde_json::json!("capability_denied"), "{command}");
+    }
+}
+
 /// Argument extraction is strict: a payload that does not match the declared
 /// contract is an unsupported command, not a command applied with a default.
 #[test]

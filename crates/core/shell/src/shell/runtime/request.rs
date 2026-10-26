@@ -1819,14 +1819,13 @@ impl Shell {
                 call_id,
                 source_instance_id,
                 source_module_id,
-                source_capabilities,
+                source_capabilities: _,
             } => {
                 self.cancel_service_call(
                     &interface,
                     call_id,
                     &source_instance_id,
                     &source_module_id,
-                    &source_capabilities,
                 );
                 Ok(VecDeque::new())
             }
@@ -2529,17 +2528,16 @@ impl Shell {
         call_id: u64,
         source_instance_id: &str,
         source_module_id: &str,
-        source_capabilities: &mesh_core_capability::CapabilitySet,
     ) {
         let call = mesh_core_backend::CallId::from_raw(call_id);
         let Some(route) = self.pending_service_call_routes.get(&call_id) else {
             return;
         };
-        let capabilities = service_capabilities(interface);
-        let required = &capabilities.control;
-        if !source_capabilities.is_granted(required)
-            || route.instance_id != source_instance_id
+        // Only the instance that made an (already authorized) call may cancel
+        // it; no further capability is needed to withdraw one's own request.
+        if route.instance_id != source_instance_id
             || route.module_id != source_module_id
+            || route.interface != canonical_interface_name_cow(interface).as_ref()
         {
             self.diagnostics.record_lifecycle_error(
                 source_module_id.to_string(),

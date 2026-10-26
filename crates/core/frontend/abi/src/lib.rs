@@ -94,7 +94,13 @@ impl EffectScope {
         self.revision
     }
 
+    /// Service effects pass: the shell authorizes each call at dispatch
+    /// against the interface contract's per-method capabilities, which this
+    /// layer cannot see.
     pub fn authorize(&self, effect: &FrontendEffect) -> Result<(), EffectRejection> {
+        if matches!(effect, FrontendEffect::Service(_)) {
+            return Ok(());
+        }
         let required = effect.required_capabilities();
         if required
             .iter()
@@ -199,10 +205,7 @@ impl FrontendEffect {
     fn required_capabilities(&self) -> Vec<Capability> {
         match self {
             Self::Surface(_) => vec![Capability::new("shell.surface")],
-            Self::Service(effect) => vec![Capability::new(format!(
-                "service.{}.control",
-                service_name(&effect.interface())
-            ))],
+            Self::Service(_) => Vec::new(),
             Self::SetLocale { .. } => vec![Capability::new("locale.write")],
             Self::WriteClipboard { .. } => vec![Capability::new("shell.clipboard.write")],
             Self::Debug(_) => vec![
@@ -287,12 +290,6 @@ pub enum ServiceEffect {
 }
 
 impl ServiceEffect {
-    fn interface(&self) -> &str {
-        match self {
-            Self::Call { interface, .. } | Self::Cancel { interface, .. } => interface,
-        }
-    }
-
     fn kind(&self) -> &'static str {
         match self {
             Self::Call { .. } => "service-call",
@@ -352,13 +349,6 @@ pub enum EffectRejection {
     },
 }
 
-fn service_name(interface: &str) -> String {
-    interface
-        .strip_prefix("mesh.")
-        .unwrap_or(interface)
-        .to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,29 +367,22 @@ mod tests {
     }
 
     #[test]
-    fn service_effects_reject_missing_control_capability() {
+    fn service_effects_are_left_to_contract_authorization_at_dispatch() {
         let effect = ScopedFrontendEffect::new(
             EffectScope::new(
-                EffectSource::new("@mesh/panel", None),
-                CapabilitySet::default(),
+                EffectSource::new("@mesh/dock", None),
+                CapabilitySet::from_ids(["service.apps.launch"]),
             ),
             FrontendEffect::Service(ServiceEffect::Call {
-                interface: "mesh.audio".into(),
-                command: "set_volume".into(),
-                payload: serde_json::json!({ "percent": 50 }),
+                interface: "mesh.apps".into(),
+                command: "activate".into(),
+                payload: serde_json::json!({ "id": "kitty" }),
                 call_id: 1,
-                instance_id: "panel".into(),
+                instance_id: "dock".into(),
             }),
         );
 
-        assert_eq!(
-            effect.authorize(),
-            Err(EffectRejection::MissingCapability {
-                module_id: "@mesh/panel".into(),
-                effect: "service-call".into(),
-                required: vec!["service.audio.control".into()],
-            })
-        );
+        assert_eq!(effect.authorize(), Ok(()));
     }
 
     #[test]

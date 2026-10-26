@@ -1177,6 +1177,14 @@ without the grant.
   own environment. The option requires the elevated `exec.locale` capability,
   sets only `LC_ALL`, and accepts names of letters, digits and `_ . @ -` up to
   64 bytes; no other environment variable is settable.
+- **Shipped — application launch.** `exec.launch-app` exposes
+  `mesh.launch_app(desktop_id)`, which finds `<desktop_id>.desktop` under
+  `$XDG_DATA_HOME/applications` and `$XDG_DATA_DIRS/*/applications`, expands
+  its `Exec` per the Desktop Entry Specification (quoting, escapes, field codes
+  for a launch with no files), honours `Path`, and starts it in its own process
+  group with no inherited stdio. It returns `{ ok = true }` or
+  `{ ok = false, error = … }`; `Terminal=true`, hidden and non-application
+  entries are refused. The function does not exist without the grant.
 - **Shipped:** the core catalog explicitly enumerates host powers and the
   built-in service permissions; unknown names are rejected.
 - **Shipped — interface-declared service permissions.** Host powers remain

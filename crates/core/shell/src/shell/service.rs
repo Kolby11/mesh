@@ -370,50 +370,29 @@ fn script_event_to_request_at(
             })
         }
         other => Some(match other.rfind('.') {
-            Some(pos) => {
-                let interface_name = &other[..pos];
-                let capabilities = service_capabilities(interface_name);
-                let required = &capabilities.control;
-                if event.source_capabilities.is_granted(required) {
-                    if let (Some(call_id), Some(source_instance_id)) =
-                        (event.call_id, event.source_instance_id.clone())
-                    {
-                        lower_frontend_effect(
-                            &event,
-                            FrontendEffect::Service(ServiceEffect::Call {
-                                interface: interface_name.to_string(),
-                                command: other[pos + 1..].to_string(),
-                                payload: event.payload.clone(),
-                                call_id,
-                                instance_id: source_instance_id,
-                            }),
-                            revision,
-                        )
-                    } else {
-                        CoreRequest::PublishDiagnostics {
-                            message: OperationRejection::Dropped {
-                                channel: event.channel.clone(),
-                                reason: "service methods are called through interface proxies"
-                                    .into(),
-                            }
-                            .to_string(),
-                        }
+            // Authorization happens at dispatch, against the contract's
+            // per-method capabilities; `service.<name>.control` is only the
+            // fallback for an interface without a contract.
+            Some(pos) => match (event.call_id, event.source_instance_id.clone()) {
+                (Some(call_id), Some(source_instance_id)) => lower_frontend_effect(
+                    &event,
+                    FrontendEffect::Service(ServiceEffect::Call {
+                        interface: other[..pos].to_string(),
+                        command: other[pos + 1..].to_string(),
+                        payload: event.payload.clone(),
+                        call_id,
+                        instance_id: source_instance_id,
+                    }),
+                    revision,
+                ),
+                _ => CoreRequest::PublishDiagnostics {
+                    message: OperationRejection::Dropped {
+                        channel: event.channel.clone(),
+                        reason: "service methods are called through interface proxies".into(),
                     }
-                } else {
-                    tracing::warn!(
-                        source_module_id = %event.source_module_id,
-                        required_capability = %required,
-                        channel = %event.channel,
-                        "denied frontend service command publication"
-                    );
-                    CoreRequest::PublishDiagnostics {
-                        message: format!(
-                            "Denied service command '{}' from '{}' without {}",
-                            event.channel, event.source_module_id, required
-                        ),
-                    }
-                }
-            }
+                    .to_string(),
+                },
+            },
             None => CoreRequest::PublishDiagnostics {
                 message: OperationRejection::Dropped {
                     channel: event.channel,
@@ -510,6 +489,32 @@ mod tests {
                 ..
             }] if *call_id == 1u64 << 63 && source_instance_id == "@mesh/audio-popover#bottom"
         ));
+    }
+
+    /// A proxy call authorized by a contract method capability such as
+    /// `service.apps.launch` reaches dispatch, which checks the contract;
+    /// lowering must not demand `service.apps.control` first.
+    #[test]
+    fn proxy_calls_reach_contract_authorization_without_the_control_capability() {
+        let requests = script_events_to_requests(vec![PublishedEvent {
+            channel: "mesh.apps.activate".into(),
+            payload: serde_json::json!({ "id": "kitty" }),
+            source_module_id: "@mesh/glass-dock".into(),
+            source_capabilities: mesh_core_capability::CapabilitySet::from_ids([
+                "service.apps.launch",
+            ]),
+            call_id: Some(7),
+            source_instance_id: Some("@mesh/glass-dock#default".into()),
+        }]);
+
+        assert!(
+            matches!(
+                requests.as_slice(),
+                [CoreRequest::ServiceCall { interface, command, .. }]
+                    if interface == "mesh.apps" && command == "activate"
+            ),
+            "{requests:?}"
+        );
     }
 
     fn typed(effects: Vec<FrontendEffect>, module: &str, granted: &[&str]) -> Vec<CoreRequest> {
@@ -615,43 +620,6 @@ mod tests {
     }
 
     #[test]
-    fn a_module_without_the_packages_capability_cannot_select_a_provider() {
-        let requests = script_events_to_requests(vec![event_with(
-            "mesh.packages.set_provider",
-            serde_json::json!({
-                "interface": "mesh.audio",
-                "provider_id": "@mesh/pulseaudio-audio",
-            }),
-            "@mesh/navigation-bar",
-            &[],
-        )]);
-
-        assert!(matches!(
-            requests.as_slice(),
-            [CoreRequest::PublishDiagnostics { message }]
-                if message.contains("service.packages.control")
-        ));
-    }
-
-    /// The old gate keyed on module id, so being named `@mesh/settings` was
-    /// enough. It is now neither here nor there: the capability decides.
-    #[test]
-    fn the_settings_module_id_grants_nothing_by_itself() {
-        let requests = script_events_to_requests(vec![event_with(
-            "mesh.packages.set_module_enabled",
-            serde_json::json!({ "module_id": "@mesh/audio-popover", "enabled": false }),
-            "@mesh/settings",
-            &[],
-        )]);
-
-        assert!(matches!(
-            requests.as_slice(),
-            [CoreRequest::PublishDiagnostics { message }]
-                if message.contains("service.packages.control")
-        ));
-    }
-
-    #[test]
     fn module_enabled_command_carries_its_payload_through() {
         let requests = script_events_to_requests(vec![event_with(
             "mesh.packages.set_module_enabled",
@@ -731,24 +699,6 @@ mod tests {
                 CoreRequest::ServiceCall { command, .. },
                 CoreRequest::ServiceCall { command: font_command, .. },
             ] if command == "set_icon_theme" && font_command == "set_font_family"
-        ));
-    }
-
-    /// Changing the theme used to require no capability at all: `shell.set-theme`
-    /// was ungated, so any module could restyle the whole shell.
-    #[test]
-    fn setting_the_theme_now_requires_a_capability() {
-        let requests = script_events_to_requests(vec![event_with(
-            "mesh.theme.set_theme",
-            serde_json::json!({ "theme_id": "mesh-default-dark" }),
-            "@mesh/some-widget",
-            &[],
-        )]);
-
-        assert!(matches!(
-            requests.as_slice(),
-            [CoreRequest::PublishDiagnostics { message }]
-                if message.contains("service.theme.control")
         ));
     }
 
@@ -850,26 +800,6 @@ mod tests {
             other => {
                 panic!("unknown shell.* channels must never become service commands, got {other:?}")
             }
-        }
-    }
-
-    #[test]
-    fn script_events_to_requests_denies_uncontrolled_service_command() {
-        let caps = mesh_core_capability::CapabilitySet::from_ids(["service.audio.read"]);
-        let requests = script_events_to_requests(vec![PublishedEvent {
-            channel: "mesh.audio.set_volume".into(),
-            payload: serde_json::json!({ "percent": 55 }),
-            source_module_id: "@mesh/panel".into(),
-            source_capabilities: caps,
-            call_id: None,
-            source_instance_id: None,
-        }]);
-
-        match requests.as_slice() {
-            [CoreRequest::PublishDiagnostics { message }] => {
-                assert!(message.contains("service.audio.control"));
-            }
-            other => panic!("expected denied diagnostic request, got {other:?}"),
         }
     }
 

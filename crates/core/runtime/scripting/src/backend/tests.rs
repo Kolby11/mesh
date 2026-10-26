@@ -4020,3 +4020,27 @@ async fn live_hyprland_wm_reads_ext_workspaces() {
         ctx.shutdown_streams().await;
     }
 }
+
+#[test]
+fn launch_app_exists_only_with_its_capability() {
+    let script = "function start()\nend\nfunction on_poll()\nif mesh.launch_app == nil then\nmesh.service.emit({ present = false })\nreturn\nend\nlocal result = mesh.launch_app(\"../escape\")\nmesh.service.emit({ present = true, ok = result.ok, error = result.error })\nend";
+
+    let mut denied = BackendScriptContext::new_with_capabilities("@test/backend", []);
+    denied.load_script(script).unwrap();
+    let payload = denied.run_poll().unwrap().unwrap();
+    assert_eq!(payload.get("present").and_then(|v| v.as_bool()), Some(false));
+
+    let mut granted =
+        BackendScriptContext::new_with_capabilities("@test/backend", ["exec.launch-app".into()]);
+    granted.load_script(script).unwrap();
+    let payload = granted.run_poll().unwrap().unwrap();
+    assert_eq!(payload.get("present").and_then(|v| v.as_bool()), Some(true));
+    assert_eq!(payload.get("ok").and_then(|v| v.as_bool()), Some(false));
+    assert!(
+        payload
+            .get("error")
+            .and_then(|v| v.as_str())
+            .is_some_and(|error| error.contains("invalid desktop file id")),
+        "{payload:?}"
+    );
+}

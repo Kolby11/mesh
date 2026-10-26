@@ -78,13 +78,6 @@ local function parse_desktop(contents)
     return entry
 end
 
--- Exec with field codes removed; quotes dropped because the launch grant
--- embeds the command in a quoted Lua string.
-local function launch_command(exec)
-    local command = (exec or ""):gsub("%%[fFuUdDnNickvm]", ""):gsub("%%%%", "%%"):gsub("[\"\\]", "")
-    return (command:gsub("%s+", " "):match("^%s*(.-)%s*$"))
-end
-
 local function load_entry(id)
     if entries[id] ~= nil then
         return entries[id] or nil
@@ -98,7 +91,6 @@ local function load_entry(id)
                 id = id,
                 name = raw.Name or id,
                 icon = raw.Icon or id,
-                command = launch_command(raw.Exec),
                 class = string.lower(raw.StartupWMClass or id),
                 listed = raw.NoDisplay ~= "true" and raw.Hidden ~= "true"
                     and (raw.Type or "Application") == "Application" and (raw.Exec or "") ~= "",
@@ -323,10 +315,5 @@ function on_command_activate(self)
         local target = focused and addresses[#addresses] or addresses[1]
         return dispatch('hl.dsp.focus({ window = "address:' .. target .. '" })')
     end
-    local entry = load_entry(id)
-    local command = entry and entry.command or ""
-    if command == "" then
-        return { ok = false, error = "no desktop entry for " .. id }
-    end
-    return dispatch('hl.dsp.exec_cmd("' .. command .. '")')
+    return mesh.launch_app(id)
 end
