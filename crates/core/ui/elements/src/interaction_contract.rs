@@ -5,7 +5,7 @@
 //! quietly growing different interpretations of the same node.
 
 use crate::layout::LayoutRect;
-use crate::style::{Corners, Display, Transform2D, Visibility};
+use crate::style::{CornerShape, CornerShapes, Corners, Display, Transform2D, Visibility};
 use crate::tree::{NodeState, WidgetNode};
 
 /// How long hover intent keeps a popover open after the pointer leaves its
@@ -149,6 +149,7 @@ pub struct AffineClip {
     pub transform: AffineTransform,
     pub rect: LayoutRect,
     pub radii: Corners,
+    pub shapes: CornerShapes,
 }
 
 impl AffineClip {
@@ -181,17 +182,29 @@ impl AffineClip {
                 .fold(1.0, f32::min);
                 let x = local_x - self.rect.x;
                 let y = local_y - self.rect.y;
-                for (dx, dy, radius) in [
-                    (x, y, r.top_left),
-                    (self.rect.width - x, y, r.top_right),
-                    (self.rect.width - x, self.rect.height - y, r.bottom_right),
-                    (x, self.rect.height - y, r.bottom_left),
+                let shapes = self.shapes;
+                for (dx, dy, radius, shape) in [
+                    (x, y, r.top_left, shapes.top_left),
+                    (self.rect.width - x, y, r.top_right, shapes.top_right),
+                    (
+                        self.rect.width - x,
+                        self.rect.height - y,
+                        r.bottom_right,
+                        shapes.bottom_right,
+                    ),
+                    (x, self.rect.height - y, r.bottom_left, shapes.bottom_left),
                 ] {
                     let radius = radius.max(0.0) * scale;
-                    if dx < radius
-                        && dy < radius
-                        && (dx - radius).powi(2) + (dy - radius).powi(2) > radius.powi(2)
-                    {
+                    if dx >= radius || dy >= radius {
+                        continue;
+                    }
+                    // A round corner leaves the area outside its arc; a scoop
+                    // removes the quarter disc centred on the corner point.
+                    let outside = match shape {
+                        CornerShape::Scoop => dx.powi(2) + dy.powi(2) < radius.powi(2),
+                        _ => (dx - radius).powi(2) + (dy - radius).powi(2) > radius.powi(2),
+                    };
+                    if outside {
                         return false;
                     }
                 }
@@ -582,6 +595,7 @@ pub fn node_clip(node: &WidgetNode, transform: AffineTransform) -> AffineClip {
     AffineClip {
         transform,
         radii: node.computed_style.border_radius,
+        shapes: node.computed_style.corner_shape,
         rect: LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -822,6 +836,7 @@ mod tests {
         let clip = AffineClip {
             transform,
             radii: Corners::zero(),
+            shapes: CornerShapes::default(),
             rect: LayoutRect {
                 x: 0.0,
                 y: 0.0,
@@ -845,6 +860,7 @@ mod tests {
                 height: 40.0,
             },
             radii: Corners::all(50.0),
+            shapes: CornerShapes::default(),
         };
         assert!(!clip.contains(20.0, 30.0));
         assert!(clip.contains(40.0, 30.0));
@@ -853,9 +869,29 @@ mod tests {
     }
 
     #[test]
+    fn scooped_overflow_clip_excludes_the_quarter_disc_at_the_corner() {
+        let clip = AffineClip {
+            transform: AffineTransform::IDENTITY,
+            rect: LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width: 40.0,
+                height: 40.0,
+            },
+            radii: Corners::all(10.0),
+            shapes: CornerShapes::from_css("scoop round round round"),
+        };
+        assert!(!clip.contains(2.0, 2.0), "inside the scoop");
+        assert!(clip.contains(9.0, 9.0), "past the scoop's arc");
+        assert!(!clip.contains(39.0, 1.0), "outside a round corner");
+        assert!(clip.contains(20.0, 20.0));
+    }
+
+    #[test]
     fn affine_clip_intersection_does_not_use_conservative_aabb_overlap() {
         let clip = AffineClip {
             radii: Corners::zero(),
+            shapes: CornerShapes::default(),
             transform: AffineTransform::translation(50.0, 50.0)
                 .then(AffineTransform::rotation(std::f32::consts::FRAC_PI_4)),
             rect: LayoutRect {

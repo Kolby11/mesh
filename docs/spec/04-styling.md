@@ -746,9 +746,11 @@ CSS keywords (`bevel`, `notch`, `squircle`, `superellipse()`) resolve to
 `round`.
 
 A scooped corner clips the element's own painting: background, gradient,
-border and `backdrop-filter`. Outer `box-shadow`s are kept out of the scoop,
-and compositor blur regions leave it out. Borders are not stroked along the
-scoop's curve, and descendants are not clipped by it.
+border and `backdrop-filter`. The border follows the scoop's inward arc, with
+the mean width of the two edges that meet there. With `overflow: hidden`,
+descendants are clipped to the scooped shape, and pointer hit testing through
+that clip excludes the scoop. Outer `box-shadow`s are kept out of the scoop,
+and compositor blur regions leave it out.
 
 ```css
 /* A concave foot: the shelf's glass sweeps out into the screen edge. */

@@ -667,7 +667,7 @@ impl PaintBackend for SkiaPaintBackend {
                             bottom_right: clip.radii.bottom_right * scale,
                             bottom_left: clip.radii.bottom_left * scale,
                         },
-                        CornerShapes::default(),
+                        clip.shapes,
                     );
                     canvas.set_matrix(&matrix);
                 } else {

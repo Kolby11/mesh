@@ -462,3 +462,74 @@ fn css_profile_multistop_gradient_paints_middle_and_invalidates_cache() {
         assert_eq!(pixel(&buffer, 6, 10), Color::from_css(middle).unwrap());
     }
 }
+
+fn scooped_box(width: f32, height: f32) -> WidgetNode {
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width,
+            height,
+        },
+        Color::TRANSPARENT,
+    );
+    root.computed_style.border_radius = mesh_core_elements::style::Corners {
+        top_left: 12.0,
+        ..mesh_core_elements::style::Corners::zero()
+    };
+    root.computed_style.corner_shape =
+        mesh_core_elements::CornerShapes::from_css("scoop round round round");
+    root
+}
+
+/// 04 §12.1: a scooped corner's border follows the inward arc.
+#[test]
+fn painter_strokes_the_border_along_a_scooped_corner() {
+    let red = Color::from_hex("#ff0000").unwrap();
+    let mut root = scooped_box(40.0, 40.0);
+    root.computed_style.border_width = mesh_core_elements::style::Edges::all(2.0);
+    root.computed_style.border_color = red;
+
+    let mut buffer = PixelBuffer::new(40, 40);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    // In the 12–14px band around the corner point.
+    assert_eq!(pixel(&buffer, 12, 4), red);
+    assert_eq!(pixel(&buffer, 4, 12), red);
+    // Inside the scoop and inside the box: nothing.
+    assert_eq!(pixel(&buffer, 5, 5), Color::TRANSPARENT);
+    assert_eq!(pixel(&buffer, 20, 20), Color::TRANSPARENT);
+    // The straight edges still carry the border past the scoop.
+    assert_eq!(pixel(&buffer, 30, 0), red);
+    assert_eq!(pixel(&buffer, 0, 30), red);
+}
+
+/// `overflow: hidden` clips descendants to the scooped shape. (1, 9) lies
+/// inside a round 12px corner but inside the scoop's quarter disc.
+#[test]
+fn painter_clips_overflow_to_a_scooped_corner() {
+    let green = Color::from_hex("#00ff00").unwrap();
+    let mut root = scooped_box(40.0, 40.0);
+    root.computed_style.overflow_x = Overflow::Hidden;
+    root.computed_style.overflow_y = Overflow::Hidden;
+    root.children = vec![node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 40.0,
+            height: 40.0,
+        },
+        green,
+    )]
+    .into();
+
+    let mut buffer = PixelBuffer::new(40, 40);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    assert_eq!(pixel(&buffer, 1, 9).a, 0, "inside the scoop");
+    assert_eq!(pixel(&buffer, 9, 1).a, 0, "inside the scoop");
+    assert_eq!(pixel(&buffer, 10, 10), green);
+    assert_eq!(pixel(&buffer, 39, 0), green);
+}

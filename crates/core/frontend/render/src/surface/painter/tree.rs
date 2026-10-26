@@ -1359,8 +1359,62 @@ fn push_box_commands(
         scale,
         node_clip,
     );
+    if scooped {
+        push_scoop_border_commands(commands, style, scale, bounds, radii, node_clip);
+    }
     close_scoop_clip(commands, scooped, mark);
     push_outline_command(commands, bounds, paint_radii, style.outline, scale, clip);
+}
+
+/// The border along each scooped corner's inward arc. The squared-off border
+/// ends where the scoop clip removes the corner; a circle stroked around the
+/// corner point, just outside the scoop, fills the band in between, and the
+/// enclosing scoop clip keeps only the part inside the box. Its width is the
+/// mean of the two edges meeting there.
+fn push_scoop_border_commands(
+    commands: &mut Vec<PainterCommand>,
+    style: &DisplayPaintStyle,
+    scale: f32,
+    bounds: ClipRect,
+    radii: Corners,
+    clip: ClipRect,
+) {
+    if style.border_color.a == 0 {
+        return;
+    }
+    let radii = super::backend::normalize_corners(bounds.width as f32, bounds.height as f32, radii);
+    let widths = &style.border_width;
+    let (left, top) = (bounds.x as f32, bounds.y as f32);
+    let (right, bottom) = (left + bounds.width as f32, top + bounds.height as f32);
+    let shapes = style.corner_shape;
+    for (shape, radius, cx, cy, width) in [
+        (shapes.top_left, radii.top_left, left, top, (widths.top + widths.left) / 2.0),
+        (shapes.top_right, radii.top_right, right, top, (widths.top + widths.right) / 2.0),
+        (
+            shapes.bottom_right,
+            radii.bottom_right,
+            right,
+            bottom,
+            (widths.bottom + widths.right) / 2.0,
+        ),
+        (
+            shapes.bottom_left,
+            radii.bottom_left,
+            left,
+            bottom,
+            (widths.bottom + widths.left) / 2.0,
+        ),
+    ] {
+        let width = width * scale;
+        if shape != mesh_core_elements::style::CornerShape::Scoop || radius <= 0.0 || width <= 0.0 {
+            continue;
+        }
+        commands.push(PainterCommand::DrawPath {
+            path: circle_path(cx, cy, radius + width / 2.0),
+            paint: PainterPaint::stroke(style.border_color, width),
+            clip,
+        });
+    }
 }
 
 /// The outline ring sits outside the border box like a shadow, so it uses

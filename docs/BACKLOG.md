@@ -63,8 +63,6 @@ October log.
 
 ## Glass shell follow-ups (found 2026-10-20)
 
-- [ ] **`corner-shape: scoop` gaps:** borders are not stroked along a scoop's curve, and
-      `overflow: hidden` clips descendants to the rounded shape, not the scooped one ([04 §12.1](spec/04-styling.md#121-corner-shapes-corner-shape)).
 - [ ] **Settings theme switch may not repaint:** reported 2026-10-21 as needing a tab change; not
       reproduced on `1d50170a` (layer and window roles, file and click paths). Capture a repro.
 - [ ] **Launcher search paints one keystroke late:** in the promoted dock launcher popup the
