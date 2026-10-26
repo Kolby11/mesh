@@ -77,7 +77,8 @@ October log.
 - [ ] **Keyboard-only entry to shell chrome:** an `on_demand` bar or dock gets the keyboard only
       after a press on it. Add an IPC/CLI command that focuses a surface, for a compositor keybind.
 - [ ] **Launcher search paints one keystroke late:** in the promoted dock launcher popup the
-      last typed character appears only on the next input event; reproduced on `d02ba382`.
+      last typed character appears only on the next input event; reproduced on `d02ba382`, not
+      reliably at `f9a5dac4` (nested Hyprland, CPU). Needs a GPU repro on the user's session.
 - [ ] **Clicks lost after a grabbed popover is dismissed (Hyprland):** the dock apps button
       ignores clicks after the launcher closes until the pointer moves; no `wl_pointer.enter`
       follows the popup's destruction. Try `hyprland_focus_grab` instead of an `xdg_popup` grab for
