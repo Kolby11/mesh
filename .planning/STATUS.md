@@ -7,6 +7,12 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Cold icon lookup fix complete.** Painting
+  uses nonblocking prepared results; cold searches run on shared binding snapshots
+  without holding the live registry lock. Live first opens in three paired fresh
+  processes improve from 460–514 to 117–141 ms CPU, and 482–508 to 58–70 ms GPU.
+  Pending icons repaint on completion rather than showing false missing markers.
+
 - **Launcher first-open attribution complete.** Cold icon commands take
   250–269 ms, about 95–98% of first child preparation in three fresh CPU and
   three fresh GPU processes. CPU stacks identify synchronous XDG theme lookup
@@ -81,8 +87,6 @@ measurements live in [`log/`](log/README.md).
 
 ## Next
 
-- Remove synchronous cold XDG icon lookup from child painting, preserving
-  deterministic icons and repaint subscriptions.
 - D1 remains deferred pending supported runtime table-write tracking; indirect
   list reads still compare every item.
 - Continue glass raster work and the in-surface blur engine after pipeline work.

@@ -208,6 +208,15 @@ step 5 is **target**):
 7. **Built-in missing-icon glyph** — embedded SVG; always renders; one
    warning per `(module, name)`.
 
+**Shipped rendering behavior:** cached targets and prepared glyph bindings can
+resolve without filesystem access. Cold host-theme lookups run through the
+resource worker against a snapshot of the committed binding chain. A pending
+lookup paints nothing; it does not paint a missing-icon marker or skip an
+unprepared higher-priority candidate. Completion repaints only subscribed
+consumers, including when the final result selects the missing-icon fallback.
+Obsolete resource generations are discarded. If no worker/completion path is
+available, the renderer retains its synchronous availability fallback.
+
 Rendered size is always the layout box; the `size` attribute is only an XDG
 resolution hint.
 

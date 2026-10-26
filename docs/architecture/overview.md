@@ -137,6 +137,10 @@ Child-surface requests
 retain dependencies on trigger geometry, ancestor policy and descendant paint
 extents, and refresh from the finalized dirty set. Identity/element validation
 runs on structural changes; semantic reindexing reuses validated structure.
+Cold semantic/XDG icon lookups use a private snapshot of shared binding maps
+on the resource worker; filesystem search does not hold the committed registry
+lock. Painting uses nonblocking prepared lookups, respecting unresolved
+higher-priority candidates and showing no false missing marker while pending.
 Asynchronous icon, glyph and image jobs track their requesting component instances,
 including promoted child targets, and repaint only those consumers on completion.
 A file icon or image whose pixels are not ready paints nothing until its job

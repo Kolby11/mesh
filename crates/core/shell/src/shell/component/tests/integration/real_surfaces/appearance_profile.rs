@@ -624,6 +624,8 @@ fn d9_settings_scroll_frame_gate() {
 /// scrollbar end changes no pixel.
 #[test]
 fn settings_scroll_shift_matches_full_paint() {
+    let resources = mesh_core_render::ResourcePaintConsumer::default();
+    let _resource_scope = resources.enter();
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(920, 900);
     let mut settings = appearance_surface(&theme, &mut buffer);
@@ -644,44 +646,68 @@ fn settings_scroll_shift_matches_full_paint() {
     while render_loop_frame(&mut settings, &theme, &mut buffer) > 0 {}
 
     let assert_matches_full_paint =
-        |settings: &FrontendSurfaceComponent, buffer: &PixelBuffer, label: &str| {
-            let selected = settings.retained_display_list.select_paint_commands(
-                Some(DamageRect {
-                    x: 0,
-                    y: 0,
-                    width: 920,
-                    height: 900,
-                }),
-                mesh_core_render::DisplayListRepaintPolicy::FullSurface,
-            );
-            let mut fresh = PixelBuffer::new(920, 900);
-            mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
-                &selected,
-                &mut fresh,
-                1.0,
-                None,
-                None,
-                None,
-                Some("@mesh/settings"),
-            );
-            let mut differing = 0usize;
-            let mut worst = 0u8;
-            for (painted, full) in buffer.data().chunks(4).zip(fresh.data().chunks(4)) {
-                let delta = painted
-                    .iter()
-                    .zip(full)
-                    .map(|(a, b)| a.abs_diff(*b))
-                    .max()
-                    .unwrap_or(0);
-                if delta > 0 {
-                    differing += 1;
-                    worst = worst.max(delta);
+        |settings: &mut FrontendSurfaceComponent, buffer: &mut PixelBuffer, label: &str| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                mesh_core_render::poll_icon_resolution_jobs();
+                mesh_core_render::poll_icon_raster_jobs();
+                mesh_core_render::poll_glyph_raster_jobs();
+                mesh_core_render::poll_image_decode_jobs();
+                if resources.take_ready() {
+                    settings.request_paint();
+                    render_loop_frame(settings, &theme, buffer);
                 }
+                let selected = settings.retained_display_list.select_paint_commands(
+                    Some(DamageRect {
+                        x: 0,
+                        y: 0,
+                        width: 920,
+                        height: 900,
+                    }),
+                    mesh_core_render::DisplayListRepaintPolicy::FullSurface,
+                );
+                let mut fresh = PixelBuffer::new(920, 900);
+                mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics(
+                    &selected,
+                    &mut fresh,
+                    1.0,
+                    None,
+                    None,
+                    None,
+                    Some("@mesh/settings"),
+                );
+                // A completion drained during the reference paint must reach the
+                // retained surface through the same repaint path as the runtime.
+                if resources.is_ready()
+                    || mesh_core_render::icon_resolution_jobs_pending()
+                    || mesh_core_render::icon_raster_jobs_pending()
+                    || mesh_core_render::glyph_raster_jobs_pending()
+                    || mesh_core_render::image_decode_jobs_pending()
+                {
+                    assert!(Instant::now() < deadline, "resources never settled");
+                    std::thread::sleep(Duration::from_millis(1));
+                    continue;
+                }
+                let mut differing = 0usize;
+                let mut worst = 0u8;
+                for (painted, full) in buffer.data().chunks(4).zip(fresh.data().chunks(4)) {
+                    let delta = painted
+                        .iter()
+                        .zip(full)
+                        .map(|(a, b)| a.abs_diff(*b))
+                        .max()
+                        .unwrap_or(0);
+                    if delta > 0 {
+                        differing += 1;
+                        worst = worst.max(delta);
+                    }
+                }
+                assert!(
+                    differing == 0,
+                    "{label}: {differing} pixels differ, worst channel delta {worst}"
+                );
+                break;
             }
-            assert!(
-                differing == 0,
-                "{label}: {differing} pixels differ, worst channel delta {worst}"
-            );
         };
     let dy_steps = [-4.0, -4.0, -8.0, -4.0, 4.0, -3.5, -4.0, -12.0, 8.0, -4.0];
     for (frame, dy) in dy_steps.into_iter().enumerate() {
@@ -694,7 +720,11 @@ fn settings_scroll_shift_matches_full_paint() {
             )
             .unwrap();
         render_loop_frame(&mut settings, &theme, &mut buffer);
-        assert_matches_full_paint(&settings, &buffer, &format!("frame {frame} (dy {dy})"));
+        assert_matches_full_paint(
+            &mut settings,
+            &mut buffer,
+            &format!("frame {frame} (dy {dy})"),
+        );
     }
     // Momentum offsets land on device pixels, so its frames shift too.
     for frame in 0..20 {
@@ -702,7 +732,11 @@ fn settings_scroll_shift_matches_full_paint() {
         if render_loop_frame(&mut settings, &theme, &mut buffer) == 0 {
             break;
         }
-        assert_matches_full_paint(&settings, &buffer, &format!("momentum frame {frame}"));
+        assert_matches_full_paint(
+            &mut settings,
+            &mut buffer,
+            &format!("momentum frame {frame}"),
+        );
     }
     // Once content moves, a nested resource list comes under the pointer and
     // takes the gesture; scrolling inside content is not shiftable.

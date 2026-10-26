@@ -332,10 +332,6 @@ of payoff.
 From the 2026-10-20 live `glass` captures; evidence in the
 [performance log](../.planning/log/performance-log.md).
 
-- [ ] Move cold semantic/XDG icon lookup out of child painting: first launcher
-      frames synchronously search theme files before the async raster queue.
-      Preserve deterministic icon resolution and consumer repaint delivery.
-      [Attribution](../.planning/log/performance-log.md#2026-10-26--launcher-first-open-attribution-cold-xdg-icon-lookup).
 - [ ] Hide waits for the root's longest opacity transition (280 ms on the glass
       dashboard and picker) while their panels fade in `--animation-duration-fast`;
       unmap when the exit transitions actually settle.

@@ -21,6 +21,7 @@ type FontFreshness = ResourceFingerprint;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct XdgIconLookupKey {
     revision: u64,
+    icon_dirs: Vec<PathBuf>,
     theme: String,
     asset_name: String,
     size: u32,
@@ -74,6 +75,12 @@ impl XdgIconLookupCache {
 
 fn xdg_lookup_cache_weight(key: &XdgIconLookupKey, value: Option<&PathBuf>) -> usize {
     size_of::<XdgIconLookupKey>()
+        .saturating_add(
+            key.icon_dirs
+                .iter()
+                .map(|path| size_of::<PathBuf>() + path.as_os_str().len())
+                .sum::<usize>(),
+        )
         .saturating_add(key.theme.len())
         .saturating_add(key.asset_name.len())
         .saturating_add(size_of::<Option<PathBuf>>())
@@ -228,6 +235,22 @@ pub fn validate_font_bytes(bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn prepared_icon_in_theme(
+    catalog: &SystemResourceCatalog,
+    theme: &str,
+    name: &str,
+    size: u32,
+) -> Option<Option<PathBuf>> {
+    let key = XdgIconLookupKey {
+        revision: resource_revision(),
+        icon_dirs: catalog.icon_dirs.clone(),
+        theme: theme.into(),
+        asset_name: name.into(),
+        size: size.max(1),
+    };
+    XDG_ICON_LOOKUP_CACHE.get()?.try_lock().ok()?.get(&key)
+}
+
 pub fn find_icon_in_theme_with_catalog(
     catalog: &SystemResourceCatalog,
     theme: &str,
@@ -236,6 +259,7 @@ pub fn find_icon_in_theme_with_catalog(
 ) -> Option<PathBuf> {
     let key = XdgIconLookupKey {
         revision: resource_revision(),
+        icon_dirs: catalog.icon_dirs.clone(),
         theme: theme.to_string(),
         asset_name: asset_name.to_string(),
         size: size.max(1),

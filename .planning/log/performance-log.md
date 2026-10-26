@@ -9432,3 +9432,78 @@ uses `wlrctl`; stack sampling uses `perf record -e cpu-clock -F 499 -k
 CLOCK_REALTIME --call-graph dwarf -p <probe-pid>`. The source inspection points
 are `render/child.rs`, `shell_component/mod.rs`, `surface/icon.rs`,
 `ui/icon/src/registry.rs`, and `ui/icon/src/xdg.rs`.
+
+## 2026-10-26 — launcher cold icon lookup leaves the paint thread
+
+**Change.** Named-icon painting checks cached targets and prepared bindings
+without filesystem access or waiting for the live registry mutex. Cold host
+lookups run on bounded resource workers with shared immutable binding/catalog
+snapshots; publication checks registry generation and resource revision. Pending
+icons stay blank until their target or terminal missing fallback is ready, then
+wake their subscribed consumers. Unprepared higher-priority candidates retain
+precedence. XDG cache keys include captured catalog roots. Prepared font result
+entries charge shared-target metadata rather than the entire font per glyph.
+Synchronous APIs and the no-worker/no-future-completion availability fallback
+remain available.
+
+**Live comparison.** Normal release GPU-feature CLI, thin LTO, one codegen unit,
+`CARGO_BUILD_JOBS=4`, on the main Hyprland `wayland-1` compositor (2880×1800,
+scale 1, 120 Hz; AMD GPU device `0xe281`). A private copy of the attribution
+fixture uses the glass profile and a 596×512 launcher. Its first replay has 42
+primitive, 17 text, 17 icon, one control and one scrollbar commands. Three fresh
+process pairs per mode run baseline then candidate; each process opens/closes
+the launcher four times using native virtual-pointer clicks after startup
+settles. CPU forces SHM (`MESH_RENDER_GPU=0`); GPU uses
+`MESH_RENDER_GPU=1`. All 48 opens are valid; sampled rustc count is zero
+throughout. The user left the pointer idle during capture.
+
+| Mode / endpoint | Baseline first, 3 | Candidate first, 3 | Baseline later, 9 | Candidate later, 9 |
+| --- | ---: | ---: | ---: | ---: |
+| CPU input → first buffer commit, ms | 459.564–514.307 | 117.309–140.671 | 60.221–125.888 | 75.760–108.729 |
+| GPU input → first buffer commit, ms | 482.192–507.992 | 57.929–69.839 | 62.399–80.300 | 44.820–80.934 |
+| CPU synchronous child preparation, ms | 358.856–400.908 | 19.134–24.600 | 3.305–7.329 | 3.946–8.844 |
+| GPU synchronous child preparation, ms | 427.386–448.893 | 10.133–11.062 | 3.905–6.242 | 2.774–6.442 |
+| CPU icon commands, ms (nested) | 340.347–378.198 | 0.407–0.560 | 0.153–0.336 | 0.204–0.419 |
+| GPU icon commands, ms (nested) | 418.843–439.554 | 0.357–0.419 | 0.354–0.534 | 0.186–0.457 |
+
+Both sides enable the same built-in profiling and Wayland protocol capture.
+The endpoint is the newly created popup's first non-null buffer attachment and
+following `wl_surface.commit`, timed from native pointer press; it includes GPU
+completion up to commit, not physical presentation. Collector/pipe receipt
+adds small overhead. This measures initial UI responsiveness: asynchronous
+icons can arrive after the first commit. No separate uninstrumented speedup is
+claimed, and the overlapping later-open ranges establish no warm-path gain.
+The excluded CPU pilot missed the launcher while the pointer was moving.
+
+**Validation.** Release renderer: **343 passed**, 16 ignored; release
+GPU-feature shell: **1,034 passed**, 37 ignored, including the corrected
+resource-completion pixel oracle. Final icon suite: **35 passed**; production
+icon integration suite: **5 passed**. The final release GPU-feature CLI builds
+successfully; formatting, shell syntax and diff checks pass. The
+production renderer tests exercise cold lookup, blank pending pixels, eventual
+file pixels, consumer-only wakeups, separate catalog identities, terminal
+missing settlement, a busy committed-registry mutex, prepared Material glyphs
+and relative file names. The Settings scroll pixel oracle now delivers resource
+completion through the runtime repaint path before comparing retained and full
+frames: the first broad run caught a reference-capture race (156 pixels), while
+the isolated and broad reruns passed before that fixture correction. Pixel
+equality and the minimum shifted-frame assertion remain unchanged.
+
+**Evidence.** Ignored `profiles/launcher-fix/` holds `compare.py`,
+`analyze_compare.py`, private fixture/config/state, all 12 logs and protocol
+JSONL/marks/load records, `results.json`, `summary.txt`, build/test logs and
+preserved binaries. Baseline is `7cfff4c6`, SHA-256
+`960960da0358fa9382b31df07c9a8cee9faba18c50a16e16a9fa84c5ef1cc321`;
+the as-measured candidate SHA-256 is
+`fb470d2ca326ac93db7ebc9d89b9e8d5f7f94942626abbd5d9a79cccadcb7606`.
+After capture, file-name compatibility, shared-font cache accounting and
+redundant ready-delivery reservation fixes and live-registry warning deduplication
+were added; they do not change the
+measured cold host-name dispatch. The final binary is kept separately as
+`candidate-final` (SHA-256
+`7fafb453c708ba17febe296dd95d46626d8489bc43905ed49cc3163d4dc88c0f`).
+Capture/analysis reuse the helpers in
+`profiles/launcher-attribution/`; this is a new paired comparison, not a reuse
+of the earlier attribution timing ranges. There is no automated latency budget
+for this live launcher endpoint; `tools/check-performance` now includes the
+production icon regression suite.

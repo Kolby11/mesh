@@ -8,6 +8,8 @@ use mesh_core_resources::{SystemResourceCatalog, resource_revision};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::mem::size_of;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Result of resolving a logical icon name through the binding chain.
 /// `Found` carries the resolved target; `Missing` lists every candidate
@@ -62,7 +64,7 @@ pub struct SupportedAxes {
     pub optical_size: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct IconRegistry {
     /// Host resources captured by the graph/profile candidate. Resolution
     /// must never consult a process-wide discovery result because that could
@@ -70,20 +72,39 @@ pub struct IconRegistry {
     host_catalog: std::sync::Arc<SystemResourceCatalog>,
     /// Loaded icon-pack binding modules keyed by their short pack id
     /// (`mesh.contributes.icons[].id`).
-    icon_packs: BTreeMap<String, IconPackBindings>,
+    icon_packs: Arc<BTreeMap<String, IconPackBindings>>,
     /// Lookup index: full module id → short pack id.
-    pack_id_by_module: BTreeMap<String, String>,
+    pack_id_by_module: Arc<BTreeMap<String, String>>,
     /// Per-frontend resolution context.
-    frontends: BTreeMap<String, FrontendIconBindings>,
+    frontends: Arc<BTreeMap<String, FrontendIconBindings>>,
     /// Shell-wide default icon-pack module id.
     shell_default_pack_module: Option<String>,
     generation: u64,
+    allow_io: bool,
+    deferred_io: AtomicBool,
     cache: HashMap<IconCacheKey, IconResolution>,
     cache_order: VecDeque<IconCacheKey>,
     cache_bytes: usize,
     warned_misses: HashSet<(String, String)>,
     warned_miss_order: VecDeque<(String, String)>,
     warned_miss_bytes: usize,
+}
+
+impl Clone for IconRegistry {
+    fn clone(&self) -> Self {
+        let mut snapshot = self.resolution_snapshot();
+        snapshot.allow_io = self.allow_io;
+        snapshot
+            .deferred_io
+            .store(self.deferred_io.load(Ordering::Relaxed), Ordering::Relaxed);
+        snapshot.cache = self.cache.clone();
+        snapshot.cache_order = self.cache_order.clone();
+        snapshot.cache_bytes = self.cache_bytes;
+        snapshot.warned_misses = self.warned_misses.clone();
+        snapshot.warned_miss_order = self.warned_miss_order.clone();
+        snapshot.warned_miss_bytes = self.warned_miss_bytes;
+        snapshot
+    }
 }
 
 const ICON_REGISTRY_CACHE_CAPACITY: usize = 2048;
@@ -281,13 +302,11 @@ fn icon_target_cache_weight(target: &ResolvedTarget) -> usize {
         ResolvedTarget::File(path) => {
             size_of::<ResolvedTarget>().saturating_add(path.as_os_str().len())
         }
-        ResolvedTarget::Glyph {
-            font_path,
-            font_bytes,
-            ..
-        } => size_of::<ResolvedTarget>()
-            .saturating_add(font_path.as_os_str().len())
-            .saturating_add(font_bytes.as_ref().map_or(0, |bytes| bytes.len())),
+        // The binding snapshot owns prepared font bytes; cached targets only
+        // clone their Arc, so charging the entire font per glyph double-counts it.
+        ResolvedTarget::Glyph { font_path, .. } => {
+            size_of::<ResolvedTarget>().saturating_add(font_path.as_os_str().len())
+        }
     }
 }
 
@@ -302,11 +321,13 @@ impl IconRegistry {
     pub fn from_catalog(catalog: std::sync::Arc<SystemResourceCatalog>) -> Result<Self> {
         Ok(Self {
             host_catalog: catalog,
-            icon_packs: BTreeMap::new(),
-            pack_id_by_module: BTreeMap::new(),
-            frontends: BTreeMap::new(),
+            icon_packs: Arc::new(BTreeMap::new()),
+            pack_id_by_module: Arc::new(BTreeMap::new()),
+            frontends: Arc::new(BTreeMap::new()),
             shell_default_pack_module: None,
             generation: 0,
+            allow_io: true,
+            deferred_io: AtomicBool::new(false),
             cache: HashMap::new(),
             cache_order: VecDeque::new(),
             cache_bytes: 0,
@@ -338,11 +359,10 @@ impl IconRegistry {
         if let Some(previous_pack_id) = self.pack_id_by_module.get(&module_id).cloned()
             && previous_pack_id != pack_id
         {
-            self.icon_packs.remove(&previous_pack_id);
+            Arc::make_mut(&mut self.icon_packs).remove(&previous_pack_id);
         }
-        self.pack_id_by_module
-            .insert(module_id.clone(), pack_id.clone());
-        self.icon_packs.insert(pack_id, bindings);
+        Arc::make_mut(&mut self.pack_id_by_module).insert(module_id.clone(), pack_id.clone());
+        Arc::make_mut(&mut self.icon_packs).insert(pack_id, bindings);
         self.bump_generation();
     }
 
@@ -384,17 +404,17 @@ impl IconRegistry {
             }
         }
 
-        self.icon_packs = next_packs;
-        self.pack_id_by_module = next_pack_by_module;
-        self.frontends = next_frontends;
+        self.icon_packs = Arc::new(next_packs);
+        self.pack_id_by_module = Arc::new(next_pack_by_module);
+        self.frontends = Arc::new(next_frontends);
         self.shell_default_pack_module = shell_default_pack;
         self.bump_generation();
         Ok(())
     }
 
     pub fn remove_icon_pack(&mut self, module_id: &str) {
-        if let Some(pack_id) = self.pack_id_by_module.remove(module_id) {
-            self.icon_packs.remove(&pack_id);
+        if let Some(pack_id) = Arc::make_mut(&mut self.pack_id_by_module).remove(module_id) {
+            Arc::make_mut(&mut self.icon_packs).remove(&pack_id);
             self.bump_generation();
         }
     }
@@ -405,12 +425,15 @@ impl IconRegistry {
         module_id: impl Into<String>,
         bindings: FrontendIconBindings,
     ) {
-        self.frontends.insert(module_id.into(), bindings);
+        Arc::make_mut(&mut self.frontends).insert(module_id.into(), bindings);
         self.bump_generation();
     }
 
     pub fn remove_frontend_bindings(&mut self, module_id: &str) {
-        if self.frontends.remove(module_id).is_some() {
+        if Arc::make_mut(&mut self.frontends)
+            .remove(module_id)
+            .is_some()
+        {
             self.bump_generation();
         }
     }
@@ -472,7 +495,48 @@ impl IconRegistry {
         }
 
         let resolution = self.resolve_uncached(module_id, semantic_name, size);
-        let weight = icon_resolution_cache_weight(&cache_key, &resolution);
+        self.store_resolution(cache_key, &resolution);
+
+        self.warn_missing_resolution(module_id, semantic_name, &resolution);
+
+        resolution
+    }
+
+    fn warn_missing_resolution(
+        &mut self,
+        module_id: &str,
+        semantic_name: &str,
+        resolution: &IconResolution,
+    ) {
+        if matches!(resolution, IconResolution::Missing { .. })
+            && self.record_warned_miss((module_id.to_string(), semantic_name.to_string()))
+        {
+            let frontend = self.frontends.get(module_id);
+            let chain = frontend
+                .map(|f| f.effective_chain(self.shell_default_pack_module.as_deref()))
+                .unwrap_or_default();
+            let known_packs: Vec<&str> = self.icon_packs.keys().map(String::as_str).collect();
+            let pack_index: Vec<(&str, &str)> = self
+                .pack_id_by_module
+                .iter()
+                .map(|(m, p)| (m.as_str(), p.as_str()))
+                .collect();
+            if let IconResolution::Missing { tried, .. } = resolution {
+                tracing::warn!(
+                    "icon '{}' requested by module '{}' could not be resolved; tried={:?} effective_chain={:?} registered_pack_ids={:?} pack_index={:?}; rendering built-in missing-icon glyph",
+                    semantic_name,
+                    module_id,
+                    tried,
+                    chain,
+                    known_packs,
+                    pack_index,
+                );
+            }
+        }
+    }
+
+    fn store_resolution(&mut self, cache_key: IconCacheKey, resolution: &IconResolution) {
+        let weight = icon_resolution_cache_weight(&cache_key, resolution);
         if weight <= ICON_REGISTRY_CACHE_MAX_BYTES {
             self.cache_order.retain(|existing| existing != &cache_key);
             if let Some(previous) = self.cache.remove(&cache_key) {
@@ -500,34 +564,106 @@ impl IconRegistry {
                 self.cache_bytes = self.cache_bytes.saturating_add(weight);
             }
         }
+    }
 
-        if matches!(resolution, IconResolution::Missing { .. })
-            && self.record_warned_miss((module_id.to_string(), semantic_name.to_string()))
-        {
-            let frontend = self.frontends.get(module_id);
-            let chain = frontend
-                .map(|f| f.effective_chain(self.shell_default_pack_module.as_deref()))
-                .unwrap_or_default();
-            let known_packs: Vec<&str> = self.icon_packs.keys().map(String::as_str).collect();
-            let pack_index: Vec<(&str, &str)> = self
-                .pack_id_by_module
-                .iter()
-                .map(|(m, p)| (m.as_str(), p.as_str()))
-                .collect();
-            if let IconResolution::Missing { tried, .. } = &resolution {
-                tracing::warn!(
-                    "icon '{}' requested by module '{}' could not be resolved; tried={:?} effective_chain={:?} registered_pack_ids={:?} pack_index={:?}; rendering built-in missing-icon glyph",
-                    semantic_name,
-                    module_id,
-                    tried,
-                    chain,
-                    known_packs,
-                    pack_index,
-                );
+    pub(crate) fn resolution_snapshot(&self) -> Self {
+        Self {
+            host_catalog: Arc::clone(&self.host_catalog),
+            icon_packs: Arc::clone(&self.icon_packs),
+            pack_id_by_module: Arc::clone(&self.pack_id_by_module),
+            frontends: Arc::clone(&self.frontends),
+            shell_default_pack_module: self.shell_default_pack_module.clone(),
+            generation: self.generation,
+            allow_io: true,
+            deferred_io: AtomicBool::new(false),
+            cache: HashMap::new(),
+            cache_order: VecDeque::new(),
+            cache_bytes: 0,
+            warned_misses: HashSet::new(),
+            warned_miss_order: VecDeque::new(),
+            warned_miss_bytes: 0,
+        }
+    }
+
+    pub(crate) fn prepared_resolution(
+        &mut self,
+        module_id: &str,
+        name: &str,
+        size: u32,
+    ) -> Option<IconResolution> {
+        let key = IconCacheKey {
+            generation: self.generation,
+            resource_revision: resource_revision(),
+            module_id: module_id.into(),
+            semantic_name: name.into(),
+            size,
+        };
+        if let Some(resolution) = self.cache.get(&key).cloned() {
+            self.cache_order.retain(|existing| existing != &key);
+            self.cache_order.push_back(key);
+            return Some(resolution);
+        }
+        let path = std::path::Path::new(name);
+        let file_name = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                ["svg", "png", "jpg", "jpeg", "bmp"]
+                    .iter()
+                    .any(|known| extension.eq_ignore_ascii_case(known))
+            });
+        if path.is_absolute() || name.starts_with("./") || name.starts_with("../") || file_name {
+            return None;
+        }
+        let mut snapshot = self.resolution_snapshot();
+        snapshot.allow_io = false;
+        let result = snapshot.resolve_uncached(module_id, name, size);
+        if snapshot.deferred_io.load(Ordering::Relaxed) {
+            return None;
+        }
+        self.store_resolution(key, &result);
+        self.warn_missing_resolution(module_id, name, &result);
+        Some(result)
+    }
+
+    pub(crate) fn publish_resolution(
+        &mut self,
+        snapshot: &Self,
+        revision: u64,
+        module_id: &str,
+        name: &str,
+        size: u32,
+        resolution: &IconResolution,
+    ) {
+        if self.generation == snapshot.generation && resource_revision() == revision {
+            self.store_resolution(
+                IconCacheKey {
+                    generation: self.generation,
+                    resource_revision: revision,
+                    module_id: module_id.into(),
+                    semantic_name: name.into(),
+                    size,
+                },
+                resolution,
+            );
+            self.warn_missing_resolution(module_id, name, resolution);
+        }
+    }
+
+    fn find_system_icon(&self, theme: &str, name: &str, size: u32) -> Option<PathBuf> {
+        if self.host_catalog.icon_dirs.is_empty() {
+            return None;
+        }
+        if self.allow_io {
+            return xdg::find_icon_in_theme_with_catalog(&self.host_catalog, theme, name, size);
+        }
+        match xdg::prepared_icon_in_theme(&self.host_catalog, theme, name, size) {
+            Some(result) => result,
+            None => {
+                self.deferred_io.store(true, Ordering::Relaxed);
+                None
             }
         }
-
-        resolution
     }
 
     fn record_warned_miss(&mut self, key: (String, String)) -> bool {
@@ -572,7 +708,12 @@ impl IconRegistry {
         true
     }
 
-    fn resolve_uncached(&self, module_id: &str, semantic_name: &str, size: u32) -> IconResolution {
+    pub(crate) fn resolve_uncached(
+        &self,
+        module_id: &str,
+        semantic_name: &str,
+        size: u32,
+    ) -> IconResolution {
         let mut tried = Vec::new();
         let frontend = self.frontends.get(module_id);
 
@@ -658,12 +799,7 @@ impl IconRegistry {
 
             // 5. Hicolor system fallback (bare logical name as freedesktop
             // name), after the active chain has had the same candidate.
-            if let Some(found) = xdg::find_icon_in_theme_with_catalog(
-                &self.host_catalog,
-                "hicolor",
-                &fallback_name,
-                size,
-            ) {
+            if let Some(found) = self.find_system_icon("hicolor", &fallback_name, size) {
                 let mapping = format!("hicolor:{fallback_name}");
                 tried.push(mapping.clone());
                 return IconResolution::Found {
@@ -728,9 +864,9 @@ impl IconRegistry {
     ) -> Option<IconResolution> {
         let mapping = format!("system-pack:{pack_id}/{lookup_name}");
         tried.push(mapping.clone());
-        let target =
-            xdg::find_icon_in_theme_with_catalog(&self.host_catalog, pack_id, lookup_name, size)
-                .map(ResolvedTarget::File)?;
+        let target = self
+            .find_system_icon(pack_id, lookup_name, size)
+            .map(ResolvedTarget::File)?;
         Some(IconResolution::Found {
             semantic_name: semantic_name.into(),
             candidate: mapping.clone(),
@@ -764,6 +900,10 @@ impl IconRegistry {
 
         // Bare absolute path
         let p = std::path::Path::new(target);
+        if p.is_absolute() && !self.allow_io {
+            self.deferred_io.store(true, Ordering::Relaxed);
+            return None;
+        }
         if p.is_absolute() && p.is_file() {
             return Some(IconResolution::Found {
                 semantic_name: semantic_name.into(),
@@ -794,9 +934,7 @@ impl IconRegistry {
         }
 
         // Asset-pack as a bare XDG theme name in the captured host catalog.
-        if let Some(path) =
-            xdg::find_icon_in_theme_with_catalog(&self.host_catalog, asset_pack, asset_name, size)
-        {
+        if let Some(path) = self.find_system_icon(asset_pack, asset_name, size) {
             return Some(IconResolution::Found {
                 semantic_name: semantic_name.into(),
                 candidate: mapping_label.clone(),
@@ -832,6 +970,12 @@ impl IconRegistry {
         axes: SupportedAxes,
     ) -> Option<ResolvedTarget> {
         let font_path = font_asset.resolved_font_path.clone()?;
+        if !self.allow_io
+            && (font_asset.prepared_font.is_none() || font_asset.prepared_glyphs.is_none())
+        {
+            self.deferred_io.store(true, Ordering::Relaxed);
+            return None;
+        }
         if font_asset.prepared_font.is_none() && !font_path.is_file() {
             return None;
         }
@@ -904,6 +1048,119 @@ mod tests {
             mesh_core_resources::SystemResourceCatalog::from_icon_dirs(vec![root.to_path_buf()]),
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn prepared_lookup_defers_cold_host_search_and_preserves_catalog_identity() {
+        let first = tempdir().unwrap();
+        let second = tempdir().unwrap();
+        let mut a = registry_with_theme(first.path(), "PreparedLookupTest", &["lookup-test"]);
+        let mut b = registry_with_theme(second.path(), "PreparedLookupTest", &["lookup-test"]);
+        a.set_shell_default_pack(Some("PreparedLookupTest".into()));
+        b.set_shell_default_pack(Some("PreparedLookupTest".into()));
+        assert!(
+            a.prepared_resolution("frontend", "lookup-test", 16)
+                .is_none()
+        );
+        let resolved = a.resolve_for_module("frontend", "lookup-test", 16);
+        assert!(resolved.path().unwrap().starts_with(first.path()));
+        assert!(
+            b.prepared_resolution("frontend", "lookup-test", 16)
+                .is_none()
+        );
+        assert!(
+            b.resolve_for_module("frontend", "lookup-test", 16)
+                .path()
+                .unwrap()
+                .starts_with(second.path())
+        );
+    }
+
+    #[test]
+    fn prepared_lookup_does_not_skip_an_unprepared_higher_priority_theme() {
+        let temp = tempdir().unwrap();
+        let mut registry = registry_with_theme(temp.path(), "PreparedPriorityTest", &["settings"]);
+        registry.set_icon_pack(IconPackBindings {
+            pack_id: "prepared-priority".into(),
+            module_id: "@mesh/prepared-priority".into(),
+            mappings: HashMap::from([("settings".into(), "font/settings".into())]),
+            vocabularies: HashMap::new(),
+            axes: SupportedAxes::default(),
+            font_aliases: HashMap::from([(
+                "font".into(),
+                FontAsset {
+                    family: "Prepared Priority".into(),
+                    glyph_map_path: None,
+                    resolved_font_path: Some(temp.path().join("not-read.ttf")),
+                    prepared_font: Some(Arc::from(&b"prepared"[..])),
+                    font_fingerprint: None,
+                    prepared_glyphs: Some(Arc::new(HashMap::from([("settings".into(), 0xe000)]))),
+                },
+            )]),
+        });
+        registry.set_frontend_bindings(
+            "frontend",
+            FrontendIconBindings {
+                declared_pack_chain: vec![
+                    "PreparedPriorityTest".into(),
+                    "@mesh/prepared-priority".into(),
+                ],
+                ..Default::default()
+            },
+        );
+        assert!(
+            registry
+                .prepared_resolution("frontend", "settings", 16)
+                .is_none()
+        );
+        let resolution = registry.resolve_for_module("frontend", "settings", 16);
+        assert!(matches!(resolution.target(), Some(ResolvedTarget::File(_))));
+        assert!(resolution.path().unwrap().starts_with(temp.path()));
+    }
+
+    #[test]
+    fn worker_snapshots_share_bindings_and_reject_superseded_cache_publication() {
+        let temp = tempdir().unwrap();
+        let mut live = registry_with_theme(temp.path(), "WorkerSnapshotTest", &["snapshot-test"]);
+        live.set_shell_default_pack(Some("WorkerSnapshotTest".into()));
+        let mut snapshot = live.resolution_snapshot();
+        assert!(Arc::ptr_eq(&snapshot.icon_packs, &live.icon_packs));
+        assert!(Arc::ptr_eq(&snapshot.frontends, &live.frontends));
+        let revision = resource_revision();
+        let resolution = snapshot.resolve_for_module("frontend", "snapshot-test", 16);
+        live.set_frontend_bindings("frontend", FrontendIconBindings::default());
+        assert!(!Arc::ptr_eq(&snapshot.frontends, &live.frontends));
+        assert!(snapshot.frontend_bindings("frontend").is_none());
+        live.publish_resolution(
+            &snapshot,
+            revision,
+            "frontend",
+            "snapshot-test",
+            16,
+            &resolution,
+        );
+        assert!(live.cache.is_empty());
+    }
+
+    #[test]
+    fn worker_missing_publication_keeps_warning_deduplication_on_the_live_registry() {
+        let mut live = IconRegistry::empty();
+        let snapshot = live.resolution_snapshot();
+        let revision = resource_revision();
+        for size in [16, 24] {
+            let result = snapshot.resolve_uncached("frontend", "missing-worker-icon", size);
+            live.publish_resolution(
+                &snapshot,
+                revision,
+                "frontend",
+                "missing-worker-icon",
+                size,
+                &result,
+            );
+        }
+        assert!(snapshot.warned_misses.is_empty());
+        assert_eq!(live.warned_misses.len(), 1);
+        assert_eq!(live.cache.len(), 2);
     }
 
     #[test]
@@ -1514,7 +1771,9 @@ mod tests {
                     ..
                 },
             ..
-        } = registry.resolve_for_module("frontend", "settings", 24)
+        } = registry
+            .prepared_resolution("frontend", "settings", 24)
+            .expect("prepared glyph must not need filesystem lookup")
         else {
             panic!("expected prepared font bytes to survive source replacement");
         };

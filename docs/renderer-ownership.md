@@ -45,6 +45,17 @@ Promoted buffer bounds clip descendant visual extents at overflow viewports,
 keeping scroll offsets from changing the popup reserve. Outer shadows remain
 included, and fixed descendants keep their surface coordinate space.
 
+Named icon paint uses nonblocking cached/prepared resolution. Cold semantic
+lookups run on the bounded resource worker over shared immutable binding maps;
+results enter the live cache only while registry generation and resource
+revision still match. XDG query caches also include the captured icon-directory
+roots, so separate catalogs cannot reuse each other's results. Pending icons
+paint nothing, then notify their consumers when either a real target or the
+terminal missing fallback is ready. Queue-pressure retries keep consumer
+subscriptions; the no-worker/no-completion path retains synchronous fallback.
+Prepared font bytes remain owned by bindings; result-cache limits charge the
+cached target metadata rather than charging shared font data once per glyph.
+
 Icon content applies its resolved node clip to file, glyph and fallback drawing,
 including when hovered transforms move a scroll subtree onto the affine path.
 

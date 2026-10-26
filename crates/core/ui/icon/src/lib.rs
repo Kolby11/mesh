@@ -99,9 +99,8 @@ pub fn resolve_icon_with_registry(
     registry.resolve(name, size)
 }
 
-/// Resolve an icon for a specific module via the shared default registry.
-/// This is the path used by the painter at render time — module bindings
-/// (declared mappings + user overrides + module's preferred pack) take
+/// Resolve an icon synchronously for a module via the shared default registry.
+/// Module bindings (declared mappings, user overrides and preferred pack) take
 /// precedence over shell-wide profile defaults.
 pub fn resolve_icon_for_module(module_id: &str, name: &str, size: u32) -> IconResolution {
     let p = Path::new(name);
@@ -123,6 +122,49 @@ pub fn resolve_icon_for_module(module_id: &str, name: &str, size: u32) -> IconRe
         .lock()
         .unwrap()
         .resolve_for_module(module_id, name, size)
+}
+
+/// Resolve from cached targets and prepared bindings without filesystem access.
+/// A busy registry or an unprepared higher-priority candidate returns `None`.
+pub fn prepared_icon_for_module(module_id: &str, name: &str, size: u32) -> Option<IconResolution> {
+    default_registry()
+        .try_lock()
+        .ok()?
+        .prepared_resolution(module_id, name, size)
+}
+
+/// Resolve on a private binding snapshot so blocking host lookup never holds
+/// the committed registry lock. Only matching-generation results enter its cache.
+pub fn resolve_icon_for_module_on_worker(module_id: &str, name: &str, size: u32) -> IconResolution {
+    let registry = default_registry();
+    let revision = mesh_core_resources::resource_revision();
+    let snapshot = registry.lock().unwrap().resolution_snapshot();
+    let path = Path::new(name);
+    let resolution = if path.is_file() {
+        IconResolution::Found {
+            semantic_name: name.into(),
+            candidate: name.into(),
+            target: ResolvedTarget::File(path.to_path_buf()),
+            multicolor: false,
+            provenance: IconResolutionProvenance {
+                owner_module: None,
+                pack_id: None,
+                candidate: name.into(),
+                fallback_stage: "direct-path".into(),
+            },
+        }
+    } else {
+        snapshot.resolve_uncached(module_id, name, size)
+    };
+    registry.lock().unwrap().publish_resolution(
+        &snapshot,
+        revision,
+        module_id,
+        name,
+        size,
+        &resolution,
+    );
+    resolution
 }
 
 /// Install or replace a frontend's icon resolution context on the shared

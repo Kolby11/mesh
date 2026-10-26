@@ -302,17 +302,34 @@ fn drain_icon_resolution_jobs() -> bool {
         && let Ok(mut queue) = queue.lock()
     {
         for (result, waiters) in results {
-            if result.cancelled || !resource_generation_is_current(result.key.resource_revision) {
+            if !resource_generation_is_current(result.key.resource_revision) {
+                continue;
+            }
+            if result.cancelled {
+                queue.missing.insert(result.key);
+                waiters.notify();
+                completed = true;
                 continue;
             }
             match result.resolution {
-                // Consumers already painted the missing marker.
                 Some(IconResolution::Missing { .. }) => {
                     queue.missing.insert(result.key);
+                    waiters.notify();
+                    completed = true;
                 }
                 Some(resolution) => {
+                    let prepared = mesh_core_icon::prepared_icon_for_module(
+                        &result.key.module_id,
+                        &result.key.semantic_name,
+                        result.key.size,
+                    )
+                    .is_some();
                     waiters.notify();
-                    queue.ready.insert(result.key, (resolution, result._budget));
+                    // The registry already owns admitted results. Only uncached
+                    // deliveries retain a one-shot reservation for their painter.
+                    if !prepared {
+                        queue.ready.insert(result.key, (resolution, result._budget));
+                    }
                     completed = true;
                 }
                 None => {}
@@ -349,33 +366,33 @@ pub fn icon_resolution_jobs_pending() -> bool {
 }
 
 #[cfg(not(test))]
-fn resolve_icon_for_render(module_id: &str, name: &str, size: u32) -> IconResolution {
-    // Semantic lookup is an in-memory operation over the prepared module
-    // bindings. It must not turn a valid icon into a visible missing-icon
-    // marker merely because the optional resource worker has not completed its
-    // first queue turn yet. Keep the queue for callers that need asynchronous
-    // resource preparation, but make the render-time lookup deterministic.
-    let resolved = mesh_core_icon::resolve_icon_for_module(module_id, name, size);
-    if !matches!(resolved, IconResolution::Missing { .. }) {
-        return resolved;
-    }
-
+fn resolve_icon_for_render(module_id: &str, name: &str, size: u32) -> Option<IconResolution> {
     drain_icon_resolution_jobs();
     let key = IconResolutionKey {
         resource_revision: resource_revision(),
-        module_id: module_id.to_string(),
-        semantic_name: name.to_string(),
+        module_id: module_id.into(),
+        semantic_name: name.into(),
         size,
     };
     if let Some(resolution) = take_ready_icon_resolution(&key) {
-        return resolution;
+        return Some(resolution);
     }
-
-    let Ok(mut queue) = icon_resolution_queue().lock() else {
-        return missing_icon_resolution(name);
+    if let Some(resolution) = mesh_core_icon::prepared_icon_for_module(module_id, name, size) {
+        return Some(resolution);
+    }
+    let Some(broker) = ResourceBroker::global() else {
+        return Some(mesh_core_icon::resolve_icon_for_module(
+            module_id, name, size,
+        ));
     };
-    if queue.missing.contains(&key) || !queue.pending.insert(key.clone()) {
-        return missing_icon_resolution(name);
+    let Ok(mut queue) = icon_resolution_queue().lock() else {
+        return None;
+    };
+    if queue.missing.contains(&key) {
+        return Some(missing_icon_resolution(name));
+    }
+    if !queue.pending.insert(key.clone()) {
+        return None;
     }
     let result_sender = queue.result_sender.clone();
     let result_key = key.clone();
@@ -383,22 +400,12 @@ fn resolve_icon_for_render(module_id: &str, name: &str, size: u32) -> IconResolu
     let cancellation_sender = result_sender.clone();
     let job_module_id = module_id.to_string();
     let job_name = name.to_string();
-    let Some(broker) = ResourceBroker::global() else {
-        queue.pending.remove(&key);
-        return missing_icon_resolution(name);
-    };
     let scheduled = broker.submit(
         ICON_RESOLUTION_WORK_BYTES,
         move |context: ResourceBrokerContext| {
-            let resolution = if context.is_current() {
-                Some(mesh_core_icon::resolve_icon_for_module(
-                    &job_module_id,
-                    &job_name,
-                    size,
-                ))
-            } else {
-                None
-            };
+            let resolution = context.is_current().then(|| {
+                mesh_core_icon::resolve_icon_for_module_on_worker(&job_module_id, &job_name, size)
+            });
             let cancelled = !context.is_current() || resolution.is_none();
             let reservation = context.into_reservation();
             let _ = result_sender.send(IconResolutionJobResult {
@@ -419,8 +426,14 @@ fn resolve_icon_for_render(module_id: &str, name: &str, size: u32) -> IconResolu
     );
     if !matches!(scheduled, Some(true)) {
         queue.pending.remove(&key);
+        drop(queue);
+        if !broker.retry_after_next_completion() {
+            return Some(mesh_core_icon::resolve_icon_for_module(
+                module_id, name, size,
+            ));
+        }
     }
-    missing_icon_resolution(name)
+    None
 }
 
 fn icon_raster_bytes(width: u32, height: u32) -> Option<usize> {
@@ -1825,7 +1838,9 @@ pub fn draw_named_icon_in_session(
     #[cfg(test)]
     let resolution = resolve_icon_result(name, size);
     #[cfg(not(test))]
-    let resolution = resolve_icon_for_render("", name, size);
+    let Some(resolution) = resolve_icon_for_render("", name, size) else {
+        return;
+    };
     draw_icon_resolution_with_axes_in_session(
         session, resolution, dest_x, dest_y, dest_w, dest_h, tint, axes,
     );
@@ -1846,7 +1861,9 @@ pub fn draw_named_icon_for_module_in_session(
     #[cfg(test)]
     let resolution = mesh_core_icon::resolve_icon_for_module(module_id, name, size);
     #[cfg(not(test))]
-    let resolution = resolve_icon_for_render(module_id, name, size);
+    let Some(resolution) = resolve_icon_for_render(module_id, name, size) else {
+        return;
+    };
     draw_icon_resolution_with_axes_in_session(
         session, resolution, dest_x, dest_y, dest_w, dest_h, tint, axes,
     );
