@@ -137,6 +137,17 @@ that opened it while that surface is visible. A surface shown without a user
 gesture, such as a notification raised by a service, leaves the keyboard where
 it is. `none` surfaces never take it.
 
+**Keyboard-only entry.** `mesh-shell focus <surface-id>` (IPC
+`shell:focus_surface:<id>`) gives a visible surface key routing and asks the
+compositor for focus, so a compositor keybind can reach `on_demand` chrome such
+as a bar or dock without a pointer press. Focus lands on the surface's focused
+element, else its first Tab stop, and shows a ring. Hidden and `none` surfaces
+are ignored.
+
+```
+bind = SUPER, F10, exec, mesh-shell focus @mesh/glass-bar
+```
+
 Because the compositor delivers every pointer event to an exclusive layer, a
 primary press outside an exclusive surface's bounds dismisses it instead of
 reaching its content.

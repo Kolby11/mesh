@@ -74,8 +74,6 @@ October log.
       `xdg_popup`s, so the 352×200 reserve every layer surface paints could go; measure buffer/damage savings first.
 - [ ] **Settings theme switch may not repaint:** reported 2026-10-21 as needing a tab change; not
       reproduced on `1d50170a` (layer and window roles, file and click paths). Capture a repro.
-- [ ] **Keyboard-only entry to shell chrome:** an `on_demand` bar or dock gets the keyboard only
-      after a press on it. Add an IPC/CLI command that focuses a surface, for a compositor keybind.
 - [ ] **Launcher search paints one keystroke late:** in the promoted dock launcher popup the
       last typed character appears only on the next input event; reproduced on `d02ba382`, not
       reliably at `f9a5dac4` (nested Hyprland, CPU). Needs a GPU repro on the user's session.

@@ -32,6 +32,7 @@ fn main() {
         Some("types") => cmd_types(&args[2..]),
         Some("debug") => cmd_debug(&args[2..]),
         Some("ipc") => cmd_ipc(&args[2..]),
+        Some("focus") => cmd_focus(&args[2..]),
         Some("ipc-socket-path") => cmd_ipc_socket_path(),
         Some("config") => cmd_config(&args[2..]),
         Some("profile") => cmd_profile(&args[2..]),
@@ -546,6 +547,14 @@ fn cmd_debug(args: &[String]) {
         }
         None => send_ipc_command("shell:debug_overlay"),
     }
+}
+
+fn cmd_focus(args: &[String]) {
+    let [surface_id] = args else {
+        eprintln!("usage: mesh-shell focus <surface-id>");
+        std::process::exit(1);
+    };
+    send_ipc_command(&format!("shell:focus_surface:{surface_id}"));
 }
 
 fn send_ipc_command(command: &str) {
@@ -1888,6 +1897,7 @@ fn cmd_help() {
     println!("            [<interface>...] [--out <dir>]  (default dir: mesh-types)");
     println!("  debug     Toggle the debug overlay on the running shell");
     println!("            subcommands: profiling, tab");
+    println!("  focus <surface-id>  Give a visible surface the keyboard (for compositor keybinds)");
     println!("  ipc       Send an IPC command to the running shell");
     println!("  ipc-socket-path  Print the shell IPC socket path");
     println!("  config    Inspect and edit the settings file");

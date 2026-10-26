@@ -590,6 +590,7 @@ impl Shell {
             CoreRequest::ToggleSurface { surface_id }
             | CoreRequest::ShowSurface { surface_id }
             | CoreRequest::HideSurface { surface_id }
+            | CoreRequest::FocusSurface { surface_id }
             | CoreRequest::HidePopover { surface_id, .. }
             | CoreRequest::SetSurfaceRole { surface_id, .. }
             | CoreRequest::ToggleSurfaceRole { surface_id }
@@ -1722,6 +1723,11 @@ impl Shell {
                 let surface_id = self.resolve_root_surface_id(surface_id);
                 self.pending_popover_hides.remove(&surface_id);
                 self.set_surface_visibility(surface_id, false)
+            }
+            CoreRequest::FocusSurface { surface_id } => {
+                let surface_id = self.resolve_root_surface_id(surface_id);
+                self.focus_surface_from_keyboard(&surface_id);
+                Ok(VecDeque::new())
             }
             CoreRequest::HidePopover {
                 surface_id,
@@ -3095,6 +3101,31 @@ impl Shell {
         }
     }
 
+    /// Keyboard-only entry to a visible surface: routing and compositor focus
+    /// move to it, and its first Tab stop (or its existing focus) shows a
+    /// ring. Hidden and `none` surfaces are left alone.
+    fn focus_surface_from_keyboard(&mut self, surface_id: &str) {
+        let visible = self
+            .core
+            .surfaces
+            .get(surface_id)
+            .is_some_and(|state| state.visible && state.closing_until.is_none());
+        let Some(index) = self.component_index_for_surface(surface_id) else {
+            tracing::warn!("focus_surface: unknown surface {surface_id}");
+            return;
+        };
+        if !visible
+            || self.components[index].component.surface_keyboard_mode()
+                == mesh_core_wayland::KeyboardMode::None
+        {
+            tracing::debug!("focus_surface: {surface_id} is hidden or never takes the keyboard");
+            return;
+        }
+        self.claim_keyboard_focus_for_surface(surface_id);
+        self.presentation_engine.request_keyboard_focus(surface_id);
+        self.components[index].component.receive_keyboard_entry();
+    }
+
     /// Hiding a surface the user opened hands the keyboard back to the
     /// surface that opened it, if the keyboard is still on the hidden one.
     fn return_keyboard_to_opener(&mut self, surface_id: &str) {
@@ -3691,6 +3722,7 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::SetChildSurfaceRole { .. } => "set_child_surface_role",
         CoreRequest::ShowSurface { .. } => "show_surface",
         CoreRequest::HideSurface { .. } => "hide_surface",
+        CoreRequest::FocusSurface { .. } => "focus_surface",
         CoreRequest::HidePopover { .. } => "hide_popover",
         CoreRequest::PublishDiagnostics { .. } => "publish_diagnostics",
         CoreRequest::ServiceCall { .. } => "service_call",

@@ -295,6 +295,11 @@ pub(super) fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
             surface_id: surface_id.to_string(),
         });
     }
+    if let Some(surface_id) = command.strip_prefix("shell:focus_surface:") {
+        return Some(CoreRequest::FocusSurface {
+            surface_id: surface_id.to_string(),
+        });
+    }
     // Role control over IPC is what makes a *compositor* keybind able to pop a
     // surface out: MESH keybinds are focused-surface actions and cannot grab a
     // global hotkey, so the user binds `mesh surface promote …` instead.

@@ -2243,6 +2243,82 @@ fn surface_shown_without_user_gesture_leaves_the_keyboard() {
     );
 }
 
+/// `mesh-shell focus <surface>` lets a compositor keybind reach `on_demand`
+/// chrome without a pointer press.
+#[test]
+fn focus_surface_request_gives_visible_chrome_the_keyboard() {
+    let catalog = GlassCatalog::new();
+    let bar = catalog.mount("glass-bar");
+    let dashboard = catalog.mount("glass-dashboard");
+    let bar_id = bar.surface_id().to_owned();
+    let dashboard_id = dashboard.surface_id().to_owned();
+    let mut shell = crate::shell::Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    shell.register_component(Box::new(bar));
+    shell.register_component(Box::new(dashboard));
+    let mut emitted = shell
+        .apply_request(CoreRequest::HideSurface {
+            surface_id: dashboard_id.clone(),
+        })
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    shell.render_components().unwrap();
+    assert_eq!(shell.keyboard_focus_surface, None);
+
+    let mut emitted = shell
+        .apply_request(
+            crate::shell::ipc::parse_ipc_command(&format!("shell:focus_surface:{dashboard_id}"))
+                .unwrap(),
+        )
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    assert_eq!(
+        shell.keyboard_focus_surface, None,
+        "a hidden surface is not focused"
+    );
+
+    let mut emitted = shell
+        .apply_request(
+            crate::shell::ipc::parse_ipc_command(&format!("shell:focus_surface:{bar_id}"))
+                .unwrap(),
+        )
+        .unwrap();
+    shell.drain_requests(&mut emitted).unwrap();
+    assert_eq!(shell.keyboard_focus_surface.as_deref(), Some(bar_id.as_str()));
+    assert_eq!(
+        shell.presentation_engine.testing_keyboard_focus_requests(),
+        [bar_id.clone()]
+    );
+}
+
+#[test]
+fn keyboard_entry_focuses_the_first_tab_stop_with_a_ring() {
+    let mut bar = host("glass-bar");
+    paint(&mut bar, 1440, 80);
+    let first = collect_focus_traversal(bar.last_tree.as_ref().unwrap())
+        .first()
+        .cloned()
+        .expect("the bar has a Tab stop");
+    bar.release_focus_for_transfer();
+    assert_eq!(bar.focused_key, None);
+
+    bar.receive_keyboard_entry();
+    assert_eq!(bar.focused_key.as_deref(), Some(first.as_str()));
+    assert_eq!(bar.focus_visible_key.as_deref(), Some(first.as_str()));
+
+    let second = collect_focus_traversal(bar.last_tree.as_ref().unwrap())[1].clone();
+    bar.focused_key = Some(second.clone());
+    bar.focus_visible_key = None;
+    bar.receive_keyboard_entry();
+    assert_eq!(
+        bar.focused_key.as_deref(),
+        Some(second.as_str()),
+        "existing focus is kept"
+    );
+    assert_eq!(bar.focus_visible_key.as_deref(), Some(second.as_str()));
+}
+
 #[derive(Debug, PartialEq)]
 struct ShowCost {
     configures: usize,

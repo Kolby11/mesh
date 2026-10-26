@@ -534,6 +534,12 @@ pub enum CoreRequest {
     HideSurface {
         surface_id: SurfaceId,
     },
+    /// Give a visible surface the keyboard, as a press on it would, and focus
+    /// its first Tab stop when nothing in it is focused. Lets a compositor
+    /// keybind reach `on_demand` chrome without a pointer.
+    FocusSurface {
+        surface_id: SurfaceId,
+    },
     HidePopover {
         surface_id: SurfaceId,
         defer_for_hover_bridge: bool,
@@ -1776,6 +1782,9 @@ pub trait ShellComponent: Send {
     }
     /// Drop focus state on a component that just transferred focus away.
     fn release_focus_for_transfer(&mut self) {}
+    /// The surface was focused from the keyboard with no pointer involved:
+    /// focus its first Tab stop, with a ring, unless something is focused.
+    fn receive_keyboard_entry(&mut self) {}
     /// Record that `trigger_key` activated the popover at `popover_surface`.
     fn register_popover_trigger(&mut self, _trigger_key: String, _popover_surface: SurfaceId) {}
     /// Drop a previously-registered popover trigger when the popover hides.

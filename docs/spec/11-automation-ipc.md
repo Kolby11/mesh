@@ -128,6 +128,10 @@ the CLI instead:
 bind = SUPER, S, exec, mesh surface toggle-role @mesh/settings
 ```
 
+`shell:focus_surface:<id>` (CLI `mesh-shell focus <id>`) moves the keyboard
+to a visible surface for the same reason; [10 §3](10-keyboard.md) states its
+focus rules. **Status: shipped** on the raw line protocol.
+
 The widget forms apply the same non-destructive transition to one retained
 widget embedded in a surface. The parent surface and shared component VM stay
 alive; only the widget's child target changes between inline layout and an

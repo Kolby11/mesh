@@ -2746,6 +2746,16 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.clear_focus_for_transfer();
     }
 
+    fn receive_keyboard_entry(&mut self) {
+        let target = match self.focused_key.clone() {
+            Some(key) => TabFocusTarget::AtKey(key),
+            None => TabFocusTarget::First,
+        };
+        let return_focus = self.return_focus.take();
+        let close_on_focus_leave = self.close_on_focus_leave;
+        self.receive_focus_transfer(&target, return_focus, close_on_focus_leave);
+    }
+
     fn register_popover_trigger(&mut self, trigger_key: String, popover_surface: String) {
         self.triggered_popovers.insert(trigger_key, popover_surface);
     }
