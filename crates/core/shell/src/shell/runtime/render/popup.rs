@@ -25,6 +25,10 @@ use super::*;
 /// compositor configures): the configure already covers the output, so the
 /// reserve could only come out of the content, leaving a full-screen overlay
 /// short of the screen edge by the reserve.
+///
+/// When the compositor supports `xdg_popup` (`popup_supported`), there is no
+/// reserve at all: a tooltip that leaves the content box is promoted to a
+/// popup, so the reserve would only be transparent pixels every frame.
 pub(super) fn surface_geometry_with_overlay_reserve(
     surface_id: &str,
     role: SurfaceRole,
@@ -32,22 +36,25 @@ pub(super) fn surface_geometry_with_overlay_reserve(
     width: u32,
     height: u32,
     spans: (bool, bool),
+    popup_supported: bool,
 ) -> (u32, u32, SurfacePadding) {
-    let (extra_w, extra_h) =
-        if surface_id == DEBUG_INSPECTOR_SURFACE_ID || role == SurfaceRole::Window {
-            (0, 0)
-        } else {
-            let (extra_w, extra_h) = component::tooltip_overlay_extra_for_content(width, height);
-            let (extra_w, extra_h) = (
-                if spans.0 { 0 } else { extra_w },
-                if spans.1 { 0 } else { extra_h },
-            );
-            match edge {
-                Some(mesh_core_wayland::Edge::Bottom) => (extra_w, 0),
-                Some(mesh_core_wayland::Edge::Right) => (0, extra_h),
-                _ => (extra_w, extra_h),
-            }
-        };
+    let (extra_w, extra_h) = if popup_supported
+        || surface_id == DEBUG_INSPECTOR_SURFACE_ID
+        || role == SurfaceRole::Window
+    {
+        (0, 0)
+    } else {
+        let (extra_w, extra_h) = component::tooltip_overlay_extra_for_content(width, height);
+        let (extra_w, extra_h) = (
+            if spans.0 { 0 } else { extra_w },
+            if spans.1 { 0 } else { extra_h },
+        );
+        match edge {
+            Some(mesh_core_wayland::Edge::Bottom) => (extra_w, 0),
+            Some(mesh_core_wayland::Edge::Right) => (0, extra_h),
+            _ => (extra_w, extra_h),
+        }
+    };
     (
         width.saturating_add(extra_w),
         height.saturating_add(extra_h),
@@ -148,6 +155,7 @@ mod overlay_reserve_tests {
                 120,
                 80,
                 (false, false),
+                false,
             );
             (w, h, padding.right, padding.bottom)
         };
@@ -186,6 +194,7 @@ mod overlay_reserve_tests {
             2880,
             1800,
             (true, true),
+            false,
         );
         assert_eq!(
             (height, padding.bottom),
@@ -199,8 +208,24 @@ mod overlay_reserve_tests {
             100,
             40,
             (true, false),
+            false,
         );
         assert_eq!((width, padding.right), (100, 0));
         assert!(padding.bottom > 0, "a fixed height keeps its reserve");
+    }
+
+    #[test]
+    fn no_reserve_when_tooltips_can_be_popups() {
+        let (width, height, padding) = surface_geometry_with_overlay_reserve(
+            "@test/bar",
+            SurfaceRole::Layer,
+            Some(Edge::Top),
+            120,
+            48,
+            (false, false),
+            true,
+        );
+        assert_eq!((width, height), (120, 48));
+        assert_eq!((padding.right, padding.bottom), (0, 0));
     }
 }

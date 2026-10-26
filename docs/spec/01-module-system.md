@@ -291,7 +291,9 @@ component author must know before setting `role: "window"`:
   size, so pairing it with `max-width: 100%` / `max-height: 100%` lets it fit
   a small output and grow back on a larger one. On an axis the root spans
   (`width`/`height: 100%`), the content takes the whole configured size; the
-  tooltip overlay reserve applies only to fixed axes.
+  tooltip overlay reserve applies only to fixed axes. The reserve exists only
+  on compositors without `xdg_popup`; elsewhere a tooltip that leaves the
+  content box is promoted to a popup and the layer is exactly its content.
 - A **window** is *told* its size by the compositor's configure — tiling
   layout, maximize, fullscreen, interactive resize — and content lays out into
   it. The measured size is only the initial request. A component with a rigid

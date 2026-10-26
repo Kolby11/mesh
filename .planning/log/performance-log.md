@@ -9531,3 +9531,38 @@ live; the compositor sees the unmap one loop turn after the settling paint.
 Validation: release GPU-feature shell lib 1,036 passed / 37 ignored / 0 failed;
 `hide_surface_unmaps_once_the_exit_settles_before_its_deadline` covers the
 shell wake and unmap.
+
+## 2026-10-26 — no tooltip overlay reserve when popups are available
+
+**Change.** Every non-window layer surface was inflated by a tooltip overlay
+reserve (200 px below the content, and up to 352 px of width) so inline
+tooltips could paint outside the content box. Tooltips that leave the content
+box already promote to `xdg_popup`s (the dock, whose bottom anchor drops the
+reserve, relied on that). `surface_geometry_with_overlay_reserve` now takes
+`popup_supported` and adds no reserve when the presentation backend supports
+popups; compositors without `xdg_popup` keep it as the fallback.
+
+**Measurement** (layer sizes the shell configured; nested Hyprland 0.56.2,
+1280×800 headless output at scale 1, release, CPU/SHM, glass profile; one run
+each, sizes are deterministic):
+
+| surface | before (`61d390af`) | after | pixels |
+| --- | --- | --- | --- |
+| `@mesh/glass-bar` | 1272×248 | 1272×48 | −80.6% (315,456 → 61,056) |
+| `@mesh/glass-widgets` | 1280×520 | 1280×320 | −38.5% (665,600 → 409,600) |
+| `@mesh/glass-dock` | 1280×114 | 1280×114 | unchanged (bottom anchor) |
+
+Each SHM slot and GPU target scales with those pixels (bar: 1.26 MB → 0.24 MB
+per 4-byte buffer at scale 1, times the slot count and scale²), as do
+full-buffer clears/presents and the compositor's blending of the transparent
+area. Steady-state damage is unchanged: content damage never covered the
+reserve, except while an inline tooltip showed. No frame-time claim was
+measured.
+
+Live check: hovering the bar clock shows its tooltip as a child popup
+(`::mesh-tooltip` child surface) below the 48 px bar; the calendar still opens,
+closes and reopens on three clicks without pointer motion.
+
+Validation: shell lib 1,036 passed / 37 ignored (new
+`no_reserve_when_tooltips_can_be_popups`; the settings mount test now expects
+its 700 px layer instead of 900 px).

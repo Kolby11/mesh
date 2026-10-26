@@ -65,8 +65,6 @@ October log.
 
 - [ ] **`corner-shape: scoop` gaps:** borders are not stroked along a scoop's curve, and
       `overflow: hidden` clips descendants to the rounded shape, not the scooped one ([04 §12.1](spec/04-styling.md#121-corner-shapes-corner-shape)).
-- [ ] **Retire the tooltip overlay reserve:** tooltips that leave their surface are now
-      `xdg_popup`s, so the 352×200 reserve every layer surface paints could go; measure buffer/damage savings first.
 - [ ] **Settings theme switch may not repaint:** reported 2026-10-21 as needing a tab change; not
       reproduced on `1d50170a` (layer and window roles, file and click paths). Capture a repro.
 - [ ] **Launcher search paints one keystroke late:** in the promoted dock launcher popup the

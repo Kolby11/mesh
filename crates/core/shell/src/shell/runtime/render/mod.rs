@@ -425,6 +425,7 @@ impl Shell {
                     surface.width,
                     surface.height,
                     spans,
+                    self.presentation_engine.popup_supported(),
                 );
                 // `render()` may have just completed a measurement by updating
                 // the shell-side surface record, while `width`/`height` still
@@ -452,6 +453,7 @@ impl Shell {
                     content.width(),
                     content.height(),
                     spans,
+                    self.presentation_engine.popup_supported(),
                 );
                 let extent =
                     ConfiguredSurfaceExtent::from_content_and_padding(content, configured_padding)
@@ -815,6 +817,7 @@ impl Shell {
                         width,
                         height,
                         spans,
+                        self.presentation_engine.popup_supported(),
                     );
                     let (padded_width, padded_height) = match configured_layer_buffer {
                         Some((buffer_width, buffer_height)) => (
