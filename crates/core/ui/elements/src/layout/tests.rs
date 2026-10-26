@@ -2330,3 +2330,182 @@ fn full_layout_write_records_projection_in_one_visit() {
         assert_layout_maps_eq(&keyed_layouts(&root), &keyed_layouts(&reference));
     }
 }
+
+#[test]
+fn producer_deltas_match_full_geometry_for_broad_layout_changes() {
+    for count in [16, 1024] {
+        for target in [0, count / 2, count - 1] {
+            for mode in [
+                "width",
+                "height",
+                "wrap",
+                "grow",
+                "shrink",
+                "align",
+                "fractional",
+                "hidden",
+                "padding",
+                "nested",
+            ] {
+                let mut root =
+                    keyed_node("root", "column", Dimension::Px(320.0), Dimension::Px(160.0));
+                root.computed_style.align_items = AlignItems::Start;
+                root.computed_style.direction = FlexDirection::Column;
+                if matches!(mode, "wrap" | "grow" | "shrink") {
+                    root.computed_style.direction = FlexDirection::Row;
+                }
+                if mode == "wrap" {
+                    root.computed_style.flex_wrap = crate::style::FlexWrap::Wrap;
+                }
+                if mode == "align" {
+                    root.computed_style.align_items = AlignItems::Center;
+                }
+                if mode == "fractional" {
+                    root.computed_style.padding = Edges::all(0.35);
+                }
+                for index in 0..count {
+                    let mut node = keyed_node(
+                        &format!("root/{index}"),
+                        "box",
+                        Dimension::Px(10.25),
+                        Dimension::Px(2.75),
+                    );
+                    node.computed_style.flex_shrink = if mode == "shrink" { 1.0 } else { 0.0 };
+                    if mode == "grow" {
+                        node.computed_style.flex_grow = 1.0;
+                    }
+                    if mode == "nested" && index == target {
+                        node.computed_style.width = Dimension::Fit;
+                        let mut absolute =
+                            keyed_node("absolute", "box", Dimension::Px(40.5), Dimension::Px(9.25));
+                        absolute.computed_style.position = Position::Absolute;
+                        absolute.computed_style.inset_left = Some(5.75);
+                        let mut fixed =
+                            keyed_node("fixed", "box", Dimension::Px(4.5), Dimension::Px(5.25));
+                        fixed.computed_style.position = Position::Fixed;
+                        fixed.computed_style.inset_right = Some(3.25);
+                        let mut promoted =
+                            keyed_node("promoted", "box", Dimension::Px(70.5), Dimension::Px(8.75));
+                        promoted.mark_promoted_popover();
+                        node.children = vec![absolute, fixed, promoted].into();
+                    }
+                    root.children.push(node);
+                }
+                let mut state = PerSurfaceLayoutState::default();
+                let mut cache = IntrinsicLayoutCache::default();
+                LayoutEngine::compute_incremental(
+                    &mut root, &mut state, 320.0, 160.0, true, true, &mut cache, None,
+                );
+                for turn in 0..4 {
+                    let snapshot = crate::FrameSnapshot::complete(&root, turn, None).unwrap();
+                    let before = keyed_layouts(&root);
+                    let grown = turn % 2 == 0;
+                    let id = if mode == "padding" {
+                        root.computed_style.padding = Edges::all(if grown { 2.75 } else { 0.25 });
+                        root.id
+                    } else {
+                        let node = &mut root.children[target];
+                        match mode {
+                            "height" => {
+                                node.computed_style.height =
+                                    Dimension::Px(if grown { 7.75 } else { 2.75 })
+                            }
+                            "grow" => node.computed_style.flex_grow = if grown { 3.0 } else { 1.0 },
+                            "shrink" => {
+                                node.computed_style.flex_shrink = if grown { 3.0 } else { 1.0 }
+                            }
+                            "hidden" => {
+                                node.computed_style.display =
+                                    if grown { Display::None } else { Display::Flex }
+                            }
+                            "nested" => {
+                                node.computed_style.overflow_x = if grown {
+                                    Overflow::Hidden
+                                } else {
+                                    Overflow::Visible
+                                }
+                            }
+                            _ => {
+                                node.computed_style.width =
+                                    Dimension::Px(if grown { 29.75 } else { 10.25 })
+                            }
+                        }
+                        node.id
+                    };
+                    let mut reference = root.clone();
+                    LayoutEngine::compute(&mut reference, 320.0, 160.0);
+                    let scope = crate::frame_work::Scope::new(true);
+                    LayoutEngine::compute_incremental_for_stable_tree(
+                        &mut root,
+                        &mut state,
+                        &snapshot,
+                        &HashSet::from([id]),
+                        320.0,
+                        160.0,
+                        &mut cache,
+                        None,
+                    );
+                    let counts = scope.snapshot();
+                    drop(scope);
+                    assert_layout_maps_eq(&keyed_layouts(&root), &keyed_layouts(&reference));
+                    let after = keyed_layouts(&root);
+                    fn changed(
+                        node: &WidgetNode,
+                        before: &HashMap<String, LayoutRect>,
+                        out: &mut HashSet<NodeId>,
+                    ) {
+                        if before[node.mesh_key().unwrap()] != node.layout {
+                            out.insert(node.id);
+                        }
+                        for child in &node.children {
+                            changed(child, before, out);
+                        }
+                    }
+                    let mut expected = HashSet::new();
+                    changed(&root, &before, &mut expected);
+                    assert_eq!(
+                        state.changed_nodes.as_ref().unwrap(),
+                        &expected,
+                        "{mode}/{count}/{target}/{turn}: {after:?}"
+                    );
+                    if mode == "width" {
+                        assert!(counts["layout_write"] <= 2, "{counts:?}");
+                        assert!(
+                            counts["layout_producer_write"] >= count as u64,
+                            "producer work must remain visible: {counts:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn missing_projection_history_keeps_full_write_back_fallback() {
+    let mut root = broad_retained_fixture(4, 4);
+    let mut state = PerSurfaceLayoutState::default();
+    let mut cache = IntrinsicLayoutCache::default();
+    LayoutEngine::compute_incremental(
+        &mut root, &mut state, 320.0, 160.0, true, true, &mut cache, None,
+    );
+    let snapshot = crate::FrameSnapshot::complete(&root, 1, None).unwrap();
+    let node = &mut root.children[1].children[2];
+    node.computed_style.width = Dimension::Px(70.5);
+    let id = node.id;
+    state.projection.remove(&id);
+    LayoutEngine::compute_incremental_for_stable_tree(
+        &mut root,
+        &mut state,
+        &snapshot,
+        &HashSet::from([id]),
+        320.0,
+        160.0,
+        &mut cache,
+        None,
+    );
+    let mut reference = root.clone();
+    LayoutEngine::compute(&mut reference, 320.0, 160.0);
+    assert_layout_maps_eq(&keyed_layouts(&root), &keyed_layouts(&reference));
+    assert!(state.changed_nodes.is_none());
+}

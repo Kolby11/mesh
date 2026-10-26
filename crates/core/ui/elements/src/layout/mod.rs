@@ -20,8 +20,10 @@ use taffy::style as taffy_style;
 /// Trait for measuring text dimensions. Implemented outside `mesh-core-elements` (in the
 /// shell render stack) and injected so the layout engine can shrink-wrap text
 mod lowering;
+mod producer;
 mod retained;
 mod sparse;
+pub use producer::ObservedLayoutTree;
 
 use lowering::*;
 use retained::*;
@@ -224,13 +226,11 @@ impl TextMeasureKey {
 /// The layout engine. Stateless — call `compute` on a widget tree.
 pub struct LayoutEngine;
 
-/// Retained layout state for a single surface, holding a persistent
-/// [`TaffyTree`] and the `_mesh_key → TaffyNodeId` identity map so that
-/// layout geometry is mutated in place across frames instead of rebuilt
-/// from scratch.
+/// Retained layout state for one surface, holding a generational node arena,
+/// Taffy's computation caches, and stable runtime-to-layout identities.
 pub struct PerSurfaceLayoutState {
     /// The retained Taffy layout tree, mutated incrementally.
-    pub tree: TaffyTree<NodeId>,
+    pub tree: ObservedLayoutTree,
     /// Maps stable runtime [`NodeId`] values to retained Taffy nodes.
     ///
     /// Runtime IDs are hash-chained from the same stable paths formerly kept
@@ -256,6 +256,7 @@ pub struct PerSurfaceLayoutState {
     /// full fresh-build on the next pass, which then sets `valid = true`.
     pub valid: bool,
     projection: HashMap<NodeId, sparse::LayoutProjection>,
+    reverse_nodes: HashMap<TaffyNodeId, NodeId>,
     /// Exact geometry changes since the previous successful layout, or `None`
     /// when no complete projection exists (for example after a topology change).
     pub changed_nodes: Option<HashSet<NodeId>>,
@@ -266,14 +267,14 @@ pub struct PerSurfaceLayoutState {
 // SAFETY: `PerSurfaceLayoutState` is an owned per-surface cache. The shell may
 // move a `FrontendSurfaceComponent` between threads because `ShellComponent`
 // requires `Send`, but layout mutation happens only through `&mut self`; the
-// retained `TaffyTree` is never shared concurrently.
+// retained layout arena is never shared concurrently.
 unsafe impl Send for PerSurfaceLayoutState {}
 
 impl PerSurfaceLayoutState {
     /// Construct a fresh, invalid state (equivalent to `Default`).
     pub fn new() -> Self {
         Self {
-            tree: lowering::unrounded_taffy_tree(),
+            tree: ObservedLayoutTree::new(),
             node_map: HashMap::new(),
             stable_node_ids: HashSet::new(),
             text_nodes: HashMap::new(),
@@ -281,6 +282,7 @@ impl PerSurfaceLayoutState {
             last_available: (0.0, 0.0),
             valid: false,
             projection: HashMap::new(),
+            reverse_nodes: HashMap::new(),
             changed_nodes: None,
             #[cfg(test)]
             fail_next_layout: false,
@@ -745,13 +747,13 @@ impl LayoutEngine {
                 state.valid = false;
             } else {
                 if let Some(dirty) = dirty_node_snapshots.filter(|_| sparse_layout) {
-                    state.changed_nodes = Some(sparse::write_sparse_layout(
+                    state.changed_nodes = sparse::write_sparse_layout(
                         root,
                         state,
                         dirty,
                         available_width,
                         available_height,
-                    ));
+                    );
                 } else {
                     sparse::write_full_layout(root, state, available_width, available_height);
                 }

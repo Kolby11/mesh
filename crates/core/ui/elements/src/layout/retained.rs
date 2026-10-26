@@ -11,7 +11,7 @@ pub(super) fn compute_fresh_retained_layout(
 ) {
     let mut report = TaffyLayoutReport::default();
 
-    state.tree = unrounded_taffy_tree();
+    state.tree = ObservedLayoutTree::new();
     state.node_map.clear();
     state.stable_node_ids.clear();
     state.text_nodes.clear();
@@ -287,7 +287,7 @@ pub(super) fn update_retained_node_snapshots(
 
 pub(super) fn update_text_context(
     node: &WidgetNode,
-    tree: &mut TaffyTree<NodeId>,
+    tree: &mut ObservedLayoutTree,
     taffy_id: TaffyNodeId,
     text_nodes: &mut HashMap<NodeId, TextMeasureData>,
 ) -> Result<(), taffy::TaffyError> {

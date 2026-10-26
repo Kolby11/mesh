@@ -75,10 +75,17 @@ changes alone propagate beyond those targets. Binding writes stage only their ta
 after all expressions succeed; failure leaves the live tree untouched without
 sharing its whole child vectors for rollback. Style diagnostics reuse that exact
 set across intervening animation frames. Structural list changes retain the rebuild
-path. Layout-class patches lay
-out only the patched branch from the restyled set and report the nodes whose
-geometry changed. Write-back rounds the nodes it projects exactly as Taffy
-would, so Taffy's own whole-tree rounding pass is disabled. Text-only leaf patches first remeasure the bounded set of
+path. Retained layout uses Taffy's public low-level traits over a generational
+arena. Layout writes record exact before/after changes, including clean siblings
+moved by flex distribution, wrapping or alignment. Sparse projection follows
+those producer deltas and dirty input paths; it does not scan a changed parent's
+unchanged children. Retained child-union indexes preserve fit extents when a
+child shrinks. Origin, rounding-origin, padding and visibility changes propagate
+through affected subtrees; large delta sets use the full traversal. Write-back
+rounds projected nodes exactly as Taffy would, without its whole-tree rounding
+pass. Overflow keeps exact per-child propagated bounds and updates ancestor
+unions by index, including scroll clamping. Structural changes or missing history
+rebuild these indexes through full annotation. Text-only leaf patches first remeasure the bounded set of
 intrinsic width constraints used by retained layout. When every result and the
 layout style are unchanged, they retain Taffy geometry and report no geometry
 changes. Changed measurements, incomplete probe history, resizing and text

@@ -266,7 +266,7 @@ pub(super) fn is_expected_taffy_measurement_diagnostic(reason: &str) -> bool {
 
 pub(super) fn build_taffy_tree(
     node: &WidgetNode,
-    tree: &mut TaffyTree<NodeId>,
+    tree: &mut impl super::producer::LayoutStore,
     node_map: &mut HashMap<NodeId, TaffyNodeId>,
     text_nodes: &mut HashMap<NodeId, TextMeasureData>,
     report: &mut TaffyLayoutReport,
@@ -277,14 +277,14 @@ pub(super) fn build_taffy_tree(
         if node.tag == "text" {
             text_nodes.insert(node.id, TextMeasureData::from_node(node));
         }
-        tree.new_leaf_with_context(style, node.id)?
+        tree.leaf(style, node.id)?
     } else {
         let children = node
             .children
             .iter()
             .map(|child| build_taffy_tree(child, tree, node_map, text_nodes, report))
             .collect::<Result<Vec<_>, _>>()?;
-        tree.new_with_children(style, &children)?
+        tree.branch(style, &children)?
     };
 
     node_map.insert(node.id, taffy_node);
@@ -572,7 +572,7 @@ fn round_layout_value(value: f32) -> f32 {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn projected_taffy_rect(
     node: &WidgetNode,
-    tree: &TaffyTree<NodeId>,
+    tree: &impl super::producer::LayoutStore,
     node_map: &HashMap<NodeId, TaffyNodeId>,
     parent_padding: Option<Edges>,
     parent_x: f32,
@@ -584,7 +584,7 @@ pub(super) fn projected_taffy_rect(
     let mut rect = node.layout;
     let mut cumulative = parent_cumulative;
     if let Some(taffy_node) = node_map.get(&node.id) {
-        let layout = tree.unrounded_layout(*taffy_node);
+        let layout = tree.rect(*taffy_node).expect("retained layout node");
         cumulative = (
             parent_cumulative.0 + layout.location.x,
             parent_cumulative.1 + layout.location.y,
@@ -661,16 +661,16 @@ pub(super) fn zero_layout_subtree(node: &mut WidgetNode) {
 /// children — it does NOT recurse.  This helper walks children first
 /// (post-order) so no orphan TaffyNodeIds accumulate (LAYOUT-04).
 pub fn remove_taffy_subtree(
-    tree: &mut TaffyTree<NodeId>,
+    tree: &mut impl super::producer::LayoutStore,
     node_id: TaffyNodeId,
 ) -> Result<(), taffy::TaffyError> {
     // Snapshot children before any mutation — once we remove the parent,
     // the children handles become invalid.
-    let children = tree.children(node_id).unwrap_or_default();
+    let children = tree.child_nodes(node_id).unwrap_or_default();
     // Post-order: remove children first so no orphan TaffyNodeIds accumulate.
     for child in children {
         remove_taffy_subtree(tree, child)?;
     }
-    tree.remove(node_id)?;
+    tree.delete(node_id)?;
     Ok(())
 }

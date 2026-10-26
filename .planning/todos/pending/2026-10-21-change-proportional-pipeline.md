@@ -114,6 +114,10 @@ the plan below is kept as the design record.
 
 ### P2. One frame dirty set drives every pass
 
+Geometry producer deltas and retained overflow unions landed 2026-10-26; the
+remaining display-scope work stays in `docs/BACKLOG.md`. Measurement and parity
+evidence are in the performance log. The prototype account below is historical.
+
 **Prototype measured 2026-10-21; exit not met.** `FrameDirty` coalesces typed
 binding writes, interaction annotation changes and animation buckets. Only
 geometry-preserving animation-only frames currently use it as an authoritative

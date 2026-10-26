@@ -8800,3 +8800,109 @@ its panel recorded-scene parity failure reproduces identically on the unchanged
 `f6a68c5a` checkout (38 of 19,200 pixels, worst channel delta 36). It remains in
 the backlog; no tolerance was changed. Raw logs are under ignored
 `profiles/backlog-2026-10-24/scene-retry/`.
+
+## 2026-10-26 — P2 producer-directed geometry write-back and exact overflow unions
+
+Baseline `dcd94b5b`; isolated candidate branch `codex/p2-sparse-geometry`.
+Reviewed the rejected-experiments table and the 2026-10-24 geometry-delta entry
+before implementation. No Taffy fork or private API is used.
+
+**Implementation.** A generational layout arena implements Taffy 0.10.1's public
+low-level traits and continues to run its flex/grid/block/leaf algorithms and
+cache policy. `set_unrounded_layout` records authoritative before/after layouts,
+including clean siblings moved by flex, wrapping or alignment. An epoch-indexed
+vector deduplicates writes without clearing a hash table sized for a previous
+large update. Cache invalidation stops at an already dirty ancestor, matching
+Taffy's policy. Sparse write-back follows producer deltas plus changed input
+paths. A changed parent's size alone does not force a child scan: native layout
+writes report affected child geometry. Origin, rounding-origin, visibility and
+padding changes conservatively propagate the projection to descendants.
+
+Layout fit extents and overflow annotation retain indexed child unions. Point
+updates preserve exact shrinking bounds and tied extrema, without reconstructing
+old contributions from scroll metrics. Full/structural passes rebuild indexes;
+missing paths/history keep the full path. Overflow changes, including clamped
+scroll offsets, join the frame dirty set. Large producer change sets use full
+write-back, and large overflow dirty sets use full annotation. Dense frames
+therefore avoid building sparse branch indexes for most of the tree.
+
+**Structural measurements.** `geometry_patch_visit_profile`, three separate
+release processes per side, four alternating updates per fixture, 16 and 1,024
+siblings, CPU raster at 320×100. For 1,024 siblings, width/text/last-height
+patches each measure **1,027–1,027 → 4–4 layout-write visits**, and
+**1,032–1,032 → 10–10 annotation visits**. A first-child height change that
+moves almost every sibling keeps **1,027** write visits; annotation falls from
+2,055 to 1,030 through the dense full pass. The small changing column beside a
+large clean column measures 8 → 6 layout-write visits and 15 → 14 annotation
+visits. Fit/extents work was already bounded for sparse width changes.
+
+`geometry_patch_frames_scale_with_the_change` additionally proves constant
+write-back and annotation visits with every sibling visible (320×1100), on both
+growth and shrink frames, with full-tree/retained/pixel parity. Bounds-index
+operations grow logarithmically: 21 → 33 for a 16 → 1,024-sibling box-width
+patch. Producer work is explicitly counted rather than hidden: that 1,024-item
+candidate frame still records **1,027 unrounded writes and 9,239 producer
+operations** (child traversal, layout dispatch and invalidation). This removes
+redundant downstream scans; it does not make Taffy's flex algorithm sparse.
+
+**Release timings.** Same thin-LTO, one-codegen-unit GPU-feature shell test
+profile on both sides; explicit CPU `PixelBuffer` raster. Three alternating
+baseline/candidate pairs, 200 updates per sample after three initialization
+paints, ordinary unpinned desktop in use, no concurrent compilation. Rows below
+are the range of per-run **paint p50 in milliseconds**. Paint includes bindings,
+style/layout, retained updates and raster; handler sync is measured separately
+in the raw data and is excluded here. The first four cases keep all siblings
+visible at 320×1100; `box_height_first` uses the 320×100 clipped workload.
+
+| Case | Siblings | Baseline paint p50, ms | Candidate paint p50, ms |
+| --- | ---: | ---: | ---: |
+| `clean_column` | 16 | 0.137–0.139 | 0.147–0.150 |
+| `clean_column` | 1,024 | 0.236–0.236 | 0.233–0.235 |
+| `box_width` | 16 | 0.144–0.145 | 0.141–0.144 |
+| `box_width` | 1,024 | 1.417–1.515 | 1.275–1.332 |
+| `text_width` | 16 | 0.216–0.217 | 0.208–0.215 |
+| `text_width` | 1,024 | 2.122–2.295 | 1.900–1.992 |
+| `box_height_last` | 16 | 0.142–0.145 | 0.145–0.146 |
+| `box_height_last` | 1,024 | 1.444–1.623 | 1.257–1.292 |
+| `box_height_first` | 16 | 0.220–0.223 | 0.224–0.230 |
+| `box_height_first` | 1,024 | 9.648–12.037 | 9.679–10.140 |
+
+Sparse 1,024-sibling cases improve; the already scoped clean-column workload is
+largely unchanged. Small workloads can pay additional bookkeeping: notably
+clean-column/16 adds about 0.01 ms. Dense-case ranges overlap; no dense-frame
+speedup or live glass/GPU latency claim is made. An initial always-sparse
+implementation measured 12.717–12.951 ms versus 12.425–12.527 ms on the dense
+1,024-sibling case. The final candidate uses the full path for large change
+sets instead; the initial data and executable are retained under
+`/tmp/mesh-p2-evidence/initial-sparse/`.
+
+**Validation.** Final release GPU-feature shell suite: **1,032 passed,
+36 ignored, zero failures**. Elements: **320 passed, 8 ignored**; interaction:
+**52 passed**. Native Taffy remains the independent full-layout oracle. The
+geometry matrix covers early/middle/last growth and shrink at 16/1,024 siblings,
+wrap, flex grow/shrink, alignment, fractional padding/coordinates, hidden nodes,
+intrinsic text probes and nested absolute/fixed/promoted descendants. Exact
+changed-node reports are checked against full geometry. Overflow tests compare
+every metric and offset clamp, including clipping, negative bounds, tied extrema,
+missing history and invalid paths. The additional optimized shell pixel matrix
+compares layouts, scroll metrics, retained command geometry/clips and every pixel
+for wrap/grow/shrink/alignment/fractional/clipped/fixed cases at both sizes and
+all three target positions. Existing promoted-popup and lifecycle tests pass.
+The structural gate and both visit profiles also pass separately.
+
+**Scope remaining.** Display-list patches under layer/scrollbar/clip/scale/scroll
+scopes, and sibling unions for shrinking display coverage, remain the P2 display
+backlog item. Compound Lua synchronization remains D1. No public styling or
+module contract changed. The completed producer-delta design note is removed;
+this record retains its outcome and git retains its design.
+
+**Evidence/reproduction.** `/tmp/mesh-p2-evidence/` contains the baseline and
+candidate test executables, `bench.py`, `timings.json`, `visits.json`, all three
+per-side visit logs, `candidate-structural-gate.log`, per-case timing logs,
+`final-release-tests.log`, and the initial always-sparse trial. Element and
+interaction output is `/tmp/mesh-p2-unit-tests.log`. Build:
+`nix develop -c cargo test --release -p mesh-core-shell --features gpu --lib`.
+Timing gate: `geometry_patch_frame_timing_profile --ignored --nocapture`, with
+`MESH_GEOMETRY_CASE` selecting the case and `MESH_GEOMETRY_VISIBLE=1` for the
+visible workloads. Separate worktrees and `/tmp/mesh-p2-target` keep the main
+checkout and its build artifacts untouched. No live compositor replay was run.

@@ -1,11 +1,17 @@
 # Status
 
-**Updated:** 2026-10-25
+**Updated:** 2026-10-26
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and
 measurements live in [`log/`](log/README.md).
 
 ## Now
+
+- **P2 geometry producer deltas and overflow indexes complete.** Sparse
+  1,024-sibling width/text patches project four nodes and annotate ten, with
+  Taffy's own traversal counted separately. Large change sets keep a linear
+  full traversal. Release GPU-feature shell: 1,032 passed; elements: 320;
+  interaction: 52. Layout, command, scroll-clamp and pixel parity pass.
 
 - **Glass bug batch committed.** Tabs are one Tab stop with arrow roving
   (core); the dashboard scrim covers the output (overlay reserve dropped on
@@ -23,8 +29,7 @@ measurements live in [`log/`](log/README.md).
 
 - **Scene-buffer retry complete.** Transient export failures wait for dmabuf
   release and resume without another raster. Three required-GPU release runs
-  pass; presentation and shell suites pass. The P2 sibling scan has a linked
-  producer-delta design and remains open.
+  pass; presentation and shell suites pass.
 
 - **Change-proportional frame pipeline.** Full layout now records geometry,
   fit extents and projection in one traversal. Its structural gate passes;
@@ -37,9 +42,8 @@ measurements live in [`log/`](log/README.md).
 
 ## Next
 
-- P2 remainder: layout write-back and overflow annotation still visit every
-  child of a re-laid-out parent; display patches rebuild under clip/scale/scroll
-  scopes.
+- P2 display remainder: patches rebuild under clip/scale/scroll/layer scopes,
+  and shrinking ancestor coverage still re-unions children.
 - D1: record compound table writes instead of converting every compound global
   during handler sync; indirect list reads still compare every item.
 - Gate shared-tree popup animation preparation by targets that can present.

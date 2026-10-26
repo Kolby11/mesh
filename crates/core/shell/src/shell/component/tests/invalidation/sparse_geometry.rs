@@ -285,7 +285,8 @@ end
 /// collection, command rebuilding, retained and layout synchronization and the
 /// keyed-list compare stay constant as clean siblings grow. A shrink that
 /// gives up its parent's coverage edge re-unions that parent's children, and
-/// layout still writes the moved parent's children. Pixels, rects and the
+/// producer deltas select layout write-back, and retained child unions avoid
+/// sibling scans in overflow annotation. Pixels, rects and the
 /// retained tree match a full rebuild every frame.
 #[test]
 fn geometry_patch_frames_scale_with_the_change() {
@@ -343,6 +344,7 @@ fn geometry_patch_frames_scale_with_the_change() {
                 );
                 assert_eq!(actual.data(), expected.data(), "{case}/{siblings}/{turn}");
                 let counts = snapshot.node_visits;
+                eprintln!("geometry {case}/{siblings}/{turn}: {counts:?}");
                 // Debug builds of the renderer always collect entries in full.
                 if !cfg!(debug_assertions) {
                     assert_eq!(
@@ -354,6 +356,9 @@ fn geometry_patch_frames_scale_with_the_change() {
                     counts["display_build"],
                     counts["retained_sync"],
                     counts["layout_sync"],
+                    counts["layout_write"],
+                    counts["layout_extents"],
+                    counts["annotation"],
                     handler["keyed_item_compare"],
                     handler["keyed_key_validation"],
                 ];
@@ -466,4 +471,149 @@ function grow() table.insert(items, {{id = 0, color = "#ffffff"}}) end
     );
     let expected = [("one", 1), ("two", 2), ("reassign", 1), ("one", 1)];
     assert_eq!(&per_size[1][..4], &expected);
+}
+
+#[test]
+fn producer_geometry_changes_match_full_commands_scroll_metrics_and_pixels() {
+    fn metrics(node: &WidgetNode, out: &mut Vec<Option<mesh_core_elements::WidgetScrollMetrics>>) {
+        out.push(node.scroll_metrics);
+        for child in &node.children {
+            metrics(child, out);
+        }
+    }
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(320, 1100);
+    for siblings in [16, 1024] {
+        for target in [1, siblings / 2, siblings] {
+            for mode in [
+                "wrap",
+                "grow",
+                "shrink",
+                "align",
+                "fractional",
+                "clip",
+                "fixed",
+            ] {
+                let root_style = match mode {
+                    "wrap" => "flex-direction: row; flex-wrap: wrap; align-items: flex-start",
+                    "grow" | "shrink" => "flex-direction: row; align-items: flex-start",
+                    "align" => "align-items: center",
+                    _ => "align-items: flex-start",
+                };
+                let item_style = match mode {
+                    "grow" => "flex-shrink: 0",
+                    "shrink" => "flex-shrink: 1",
+                    "clip" => "flex-shrink: 0; overflow: hidden",
+                    "fixed" => "flex-shrink: 0; position: fixed",
+                    _ => "flex-shrink: 0",
+                };
+                let mutate = match mode {
+                    "grow" => "items[target].grow = grown and 3 or 1",
+                    "shrink" => "items[target].shrink = grown and 3 or 1",
+                    _ => "items[target].size = grown and '20.75px' or '8.25px'",
+                };
+                let inner = if mode == "clip" {
+                    "<box style=\"width: 40px; height: 4px; flex-shrink: 0; background: #0000ff\" />"
+                } else {
+                    ""
+                };
+                let source = format!(
+                    r##"
+<script lang="luau">
+items = {{}}
+for i = 1, {siblings} do
+    items[i] = {{id = i, size = "8.25px", grow = {grow}, shrink = {shrink},
+        color = i % 2 == 0 and "#ff0000" or "#00ff00",
+        x = tostring((i % 32) * 9) .. "px", y = tostring(math.floor(i / 32) * 2) .. "px"}}
+end
+target = {target}
+grown = false
+function mutate()
+    grown = not grown
+    {mutate}
+end
+</script>
+<template><column style="width: 320px; height: 1100px; {root_style}; padding: 0.35px">
+{{#for item in items key={{item.id}}}}
+<box style="height: 0.75px; {item_style}" style:width={{item.size}}
+    style:flex-grow={{item.grow}} style:flex-shrink={{item.shrink}}
+    style:background={{item.color}} style:left={{item.x}} style:top={{item.y}}>{inner}</box>
+{{/for}}
+</column></template>
+"##,
+                    grow = if mode == "grow" { 1 } else { 0 },
+                    shrink = if mode == "shrink" { 1 } else { 0 }
+                );
+                let mut patched = test_frontend_component(&source);
+                let mut full = test_frontend_component(&source);
+                full.force_full_template_build = true;
+                let (mut actual, mut expected) =
+                    (PixelBuffer::new(320, 1100), PixelBuffer::new(320, 1100));
+                for _ in 0..3 {
+                    patched
+                        .paint_raster(&theme, extent, &mut actual, 1.0)
+                        .unwrap();
+                    full.paint_raster(&theme, extent, &mut expected, 1.0)
+                        .unwrap();
+                }
+                for turn in 0..2 {
+                    patched.call_namespaced_handler("mutate", &[]).unwrap();
+                    full.call_namespaced_handler("mutate", &[]).unwrap();
+                    patched
+                        .paint_raster(&theme, extent, &mut actual, 1.0)
+                        .unwrap();
+                    full.paint_raster(&theme, extent, &mut expected, 1.0)
+                        .unwrap();
+                    let (mut a, mut b) = (Vec::new(), Vec::new());
+                    layouts(patched.last_tree.as_ref().unwrap(), &mut a);
+                    layouts(full.last_tree.as_ref().unwrap(), &mut b);
+                    assert!(
+                        a.iter()
+                            .map(|(_, rect)| rect)
+                            .eq(b.iter().map(|(_, rect)| rect)),
+                        "{mode}/{siblings}/{target}/{turn}"
+                    );
+                    let (mut a, mut b) = (Vec::new(), Vec::new());
+                    metrics(patched.last_tree.as_ref().unwrap(), &mut a);
+                    metrics(full.last_tree.as_ref().unwrap(), &mut b);
+                    assert_eq!(a, b, "metrics {mode}/{siblings}/{target}/{turn}");
+                    let a = patched.retained_display_list.paint_commands();
+                    let b = full.retained_display_list.paint_commands();
+                    assert_eq!(
+                        a.len(),
+                        b.len(),
+                        "commands {mode}/{siblings}/{target}/{turn}"
+                    );
+                    for (a, b) in a.iter().zip(b) {
+                        assert_eq!(
+                            (
+                                a.kind,
+                                a.node.id,
+                                a.node.transform,
+                                a.node.layout,
+                                a.node.local_layout
+                            ),
+                            (
+                                b.kind,
+                                b.node.id,
+                                b.node.transform,
+                                b.node.layout,
+                                b.node.local_layout
+                            )
+                        );
+                        assert_eq!(format!("{:?}", a.clip), format!("{:?}", b.clip));
+                        assert_eq!(
+                            format!("{:?}", a.node.ancestor_clips),
+                            format!("{:?}", b.node.ancestor_clips)
+                        );
+                    }
+                    assert_eq!(
+                        actual.data(),
+                        expected.data(),
+                        "pixels {mode}/{siblings}/{target}/{turn}"
+                    );
+                }
+            }
+        }
+    }
 }

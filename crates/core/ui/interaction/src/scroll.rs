@@ -1,3 +1,6 @@
+mod overflow_cache;
+pub use overflow_cache::RetainedOverflow;
+
 use super::*;
 use mesh_core_elements::NodeId;
 use std::collections::HashMap;
@@ -260,66 +263,6 @@ pub fn annotate_overflow_tree(
         scroll_offsets,
         children_bounds,
     ))
-}
-
-/// Re-measure overflow after layout for the nodes at `paths` and all their
-/// ancestors, deepest first, reading every other child's extents from the
-/// `scroll_metrics` its last measurement stored. Equivalent to
-/// [`annotate_overflow_tree`] when only these nodes' geometry changed since
-/// the tree was last fully measured. Returns the nodes whose metrics changed.
-pub fn refresh_overflow_paths(
-    tree: &mut WidgetNode,
-    paths: &[&[usize]],
-    scroll_offsets: &mut HashMap<NodeId, ScrollOffsetState>,
-) -> Vec<NodeId> {
-    let mut prefixes = std::collections::BTreeSet::<&[usize]>::new();
-    for path in paths {
-        for depth in 0..=path.len() {
-            prefixes.insert(&path[..depth]);
-        }
-    }
-    let mut ordered = prefixes.into_iter().collect::<Vec<_>>();
-    ordered.sort_by_key(|prefix| std::cmp::Reverse(prefix.len()));
-    let mut changed = Vec::new();
-    for prefix in ordered {
-        let mut node = &mut *tree;
-        for &index in prefix {
-            node = &mut node.children[index];
-        }
-        let mut children_bounds = None;
-        for child in &node.children {
-            mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::Annotation);
-            children_bounds = Some(union_bounds(children_bounds, measured_bounds(child)));
-        }
-        let previous = node.scroll_metrics;
-        annotate_overflow_node(node, scroll_offsets, children_bounds);
-        if node.scroll_metrics != previous {
-            changed.push(node.id);
-        }
-    }
-    changed
-}
-
-/// The bounds [`annotate_overflow_node`] propagated for an already measured
-/// node: its own box, plus its content extent unless it clips.
-fn measured_bounds(node: &WidgetNode) -> ContentBounds {
-    let own = (
-        node.layout.x,
-        node.layout.y,
-        node.layout.x + node.layout.width.max(0.0),
-        node.layout.y + node.layout.height.max(0.0),
-    );
-    if node_clips_children(node) {
-        return own;
-    }
-    let Some(metrics) = node.scroll_metrics else {
-        return own;
-    };
-    let origin_x = node.layout.x + node.computed_style.padding.left;
-    let origin_y = node.layout.y + node.computed_style.padding.top;
-    let content_right = if metrics.content_width > 0.0 { origin_x + metrics.content_width } else { own.2 };
-    let content_bottom = if metrics.content_height > 0.0 { origin_y + metrics.content_height } else { own.3 };
-    (own.0, own.1, own.2.max(content_right), own.3.max(content_bottom))
 }
 
 /// Annotates one node after its children and returns its propagated bounds, so

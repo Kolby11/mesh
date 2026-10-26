@@ -1,5 +1,6 @@
 pub mod accessibility;
 pub mod attributes;
+pub mod bounds_index;
 pub mod composition;
 pub mod element;
 pub mod frame;

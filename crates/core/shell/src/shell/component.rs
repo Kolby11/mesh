@@ -1252,6 +1252,7 @@ pub(super) struct FrontendSurfaceComponent {
     /// Annotation inputs whose projection and overflow extents the retained
     /// tree still carries; see [`RuntimeAnnotationInputs`].
     scoped_annotation_inputs: Option<RuntimeAnnotationInputs>,
+    overflow_bounds: mesh_core_interaction::RetainedOverflow,
     /// The last finalize reported its exact restyled set over reused geometry,
     /// so the retained update can skip subtree discovery.
     frame_restyled_nodes: Option<HashSet<NodeId>>,
@@ -1596,6 +1597,7 @@ impl FrontendSurfaceComponent {
             element_metric_usage,
             resolved_surface_shortcuts_cache: RefCell::new(None),
             scoped_annotation_inputs: None,
+            overflow_bounds: mesh_core_interaction::RetainedOverflow::default(),
             frame_restyled_nodes: None,
             pending_animation_pass: None,
             paint_scale: 1.0,

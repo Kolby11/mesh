@@ -717,6 +717,7 @@ impl FrontendSurfaceComponent {
             .take()
             .filter(|_| scoped_interaction_frame && self.last_frame_snapshot.is_some())
             .and_then(|inputs| self.annotation_input_changes(&inputs));
+        let overflow_was_scoped;
         let mut annotation_dirty = {
             let shortcut_cache = self.resolved_surface_shortcuts_cache.borrow();
             let mut annotation_context = RuntimeAnnotationContext::new(
@@ -754,6 +755,7 @@ impl FrontendSurfaceComponent {
                     &mut annotation_context,
                 )
             });
+            overflow_was_scoped = scoped;
             #[cfg(test)]
             {
                 self.scoped_annotation_frames += u64::from(scoped);
@@ -1187,41 +1189,52 @@ impl FrontendSurfaceComponent {
                 Some(trigger_kind),
             );
         }
-        if trigger_kind == "rebuild" {
-            // New compiler trees have no provisional layout. Clamp scroll
-            // offsets only against the authoritative post-style geometry.
-            mesh_core_interaction::annotate_overflow_tree(tree, &mut self.scroll_offsets);
+        if !overflow_was_scoped {
+            self.overflow_bounds.invalidate();
+        }
+        if layout_work_required && self.layout_state.changed_nodes.is_none() {
+            scoped_finalize = false;
         }
         if let Some(changed) = &self.layout_state.changed_nodes {
             annotation_dirty.extend(changed.iter().copied());
         }
-        // Annotation measures overflow before layout, except on rebuilds. A
-        // restyle whose layout reports its changed nodes re-measures just
-        // those and their ancestors, so the next frame can stay scoped.
-        let overflow_current = trigger_kind == "rebuild"
-            || !layout_work_required
-            || match (&self.layout_state.changed_nodes, &self.last_frame_snapshot) {
-                (Some(changed), Some(snapshot)) => {
-                    let visit = || {
-                        mesh_core_elements::frame_work::visit(
-                            mesh_core_elements::frame_work::Pass::Annotation,
-                        )
-                    };
-                    match snapshot.live_paths(tree, changed, visit) {
-                        Some(paths) if paths.len() == changed.len() => {
-                            let remeasured = mesh_core_interaction::refresh_overflow_paths(
-                                tree,
-                                &paths,
-                                &mut self.scroll_offsets,
-                            );
-                            annotation_dirty.extend(remeasured);
-                            true
-                        }
-                        _ => false,
-                    }
+        let mut overflow_current = self.overflow_bounds.is_current(tree.id);
+        if overflow_current && layout_work_required {
+            overflow_current = false;
+            if let (Some(changed), Some(snapshot)) =
+                (&self.layout_state.changed_nodes, &self.last_frame_snapshot)
+            {
+                let mut dirty = changed.clone();
+                if let Some(inputs) = &stable_layout_nodes {
+                    dirty.extend(inputs);
                 }
-                _ => false,
-            };
+                if let Some(restyled) = &scoped_restyled {
+                    dirty.extend(restyled);
+                }
+                let visit = || {
+                    mesh_core_elements::frame_work::visit(
+                        mesh_core_elements::frame_work::Pass::Annotation,
+                    )
+                };
+                if dirty.len().saturating_mul(2) <= self.layout_state.node_map.len()
+                    && let Some(paths) = snapshot.live_paths(tree, &dirty, visit)
+                    && paths.len() == dirty.len()
+                    && let Some(remeasured) =
+                        self.overflow_bounds
+                            .refresh(tree, &paths, &mut self.scroll_offsets)
+                {
+                    annotation_dirty.extend(remeasured);
+                    overflow_current = true;
+                }
+            }
+        }
+        if !overflow_current {
+            annotation_dirty.extend(
+                self.overflow_bounds
+                    .annotate_tree(tree, &mut self.scroll_offsets),
+            );
+            overflow_current = true;
+        }
         self.scoped_annotation_inputs = annotation_inputs.filter(|_| overflow_current);
         // Normalize the live projection after style/layout. Paint refreshes
         // any subsequently animated nodes before the retained diff and final
