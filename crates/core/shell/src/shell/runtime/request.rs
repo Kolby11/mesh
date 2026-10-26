@@ -3533,6 +3533,16 @@ impl Shell {
         })
     }
 
+    /// The closing surface's exit has played out before its declared duration:
+    /// the duration is the root's longest opacity transition, which can outlast
+    /// the transitions the exit styles actually start.
+    pub(in crate::shell) fn surface_exit_settled(&self, surface_id: &str) -> bool {
+        self.components
+            .iter()
+            .find(|runtime| runtime.surface_id == surface_id)
+            .is_some_and(|runtime| runtime.component.exit_settled())
+    }
+
     pub(in crate::shell) fn complete_due_surface_transitions(
         &mut self,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
@@ -3547,10 +3557,8 @@ impl Shell {
             .surfaces
             .iter()
             .filter_map(|(surface_id, state)| {
-                state
-                    .closing_until
-                    .is_some_and(|until| until <= now)
-                    .then(|| surface_id.clone())
+                let until = state.closing_until?;
+                (until <= now || self.surface_exit_settled(surface_id)).then(|| surface_id.clone())
             })
             .collect();
         let mut emitted = VecDeque::new();

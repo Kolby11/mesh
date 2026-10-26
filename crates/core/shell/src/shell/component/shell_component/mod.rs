@@ -1807,6 +1807,9 @@ impl ShellComponent for FrontendSurfaceComponent {
             self.surface_entering = false;
             self.invalidate_interaction_restyle();
         }
+        if self.surface_exiting {
+            self.exit_frame_painted = true;
+        }
 
         Ok(())
     }
@@ -2610,7 +2613,15 @@ impl ShellComponent for FrontendSurfaceComponent {
             return;
         }
         self.surface_exiting = exiting;
+        self.exit_frame_painted = false;
         self.invalidate_interaction_restyle();
+    }
+
+    fn exit_settled(&self) -> bool {
+        self.surface_exiting
+            && self.exit_frame_painted
+            && self.transitions.is_empty()
+            && !self.has_active_keyframe_animation
     }
 
     fn set_closing_child_keys(&mut self, keys: std::collections::HashSet<String>) {

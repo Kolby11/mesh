@@ -114,7 +114,8 @@ end
 
     .dashboard.mesh-surface-entering { opacity: 0; transform: translateY(26px) scale(0.95); }
     .dashboard.mesh-surface-exiting { opacity: 0; transform: translateY(14px) scale(0.97); transition-duration: var(--animation-duration-fast); }
-    .scrim.mesh-surface-entering, .scrim.mesh-surface-exiting { opacity: 0; }
+    .scrim.mesh-surface-entering { opacity: 0; }
+    .scrim.mesh-surface-exiting { opacity: 0; transition-duration: var(--animation-duration-fast); }
 
     .header {
         width: 100%;

@@ -350,11 +350,11 @@ impl Shell {
             next_deadline = next_deadline.min(command_due_at);
         }
 
-        for surface in self.core.surfaces.values() {
+        for (surface_id, surface) in &self.core.surfaces {
             let Some(closing_until) = surface.closing_until else {
                 continue;
             };
-            if closing_until <= now {
+            if closing_until <= now || self.surface_exit_settled(surface_id) {
                 return Duration::ZERO;
             }
             next_deadline = next_deadline.min(closing_until);

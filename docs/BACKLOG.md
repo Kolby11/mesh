@@ -327,15 +327,6 @@ of payoff.
       caches are phases 3–5 of the [in-surface blur engine](../.planning/todos/pending/2026-09-30-in-surface-blur-engine.md),
       gated on the D6 renderer prototype.
 
-### Live glass session
-
-From the 2026-10-20 live `glass` captures; evidence in the
-[performance log](../.planning/log/performance-log.md).
-
-- [ ] Hide waits for the root's longest opacity transition (280 ms on the glass
-      dashboard and picker) while their panels fade in `--animation-duration-fast`;
-      unmap when the exit transitions actually settle.
-
 ### Style
 
 - [ ] Typed style declarations: 97.5% of declarations in an Appearance rebuild

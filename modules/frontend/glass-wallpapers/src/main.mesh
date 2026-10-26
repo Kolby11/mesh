@@ -269,7 +269,8 @@ end
 
     .picker.mesh-surface-entering { opacity: 0; transform: translateY(30px) scale(0.95); }
     .picker.mesh-surface-exiting { opacity: 0; transform: translateY(16px) scale(0.97); transition-duration: var(--animation-duration-fast); }
-    .scrim.mesh-surface-entering, .scrim.mesh-surface-exiting { opacity: 0; }
+    .scrim.mesh-surface-entering { opacity: 0; }
+    .scrim.mesh-surface-exiting { opacity: 0; transition-duration: var(--animation-duration-fast); }
 
     .head {
         width: 100%;

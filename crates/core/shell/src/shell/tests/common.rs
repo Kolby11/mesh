@@ -1206,6 +1206,7 @@ pub(super) struct RecordingClipboard {
 #[derive(Debug, Default)]
 pub(super) struct TransitionRecordingState {
     pub(super) exiting: Vec<bool>,
+    pub(super) exit_settled: bool,
 }
 
 pub(super) struct TransitionRecordingComponent {
@@ -1311,6 +1312,10 @@ impl super::types::ShellComponent for TransitionRecordingComponent {
 
     fn set_surface_exiting(&mut self, exiting: bool) {
         self.state.lock().unwrap().exiting.push(exiting);
+    }
+
+    fn exit_settled(&self) -> bool {
+        self.state.lock().unwrap().exit_settled
     }
 }
 

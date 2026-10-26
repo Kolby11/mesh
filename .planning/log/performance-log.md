@@ -9507,3 +9507,27 @@ Capture/analysis reuse the helpers in
 of the earlier attribution timing ranges. There is no automated latency budget
 for this live launcher endpoint; `tools/check-performance` now includes the
 production icon regression suite.
+
+## 2026-10-26 — hiding surfaces unmap when their exit settles
+
+**Change.** A hiding surface previously stayed mapped for its root's longest
+opacity transition, which on violet-glass is the theme's default
+`--animation-duration-medium` (280 ms), whether or not anything was still
+animating. The component now reports `exit_settled` once it has painted its
+`mesh-surface-exiting` styles with no transition or keyframe animation still
+running, and the shell unmaps it then; the root duration remains the upper
+bound. The glass dashboard and wallpaper picker scrims now exit with
+`--animation-duration-fast`, like their panels; their 280 ms scrim fade was
+the longest exit transition actually running.
+
+**Measurement.** `glass_exit_settles_before_the_root_opacity_duration`
+(release, GPU feature; the test paints every 8 ms against the real violet-glass
+theme), three runs: dashboard 115.4–116.6 ms, picker 115.2–116.9 ms from
+`set_surface_exiting(true)` to settled, against the previous fixed 280 ms
+unmap delay. With the core change alone (scrim still 280 ms), the dashboard
+settled at 309 ms in a debug run, so the bound still applied. Not measured
+live; the compositor sees the unmap one loop turn after the settling paint.
+
+Validation: release GPU-feature shell lib 1,036 passed / 37 ignored / 0 failed;
+`hide_surface_unmaps_once_the_exit_settles_before_its_deadline` covers the
+shell wake and unmap.

@@ -105,6 +105,39 @@ fn hide_surface_uses_configured_exit_transition_before_unmapping() {
 }
 
 #[test]
+fn hide_surface_unmaps_once_the_exit_settles_before_its_deadline() {
+    let state = Arc::new(Mutex::new(TransitionRecordingState::default()));
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(TransitionRecordingComponent::new(
+        "@test/settles",
+        60_000,
+        Arc::clone(&state),
+    )));
+    shell
+        .apply_request(CoreRequest::HideSurface {
+            surface_id: "@test/settles".into(),
+        })
+        .unwrap();
+
+    assert!(shell.complete_due_surface_transitions().unwrap().is_empty());
+    assert!(shell.core.surfaces["@test/settles"].visible);
+    let later = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+    shell.next_frontend_reload_check = later;
+    shell.next_theme_reload_check = later;
+    shell.next_shell_settings_reload_check = later;
+    shell.next_watch_reconcile = later;
+    assert!(shell.next_runtime_sleep(false) > std::time::Duration::ZERO);
+
+    state.lock().unwrap().exit_settled = true;
+    assert_eq!(shell.next_runtime_sleep(false), std::time::Duration::ZERO);
+    shell.complete_due_surface_transitions().unwrap();
+    let surface = &shell.core.surfaces["@test/settles"];
+    assert!(!surface.visible);
+    assert!(surface.closing_until.is_none());
+    assert_eq!(state.lock().unwrap().exiting, vec![true, false]);
+}
+
+#[test]
 fn hide_surface_without_transition_unmaps_immediately() {
     let state = Arc::new(Mutex::new(TransitionRecordingState::default()));
     let mut shell = Shell::new();
@@ -986,6 +1019,7 @@ fn ready_render_work_without_progress_backs_off_instead_of_spinning() {
     shell.next_frontend_reload_check = later;
     shell.next_theme_reload_check = later;
     shell.next_shell_settings_reload_check = later;
+    shell.next_watch_reconcile = later;
     shell.next_watch_reconcile = later;
 
     shell.render_stalled = false;

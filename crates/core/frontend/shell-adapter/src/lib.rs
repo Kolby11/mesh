@@ -2015,6 +2015,12 @@ pub trait ShellComponent: Send {
     }
     /// Mark whether the surface is currently playing its hide transition.
     fn set_surface_exiting(&mut self, _exiting: bool) {}
+    /// Whether an exiting surface has painted its exit styles and has no
+    /// transition or keyframe animation left to run. The shell may unmap it
+    /// before [`hide_transition_ms`](Self::hide_transition_ms) elapses.
+    fn exit_settled(&self) -> bool {
+        false
+    }
     fn allows_shrink_to_fit(&self) -> bool {
         false
     }

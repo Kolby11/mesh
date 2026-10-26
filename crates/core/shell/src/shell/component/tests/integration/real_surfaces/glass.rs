@@ -1901,6 +1901,46 @@ fn exiting_glass_surface_stops_exporting_compositor_blur() {
     assert!(!component.display_list_blur_regions().is_empty());
 }
 
+#[test]
+fn glass_exit_settles_before_the_root_opacity_duration() {
+    let theme = theme();
+    for module in ["glass-dashboard", "glass-wallpapers"] {
+        let mut component = host(module);
+        let extent = SurfaceExtent::unpadded(1920, 1080);
+        let mut pixels = PixelBuffer::new(1920, 1080);
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+        let declared = std::time::Duration::from_millis(component.hide_transition_ms());
+        assert!(!declared.is_zero(), "{module}: root declares an opacity transition");
+
+        component.set_surface_exiting(true);
+        assert!(
+            !component.exit_settled(),
+            "{module}: nothing has animated before the exit frame paints"
+        );
+        let started = std::time::Instant::now();
+        component
+            .paint_raster(&theme, extent, &mut pixels, 1.0)
+            .unwrap();
+        assert!(!component.exit_settled(), "{module}: the exit transitions are running");
+        while !component.exit_settled() && started.elapsed() < declared * 2 {
+            std::thread::sleep(std::time::Duration::from_millis(8));
+            component
+                .paint_raster(&theme, extent, &mut pixels, 1.0)
+                .unwrap();
+        }
+        let settled = started.elapsed();
+        assert!(
+            component.exit_settled() && settled < declared,
+            "{module}: exit settled after {settled:?}; the root declares {declared:?}"
+        );
+
+        component.set_surface_exiting(false);
+        assert!(!component.exit_settled());
+    }
+}
+
 /// Drives one real glass surface through the shell runtime against the
 /// testing presentation backend.
 struct ShownSurfaceHarness {

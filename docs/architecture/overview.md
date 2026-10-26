@@ -158,6 +158,9 @@ surfaces open straight into their resting styles, while promoted popups play
 their entering frame. Once startup is idle, each never-shown hidden layer
 surface is painted once into an unpresented canvas so its first show takes the
 same path and its resources are already prepared.
+A hiding surface stays mapped while its `mesh-surface-exiting` styles animate
+and unmaps once it has painted them with no transition or keyframe animation
+still running; its root's opacity transition duration bounds the wait.
 The event loop includes input-repeat, temporary focus-grab and pending-frame
 escape deadlines alongside component ticks and reload maintenance.
 

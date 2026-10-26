@@ -779,6 +779,9 @@ pub(super) struct FrontendSurfaceComponent {
     test_capability_fallback: bool,
     pub(super) visible: bool,
     surface_exiting: bool,
+    /// A paint has applied the exiting styles, so `transitions` and keyframe
+    /// state describe the exit that is actually running.
+    exit_frame_painted: bool,
     surface_entering: bool,
     /// The next style pass starts no transitions from the retained tree: a
     /// re-shown top-level surface snaps to its resting styles rather than
@@ -1389,6 +1392,7 @@ impl FrontendSurfaceComponent {
             test_capability_fallback: false,
             visible: settings_state.layout.visible_on_start,
             surface_exiting: false,
+            exit_frame_painted: false,
             surface_entering: false,
             snap_transitions_once: false,
             closing_child_keys: HashSet::new(),
