@@ -1,0 +1,207 @@
+{
+  "name": "@mesh/tray-interface",
+  "version": "1.0.0",
+  "description": "StatusNotifier tray items and activation controls.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.tray",
+      "version": "1.0",
+      "domain": "tray",
+      "relationship": "base",
+      "contract": {
+        "state": [
+          {
+            "name": "available",
+            "type": "boolean"
+          },
+          {
+            "name": "items",
+            "type": "Item[]"
+          }
+        ],
+        "methods": [
+          {
+            "name": "activate",
+            "args": [
+              {
+                "name": "id",
+                "type": "string"
+              },
+              {
+                "name": "x",
+                "type": "int"
+              },
+              {
+                "name": "y",
+                "type": "int"
+              }
+            ],
+            "returns": "Result"
+          },
+          {
+            "name": "secondary_activate",
+            "args": [
+              {
+                "name": "id",
+                "type": "string"
+              },
+              {
+                "name": "x",
+                "type": "int"
+              },
+              {
+                "name": "y",
+                "type": "int"
+              }
+            ],
+            "returns": "Result"
+          },
+          {
+            "name": "context_menu",
+            "args": [
+              {
+                "name": "id",
+                "type": "string"
+              },
+              {
+                "name": "x",
+                "type": "int"
+              },
+              {
+                "name": "y",
+                "type": "int"
+              }
+            ],
+            "returns": "Result"
+          },
+          {
+            "name": "scroll",
+            "args": [
+              {
+                "name": "id",
+                "type": "string"
+              },
+              {
+                "name": "delta",
+                "type": "int"
+              },
+              {
+                "name": "orientation",
+                "type": "string"
+              }
+            ],
+            "returns": "Result"
+          }
+        ],
+        "events": [],
+        "types": {
+          "Item": {
+            "fields": [
+              {
+                "name": "id",
+                "type": "string"
+              },
+              {
+                "name": "title",
+                "type": "string"
+              },
+              {
+                "name": "application_id",
+                "type": "string"
+              },
+              {
+                "name": "category",
+                "type": "string"
+              },
+              {
+                "name": "status",
+                "type": "string"
+              },
+              {
+                "name": "icon_name",
+                "type": "string"
+              },
+              {
+                "name": "attention_icon_name",
+                "type": "string"
+              },
+              {
+                "name": "overlay_icon_name",
+                "type": "string"
+              },
+              {
+                "name": "icon_theme_path",
+                "type": "string"
+              },
+              {
+                "name": "tooltip_title",
+                "type": "string"
+              },
+              {
+                "name": "tooltip_text",
+                "type": "string"
+              },
+              {
+                "name": "item_is_menu",
+                "type": "boolean"
+              },
+              {
+                "name": "menu",
+                "type": "string"
+              },
+              {
+                "name": "icon_width",
+                "type": "int"
+              },
+              {
+                "name": "icon_height",
+                "type": "int"
+              },
+              {
+                "name": "icon_argb",
+                "type": "string"
+              }
+            ]
+          },
+          "Result": {
+            "fields": [
+              {
+                "name": "ok",
+                "type": "boolean"
+              },
+              {
+                "name": "error",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "capabilities": {
+          "read": [
+            "service.tray.read"
+          ],
+          "methods": {
+            "activate": [
+              "service.tray.control"
+            ],
+            "secondary_activate": [
+              "service.tray.control"
+            ],
+            "context_menu": [
+              "service.tray.control"
+            ],
+            "scroll": [
+              "service.tray.control"
+            ]
+          },
+          "permissions": {
+            "service.tray.read": "standard",
+            "service.tray.control": "standard"
+          }
+        }
+      }
+    }
+  }
+}

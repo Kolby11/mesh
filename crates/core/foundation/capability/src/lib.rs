@@ -407,7 +407,17 @@ pub fn describe_capability(id: &str) -> String {
         );
     }
     if let Some(grant) = parse_dbus_subscribe_capability(id) {
-        return format!("watch {} for changes ({} bus)", grant.sender, bus(grant.system));
+        return match grant.interface {
+            Some(interface) => format!(
+                "watch {interface} signals from any service ({} bus)",
+                bus(grant.system)
+            ),
+            None => format!(
+                "watch {} for changes ({} bus)",
+                grant.sender,
+                bus(grant.system)
+            ),
+        };
     }
     if let Some(grant) = parse_dbus_call_capability(id) {
         let destination = grant.destination.as_deref().unwrap_or("any service");
@@ -465,8 +475,9 @@ pub fn describe_capability(id: &str) -> String {
 }
 
 /// A `dbus.read:<bus>:<destination>:<interface>` grant: reading the
-/// properties of one interface at one bus name (`Properties.Get`/`GetAll`)
-/// and introspecting that name's objects. It permits no other call.
+/// properties of one interface at a bus name (`Properties.Get`/`GetAll`)
+/// and introspecting its objects. `*` permits dynamic names for that interface.
+/// It permits no other call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbusReadGrant {
     pub system: bool,
@@ -488,7 +499,7 @@ impl DbusReadGrant {
         member: &str,
         property_interface: Option<&str>,
     ) -> bool {
-        if self.system != system || self.destination != destination {
+        if self.system != system || (self.destination != "*" && self.destination != destination) {
             return false;
         }
         match (interface, member) {
@@ -506,35 +517,58 @@ pub fn parse_dbus_read_capability(value: &str) -> Option<DbusReadGrant> {
     let system = parse_bus(parts.next()?)?;
     let destination = parts.next()?;
     let interface = parts.next()?;
-    (dbus_dotted_name(destination, true) && dbus_dotted_name(interface, false)).then(|| {
-        DbusReadGrant {
-            system,
-            destination: destination.to_string(),
-            interface: interface.to_string(),
-        }
+    ((destination == "*" || dbus_dotted_name(destination, true))
+        && dbus_dotted_name(interface, false))
+    .then(|| DbusReadGrant {
+        system,
+        destination: destination.to_string(),
+        interface: interface.to_string(),
     })
 }
 
-/// A `dbus.subscribe:<bus>:<sender>` grant: receiving the signals one
-/// well-known bus name emits.
+/// A `dbus.subscribe:<bus>:<sender>` grant observes one well-known bus name.
+/// `dbus.subscribe:<bus>:*:<interface>` observes dynamic clients only through
+/// filters naming that exact interface.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbusSubscribeGrant {
     pub system: bool,
     pub sender: String,
+    pub interface: Option<String>,
 }
 
 impl DbusSubscribeGrant {
     pub fn permits(&self, system: bool, sender: &str) -> bool {
-        self.system == system && self.sender == sender
+        self.permits_filter(system, sender, None)
+    }
+
+    pub fn permits_filter(&self, system: bool, sender: &str, interface: Option<&str>) -> bool {
+        self.system == system
+            && (self.sender == sender || self.sender == "*")
+            && self
+                .interface
+                .as_deref()
+                .is_none_or(|required| interface == Some(required))
     }
 }
 
 pub fn parse_dbus_subscribe_capability(value: &str) -> Option<DbusSubscribeGrant> {
-    let (bus, sender) = value.strip_prefix("dbus.subscribe:")?.split_once(':')?;
+    let (bus, target) = value.strip_prefix("dbus.subscribe:")?.split_once(':')?;
     let system = parse_bus(bus)?;
-    dbus_dotted_name(sender, true).then(|| DbusSubscribeGrant {
+    let (sender, interface) = if let Some(interface) = target.strip_prefix("*:") {
+        if !dbus_dotted_name(interface, false) {
+            return None;
+        }
+        ("*", Some(interface.to_string()))
+    } else {
+        if !dbus_dotted_name(target, true) {
+            return None;
+        }
+        (target, None)
+    };
+    Some(DbusSubscribeGrant {
         system,
         sender: sender.to_string(),
+        interface,
     })
 }
 
@@ -981,6 +1015,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dynamic_dbus_signal_grants_require_the_declared_interface() {
+        let grant =
+            parse_dbus_subscribe_capability("dbus.subscribe:session:*:org.kde.StatusNotifierItem")
+                .unwrap();
+        assert!(grant.permits_filter(false, ":1.20", Some("org.kde.StatusNotifierItem")));
+        assert!(!grant.permits_filter(false, ":1.20", None));
+        assert!(!grant.permits_filter(false, ":1.20", Some("org.secret.Messages")));
+        assert!(!grant.permits_filter(true, ":1.20", Some("org.kde.StatusNotifierItem")));
+        assert!(parse_dbus_subscribe_capability("dbus.subscribe:session:*").is_none());
+        let read =
+            parse_dbus_read_capability("dbus.read:session:*:org.kde.StatusNotifierItem").unwrap();
+        assert!(read.permits(
+            false,
+            ":1.20",
+            DBUS_PROPERTIES_INTERFACE,
+            "GetAll",
+            Some("org.kde.StatusNotifierItem")
+        ));
+        assert!(!read.permits(
+            false,
+            ":1.20",
+            DBUS_PROPERTIES_INTERFACE,
+            "GetAll",
+            Some("org.secret.Messages")
+        ));
+        assert!(!read.permits(
+            false,
+            ":1.20",
+            DBUS_PROPERTIES_INTERFACE,
+            "Set",
+            Some("org.kde.StatusNotifierItem")
+        ));
+    }
+
+    #[test]
     fn scoped_dbus_reads_and_subscriptions_name_one_service() {
         let catalog = CapabilityCatalog::builtin();
         assert_eq!(
@@ -994,7 +1063,7 @@ mod tests {
         for invalid in [
             "dbus.system",
             "dbus.session",
-            "dbus.read:system:*:org.a.B",
+            "dbus.read:system:*:*",
             "dbus.read:system:org.a.B",
             "dbus.subscribe:system:*",
             "dbus.subscribe:user:org.a.B",
@@ -1033,8 +1102,14 @@ mod tests {
                 "dbus.read:system:org.freedesktop.UPower:org.freedesktop.UPower.Device",
                 "read org.freedesktop.UPower.Device properties from org.freedesktop.UPower (system bus)",
             ),
-            ("dbus.subscribe:system:org.a.B", "watch org.a.B for changes (system bus)"),
-            ("dbus.call:session:*:org.a.Item", "call org.a.Item methods on any service (session bus)"),
+            (
+                "dbus.subscribe:system:org.a.B",
+                "watch org.a.B for changes (system bus)",
+            ),
+            (
+                "dbus.call:session:*:org.a.Item",
+                "call org.a.Item methods on any service (session bus)",
+            ),
         ] {
             assert_eq!(describe_capability(id), text);
         }
@@ -1052,8 +1127,17 @@ mod tests {
             catalog.validate("fs.read:/**/applications/*.desktop"),
             Ok(PrivilegeLevel::Elevated)
         );
-        assert_eq!(catalog.validate("fs.read:~/.config/app.json"), Ok(PrivilegeLevel::Elevated));
-        for invalid in ["fs.read", "fs.watch", "fs.read:proc/stat", "fs.read:/a/../b", "fs.read:/a/x**"] {
+        assert_eq!(
+            catalog.validate("fs.read:~/.config/app.json"),
+            Ok(PrivilegeLevel::Elevated)
+        );
+        for invalid in [
+            "fs.read",
+            "fs.watch",
+            "fs.read:proc/stat",
+            "fs.read:/a/../b",
+            "fs.read:/a/x**",
+        ] {
             assert!(catalog.validate(invalid).is_err(), "{invalid}");
         }
 

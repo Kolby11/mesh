@@ -79,6 +79,7 @@ and easing, with separate entrance animations for islands, cards and popups.
 | `@mesh/networkmanager-network` | backend | `src/main.luau` | `mesh.network` through `nmcli` |
 | `@mesh/hyprland-apps` | backend | `src/main.luau` | `mesh.apps`: desktop entries joined with Hyprland clients |
 | `@mesh/wf-recorder` | backend | `src/main.luau` | `mesh.recorder` through `wf-recorder` |
+| `@mesh/status-notifier-tray` | backend | `src/main.luau` | `mesh.tray`: StatusNotifier watcher/host, item state and controls |
 | `@mesh/freedesktop-notifications` | backend | `src/main.luau` | `mesh.notifications`: owns `org.freedesktop.Notifications` through `mesh.dbus_serve` |
 | `@mesh/proc-system` | backend | `src/main.luau` | `mesh.system` from `/proc`, hwmon and `df` |
 | `@mesh/cava-visualizer` | backend | `src/main.luau` | `mesh.visualizer` spectrum bars from `cava` |
@@ -97,6 +98,7 @@ and easing, with separate entrance animations for islands, cards and popups.
 | `@mesh/weather-interface` | interface | `mesh.weather` conditions and forecast contract |
 | `@mesh/network-interface` | interface | `mesh.network` connectivity and Wi-Fi contract |
 | `@mesh/apps-interface` | interface | `mesh.apps` pinned, running and installed application contract |
+| `@mesh/tray-interface` | interface | `mesh.tray` item state and activation contract |
 | `@mesh/notifications-interface` | interface | `mesh.notifications` desktop notification contract |
 | `@mesh/system-interface` | interface | `mesh.system` processor, memory, disk, temperature and network load |
 | `@mesh/visualizer-interface` | interface | `mesh.visualizer` audio spectrum contract |

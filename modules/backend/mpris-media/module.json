@@ -13,23 +13,21 @@
         "exec.argv:playerctl:[\"play-pause\"]",
         "exec.argv:playerctl:[\"next\"]",
         "exec.argv:playerctl:[\"previous\"]",
-        "exec.argv:playerctl:[\"position\",\"*\"]",
-        "exec.argv:sh:[\"-c\",\"d=\\\"${XDG_CACHE_HOME:-$HOME/.cache}/mesh/media-art\\\"; mkdir -p \\\"$d\\\" && printf '%s' \\\"$d\\\"\"]"
+        "exec.argv:playerctl:[\"position\",\"*\"]"
       ],
       "optionalCapabilities": [
-        "exec.argv:curl:[\"-sfL\",\"--max-time\",\"10\",\"-o\",\"*\",\"*\"]"
+        "net.http"
       ],
       "binaries": [
         {
           "name": "playerctl",
           "reason": "Read and control MPRIS media players.",
-          "packages": { "arch": "playerctl", "debian": "playerctl", "fedora": "playerctl", "nixos": "playerctl" }
-        },
-        {
-          "name": "curl",
-          "reason": "Download remote cover art into the local cache.",
-          "optional": true,
-          "packages": { "arch": "curl", "debian": "curl", "fedora": "curl", "nixos": "curl" }
+          "packages": {
+            "arch": "playerctl",
+            "debian": "playerctl",
+            "fedora": "playerctl",
+            "nixos": "playerctl"
+          }
         }
       ],
       "modules": {

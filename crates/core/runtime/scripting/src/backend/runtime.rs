@@ -1364,6 +1364,7 @@ impl BackendScriptContext {
         mesh.set("json", crate::json::create_json_library(self.lua_ref()?)?)?;
         self.install_exec_api(&mesh)?;
         self.install_file_api(&mesh)?;
+        self.install_http_api(&mesh)?;
         self.install_config_api(&mesh)?;
         self.install_log_api(&mesh)?;
         let task = crate::context::tasks::create_task_library(self.lua_ref()?, &self.tasks)?;
@@ -1704,6 +1705,27 @@ impl BackendScriptContext {
                     }
                 })?,
         )?;
+        let property_streams = Arc::clone(&self.streams);
+        let property_started = Arc::clone(&self.host_side_effects_enabled);
+        let property_services = Arc::clone(&services);
+        mesh.set(
+            "dbus_set_property",
+            self.lua_ref()?.create_function(
+                move |lua, (handle, name, value): (Table, String, LuaValue)| {
+                    require_started(&property_started)?;
+                    let generation: u64 = handle.get("generation")?;
+                    let id: u64 = handle.get("id")?;
+                    if generation != property_streams.generation() {
+                        return Ok(false);
+                    }
+                    let value = lua.from_value::<JsonValue>(value)?;
+                    property_services
+                        .set_property(super::StreamId::from_raw(id), &name, value)
+                        .map(|()| true)
+                        .map_err(mlua::Error::runtime)
+                },
+            )?,
+        )?;
         let owned = |streams: &Arc<super::StreamState>, handle: &Table| -> mlua::Result<_> {
             let generation: u64 = handle.get("generation")?;
             let id: u64 = handle.get("id")?;
@@ -1805,8 +1827,15 @@ impl BackendScriptContext {
                     let filter = lua
                         .from_value::<super::host_events::SignalFilter>(LuaValue::Table(filter))?;
                     let granted = capabilities.iter().any(|id| {
-                        mesh_core_capability::parse_dbus_subscribe_capability(id)
-                            .is_some_and(|grant| grant.permits(system, &filter.sender))
+                        mesh_core_capability::parse_dbus_subscribe_capability(id).is_some_and(
+                            |grant| {
+                                grant.permits_filter(
+                                    system,
+                                    &filter.sender,
+                                    filter.interface.as_deref(),
+                                )
+                            },
+                        )
                     });
                     if !granted {
                         return Ok(LuaValue::Boolean(false));
@@ -2093,6 +2122,53 @@ impl BackendScriptContext {
             super::task_io::yielding_host_function(self.lua_ref()?, blocking, start)?,
         )?;
         Ok(())
+    }
+
+    fn install_http_api(&mut self, mesh: &Table) -> mlua::Result<()> {
+        let granted = self.capabilities.contains("net.http");
+        let resources = self.policy.budget();
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        let cache = super::http::cache_root(&self.module_id);
+        let blocking = self.lua_ref()?.create_function(move |lua, spec: Table| {
+            require_started(&started)?;
+            if !granted {
+                return Err(mlua::Error::runtime("missing capability net.http"));
+            }
+            let spec = lua.from_value::<super::http::Request>(LuaValue::Table(spec))?;
+            spec.validate().map_err(mlua::Error::runtime)?;
+            let value = {
+                let _pause = resources.pause_frame_clock();
+                super::http::request(spec, resources.output_limit() as usize, &cache)
+            };
+            let bytes = resources
+                .validate_json(&value, "HTTP reply")
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            resources
+                .reserve_output(bytes)
+                .map_err(|error| mlua::Error::external(error.to_string()))?;
+            lua.to_value(&value)
+        })?;
+        let resources = self.policy.budget();
+        let started = Arc::clone(&self.host_side_effects_enabled);
+        let owner = Arc::clone(&self.task_io);
+        let cache = super::http::cache_root(&self.module_id);
+        let start = self.lua_ref()?.create_function(move |lua, spec: Table| {
+            require_started(&started)?;
+            if !granted {
+                return Err(mlua::Error::runtime("missing capability net.http"));
+            }
+            let spec = lua.from_value::<super::http::Request>(LuaValue::Table(spec))?;
+            spec.validate().map_err(mlua::Error::runtime)?;
+            let limit = resources.output_limit() as usize;
+            let cache = cache.clone();
+            owner.spawn(lua, resources.clone(), move || {
+                Ok(super::http::request(spec, limit, &cache))
+            })
+        })?;
+        mesh.set(
+            "http_request",
+            super::task_io::yielding_host_function(self.lua_ref()?, blocking, start)?,
+        )
     }
 
     fn install_file_api(&mut self, mesh: &Table) -> mlua::Result<()> {

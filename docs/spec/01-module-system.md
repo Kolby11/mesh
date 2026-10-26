@@ -1155,7 +1155,10 @@ without the grant.
   permits only `Properties.Get`/`GetAll` for that interface and `Introspect` at
   that name; `dbus.subscribe:<bus>:<sender>` permits `mesh.dbus_subscribe`
   for that sender. Both are Standard on the system bus and Elevated on the
-  session bus. There is no bus-wide D-Bus grant.
+  session bus. Dynamic-client reads may use `dbus.read:<bus>:*:<interface>`;
+  dynamic signal sources use `dbus.subscribe:<bus>:*:<interface>` and require
+  that exact `filter.interface`. Neither form permits another interface or bus;
+  an unqualified `dbus.subscribe:<bus>:*` remains invalid.
 - **Shipped — scoped files.** `fs.read:<pattern>` and `fs.watch:<pattern>`
   permit `mesh.read_file` and `mesh.watch_path` on matching paths. Patterns
   are absolute or start with `~/` (home); `*` matches within a segment and a
@@ -1168,9 +1171,15 @@ without the grant.
   battery status", "watch org.freedesktop.UPower for changes". Install
   approval errors include it, and `mesh-shell permissions <module>` (also
   printed after `install`) lists a module's grants by level.
+- **Shipped — HTTP.** `net.http` permits backend `mesh.http_request(spec)`:
+  bounded HTTP/HTTPS requests with verified TLS, deadlines and redirects. The
+  call yields in a coroutine. `cache = true` returns a module-scoped cached
+  file for binary data rather than exposing arbitrary filesystem writes. See
+  [backend host APIs](../modules/backend-events.md#http-requests).
 - **Shipped — owned D-Bus names.** `dbus.own:<bus>:<name>` permits
   `mesh.dbus_serve` to own one well-known name and export one interface at one
-  object path; `<bus>` is `system` (High) or `session` (Elevated). See
+  object path, including declared read-only properties; `<bus>` is `system`
+  (High) or `session` (Elevated). See
   [backend host events](../modules/backend-events.md#d-bus-services).
 - **Shipped — exec locale.** Exec children run in `LC_ALL=C.UTF-8` so a
   provider parses the same tool output on every host. A call can ask for

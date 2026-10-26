@@ -57,6 +57,17 @@ pub fn replace_default_registry(registry: IconRegistryHandle) {
     mesh_core_resources::advance_resource_revision();
 }
 
+/// Whether a file icon preserves its source colours. Symbolic assets inherit tint.
+pub fn file_icon_is_multicolor(path: &Path) -> bool {
+    let name = path
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    !name.ends_with("-symbolic")
+        && !name.ends_with(".symbolic")
+        && !path.components().any(|part| part.as_os_str() == "symbolic")
+}
+
 /// Resolve an icon name to a file path using the active committed icon
 /// registry. Before a graph/profile publishes its resource snapshot, the
 /// default registry is intentionally empty.
@@ -77,7 +88,7 @@ pub fn resolve_icon_result(name: &str, size: u32) -> IconResolution {
             semantic_name: name.into(),
             candidate: p.display().to_string(),
             target: ResolvedTarget::File(p.to_path_buf()),
-            multicolor: false,
+            multicolor: file_icon_is_multicolor(p),
             provenance: IconResolutionProvenance {
                 owner_module: None,
                 pack_id: None,
@@ -109,7 +120,7 @@ pub fn resolve_icon_for_module(module_id: &str, name: &str, size: u32) -> IconRe
             semantic_name: name.into(),
             candidate: p.display().to_string(),
             target: ResolvedTarget::File(p.to_path_buf()),
-            multicolor: false,
+            multicolor: file_icon_is_multicolor(p),
             provenance: IconResolutionProvenance {
                 owner_module: None,
                 pack_id: None,
@@ -145,7 +156,7 @@ pub fn resolve_icon_for_module_on_worker(module_id: &str, name: &str, size: u32)
             semantic_name: name.into(),
             candidate: name.into(),
             target: ResolvedTarget::File(path.to_path_buf()),
-            multicolor: false,
+            multicolor: file_icon_is_multicolor(path),
             provenance: IconResolutionProvenance {
                 owner_module: None,
                 pack_id: None,

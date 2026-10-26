@@ -7,6 +7,7 @@ mod exec;
 mod exec_stream;
 mod host_events;
 mod host_sources;
+mod http;
 mod launch_app;
 mod logging;
 mod pipewire_source;
@@ -36,3 +37,6 @@ pub use state::BackendState;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod tray_tests;

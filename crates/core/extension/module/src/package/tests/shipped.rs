@@ -563,3 +563,43 @@ fn every_shipped_provider_implements_a_typed_contract() {
         }
     }
 }
+
+#[test]
+fn shipped_tray_and_http_providers_have_valid_contracts_and_host_grants() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let catalog = mesh_core_capability::CapabilityCatalog::builtin();
+    for directory in [
+        "interfaces/tray",
+        "backend/status-notifier-tray",
+        "backend/open-meteo-weather",
+        "backend/mpris-media",
+    ] {
+        let loaded = load_module_manifest(&root.join("modules").join(directory)).unwrap();
+        assert!(
+            !loaded
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == ModuleManifestDiagnosticSeverity::Error),
+            "{directory}: {:?}",
+            loaded.diagnostics
+        );
+        for capability in loaded
+            .manifest
+            .mesh
+            .capabilities
+            .required
+            .iter()
+            .chain(&loaded.manifest.mesh.capabilities.optional)
+        {
+            catalog
+                .validate(capability)
+                .unwrap_or_else(|error| panic!("{directory}: {error}"));
+        }
+    }
+    let graph = load_installed_module_graph(shipped_graph_path()).unwrap();
+    assert!(
+        graph.interface_contract("mesh.tray").is_some(),
+        "{:?}",
+        graph.diagnostics()
+    );
+}

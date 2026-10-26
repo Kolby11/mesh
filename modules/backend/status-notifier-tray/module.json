@@ -1,0 +1,45 @@
+{
+  "name": "@mesh/status-notifier-tray",
+  "version": "0.1.0",
+  "description": "StatusNotifier watcher and host, using an existing watcher when available.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "entry": "src/main.luau",
+    "uses": {
+      "modules": {
+        "@mesh/tray-interface": "^1.0.0"
+      },
+      "capabilities": [
+        "dbus.own:session:org.kde.StatusNotifierHost.mesh",
+        "dbus.own:session:org.kde.StatusNotifierWatcher",
+        "dbus.own:session:org.freedesktop.StatusNotifierWatcher",
+        "dbus.subscribe:session:org.freedesktop.DBus",
+        "dbus.call:session:org.freedesktop.DBus:org.freedesktop.DBus",
+        "dbus.read:session:org.kde.StatusNotifierWatcher:org.kde.StatusNotifierWatcher",
+        "dbus.call:session:org.kde.StatusNotifierWatcher:org.kde.StatusNotifierWatcher",
+        "dbus.subscribe:session:org.kde.StatusNotifierWatcher",
+        "dbus.read:session:*:org.kde.StatusNotifierItem",
+        "dbus.call:session:*:org.kde.StatusNotifierItem",
+        "dbus.subscribe:session:*:org.kde.StatusNotifierItem",
+        "dbus.read:session:org.freedesktop.StatusNotifierWatcher:org.freedesktop.StatusNotifierWatcher",
+        "dbus.call:session:org.freedesktop.StatusNotifierWatcher:org.freedesktop.StatusNotifierWatcher",
+        "dbus.subscribe:session:org.freedesktop.StatusNotifierWatcher",
+        "dbus.read:session:*:org.freedesktop.StatusNotifierItem",
+        "dbus.call:session:*:org.freedesktop.StatusNotifierItem",
+        "dbus.subscribe:session:*:org.freedesktop.StatusNotifierItem",
+        "dbus.subscribe:session:*:org.freedesktop.DBus.Properties"
+      ]
+    },
+    "implements": [
+      {
+        "interface": "mesh.tray",
+        "version": "1.0",
+        "provider": "status-notifier",
+        "label": "StatusNotifier (D-Bus)",
+        "priority": 100
+      }
+    ]
+  }
+}

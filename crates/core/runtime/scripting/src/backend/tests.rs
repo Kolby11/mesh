@@ -3866,7 +3866,12 @@ end
     assert_eq!(state["other"], false);
     assert_eq!(state["escape"], false);
     assert_eq!(state["foreign_signals"], false);
-    let denied = |field: &str| state[field].as_str().unwrap_or("").starts_with("missing capability");
+    let denied = |field: &str| {
+        state[field]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("missing capability")
+    };
     assert!(!denied("read_error"), "{state:?}");
     assert!(denied("other_interface_error"), "{state:?}");
     assert!(denied("set_error"), "{state:?}");
@@ -3920,8 +3925,10 @@ async fn live_dbus_providers_read_state() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "requires a Wayland compositor advertising ext-workspace"]
 async fn live_ext_workspace_records() {
-    let mut ctx =
-        BackendScriptContext::new_with_capabilities("@test/workspaces", ["wayland.observe".to_string()]);
+    let mut ctx = BackendScriptContext::new_with_capabilities(
+        "@test/workspaces",
+        ["wayland.observe".to_string()],
+    );
     ctx.load_script("function start() mesh.wayland_subscribe(\"workspace\") end")
         .unwrap();
     ctx.call_init().unwrap();
@@ -3931,7 +3938,11 @@ async fn live_ext_workspace_records() {
     while tokio::time::Instant::now() < deadline
         && !records.iter().any(|line: &String| line.contains("\"done\""))
     {
-        let _ = tokio::time::timeout(std::time::Duration::from_millis(200), streams.wait_for_event()).await;
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            streams.wait_for_event(),
+        )
+        .await;
         for event in streams.drain_events() {
             match event.kind {
                 StreamEventKind::Line(line) => records.push(line),
@@ -4043,4 +4054,82 @@ fn launch_app_exists_only_with_its_capability() {
             .is_some_and(|error| error.contains("invalid desktop file id")),
         "{payload:?}"
     );
+}
+
+#[test]
+fn http_requires_its_capability_and_backend_start() {
+    let script = "function start(self) mesh.http_request({ url = 'http://127.0.0.1:1/' }) end";
+    let mut denied = BackendScriptContext::new("@test/http-denied");
+    denied.load_script(script).unwrap();
+    assert!(
+        denied
+            .call_init()
+            .unwrap_err()
+            .to_string()
+            .contains("net.http")
+    );
+    let mut staged =
+        BackendScriptContext::new_with_capabilities("@test/http-staged", ["net.http".into()]);
+    assert!(
+        staged
+            .load_script(
+                "mesh.http_request({ url = 'http://127.0.0.1:1/' }); function start(self) end"
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("before start(self)")
+    );
+    let mut invalid =
+        BackendScriptContext::new_with_capabilities("@test/http-input", ["net.http".into()]);
+    invalid
+        .load_script("function start(self) mesh.http_request({url = 'file:///etc/passwd'}) end")
+        .unwrap();
+    assert!(
+        invalid
+            .call_init()
+            .unwrap_err()
+            .to_string()
+            .contains("HTTP")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn http_yields_the_backend_until_the_bounded_worker_completes() {
+    use std::io::{Read, Write};
+    use std::time::{Duration, Instant};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    let (release, wait) = std::sync::mpsc::channel();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut bytes = [0; 4096];
+        stream.read(&mut bytes).unwrap();
+        let released = wait.recv_timeout(Duration::from_secs(2)).is_ok();
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello")
+            .unwrap();
+        released
+    });
+    let mut ctx =
+        BackendScriptContext::new_with_capabilities("@test/http-worker", ["net.http".into()]);
+    ctx.load_script(&format!("state = {{}}; function start(self) local reply = mesh.http_request({{url = {url:?}}}); state = {{success = reply.success, body = reply.body}} end")).unwrap();
+    assert!(
+        ctx.call_init().unwrap().is_none(),
+        "HTTP startup should suspend"
+    );
+    release.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let state = loop {
+        let run = ctx.run_due_tasks(Instant::now());
+        assert!(run.errors.is_empty(), "{:?}", run.errors);
+        if let Some(start) = run.start {
+            start.unwrap();
+            break run.state.unwrap();
+        }
+        assert!(Instant::now() < deadline);
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    };
+    assert!(server.join().unwrap(), "HTTP blocked the backend thread");
+    assert_eq!(state["success"], true);
+    assert_eq!(state["body"], "hello");
 }

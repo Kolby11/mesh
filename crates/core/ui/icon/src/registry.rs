@@ -722,7 +722,7 @@ impl IconRegistry {
             if let Some(target) = frontend.user_overrides.get(semantic_name)
                 && let Some(found) = self.try_target(
                     target,
-                    false,
+                    None,
                     semantic_name,
                     size,
                     &mut tried,
@@ -737,7 +737,7 @@ impl IconRegistry {
             if let Some(target) = frontend.author_overrides.get(semantic_name)
                 && let Some(found) = self.try_target(
                     target,
-                    false,
+                    None,
                     semantic_name,
                     size,
                     &mut tried,
@@ -805,8 +805,8 @@ impl IconRegistry {
                 return IconResolution::Found {
                     semantic_name: semantic_name.into(),
                     candidate: mapping.clone(),
+                    multicolor: crate::file_icon_is_multicolor(&found),
                     target: ResolvedTarget::File(found),
-                    multicolor: false,
                     provenance: IconResolutionProvenance {
                         owner_module: None,
                         pack_id: Some("hicolor".into()),
@@ -844,7 +844,7 @@ impl IconRegistry {
             .or_else(|| pack.mappings.get(logical_name))?;
         self.try_target(
             &target.target,
-            target.multicolor,
+            Some(target.multicolor),
             semantic_name,
             size,
             tried,
@@ -864,14 +864,14 @@ impl IconRegistry {
     ) -> Option<IconResolution> {
         let mapping = format!("system-pack:{pack_id}/{lookup_name}");
         tried.push(mapping.clone());
-        let target = self
-            .find_system_icon(pack_id, lookup_name, size)
-            .map(ResolvedTarget::File)?;
+        let path = self.find_system_icon(pack_id, lookup_name, size)?;
+        let multicolor = crate::file_icon_is_multicolor(&path);
+        let target = ResolvedTarget::File(path);
         Some(IconResolution::Found {
             semantic_name: semantic_name.into(),
             candidate: mapping.clone(),
             target,
-            multicolor: false,
+            multicolor,
             provenance: IconResolutionProvenance {
                 owner_module: None,
                 pack_id: Some(pack_id.into()),
@@ -887,7 +887,7 @@ impl IconRegistry {
     fn try_target(
         &self,
         target: &str,
-        multicolor: bool,
+        multicolor: Option<bool>,
         semantic_name: &str,
         size: u32,
         tried: &mut Vec<String>,
@@ -909,7 +909,7 @@ impl IconRegistry {
                 semantic_name: semantic_name.into(),
                 candidate: mapping_label.clone(),
                 target: ResolvedTarget::File(p.to_path_buf()),
-                multicolor,
+                multicolor: multicolor.unwrap_or_else(|| crate::file_icon_is_multicolor(p)),
                 provenance: self.provenance(owner_pack, mapping_label, fallback_stage),
             });
         }
@@ -928,7 +928,7 @@ impl IconRegistry {
                 semantic_name: semantic_name.into(),
                 candidate: mapping_label.clone(),
                 target,
-                multicolor,
+                multicolor: multicolor.unwrap_or(false),
                 provenance: self.provenance(Some(owner_pack), mapping_label, fallback_stage),
             });
         }
@@ -938,8 +938,8 @@ impl IconRegistry {
             return Some(IconResolution::Found {
                 semantic_name: semantic_name.into(),
                 candidate: mapping_label.clone(),
-                target: ResolvedTarget::File(path),
-                multicolor,
+                target: ResolvedTarget::File(path.clone()),
+                multicolor: multicolor.unwrap_or_else(|| crate::file_icon_is_multicolor(&path)),
                 provenance: self.provenance(owner_pack, mapping_label, fallback_stage),
             });
         }
@@ -1048,6 +1048,56 @@ mod tests {
             mesh_core_resources::SystemResourceCatalog::from_icon_dirs(vec![root.to_path_buf()]),
         ))
         .unwrap()
+    }
+
+    #[test]
+    fn system_icon_names_preserve_colour_except_symbolic_assets() {
+        let root = tempdir().unwrap();
+        let mut registry =
+            registry_with_theme(root.path(), "ColourPolicy", &["logo", "logo-symbolic"]);
+        registry.set_shell_default_pack(Some("ColourPolicy".into()));
+        for (name, expected) in [("logo", true), ("logo-symbolic", false)] {
+            assert!(
+                matches!(registry.resolve_for_module("frontend", name, 16), IconResolution::Found { multicolor, .. } if multicolor == expected)
+            );
+        }
+        registry.set_icon_pack(IconPackBindings {
+            pack_id: "explicit-colour".into(),
+            module_id: "@test/explicit-colour".into(),
+            mappings: HashMap::from([
+                (
+                    "tinted".into(),
+                    crate::IconMapping {
+                        target: "ColourPolicy/logo".into(),
+                        multicolor: false,
+                    },
+                ),
+                (
+                    "coloured".into(),
+                    crate::IconMapping {
+                        target: "ColourPolicy/logo-symbolic".into(),
+                        multicolor: true,
+                    },
+                ),
+            ]),
+            vocabularies: HashMap::new(),
+            axes: SupportedAxes::default(),
+            font_aliases: HashMap::new(),
+        });
+        for (name, expected) in [
+            ("explicit-colour/tinted", false),
+            ("explicit-colour/coloured", true),
+        ] {
+            assert!(
+                matches!(registry.resolve_for_module("frontend", name, 16), IconResolution::Found { multicolor, .. } if multicolor == expected)
+            );
+        }
+        assert!(!crate::file_icon_is_multicolor(std::path::Path::new(
+            "theme/symbolic/apps/logo.svg"
+        )));
+        assert!(!crate::file_icon_is_multicolor(std::path::Path::new(
+            "logo-symbolic.symbolic.png"
+        )));
     }
 
     #[test]

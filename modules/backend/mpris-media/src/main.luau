@@ -16,9 +16,8 @@ local EMPTY = {
 
 state = table.clone(EMPTY)
 
-local art_dir = nil
--- Remote art URL -> cached local path, so a track change never re-downloads.
-local art_cache = {}
+-- Repeated metadata updates for the current track reuse its downloaded art.
+local art_url, art_path = "", ""
 
 local function now()
     return os.time()
@@ -32,24 +31,13 @@ local function micros(value)
     return number / 1000000
 end
 
-local function resolve_art_dir()
-    if art_dir then
-        return art_dir
-    end
-    local result = mesh.exec("sh", { "-c", "d=\"${XDG_CACHE_HOME:-$HOME/.cache}/mesh/media-art\"; mkdir -p \"$d\" && printf '%s' \"$d\"" })
-    if result.success and (result.stdout or "") ~= "" then
-        art_dir = result.stdout
-    end
-    return art_dir
-end
-
 local function url_decode(text)
     return (text:gsub("%%(%x%x)", function(hex)
         return string.char(tonumber(hex, 16))
     end))
 end
 
--- Returns a local path for `url`, downloading remote art at most once.
+-- Returns a local path, downloading once while this art URL remains current.
 local function local_art(url)
     if url == "" then
         return ""
@@ -61,29 +49,17 @@ local function local_art(url)
     if not url:match("^https?://") then
         return ""
     end
-    if art_cache[url] then
-        return art_cache[url]
-    end
-    local dir = resolve_art_dir()
-    if not dir then
+    if art_url == url then return art_path end
+    if not mesh.service.has_capability("net.http") then
         return ""
     end
-    local name = url:gsub("^https?://", ""):gsub("[^%w%.%-_]", "_")
-    if #name > 120 then
-        name = name:sub(-120)
-    end
-    local path = dir .. "/" .. name
-    local args = { "-sfL", "--max-time", "10", "-o", path, url }
-    if not mesh.service.can_exec("curl", args) then
-        return ""
-    end
-    local result = mesh.exec("curl", args)
+    local result = mesh.http_request({ url = url, timeout_ms = 10000, cache = true })
     if not result.success then
         mesh.log.debug("[mpris-media] cover art download failed: " .. url)
         return ""
     end
-    art_cache[url] = path
-    return path
+    art_url, art_path = url, result.path
+    return art_path
 end
 
 local function parse(line)

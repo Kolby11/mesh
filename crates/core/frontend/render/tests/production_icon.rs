@@ -395,3 +395,52 @@ fn relative_file_names_resolve_on_the_worker_without_false_missing_markers() {
         );
     }
 }
+
+#[test]
+fn named_and_source_icons_preserve_colour_while_symbolic_files_inherit_tint() {
+    let _guard = test_guard();
+    let root = tempfile::tempdir().unwrap();
+    install_theme(root.path(), "#ff0000");
+    let regular = root.path().join("AsyncIconTest/scalable/cold-test.svg");
+    let symbolic = root
+        .path()
+        .join("AsyncIconTest/scalable/cold-test-symbolic.svg");
+    std::fs::copy(&regular, &symbolic).unwrap();
+    for (source, name, expected) in [
+        (false, "cold-test", [0, 0, 255, 255]),
+        (false, "cold-test-symbolic", [0, 255, 0, 255]),
+        (true, regular.to_str().unwrap(), [0, 0, 255, 255]),
+        (true, symbolic.to_str().unwrap(), [0, 255, 0, 255]),
+    ] {
+        let mut icon = named_icon(name);
+        icon.computed_style.color = Color {
+            r: 0,
+            g: 255,
+            b: 0,
+            a: 255,
+        };
+        if source {
+            icon.attributes.remove(Prop::Name);
+            icon.attributes.insert(Prop::Src, name.into());
+        }
+        let consumer = mesh_core_render::ResourcePaintConsumer::default();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            mesh_core_render::poll_icon_resolution_jobs();
+            mesh_core_render::poll_icon_raster_jobs();
+            let pixels = paint_icon(&icon, &consumer);
+            if pixels.data().chunks_exact(4).any(|pixel| pixel[3] != 0) {
+                assert!(
+                    pixels.data().chunks_exact(4).all(|pixel| pixel == expected),
+                    "source={source}, name={name}"
+                );
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "icon never became ready"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+}

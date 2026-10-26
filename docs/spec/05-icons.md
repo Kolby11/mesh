@@ -227,6 +227,15 @@ semantics): monochrome assets are recolored; `multicolor` targets skip
 recoloring and axis application. There is no `icon.color` token — tint the
 parent.
 
+Shipped file policy: implicit XDG/theme and hicolor results, direct file names,
+and `<icon src>` preserve source colours unless the resolved file stem ends in
+`-symbolic` or `.symbolic`, or a path component is `symbolic`. Those symbolic
+files inherit `color`. This classification uses the resolved asset path, without
+reading image contents during lookup. Explicit icon-pack mappings keep their
+`multicolor` flag (including `false` for a deliberately tinted file); prepared
+font glyphs remain tinted. `<image src>` always preserves source colours,
+including symbolic files.
+
 ## 7. Variable axes & style tokens
 
 Theme tokens control icon look without shipping new packs

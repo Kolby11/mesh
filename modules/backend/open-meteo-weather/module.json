@@ -8,14 +8,7 @@
     "kind": "backend",
     "uses": {
       "capabilities": [
-        "exec.argv:curl:[\"-sf\",\"--max-time\",\"15\",\"*\"]"
-      ],
-      "binaries": [
-        {
-          "name": "curl",
-          "reason": "Fetch forecasts from api.open-meteo.com and the IP location fallback.",
-          "packages": { "arch": "curl", "debian": "curl", "fedora": "curl", "nixos": "curl" }
-        }
+        "net.http"
       ],
       "modules": {
         "@mesh/weather-interface": "^1.0.0"

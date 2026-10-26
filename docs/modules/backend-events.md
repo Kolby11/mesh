@@ -138,6 +138,38 @@ In a coroutine the call suspends on the bounded host worker pool like
 private bus connection, so it suits occasional reads and controls rather than
 per-frame polling.
 
+## HTTP requests
+
+`mesh.http_request(spec)` requires `net.http` and a started backend. It yields
+on the bounded host I/O workers inside a coroutine; synchronous callers retain
+blocking behaviour with their frame clock paused. The request accepts `url`,
+`method` (default `GET`), string `headers`, UTF-8 `body`, `timeout_ms` (default
+15,000; 1–60,000), and `cache` (default `false`). Only HTTP/HTTPS URLs without
+embedded credentials are accepted. TLS certificates are verified; requests starting with HTTPS cannot
+redirect to HTTP. At most five redirects are followed, and the deadline includes
+response-body reads. Request bodies are limited to 1 MiB, with bounded URL and
+header sizes.
+
+```lua
+local reply = mesh.http_request({ url = "https://example.org/status", timeout_ms = 10000 })
+if reply.success then
+    local status = mesh.json.decode(reply.body)
+end
+local image = mesh.http_request({ url = "https://example.org/art.png", cache = true })
+-- image.path is a local file suitable for <image src>.
+```
+
+The result has `success`, `status`, `headers`, `body`, `path`, and `error`.
+HTTP errors retain the status and text body; transport errors have status zero.
+Ordinary bodies must be UTF-8 and fit the callback's JSON/output budgets.
+`cache = true` is GET-only, reads at most 8 MiB, and returns a content-addressed
+file under `$XDG_CACHE_HOME/mesh/http/<module hash>` (or `$HOME/.cache/...`),
+with an empty body. Binary files are mode 0600; each module's disk cache is
+bounded to 32 MiB and 128 files. Cached files may be evicted; consumers should
+retain their current result, not an unbounded map of old paths. Failed HTTP
+responses do not create cache entries. Both weather and optional MPRIS remote
+art use this API; neither requires `curl`.
+
 ## D-Bus services
 
 `mesh.dbus_serve(bus, spec)` owns one well-known name and exports one interface
@@ -181,6 +213,38 @@ error. Each call is answered once; one the provider leaves unanswered gets
 All three raise an error for malformed values and return `false` for a handle from
 another generation. Arrays longer than 1,024 items in a call body (raw pixel
 data, for example) arrive as `{ elided = <length> }`.
+
+Service specs can also declare read-only properties as
+`properties = { Enabled = { signature = "b", value = false } }`. The host
+validates initial values, serves `Properties.Get`/`GetAll`, rejects `Set`, and
+includes properties in introspection. `mesh.dbus_set_property(handle, name,
+value)` validates the existing declared type, updates the value and emits
+`PropertiesChanged` when it changes. A stale generation returns `false`.
+
+For clients with dynamic bus names, `dbus.read:session:*:<interface>` authorizes
+only that interface's property reads. `dbus.subscribe:session:*:<interface>`
+authorizes filters with that exact interface and a concrete sender/path; it
+does not grant unrestricted bus observation.
+
+## StatusNotifier tray provider
+
+`@mesh/status-notifier-tray` implements `mesh.tray` from
+`@mesh/tray-interface`. Select it through normal provider bindings; it does not
+add a tray surface or take over a running desktop watcher by default. It owns a
+persistent host name, joins an existing KDE/freedesktop watcher when available,
+and otherwise exports the corresponding watcher. Registration accepts service
+names or a sender-relative object path. The provider publishes item metadata,
+tracks item signals and bus-owner loss, retries watcher connections, and
+forwards `activate`, `secondary_activate`, `context_menu` and `scroll` commands.
+Menu-only items activate through `ContextMenu`.
+
+Items expose semantic icon names (including attention and overlay names),
+tooltip text, a menu object path and icon-theme path. Pixmap-only items expose
+bounded hexadecimal ARGB32 network-order bytes with width/height, downsampled
+to at most 32×32. Names are preferred. Registration is bounded to 32 items;
+published state is bounded, dropping optional pixmaps before metadata when
+necessary. Consumers render these fields using their own modules; a composed
+DBusMenu UI is not included. See the [StatusNotifier specification](https://specifications.freedesktop.org/status-notifier-item/latest-single/).
 
 ## Other protocol records
 

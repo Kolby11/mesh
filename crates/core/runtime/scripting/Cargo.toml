@@ -27,6 +27,7 @@ tracing = { workspace = true }
 libc = { workspace = true }
 mlua = { version = "0.11", features = ["luau", "serialize", "send"] }
 zbus = { version = "~5.12.0", default-features = false, features = ["tokio"] }
+ureq = { version = "3.5", default-features = false, features = ["rustls", "gzip"] }
 futures-util = "0.3"
 pipewire = "0.10"
 wayland-client = "0.31"

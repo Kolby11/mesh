@@ -196,7 +196,9 @@ pub(super) fn build_paint_content_with_previous(
                 .attributes
                 .get(Prop::Size)
                 .and_then(|value| value.parse::<u32>().ok()),
-            multicolor: false,
+            multicolor: node.attributes.get(Prop::Src).is_some_and(|src| {
+                mesh_core_icon::file_icon_is_multicolor(std::path::Path::new(src))
+            }),
         }),
         // An image is content, not a glyph: its file paints in its own colours.
         "image" => DisplayPaintContent::Icon(DisplayIconPaint {

@@ -20,11 +20,11 @@ local function settings()
 end
 
 local function fetch_json(url)
-    local result = mesh.exec("curl", { "-sf", "--max-time", "15", url })
+    local result = mesh.http_request({ url = url, timeout_ms = 15000 })
     if not result.success then
         return nil
     end
-    local ok, value = pcall(mesh.json.decode, result.stdout or "")
+    local ok, value = pcall(mesh.json.decode, result.body or "")
     return ok and type(value) == "table" and value or nil
 end
 

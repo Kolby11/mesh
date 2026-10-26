@@ -48,6 +48,13 @@ pub(super) struct MethodSpec {
     pub output: String,
 }
 
+#[derive(Clone, Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct PropertySpec {
+    pub signature: String,
+    pub value: Json,
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ServiceSpec {
@@ -58,6 +65,8 @@ pub(super) struct ServiceSpec {
     pub methods: BTreeMap<String, MethodSpec>,
     #[serde(default)]
     pub signals: BTreeMap<String, String>,
+    #[serde(default)]
+    pub properties: BTreeMap<String, PropertySpec>,
     /// Take the name from a current owner that allows replacement.
     #[serde(default)]
     pub replace: bool,
@@ -76,6 +85,19 @@ impl ServiceSpec {
                 .map_err(|error| format!("invalid method name {member:?}: {error}"))?;
             body_types(&method.input)?;
             body_types(&method.output)?;
+        }
+        if self.properties.len() > 256 {
+            return Err("too many D-Bus properties".into());
+        }
+        for (name, property) in &self.properties {
+            zbus::names::MemberName::try_from(name.as_str()).map_err(|error| error.to_string())?;
+            if body_types(&property.signature)?.len() != 1 {
+                return Err("a property needs exactly one D-Bus type".into());
+            }
+            encode_body(&property.signature, &[property.value.clone()])?;
+            if property.value.to_string().len() > MAX_STREAM_LINE_BYTES / 4 {
+                return Err("D-Bus property exceeds size limit".into());
+            }
         }
         for (member, signature) in &self.signals {
             zbus::names::MemberName::try_from(member.as_str())
@@ -114,6 +136,13 @@ impl ServiceSpec {
             xml.push_str(&args(signature, None));
             xml.push_str("    </signal>\n");
         }
+        for (name, property) in &self.properties {
+            xml.push_str(&format!(
+                "    <property name=\"{name}\" type=\"{}\" access=\"read\"/>\n",
+                property.signature
+            ));
+        }
+        xml.push_str("  </interface>\n  <interface name=\"org.freedesktop.DBus.Properties\">\n    <method name=\"Get\"><arg type=\"s\" direction=\"in\"/><arg type=\"s\" direction=\"in\"/><arg type=\"v\" direction=\"out\"/></method>\n    <method name=\"GetAll\"><arg type=\"s\" direction=\"in\"/><arg type=\"a{sv}\" direction=\"out\"/></method>\n    <method name=\"Set\"><arg type=\"s\" direction=\"in\"/><arg type=\"s\" direction=\"in\"/><arg type=\"v\" direction=\"in\"/></method>\n    <signal name=\"PropertiesChanged\"><arg type=\"s\"/><arg type=\"a{sv}\"/><arg type=\"as\"/></signal>\n");
         xml.push_str(
             "  </interface>\n  <interface name=\"org.freedesktop.DBus.Introspectable\">\n    \
              <method name=\"Introspect\">\n      <arg type=\"s\" direction=\"out\"/>\n    \
@@ -125,6 +154,9 @@ impl ServiceSpec {
 }
 
 enum Command {
+    PropertyChanged {
+        body: Structure<'static>,
+    },
     Reply {
         id: u64,
         body: Option<Structure<'static>>,
@@ -142,6 +174,7 @@ enum Command {
 
 struct Service {
     spec: Arc<ServiceSpec>,
+    properties: Arc<Mutex<BTreeMap<String, PropertySpec>>>,
     commands: mpsc::UnboundedSender<Command>,
     /// Pending call id -> method name, so replies encode against the
     /// declared output signature before they reach the connection task.
@@ -204,6 +237,47 @@ impl DbusServices {
             .map_err(|_| "D-Bus service has stopped".to_string())
     }
 
+    pub(super) fn set_property(
+        &self,
+        stream: StreamId,
+        name: &str,
+        value: Json,
+    ) -> Result<(), String> {
+        let services = self
+            .services
+            .lock()
+            .expect("dbus service registry poisoned");
+        let service = services.get(&stream).ok_or("not an active D-Bus service")?;
+        let mut properties = service
+            .properties
+            .lock()
+            .expect("dbus property registry poisoned");
+        let property = properties.get_mut(name).ok_or("property is not declared")?;
+        encode_body(&property.signature, &[value.clone()])?;
+        if value.to_string().len() > MAX_STREAM_LINE_BYTES / 4 {
+            return Err("D-Bus property exceeds size limit".into());
+        }
+        if property.value == value {
+            return Ok(());
+        }
+        let variant = serde_json::json!({"signature": property.signature, "value": value});
+        let body = encode_body(
+            "sa{sv}as",
+            &[
+                Json::String(service.spec.interface.clone()),
+                serde_json::json!({name: variant}),
+                serde_json::json!([]),
+            ],
+        )?
+        .unwrap();
+        service
+            .commands
+            .send(Command::PropertyChanged { body })
+            .map_err(|_| "D-Bus service has stopped".to_string())?;
+        property.value = value;
+        Ok(())
+    }
+
     pub(super) fn emit(&self, stream: StreamId, member: &str, args: &[Json]) -> Result<(), String> {
         let services = self
             .services
@@ -238,6 +312,8 @@ pub(super) fn spawn_service(
     let pending = Arc::new(Mutex::new(HashMap::new()));
     let registry = Arc::clone(services);
     let task_spec = Arc::clone(&spec);
+    let properties = Arc::new(Mutex::new(spec.properties.clone()));
+    let task_properties = Arc::clone(&properties);
     let task_pending = Arc::clone(&pending);
     // Hold the registry across the spawn so a service that fails at once
     // removes its entry only after it was inserted.
@@ -252,7 +328,7 @@ pub(super) fn spawn_service(
         move |state, stream, mut stop| async move {
             let result = tokio::select! {
                 _ = &mut stop => Ok(()),
-                result = serve(&state, &stream, bus, &task_spec, &task_pending, receiver) => result,
+                result = serve(&state, &stream, bus, &task_spec, &task_properties, &task_pending, receiver) => result,
             };
             registry
                 .services
@@ -266,6 +342,7 @@ pub(super) fn spawn_service(
         handle.id(),
         Service {
             spec,
+            properties,
             commands,
             pending,
         },
@@ -278,6 +355,7 @@ async fn serve(
     stream: &StreamHandle,
     bus: BusTarget,
     spec: &ServiceSpec,
+    properties: &Mutex<BTreeMap<String, PropertySpec>>,
     pending_members: &Mutex<HashMap<u64, String>>,
     mut commands: mpsc::UnboundedReceiver<Command>,
 ) -> Result<(), String> {
@@ -320,7 +398,7 @@ async fn serve(
                     return Err("D-Bus connection closed".into());
                 };
                 let message = message.map_err(error)?;
-                let Some(record) = route(&connection, spec, &message).await.map_err(error)? else {
+                let Some(record) = route(&connection, spec, properties, &message).await.map_err(error)? else {
                     continue;
                 };
                 if pending.len() >= MAX_PENDING_CALLS {
@@ -365,6 +443,9 @@ async fn serve(
                     return Ok(());
                 };
                 match command {
+                    Command::PropertyChanged { body } => {
+                        connection.emit_signal(None::<&str>, spec.path.as_str(), "org.freedesktop.DBus.Properties", "PropertiesChanged", &body).await.map_err(error)?;
+                    }
                     Command::Reply { id, body } => {
                         if let Some((call, _)) = take(&mut pending, pending_members, id) {
                             match body {
@@ -442,6 +523,7 @@ fn take(
 async fn route(
     connection: &Connection,
     spec: &ServiceSpec,
+    properties: &Mutex<BTreeMap<String, PropertySpec>>,
     message: &Message,
 ) -> zbus::Result<Option<Json>> {
     let header = message.header();
@@ -469,6 +551,18 @@ async fn route(
             return Ok(None);
         }
         _ => {}
+    }
+    if path == spec.path && interface == Some("org.freedesktop.DBus.Properties") {
+        let reply = property_reply(spec, properties, member, message);
+        match reply {
+            Ok(body) => {
+                connection.reply(&header, &body).await?;
+            }
+            Err((name, error)) => {
+                connection.reply_error(&header, name, &error).await?;
+            }
+        }
+        return Ok(None);
     }
     let method = (path == spec.path && interface.is_none_or(|name| name == spec.interface))
         .then(|| spec.methods.get(member))
@@ -510,6 +604,53 @@ async fn route(
         "signature": method.input,
         "body": fields,
     })))
+}
+
+fn property_reply(
+    spec: &ServiceSpec,
+    properties: &Mutex<BTreeMap<String, PropertySpec>>,
+    member: &str,
+    message: &Message,
+) -> Result<Structure<'static>, (&'static str, String)> {
+    let invalid = |error: String| ("org.freedesktop.DBus.Error.InvalidArgs", error);
+    let (interface, property) = match member {
+        "Get" => {
+            let (interface, name) = message
+                .body()
+                .deserialize::<(String, String)>()
+                .map_err(|error| invalid(error.to_string()))?;
+            (interface, Some(name))
+        }
+        "GetAll" => (
+            message
+                .body()
+                .deserialize::<String>()
+                .map_err(|error| invalid(error.to_string()))?,
+            None,
+        ),
+        "Set" => {
+            return Err((
+                "org.freedesktop.DBus.Error.PropertyReadOnly",
+                "exported properties are read-only".into(),
+            ));
+        }
+        _ => return Err(("org.freedesktop.DBus.Error.UnknownMethod", member.into())),
+    };
+    if interface != spec.interface {
+        return Err(("org.freedesktop.DBus.Error.UnknownInterface", interface));
+    }
+    let properties = properties.lock().expect("dbus property registry poisoned");
+    let (signature, value) = if let Some(name) = property {
+        let value = properties
+            .get(&name)
+            .ok_or(("org.freedesktop.DBus.Error.UnknownProperty", name))?;
+        ("v", serde_json::to_value(value).unwrap())
+    } else {
+        ("a{sv}", serde_json::to_value(&*properties).unwrap())
+    };
+    encode_body(signature, &[value])
+        .map_err(invalid)?
+        .ok_or_else(|| invalid("empty property reply".into()))
 }
 
 fn elide_large_arrays(value: &mut Json) {
@@ -560,7 +701,8 @@ mod tests {
                 "Hints": { "in": "asa{sv}" },
                 "Quiet": {}
             },
-            "signals": { "Changed": "s" }
+            "signals": { "Changed": "s" },
+            "properties": { "Enabled": { "signature": "b", "value": false } }
         }))
         .unwrap()
     }
@@ -605,6 +747,55 @@ mod tests {
             assert!(Instant::now() < deadline, "service never owned its name");
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+
+        let enabled = || {
+            client.call_method(
+                Some("org.mesh.Served"),
+                "/org/mesh/Served",
+                Some("org.freedesktop.DBus.Properties"),
+                "Get",
+                &("org.mesh.Served", "Enabled"),
+            )
+        };
+        let reply = enabled().await.unwrap();
+        assert!(
+            !bool::try_from(
+                reply
+                    .body()
+                    .deserialize::<zbus::zvariant::OwnedValue>()
+                    .unwrap()
+            )
+            .unwrap()
+        );
+        services
+            .set_property(handle.id(), "Enabled", Json::Bool(true))
+            .unwrap();
+        assert!(
+            services
+                .set_property(handle.id(), "Enabled", Json::String("wrong type".into()))
+                .is_err()
+        );
+        let reply = enabled().await.unwrap();
+        assert!(
+            bool::try_from(
+                reply
+                    .body()
+                    .deserialize::<zbus::zvariant::OwnedValue>()
+                    .unwrap()
+            )
+            .unwrap()
+        );
+        let denied = client
+            .call_method(
+                Some("org.mesh.Served"),
+                "/org/mesh/Served",
+                Some("org.freedesktop.DBus.Properties"),
+                "Get",
+                &("org.mesh.Other", "Enabled"),
+            )
+            .await
+            .unwrap_err();
+        assert!(denied.to_string().contains("UnknownInterface"));
 
         let mut signals = zbus::MessageStream::for_match_rule(
             zbus::MatchRule::builder()

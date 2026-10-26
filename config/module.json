@@ -159,14 +159,13 @@
         "locale.read"
       ],
       "@mesh/mpris-media": [
-        "exec.argv:curl:[\"-sfL\",\"--max-time\",\"10\",\"-o\",\"*\",\"*\"]",
+        "net.http",
         "exec.argv:playerctl:[\"--follow\",\"metadata\",\"--format\",\"*\"]",
         "exec.argv:playerctl:[\"metadata\",\"--format\",\"*\"]",
         "exec.argv:playerctl:[\"next\"]",
         "exec.argv:playerctl:[\"play-pause\"]",
         "exec.argv:playerctl:[\"position\",\"*\"]",
-        "exec.argv:playerctl:[\"previous\"]",
-        "exec.argv:sh:[\"-c\",\"d=\\\"${XDG_CACHE_HOME:-$HOME/.cache}/mesh/media-art\\\"; mkdir -p \\\"$d\\\" && printf '%s' \\\"$d\\\"\"]"
+        "exec.argv:playerctl:[\"previous\"]"
       ],
       "@mesh/navigation-bar": [
         "service.settings.read",
@@ -183,7 +182,7 @@
         "exec.argv:nmcli:[\"radio\",\"wifi\",\"*\"]"
       ],
       "@mesh/opacity-test": ["shell.surface", "theme.read"],
-      "@mesh/open-meteo-weather": ["exec.argv:curl:[\"-sf\",\"--max-time\",\"15\",\"*\"]"],
+      "@mesh/open-meteo-weather": ["net.http"],
       "@mesh/pipewire-audio": [
         "pipewire.observe",
         "exec.argv:wpctl:[\"get-volume\",\"*\"]",

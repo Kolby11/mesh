@@ -7,6 +7,14 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Colour icons and remaining host APIs complete.** Non-symbolic named/file
+  icons retain colours; symbolic files and explicit pack policies retain tint
+  control. Bounded yielding HTTP replaces provider `curl`; the StatusNotifier
+  tray module owns or joins watchers through generic D-Bus services and scoped
+  dynamic-client grants. Release: scripting 377, modules 337, icons 36,
+  capabilities 15, shell 1,037 and GPU-feature production icons 6 passed.
+  The final release CLI builds; private-bus tray integration passes.
+
 - **Glass backlog batch (2026-10-26).** Committed and pushed: `mesh-shell focus
   <id>` for keyboard-only chrome entry; one platform focus ring in shipped
   modules; Hyprland focus grab for click-open popovers (lost trigger clicks);

@@ -734,7 +734,7 @@ pub struct DisplayIconPaint {
     pub name: Option<Arc<str>>,
     pub size: Option<u32>,
     /// Paint the file's own colours instead of tinting it with `color`
-    /// (`<image>`; spec 05 §6 `multicolor`).
+    /// (`<image>` and non-symbolic file icons; spec 05 §6 `multicolor`).
     pub multicolor: bool,
 }
 
