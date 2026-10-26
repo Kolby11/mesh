@@ -13,6 +13,15 @@ exact family live through the shell typography tokens. Font-pack role mapping,
 pack-qualified references, and per-module chains remain target work. Fallback
 chains per script are deferred.
 
+**Shipped catalog transport:** `mesh.theme.system_resources` includes the first
+24 `font_families`, `font_total`, and an opaque `font_revision`. Read-authorized
+clients request more with `mesh.theme.list_font_families(offset, limit)`
+(`theme.read`); the limit is clamped to 1–24. The completed call returns
+`families`, `total`, `next_offset` (null at the end), and `revision`. Offsets
+beyond the catalog return an empty final page. Clients discard pages whose
+revision differs from their initial page. Settings loads pages on “Show more”
+instead of receiving every installed font in each theme update.
+
 ## 1. Three layers
 
 ```

@@ -482,6 +482,15 @@ element rules), which declare hooks it leaves at their defaults, independent
 modules, internal selectors, and `@module` targets that are not installed. The
 other commands above remain targets.
 
+The theme selector and Settings Appearance cards show counts of tuned modules,
+modules using declared defaults, independent modules, and compatibility warnings
+(internal selectors and absent targets). These counts describe additional theme
+tuning; modules using defaults still inherit the semantic theme contract. The
+selectors show whether the theme follows the shared preference or is pinned to
+the active shell profile. With an active profile, **Pin to this shell** writes a
+profile preference; **Use for all shells** releases that pin and writes the current
+theme to the shared preference.
+
 ## 9. Element blur (`filter`)
 
 **Status: shipped.**

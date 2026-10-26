@@ -1249,6 +1249,7 @@ impl InstalledModuleGraph {
                 || before.path != after.path
                 || before.manifest.version != after.manifest.version
                 || before.trust != after.trust
+                || manifest_identity(&before.manifest) != manifest_identity(&after.manifest)
             {
                 diff.updated_modules.push(module_id.clone());
             }
@@ -1839,6 +1840,10 @@ impl InstalledModuleGraph {
     }
 }
 
+fn manifest_identity(manifest: &ModuleManifest) -> serde_json::Value {
+    serde_json::to_value(manifest).expect("module manifests serialize to JSON")
+}
+
 fn graph_revision(
     modules: &HashMap<String, InstalledModuleNode>,
     diagnostics: &[ModuleGraphDiagnostic],
@@ -1854,9 +1859,10 @@ fn graph_revision(
         hasher.update([module.enabled as u8]);
         hasher.update(format!("{:?}", module.trust).as_bytes());
         hasher.update(module.manifest_path.to_string_lossy().as_bytes());
-        if let Ok(manifest) = serde_json::to_vec(&module.manifest) {
-            hasher.update(manifest);
-        }
+        hasher.update(
+            serde_json::to_vec(&manifest_identity(&module.manifest))
+                .expect("module manifest identities serialize to JSON"),
+        );
     }
     for diagnostic in diagnostics {
         hasher.update(diagnostic.module_id.as_bytes());

@@ -115,9 +115,9 @@ evidence and test workloads are in the linked reports.
 
 ### Section 02 — Module system and installation
 
-- [ ] **S02-LOGIC-003 / S02-LOGIC-008 / S02-LOGIC-011:** Bind graph diffs and
-      activation candidates to the same store, manifest/content revision, and
-      lock identity so same-version edits or mismatched objects cannot publish. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
+- [ ] **S02-LOGIC-003 / S02-LOGIC-011:** Bind activation candidates to the
+      same store generation and independently verified source revision; source
+      revision provenance remains lock-only. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
 - [ ] **S02-LOGIC-013:** Add generation-aware package garbage collection that
       retains active, rollback, and in-flight journal objects while reclaiming
       only unreferenced immutable content. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/02-module-system-and-installation.md)
@@ -144,12 +144,9 @@ evidence and test workloads are in the linked reports.
 - [ ] **S04-PERF-002 / S04-PERF-003 / S04-DEAD-003:** Share one bounded CSS,
       token, and keyframe representation across theme and component paths, then
       measure typed token dependency resolution and reload reuse. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/04-themes.md)
-- [ ] **Theme coverage and pinning in the UI:** `mesh-shell theme coverage` and
-      `set_theme { scope }` exist, but the theme selector shows neither coverage
-      nor a "pin to this shell" control.
-- [ ] **`mesh.theme` snapshot exceeds the 64 KiB command budget:** full
-      tokens/provenance plus every host font family are published together and
-      warn at startup; split or page the host font list.
+- [ ] **`mesh.theme` snapshot exceeds the 64 KiB command budget:** token values
+      and provenance still exceed the limit after font pagination; design bounded
+      snapshot/detail transport without losing token inspection or change events.
 
 ### Section 05 — Localization and i18n
 

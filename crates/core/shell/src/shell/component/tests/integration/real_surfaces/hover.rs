@@ -64,7 +64,7 @@ fn shipped_navigation_hover_popover_does_not_expand_parent_control_layout() {
         1,
         "hover-opened theme selector should be promoted to one child popup request: {requests:?}"
     );
-    assert_eq!(requests[0].content_size, (132, 60));
+    assert_eq!(requests[0].content_size, (220, 144));
     assert_eq!(
         requests[0].anchor_rect,
         i32_rect((theme_left, theme_top, theme_right, theme_bottom)),
@@ -118,7 +118,12 @@ fn shipped_navigation_theme_and_language_pointer_hover_promotes_popovers() {
     let height = 80;
 
     for (trigger, expected_size, expected_core_class, expected_text) in [
-        ("themeButton", (132, 60), "bubble-option-core-default", None),
+        (
+            "themeButton",
+            (220, 144),
+            "bubble-option-core-default",
+            None,
+        ),
         (
             "languageButton",
             (132, 60),

@@ -1,5 +1,86 @@
 use super::*;
 
+#[test]
+fn shipped_theme_controls_show_coverage_and_write_explicit_pin_scope() {
+    for module in ["@mesh/theme-selector", "@mesh/settings"] {
+        let theme = default_theme();
+        let mut component = real_frontend_module_component(module, audio_network_catalog());
+        component.popup_promoted = module == "@mesh/theme-selector";
+        let mut buffer = PixelBuffer::new(920, 900);
+        let extent = SurfaceExtent::unpadded(920, 900);
+        if module == "@mesh/settings" {
+            component
+                .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
+                .unwrap();
+        }
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
+        let handler = if module == "@mesh/settings" {
+            "__mesh_embed__::@mesh/settings/local:AppearancePage::onThemePin"
+        } else {
+            "__mesh_embed__::@mesh/theme-selector::onThemePin"
+        };
+        for (scope, next_scope) in [("user", "profile"), ("profile", "user")] {
+            component
+                .handle_service_event(&ServiceEvent::Updated {
+                    service: "mesh.theme".into(),
+                    source_module: "@mesh/shell".into(),
+                    payload: serde_json::json!({
+                        "current": "nord", "theme_id": "nord", "is_dark": true,
+                        "scope": scope, "can_pin": true,
+                        "themes": [{"id": "nord", "label": "Nord", "coverage": {
+                            "tuned": 2, "defaults": 3, "independent": 1,
+                            "internal_selectors": 1, "absent_targets": 2
+                        }}],
+                        "available": ["nord"], "system_resources": {}
+                    }),
+                })
+                .unwrap();
+            component
+                .paint_raster(&theme, extent, &mut buffer, 1.0)
+                .unwrap();
+            let text = rendered_text(&component);
+            assert!(
+                text.iter().any(|value| value
+                    == "2 tuned · 3 using defaults · 1 independent · 3 compatibility warnings"),
+                "{module}: {text:?}"
+            );
+            let expected = if scope == "profile" {
+                "Theme pinned to this shell"
+            } else {
+                "Theme follows your shared preference"
+            };
+            assert!(
+                text.iter().any(|value| value == expected),
+                "{module}: {text:?}"
+            );
+            let requests = component.call_namespaced_handler(handler, &[]).unwrap();
+            assert!(
+                matches!(requests.as_slice(), [CoreRequest::ServiceCall {interface, command, payload, ..}] if interface == "mesh.theme" && command == "set_theme" && payload["theme_id"] == "nord" && payload["scope"] == next_scope),
+                "{module}: {requests:?}; {:?}",
+                component
+                    .diagnostics
+                    .as_ref()
+                    .map(|diagnostics| diagnostics.issues())
+            );
+        }
+        component.handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.theme".into(), source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({"current": "nord", "theme_id": "nord", "scope": "user", "can_pin": false, "is_dark": true, "themes": [], "available": ["nord"], "system_resources": {}}),
+        }).unwrap();
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
+        assert!(
+            !rendered_text(&component)
+                .iter()
+                .any(|value| value == "Pin to this shell"),
+            "{module} must not offer a pin without an active profile"
+        );
+    }
+}
+
 // Applying a theme is a round trip through the shell. Until the service reports
 // back, the popover has to mark the picked bubble itself, or the ring keeps
 // highlighting the theme the user just moved away from.
@@ -234,6 +315,12 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
         "only three themes are on screen: {before:?}"
     );
 
+    let tree = component
+        .child_surface_debug_tree(&node_key, content_offset)
+        .unwrap();
+    let stage = first_node_by_class(&tree, "bubble-options-stage").unwrap();
+    let bounds = find_node_bounds_by_key(&tree, stage.mesh_key().unwrap(), 0.0, 0.0).unwrap();
+    let scroll_position = ((bounds.0 + bounds.2) / 2.0, (bounds.1 + bounds.3) / 2.0);
     let mut seen: Vec<String> = before.clone();
     for _ in 0..4 {
         component
@@ -244,8 +331,8 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
                 ch,
                 content_offset,
                 ComponentInput::Scroll {
-                    x: content_offset.0 + cw as f32 / 2.0,
-                    y: content_offset.1 + ch as f32 / 2.0,
+                    x: scroll_position.0,
+                    y: scroll_position.1,
                     dx: 0.0,
                     dy: 1.0,
                 },

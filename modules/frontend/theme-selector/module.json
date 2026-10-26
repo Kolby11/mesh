@@ -20,6 +20,7 @@
       },
       "capabilities": [
         "theme.read",
+        "locale.read",
         "service.theme.control"
       ]
     },
@@ -34,6 +35,16 @@
       "ignore_shell_default": true
     },
     "entry": "src/main.mesh",
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": ["en", "sk"]
+    },
+    "contributes": {
+      "i18n": [
+        { "id": "en", "locale": "en", "path": "config/i18n/en.json" },
+        { "id": "sk", "locale": "sk", "path": "config/i18n/sk.json" }
+      ]
+    },
     "accessibility": {
       "role": "menu"
     }

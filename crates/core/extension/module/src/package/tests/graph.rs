@@ -4,6 +4,83 @@ use crate::ModuleType;
 use std::collections::HashMap;
 
 #[test]
+fn graph_diff_detects_same_version_manifest_edits() {
+    let root = root_with_modules(&[("@me/front", ModuleKind::Ui)], &[], None);
+    let module = loaded_module(
+        "@me/front",
+        ModuleKind::Ui,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    let before = InstalledModuleGraph::from_parts(root.clone(), vec![module.clone()]).unwrap();
+    let edits: [(&str, fn(&mut ModuleManifest)); 5] = [
+        ("entrypoint", |manifest| {
+            manifest.mesh.entry = Some("src/changed.mesh".into())
+        }),
+        ("capability", |manifest| {
+            manifest.mesh.uses.capabilities.push("theme.read".into())
+        }),
+        ("dependency", |manifest| {
+            manifest.mesh.uses.modules.insert(
+                "@me/library".into(),
+                serde_json::from_value(serde_json::json!(">=1.0.0")).unwrap(),
+            );
+        }),
+        ("resource", |manifest| {
+            manifest.mesh.uses.resources.icons.push("@me/icons".into())
+        }),
+        ("contribution", |manifest| {
+            manifest.mesh.contributes.layout = serde_json::from_value(serde_json::json!([
+                { "id": "extra", "entrypoint": "src/extra.mesh" }
+            ]))
+            .unwrap();
+        }),
+    ];
+    for (name, edit) in edits {
+        let mut changed = module.clone();
+        edit(&mut changed.manifest);
+        let after = InstalledModuleGraph::from_parts(root.clone(), vec![changed]).unwrap();
+        assert_eq!(
+            before.diff(&after).updated_modules,
+            vec!["@me/front"],
+            "{name}"
+        );
+        assert_ne!(before.revision(), after.revision(), "{name}");
+    }
+    let unchanged = InstalledModuleGraph::from_parts(root, vec![module]).unwrap();
+    assert!(before.diff(&unchanged).is_empty());
+    assert_eq!(before.revision(), unchanged.revision());
+}
+
+#[test]
+fn graph_revision_ignores_manifest_map_iteration_order() {
+    let root = root_with_modules(&[("@me/front", ModuleKind::Ui)], &[], None);
+    let mut module = loaded_module(
+        "@me/front",
+        ModuleKind::Ui,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    for index in 0..16 {
+        module.manifest.mesh.uses.modules.insert(
+            format!("@me/library-{index}"),
+            serde_json::from_value(serde_json::json!(">=1.0.0")).unwrap(),
+        );
+    }
+    let bytes = serde_json::to_vec(&module.manifest).unwrap();
+    module.manifest = serde_json::from_slice(&bytes).unwrap();
+    let before = InstalledModuleGraph::from_parts(root.clone(), vec![module.clone()]).unwrap();
+    for _ in 0..16 {
+        module.manifest = serde_json::from_slice(&bytes).unwrap();
+        let after = InstalledModuleGraph::from_parts(root.clone(), vec![module.clone()]).unwrap();
+        assert!(before.diff(&after).is_empty());
+        assert_eq!(before.revision(), after.revision());
+    }
+}
+
+#[test]
 fn trust_policy_blocks_untrusted_modules_before_activation() {
     let mut root = root_with_modules(&[("@me/local", ModuleKind::Ui)], &[], None);
     root.trust_policy = TrustPolicy {

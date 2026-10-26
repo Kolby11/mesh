@@ -249,7 +249,7 @@
         "shell.surface"
       ],
       "@mesh/text-selection-proof": ["shell.surface", "theme.read"],
-      "@mesh/theme-selector": ["service.theme.control", "theme.read"],
+      "@mesh/theme-selector": ["service.theme.control", "theme.read", "locale.read"],
       "@mesh/theme-widget": [
         "locale.read",
         "theme.read"

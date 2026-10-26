@@ -227,6 +227,8 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
             ("revision", "string?"),
             ("is_dark", "boolean"),
             ("themes", "object[]"),
+            ("scope", "string"),
+            ("can_pin", "boolean"),
             ("available", "string[]"),
             ("system_resources", "object"),
         ]
@@ -240,11 +242,33 @@ pub(super) fn audio_network_catalog() -> InterfaceCatalog {
         .collect(),
         methods: vec![
             InterfaceMethod {
+                name: "list_font_families".into(),
+                args: vec![
+                    InterfaceArgument {
+                        name: "offset".into(),
+                        arg_type: "int?".into(),
+                    },
+                    InterfaceArgument {
+                        name: "limit".into(),
+                        arg_type: "int?".into(),
+                    },
+                ],
+                returns: Some("Result".into()),
+                coalesce: false.into(),
+                state_binding: None,
+            },
+            InterfaceMethod {
                 name: "set_theme".into(),
-                args: vec![InterfaceArgument {
-                    name: "theme_id".into(),
-                    arg_type: "string".into(),
-                }],
+                args: vec![
+                    InterfaceArgument {
+                        name: "theme_id".into(),
+                        arg_type: "string".into(),
+                    },
+                    InterfaceArgument {
+                        name: "scope".into(),
+                        arg_type: "string?".into(),
+                    },
+                ],
                 returns: Some("Result".into()),
                 coalesce: false.into(),
                 state_binding: None,
@@ -1233,6 +1257,7 @@ pub(super) fn real_frontend_module_component(
             &["en", "sk"],
         ),
         ("@mesh/settings", &settings_dir, &["en", "sk"]),
+        ("@mesh/theme-selector", &theme_selector_dir, &["en", "sk"]),
         ("@mesh/quick-settings", &quick_settings_dir, &["en", "sk"]),
     ]
     .into_iter()

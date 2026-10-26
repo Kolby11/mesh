@@ -7,6 +7,13 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Parallel backlog batch implemented (2026-10-26).** Graph diffs detect
+  same-version manifest edits; activation snapshots reject mismatched names and
+  versions. Both theme selectors show coverage and profile pinning. Font discovery
+  pages in groups of 24. Module tests: 342 passed; shell: 1,038 passed, one launcher
+  pixel failure that passes in isolation. Token/provenance snapshot sizing and
+  activation source provenance remain open; see the October log.
+
 - **Colour icons and remaining host APIs complete.** Non-symbolic named/file
   icons retain colours; symbolic files and explicit pack policies retain tint
   control. Bounded yielding HTTP replaces provider `curl`; the StatusNotifier

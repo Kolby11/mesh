@@ -7,6 +7,94 @@ use mesh_core_service::{
 use std::collections::HashMap;
 
 #[test]
+fn settings_loads_additional_font_pages_once_and_discards_stale_results() {
+    let theme = default_theme();
+    let mut component = real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+    let extent = SurfaceExtent::unpadded(920, 900);
+    component
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
+        .unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.theme".into(),
+            source_module: "@mesh/shell".into(),
+            payload: serde_json::json!({
+                "current": "nord", "theme_id": "nord", "is_dark": true,
+                "scope": "user", "can_pin": true, "themes": [], "available": [],
+                "system_resources": {
+                    "font_revision": "catalog-one", "font_total": 72,
+                    "font_families": (0..24).map(|index| serde_json::json!({
+                        "name": format!("Test Font {index:02}"), "face_count": 1, "monospace": false
+                    })).collect::<Vec<_>>()
+                }
+            }),
+        })
+        .unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+    let handler = "__mesh_embed__::@mesh/settings/local:AppearancePage::onShowMoreFonts";
+    for (offset, revision) in [(24, "catalog-one"), (48, "stale-catalog")] {
+        let mut requests = component.call_namespaced_handler(handler, &[]).unwrap();
+        requests.extend(component.tick().unwrap());
+        let calls = requests
+            .iter()
+            .filter_map(|request| match request {
+                CoreRequest::ServiceCall {
+                    command,
+                    payload,
+                    call_id,
+                    source_instance_id,
+                    ..
+                } if command == "list_font_families" => {
+                    Some((payload, *call_id, source_instance_id))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            calls.len(),
+            1,
+            "{requests:?}; rendered: {:?}",
+            rendered_text(&component)
+        );
+        let (payload, call_id, instance) = calls[0];
+        assert_eq!(payload["offset"], offset);
+        let mut duplicate = component.call_namespaced_handler(handler, &[]).unwrap();
+        duplicate.extend(component.tick().unwrap());
+        assert!(!duplicate.iter().any(|request| matches!(request, CoreRequest::ServiceCall { command, .. } if command == "list_font_families")));
+        assert!(component.deliver_service_call_result(
+            instance,
+            call_id,
+            "ok",
+            &serde_json::json!({
+                "ok": true, "revision": revision, "total": 72,
+                "families": (offset..offset + 24).map(|index| serde_json::json!({
+                    "name": format!("Test Font {index:02}"), "face_count": 1, "monospace": false
+                })).collect::<Vec<_>>()
+            })
+        ));
+        component.tick().unwrap();
+        component
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
+        let text = rendered_text(&component);
+        assert!(text.iter().any(|line| line == "Test Font 47"));
+        assert!(!text.iter().any(|line| line == "Test Font 48"));
+        assert_eq!(
+            text.iter()
+                .filter(|line| line.as_str() == "Test Font 24")
+                .count(),
+            1
+        );
+    }
+}
+
+#[test]
 fn debug_inspector_backend_services_view_separates_runtime_health_and_timing_stages() {
     let mut component = real_frontend_module_component("@mesh/debug-inspector", debug_catalog());
     // Paint once so the inspector's script reads (and thus tracks) its

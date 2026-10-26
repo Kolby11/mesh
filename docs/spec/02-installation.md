@@ -210,6 +210,12 @@ the active object paths when a snapshot exists, while the installed module tree
 remains the directly editable authoring source and is retained for update and
 local-edit checks.
 
+Snapshot publication and activation verify each object's content digest and
+require its manifest name and version to match the snapshot's module key and
+version. A mismatch rejects the candidate before advancing the active generation.
+Graph diffs compare the complete normalized manifest, so same-version edits to
+dependencies, capabilities, entrypoints and contributions request activation.
+
 Managed snapshot entries use their immutable objects. Unlocked source modules
 remain available alongside those entries; publishing a package generation does
 not replace the untracked distribution or local authoring inventory. Package

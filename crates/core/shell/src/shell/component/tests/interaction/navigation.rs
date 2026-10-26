@@ -102,7 +102,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
         1,
         "keyboard activation should derive one promoted theme selector popup: {child_requests:?}"
     );
-    assert_eq!(child_requests[0].content_size, (132, 60));
+    assert_eq!(child_requests[0].content_size, (220, 144));
     assert!(
         rect_matches_bounds(child_requests[0].anchor_rect, theme_bounds),
         "theme selector popup should anchor to the theme trigger bounds {:?}, got {:?}",

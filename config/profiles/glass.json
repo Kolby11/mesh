@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "revision": 29,
+  "revision": 43,
   "from": {
     "module": "@mesh/glass"
   },
@@ -20,11 +20,11 @@
         "policy": "manual"
       },
       "icons": {
-        "default_pack": "Bibata-Modern-Amber-Right"
+        "default_pack": "Bibata-Modern-Ice-Right"
       },
       "render": {
         "backdrop": {
-          "image": "/home/kolby/Pictures/Wallpapers/space-panels.png"
+          "image": "/home/kolby/Pictures/Wallpapers/forest.jpg"
         }
       }
     }

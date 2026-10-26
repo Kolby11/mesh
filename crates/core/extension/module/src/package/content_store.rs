@@ -160,6 +160,7 @@ impl ModuleStore {
                     locked.digest, stored.digest
                 )));
             }
+            self.verified_activation_module(module_id, &locked.version, &stored.digest)?;
             modules.insert(
                 id.as_str().to_string(),
                 ActivationModule {
@@ -178,8 +179,8 @@ impl ModuleStore {
         snapshot: &ActivationSnapshot,
     ) -> Result<PathBuf, ModuleManifestError> {
         snapshot.validate()?;
-        for module in snapshot.modules.values() {
-            self.object(&module.digest)?;
+        for (module_id, module) in &snapshot.modules {
+            self.verified_activation_module(module_id, &module.version, &module.digest)?;
         }
 
         let generation_dir = self.activation_generation_path(snapshot.generation)?;
@@ -308,6 +309,15 @@ impl ModuleStore {
                 source,
             })?;
         snapshot.validate()?;
+        for (module_id, module) in &snapshot.modules {
+            self.verified_activation_module(module_id, &module.version, &module.digest)?;
+        }
+        if snapshot.generation != generation {
+            return Err(ModuleManifestError::Validation(format!(
+                "activation generation {generation} contains snapshot generation {}",
+                snapshot.generation
+            )));
+        }
         Ok(snapshot)
     }
 
@@ -320,6 +330,9 @@ impl ModuleStore {
         destination: &Path,
     ) -> Result<(), ModuleManifestError> {
         snapshot.validate()?;
+        for (module_id, module) in &snapshot.modules {
+            self.verified_activation_module(module_id, &module.version, &module.digest)?;
+        }
         if destination.exists() {
             return Err(ModuleManifestError::Validation(format!(
                 "activation materialization destination {} already exists",
@@ -348,6 +361,23 @@ impl ModuleStore {
         }
         make_immutable(destination)?;
         Ok(())
+    }
+
+    fn verified_activation_module(
+        &self,
+        module_id: &str,
+        version: &str,
+        digest: &ContentDigest,
+    ) -> Result<PathBuf, ModuleManifestError> {
+        let path = self.object(digest)?;
+        let manifest = ModuleManifest::from_path(&path.join("module.json"))?;
+        if manifest.name != module_id || manifest.version != version {
+            return Err(ModuleManifestError::Validation(format!(
+                "activation module {module_id} {version} does not match stored manifest {} {} at {digest}",
+                manifest.name, manifest.version
+            )));
+        }
+        Ok(path)
     }
 
     fn ensure_layout(&self) -> Result<(), ModuleManifestError> {
@@ -822,6 +852,135 @@ mod tests {
 
         let changed = ActivationSnapshot::new(7, BTreeMap::new(), None).unwrap();
         assert!(store.publish_snapshot(&changed).is_err());
+        remove_snapshot_tree(&root);
+    }
+
+    #[test]
+    fn activation_rejects_content_under_a_different_module_identity() {
+        let root = temp_dir("activation-identity");
+        let source = root.join("source");
+        module(&source, "<template><box/></template>");
+        let store = ModuleStore::new(root.join("store")).unwrap();
+        let stored = store.publish(&source).unwrap();
+        let valid = ActivationSnapshot::new(
+            1,
+            BTreeMap::from([(
+                "@me/example".into(),
+                ActivationModule {
+                    digest: stored.digest.clone(),
+                    version: "1.0.0".into(),
+                },
+            )]),
+            None,
+        )
+        .unwrap();
+        store.publish_snapshot(&valid).unwrap();
+        store.activate_generation(1).unwrap();
+
+        for (index, (module_id, version)) in [("@me/other", "1.0.0"), ("@me/example", "2.0.0")]
+            .into_iter()
+            .enumerate()
+        {
+            let snapshot = ActivationSnapshot::new(
+                index as u64 + 2,
+                BTreeMap::from([(
+                    module_id.into(),
+                    ActivationModule {
+                        digest: stored.digest.clone(),
+                        version: version.into(),
+                    },
+                )]),
+                None,
+            )
+            .unwrap();
+            let error = store.publish_snapshot(&snapshot).unwrap_err();
+            assert!(error.to_string().contains("does not match stored manifest"));
+            assert!(
+                !store
+                    .activation_generation_path(snapshot.generation)
+                    .unwrap()
+                    .exists()
+            );
+            let destination = root.join(format!("materialized-{index}"));
+            assert!(store.materialize_snapshot(&snapshot, &destination).is_err());
+            assert!(!destination.exists());
+            assert_eq!(store.active_snapshot().unwrap(), Some(valid.clone()));
+        }
+        remove_snapshot_tree(&root);
+    }
+
+    #[test]
+    fn lock_snapshot_rejects_a_stored_object_with_mismatched_identity() {
+        let root = temp_dir("lock-identity");
+        let source = root.join("source");
+        module(&source, "<template><box/></template>");
+        let store = ModuleStore::new(root.join("store")).unwrap();
+        let stored = store.publish(&source).unwrap();
+        for (module_id, version) in [("@me/other", "1.0.0"), ("@me/example", "2.0.0")] {
+            let mut lock = MeshLock::new();
+            lock.modules.insert(
+                module_id.into(),
+                super::super::LockedModule {
+                    version: version.into(),
+                    source: super::super::ModuleSource::Path {
+                        path: "source".into(),
+                    },
+                    revision: None,
+                    digest: stored.digest.to_string(),
+                    trust: Default::default(),
+                    signature: None,
+                    dependencies: Default::default(),
+                    requested_by: Default::default(),
+                },
+            );
+            let error = store
+                .snapshot_from_lock(1, &lock, &root.join("missing-modules"))
+                .unwrap_err();
+            assert!(error.to_string().contains("does not match stored manifest"));
+        }
+        remove_snapshot_tree(&root);
+    }
+
+    #[test]
+    fn activation_rejects_mismatched_identity_in_an_existing_snapshot() {
+        let root = temp_dir("existing-snapshot-identity");
+        let source = root.join("source");
+        module(&source, "<template><box/></template>");
+        let store = ModuleStore::new(root.join("store")).unwrap();
+        let stored = store.publish(&source).unwrap();
+        let valid = ActivationSnapshot::new(
+            1,
+            BTreeMap::from([(
+                "@me/example".into(),
+                ActivationModule {
+                    digest: stored.digest.clone(),
+                    version: "1.0.0".into(),
+                },
+            )]),
+            None,
+        )
+        .unwrap();
+        store.publish_snapshot(&valid).unwrap();
+        store.activate_generation(1).unwrap();
+        let mut forged = valid.clone();
+        forged.generation = 2;
+        let module = forged.modules.remove("@me/example").unwrap();
+        forged.modules.insert("@me/other".into(), module);
+        let path = store.activation_generation_path(2).unwrap();
+        fs::create_dir(&path).unwrap();
+        fs::write(
+            path.join(SNAPSHOT_FILE),
+            serde_json::to_vec(&forged).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            store
+                .activate_generation(2)
+                .unwrap_err()
+                .to_string()
+                .contains("does not match stored manifest")
+        );
+        assert_eq!(store.active_snapshot().unwrap(), Some(valid));
         remove_snapshot_tree(&root);
     }
 

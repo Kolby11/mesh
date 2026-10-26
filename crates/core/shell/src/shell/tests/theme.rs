@@ -2,6 +2,80 @@ use super::common::*;
 use super::*;
 
 #[test]
+fn theme_font_catalog_is_paged_and_read_authorized() {
+    let mut shell = Shell::new();
+    shell.discover_modules();
+    let catalog = Arc::make_mut(&mut Arc::make_mut(&mut shell.resource_snapshot).host_catalog);
+    catalog.font_families = (0..1200)
+        .map(|index| mesh_core_resources::SystemFontFamily {
+            name: format!("Installed Font Family {index:04}"),
+            face_count: 12,
+            monospace: index % 3 == 0,
+        })
+        .collect();
+    let state = shell.authoritative_theme_service_payload();
+    let font_bytes = serde_json::to_vec(&state["system_resources"]["font_families"])
+        .unwrap()
+        .len();
+    assert!(
+        font_bytes < 4 * 1024,
+        "initial font page is {font_bytes} bytes"
+    );
+    assert_eq!(
+        state["system_resources"]["font_families"]
+            .as_array()
+            .unwrap()
+            .len(),
+        24
+    );
+    assert_eq!(state["system_resources"]["font_total"], 1200);
+    let read = mesh_core_capability::CapabilitySet::from_ids(["theme.read"]);
+    let mut offset = 0;
+    let mut names = Vec::new();
+    loop {
+        let page = shell.dispatch_service_command(
+            "mesh.theme",
+            "list_font_families",
+            &serde_json::json!({"offset":offset,"limit":1000}),
+            "@test/fonts",
+            &read,
+        );
+        assert_eq!(page["ok"], true, "{page}");
+        assert_eq!(page["revision"], state["system_resources"]["font_revision"]);
+        let families = page["families"].as_array().unwrap();
+        assert!(families.len() <= 24);
+        names.extend(
+            families
+                .iter()
+                .map(|family| family["name"].as_str().unwrap().to_owned()),
+        );
+        let Some(next) = page["next_offset"].as_u64() else {
+            break;
+        };
+        offset = next;
+    }
+    assert_eq!(names.len(), 1200);
+    assert_eq!(names[1199], "Installed Font Family 1199");
+    let denied = shell.dispatch_service_command(
+        "mesh.theme",
+        "list_font_families",
+        &serde_json::json!({}),
+        "@test/fonts",
+        &mesh_core_capability::CapabilitySet::default(),
+    );
+    assert_eq!(denied["error"], "capability_denied");
+    let empty = shell.list_theme_font_families(&serde_json::json!({"offset":u64::MAX}));
+    assert_eq!(empty["families"], serde_json::json!([]));
+    assert!(empty["next_offset"].is_null());
+    Arc::make_mut(&mut Arc::make_mut(&mut shell.resource_snapshot).host_catalog).revision += 1;
+    let revised = shell.list_theme_font_families(&serde_json::json!({}));
+    assert_ne!(
+        revised["revision"],
+        state["system_resources"]["font_revision"]
+    );
+}
+
+#[test]
 fn provider_theme_update_is_accepted_through_the_generic_state_path() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();

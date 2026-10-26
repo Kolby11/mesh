@@ -1,0 +1,11 @@
+{
+  "theme.pinned": "Theme pinned to this shell",
+  "theme.shared": "Theme follows your shared preference",
+  "theme.pin": "Pin to this shell",
+  "theme.unpin": "Use for all shells",
+  "coverage.tuned": "tuned",
+  "coverage.defaults": "using defaults",
+  "coverage.independent": "independent",
+  "coverage.warnings": "compatibility warnings",
+  "coverage.unavailable": "Coverage unavailable"
+}

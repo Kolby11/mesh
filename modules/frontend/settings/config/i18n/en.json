@@ -226,5 +226,14 @@
   "advanced.theme_packs": "Theme packs",
   "advanced.required_icons": "Required icons",
   "advanced.provided_themes": "Provided themes",
-  "common.reset": "Reset"
+  "common.reset": "Reset",
+  "appearance.theme.pinned": "Theme pinned to this shell",
+  "appearance.theme.shared": "Theme follows your shared preference",
+  "appearance.theme.pin": "Pin to this shell",
+  "appearance.theme.unpin": "Use for all shells",
+  "appearance.coverage.tuned": "tuned",
+  "appearance.coverage.defaults": "using defaults",
+  "appearance.coverage.independent": "independent",
+  "appearance.coverage.warnings": "compatibility warnings",
+  "appearance.coverage.unavailable": "Coverage unavailable"
 }

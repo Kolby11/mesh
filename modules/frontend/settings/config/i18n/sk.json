@@ -225,5 +225,14 @@
   "advanced.theme_packs": "Balíky tém",
   "advanced.required_icons": "Povinné ikony",
   "advanced.provided_themes": "Poskytované témy",
-  "common.reset": "Obnoviť"
+  "common.reset": "Obnoviť",
+  "appearance.theme.pinned": "Téma pripnutá k tomuto prostrediu",
+  "appearance.theme.shared": "Téma používa vaše spoločné nastavenie",
+  "appearance.theme.pin": "Pripnúť k tomuto prostrediu",
+  "appearance.theme.unpin": "Použiť vo všetkých prostrediach",
+  "appearance.coverage.tuned": "prispôsobené",
+  "appearance.coverage.defaults": "s predvoleným vzhľadom",
+  "appearance.coverage.independent": "nezávislé",
+  "appearance.coverage.warnings": "upozornení na kompatibilitu",
+  "appearance.coverage.unavailable": "Pokrytie nie je dostupné"
 }

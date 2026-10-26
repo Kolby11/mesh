@@ -546,6 +546,7 @@ fn shell_registers_theme_provider_for_frontend_theme_proxy() {
             "themes",
             "available",
             "scope",
+            "can_pin",
             "system_resources",
             "backdrop_image",
         ],

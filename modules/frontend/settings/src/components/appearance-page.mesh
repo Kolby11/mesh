@@ -3,6 +3,8 @@
         <column class="settings-section">
             <text class="settings-section-title">{t('appearance.theme')}</text>
             <text class="settings-section-copy">{t('appearance.theme.copy')}</text>
+            <text class="settings-card-meta">{theme_scope_label}</text>
+            <button class="settings-secondary-button" hidden={theme_pin_hidden} onclick={onThemePin}>{theme_pin_label}</button>
             <row class="theme-grid">
                 {#for row in theme_rows}
                     <button class="theme-option" class:theme-option-active={row.active} onclick={onThemeSelect(row.id)}>
@@ -21,6 +23,7 @@
                             <column class="settings-card-copy">
                                 <text class="settings-card-title">{row.label}</text>
                                 <text class="settings-card-meta">{row.id}</text>
+                                <text class="settings-card-meta">{row.coverage}</text>
                             </column>
                             <text class="theme-check" hidden={not row.active}>✓</text>
                         </row>
@@ -119,6 +122,9 @@ local t = import("mesh.i18n", "t")
 theme_value = "mesh-default"
 locale_value = "en"
 theme_rows = {}
+theme_scope_label = ""
+theme_pin_label = ""
+theme_pin_hidden = true
 icon_theme_rows = {}
 font_rows = {}
 icon_theme_value = "hicolor"
@@ -130,6 +136,9 @@ locale_slovak = false
 local RESOURCE_PAGE_SIZE = 24
 local icon_limit = RESOURCE_PAGE_SIZE
 local font_limit = RESOURCE_PAGE_SIZE
+local font_catalog = {}
+local font_revision = nil
+local font_loading = false
 
 local function fallback_preview_palette(theme_id)
     local id = string.lower(tostring(theme_id or ""))
@@ -195,6 +204,9 @@ local function installed_themes()
             if rows[position].palette == nil and palette ~= nil then
                 rows[position].palette = palette
             end
+            if type(candidate) == "table" and candidate.coverage ~= nil then
+                rows[position].coverage = candidate.coverage
+            end
             return
         end
 
@@ -202,6 +214,7 @@ local function installed_themes()
             id = id,
             label = label,
             palette = palette,
+            coverage = type(candidate) == "table" and candidate.coverage or nil,
         }
         positions[id] = #rows
         seen[id] = true
@@ -266,6 +279,12 @@ local function sync_theme(theme_id)
             label = option.label,
             palette = palette,
             active = active,
+            coverage = type(option.coverage) == "table"
+                and (tostring(option.coverage.tuned or 0) .. " " .. t('appearance.coverage.tuned')
+                    .. " · " .. tostring(option.coverage.defaults or 0) .. " " .. t('appearance.coverage.defaults')
+                    .. " · " .. tostring(option.coverage.independent or 0) .. " " .. t('appearance.coverage.independent')
+                    .. " · " .. tostring((option.coverage.internal_selectors or 0) + (option.coverage.absent_targets or 0)) .. " " .. t('appearance.coverage.warnings'))
+                or t('appearance.coverage.unavailable'),
         }
     end
     theme_rows = rows
@@ -301,9 +320,14 @@ local function sync_system_resources()
     end
     icon_theme_rows = icons
 
+    if resources.font_revision ~= font_revision or font_revision == nil then
+        font_catalog = resources.font_families or {}
+        font_revision = resources.font_revision
+        font_limit = RESOURCE_PAGE_SIZE
+    end
     local fonts = {}
     font_more_hidden = true
-    for index, candidate in ipairs(resources.font_families or {}) do
+    for index, candidate in ipairs(font_catalog) do
         if index <= font_limit then
             local name = tostring(candidate.name or "")
             local face_count = tonumber(candidate.face_count or 0) or 0
@@ -317,6 +341,9 @@ local function sync_system_resources()
             font_more_hidden = false
         end
     end
+    if tonumber(resources.font_total or #font_catalog) > font_limit then
+        font_more_hidden = false
+    end
     font_rows = fonts
 end
 
@@ -329,6 +356,10 @@ effect(function()
         end
     end
     sync_theme(current_theme)
+    local pinned = theme and theme.scope == "profile"
+    theme_scope_label = pinned and t('appearance.theme.pinned') or t('appearance.theme.shared')
+    theme_pin_label = pinned and t('appearance.theme.unpin') or t('appearance.theme.pin')
+    theme_pin_hidden = not (pinned or (theme and theme.can_pin))
     sync_locale(mesh.locale.current() or "en")
     sync_system_resources()
 end)
@@ -338,6 +369,10 @@ function onThemeSelect(theme_id)
     if selected == "" then return end
     sync_theme(selected)
     theme.set_theme(selected)
+end
+
+function onThemePin()
+    theme.set_theme(theme_value, theme.scope == "profile" and "user" or "profile")
 end
 
 function onIconThemeSelect(theme_id)
@@ -360,6 +395,26 @@ function onShowMoreIcons()
 end
 
 function onShowMoreFonts()
+    if font_loading then return end
+    local resources = theme and theme.system_resources or {}
+    if resources.font_revision ~= nil and #font_catalog < tonumber(resources.font_total or 0) then
+        font_loading = true
+        task.spawn(function()
+            local succeeded, completion = pcall(function()
+                return theme.list_font_families(#font_catalog, RESOURCE_PAGE_SIZE):await()
+            end)
+            font_loading = false
+            if not succeeded then return end
+            local page = completion and completion.result or {}
+            if page.ok ~= true or page.revision ~= font_revision then return end
+            for _, candidate in ipairs(page.families or {}) do
+                font_catalog[#font_catalog + 1] = candidate
+            end
+            font_limit = font_limit + RESOURCE_PAGE_SIZE
+            sync_system_resources()
+        end)
+        return
+    end
     font_limit = font_limit + RESOURCE_PAGE_SIZE
     sync_system_resources()
 end

@@ -1,5 +1,5 @@
 {
-  "revision": 190,
+  "revision": 195,
   "schemaVersion": 1,
   "shell": {
     "fonts": {
@@ -20,7 +20,7 @@
       }
     },
     "theme": {
-      "active": "@mesh/nord:nord"
+      "active": "@mesh/catppuccin-mocha:catppuccin-mocha"
     }
   }
 }

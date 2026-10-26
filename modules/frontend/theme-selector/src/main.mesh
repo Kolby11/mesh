@@ -16,19 +16,32 @@
         gravity="bottom"
         open-on="hover"
     >
-        <BubbleOptions
-            label="Select theme"
-            items={items}
-            rotation={rotation}
-            onselect={onSelectTheme}
-            onscroll={onThemeScroll}
-        />
+        <column class="theme-picker-content">
+            <BubbleOptions
+                label="Select theme"
+                items={items}
+                rotation={rotation}
+                onselect={onSelectTheme}
+                onscroll={onThemeScroll}
+            />
+            <column class="theme-picker-info">
+                <text class="theme-picker-summary">{coverage_label}</text>
+                <text class="theme-picker-summary">{scope_label}</text>
+                <button class="theme-picker-pin" hidden={pin_hidden} onclick={onThemePin}>{pin_label}</button>
+            </column>
+        </column>
     </popover>
 </template>
 
 <script lang="luau">
 local theme = require("mesh.theme")
 local BubbleOptions = require("@mesh/bubble-options")
+local t = import("mesh.i18n", "t")
+
+coverage_label = ""
+scope_label = ""
+pin_label = ""
+pin_hidden = true
 
 -- Written by the core disclosure controller (`open-on="hover"`).
 open = false
@@ -213,6 +226,20 @@ effect(function(self)
     end
     was_open = open
     sync_options(current)
+    coverage_label = t('coverage.unavailable')
+    for _, option in ipairs(theme.themes or {}) do
+        if option.id == current and type(option.coverage) == "table" then
+            local coverage = option.coverage
+            coverage_label = tostring(coverage.tuned or 0) .. " " .. t('coverage.tuned')
+                .. " · " .. tostring(coverage.defaults or 0) .. " " .. t('coverage.defaults')
+                .. " · " .. tostring(coverage.independent or 0) .. " " .. t('coverage.independent')
+                .. " · " .. tostring((coverage.internal_selectors or 0) + (coverage.absent_targets or 0)) .. " " .. t('coverage.warnings')
+        end
+    end
+    local pinned = theme.scope == "profile"
+    scope_label = pinned and t('theme.pinned') or t('theme.shared')
+    pin_label = pinned and t('theme.unpin') or t('theme.pin')
+    pin_hidden = not (pinned or theme.can_pin)
 end)
 
 -- Selecting a theme does not close the popover: it stays open so the user can
@@ -223,6 +250,10 @@ function onSelectTheme(theme_id)
     set_current_theme(theme_id)
     sync_options(theme_id)
     theme.set_theme(theme_id)
+end
+
+function onThemePin()
+    theme.set_theme(active_theme(), theme.scope == "profile" and "user" or "profile")
 end
 
 -- Scrolling turns the ring one theme at a time.
@@ -245,6 +276,36 @@ end
 </script>
 
 <style>
+    .theme-picker-content {
+        width: fit;
+        align-items: center;
+        gap: var(--spacing-sm);
+        padding-bottom: var(--spacing-sm);
+    }
+
+    .theme-picker-summary {
+        width: 100%;
+        white-space: normal;
+        font-size: var(--typography-size-xs);
+        color: var(--color-on-surface);
+    }
+
+    .theme-picker-info {
+        width: 220px;
+        max-width: 100%;
+        gap: var(--spacing-sm);
+        padding: var(--spacing-sm);
+        border-radius: var(--radius-md);
+        background: var(--color-surface-container-high);
+    }
+
+    .theme-picker-pin {
+        padding: var(--spacing-sm) var(--spacing-md);
+        border-radius: var(--radius-md);
+        background: var(--color-surface-container-high);
+        color: var(--color-on-surface);
+    }
+
     .theme-float-shell {
         /* Sized to the bounding box of the BubbleOptions content instead of a
         hardcoded size — <popover> isn't a container tag, so it needs the

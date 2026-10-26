@@ -222,7 +222,9 @@ fn system_resources_json(
             "path": theme.path,
             "inherits": theme.inherits,
         })).collect::<Vec<_>>(),
-        "font_families": resources.font_families.iter().map(|family| serde_json::json!({
+        "font_revision": format!("{:016x}", resources.revision),
+        "font_total": resources.font_families.len(),
+        "font_families": resources.font_families.iter().take(24).map(|family| serde_json::json!({
             "name": family.name,
             "face_count": family.face_count,
             "monospace": family.monospace,
@@ -231,6 +233,40 @@ fn system_resources_json(
 }
 
 impl Shell {
+    pub(in crate::shell) fn list_theme_font_families(
+        &self,
+        payload: &serde_json::Value,
+    ) -> serde_json::Value {
+        let resources = &self.resource_snapshot.host_catalog;
+        let offset = payload
+            .get("offset")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0);
+        let limit = payload
+            .get("limit")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(24)
+            .clamp(1, 24);
+        let offset = usize::try_from(offset)
+            .unwrap_or(usize::MAX)
+            .min(resources.font_families.len());
+        let end = offset
+            .saturating_add(limit as usize)
+            .min(resources.font_families.len());
+        serde_json::json!({
+            "ok": true,
+            "status": "applied",
+            "families": resources.font_families[offset..end].iter().map(|family| serde_json::json!({
+                "name": family.name,
+                "face_count": family.face_count,
+                "monospace": family.monospace,
+            })).collect::<Vec<_>>(),
+            "next_offset": (end < resources.font_families.len()).then_some(end),
+            "total": resources.font_families.len(),
+            "revision": format!("{:016x}", resources.revision),
+        })
+    }
+
     /// Prepare a shared or active-profile settings candidate. The closure
     /// receives the shared candidate when no profile is active, otherwise it
     /// receives the sparse profile override that owns the write.
@@ -858,11 +894,25 @@ impl Shell {
                 })
         };
         let theme_entry = |theme: &mesh_core_theme::Theme| {
+            let coverage = self
+                .installed_module_graph
+                .as_ref()
+                .and_then(|graph| graph.theme_coverage(&theme.id))
+                .map(|coverage| {
+                    serde_json::json!({
+                        "tuned": coverage.tuned.len(),
+                        "defaults": coverage.defaults.len(),
+                        "independent": coverage.independent.len(),
+                        "internal_selectors": coverage.internal_selectors.len(),
+                        "absent_targets": coverage.absent_targets.len(),
+                    })
+                });
             serde_json::json!({
                 "id": theme.id,
                 "label": theme.name,
                 "modes": theme_modes(theme),
                 "palette": theme_preview_palette(theme),
+                "coverage": coverage,
             })
         };
         let mut themes = self
@@ -905,6 +955,7 @@ impl Shell {
             "themes": themes,
             "available": available,
             "scope": self.active_theme_scope().as_str(),
+            "can_pin": self.active_profile_id.is_some(),
             "system_resources": system_resources_json(
                 &self.settings,
                 &self.resource_snapshot.host_catalog,

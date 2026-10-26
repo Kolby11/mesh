@@ -1,0 +1,11 @@
+{
+  "theme.pinned": "Téma pripnutá k tomuto prostrediu",
+  "theme.shared": "Téma používa vaše spoločné nastavenie",
+  "theme.pin": "Pripnúť k tomuto prostrediu",
+  "theme.unpin": "Použiť vo všetkých prostrediach",
+  "coverage.tuned": "prispôsobené",
+  "coverage.defaults": "s predvoleným vzhľadom",
+  "coverage.independent": "nezávislé",
+  "coverage.warnings": "upozornení na kompatibilitu",
+  "coverage.unavailable": "Pokrytie nie je dostupné"
+}

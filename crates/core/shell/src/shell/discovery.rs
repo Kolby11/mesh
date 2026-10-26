@@ -1895,6 +1895,7 @@ impl Shell {
                 ("themes", "object[]"),
                 ("available", "string[]"),
                 ("scope", "string"),
+                ("can_pin", "boolean"),
                 ("system_resources", "object"),
                 ("backdrop_image", "string?"),
             ],
@@ -1904,8 +1905,16 @@ impl Shell {
                 ("set_icon_theme", &[("theme_id", "string")]),
                 ("set_font_family", &[("family", "string")]),
                 ("set_backdrop_image", &[("path", "string")]),
+                (
+                    "list_font_families",
+                    &[("offset", "int?"), ("limit", "int?")],
+                ),
             ],
         );
+        theme_contract
+            .capabilities
+            .methods
+            .insert("list_font_families".into(), vec!["theme.read".into()]);
         theme_contract.events = vec![
             mesh_core_service::InterfaceEvent {
                 name: "ThemeChanged".into(),
