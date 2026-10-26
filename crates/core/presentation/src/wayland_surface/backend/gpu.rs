@@ -426,6 +426,7 @@ impl WaylandSurfaceBackend {
             return PresentStatus::SurfaceMissing;
         };
         let (scale, object) = (entry.scale, entry.surface_generation().object);
+        scene.include_damage(damage);
         let Some(snapshot) = scene.snapshot(mesh_core_render::FractionalScale::new(scale)) else {
             self.gpu.disable(&PresentationError::BufferAlloc(
                 "scene recording is incomplete".into(),

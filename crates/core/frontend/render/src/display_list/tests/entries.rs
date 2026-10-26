@@ -1011,3 +1011,71 @@ fn css_profile_later_shadow_participates_in_damage_selection() {
     );
     assert!(selected.iter().any(|command| command.node.id == 1));
 }
+
+/// A promoted popup's display list can miss a retained-tree generation while
+/// its parent paints. The tree's dirty set covers only its latest generation,
+/// so the next update must not patch from it: a text edit made in the
+/// skipped generation still produces damage.
+#[test]
+fn skipped_retained_generations_do_not_trust_the_latest_dirty_set() {
+    let _resources = crate::resource_state_test_lock();
+    let tree = |content: &str| {
+        let mut root = node(1, "box", 0.0, 0.0, 100.0, 40.0);
+        let mut text = node(2, "text", 0.0, 0.0, 40.0, 10.0);
+        text.attributes.insert(Prop::Content, content.into());
+        root.children.push(text);
+        root.children.push(node(3, "box", 60.0, 0.0, 10.0, 10.0));
+        root
+    };
+    let mut list = RetainedDisplayList::default();
+    list.update_for_retained_generation(
+        &tree("a"),
+        1,
+        RenderObjectDirtySummary {
+            inserted: 3,
+            ..Default::default()
+        },
+        &HashSet::from([1, 2, 3]),
+        100,
+        40,
+        false,
+        true,
+    );
+
+    // Generation 2 edited the text; this list only sees generation 3, whose
+    // dirty set names the unrelated box alone.
+    let mut next = tree("ab");
+    next.children[1].computed_style.background_color = Color {
+        r: 200,
+        g: 0,
+        b: 0,
+        a: 255,
+    };
+    list.update_for_retained_generation(
+        &next,
+        3,
+        RenderObjectDirtySummary {
+            material: 1,
+            ..Default::default()
+        },
+        &HashSet::from([3]),
+        100,
+        40,
+        false,
+        true,
+    );
+
+    let text_rect = DamageRect {
+        x: 0,
+        y: 0,
+        width: 40,
+        height: 10,
+    };
+    assert!(
+        list.damage_rects()
+            .iter()
+            .any(|rect| rect.intersects(text_rect)),
+        "{:?}",
+        list.damage_rects()
+    );
+}

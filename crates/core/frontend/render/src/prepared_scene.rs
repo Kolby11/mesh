@@ -167,6 +167,48 @@ impl SceneCanvas {
         .with_scene_cache(Rc::clone(&self.node_cache))
     }
 
+    /// Widen this frame's redraw region by `logical` damage that an earlier,
+    /// refused or unpresented frame left for this present. The scene worker
+    /// redraws its retained target only inside the plan's damage, so damage
+    /// carried forward by the caller would otherwise be reported to the
+    /// compositor over stale pixels.
+    pub fn include_damage(&mut self, logical: &[crate::DamageRect]) {
+        let Some(plan) = self.plan.as_mut() else {
+            return;
+        };
+        let missing: Vec<_> = logical
+            .iter()
+            .filter(|rect| rect.width > 0 && rect.height > 0)
+            .filter(|rect| !plan.damage.logical.contains(rect))
+            .copied()
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        let plan = Arc::make_mut(plan);
+        let mut bounds = plan.damage.logical_bounds;
+        for rect in &missing {
+            bounds = if bounds.width == 0 || bounds.height == 0 {
+                *rect
+            } else {
+                let left = bounds.x.min(rect.x);
+                let top = bounds.y.min(rect.y);
+                let right = (bounds.x + bounds.width).max(rect.x + rect.width);
+                let bottom = (bounds.y + bounds.height).max(rect.y + rect.height);
+                crate::DamageRect {
+                    x: left,
+                    y: top,
+                    width: right - left,
+                    height: bottom - top,
+                }
+            };
+        }
+        let mut rects = plan.damage.logical.to_vec();
+        rects.extend(missing);
+        plan.damage.logical = rects.into();
+        plan.damage.logical_bounds = bounds;
+    }
+
     /// Return preparation work since the most recent `begin`, excluding GPU replay.
     pub fn preparation_metrics(&self) -> ScenePreparationMetrics {
         self.node_cache.borrow().metrics
@@ -299,6 +341,39 @@ mod tests {
         assert_eq!(buffer.get_pixel(4, 4).g, 0);
         assert_eq!(buffer.get_pixel(20, 20).g, 0);
         assert_eq!(buffer.get_pixel(12, 12).g, 255);
+    }
+
+    #[test]
+    fn included_damage_widens_the_snapshot_plan() {
+        let mut recording = SceneCanvas::new(32, 24).unwrap();
+        let mut frame = plan();
+        let own = crate::DamageRect {
+            x: 0,
+            y: 0,
+            width: 4,
+            height: 4,
+        };
+        let carried = crate::DamageRect {
+            x: 10,
+            y: 10,
+            width: 6,
+            height: 2,
+        };
+        frame.damage.logical = vec![own].into();
+        frame.damage.logical_bounds = own;
+        recording.begin(&frame);
+        recording.include_damage(&[carried, own]);
+        let snapshot = recording.snapshot(FractionalScale::identity()).unwrap();
+        assert_eq!(&*snapshot.plan().damage.logical, &[own, carried]);
+        assert_eq!(
+            snapshot.plan().damage.logical_bounds,
+            crate::DamageRect {
+                x: 0,
+                y: 0,
+                width: 16,
+                height: 12
+            }
+        );
     }
 }
 

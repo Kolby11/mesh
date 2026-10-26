@@ -65,9 +65,6 @@ October log.
 
 - [ ] **Settings theme switch may not repaint:** reported 2026-10-21 as needing a tab change; not
       reproduced on `1d50170a` (layer and window roles, file and click paths). Capture a repro.
-- [ ] **Launcher search paints one keystroke late:** in the promoted dock launcher popup the
-      last typed character appears only on the next input event; reproduced on `d02ba382`, not
-      reliably at `f9a5dac4` (nested Hyprland, CPU). Needs a GPU repro on the user's session.
 - [ ] **Initial queries on differing outputs:** before Wayland reports placement,
       a new surface has no unambiguous output-size hint. Resolve first-paint
       container queries without guessing an output or sizing content from a placeholder.

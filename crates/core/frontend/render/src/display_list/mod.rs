@@ -295,6 +295,13 @@ impl RetainedDisplayList {
         let caller_lineage_changed = retained_tree_generation.is_some()
             && self.retained_tree_generation == retained_tree_generation
             && !caller_lineage_valid;
+        // The retained tree's dirty set describes only its latest generation.
+        // A display list that missed one (a promoted popup skipping a frame
+        // while its parent painted) cannot patch from it.
+        let generations_skipped = matches!(
+            (self.retained_tree_generation, retained_tree_generation),
+            (Some(seen), Some(now)) if now > seen.saturating_add(1)
+        );
         if retained_tree_generation.is_some()
             && self.retained_tree_generation == retained_tree_generation
             && caller_lineage_valid
@@ -320,6 +327,7 @@ impl RetainedDisplayList {
         let scroll_only = dirty_summary.scroll > 0
             && !resource_revision_changed
             && !caller_lineage_changed
+            && !generations_skipped
             && !policy_changed
             && self.root_id == Some(root.id)
             && self.surface_size == Some((surface.width, surface.height))
@@ -336,12 +344,14 @@ impl RetainedDisplayList {
                     .is_some_and(|subtree| subtree.scroll_viewport.is_some())
             });
         let blur_metadata_reuse_candidate = has_authoritative_dirty_summary
+            && !generations_skipped
             && self.root_id == Some(root.id)
             && self.surface_size == Some((surface.width, surface.height))
             && self.paint_origin == paint_origin
             && dirty_summary_preserves_blur_metadata(dirty_summary);
         let sparse_inputs_valid = !resource_revision_changed
             && !caller_lineage_changed
+            && !generations_skipped
             && self.can_patch_sparse_entries(
                 root,
                 dirty_summary,
@@ -396,7 +406,7 @@ impl RetainedDisplayList {
             );
         }
         let origin_changed = self.paint_origin != paint_origin;
-        let decision = if resource_revision_changed || policy_changed {
+        let decision = if resource_revision_changed || policy_changed || generations_skipped {
             LocalReuseDecision::FallbackFull { broad_dirty: false }
         } else if origin_changed {
             LocalReuseDecision::FallbackFull { broad_dirty: false }

@@ -637,4 +637,74 @@ mod tests {
             release.release();
         }
     }
+
+    /// Damage a refused frame left behind is redrawn by the next scene that
+    /// includes it, not only reported to the compositor.
+    #[test]
+    fn scene_worker_redraws_damage_included_from_an_earlier_frame() {
+        let Some(worker) = worker() else {
+            return;
+        };
+        let mut canvas = SceneCanvas::new(32, 24).unwrap();
+        let key = canvas.surface;
+        let first = worker
+            .submit(record(&mut canvas, skia_safe::Color::BLUE, true))
+            .unwrap();
+        let (first_output, _) = worker
+            .wait_completed(key, Duration::from_secs(10))
+            .unwrap()
+            .output
+            .unwrap();
+        assert!(worker.acknowledge_presented(key, first));
+        let release = first_output.attached();
+
+        let carried = DamageRect {
+            x: 20,
+            y: 4,
+            width: 8,
+            height: 8,
+        };
+        let mut plan = FramePaintPlan::empty();
+        plan.inputs.surface_size = Some((32, 24));
+        plan.inputs.resource_revision = 7;
+        plan.damage.logical = vec![DamageRect {
+            x: 4,
+            y: 4,
+            width: 8,
+            height: 8,
+        }]
+        .into();
+        canvas.begin(&plan);
+        canvas.session().with_canvas(|canvas| {
+            canvas.clear(skia_safe::Color::RED);
+            canvas.draw_rect(
+                skia_safe::Rect::from_xywh(20., 4., 8., 8.),
+                skia_safe::Paint::default().set_color(skia_safe::Color::GREEN),
+            );
+        });
+        canvas.include_damage(&[carried]);
+        let second = worker
+            .submit(canvas.snapshot(FractionalScale::identity()).unwrap())
+            .unwrap();
+        let (second_output, pixels) = worker
+            .wait_completed(key, Duration::from_secs(10))
+            .unwrap()
+            .output
+            .unwrap();
+        assert_eq!(
+            pixels.get_pixel(22, 6),
+            mesh_core_elements::Color {
+                r: 0,
+                g: 255,
+                b: 0,
+                a: 255
+            }
+        );
+        assert!(worker.acknowledge_presented(key, second));
+        worker.remove_surface(key);
+        worker.shutdown().unwrap();
+        drop(second_output);
+        drop(first_output);
+        release.release();
+    }
 }

@@ -13,7 +13,9 @@ measurements live in [`log/`](log/README.md).
   hidden layers destroyed instead of null-buffer unmapped (sway `wrong configure
   serial`); `mesh.launch_app` plus contract-only service-call authorization (dock
   activation was always denied); no tooltip overlay reserve when popups exist
-  (bar layer 1272×248 → 1272×48). Each was checked live in a nested Hyprland
+  (bar layer 1272×248 → 1272×48); scooped borders and overflow clips; the
+  launcher late keystroke (popup display lists trusted a dirty set from a
+  later retained generation, and GPU scenes ignored carried damage). Each was checked live in a nested Hyprland
   or headless sway; see the October and performance logs.
 
 - **Hiding surfaces unmap when their exit settles (`f9a5dac4`).** The root's
