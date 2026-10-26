@@ -7,6 +7,12 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Hiding surfaces unmap when their exit settles (`f9a5dac4`).** The root's
+  opacity duration is now only the bound; glass dashboard and picker exits
+  settle in 115–117 ms instead of 280 ms. Release GPU-feature shell: 1,036
+  passed. The launcher late-keystroke bug did not reproduce in a nested
+  Hyprland; it stays in the backlog pending a GPU repro.
+
 - **Cold icon lookup fix complete.** Painting
   uses nonblocking prepared results; cold searches run on shared binding snapshots
   without holding the live registry lock. Live first opens in three paired fresh
