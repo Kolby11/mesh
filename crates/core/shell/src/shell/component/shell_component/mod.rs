@@ -2326,6 +2326,14 @@ impl ShellComponent for FrontendSurfaceComponent {
         content_offset: (u32, u32),
         exiting: bool,
     ) -> Result<bool, ComponentError> {
+        let trace_phase = |phase: &str, started: Option<std::time::Instant>| {
+            if let Some(started) = started {
+                tracing::debug!(target: "mesh_profiling", surface = self.id(), node_key,
+                    child_stage = phase, duration_us = started.elapsed().as_micros() as u64,
+                    "child paint attribution");
+            }
+        };
+        let mut phase_started = self.profiling_enabled.then(std::time::Instant::now);
         if node_key == tooltip::TOOLTIP_CHILD_KEY {
             return Ok(self.paint_tooltip_popup(canvas, scale, content_offset));
         }
@@ -2358,6 +2366,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         let display_list = child_display_lists.get_or_insert(node.id);
         display_list.set_backdrop_blur_policy(self.paint_context.backdrop_policy);
         display_list.set_refraction_source(self.paint_context.backdrop.source_beneath);
+        trace_phase("root_snapshot", phase_started);
+        phase_started = self.profiling_enabled.then(std::time::Instant::now);
         display_list.update_at_for_retained_generation_with_dirty_nodes(
             &child_root,
             retained_generation,
@@ -2371,6 +2381,8 @@ impl ShellComponent for FrontendSurfaceComponent {
             true,
         );
 
+        trace_phase("display_list", phase_started);
+        phase_started = self.profiling_enabled.then(std::time::Instant::now);
         let mut damage_rects = display_list.damage_rects().to_vec();
         // A raster can be requested solely because the physical buffer was
         // replaced (for example after a scale change) while the logical
@@ -2404,7 +2416,11 @@ impl ShellComponent for FrontendSurfaceComponent {
                 DisplayListRepaintPolicy::MinimalDamage
             },
         );
+        trace_phase("command_selection", phase_started);
+        phase_started = self.profiling_enabled.then(std::time::Instant::now);
         let mut session = canvas.session();
+        trace_phase("canvas_session", phase_started);
+        phase_started = self.profiling_enabled.then(std::time::Instant::now);
         for damage in damage_rects {
             let physical_damage =
                 scale_damage_rect_to_buffer(damage, scale, session.width(), session.height());
@@ -2412,7 +2428,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 physical_damage,
                 mesh_core_elements::style::Color::TRANSPARENT,
             );
-            mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session_with_context(
+            let metrics = mesh_core_render::paint_selected_display_list_for_module_with_profiling_metrics_and_attribution_in_session_with_context(
                 &selected,
                 &mut session,
                 scale,
@@ -2425,10 +2441,28 @@ impl ShellComponent for FrontendSurfaceComponent {
                 None,
                 None,
                 Some(self.compiled.manifest.package.id.as_str()),
-                false,
+                self.profiling_enabled,
                 Some(&self.paint_context),
             );
+            if self.profiling_enabled {
+                for class in mesh_core_render::PaintCommandClass::ALL {
+                    let sample = metrics.command_attribution.get(class);
+                    if sample.command_count > 0 {
+                        tracing::debug!(target: "mesh_profiling", surface = self.id(), node_key,
+                            child_command_class = class.label(), duration_us = sample.elapsed_micros,
+                            command_count = sample.command_count, "child paint attribution");
+                    }
+                }
+                tracing::debug!(target: "mesh_profiling", surface = self.id(), node_key,
+                    child_text_shaping_us = metrics.text.shaping_micros,
+                    child_icon_raster_us = metrics.icon_image_raster_micros,
+                    "child paint attribution");
+            }
         }
+        trace_phase("command_replay", phase_started);
+        phase_started = self.profiling_enabled.then(std::time::Instant::now);
+        drop(session);
+        trace_phase("canvas_finalize", phase_started);
         Ok(true)
     }
 

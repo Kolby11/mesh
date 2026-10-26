@@ -205,6 +205,31 @@ patching/selective template builds in the spectrum profile for comparison.
 Use profiling-disabled runs for timing claims about
 instrumentation overhead.
 
+## Child popup first-open attribution
+
+Start a release shell with `RUST_LOG=info,mesh_profiling=debug`, then enable
+profiling with `target/release/mesh-shell debug profiling` before opening the
+popup. `MESH_RENDER_GPU=0` forces CPU/SHM with the same GPU-enabled binary.
+Use fresh processes to distinguish first-use resource work from warm reopens.
+
+Child surface samples with `attribution:child_` triggers split canvas setup,
+backdrop context, component painting, and damage/blur updates. These are nested
+attribution samples; exclude them from sums of ordinary stage totals. Child
+paint logs additionally carry `child_stage` for root snapshot, display-list
+update, command selection, canvas session, command replay and finalization.
+`child_command_class` splits replay into primitive, text, icon, control and
+scrollbar commands; text shaping and icon raster times are nested subsets.
+Detailed child logs identify the component and node key, while outer samples
+identify the actual child surface. Timers and command attribution are disabled
+when built-in profiling is off.
+
+Match input to the target's first non-null Wayland buffer commit for live open
+latency. CPU child replay is immediate; GPU child replay records commands, and
+its timer excludes asynchronous worker raster and later compositor commit.
+Use stack sampling alongside these spans when an icon-command time greatly
+exceeds the narrower icon-raster counter. Repeat with profiling disabled before
+claiming production latency or an optimization speedup.
+
 ## Focused live GPU popup validation
 
 ```bash

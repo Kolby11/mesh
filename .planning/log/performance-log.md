@@ -9309,3 +9309,126 @@ executables, `bench.py`, `timings.json` (216 rows including controls), six proce
 logs, summary and build/test logs. Run
 `cargo test --release -p mesh-core-render --lib retained_display_span_profile -- --ignored --nocapture --test-threads=1`
 inside `nix develop`. No live compositor or hardware replay is claimed.
+
+## 2026-10-26 — launcher first-open attribution: cold XDG icon lookup
+
+Baseline `9122f5e3` plus profiling-only child preparation probes. This completes
+attribution of the earlier 305–490 ms live launcher delay; the identified
+optimization is a separate backlog item. No speedup is claimed in this entry.
+
+**Finding.** The first child paint spends about **95–98%** of its synchronous
+preparation in icon commands. Both CPU and GPU paths take roughly **250–269 ms**
+there; later first-frame icon work is **0.135–0.395 ms**. The narrow icon raster
+counter accounts for only **1.298–3.627 ms** in cold samples. Canvas creation,
+backdrop context and display-list construction do not explain the long first
+open. Resource lookup inside icon commands is the dominant cold path.
+
+A separate CPU stack capture, correlated to the cold child's replay interval,
+contains **24 of 29 UI-thread user-CPU samples** under
+`mesh_core_icon::xdg::find_icon_in_theme_with_catalog` / named-icon resolution.
+Twenty include `icon::theme::Theme::find_icon_here`; thirteen include filesystem
+metadata calls, and two include theme-index parsing/search construction. These
+are inclusive overlapping sample counts, not additive wall-time percentages.
+`statx` is the most frequent leaf frame (11 samples). Kernel/off-CPU time is not
+represented by those user-only samples.
+
+The code explains why the async file-raster work did not remove this stall:
+`resolve_icon_for_render` first calls `resolve_icon_for_module` synchronously.
+An uncached semantic lookup reaches `find_icon_in_theme_with_catalog`, which
+constructs `IconSearch::new_from(...).search().icons()` and searches the theme
+filesystem before returning a target. The render-time async resolution queue
+is only reached after that immediate lookup returns `Missing`. Per-query caches
+make reopens cheap but do not prepare previously unseen names/sizes before the
+first child frame. Moving cold semantic/XDG resolution off paint, or publishing
+a prepared theme index/targets, must preserve icon fallback correctness and
+consumer repaint subscriptions; no behavior change is implemented here.
+
+**Environment and method.** Normal release CLI build, default GPU feature,
+thin LTO / one codegen unit, `CARGO_BUILD_JOBS=4`, built in `nix develop`.
+Binary SHA-256: `960960da0358fa9382b31df07c9a8cee9faba18c50a16e16a9fa84c5ef1cc321`.
+Main Hyprland `wayland-1`, 2880×1800 at scale 1 / 120 Hz, AMD device `0xe281`,
+dmabuf format `0x34324241`, modifier `0xffffffffffffff`. The desktop remains
+active with quickshell present. No rustc process is observed in any selected
+capture (sampled every 0.5 seconds); runs are not CPU-pinned.
+
+A private copy of the historical glass profile/settings/module graph preserves
+the earlier fixture's roots, icon/font preferences and wallpaper. Its module
+path points to the current checkout. Config, home, state and IPC socket paths
+are private to the probe; checkout preferences are not changed. Hidden-layer
+prewarming is left enabled and boot settles for six seconds before profiling
+is enabled. OS caches are shared/warm; "first" means first open in a fresh
+process. Each launcher popup requests 596×512 logical pixels. Its first replay
+has 42 primitive, 17 text, 17 icon, one control and one scrollbar command.
+
+Three alternating CPU/GPU process pairs use the same executable with
+`MESH_RENDER_GPU=0` or `1`. Runtime logs confirm CPU/SHM or the real GPU path,
+with no GPU fallback. Each process gets four native Wayland virtual-pointer
+clicks on the launcher trigger, with an outside click and 0.8 s dismissal wait
+between opens. The endpoint is the first non-null buffer attachment followed
+by `wl_surface.commit` for that newly created popup; the start is the logged
+native pointer press. This includes asynchronous GPU completion up to buffer
+commit, not compositor presentation feedback/physical scanout. A local pipe
+collector timestamps protocol receipts, adding small collector/pipe overhead.
+
+| Target/mode | First open, 3 processes | Later opens, 9 samples |
+| --- | ---: | ---: |
+| CPU/SHM, profiling enabled | 356.355–384.859 ms | 56.658–86.966 ms |
+| GPU, profiling enabled | 311.699–345.658 ms | 35.688–85.145 ms |
+
+**First child preparation breakdown** (three samples per mode; nested rows must
+not be added to their parent):
+
+| Operation | CPU, ms | GPU, ms |
+| --- | ---: | ---: |
+| Total synchronous child preparation | 262.351–273.701 | 259.120–277.844 |
+| Canvas setup | 0.823–1.036 | 0.001–0.002 |
+| Backdrop context | 0.002–0.003 | 0.002–0.003 |
+| Component child paint | 261.172–272.305 | 258.859–277.566 |
+| Root snapshot | 0.013–0.024 | 0.009–0.023 |
+| Display list | 1.822–2.375 | 1.777–3.358 |
+| Command selection | 0.002–0.002 | 0.002–0.007 |
+| Canvas session | 0.001–0.002 | 0.001–0.001 |
+| Command replay/recording | 259.279–269.848 | 257.020–274.109 |
+| Icon commands (subset) | 249.975–259.866 | 252.703–268.947 |
+| Text commands (subset) | 3.232–4.287 | 3.378–3.946 |
+| Icon raster counter (subset) | 1.298–3.627 | 1.484–2.850 |
+| Canvas finalization | 0.004–0.005 | 0.002–0.002 |
+| Damage/blur metadata | 0.014–0.018 | 0.014–0.015 |
+
+The first child timer can describe a preparation attempt before its first
+successful buffer commit; the commit latency above is the user-visible
+pipeline endpoint. Input handling, parent preparation, configure callbacks and
+GPU completion account for the remainder outside this child timer. This entry
+does not attribute that smaller remainder to one cause.
+
+**Instrumentation check.** Repeated native-click captures with built-in
+profiling disabled still reproduce the stall: CPU first open **314.704–340.105
+ms** (2 fresh processes), GPU **307.211–361.935 ms** (3 fresh processes). Later
+opens are **65.685–99.011 ms** (6 CPU samples) and **38.518–72.827 ms** (9 GPU
+samples). These are separate runs, not paired instrumentation-overhead or
+speedup estimates. A CPU control whose popup was already created before the
+marked click is excluded. The separate stack capture is also excluded from
+latency ranges; it samples the actual cold child replay window. The startup
+pilot with invalid module-path syntax is not a measurement.
+
+**Observability and validation.** Profiling-enabled runtime samples now split
+child canvas setup, backdrop context, component paint and damage/blur work.
+Child paint logs split snapshot/display-list/selection/session/replay/finalize,
+plus command classes and nested text/raster counters. All timing/attribution
+collection is gated by built-in profiling; normal painting keeps that work off.
+The profiler guide documents the nested scopes and commit boundary. Live CPU
+and GPU runs complete all four opens and orderly shutdown. Release GPU-feature
+shell suite: **1,034 passed**, 37 ignored, zero failures. Formatting and diff
+checks pass on the changed files. No renderer, scheduling or icon-resolution behavior is fixed
+or benchmarked as an optimization in this commit.
+
+**Evidence/reproduction.** Ignored `profiles/launcher-attribution/` contains
+`capture.py`, `profile_extra.py`, `analyze.py`, `analyze_stacks.py`, private
+config/state, instrumented and pre-probe binaries, metadata, `results.json`,
+`unprofiled-results.json`, 12 process logs/JSONL files plus marks/load records,
+the pilot, stack capture, raw `first-open.perf.data`, symbolized `stacks.txt`,
+`stack-summary.json`, build/test logs and summaries. Native pointer injection
+uses `wlrctl`; stack sampling uses `perf record -e cpu-clock -F 499 -k
+CLOCK_REALTIME --call-graph dwarf -p <probe-pid>`. The source inspection points
+are `render/child.rs`, `shell_component/mod.rs`, `surface/icon.rs`,
+`ui/icon/src/registry.rs`, and `ui/icon/src/xdg.rs`.

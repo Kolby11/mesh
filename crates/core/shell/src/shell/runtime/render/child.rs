@@ -553,6 +553,7 @@ impl Shell {
             });
         }
 
+        let canvas_started = self.profiling_enabled().then(std::time::Instant::now);
         {
             let gpu = self.gpu_canvas_wanted();
             if !super::canvas_matches(
@@ -585,6 +586,16 @@ impl Shell {
             }
         }
 
+        if let Some(started) = canvas_started {
+            self.record_surface_profiling_stage(
+                &child_surface_id,
+                Some(component_id),
+                mesh_core_debug::ProfilingStage::Paint,
+                started.elapsed(),
+                Some("attribution:child_canvas_setup"),
+            );
+        }
+
         let (pad_left, pad_top, ..) = self.components[index].children[child_index].content_padding;
         // `paint_child_surface`'s offset is in the same logical layout units
         // as `-bounds.0`/`-bounds.1` (the renderer applies `scale` to layout
@@ -613,6 +624,7 @@ impl Shell {
         {
             return Ok(false);
         }
+        let backdrop_started = self.profiling_enabled().then(std::time::Instant::now);
         let paint_context = mesh_core_render::PaintContext {
             blur_quality: blur_quality_from_settings(&self.settings.render.blur),
             backdrop_policy: mesh_core_render::backdrop_blur_policy(),
@@ -622,6 +634,16 @@ impl Shell {
         self.components[index]
             .component
             .set_paint_context(paint_context);
+        if let Some(started) = backdrop_started {
+            self.record_surface_profiling_stage(
+                &child_surface_id,
+                Some(component_id),
+                mesh_core_debug::ProfilingStage::Paint,
+                started.elapsed(),
+                Some("attribution:child_backdrop_context"),
+            );
+        }
+        let paint_started = self.profiling_enabled().then(std::time::Instant::now);
         let painted = {
             let runtime = &mut self.components[index];
             let buffer = runtime.children[child_index]
@@ -634,10 +656,20 @@ impl Shell {
                 .paint_child_surface(&node_key, buffer, scale, content_offset, exiting)
                 .map_err(ShellRunError::Component)?
         };
+        if let Some(started) = paint_started {
+            self.record_surface_profiling_stage(
+                &child_surface_id,
+                Some(component_id),
+                mesh_core_debug::ProfilingStage::Paint,
+                started.elapsed(),
+                Some("attribution:child_component_paint"),
+            );
+        }
         if !painted {
             self.destroy_child_surface_at(index, child_index);
             return Ok(false);
         }
+        let damage_started = self.profiling_enabled().then(std::time::Instant::now);
         let child_damage = self.components[index]
             .component
             .child_surface_present_damage(&node_key);
@@ -672,6 +704,15 @@ impl Shell {
                 .surface_id,
             child_blur_regions,
         );
+        if let Some(started) = damage_started {
+            self.record_surface_profiling_stage(
+                &child_surface_id,
+                Some(component_id),
+                mesh_core_debug::ProfilingStage::Paint,
+                started.elapsed(),
+                Some("attribution:child_damage_and_blur"),
+            );
+        }
         match self.present_surface_target(
             index,
             TargetRef::Child(child_index),

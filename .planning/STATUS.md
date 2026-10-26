@@ -7,6 +7,13 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- **Launcher first-open attribution complete.** Cold icon commands take
+  250–269 ms, about 95–98% of first child preparation in three fresh CPU and
+  three fresh GPU processes. CPU stacks identify synchronous XDG theme lookup
+  and file metadata probes before raster scheduling. Canvas/backdrop setup is
+  small. Release GPU-feature shell: 1,034 passed. Evidence and profiling-disabled
+  controls are in the performance log.
+
 - **P2 retained display spans complete.** Persistent span branches replace
   full-array copies and scrollbar repair scans. Ancestor rebuilds share offset
   child spans; frame plans publish the repaired immutable metadata. Repeated
@@ -74,7 +81,8 @@ measurements live in [`log/`](log/README.md).
 
 ## Next
 
-- Attribute the launcher's first child-surface preparation before optimizing it.
+- Remove synchronous cold XDG icon lookup from child painting, preserving
+  deterministic icons and repaint subscriptions.
 - D1 remains deferred pending supported runtime table-write tracking; indirect
   list reads still compare every item.
 - Continue glass raster work and the in-surface blur engine after pipeline work.
