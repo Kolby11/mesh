@@ -456,7 +456,6 @@ pub(super) fn dirty_summary_allows_command_patch(dirty: RenderObjectDirtySummary
         && dirty.reordered == 0
         && dirty.transform == 0
         && dirty.opacity == 0
-        && dirty.scroll == 0
         && dirty.material == 0
         && dirty.primitive == 0
 }

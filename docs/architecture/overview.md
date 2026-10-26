@@ -107,11 +107,16 @@ remains conservative on these fallback frames. Display ancestors use retained pa
 prefix once. Stable text, semantic and local geometry changes replace
 ordinary node commands through a bounded persistent command tree, without
 rebuilding sibling lists, and re-collect only their own display entries.
-Equal visual bounds preserve ancestor coverage and effect metadata. Moved
-bounds update ancestor coverage and spans in place when every ancestor owns one
-command; a shrink that gives up its parent's coverage edge re-unions that
-parent's children. Other command shapes, layers above a moved node, and boxes
-that define a descendant's clip or transform use subtree rebuilds.
+Dirty paths retain their cumulative affine transforms, overflow clips and
+scroll-content coordinate spaces. Topology-stable node and scrollbar commands
+are replaced beneath compositing/filter layers and clip/scale/scroll ancestors;
+layer clips, damage coverage and filter regions are repaired from retained child
+bounds. Scroll content keeps viewport-anchored entry damage. Overflow-metric
+changes and retained scroll offsets patch the existing owner, scrollbar and
+scroll-scope commands while preserving content snapshots. Scope topology changes, moved viewports and boxes that change a
+descendant's clip or transform keep the conservative rebuild. A shrink that
+gives up its parent's coverage edge still re-unions that parent's children;
+span arrays still copy and repair unrelated entries.
 Text-only binding patches also retain focus scopes, disclosures and interaction
 targets when all dirty paths preserve styles, state, geometry and non-text
 attributes. Other input changes keep the ordinary reconciliation path.

@@ -9008,3 +9008,113 @@ measurement, not an A/B speedup claim for the preceding popup gate.
 the launcher uses `wlrctl pointer move/click`. The probes shut down after each
 run. The popup implementation's release suite remains 1,024 passed / 37 ignored;
 this commit changes only the backlog, status and this measurement record.
+
+## 2026-10-26 — retain display commands beneath compositing and scroll scopes
+
+Baseline `8adb3e02`; isolated candidate branch `codex/p2-display-scopes`.
+Reviewed the rejected-experiments table and the preceding P2 geometry record.
+This completes the display-scope fallback item; shrinking display coverage and
+retained span-array copying remain separate backlog work.
+
+**Implementation.** The sparse command index retains all of an owner's local
+command positions, including trailing scrollbars and layer/scroll push/pop
+commands. Topology-stable updates replace persistent command leaves along dirty
+paths. Changed child bounds repair compositing and filter clips without
+rebuilding clean paint payloads or child command topology. Filter replay regions
+are refreshed, and old/new effect coverage is included in damage. Scope-owned
+span coverage is repaired along with ordinary spans. Ordered spans use indexed
+lookups; trailing scrollbar spans retain conservative span-array repair.
+
+Path resolution carries live cumulative affine coordinates and retained scroll
+content spaces. Entry bounds inside retained content stay anchored to its
+viewport, and only viewports on updated paths receive sparse damage. A moved
+viewport invalidates sparse entry collection. Stable overflow metrics update an
+existing scrollbar owner, and retained offset-only frames replace the owner's
+node and scroll commands without visiting content. Non-retained offset changes,
+changes to descendant clip/transform spaces, visibility/topology changes and
+missing history retain the conservative path. Scroll-content eligibility changes
+from paint material/primitive updates also keep full entry collection.
+
+**A/B method.** Normal release profile (thin LTO, one codegen unit), renderer
+unit-test executables, same fixture source on both sides. The baseline worktree
+adds only `scoped_display_patch_profile`; it does not change runtime code. Three
+alternating baseline/candidate process pairs; each process contains three
+alternating rounds per workload, each with 100 updates after three initialization
+updates. There are nine p50 samples per side and row below. The ordinary desktop
+is unpinned and remains in use. The harness checks that no `rustc` process is
+active before each executable; all shell compilation/tests finished first.
+
+The fixture has 16 or 1,024 box siblings in a 320×1100 surface, one width toggled
+20↔40 px, and wider clean siblings that keep the child union's extrema stable.
+This isolates command preparation from the separate shrinking-union problem.
+Scopes are overflow clip, 0.95 scale, 0.7 opacity, 2 px foreground filter blur,
+retained hidden-overflow scroll, or retained scroll with scrollbars. Scroll
+metrics are explicit (100 px range, 5.5 px offset). The measured interval is
+`RetainedDisplayList::update_with_dirty_nodes`, excluding retained-object dirty
+classification, layout, handler synchronization and raster. These are display
+preparation timings, not whole-frame, live GPU or first-open latency results.
+The ignored harness also records a deliberately forced conservative control;
+the table uses only actual baseline/candidate rows (`control == false`).
+
+| Scope | Siblings | Baseline preparation p50, ms | Candidate preparation p50, ms |
+| --- | ---: | ---: | ---: |
+| `clip` | 16 | 0.004749–0.004749 | 0.004749–0.004749 |
+| `clip` | 1,024 | 0.009498–0.009498 | 0.010685–0.010685 |
+| `scale` | 16 | 0.004749–0.004749 | 0.004749–0.005936 |
+| `scale` | 1,024 | 0.009498–0.009498 | 0.010685–0.011872 |
+| `opacity` | 16 | 0.010685–0.010685 | 0.004749–0.005936 |
+| `opacity` | 1,024 | 0.349048–0.390602 | 0.008310–0.008311 |
+| `filter` | 16 | 0.010685–0.011872 | 0.005936–0.005936 |
+| `filter` | 1,024 | 0.350235–0.381104 | 0.008310–0.008311 |
+| `scroll` | 16 | 0.017808–0.017809 | 0.004749–0.004749 |
+| `scroll` | 1,024 | 0.960476–0.981846 | 0.008310–0.008311 |
+| `scrollbar` | 16 | 0.017808–0.017809 | 0.004749–0.005936 |
+| `scrollbar` | 1,024 | 0.964037–0.987782 | 0.008310–0.008311 |
+
+At 1,024 siblings, opacity/filter display-build visits are **1,026 → 1**;
+scroll/scrollbar visits are **1,025 → 1**, with display-entry visits
+**1,025 → 0**. All nine samples agree. Clip/scale were already sparse on the
+baseline: build visits stay one and entry visits zero. They pay about 1–2.4 µs
+more preparation in the large fixture; no speedup is claimed for those cases.
+Timer quantization is visible at this scale. The principal win is removal of
+layer and scroll fallbacks, not a universal latency improvement.
+
+An initial repair implementation scanned every retained span to look up changed
+owners. It passed parity but regressed the already-sparse large clip/scale cases
+from about 0.0095–0.0107 ms to 0.0214 ms. It was replaced by indexed lookups on
+ordered spans, leaving the final ranges above. Initial executable, raw output
+and JSON remain in `/tmp/mesh-display-evidence/initial-span-scan/`.
+
+**Validation.** Final renderer debug suite: **342 passed, 14 ignored**; final
+renderer release suite: **341 passed, 14 ignored**. Final release GPU-feature
+shell suite: **1,034 passed, 37 ignored**. Zero failures. The expanded
+`geometry_command_patches_skip_siblings_and_match_full_build` gate covers
+16/1,024 siblings, first/middle/last targets, growth and shrink, clip/scale,
+opacity/filter layers, scroll and scrollbar ancestors. It also changes layer
+owner geometry or scroll-owner overflow metrics with a leaf. Build visits stay
+one for a single dirty node and two for the paired changes. Commands, entries,
+subtree coverage, replay spans, layer/filter metadata, fresh full raster and
+partial repaint pixels match the full oracle. Partial repaints use the shipped
+blur-damage expansion. The retained-offset test additionally asserts one build
+visit and immutable content-command reuse. Existing scroll shift/damage,
+promoted-popup, animation and lifecycle tests pass. Formatting and diff checks
+pass. No live compositor replay was run or claimed.
+
+**Limits and remaining scope.** A scope change that actually changes descendant
+coordinate spaces still rebuilds those descendants. A child giving up an edge of
+an ordinary ancestor's bounds still triggers a sibling union scan. Persistent
+commands reuse clean branches, but flat retained span arrays can still copy
+unrelated entries; scrollbar-containing span repair still scans those arrays.
+Neither those costs nor the independent P3/D1 table-write observation question
+is presented as completed.
+
+**Evidence/reproduction.** `/tmp/mesh-display-evidence/` retains both profile
+executables, `bench.py`, `timings.json` (432 rows including the auxiliary
+controls), six raw process logs and the printed summary. Run
+`cargo test --release -p mesh-core-render --lib scoped_display_patch_profile --
+--ignored --nocapture --test-threads=1` inside `nix develop`. Renderer suite logs
+are `/tmp/mesh-display-final-debug.log` and
+`/tmp/mesh-display-final-release-render.log`; the final shell log is
+`/tmp/mesh-display-final-shell.log`. Builds use `/tmp/mesh-p2-target`, leaving
+main-checkout build artifacts and the user's profile edits untouched. Temporary
+implementation and baseline worktrees are removed after committing/integration.

@@ -24,7 +24,7 @@ use super::types::{
 #[derive(Debug)]
 struct CommandLocation {
     start: usize,
-    local_commands: usize,
+    positions: Vec<usize>,
 }
 
 #[derive(Debug, Default)]
@@ -43,9 +43,9 @@ impl SparsePaintIndex {
                 .entry(command.node.id)
                 .or_insert(CommandLocation {
                     start: index,
-                    local_commands: 0,
+                    positions: Vec::new(),
                 });
-            location.local_commands += 1;
+            location.positions.push(index);
             self.has_scroll_viewports |= command.kind == DisplayPaintCommandKind::PushScrollContent;
         }
     }
@@ -54,6 +54,7 @@ impl SparsePaintIndex {
 pub(super) struct SparsePaintPatch {
     pub(super) subtrees: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
     pub(super) metrics: LocalReuseMetrics,
+    pub(super) damage: Vec<DamageRect>,
 }
 
 /// The coordinate space and clip a node passes to its children, as
@@ -62,13 +63,26 @@ struct PathFrame<'t> {
     node: &'t WidgetNode,
     child_space: AffineTransform,
     child_clip: DisplayListClip,
+    clip: DisplayListClip,
 }
 
 impl<'t> PathFrame<'t> {
-    fn new(node: &'t WidgetNode, paint: &DisplayPaintNode, clip: DisplayListClip) -> Self {
+    fn new(
+        node: &'t WidgetNode,
+        paint: &DisplayPaintNode,
+        clip: DisplayListClip,
+        retained: bool,
+    ) -> Self {
         let scroll = node.resolved_scroll_metrics();
-        let child_space = child_transform(paint.transform, node, scroll.x, scroll.y);
-        let child_clip = if node.computed_style.overflow_x.clips_contents()
+        let child_space = child_transform(
+            paint.transform,
+            node,
+            if retained { 0.0 } else { scroll.x },
+            if retained { 0.0 } else { scroll.y },
+        );
+        let child_clip = if retained {
+            super::scroll::CONTENT_CLIP
+        } else if node.computed_style.overflow_x.clips_contents()
             || node.computed_style.overflow_y.clips_contents()
         {
             intersect_display_clip(clip, node_clip_for(paint))
@@ -79,6 +93,7 @@ impl<'t> PathFrame<'t> {
             node,
             child_space,
             child_clip,
+            clip,
         }
     }
 }
@@ -92,10 +107,9 @@ struct MovedCommand {
 }
 
 impl RetainedDisplayList {
-    /// Replace the commands of nodes that each own one ordinary command,
-    /// without visiting their siblings. Text, semantic and local geometry
-    /// changes preserve command topology. Moved bounds also update ancestor
-    /// coverage and spans exactly, which requires single-command ancestors.
+    /// Replace topology-stable node and scrollbar commands through retained
+    /// paths. Ancestor layer coverage and scroll coordinate spaces are repaired
+    /// without rebuilding clean paint payloads or command topology.
     pub(super) fn patch_stable_commands(
         &self,
         root: &WidgetNode,
@@ -119,7 +133,8 @@ impl RetainedDisplayList {
         let mut updated: HashMap<NodeId, RetainedPaintSubtree> = HashMap::new();
         let mut moved = Vec::new();
         // What each path node passes its children, for re-unioning coverage.
-        let mut child_spaces: HashMap<NodeId, (AffineTransform, DisplayListClip)> = HashMap::new();
+        let mut child_spaces: HashMap<NodeId, (AffineTransform, DisplayListClip, DisplayListClip)> =
+            HashMap::new();
         let mut stack: Vec<PathFrame<'_>> = Vec::new();
         let mut previous: &[usize] = &[];
         for (path, id) in targets {
@@ -130,7 +145,12 @@ impl RetainedDisplayList {
                 .count();
             if stack.is_empty() {
                 frame_work::visit(frame_work::Pass::DisplayAncestors);
-                stack.push(PathFrame::new(root, retained_paint(root.id)?, surface_clip));
+                stack.push(PathFrame::new(
+                    root,
+                    retained_paint(root.id)?,
+                    surface_clip,
+                    self.subtrees.get(&root.id)?.scroll_viewport.is_some(),
+                ));
             }
             stack.truncate(shared + 1);
             for &index in &path[shared..] {
@@ -142,18 +162,41 @@ impl RetainedDisplayList {
                 } else {
                     parent.child_clip
                 };
-                stack.push(PathFrame::new(node, retained_paint(node.id)?, clip));
+                stack.push(PathFrame::new(
+                    node,
+                    retained_paint(node.id)?,
+                    clip,
+                    self.subtrees.get(&node.id)?.scroll_viewport.is_some(),
+                ));
             }
             previous = path;
             let live = stack.last()?.node;
             if live.id != id || super::build::node_is_explicitly_hidden(live) {
                 return None;
             }
-            if self.sparse_paint_index.starts.get(&id)?.local_commands != 1 {
+            let location = self.sparse_paint_index.starts.get(&id)?;
+            let subtree = self.subtrees.get(&id)?;
+            let command = location.positions.iter().find_map(|position| {
+                self.paint_commands
+                    .get(*position)
+                    .filter(|command| command.kind == DisplayPaintCommandKind::Node)
+            })?;
+            if command.node.id != id {
                 return None;
             }
-            let command = self.subtrees.get(&id)?.commands.first()?;
-            if command.kind != DisplayPaintCommandKind::Node || command.node.id != id {
+            if location.positions.iter().any(|position| {
+                !matches!(
+                    self.paint_commands[*position].kind,
+                    DisplayPaintCommandKind::Node
+                        | DisplayPaintCommandKind::Scrollbars
+                        | DisplayPaintCommandKind::PushScrollContent
+                        | DisplayPaintCommandKind::PopScrollContent
+                        | DisplayPaintCommandKind::PushCompositingLayer
+                        | DisplayPaintCommandKind::PopCompositingLayer
+                        | DisplayPaintCommandKind::PushFilterLayer
+                        | DisplayPaintCommandKind::PopFilterLayer
+                )
+            }) {
                 return None;
             }
             if live.computed_style.position == Position::Fixed {
@@ -191,6 +234,19 @@ impl RetainedDisplayList {
             {
                 return None;
             }
+            if super::build::display_node_may_show_scrollbars(&node)
+                != location.positions.iter().any(|position| {
+                    self.paint_commands[*position].kind == DisplayPaintCommandKind::Scrollbars
+                })
+                || (subtree.scroll_viewport.is_none()
+                    && (node.scrollbars.scroll_x != command.node.scrollbars.scroll_x
+                        || node.scrollbars.scroll_y != command.node.scrollbars.scroll_y))
+                || (subtree.scroll_viewport.is_some()
+                    && node.scrollbars.max_x <= f32::EPSILON
+                    && node.scrollbars.max_y <= f32::EPSILON)
+            {
+                return None;
+            }
             let replacement = DisplayPaintCommand {
                 node: Arc::new(node),
                 clip: node_clip,
@@ -200,23 +256,50 @@ impl RetainedDisplayList {
                 return None;
             }
             let bounds = command_bounds(&replacement);
-            let position = self.sparse_paint_index.starts.get(&id)?.start;
             let ancestors: Vec<NodeId> = stack.iter().map(|frame| frame.node.id).collect();
-            for &ancestor in &ancestors {
-                let previous = self.subtrees.get(&ancestor)?;
-                let relative =
-                    position.checked_sub(self.sparse_paint_index.starts.get(&ancestor)?.start)?;
-                let subtree = updated.entry(ancestor).or_insert_with(|| {
-                    let mut next = (**previous).clone();
-                    next.generation = next.generation.saturating_add(1);
-                    next
-                });
-                let old = subtree.commands.get(relative)?;
-                if old.node.id != id || old.kind != replacement.kind {
-                    return None;
+            for &position in &location.positions {
+                let original = self.paint_commands.get(position)?;
+                let mut local = replacement.clone();
+                local.kind = original.kind;
+                if matches!(
+                    local.kind,
+                    DisplayPaintCommandKind::PushCompositingLayer
+                        | DisplayPaintCommandKind::PushFilterLayer
+                ) {
+                    local.clip = original.clip;
                 }
-                subtree.commands =
-                    Arc::new(subtree.commands.replaced(relative, replacement.clone())?);
+                if matches!(
+                    local.kind,
+                    DisplayPaintCommandKind::PushScrollContent
+                        | DisplayPaintCommandKind::PopScrollContent
+                ) {
+                    let mut scope_node = (*local.node).clone();
+                    scope_node.ancestor_clips = Arc::clone(&original.node.ancestor_clips);
+                    local.node = Arc::new(scope_node);
+                    local.clip = original.clip;
+                }
+                for &ancestor in &ancestors {
+                    let previous = self.subtrees.get(&ancestor)?;
+                    let relative = position
+                        .checked_sub(self.sparse_paint_index.starts.get(&ancestor)?.start)?;
+                    let subtree = updated.entry(ancestor).or_insert_with(|| {
+                        let mut next = (**previous).clone();
+                        next.generation = next.generation.saturating_add(1);
+                        next
+                    });
+                    let old = subtree.commands.get(relative)?;
+                    if old.node.id != id || old.kind != local.kind {
+                        return None;
+                    }
+                    subtree.commands =
+                        Arc::new(subtree.commands.replaced(relative, local.clone())?);
+                }
+            }
+            if subtree.scroll_viewport.is_some() {
+                updated.get_mut(&id)?.scroll_offset = (
+                    replacement.node.scrollbars.scroll_x,
+                    replacement.node.scrollbars.scroll_y,
+                );
             }
             if bounds != command_bounds(command) {
                 moved.push(MovedCommand {
@@ -226,20 +309,61 @@ impl RetainedDisplayList {
                 });
             }
             let frame = stack.last_mut()?;
-            *frame = PathFrame::new(live, &replacement.node, clip);
+            *frame = PathFrame::new(
+                live,
+                &replacement.node,
+                clip,
+                subtree.scroll_viewport.is_some(),
+            );
             for frame in &stack {
-                child_spaces.insert(frame.node.id, (frame.child_space, frame.child_clip));
+                child_spaces.insert(
+                    frame.node.id,
+                    (frame.child_space, frame.child_clip, frame.clip),
+                );
             }
         }
         if !moved.is_empty() {
             self.update_moved_coverage(root, &moved, &child_spaces, surface_clip, &mut updated)?;
         }
         let metrics = LocalReuseMetrics {
-            rebuilt_commands: dirty.len() as u64,
+            rebuilt_commands: dirty
+                .iter()
+                .map(|id| self.sparse_paint_index.starts[id].positions.len() as u64)
+                .sum(),
             rebuilt_segments: updated.len() as u64,
             reused_segments: self.subtrees.len().saturating_sub(updated.len()) as u64,
         };
+        let damage = updated
+            .iter()
+            .filter_map(|(id, next)| {
+                let previous = self.subtrees.get(id)?;
+                if let Some(viewport) = next.scroll_viewport {
+                    return Some([viewport, viewport]);
+                }
+                if !self
+                    .sparse_paint_index
+                    .starts
+                    .get(id)?
+                    .positions
+                    .iter()
+                    .any(|position| {
+                        matches!(
+                            self.paint_commands[*position].kind,
+                            DisplayPaintCommandKind::PushFilterLayer
+                                | DisplayPaintCommandKind::PushCompositingLayer
+                        )
+                    })
+                {
+                    return None;
+                }
+                let old = previous.command_span?;
+                let next = next.command_span?;
+                (old.bounds != next.bounds).then_some([old.bounds, next.bounds])
+            })
+            .flatten()
+            .collect();
         Some(SparsePaintPatch {
+            damage,
             subtrees: updated
                 .into_iter()
                 .map(|(id, subtree)| (id, Arc::new(subtree)))
@@ -256,7 +380,7 @@ impl RetainedDisplayList {
         &self,
         root: &WidgetNode,
         moved: &[MovedCommand],
-        child_spaces: &HashMap<NodeId, (AffineTransform, DisplayListClip)>,
+        child_spaces: &HashMap<NodeId, (AffineTransform, DisplayListClip, DisplayListClip)>,
         surface_clip: DisplayListClip,
         updated: &mut HashMap<NodeId, RetainedPaintSubtree>,
     ) -> Option<()> {
@@ -267,12 +391,6 @@ impl RetainedDisplayList {
             for (depth, &id) in command.ancestors.iter().enumerate() {
                 let parent = depth.checked_sub(1).map(|parent| command.ancestors[parent]);
                 depth_of.insert(id, (depth, parent));
-            }
-        }
-        for &id in depth_of.keys() {
-            let index = self.sparse_paint_index.starts.get(&id)?;
-            if index.local_commands != 1 || self.subtrees.get(&id)?.scroll_viewport.is_some() {
-                return None;
             }
         }
         let mut order: Vec<_> = depth_of
@@ -295,9 +413,9 @@ impl RetainedDisplayList {
                     rescan = true;
                 }
             }
-            if rescan {
+            if rescan && self.subtrees.get(&id)?.scroll_viewport.is_none() {
                 let node = self.live_node(root, id)?;
-                let &(space, clip) = child_spaces.get(&id)?;
+                let &(space, clip, _) = child_spaces.get(&id)?;
                 child_bounds = DamageRect::default();
                 for child in &node.children {
                     frame_work::visit(frame_work::Pass::DisplayAncestors);
@@ -326,7 +444,72 @@ impl RetainedDisplayList {
                     }
                 }
             }
-            let bounds = local_bounds.union(child_bounds);
+            let start = self.sparse_paint_index.starts.get(&id)?.start;
+            let previous = self.subtrees.get(&id)?;
+            let mut bounds = local_bounds.union(child_bounds);
+            let mut local_bounds = local_bounds;
+            // Layer clips depend on descendant coverage, but their command
+            // positions and clean paint payloads remain valid.
+            let mut local_commands = Vec::new();
+            for &position in &self.sparse_paint_index.starts.get(&id)?.positions {
+                let index = position.checked_sub(start)?;
+                local_commands.push((index, updated.get(&id)?.commands.get(index)?.clone()));
+            }
+            let incoming = child_spaces.get(&id)?.2;
+            let filter = local_commands
+                .iter()
+                .any(|(_, c)| c.kind == DisplayPaintCommandKind::PushFilterLayer);
+            let compositing = local_commands
+                .iter()
+                .any(|(_, c)| c.kind == DisplayPaintCommandKind::PushCompositingLayer);
+            if filter || compositing {
+                let mut builder = super::subtree::PaintSubtreeBuilder::default();
+                for (_, command) in &local_commands {
+                    let mut command = command.clone();
+                    command.clip = intersect_display_clip(incoming, visual_clip_for(&command.node));
+                    builder.push_command(command);
+                }
+                builder.child_bounds = child_bounds;
+                builder.bounds = builder.local_bounds.union(child_bounds);
+                if filter {
+                    let radius = local_commands.first()?.1.node.style.filter.blur_radius;
+                    builder.grow_filter_layer_bounds(incoming, radius * 3.0);
+                }
+                if compositing {
+                    builder.grow_compositing_layer_bounds(incoming);
+                }
+                bounds = builder.bounds;
+                local_bounds = builder.local_bounds;
+                for ((index, old), replacement) in local_commands.iter().zip(builder.commands) {
+                    if old.clip != replacement.clip {
+                        for (&ancestor, (_, _)) in &depth_of {
+                            let ancestor_start =
+                                self.sparse_paint_index.starts.get(&ancestor)?.start;
+                            if start < ancestor_start {
+                                continue;
+                            }
+                            let relative = start + index - ancestor_start;
+                            let next = updated.get_mut(&ancestor)?;
+                            if next
+                                .commands
+                                .get(relative)
+                                .is_some_and(|c| c.node.id == id && c.kind == replacement.kind)
+                            {
+                                next.commands = Arc::new(
+                                    next.commands.replaced(relative, replacement.clone())?,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(viewport) = previous.scroll_viewport {
+                let own = local_commands
+                    .iter()
+                    .find(|(_, c)| c.kind == DisplayPaintCommandKind::Node)?;
+                bounds = command_bounds(&own.1).union(viewport);
+                child_bounds = viewport;
+            }
             let subtree = updated.get_mut(&id)?;
             subtree.command_span = Some(RetainedSubtreeSpan {
                 bounds,
@@ -334,21 +517,6 @@ impl RetainedDisplayList {
                 child_bounds,
                 ..span
             });
-            let start = self.sparse_paint_index.starts.get(&id)?.start;
-            let mut spans = subtree.spans.to_vec();
-            for command in moved {
-                if !command.ancestors.contains(&id) {
-                    continue;
-                }
-                let relative = self.sparse_paint_index.starts.get(&command.id)?.start - start;
-                let index = spans.partition_point(|span| span.start < relative);
-                let span = spans.get_mut(index)?;
-                if span.owner != command.id || span.start != relative {
-                    return None;
-                }
-                span.bounds = command.bounds;
-            }
-            subtree.spans = spans.into();
             if let Some(parent) = depth_of[&id].1 {
                 changed_children
                     .entry(parent)
@@ -356,7 +524,96 @@ impl RetainedDisplayList {
                     .push((span.bounds, bounds));
             }
         }
+        let mut changes = Vec::new();
+        for (&id, next) in updated.iter() {
+            let previous = self.subtrees.get(&id)?;
+            let old = previous.command_span?;
+            let next = next.command_span?;
+            let scope =
+                previous.spans.len() == 1 && previous.spans[0].end == previous.commands.len();
+            let (old, new) = if scope {
+                (old.bounds, next.bounds)
+            } else {
+                (old.local_bounds, next.local_bounds)
+            };
+            if old != new {
+                changes.push((id, new));
+            }
+        }
+        for (&id, subtree) in updated.iter_mut() {
+            let start = self.sparse_paint_index.starts.get(&id)?.start;
+            let mut replacements = Vec::new();
+            if subtree.command_span?.includes_scrollbars {
+                for (index, span) in subtree.spans.iter().enumerate() {
+                    if let Some((_, bounds)) =
+                        changes.iter().find(|(owner, _)| *owner == span.owner)
+                    {
+                        replacements.push((index, *bounds));
+                    }
+                }
+            } else {
+                // Without trailing scrollbar spans, paint spans are ordered by
+                // command offset; covered descendants have no separate span.
+                for &(owner, bounds) in &changes {
+                    let Some(relative) = self
+                        .sparse_paint_index
+                        .starts
+                        .get(&owner)?
+                        .start
+                        .checked_sub(start)
+                    else {
+                        continue;
+                    };
+                    let index = subtree.spans.partition_point(|span| span.start < relative);
+                    if subtree
+                        .spans
+                        .get(index)
+                        .is_some_and(|span| span.owner == owner && span.start == relative)
+                    {
+                        replacements.push((index, bounds));
+                    }
+                }
+            }
+            if !replacements.is_empty() {
+                let mut spans = subtree.spans.to_vec();
+                for (index, bounds) in replacements {
+                    spans[index].bounds = bounds;
+                }
+                subtree.spans = spans.into();
+            }
+        }
         Some(())
+    }
+
+    pub(super) fn scroll_metrics_are_local(
+        &self,
+        root: &WidgetNode,
+        dirty: &HashSet<NodeId>,
+    ) -> bool {
+        dirty.iter().all(|id| {
+            let Some(node) = self.live_node(root, *id) else {
+                return false;
+            };
+            let Some(previous) = self.subtrees.get(id) else {
+                return false;
+            };
+            let Some(paint) = previous.commands.first().map(|c| &c.node) else {
+                return false;
+            };
+            let scroll = node.resolved_scroll_metrics();
+            let old = &paint.scrollbars;
+            if scroll.x == old.scroll_x
+                && scroll.y == old.scroll_y
+                && scroll.max_x == old.max_x
+                && scroll.max_y == old.max_y
+                && scroll.content_width == old.content_width
+                && scroll.content_height == old.content_height
+            {
+                return true;
+            }
+            previous.scroll_viewport.is_some()
+                && (scroll.max_x > f32::EPSILON || scroll.max_y > f32::EPSILON)
+        })
     }
 
     fn live_node<'t>(&self, root: &'t WidgetNode, id: NodeId) -> Option<&'t WidgetNode> {

@@ -39,6 +39,7 @@ fn scroll_scope_reuses_offscreen_content_commands_and_entries() {
         let dirty = objects.update(&root);
         assert_eq!(dirty.scroll, 1);
         assert_eq!(dirty.geometry, 0);
+        let work = mesh_core_elements::frame_work::Scope::new(true);
         let metrics = list.update_with_dirty_nodes(
             &root,
             dirty,
@@ -48,6 +49,8 @@ fn scroll_scope_reuses_offscreen_content_commands_and_entries() {
             false,
             true,
         );
+        assert_eq!(work.snapshot()["display_build"], 1);
+        drop(work);
         assert!(Arc::ptr_eq(&retained, &list.subtrees[&30].commands));
         assert_eq!(list.entries, entries);
         assert_eq!(metrics.entries_rebuilt, 0);
@@ -850,14 +853,47 @@ fn text_command_patches_skip_siblings_and_preserve_effect_coverage() {
 fn geometry_command_patches_skip_siblings_and_match_full_build() {
     let mut by_count = Vec::new();
     for count in [16, 1024] {
-        for effect in ["plain", "clip", "opacity"] {
+        for effect in [
+            "plain",
+            "clip",
+            "opacity",
+            "filter",
+            "scale",
+            "scroll",
+            "scrollbar",
+        ] {
             let mut root = node(1, "column", 0.0, 0.0, 200.0, 100.0);
             match effect {
                 "clip" => root.computed_style.overflow_y = Overflow::Hidden,
                 "opacity" => root.computed_style.opacity = 0.5,
+                "filter" => root.computed_style.filter.blur_radius = 2.0,
+                "scale" => {
+                    root.computed_style.transform.scale_x = 0.9;
+                    root.computed_style.transform.scale_y = 0.95;
+                }
+                "scroll" | "scrollbar" => {
+                    root.computed_style.overflow_y = if effect == "scroll" {
+                        Overflow::Hidden
+                    } else {
+                        Overflow::Scroll
+                    };
+                    root.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+                        y: 5.5,
+                        max_y: 30.0,
+                        content_width: 200.0,
+                        content_height: 130.0,
+                        ..Default::default()
+                    });
+                }
                 _ => {}
             }
             let mut branch = node(2, "column", 0.0, 0.0, 200.0, 100.0);
+            if matches!(effect, "opacity" | "filter") {
+                root.layout.width = 12.0;
+                root.layout.height = 12.0;
+                branch.layout.width = 10.0;
+                branch.layout.height = 10.0;
+            }
             for index in 0..count {
                 let y = (index % 25) as f32 * 4.0;
                 branch
@@ -869,14 +905,25 @@ fn geometry_command_patches_skip_siblings_and_match_full_build() {
             objects.update(&root);
             let mut list = RetainedDisplayList::default();
             list.update(&root, 200, 100, false, true);
-            let middle = count as usize / 2;
+            let engine = crate::FrontendRenderEngine::new();
+            let mut partial = crate::PixelBuffer::new(200, 100);
+            engine.render_tree(&root, &mut partial, 1.0);
             let mut visits = Vec::new();
-            for turn in 0..6 {
+            for turn in 0..18 {
+                let middle = [count as usize / 2, 0, count as usize - 1][turn / 6];
                 let item = &mut root.children[0].children[middle];
                 match turn % 3 {
                     0 => item.layout.width = 40.0,
                     1 => item.layout.width = 10.0,
                     _ => item.layout.height = 3.0 - item.layout.height + 2.0,
+                }
+                if matches!(effect, "opacity" | "filter") {
+                    root.layout.width = if turn % 2 == 0 { 12.0 } else { 18.0 };
+                }
+                if matches!(effect, "scroll" | "scrollbar") {
+                    let metrics = root.scroll_metrics.as_mut().unwrap();
+                    metrics.max_y = 30.0 + turn as f32;
+                    metrics.content_height = 130.0 + turn as f32;
                 }
                 let dirty = objects.update(&root);
                 let work = mesh_core_elements::frame_work::Scope::new(true);
@@ -917,11 +964,61 @@ fn geometry_command_patches_skip_siblings_and_match_full_build() {
                     assert_eq!(patched.child_bounds, rebuilt.child_bounds);
                 }
                 assert!(metrics.damage_rect.width > 0, "{effect}, {count}, {turn}");
-                if effect == "plain" {
-                    assert_eq!(counts["display_build"], 1, "{count}, {turn}: {counts:?}");
-                    assert_eq!(counts["display_entries"], 0, "{count}, {turn}: {counts:?}");
+                assert_eq!(list.entries, full.entries, "{effect}, {count}, {turn}");
+                assert_eq!(
+                    counts["display_build"],
+                    if matches!(effect, "scroll" | "scrollbar" | "opacity" | "filter") && turn > 0 {
+                        2
+                    } else {
+                        1
+                    },
+                    "{effect}, {count}, {turn}: {counts:?}"
+                );
+                assert_eq!(counts["display_entries"], 0, "{count}, {turn}: {counts:?}");
+                if effect == "plain" && turn < 6 {
                     visits.push((turn, counts["display_ancestors"]));
                 }
+                let mut damage = list.damage_rects().to_vec();
+                list.expand_damage_for_blur_regions(&mut damage);
+                let selected = list.select_paint_commands_for_rects(
+                    &damage,
+                    DisplayListRepaintPolicy::MinimalDamage,
+                );
+                for rect in damage {
+                    partial.clear_rect(rect.x, rect.y, rect.width, rect.height, Color::TRANSPARENT);
+                    engine.render_selected_display_list_for_module(
+                        &selected,
+                        &mut partial,
+                        1.0,
+                        Some((rect.x, rect.y, rect.width, rect.height)),
+                        None,
+                        None,
+                    );
+                }
+                let mut fresh = crate::PixelBuffer::new(200, 100);
+                engine.render_tree(&root, &mut fresh, 1.0);
+                assert!(
+                    partial.data() == fresh.data(),
+                    "partial {effect}, {count}, {turn}"
+                );
+                let render = |commands: &[DisplayPaintCommand]| {
+                    let mut pixels = crate::PixelBuffer::new(200, 100);
+                    crate::paint_display_list_for_module_with_profiling_metrics(
+                        commands,
+                        &mut pixels,
+                        1.0,
+                        None,
+                        None,
+                        None,
+                        None,
+                    );
+                    pixels
+                };
+                assert_eq!(
+                    render(list.paint_commands()).data(),
+                    render(full.paint_commands()).data(),
+                    "{effect}, {count}, {turn}"
+                );
             }
             if effect == "plain" {
                 by_count.push(visits);
@@ -935,6 +1032,93 @@ fn geometry_command_patches_skip_siblings_and_match_full_build() {
             assert!(large.1 > small.1, "{small:?} {large:?}");
         } else {
             assert_eq!(small, large);
+        }
+    }
+}
+
+#[test]
+#[ignore = "release-only scoped display patch profile"]
+fn scoped_display_patch_profile() {
+    use std::time::Instant;
+    for effect in ["clip", "scale", "opacity", "filter", "scroll", "scrollbar"] {
+        for count in [16, 1024] {
+            for round in 0..3 {
+                for conservative in if round % 2 == 0 {
+                    [true, false]
+                } else {
+                    [false, true]
+                } {
+                    let mut root = node(1, "column", 0.0, 0.0, 320.0, 1100.0);
+                    match effect {
+                        "clip" => root.computed_style.overflow_y = Overflow::Hidden,
+                        "scale" => {
+                            root.computed_style.transform.scale_x = 0.95;
+                            root.computed_style.transform.scale_y = 0.95;
+                        }
+                        "opacity" => root.computed_style.opacity = 0.7,
+                        "filter" => root.computed_style.filter.blur_radius = 2.0,
+                        _ => {
+                            root.computed_style.overflow_y = if effect == "scroll" {
+                                Overflow::Hidden
+                            } else {
+                                Overflow::Scroll
+                            };
+                            root.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+                                y: 5.5,
+                                max_y: 100.0,
+                                content_width: 320.0,
+                                content_height: 1200.0,
+                                ..Default::default()
+                            });
+                        }
+                    }
+                    for index in 0..count {
+                        root.children
+                            .push(node(2 + index, "box", 0.0, index as f32, 80.0, 1.0));
+                    }
+                    let mut objects = crate::RenderObjectTree::default();
+                    objects.update(&root);
+                    let mut list = RetainedDisplayList::default();
+                    list.update(&root, 320, 1100, false, true);
+                    let mut samples = Vec::new();
+                    let mut visits = None;
+                    for turn in 0..103 {
+                        root.children[count as usize / 2].layout.width =
+                            if turn % 2 == 0 { 20.0 } else { 40.0 };
+                        let mut dirty = objects.update(&root);
+                        // A material change deliberately selects the conservative
+                        // rebuild path; the live tree and dirty IDs are identical.
+                        if conservative {
+                            dirty.material = 1;
+                        }
+                        let scope = mesh_core_elements::frame_work::Scope::new(turn == 3);
+                        let start = Instant::now();
+                        list.update_with_dirty_nodes(
+                            &root,
+                            dirty,
+                            objects.dirty_node_ids(),
+                            320,
+                            1100,
+                            false,
+                            true,
+                        );
+                        let elapsed = start.elapsed().as_secs_f64() * 1000.0;
+                        if turn == 3 {
+                            visits = Some(scope.snapshot());
+                        }
+                        drop(scope);
+                        if turn >= 3 {
+                            samples.push(elapsed);
+                        }
+                    }
+                    samples.sort_unstable_by(f64::total_cmp);
+                    eprintln!(
+                        "scope_profile effect={effect} count={count} round={round} conservative={conservative} p50_ms={:.6} visits={:?}",
+                        samples[samples.len() / 2],
+                        visits.unwrap()
+                    );
+                }
+            }
         }
     }
 }

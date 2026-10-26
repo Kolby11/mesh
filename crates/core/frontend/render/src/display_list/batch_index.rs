@@ -131,6 +131,9 @@ struct NodeLocation {
     start: usize,
     /// Whether the node and all its ancestors were visible at the last rebuild.
     visible: bool,
+    viewport: Option<DamageRect>,
+    retains_content: bool,
+    border_bounds: mesh_core_elements::LayoutRect,
 }
 
 /// Paint order within a node, matching `for_each_primitive_slot`. `Text` and
@@ -176,7 +179,13 @@ impl BatchIndex {
     ) {
         self.nodes.clear();
         let mut path = Vec::new();
-        self.record(root, root_transform(offset_x, offset_y), &mut path, true);
+        self.record(
+            root,
+            root_transform(offset_x, offset_y),
+            &mut path,
+            true,
+            None,
+        );
         self.root_id = Some(root.id);
         self.base = (self.nodes.len() * SLOTS.len()).max(1).next_power_of_two();
         self.summaries.clear();
@@ -199,8 +208,11 @@ impl BatchIndex {
         parent_transform: AffineTransform,
         path: &mut Vec<usize>,
         visible: bool,
+        viewport: Option<DamageRect>,
     ) {
         let visible = visible && !node_is_explicitly_hidden(node);
+        let world = node_transform(parent_transform, node);
+        let retained = viewport.is_none() && super::scroll::can_retain_scroll_content(node, world);
         let start = self.nodes.len() * SLOTS.len();
         self.nodes.insert(
             node.id,
@@ -209,18 +221,29 @@ impl BatchIndex {
                 parent_transform,
                 start,
                 visible,
+                viewport,
+                retains_content: retained,
+                border_bounds: mesh_core_elements::node_layout_bounds(node, world),
             },
         );
         let scroll = node.resolved_scroll_metrics();
         let child_transform = child_transform(
-            node_transform(parent_transform, node),
+            world,
             node,
-            scroll.x,
-            scroll.y,
+            if retained { 0.0 } else { scroll.x },
+            if retained { 0.0 } else { scroll.y },
         );
+        let viewport = viewport.or_else(|| {
+            retained.then(|| {
+                crate::FractionalScale::identity()
+                    .device_layout_rect(mesh_core_elements::node_layout_bounds(node, world))
+                    .to_nonnegative_damage_rect()
+                    .unwrap_or_default()
+            })
+        });
         for (index, child) in node.children.iter().enumerate() {
             path.push(index);
-            self.record(child, child_transform, path, visible);
+            self.record(child, child_transform, path, visible, viewport);
             path.pop();
         }
     }
@@ -234,7 +257,7 @@ impl BatchIndex {
         ids: &HashSet<NodeId>,
         mut visit: impl FnMut(),
         mut ancestor: impl FnMut(&'t WidgetNode),
-    ) -> Option<Vec<(&'s NodeLocation, &'t WidgetNode)>> {
+    ) -> Option<Vec<(&'s NodeLocation, &'t WidgetNode, AffineTransform)>> {
         let mut targets = ids
             .iter()
             .map(|id| self.nodes.get(id).map(|location| (location, *id)))
@@ -243,7 +266,7 @@ impl BatchIndex {
         if !targets.is_empty() {
             visit();
         }
-        let mut stack = vec![root];
+        let mut stack = vec![(root, self.nodes.get(&root.id)?.parent_transform)];
         let mut previous: &[usize] = &[];
         let mut located = Vec::with_capacity(targets.len());
         for (location, id) in targets {
@@ -256,17 +279,32 @@ impl BatchIndex {
             stack.truncate(shared + 1);
             for &index in &path[shared..] {
                 visit();
-                let child = stack.last()?.children.get(index)?;
-                stack.push(child);
+                let &(parent, parent_space) = stack.last()?;
+                let child = parent.children.get(index)?;
+                let scroll = parent.resolved_scroll_metrics();
+                let retained = self.nodes.get(&parent.id)?.retains_content;
+                let space = if child.computed_style.position
+                    == mesh_core_elements::style::Position::Fixed
+                {
+                    root_transform(0.0, 0.0)
+                } else {
+                    child_transform(
+                        node_transform(parent_space, parent),
+                        parent,
+                        if retained { 0.0 } else { scroll.x },
+                        if retained { 0.0 } else { scroll.y },
+                    )
+                };
+                stack.push((child, space));
             }
-            for node in &stack[shared..path.len()] {
+            for (node, _) in &stack[shared..path.len()] {
                 ancestor(node);
             }
-            let node = *stack.last()?;
+            let &(node, parent_space) = stack.last()?;
             if node.id != id {
                 return None;
             }
-            located.push((location, node));
+            located.push((location, node, parent_space));
             previous = path;
         }
         Some(located)
@@ -310,9 +348,15 @@ impl BatchIndex {
             && self
                 .live_locations(root, dirty, || {}, |_| {})
                 .is_some_and(|located| {
-                    located.iter().all(|(_, node)| {
-                        node.children.is_empty()
-                            || size_independent_transform(node.computed_style.transform)
+                    located.iter().all(|(location, node, parent)| {
+                        (!location.retains_content
+                            || location.border_bounds
+                                == mesh_core_elements::node_layout_bounds(
+                                    node,
+                                    node_transform(*parent, node),
+                                ))
+                            && (node.children.is_empty()
+                                || size_independent_transform(node.computed_style.transform))
                     })
                 })
     }
@@ -341,7 +385,7 @@ impl BatchIndex {
         let Some(located) = self.live_locations(root, dirty, || {}, |_| {}) else {
             return false;
         };
-        for (location, node) in located {
+        for (location, node, parent_space) in located {
             // An ancestor's `hidden` is folded into `visible`, so a node that
             // is itself visible under a hidden ancestor also takes the
             // fallback rather than emitting entries nothing paints.
@@ -351,12 +395,22 @@ impl BatchIndex {
             if location.visible {
                 collect_node_entries(
                     node,
-                    node_transform(location.parent_transform, node),
+                    node_transform(parent_space, node),
                     None,
                     true,
                     next,
                     fingerprints,
                 );
+                if let Some(viewport) = location.viewport {
+                    for slot in SLOTS {
+                        if let Some(entry) = next.get_mut(&DisplayListKey {
+                            node_id: node.id,
+                            slot,
+                        }) {
+                            entry.bounds = viewport;
+                        }
+                    }
+                }
             }
         }
         true

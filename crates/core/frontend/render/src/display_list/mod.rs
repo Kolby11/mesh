@@ -358,7 +358,6 @@ impl RetainedDisplayList {
         // index cannot answer falls back to the tree walk below, which reseeds
         // it from the reconciled map.
         let patch_batch_index = patch_sparse_entries
-            && !self.sparse_paint_index.has_scroll_viewports
             && self.batch_index.matches_root(root)
             && self.batch_index.collect_dirty_entries_with_fingerprints(
                 root,
@@ -410,7 +409,6 @@ impl RetainedDisplayList {
         };
         let sparse_patch = (sparse_inputs_valid
             && has_authoritative_dirty_summary
-            && !self.sparse_paint_index.has_scroll_viewports
             && self.batch_index.matches_root(root)
             && matches!(decision, LocalReuseDecision::RebuildDirtySubtrees)
             && dirty_summary_allows_command_patch(dirty_summary))
@@ -424,6 +422,10 @@ impl RetainedDisplayList {
         })
         .flatten();
         let patched_commands = sparse_patch.is_some();
+        let patch_damage = sparse_patch
+            .as_ref()
+            .map(|patch| patch.damage.clone())
+            .unwrap_or_default();
         let (
             paint_commands,
             command_kinds,
@@ -550,12 +552,16 @@ impl RetainedDisplayList {
         } else {
             self.reconcile_entries(&mut next, patch_sparse_entries, dirty_node_ids, surface)
         };
+        for rect in patch_damage {
+            damage = union_damage(damage, rect);
+            push_sparse_damage_rect(&mut damage_rects, rect, surface);
+        }
         // Offsets are absent from immutable content signatures. Damage an
         // anchored viewport explicitly when its owner's subtree was rebuilt;
         // viewports a layout change did not reach keep their pixels.
         let scoped_geometry_change = changed_layout_count(dirty_summary) > 0;
-        // A command patch admits no scroll viewports, and its subtree map
-        // holds only the replaced subtrees.
+        // Sparse patches damage only viewports on their replaced paths above;
+        // the general rebuild owns a complete subtree map.
         if scoped_geometry_change && !patched_commands {
             for viewport in changed_scroll_viewports(&self.subtrees, &subtrees) {
                 damage = union_damage(damage, viewport);
@@ -566,8 +572,8 @@ impl RetainedDisplayList {
         // A text change can share a frame with a visibility annotation the
         // summary does not classify as primitive; the command count catches
         // that topology change before blur regions are preserved.
-        // A command patch replaces only single-command nodes whose boxes do
-        // not define a descendant's clip, so no blur node or its clip changed.
+        // Command patches preserve backdrop nodes and descendant clip stacks;
+        // foreground filter layer regions are refreshed separately below.
         let can_reuse_blur_metadata = !resource_revision_changed
             && (blur_metadata_reuse_candidate || patched_commands)
             && removed == 0
@@ -707,10 +713,8 @@ impl RetainedDisplayList {
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
         self.scroll_shifts = shifts;
-        if !patched_commands {
-            self.filter_layer_regions =
-                filter_layer_regions(self.paint_commands.as_ref(), &self.layer_scopes, surface);
-        }
+        self.filter_layer_regions =
+            filter_layer_regions(self.paint_commands.as_ref(), &self.layer_scopes, surface);
         self.root_id = Some(root.id);
         self.retained_tree_generation = retained_tree_generation;
         #[cfg(debug_assertions)]
@@ -1458,16 +1462,12 @@ impl RetainedDisplayList {
             && dirty_summary.transform == 0
             && dirty_summary.opacity == 0
             && (dirty_summary.geometry == 0 && dirty_summary.clip == 0
-                || (!self.sparse_paint_index.has_scroll_viewports
-                    && self
-                        .batch_index
-                        .dirty_geometry_is_local(root, dirty_node_ids)))
-            && (dirty_summary.scroll == 0
-                || dirty_node_ids.iter().all(|id| {
-                    self.subtrees
-                        .get(id)
-                        .is_some_and(|s| s.scroll_viewport.is_some())
-                }))
+                || self
+                    .batch_index
+                    .dirty_geometry_is_local(root, dirty_node_ids))
+            && (!self.sparse_paint_index.has_scroll_viewports
+                || (dirty_summary.material == 0 && dirty_summary.primitive == 0))
+            && (dirty_summary.scroll == 0 || self.scroll_metrics_are_local(root, dirty_node_ids))
     }
 }
 
