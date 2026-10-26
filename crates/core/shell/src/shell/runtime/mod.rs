@@ -394,6 +394,34 @@ impl Shell {
         }
     }
 
+    fn surface_has_present_slot(&self, id: &str) -> bool {
+        self.surface_is_effectively_visible(id)
+            && !self
+                .presentation_engine
+                .surface_waiting_for_frame_callback(id)
+            && !self
+                .presentation_engine
+                .surface_waiting_for_buffer_release(id)
+            && self.presentation_engine.surface_ready_to_present(id)
+    }
+
+    fn animation_children_ready(&self, runtime: &types::ComponentRuntime) -> Option<bool> {
+        let keys: Vec<_> = runtime
+            .children
+            .iter()
+            .filter(|child| child.kind == types::ChildSurfaceKind::Popover)
+            .map(|child| child.node_key.as_str())
+            .collect();
+        if keys.is_empty() {
+            return None;
+        }
+        let targets = runtime.component.animation_child_render_targets(&keys)?;
+        Some(runtime.children.iter().any(|child| {
+            targets.contains(&child.node_key)
+                && self.surface_has_present_slot(child.target.surface_id.as_str())
+        }))
+    }
+
     pub(in crate::shell) fn components_have_ready_render_work(&self) -> bool {
         let resource_revision = mesh_core_resources::resource_revision();
         self.components.iter().any(|runtime| {
@@ -408,6 +436,12 @@ impl Shell {
                 && !resource_revision_changed
             {
                 return false;
+            }
+            if !runtime.resource_paints.is_ready()
+                && !resource_revision_changed
+                && let Some(ready) = self.animation_children_ready(runtime)
+            {
+                return ready;
             }
             // A component drives its parent surface plus any child popups from
             // one VM; it has ready work if any of its targets can present now.

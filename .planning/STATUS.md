@@ -27,6 +27,18 @@ measurements live in [`log/`](log/README.md).
   configured content sizes take precedence. GPU-feature shell: 1,018 passed;
   presentation: 116 passed. Differing outputs before placement remain open.
 
+- **Live glass first-open measurement complete.** Three fresh release processes
+  on the main Hyprland compositor: picker first buffer commit 43–45 ms, launcher
+  305–490 ms; later opens 10–18 / 42–66 ms. First launcher child preparation
+  dominates; attribution is the follow-up in the backlog and performance log.
+
+- **Popup animation readiness complete.** Animation-only shared-tree work waits
+  for an affected popup's presentation slot; parent/input/resource changes keep
+  the conservative path. Release GPU-feature shell: 1,024 passed; the blocked
+  popup preparation gate passes three runs.
+- Compound-table write tracking is deferred for this branch pending a supported
+  runtime observation mechanism; existing-key writes bypass `__newindex`.
+
 - **Scene-buffer retry complete.** Transient export failures wait for dmabuf
   release and resume without another raster. Three required-GPU release runs
   pass; presentation and shell suites pass.
@@ -46,8 +58,7 @@ measurements live in [`log/`](log/README.md).
   and shrinking ancestor coverage still re-unions children.
 - D1: record compound table writes instead of converting every compound global
   during handler sync; indirect list reads still compare every item.
-- Gate shared-tree popup animation preparation by targets that can present.
-- Measure glass first open live (picker over IPC, launcher by hand).
+- Attribute the launcher's first child-surface preparation before optimizing it.
 - Continue glass raster work and the in-surface blur engine after pipeline work.
 
 ## Blocked / known baselines

@@ -869,6 +869,58 @@ impl ShellComponent for FrontendSurfaceComponent {
             || !self.entering_child_keys.is_empty()
     }
 
+    fn animation_child_render_targets(&self, child_node_keys: &[&str]) -> Option<Vec<String>> {
+        if !self.animation_only_dirty
+            || self.surface_entering
+            || self.surface_exiting
+            || self.tooltip_visible
+        {
+            return None;
+        }
+        let snapshot = self.last_frame_snapshot.as_ref()?;
+        let mut nodes: HashSet<_> = self.transitions.node_ids().collect();
+        nodes.extend(
+            self.keyframe_animation_slots
+                .iter()
+                .filter_map(|(slot, _)| {
+                    (self.keyframe_animation_lifecycles.get(slot)
+                        != Some(&mesh_core_animation::AnimationLifecycle::Completed))
+                    .then_some(slot.0)
+                }),
+        );
+        nodes.extend(
+            self.entering_child_keys
+                .iter()
+                .chain(&self.closing_child_keys)
+                .map(|key| runtime_node_id_for_key(key)),
+        );
+        if nodes.is_empty() {
+            return None;
+        }
+        let paths: Vec<_> = child_node_keys
+            .iter()
+            .filter_map(|key| {
+                snapshot
+                    .node_path(runtime_node_id_for_key(key))
+                    .map(|path| (*key, path))
+            })
+            .collect();
+        let mut targets = Vec::new();
+        for id in nodes {
+            let path = snapshot.node_path(id)?;
+            // Only realized popovers are out of flow and absent from parent
+            // painting. Unknown paths and parent animations keep the broad gate.
+            let (key, _) = paths
+                .iter()
+                .filter(|(_, child_path)| path.starts_with(child_path))
+                .max_by_key(|(_, child_path)| child_path.len())?;
+            if !targets.iter().any(|target| target == key) {
+                targets.push((*key).to_owned());
+            }
+        }
+        Some(targets)
+    }
+
     fn discard_child_surface_paint(&mut self, node_key: &str) {
         if node_key == tooltip::TOOLTIP_CHILD_KEY {
             self.tooltip_popup_handled_generation.set(
