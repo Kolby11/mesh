@@ -1100,14 +1100,21 @@ fn tracked_fork(
         .unwrap_or_else(|error| exit_error(error))
         .unwrap_or_else(|| exit_error(format!("{fork_id} is not a tracked fork")));
     let upstream = graph.module(&record.upstream).unwrap_or_else(|| {
-        exit_error(format!("upstream {} is no longer installed", record.upstream))
+        exit_error(format!(
+            "upstream {} is no longer installed",
+            record.upstream
+        ))
     });
     let version = upstream.manifest.version.clone();
     (fork_dir, record, module_dir(upstream), version)
 }
 
 fn cmd_module_fork(args: &[String]) {
-    let upstream_id = required_arg(args, 0, "mesh-shell module fork <module-id> [--as <new-id>]");
+    let upstream_id = required_arg(
+        args,
+        0,
+        "mesh-shell module fork <module-id> [--as <new-id>]",
+    );
     let fork_id = match args.iter().position(|arg| arg == "--as") {
         Some(index) => args
             .get(index + 1)
@@ -1143,14 +1150,34 @@ fn cmd_module_fork(args: &[String]) {
     // user already gave so the copy activates the same way.
     let mut root = mesh_core_module::package::RootModuleGraphManifest::from_path(&root_path)
         .unwrap_or_else(|error| exit_error(error));
+    let relative_path = destination
+        .strip_prefix(&modules_dir)
+        .unwrap_or_else(|error| exit_error(error))
+        .to_string_lossy()
+        .replace('\\', "/");
+    root.record_installed_module(
+        fork_id.clone(),
+        mesh_core_module::package::InstalledModuleEntry {
+            kind: upstream.kind,
+            path: relative_path,
+            enabled: false,
+        },
+    );
     if let Some(approvals) = root.capability_approvals.get(upstream_id).cloned() {
         root.capability_approvals.insert(fork_id.clone(), approvals);
-        root.save(&root_path).unwrap_or_else(|error| exit_error(error));
     }
-    println!("forked {upstream_id} {} as {fork_id} at {}", upstream.manifest.version, destination.display());
+    root.save(&root_path)
+        .unwrap_or_else(|error| exit_error(error));
+    println!(
+        "forked {upstream_id} {} as {fork_id} at {}",
+        upstream.manifest.version,
+        destination.display()
+    );
 
     let paths = profile_paths();
-    let Some((profile_id, profile)) = paths.load_active().unwrap_or_else(|error| exit_error(error))
+    let Some((profile_id, profile)) = paths
+        .load_active()
+        .unwrap_or_else(|error| exit_error(error))
     else {
         println!("no active profile; reference {fork_id} where {upstream_id} was used");
         return;
@@ -1161,9 +1188,10 @@ fn cmd_module_fork(args: &[String]) {
         .into_iter()
         .map(|node| &node.manifest)
         .collect::<Vec<_>>();
-    let effective = mesh_core_module::package::resolve_composition(&profile, manifests.iter().copied())
-        .unwrap_or_else(|error| exit_error(error))
-        .to_profile();
+    let effective =
+        mesh_core_module::package::resolve_composition(&profile, manifests.iter().copied())
+            .unwrap_or_else(|error| exit_error(error))
+            .to_profile();
     let slot_defaults = effective
         .roots
         .iter()
@@ -1185,14 +1213,24 @@ fn cmd_module_fork(args: &[String]) {
         &fork_id,
     );
     if changed {
+        mesh_core_module::package::load_installed_module_graph_for_profile(&root_path, &next)
+            .unwrap_or_else(|error| {
+                exit_error(format!("fork created but profile was not changed: {error}"))
+            });
         save_profile_revision(&paths, &profile_id, &next).unwrap_or_else(|error| exit_error(error));
-        println!("profile {profile_id} now uses {fork_id}; {upstream_id} stays installed as the fallback");
+        println!(
+            "profile {profile_id} now uses {fork_id}; {upstream_id} stays installed as the fallback"
+        );
     } else {
         println!("profile {profile_id} does not use {upstream_id} directly");
     }
 }
 
-fn print_fork_changes(label: &str, changes: &[mesh_core_module::package::ForkFileDiff], patches: bool) {
+fn print_fork_changes(
+    label: &str,
+    changes: &[mesh_core_module::package::ForkFileDiff],
+    patches: bool,
+) {
     if changes.is_empty() {
         println!("{label}: no changes");
         return;
@@ -1251,7 +1289,9 @@ fn cmd_module_rebase(args: &[String]) {
         }
     }
     if !outcome.conflicts.is_empty() {
-        exit_error("resolve the conflict markers, then reload; the fork now tracks the new upstream");
+        exit_error(
+            "resolve the conflict markers, then reload; the fork now tracks the new upstream",
+        );
     }
 }
 
@@ -1312,7 +1352,11 @@ fn print_permissions(
             "  {:<8} {}{}",
             capability.level.to_string(),
             mesh_core_capability::describe_capability(&capability.id),
-            if capability.required { "" } else { " (optional)" }
+            if capability.required {
+                ""
+            } else {
+                " (optional)"
+            }
         );
     }
 }

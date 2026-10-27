@@ -107,6 +107,7 @@ impl SlotOverride {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EffectiveComposition {
     pub spec: CompositionSpec,
+    pub dependency_forks: BTreeMap<String, String>,
     /// The composition module this was resolved from, if any. A profile with no
     /// `from` is a hand-built composition — the pre-composition behavior, still
     /// fully supported.
@@ -162,6 +163,7 @@ impl EffectiveComposition {
             roots,
             background_services: self.spec.background_services.clone(),
             providers: self.spec.providers.clone(),
+            dependency_forks: self.dependency_forks.clone(),
             remove_background_services: self.spec.remove_background_services.clone(),
             remove_providers: self.spec.remove_providers.clone(),
             slots: self.spec.slots.clone(),
@@ -242,6 +244,7 @@ pub fn resolve_composition<'a>(
 
     Ok(EffectiveComposition {
         spec,
+        dependency_forks: profile.dependency_forks.clone(),
         source_module,
         source_version,
         orphaned_overrides,

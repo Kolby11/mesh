@@ -36,6 +36,9 @@ pub struct ShellProfile {
     pub background_services: BTreeSet<String>,
     #[serde(default)]
     pub providers: BTreeMap<String, String>,
+    /// Profile-local substitutions for declared module dependency edges.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub dependency_forks: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub remove_background_services: BTreeSet<String>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
@@ -232,6 +235,19 @@ impl ShellProfile {
                  Schema 3 adds sparse nodeSlots; set \"schemaVersion\": {PROFILE_SCHEMA_VERSION} to migrate an otherwise valid profile",
                 self.schema_version
             )));
+        }
+        let mut destinations = BTreeSet::new();
+        for (upstream, fork) in &self.dependency_forks {
+            ModuleId::parse(upstream)?;
+            ModuleId::parse(fork)?;
+            if upstream == fork
+                || self.dependency_forks.contains_key(fork)
+                || !destinations.insert(fork)
+            {
+                return Err(ModuleManifestError::Validation(format!(
+                    "profile dependency fork {upstream} -> {fork} forms a chain or ambiguous mapping"
+                )));
+            }
         }
         for (instance_id, instance) in &self.roots {
             validate_instance_id(instance_id, &instance.module)?;
@@ -476,6 +492,7 @@ impl ShellProfile {
         &self,
         manifests: impl IntoIterator<Item = &'a ModuleManifest>,
     ) -> Result<HashSet<String>, ModuleManifestError> {
+        self.validate()?;
         let manifest_list = manifests.into_iter().collect::<Vec<_>>();
         let mut manifests = HashMap::new();
         for manifest in manifest_list.iter().copied() {
@@ -484,6 +501,35 @@ impl ShellProfile {
                     "duplicate installed module manifest '{}'",
                     manifest.name
                 )));
+            }
+        }
+        for (upstream, fork) in &self.dependency_forks {
+            let source = manifests.get(upstream.as_str()).ok_or_else(|| {
+                ModuleManifestError::Validation(format!(
+                    "fork upstream {upstream} is not installed"
+                ))
+            })?;
+            let target = manifests.get(fork.as_str()).ok_or_else(|| {
+                ModuleManifestError::Validation(format!("fork {fork} is not installed"))
+            })?;
+            if source.mesh.kind != target.mesh.kind {
+                return Err(ModuleManifestError::Validation(format!(
+                    "fork {fork} has a different kind from {upstream}"
+                )));
+            }
+            for library in &source.mesh.contributes.libraries {
+                if !target
+                    .mesh
+                    .contributes
+                    .libraries
+                    .iter()
+                    .any(|candidate| candidate.namespace == library.namespace)
+                {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "fork {fork} does not provide library namespace {} from {upstream}",
+                        library.namespace
+                    )));
+                }
             }
         }
         let mut active = HashSet::new();
@@ -628,7 +674,12 @@ impl ShellProfile {
                     .modules
                     .iter()
                     .filter(|(_, dependency)| !dependency.is_optional())
-                    .map(|(module_id, _)| module_id.clone()),
+                    .map(|(module_id, _)| {
+                        self.dependency_forks
+                            .get(module_id)
+                            .unwrap_or(module_id)
+                            .clone()
+                    }),
             );
             if manifest.mesh.kind == ModuleKind::Composition
                 && let Some(parent) = &manifest.mesh.extends
@@ -736,9 +787,50 @@ impl ShellProfile {
                 }
             }
         }
-        let resolution = super::resolve_closure(
+        if !self.dependency_forks.is_empty() {
+            fn visit<'a>(
+                id: &'a str,
+                manifests: &HashMap<&'a str, &'a ModuleManifest>,
+                forks: &'a BTreeMap<String, String>,
+                visiting: &mut HashSet<&'a str>,
+                visited: &mut HashSet<&'a str>,
+            ) -> Result<(), ModuleManifestError> {
+                if visiting.contains(id) {
+                    return Err(ModuleManifestError::Validation(format!(
+                        "profile dependency fork creates a dependency cycle at {id}"
+                    )));
+                }
+                if !visited.insert(id) {
+                    return Ok(());
+                }
+                visiting.insert(id);
+                if let Some(manifest) = manifests.get(id) {
+                    for (dependency, spec) in &manifest.mesh.dependencies.modules {
+                        let target = forks.get(dependency).unwrap_or(dependency).as_str();
+                        if !spec.is_optional() && manifests.contains_key(target) {
+                            visit(target, manifests, forks, visiting, visited)?;
+                        }
+                    }
+                }
+                visiting.remove(id);
+                Ok(())
+            }
+            let mut visiting = HashSet::new();
+            let mut visited = HashSet::new();
+            for id in &active {
+                visit(
+                    id,
+                    &manifests,
+                    &self.dependency_forks,
+                    &mut visiting,
+                    &mut visited,
+                )?;
+            }
+        }
+        let resolution = super::resolution::resolve_closure_with_forks(
             active.iter().map(String::as_str),
             manifest_list.iter().copied(),
+            &self.dependency_forks,
         );
         if !resolution.is_satisfiable() {
             if let Some(conflict) = resolution.conflicts.first() {
@@ -807,6 +899,7 @@ impl Default for ShellProfile {
             roots: BTreeMap::new(),
             background_services: BTreeSet::new(),
             providers: BTreeMap::new(),
+            dependency_forks: BTreeMap::new(),
             remove_background_services: BTreeSet::new(),
             remove_providers: BTreeSet::new(),
             slots: BTreeMap::new(),
@@ -1387,6 +1480,62 @@ mod tests {
             root.layout.unwrap().entrypoint,
             "@me/panel:main".to_string()
         );
+    }
+
+    #[test]
+    fn dependency_fork_is_profile_scoped_and_checks_version() {
+        let frontend = manifest(
+            r#"{"name":"@me/panel","version":"1","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh","uses":{"modules":{"@me/component":"^1"}}}}"#,
+        );
+        let upstream = manifest(
+            r#"{"name":"@me/component","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
+        );
+        let fork = manifest(
+            r#"{"name":"@local/component","version":"1.1.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
+        );
+        let incompatible = manifest(
+            r#"{"name":"@local/component","version":"2.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
+        );
+        let mut profile = ShellProfile::new();
+        profile.add_root(&frontend).unwrap();
+        let original = profile
+            .active_module_ids([&frontend, &upstream, &fork])
+            .unwrap();
+        assert!(original.contains("@me/component"));
+        profile
+            .dependency_forks
+            .insert("@me/component".into(), "@local/component".into());
+        let selected = profile
+            .active_module_ids([&frontend, &upstream, &fork])
+            .unwrap();
+        assert!(selected.contains("@local/component"));
+        assert!(!selected.contains("@me/component"));
+        assert!(
+            profile
+                .active_module_ids([&frontend, &upstream, &incompatible])
+                .is_err()
+        );
+        let cyclic_fork = manifest(
+            r#"{"name":"@local/component","version":"1.1.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh","uses":{"modules":{"@me/panel":"*"}}}}"#,
+        );
+        assert!(
+            profile
+                .active_module_ids([&frontend, &upstream, &cyclic_fork])
+                .unwrap_err()
+                .to_string()
+                .contains("cycle")
+        );
+        let serialized = serde_json::to_string(&profile).unwrap();
+        assert_eq!(
+            ShellProfile::from_json_str(&serialized)
+                .unwrap()
+                .dependency_forks,
+            profile.dependency_forks
+        );
+        profile
+            .dependency_forks
+            .insert("@local/component".into(), "@me/component".into());
+        assert!(profile.validate().is_err());
     }
 
     #[test]

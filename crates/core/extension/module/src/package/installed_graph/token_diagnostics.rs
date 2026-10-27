@@ -15,6 +15,7 @@ use std::path::Path;
 pub(super) fn token_families(
     modules: &HashMap<String, InstalledModuleNode>,
     module: &InstalledModuleNode,
+    forks: &std::collections::BTreeMap<String, String>,
 ) -> Vec<String> {
     let mut families = module
         .manifest
@@ -22,6 +23,7 @@ pub(super) fn token_families(
         .uses
         .modules
         .keys()
+        .map(|id| forks.get(id).unwrap_or(id))
         .filter(|id| *id != &module.id)
         .filter(|id| {
             modules.get(*id).is_some_and(|family| {
@@ -37,6 +39,7 @@ pub(super) fn token_families(
         .cloned()
         .collect::<Vec<_>>();
     families.sort();
+    families.dedup();
     families
 }
 
@@ -45,6 +48,7 @@ pub(super) fn token_families(
 pub(super) fn visible_module_tokens(
     modules: &HashMap<String, InstalledModuleNode>,
     module: &InstalledModuleNode,
+    forks: &std::collections::BTreeMap<String, String>,
 ) -> BTreeSet<String> {
     let declared = |module: &InstalledModuleNode| {
         module
@@ -62,7 +66,7 @@ pub(super) fn visible_module_tokens(
             .unwrap_or_default()
     };
     let mut visible = declared(module).into_iter().collect::<BTreeSet<_>>();
-    for family in token_families(modules, module) {
+    for family in token_families(modules, module, forks) {
         visible.extend(declared(&modules[&family]));
     }
     visible
@@ -71,10 +75,11 @@ pub(super) fn visible_module_tokens(
 pub(super) fn diagnose(
     modules: &HashMap<String, InstalledModuleNode>,
     diagnostics: &mut Vec<ModuleGraphDiagnostic>,
+    forks: &std::collections::BTreeMap<String, String>,
 ) {
     for module in modules.values().filter(|module| module.enabled) {
         if let Some(theme) = &module.manifest.mesh.theme {
-            let visible = visible_module_tokens(modules, module);
+            let visible = visible_module_tokens(modules, module, forks);
             for name in &theme.tokens_used {
                 if !is_standard_token(name)
                     && !is_private_token(name)
@@ -204,7 +209,7 @@ pub(super) fn diagnose(
                     else {
                         continue;
                     };
-                    let declared = visible_module_tokens(modules, owner);
+                    let declared = visible_module_tokens(modules, owner, forks);
                     for token in target.tokens.difference(&declared) {
                         record(
                             module,

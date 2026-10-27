@@ -3,7 +3,6 @@ use super::super::{
     InterfaceRelationship, ModuleKind, ModuleManifest, ModuleManifestDiagnostic,
     ModuleManifestError, NodeSlotOverride, ResolutionOutcome, RootModuleGraphManifest,
     SlotOverride, TrustPolicy, TrustTier, apply_slot_override, parse_module_entrypoint,
-    resolve_closure,
 };
 use super::scan::{scan_mesh_files_recursive, scan_mesh_source, scan_mesh_sources};
 use super::*;
@@ -343,6 +342,7 @@ pub struct InstalledModuleGraph {
     /// inputs. Runtime and authoring consumers use it to avoid mixing data
     /// from different graph generations.
     revision: u64,
+    dependency_forks: std::collections::BTreeMap<String, String>,
     modules: HashMap<String, InstalledModuleNode>,
     trust_policy: TrustPolicy,
     backend_providers: HashMap<String, Vec<BackendProviderNode>>,
@@ -411,6 +411,7 @@ impl ModuleGraphDiff {
 /// longer has a home for.
 #[derive(Debug, Clone, Default)]
 pub struct CompositionContext {
+    pub dependency_forks: std::collections::BTreeMap<String, String>,
     pub slots: std::collections::BTreeMap<String, SlotOverride>,
     pub node_slots:
         std::collections::BTreeMap<String, std::collections::BTreeMap<String, NodeSlotOverride>>,
@@ -598,7 +599,11 @@ impl InstalledModuleGraph {
             .values()
             .map(|module| &module.manifest)
             .collect::<Vec<_>>();
-        let resolution = resolve_closure(enabled_ids.iter().copied(), enabled_manifests);
+        let resolution = super::super::resolution::resolve_closure_with_forks(
+            enabled_ids.iter().copied(),
+            enabled_manifests,
+            &composition.dependency_forks,
+        );
         let active_module_ids = resolution.active_modules(enabled_ids.iter().copied());
         for node in graph_modules.values_mut() {
             node.enabled = active_module_ids.contains(&node.id);
@@ -651,7 +656,11 @@ impl InstalledModuleGraph {
                 if !spec.is_optional() {
                     continue;
                 }
-                if let Some(dependency) = graph_modules.get(dependency_id)
+                let resolved = composition
+                    .dependency_forks
+                    .get(dependency_id)
+                    .unwrap_or(dependency_id);
+                if let Some(dependency) = graph_modules.get(resolved)
                     && !dependency.enabled
                 {
                     manual_diagnostics.push(ModuleGraphDiagnostic {
@@ -1087,7 +1096,10 @@ impl InstalledModuleGraph {
         );
         let mut diagnostics = diagnostics;
         if authoring_diagnostics_enabled() {
-            diagnostics.extend(build_authoring_diagnostics(&graph_modules));
+            diagnostics.extend(build_authoring_diagnostics(
+                &graph_modules,
+                &composition.dependency_forks,
+            ));
             sort_diagnostics(&mut diagnostics);
         }
         let health = build_graph_health(
@@ -1096,10 +1108,11 @@ impl InstalledModuleGraph {
             &frontend_requirements,
             &diagnostics,
         );
-        let revision = graph_revision(&graph_modules, &diagnostics);
+        let revision = graph_revision(&graph_modules, &diagnostics, &composition.dependency_forks);
 
         Ok(Self {
             revision,
+            dependency_forks: composition.dependency_forks,
             modules: graph_modules,
             trust_policy,
             backend_providers,
@@ -1176,7 +1189,13 @@ impl InstalledModuleGraph {
     pub fn theme_token_families(&self, module_id: &str) -> Vec<String> {
         self.modules
             .get(module_id)
-            .map(|module| super::token_diagnostics::token_families(&self.modules, module))
+            .map(|module| {
+                super::token_diagnostics::token_families(
+                    &self.modules,
+                    module,
+                    &self.dependency_forks,
+                )
+            })
             .unwrap_or_default()
     }
 
@@ -1186,9 +1205,13 @@ impl InstalledModuleGraph {
         self.modules
             .get(module_id)
             .map(|module| {
-                super::token_diagnostics::visible_module_tokens(&self.modules, module)
-                    .into_iter()
-                    .collect()
+                super::token_diagnostics::visible_module_tokens(
+                    &self.modules,
+                    module,
+                    &self.dependency_forks,
+                )
+                .into_iter()
+                .collect()
             })
             .unwrap_or_default()
     }
@@ -1208,6 +1231,18 @@ impl InstalledModuleGraph {
         self.revision
     }
 
+    /// Resolve an authored dependency ID within this graph generation.
+    pub fn resolve_dependency<'a>(&'a self, id: &'a str) -> &'a str {
+        self.dependency_forks
+            .get(id)
+            .map(String::as_str)
+            .unwrap_or(id)
+    }
+
+    pub fn dependency_forks(&self) -> &std::collections::BTreeMap<String, String> {
+        &self.dependency_forks
+    }
+
     /// Record modules that discovery or manifest loading had to leave out.
     /// They are part of the graph's identity, so a module that disappears
     /// because it became unreadable changes the revision visibly instead of
@@ -1217,7 +1252,7 @@ impl InstalledModuleGraph {
             return self;
         }
         self.diagnostics.extend(isolated);
-        self.revision = graph_revision(&self.modules, &self.diagnostics);
+        self.revision = graph_revision(&self.modules, &self.diagnostics, &self.dependency_forks);
         self
     }
 
@@ -1241,6 +1276,10 @@ impl InstalledModuleGraph {
             removed_modules: before_ids.difference(&after_ids).cloned().collect(),
             ..ModuleGraphDiff::default()
         };
+        if self.dependency_forks != next.dependency_forks {
+            diff.profile_effects
+                .push("dependency fork selections changed".into());
+        }
 
         for module_id in before_ids.intersection(&after_ids) {
             let before = &self.modules[module_id];
@@ -1428,7 +1467,7 @@ impl InstalledModuleGraph {
     /// graph construction. It parses module source, so callers should invoke
     /// it from explicit tooling such as `mesh-shell config doctor`.
     pub fn authoring_diagnostics(&self) -> Vec<ModuleGraphDiagnostic> {
-        build_authoring_diagnostics(&self.modules)
+        build_authoring_diagnostics(&self.modules, &self.dependency_forks)
     }
 
     pub fn health(&self) -> &[ModuleGraphHealthRecord] {
@@ -1847,8 +1886,10 @@ fn manifest_identity(manifest: &ModuleManifest) -> serde_json::Value {
 fn graph_revision(
     modules: &HashMap<String, InstalledModuleNode>,
     diagnostics: &[ModuleGraphDiagnostic],
+    dependency_forks: &std::collections::BTreeMap<String, String>,
 ) -> u64 {
     let mut hasher = Sha256::new();
+    hasher.update(serde_json::to_vec(dependency_forks).expect("fork mappings serialize"));
     let mut module_ids = modules.keys().collect::<Vec<_>>();
     module_ids.sort();
     for module_id in module_ids {

@@ -187,6 +187,12 @@ impl FrontendSurfaceComponent {
             imported_module_ids.reverse();
             let mut visited = std::collections::HashSet::new();
             while let Some(module_id) = imported_module_ids.pop() {
+                let module_id = self
+                    .frontend_catalog
+                    .dependency_forks
+                    .get(&module_id)
+                    .cloned()
+                    .unwrap_or(module_id);
                 if module_id == self.id() || !visited.insert(module_id.clone()) {
                     continue;
                 }

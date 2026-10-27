@@ -292,7 +292,29 @@ fn load_installed_module_graph_with(
             .map(|loaded| loaded.manifest.clone())
             .collect::<Vec<_>>();
         let resolved = resolve_composition(profile, manifests.iter())?;
-        let effective_profile = resolved.to_profile();
+        let mut effective_profile = resolved.to_profile();
+        effective_profile.dependency_forks = profile.dependency_forks.clone();
+        for (upstream, fork) in &profile.dependency_forks {
+            let target = modules
+                .iter()
+                .find(|module| &module.manifest.name == fork)
+                .ok_or_else(|| {
+                    ModuleManifestError::Validation(format!("fork {fork} is not installed"))
+                })?;
+            let dir = target.path.parent().ok_or_else(|| {
+                ModuleManifestError::Validation(format!("fork {fork} has no module directory"))
+            })?;
+            let record = super::super::fork_record(dir)?.ok_or_else(|| {
+                ModuleManifestError::Validation(format!("{fork} is not a tracked fork"))
+            })?;
+            if &record.upstream != upstream {
+                return Err(ModuleManifestError::Validation(format!(
+                    "fork {fork} tracks {}, not {upstream}",
+                    record.upstream
+                )));
+            }
+        }
+        composition.dependency_forks = profile.dependency_forks.clone();
         composition.slots = resolved.spec.slots.clone();
         composition.icon_pack_chain = Some(resolved.spec.resources.icons().to_vec());
         composition.font_pack_chain = Some(resolved.spec.resources.fonts().to_vec());

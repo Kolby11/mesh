@@ -281,6 +281,7 @@ end
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new_for_test(
         root_compiled,

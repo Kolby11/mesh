@@ -751,6 +751,7 @@ pub(super) fn test_frontend_component_with_local_components(
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
@@ -790,6 +791,7 @@ pub(super) fn test_frontend_component_with_manifest(
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
@@ -865,6 +867,7 @@ pub(super) fn test_frontend_component_with_required_icons(
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
@@ -910,6 +913,7 @@ pub(super) fn test_frontend_component_with_catalog(
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
@@ -1193,6 +1197,7 @@ pub(super) fn real_frontend_module_component(
         extension_point_contributions: HashMap::new(),
         extension_point_entries: HashMap::new(),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
     let mut navigation_items = Vec::new();
     let mut widget_locale_roots = Vec::new();

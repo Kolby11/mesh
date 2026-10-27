@@ -51,11 +51,6 @@ unless an item says otherwise. IDs point into the
 (evidence and tests). The `A*` module-architecture items have landed; see the
 October log.
 
-### Priority 7 — Customization and ecosystem
-
-- [ ] Forks of modules that other modules name in `uses.modules` leave those
-      dependents on the upstream; `module fork` rewires only the active profile.
-
 ### Priority 8 — Structural mechanics
 
 - [ ] **SH-08:** Extract `shell/component/**` into a `mesh-core-frontend-runtime`

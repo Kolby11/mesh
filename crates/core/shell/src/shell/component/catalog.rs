@@ -21,6 +21,7 @@ use crate::shell::ShellRunError;
 #[derive(Debug, Clone, Default)]
 pub(in crate::shell) struct FrontendCatalog {
     pub(in crate::shell) modules: HashMap<String, FrontendCatalogEntry>,
+    pub(super) dependency_forks: std::collections::BTreeMap<String, String>,
     /// Source/indexing failures are kept with the catalog generation instead
     /// of aborting unrelated module compilation. The shell reports these as
     /// scoped diagnostics while graph construction remains authoritative.
@@ -523,6 +524,9 @@ fn catalog_changes(
             changed.insert(module_id.clone());
         }
     }
+    if previous.dependency_forks != next.dependency_forks {
+        changed.extend(previous.modules.keys().chain(next.modules.keys()).cloned());
+    }
 
     let mut changed_extension_points = HashSet::new();
     for key in previous
@@ -927,6 +931,9 @@ impl FrontendCatalog {
 
         let mut catalog = Self {
             modules: compiled_entries.into_iter().collect(),
+            dependency_forks: graph
+                .map(|graph| graph.dependency_forks().clone())
+                .unwrap_or_default(),
             diagnostics,
             extension_point_contributions: HashMap::new(),
             extension_point_entries: HashMap::new(),
@@ -1469,7 +1476,12 @@ impl FrontendCatalog {
                 "target module '{module_id}' is not declared in mesh.uses.modules as a required module dependency"
             ));
         }
-        let Some(entry) = self.modules.get(module_id) else {
+        let resolved = self
+            .dependency_forks
+            .get(module_id)
+            .map(String::as_str)
+            .unwrap_or(module_id);
+        let Some(entry) = self.modules.get(resolved) else {
             return Err("target module is not loaded".into());
         };
         match entry.compiled.manifest.package.module_type {
@@ -1502,7 +1514,11 @@ impl FrontendCatalog {
                 else {
                     continue;
                 };
-                let Some(target) = self.modules.get(&target_module_id) else {
+                let resolved = self
+                    .dependency_forks
+                    .get(&target_module_id)
+                    .unwrap_or(&target_module_id);
+                let Some(target) = self.modules.get(resolved) else {
                     continue;
                 };
                 let public_props = target.compiled.public_prop_schema();
@@ -1619,7 +1635,11 @@ impl FrontendCatalog {
             ));
         };
         self.validate_component_module_import(host, &module_id)?;
-        Ok(module_id)
+        Ok(self
+            .dependency_forks
+            .get(&module_id)
+            .cloned()
+            .unwrap_or(module_id))
     }
 }
 
@@ -1857,7 +1877,11 @@ local Settings = require("@mesh/settings")
     fn catalog_with_navigation_contribution_source(
         settings_source: &str,
     ) -> (tempfile::TempDir, FrontendCatalog) {
-        catalog_with_contribution_source("@mesh/navigation-bar", "src/settings.mesh", settings_source)
+        catalog_with_contribution_source(
+            "@mesh/navigation-bar",
+            "src/settings.mesh",
+            settings_source,
+        )
     }
 
     /// The shipped catalog with `module_id` copied to a temporary directory
@@ -1901,8 +1925,11 @@ local Settings = require("@mesh/settings")
         let mut manifest = navigation.manifest;
         if manifest.entrypoints.main.as_deref() == Some(entry_path) {
             // Keep the module root compilable while its contribution fails.
-            std::fs::write(temp.path().join("src/root.mesh"), "<template><box /></template>")
-                .unwrap();
+            std::fs::write(
+                temp.path().join("src/root.mesh"),
+                "<template><box /></template>",
+            )
+            .unwrap();
             manifest.entrypoints.main = Some("src/root.mesh".into());
         }
         modules.insert(
@@ -2001,10 +2028,7 @@ local audio = require("mesh.audio@>=2.0")
             before
                 .catalog
                 .extension_point_entries
-                .contains_key(&contribution_entry_key(
-                    "@mesh/volume-widget",
-                    "volume"
-                ))
+                .contains_key(&contribution_entry_key("@mesh/volume-widget", "volume"))
         );
 
         std::fs::write(

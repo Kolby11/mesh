@@ -276,9 +276,15 @@ best-effort.
 reserved), renames it in its `module.json`, copies upstream's capability
 approvals, and stores the upstream id, version and a snapshot of its tree in
 `.mesh-fork/` (module discovery never loads that snapshot). The active
-profile is rewired to the copy: roots and providers that used upstream, and
+profile is rewired to the copy: roots, background services and providers that used upstream, and
 `upstream:<contribution>` placements in customizable slots — including host
-defaults the profile had not overridden — now name the fork. Upstream stays
+defaults the profile had not overridden — now name the fork. The profile's
+`dependencyForks` map also resolves declared module dependencies, component
+imports, Luau library namespaces and token families to that tracked fork.
+Other profiles retain their own choices. Candidate activation rejects missing
+or untracked forks, mismatched kinds or library namespaces, incompatible required
+versions, ambiguous mappings, replacement chains and dependency cycles. The
+authored dependency and installed sources remain unchanged. Upstream stays
 installed as the fallback; without an active profile nothing is rewired.
 Interface modules cannot be forked, since the copy would declare a second
 contract under the same interface name.

@@ -75,15 +75,23 @@ pub fn create_fork(
             "{upstream_id} is an interface module and cannot be forked: the copy would \
              declare a second {} contract. Fork a provider or consumer instead, or \
              publish a new interface under its own name",
-            manifest["mesh"]["interface"]["name"].as_str().unwrap_or("interface")
+            manifest["mesh"]["interface"]["name"]
+                .as_str()
+                .unwrap_or("interface")
         )));
     }
     copy_tree(upstream_dir, destination)?;
-    copy_tree(upstream_dir, &destination.join(FORK_STATE_DIR).join(BASE_DIR))?;
+    copy_tree(
+        upstream_dir,
+        &destination.join(FORK_STATE_DIR).join(BASE_DIR),
+    )?;
     let manifest = destination.join("module.json");
     let text = std::fs::read_to_string(&manifest).map_err(|error| io_error(&manifest, error))?;
     let renamed = rename_manifest(&text, upstream_id, fork_id).ok_or_else(|| {
-        invalid(format!("{} does not name {upstream_id}", manifest.display()))
+        invalid(format!(
+            "{} does not name {upstream_id}",
+            manifest.display()
+        ))
     })?;
     std::fs::write(&manifest, renamed).map_err(|error| io_error(&manifest, error))?;
     let record = ForkRecord {
@@ -104,10 +112,11 @@ fn rename_manifest(text: &str, from: &str, to: &str) -> Option<String> {
 
 fn write_record(fork_dir: &Path, record: &ForkRecord) -> Result<(), ModuleManifestError> {
     let path = fork_dir.join(FORK_STATE_DIR).join(RECORD_FILE);
-    let mut text = serde_json::to_string_pretty(record).map_err(|source| ModuleManifestError::Json {
-        path: path.clone(),
-        source,
-    })?;
+    let mut text =
+        serde_json::to_string_pretty(record).map_err(|source| ModuleManifestError::Json {
+            path: path.clone(),
+            source,
+        })?;
     text.push('\n');
     std::fs::write(&path, text).map_err(|error| io_error(&path, error))
 }
@@ -200,7 +209,10 @@ fn diff_trees(from: &Path, to: &Path) -> Result<Vec<ForkFileDiff>, ModuleManifes
         .collect::<BTreeSet<_>>();
     let mut changes = Vec::new();
     for path in paths {
-        let (old, new) = (read_optional(&from.join(&path))?, read_optional(&to.join(&path))?);
+        let (old, new) = (
+            read_optional(&from.join(&path))?,
+            read_optional(&to.join(&path))?,
+        );
         let change = match (&old, &new) {
             (None, Some(_)) => FileChange::Added,
             (Some(_), None) => FileChange::Removed,
@@ -215,12 +227,19 @@ fn diff_trees(from: &Path, to: &Path) -> Result<Vec<ForkFileDiff>, ModuleManifes
             (Some(old), Some(new)) => Some(
                 similar::TextDiff::from_lines(&old, &new)
                     .unified_diff()
-                    .header(&format!("a/{}", path.display()), &format!("b/{}", path.display()))
+                    .header(
+                        &format!("a/{}", path.display()),
+                        &format!("b/{}", path.display()),
+                    )
                     .to_string(),
             ),
             _ => None,
         };
-        changes.push(ForkFileDiff { path, change, patch });
+        changes.push(ForkFileDiff {
+            path,
+            change,
+            patch,
+        });
     }
     Ok(changes)
 }
@@ -276,7 +295,9 @@ pub fn rebase_fork(
                 .unwrap_or(Some(""))
         });
         match texts {
-            [Some(base), Some(fork), Some(upstream)] if fork_exists_or_upstream(&fork, &upstream) => {
+            [Some(base), Some(fork), Some(upstream)]
+                if fork_exists_or_upstream(&fork, &upstream) =>
+            {
                 let (merged, clean) = merge3(base, fork, upstream);
                 write_optional(&target, Some(merged.as_bytes()))?;
                 if clean {
@@ -315,7 +336,9 @@ fn write_optional(path: &Path, bytes: Option<&[u8]>) -> Result<(), ModuleManifes
             std::fs::write(path, bytes).map_err(|error| io_error(path, error))
         }
         None => match std::fs::remove_file(path) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(io_error(path, error)),
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                Err(io_error(path, error))
+            }
             _ => Ok(()),
         },
     }
@@ -433,17 +456,20 @@ pub fn rewire_profile(
     fork: &str,
 ) -> (ShellProfile, bool) {
     let mut next = profile.clone();
-    let mut changed = false;
+    let mut changed = next.dependency_forks.get(upstream).map(String::as_str) != Some(fork);
+    next.dependency_forks
+        .insert(upstream.to_string(), fork.to_string());
     for (instance, root) in &effective.roots {
         if root.module == upstream {
-            let entry = next.roots.entry(instance.clone()).or_insert_with(|| {
-                super::ProfileRootInstance {
-                    module: String::new(),
-                    entrypoint: root.entrypoint.clone(),
-                    active: None,
-                    surface: None,
-                }
-            });
+            let entry =
+                next.roots
+                    .entry(instance.clone())
+                    .or_insert_with(|| super::ProfileRootInstance {
+                        module: String::new(),
+                        entrypoint: root.entrypoint.clone(),
+                        active: None,
+                        surface: None,
+                    });
             entry.module = fork.to_string();
             changed = true;
         }
@@ -453,6 +479,13 @@ pub fn rewire_profile(
             next.providers.insert(interface.clone(), fork.to_string());
             changed = true;
         }
+    }
+    if effective.background_services.contains(upstream) {
+        next.background_services.remove(upstream);
+        next.remove_background_services.insert(upstream.to_string());
+        next.remove_background_services.remove(fork);
+        next.background_services.insert(fork.to_string());
+        changed = true;
     }
     let prefix = format!("{upstream}:");
     let rewrite = |reference: &str| {
@@ -541,7 +574,11 @@ mod tests {
         let (merged, clean) = merge3(base, "a\nsame\nc\nd\ne\n", "a\nsame\nc\nd\ne\n");
         assert!(clean);
         assert_eq!(merged, "a\nsame\nc\nd\ne\n");
-        let (merged, clean) = merge3(base, "a\nb\nc\nd\ne\nfork tail\n", "upstream head\na\nb\nc\nd\ne\n");
+        let (merged, clean) = merge3(
+            base,
+            "a\nb\nc\nd\ne\nfork tail\n",
+            "upstream head\na\nb\nc\nd\ne\n",
+        );
         assert!(clean);
         assert_eq!(merged, "upstream head\na\nb\nc\nd\ne\nfork tail\n");
     }
@@ -562,8 +599,74 @@ mod tests {
         let error = create_fork(&upstream, "@mesh/wm-interface", "1.1.0", "@me/wm", &fork)
             .unwrap_err()
             .to_string();
-        assert!(error.contains("interface module") && error.contains("mesh.wm"), "{error}");
+        assert!(
+            error.contains("interface module") && error.contains("mesh.wm"),
+            "{error}"
+        );
         assert!(!fork.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn profile_graph_checks_fork_provenance_and_isolates_profiles() {
+        let root = temp_dir("profile-graph");
+        let modules = root.join("modules");
+        let upstream = modules.join("mesh/component");
+        let frontend = modules.join("mesh/panel");
+        std::fs::create_dir_all(&upstream).unwrap();
+        std::fs::create_dir_all(&frontend).unwrap();
+        std::fs::write(
+            root.join("module.json"),
+            r#"{"mesh":{"schemaVersion":1,"modulesDir":"modules"}}"#,
+        )
+        .unwrap();
+        std::fs::write(upstream.join("module.json"), r##"{"name": "@mesh/component", "version": "1.0.0", "mesh": {"apiVersion":"0.1","kind":"ui","entry":"main.mesh","theme":{"tokens":{"panel.color":"#112233"}}}}"##).unwrap();
+        std::fs::write(frontend.join("module.json"), r#"{"name":"@mesh/panel","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh","surface":{"anchor":"top","layer":"top"},"uses":{"modules":{"@mesh/component":"^1"}}}}"#).unwrap();
+        let fork = modules.join("local/component");
+        create_fork(
+            &upstream,
+            "@mesh/component",
+            "1.0.0",
+            "@local/component",
+            &fork,
+        )
+        .unwrap();
+        let mut profile = ShellProfile::new();
+        profile.roots.insert(
+            "@mesh/panel#default".into(),
+            super::super::ProfileRootInstance {
+                module: "@mesh/panel".into(),
+                entrypoint: "main".into(),
+                active: Some(true),
+                surface: None,
+            },
+        );
+        let original = super::super::load_installed_module_graph_for_profile(
+            &root.join("module.json"),
+            &profile,
+        )
+        .unwrap();
+        profile
+            .dependency_forks
+            .insert("@mesh/component".into(), "@local/component".into());
+        let mapped = super::super::load_installed_module_graph_for_profile(
+            &root.join("module.json"),
+            &profile,
+        )
+        .unwrap();
+        assert!(original.module("@mesh/component").unwrap().enabled);
+        assert!(mapped.module("@local/component").unwrap().enabled);
+        assert!(!mapped.module("@mesh/component").unwrap().enabled);
+        assert_eq!(mapped.theme_token_families("@mesh/panel"), ["@local/component"]);
+        assert_ne!(original.revision(), mapped.revision());
+        std::fs::remove_file(fork.join(FORK_STATE_DIR).join(RECORD_FILE)).unwrap();
+        assert!(
+            super::super::load_installed_module_graph_for_profile(
+                &root.join("module.json"),
+                &profile
+            )
+            .is_err()
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -583,8 +686,17 @@ mod tests {
 
         let record = create_fork(&upstream, "@mesh/clock", "0.1.0", "@me/clock", &fork).unwrap();
         assert_eq!(fork_record(&fork).unwrap(), Some(record));
-        assert!(std::fs::read_to_string(fork.join("module.json")).unwrap().contains("\"@me/clock\""));
-        assert!(tree_files(&fork).unwrap().iter().all(|path| !path.starts_with(FORK_STATE_DIR)));
+        assert!(
+            std::fs::read_to_string(fork.join("module.json"))
+                .unwrap()
+                .contains("\"@me/clock\"")
+        );
+        assert!(
+            tree_files(&fork)
+                .unwrap()
+                .iter()
+                .all(|path| !path.starts_with(FORK_STATE_DIR))
+        );
 
         std::fs::write(fork.join("src/main.mesh"), "ONE\ntwo\nthree\nfour\n").unwrap();
         std::fs::write(upstream.join("src/main.mesh"), "one\ntwo\nthree\nFOUR\n").unwrap();
@@ -598,7 +710,11 @@ mod tests {
 
         let diff = diff_fork(&fork, &upstream).unwrap();
         assert_eq!(diff.upstream.len(), 4);
-        assert!(diff.local.iter().any(|change| change.path == Path::new("src/main.mesh")));
+        assert!(
+            diff.local
+                .iter()
+                .any(|change| change.path == Path::new("src/main.mesh"))
+        );
 
         let outcome = rebase_fork(&fork, &upstream, "0.2.0").unwrap();
         assert!(outcome.conflicts.is_empty(), "{outcome:?}");
@@ -606,10 +722,19 @@ mod tests {
             std::fs::read_to_string(fork.join("src/main.mesh")).unwrap(),
             "ONE\ntwo\nthree\nFOUR\n"
         );
-        assert_eq!(std::fs::read_to_string(fork.join("src/new.mesh")).unwrap(), "new\n");
+        assert_eq!(
+            std::fs::read_to_string(fork.join("src/new.mesh")).unwrap(),
+            "new\n"
+        );
         let manifest = std::fs::read_to_string(fork.join("module.json")).unwrap();
-        assert!(manifest.contains("\"@me/clock\"") && manifest.contains("0.2.0"), "{manifest}");
-        assert_eq!(fork_record(&fork).unwrap().unwrap().upstream_version, "0.2.0");
+        assert!(
+            manifest.contains("\"@me/clock\"") && manifest.contains("0.2.0"),
+            "{manifest}"
+        );
+        assert_eq!(
+            fork_record(&fork).unwrap().unwrap().upstream_version,
+            "0.2.0"
+        );
         assert!(diff_fork(&fork, &upstream).unwrap().upstream.is_empty());
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -633,7 +758,8 @@ mod tests {
             "end".to_string(),
             vec!["@mesh/clock:clock".to_string()],
         )];
-        let (next, changed) = rewire_profile(&profile, &effective, &defaults, "@mesh/clock", "@me/clock");
+        let (next, changed) =
+            rewire_profile(&profile, &effective, &defaults, "@mesh/clock", "@me/clock");
         assert!(changed);
         let start = &next.node_slots["@mesh/bar#default"]["start"].nodes;
         assert_eq!(start[0].contribution, "@me/clock:clock");
@@ -646,7 +772,25 @@ mod tests {
 
         let (next, _) = rewire_profile(&profile, &effective, &[], "@mesh/bar", "@me/bar");
         assert_eq!(next.roots["@mesh/bar#default"].module, "@me/bar");
-        let (next, _) = rewire_profile(&profile, &effective, &[], "@mesh/clock-backend", "@me/clock-backend");
+        let (next, _) = rewire_profile(
+            &profile,
+            &effective,
+            &[],
+            "@mesh/clock-backend",
+            "@me/clock-backend",
+        );
         assert_eq!(next.providers["mesh.clock"], "@me/clock-backend");
+    }
+
+    #[test]
+    fn rewiring_replaces_inherited_background_service() {
+        let profile = ShellProfile::new();
+        let mut effective = ShellProfile::new();
+        effective.background_services.insert("@mesh/service".into());
+        let (next, changed) =
+            rewire_profile(&profile, &effective, &[], "@mesh/service", "@local/service");
+        assert!(changed);
+        assert!(next.remove_background_services.contains("@mesh/service"));
+        assert!(next.background_services.contains("@local/service"));
     }
 }

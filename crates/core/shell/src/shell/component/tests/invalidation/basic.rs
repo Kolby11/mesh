@@ -1156,6 +1156,7 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
         extension_point_contributions: Default::default(),
         extension_point_entries: Default::default(),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
@@ -1252,6 +1253,7 @@ end
         extension_point_contributions: Default::default(),
         extension_point_entries: Default::default(),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
@@ -1359,6 +1361,7 @@ end
         extension_point_contributions: Default::default(),
         extension_point_entries: Default::default(),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
@@ -1463,6 +1466,7 @@ end
         extension_point_contributions: Default::default(),
         extension_point_entries: Default::default(),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
@@ -1581,6 +1585,7 @@ fn source_reload_recompiles_primary_and_contribution_roots_atomically() {
             contribution.clone().into(),
         )]),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,
@@ -1744,6 +1749,7 @@ fn source_reload_recompiles_contributions_consumed_from_other_modules() {
             contribution.clone().into(),
         )]),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new_for_test(
         host_compiled,
@@ -1871,6 +1877,7 @@ fn contribution_only_import_dependency_invalidates_its_host() {
             ),
         )]),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
 
     let handle = FrontendCatalogHandle::from(catalog.clone());
@@ -1881,6 +1888,62 @@ fn contribution_only_import_dependency_invalidates_its_host() {
     assert!(state.affected_modules.contains(contribution_module_id));
     assert!(state.affected_modules.contains(dependency_id));
     assert!(!state.affected_modules.contains(unrelated_id));
+}
+
+#[test]
+fn profile_fork_mapping_changes_component_lookup_and_invalidates_consumers() {
+    use crate::shell::component::catalog::{
+        FrontendCatalog, FrontendCatalogEntry, FrontendCatalogHandle,
+    };
+    use mesh_core_component::parse_component;
+    use mesh_core_frontend::CompiledFrontendModule;
+
+    let mut host = minimal_test_manifest("@test/host");
+    host.dependencies.modules.insert(
+        "@test/upstream".into(),
+        mesh_core_module::manifest::DependencySpec::Simple("*".into()),
+    );
+    let entry = |manifest, imports| FrontendCatalogEntry {
+        module_dir: ".".into(),
+        compiled: CompiledFrontendModule {
+            manifest,
+            source_path: "src/main.mesh".into(),
+            component: parse_component("<template><text /></template>").unwrap(),
+            public_props: Default::default(),
+            local_components: Default::default(),
+            module_component_imports: imports,
+            watched_paths: Vec::new(),
+        }
+        .into(),
+    };
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([
+            (
+                "@test/host".into(),
+                entry(
+                    host.clone(),
+                    HashMap::from([("Child".into(), "@test/upstream".into())]),
+                ),
+            ),
+            (
+                "@test/fork".into(),
+                entry(minimal_test_manifest("@test/fork"), HashMap::new()),
+            ),
+        ]),
+        dependency_forks: [("@test/upstream".into(), "@test/fork".into())].into(),
+        ..Default::default()
+    };
+    assert_eq!(
+        catalog
+            .imported_component_module_id(&host, None, "Child")
+            .unwrap(),
+        "@test/fork"
+    );
+    let handle = FrontendCatalogHandle::from(catalog.clone());
+    let mut next = catalog;
+    next.dependency_forks.clear();
+    handle.replace(next, None);
+    assert!(handle.snapshot().affected_modules.contains("@test/host"));
 }
 
 #[test]
@@ -1936,6 +1999,7 @@ local Child = require("./components/child.mesh")
         extension_point_contributions: Default::default(),
         extension_point_entries: Default::default(),
         node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
     };
     let mut component = FrontendSurfaceComponent::new_for_test(
         compiled,

@@ -18,7 +18,8 @@ use std::hash::{Hash, Hasher};
 
 use bitflags::bitflags;
 use mesh_core_elements::style::{
-    BackgroundPaint, Color, ComputedStyle, Corners, Dimension, Edges, Transform2D,
+    BackgroundPaint, Color, ComputedStyle, Corners, Dimension, Edges, GradientGeometry,
+    Transform2D,
 };
 use mesh_core_elements::{
     AccessibilityRole, NodeId, NodeState, WidgetNode, WindowSurfaceState, element_snapshot_json,

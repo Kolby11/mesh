@@ -71,10 +71,11 @@ pub(super) fn authoring_diagnostics_enabled() -> bool {
 
 pub(super) fn build_authoring_diagnostics(
     modules: &HashMap<String, InstalledModuleNode>,
+    forks: &std::collections::BTreeMap<String, String>,
 ) -> Vec<ModuleGraphDiagnostic> {
     let mut diagnostics = Vec::new();
-    diagnose_frontend_source_contracts(modules, &mut diagnostics);
-    super::token_diagnostics::diagnose(modules, &mut diagnostics);
+    diagnose_frontend_source_contracts(modules, &mut diagnostics, forks);
+    super::token_diagnostics::diagnose(modules, &mut diagnostics, forks);
     sort_diagnostics(&mut diagnostics);
     diagnostics
 }
@@ -552,6 +553,7 @@ fn diagnose_required_binaries(
 fn diagnose_frontend_source_contracts(
     modules: &HashMap<String, InstalledModuleNode>,
     diagnostics: &mut Vec<ModuleGraphDiagnostic>,
+    forks: &std::collections::BTreeMap<String, String>,
 ) {
     for module in modules
         .values()
@@ -682,7 +684,8 @@ fn diagnose_frontend_source_contracts(
 
         for ((path, _content), scan) in mesh_files.iter().zip(&mesh_source_scans) {
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-            let local_tokens = super::token_diagnostics::visible_module_tokens(modules, module);
+            let local_tokens =
+                super::token_diagnostics::visible_module_tokens(modules, module, forks);
             if !module
                 .manifest
                 .mesh

@@ -64,12 +64,86 @@ fn declared_luau_libraries(
     let mut libraries = mesh_core_scripting::LuauLibraries::default();
     for library in graph.contributed_libraries() {
         let declared = library.module_id == manifest.package.id
-            || manifest.dependencies.modules.contains_key(&library.module_id);
+            || manifest.dependencies.modules.keys().any(|dependency| {
+                let resolved = graph.resolve_dependency(dependency);
+                resolved == library.module_id
+                    && (resolved == dependency
+                        || graph.module(dependency).is_some_and(|upstream| {
+                            upstream
+                                .manifest
+                                .mesh
+                                .contributes
+                                .libraries
+                                .iter()
+                                .any(|entry| entry.namespace == library.namespace)
+                        }))
+            });
         if declared && let Some(module_dir) = library.source.manifest_path.parent() {
             libraries.insert(library.namespace.clone(), module_dir.join(&library.path));
         }
     }
     libraries
+}
+
+#[cfg(test)]
+#[test]
+fn forked_library_uses_authored_namespace_and_profile_selection() {
+    use mesh_core_module::package::{
+        ProfileRootInstance, ShellProfile, create_fork, load_installed_module_graph_for_profile,
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let modules = temp.path().join("modules");
+    let upstream = modules.join("alice/lib");
+    let host = modules.join("alice/host");
+    std::fs::create_dir_all(upstream.join("lib")).unwrap();
+    std::fs::create_dir_all(&host).unwrap();
+    std::fs::write(
+        temp.path().join("module.json"),
+        r#"{"mesh":{"schemaVersion":1,"modulesDir":"modules"}}"#,
+    )
+    .unwrap();
+    std::fs::write(upstream.join("module.json"), r#"{"name": "@alice/lib", "version":"1.0.0", "mesh":{"apiVersion":"0.1","kind":"library","provides":{"libraries":[{"namespace":"@alice/lib","path":"lib"}]}}}"#).unwrap();
+    std::fs::write(upstream.join("lib/init.luau"), "return 'upstream'").unwrap();
+    std::fs::write(host.join("module.json"), r#"{"name":"@alice/host","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh","surface":{"anchor":"top","layer":"top"},"uses":{"modules":{"@alice/lib":"^1"}}}}"#).unwrap();
+    let fork = modules.join("local/lib");
+    create_fork(&upstream, "@alice/lib", "1.0.0", "@local/lib", &fork).unwrap();
+    std::fs::write(fork.join("lib/init.luau"), "return 'fork'").unwrap();
+    let mut profile = ShellProfile::new();
+    profile.roots.insert(
+        "@alice/host#default".into(),
+        ProfileRootInstance {
+            module: "@alice/host".into(),
+            entrypoint: "main".into(),
+            active: Some(true),
+            surface: None,
+        },
+    );
+    for (mapped, expected) in [(false, "upstream"), (true, "fork")] {
+        if mapped {
+            profile
+                .dependency_forks
+                .insert("@alice/lib".into(), "@local/lib".into());
+        }
+        let graph =
+            load_installed_module_graph_for_profile(&temp.path().join("module.json"), &profile)
+                .unwrap();
+        let manifest = graph
+            .module("@alice/host")
+            .unwrap()
+            .manifest
+            .clone()
+            .into_runtime_manifest();
+        let mut context =
+            mesh_core_scripting::ScriptContext::new("@alice/host", Default::default()).unwrap();
+        context.set_luau_libraries(declared_luau_libraries(&graph, &manifest));
+        context
+            .load_script("value = require('@alice/lib')")
+            .unwrap();
+        assert_eq!(
+            context.state.get("value"),
+            Some(serde_json::json!(expected))
+        );
+    }
 }
 
 /// Graph-free test fixtures see every shipped library.

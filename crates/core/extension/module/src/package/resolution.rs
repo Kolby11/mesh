@@ -137,6 +137,14 @@ pub fn resolve_closure<'a>(
     roots: impl IntoIterator<Item = &'a str>,
     available: impl IntoIterator<Item = &'a ModuleManifest>,
 ) -> ResolutionOutcome {
+    resolve_closure_with_forks(roots, available, &BTreeMap::new())
+}
+
+pub fn resolve_closure_with_forks<'a>(
+    roots: impl IntoIterator<Item = &'a str>,
+    available: impl IntoIterator<Item = &'a ModuleManifest>,
+    forks: &BTreeMap<String, String>,
+) -> ResolutionOutcome {
     let available: HashMap<&str, &ModuleManifest> = available
         .into_iter()
         .map(|manifest| (manifest.name.as_str(), manifest))
@@ -198,6 +206,7 @@ pub fn resolve_closure<'a>(
                 .or_insert_with(|| ("*".into(), false));
         }
         for (dependency_id, (requirement, optional)) in module_dependencies {
+            let dependency_id = forks.get(&dependency_id).cloned().unwrap_or(dependency_id);
             requested_by
                 .entry(dependency_id.clone())
                 .or_default()
