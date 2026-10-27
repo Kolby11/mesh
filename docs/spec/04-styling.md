@@ -752,6 +752,14 @@ shape.
 The shorthand resets both the background color and image/gradient; use
 `background-color` or `background-image` to change only that part.
 
+A relative `url(...)` asset path resolves against the directory of the
+stylesheet that declares it — the component file's directory for `.mesh`
+style blocks (local imports resolve against the imported file's own
+directory) and the theme stylesheet's directory for theme packs, following
+GTK's model. Absolute paths, URL schemes, `data:` URIs, and paths escaping
+the declaring directory pass through untouched, and `var(--token)` /
+`prop(...)` references keep their runtime resolution order.
+
 Linear gradients run top to bottom (optionally written `to bottom`) and accept
 at least two evenly spaced color stops. Every stop uses the same CSS color parser
 as theme colors, including hex, named colors, transparent, and supported functional

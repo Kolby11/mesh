@@ -1723,7 +1723,11 @@ pub fn load_theme_from_source(
             path: path.clone(),
             message: error.to_string(),
         })?;
-    parse_theme_css(id, name, &content).map_err(|message| ThemeError::CssParse { path, message })
+    // Relative `url(...)` assets resolve against the stylesheet's directory,
+    // like GTK: a theme pack ships its images next to the CSS that names them.
+    let asset_base = path.parent().unwrap_or(Path::new("/")).to_path_buf();
+    parse_theme_css_with_asset_base(id, name, &content, Some(&asset_base))
+        .map_err(|message| ThemeError::CssParse { path, message })
 }
 
 fn embedded_default_theme() -> Theme {
@@ -1789,6 +1793,15 @@ pub fn theme_module_targets(source: &str) -> Result<Vec<ThemeModuleTarget>, Stri
 }
 
 fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String> {
+    parse_theme_css_with_asset_base(id, name, content, None)
+}
+
+fn parse_theme_css_with_asset_base(
+    id: &str,
+    name: &str,
+    content: &str,
+    asset_base: Option<&Path>,
+) -> Result<Theme, String> {
     let mut theme = Theme {
         id: id.to_string(),
         name: name.to_string(),
@@ -1807,6 +1820,12 @@ fn parse_theme_css(id: &str, name: &str, content: &str) -> Result<Theme, String>
 
     let stylesheet = css::parse_stylesheet(content, 0)
         .map_err(|error| format!("{} at {:?}", error.message, error.span))?;
+    let stylesheet = match asset_base {
+        // Relative `url(...)` assets resolve against the stylesheet's own
+        // directory; embedded defaults have no declaring directory.
+        Some(asset_base) => css::absolutize_stylesheet_urls(&stylesheet, asset_base),
+        None => stylesheet,
+    };
     lower_theme_rules(&stylesheet.rules, &mut theme)?;
     normalize_legacy_default_shell_animations(&mut theme, Vec::new());
     flatten_module_tokens_into(&mut theme.tokens, &theme.modules);
@@ -3284,6 +3303,58 @@ mod tests {
         symlink(root.join("themes"), root.join("link")).unwrap();
         let escaped = ThemeSourceHandle::new(&root, "link/main.css").unwrap();
         assert!(escaped.read_utf8_bounded(1024).is_err());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn theme_pack_urls_resolve_against_the_declaring_stylesheet_directory() {
+        let root = std::env::temp_dir().join(format!("mesh-theme-urls-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("themes/assets")).unwrap();
+        std::fs::write(
+            root.join("themes/dark.css"),
+            concat!(
+                "node { background-image: url(assets/panel.png); }",
+                "card { background: #fff url(\"bg.webp\") no-repeat; }",
+                "text { background-image: url(data:image/png;base64,AAA); }",
+                "esc { background-image: url(../outside.png); }",
+            ),
+        )
+        .unwrap();
+
+        let source = ThemeSourceHandle::new(&root, "themes/dark.css").unwrap();
+        let theme = load_theme_from_source(&source, "test", "Test").unwrap();
+        let background = |theme: &Theme, component: &str| -> String {
+            theme
+                .defaults()
+                .components
+                .get(component)
+                .unwrap_or_else(|| panic!("missing defaults for {component}"))
+                .get("background-image")
+                .or_else(|| {
+                    theme
+                        .defaults()
+                        .components
+                        .get(component)
+                        .unwrap_or_else(|| panic!("missing defaults for {component}"))
+                        .get("background")
+                })
+                .cloned()
+                .unwrap_or_else(|| panic!("missing background for {component}"))
+        };
+        assert_eq!(
+            background(&theme, "base"),
+            format!("url({})", root.join("themes/assets/panel.png").display())
+        );
+        assert!(
+            background(&theme, "card")
+                .contains(&format!("url({})", root.join("themes/bg.webp").display())),
+            "quoted url should resolve: {}",
+            background(&theme, "card")
+        );
+        // Unresolvable forms pass through untouched.
+        assert_eq!(background(&theme, "text"), "url(data:image/png;base64,AAA)");
+        assert_eq!(background(&theme, "esc"), "url(../outside.png)");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -251,6 +251,64 @@ pub fn prop_variable_key(name: &str) -> String {
 
 pub use mesh_core_theme::css::{StyleValue, classify_style_value};
 
+impl StyleBlock {
+    /// Rewrite relative `url(...)` asset paths in this block's declarations
+    /// (rules and keyframe stops) so they resolve against `asset_base`, the
+    /// declaring component file's directory. Unresolvable forms — absolute
+    /// paths, URL schemes, `data:` URIs, `..` escapes — pass through
+    /// unchanged, and `var(--token)` / `prop(...)` values keep their runtime
+    /// resolution order.
+    pub fn absolutize_urls(&mut self, asset_base: &std::path::Path) {
+        for rule in &mut self.rules {
+            for declaration in &mut rule.declarations {
+                match &declaration.value {
+                    StyleValue::Var(_) | StyleValue::Prop(_) => continue,
+                    StyleValue::Literal(value) => {
+                        declaration.value =
+                            StyleValue::Literal(absolutize_declaration_urls(value, asset_base));
+                    }
+                }
+            }
+        }
+        for keyframes in &mut self.keyframes {
+            for stop in &mut keyframes.stops {
+                for declaration in &mut stop.declarations {
+                    match &declaration.value {
+                        StyleValue::Var(_) | StyleValue::Prop(_) => continue,
+                        StyleValue::Literal(value) => {
+                            declaration.value =
+                                StyleValue::Literal(absolutize_declaration_urls(value, asset_base));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn absolutize_declaration_urls(value: &str, asset_base: &std::path::Path) -> String {
+    let mut rewritten = value.to_string();
+    let mut search = 0;
+    while let Some(open) = rewritten[search..].find("url(") {
+        let open = open + search;
+        let content_start = open + "url(".len();
+        let Some(close_rel) = rewritten[content_start..].find(')') else {
+            break;
+        };
+        let close = content_start + close_rel;
+        let Some(resolved) =
+            mesh_core_files::resolve_asset_url(asset_base, &rewritten[content_start..close])
+        else {
+            search = close;
+            continue;
+        };
+        let resolved = resolved.to_string_lossy().into_owned();
+        rewritten.replace_range(content_start..close, &resolved);
+        search = content_start + resolved.len();
+    }
+    rewritten
+}
+
 pub fn is_transition_safe_keyframe_property(property: &str) -> bool {
     mesh_core_theme::css::is_transition_safe_keyframe_property(property)
 }

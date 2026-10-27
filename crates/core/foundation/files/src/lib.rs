@@ -153,6 +153,41 @@ impl ContainedFile {
     }
 }
 
+/// A CSS `url(...)` asset path resolved against a declaring stylesheet's
+/// directory, following GTK's model: styles and themes ship images next to
+/// the stylesheet that names them.
+///
+/// `asset_base` is the stylesheet's containing directory (typically the
+/// module root joined with the stylesheet's parent directory). Returns the
+/// absolutized path when `url_path` is a relative path of normal components
+/// (`url(assets/panel.png)`, `url("bg.webp")`). Returns `None` — leaving the
+/// value untouched — for absolute paths, URL schemes (`http://`, `data:`), or
+/// paths that escape `asset_base` with `..`, so the painter's existing
+/// missing-asset diagnostics stay authoritative for them.
+pub fn resolve_asset_url(asset_base: &Path, url_path: &str) -> Option<PathBuf> {
+    let trimmed = url_path.trim();
+    let inner = trimmed
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+        .or_else(|| {
+            trimmed
+                .strip_prefix('\'')
+                .and_then(|rest| rest.strip_suffix('\''))
+        })
+        .map(str::trim)
+        .unwrap_or(trimmed);
+    if inner.is_empty()
+        || inner.contains(':')
+        || Path::new(inner)
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_)))
+    {
+        return None;
+    }
+    let joined = asset_base.join(inner);
+    joined.is_absolute().then_some(joined)
+}
+
 #[cfg(unix)]
 fn open_at(
     parent: i32,
@@ -212,5 +247,28 @@ mod tests {
                 .read_utf8_bounded(5),
             Err(ContainedFileError::NotRegularFile { .. })
         ));
+    }
+
+    #[test]
+    fn asset_urls_resolve_against_the_declaring_stylesheet_directory() {
+        let base = Path::new("/modules/theme/pack");
+        assert_eq!(
+            resolve_asset_url(base, "assets/panel.png"),
+            Some(PathBuf::from("/modules/theme/pack/assets/panel.png"))
+        );
+        assert_eq!(
+            resolve_asset_url(base, " \"bg.webp\" "),
+            Some(PathBuf::from("/modules/theme/pack/bg.webp"))
+        );
+        assert_eq!(
+            resolve_asset_url(base, "'a b.png'"),
+            Some(PathBuf::from("/modules/theme/pack/a b.png"))
+        );
+        assert_eq!(resolve_asset_url(base, "/etc/passwd"), None);
+        assert_eq!(resolve_asset_url(base, "../escape.png"), None);
+        assert_eq!(resolve_asset_url(base, "https://example.com/x.png"), None);
+        assert_eq!(resolve_asset_url(base, "data:image/png;base64,AAA"), None);
+        assert_eq!(resolve_asset_url(base, ""), None);
+        assert_eq!(resolve_asset_url(base, ".."), None);
     }
 }

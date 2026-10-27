@@ -22,6 +22,7 @@ use lightningcss::{
     traits::ToCss as LightningToCss,
 };
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::{cell::RefCell, collections::VecDeque, sync::Arc};
 
 /// The selector subset MESH can match against a single element node.
@@ -146,6 +147,84 @@ pub enum StyleValue {
     /// A component-prop reference: `prop(name)`. Resolved against the per-instance
     /// prop value map (published under `prop_variable_key(name)`).
     Prop(String),
+}
+
+/// Rewrite every `url(...)` value in a parsed stylesheet so relative asset
+/// paths are absolute, resolved against the declaring stylesheet's directory.
+/// GTK's model: themes and modules ship images next to the CSS that names
+/// them. Values that are not resolvable relative asset paths — absolute paths,
+/// URL schemes, `data:` URIs, `..` escapes — pass through unchanged so the
+/// painter's missing-asset diagnostics stay authoritative.
+///
+/// Only literal declarations are rewritten; `var(--token)` and `prop(...)`
+/// references keep their resolution order (the variable's declaring
+/// stylesheet wins, and a variable may be set per surface).
+pub fn absolutize_stylesheet_urls(
+    stylesheet: &Arc<Stylesheet>,
+    asset_base: &Path,
+) -> Arc<Stylesheet> {
+    let mut owned = (**stylesheet).clone();
+    absolutize_rule_urls(&mut owned.rules, asset_base);
+    Arc::new(owned)
+}
+
+fn absolutize_rule_urls(rules: &mut [Rule], asset_base: &Path) {
+    for rule in rules.iter_mut() {
+        match rule {
+            Rule::Style(style) => {
+                absolutize_declarations(&mut style.declarations, asset_base);
+            }
+            Rule::Container(container) => {
+                absolutize_rule_urls(&mut container.rules, asset_base);
+            }
+            Rule::Keyframes(keyframes) => {
+                for stop in keyframes.stops.iter_mut() {
+                    absolutize_declarations(&mut stop.declarations, asset_base);
+                }
+            }
+            Rule::Custom(_) => {}
+        }
+    }
+}
+
+fn absolutize_declarations(declarations: &mut [Declaration], asset_base: &Path) {
+    for declaration in declarations.iter_mut() {
+        if matches!(
+            declaration.classified,
+            StyleValue::Var(_) | StyleValue::Prop(_)
+        ) {
+            continue;
+        }
+        for value in [&mut declaration.value, &mut declaration.raw_value] {
+            absolutize_url_value(value, asset_base);
+        }
+    }
+}
+
+/// Rewrite `url(<path>)` occurrences inside one declaration value string.
+/// Shell states and multiple backgrounds mean one declaration can name
+/// several images.
+fn absolutize_url_value(value: &mut String, asset_base: &Path) {
+    let mut rewritten = value.clone();
+    let mut search = 0;
+    while let Some(open) = rewritten[search..].find("url(") {
+        let open = open + search;
+        let content_start = open + "url(".len();
+        let Some(close_rel) = rewritten[content_start..].find(')') else {
+            break;
+        };
+        let close = content_start + close_rel;
+        let Some(resolved) =
+            mesh_core_files::resolve_asset_url(asset_base, &rewritten[content_start..close])
+        else {
+            search = close;
+            continue;
+        };
+        let resolved = resolved.to_string_lossy().into_owned();
+        rewritten.replace_range(content_start..close, &resolved);
+        search = content_start + resolved.len();
+    }
+    *value = rewritten;
 }
 
 /// Classify one lowered CSS value while preserving the shared theme variable

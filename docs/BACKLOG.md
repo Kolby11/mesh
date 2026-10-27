@@ -81,9 +81,6 @@ October log.
 
 ## Theme materials (found 2026-10-27)
 
-- [ ] **Asset-relative `url()`:** `background-image: url(...)` passes its relative path straight to the painter, so it
-      resolves against the shell's working directory; resolve it against the declaring stylesheet's theme pack or module
-      (as GTK does) so themes and modules can ship images.
 - [ ] **Multi-stop, positioned and radial gradients:** `linear-gradient` accepts only evenly spaced stops top to bottom,
       though `MultiStopLinearGradient` already carries intermediate colours. Parse stop positions, angles and
       `radial-gradient`; skeuomorphic themes (the Frutiger Aero reflection band) need them.

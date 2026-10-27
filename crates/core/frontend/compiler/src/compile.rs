@@ -375,12 +375,20 @@ fn parse_component_file(path: &Path) -> Result<ComponentFile, CompileFrontendErr
     let component = match parsed_component_cache::get(&source) {
         Some(component) => component,
         None => {
-            let component =
+            let mut component =
                 parse_component(&source).map_err(|source| CompileFrontendError::ParseSource {
                     path: path.to_path_buf(),
                     span: source.span(),
                     source,
                 })?;
+            // Relative `url(...)` assets resolve against the component
+            // file's directory, like GTK: a module ships its images next to
+            // the `.mesh` source that names them. Local imports go through
+            // this same function with their own directory.
+            if let Some(style) = component.style.as_mut() {
+                let asset_base = path.parent().unwrap_or(Path::new("/")).to_path_buf();
+                style.absolutize_urls(&asset_base);
+            }
             parsed_component_cache::insert(source, &component);
             component
         }
@@ -1854,6 +1862,159 @@ local Child = require("./child.mesh")
                 "symlinked entrypoints must be rejected"
             );
         }
+    }
+
+    #[test]
+    fn component_style_urls_resolve_against_the_component_file_directory() {
+        let workspace = tempfile::tempdir().unwrap();
+        let src = workspace.path().join("src");
+        std::fs::create_dir_all(src.join("assets")).unwrap();
+        let main = src.join("main.mesh");
+        let child = src.join("child.mesh");
+        std::fs::write(
+            &main,
+            concat!(
+                "<template><Child /></template>",
+                "<script lang=\"luau\">local Child = require(\"./child.mesh\")</script>",
+                "<style>",
+                "box { background-image: url(assets/panel.png); }",
+                "card { background: #fff url(\"bg.webp\") no-repeat; }",
+                "data { background-image: url(data:image/png;base64,AAA); }",
+                "esc { background-image: url(../outside.png); }",
+                "token { background-image: var(--panel-image); }",
+                "@container (min-width: 100px) { inner { background-image: url(assets/key.png); } }",
+                "</style>",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &child,
+            concat!(
+                "<template><box /></template>",
+                "<style>box { background-image: url(child.png); }</style>",
+            ),
+        )
+        .unwrap();
+
+        let manifest = mesh_core_module::Manifest {
+            package: mesh_core_module::ModuleSection {
+                id: "test".into(),
+                version: "0.1.0".into(),
+                module_type: mesh_core_module::ModuleType::Widget,
+                api_version: "0.1.0".into(),
+                name: None,
+                license: None,
+                description: None,
+                authors: vec![],
+                repository: None,
+            },
+            compatibility: Default::default(),
+            dependencies: Default::default(),
+            capabilities: Default::default(),
+            entrypoints: mesh_core_module::manifest::EntrypointsSection {
+                main: Some("src/main.mesh".into()),
+            },
+            accessibility: None,
+            keybinds: Default::default(),
+            i18n: None,
+            theme: None,
+            service: None,
+            provides: vec![],
+            interface: None,
+            interfaces: Vec::new(),
+            extensions: vec![],
+            exports: Default::default(),
+            hosted_extension_points: Default::default(),
+            extension_point_contributions: Default::default(),
+            surface_layout: None,
+            assets: None,
+            icons: None,
+            icon_pack: None,
+            icon_requirements: Default::default(),
+            translations: Default::default(),
+        };
+        let compiled = compile_frontend_entrypoint(&manifest, workspace.path(), "src/main.mesh")
+            .expect("module compiles");
+        let rule_value = |component: &ComponentFile, selector: &str| -> Option<String> {
+            component
+                .style
+                .as_ref()?
+                .rules
+                .iter()
+                .find(|rule| matches!(&rule.selector, mesh_core_theme::css::Selector::Tag(tag) if tag == selector))
+                .and_then(|rule| {
+                    rule.declarations
+                        .iter()
+                        .find(|declaration| declaration.property == "background-image")
+                        .or_else(|| {
+                            rule.declarations
+                                .iter()
+                                .find(|declaration| declaration.property == "background")
+                        })
+                })
+                .and_then(|declaration| match &declaration.value {
+                    mesh_core_theme::css::StyleValue::Literal(value) => Some(value.clone()),
+                    _ => None,
+                })
+        };
+        assert_eq!(
+            rule_value(&compiled.component, "box").as_deref(),
+            Some(format!("url({})", src.join("assets/panel.png").display()).as_str()),
+            "root style url should resolve against the component file directory"
+        );
+        assert!(
+            rule_value(&compiled.component, "card")
+                .unwrap()
+                .contains(&format!("url({})", src.join("bg.webp").display())),
+            "quoted url should resolve"
+        );
+        assert_eq!(
+            rule_value(&compiled.component, "data").as_deref(),
+            Some("url(\"data:image/png;base64,AAA\")"),
+            "data URIs pass through untouched"
+        );
+        assert_eq!(
+            rule_value(&compiled.component, "esc").as_deref(),
+            Some("url(\"../outside.png\")"),
+            "escaping paths pass through untouched"
+        );
+        assert_eq!(
+            rule_value(&compiled.component, "token"),
+            None,
+            "var() references keep runtime resolution"
+        );
+        assert!(
+            compiled
+                .component
+                .style
+                .as_ref()
+                .unwrap()
+                .rules
+                .iter()
+                .any(|rule| {
+                    matches!(&rule.selector, mesh_core_theme::css::Selector::Tag(tag) if tag == "inner")
+                        && rule
+                            .declarations
+                            .iter()
+                            .any(|declaration| matches!(
+                                &declaration.value,
+                                mesh_core_theme::css::StyleValue::Literal(value)
+                                    if value == &format!("url({})", src.join("assets/key.png").display())
+                            ))
+                }),
+            "urls inside container rules resolve too"
+        );
+
+        let child_component = compiled
+            .local_components
+            .values()
+            .next()
+            .expect("child component");
+        assert_eq!(
+            rule_value(child_component, "box").as_deref(),
+            Some(format!("url({})", src.join("child.png").display()).as_str()),
+            "local import urls resolve against the imported file's own directory"
+        );
     }
 
     #[test]

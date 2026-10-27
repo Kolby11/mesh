@@ -7,15 +7,13 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
-- Live widget follow-ups are complete: host-published props invalidate cached
-  template values; card/spectrum dimensions stay synchronized, seeking holds its
-  preview through stale samples, and component keyframes run with real durations.
-- Full shell suite (two threads): 1,050 passed, 37 ignored. Scripting: 383 passed,
-  7 ignored. Release binary rebuilt; GPU resized-card visuals checked in an isolated
-  preview, which has been stopped. Live music-control input remains unchecked.
+- Nothing in flight. Asset-relative `url()` resolution shipped and closed
+  (2026-10-27 log entry); the seek-then-track-switch slider report is closed.
 
 ## Next
 
+- Theme materials remainder: multi-stop/positioned/radial gradients, then
+  backdrop grain (Aero depends on both).
 - Continue trusted live glass source work and the in-surface blur engine.
 
 ## Blocked / known baselines
