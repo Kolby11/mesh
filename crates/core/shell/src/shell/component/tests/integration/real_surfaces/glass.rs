@@ -1228,6 +1228,108 @@ fn liquid_glass_desktop_cards_resize_live_independently_and_reset() {
     assert!(first_node_with_ref(component.last_tree.as_ref().unwrap(), "resizeHandle").is_none());
 }
 
+/// The Aero reflection-band idiom: a positioned mid stop through a theme
+/// token must resolve, lower to the new gradient paint, and raster as a
+/// crisp band rather than an evenly spaced blend.
+#[test]
+fn desktop_theme_positioned_gradient_paints_a_reflection_band() {
+    let pack = mesh_core_theme::load_theme_from_source(
+        &ThemeSourceHandle::new(root().join("modules/themes/violet-glass"), "theme.css").unwrap(),
+        "violet-glass",
+        "Violet Glass",
+    )
+    .unwrap();
+    let mut overrides = HashMap::new();
+    overrides.insert(
+        "glass.surface.flare".to_string(),
+        mesh_core_theme::TokenValue::String(
+            "linear-gradient(to bottom, #ffffff00, #ffffff00 40%, #ffffffff 40%, #ffffffff 45%, #ffffff00 45%)"
+                .to_string(),
+        ),
+    );
+    let mut layers = vec![ThemeModuleLayer {
+        module_id: "@mesh/glass-material".into(),
+        module: ThemeModule {
+            tokens: overrides,
+            ..Default::default()
+        },
+        families: Vec::new(),
+    }];
+    // The dock's own flare token beats the family share: compose gives the
+    // module layer the last word before the pack merges its @module block.
+    let mut dock_tokens = HashMap::new();
+    dock_tokens.insert(
+        "glass.surface.flare".to_string(),
+        mesh_core_theme::TokenValue::String(
+            "linear-gradient(to bottom, #ffffff00, #ffffff00 40%, #ffffffff 40%, #ffffffff 45%, #ffffff00 45%)"
+                .to_string(),
+        ),
+    );
+    layers.push(ThemeModuleLayer {
+        module_id: "@mesh/glass-dock".into(),
+        module: ThemeModule {
+            tokens: dock_tokens,
+            ..Default::default()
+        },
+        families: vec!["@mesh/glass-material".into()],
+    });
+    for module in ["glass-bar"] {
+        layers.push(ThemeModuleLayer {
+            module_id: format!("@mesh/{module}"),
+            module: ThemeModule::default(),
+            families: vec!["@mesh/glass-material".into()],
+        });
+    }
+    let themed = Theme::compose_layers(
+        &default_theme(),
+        &pack,
+        "@mesh/violet-glass",
+        "dark",
+        layers,
+        &HashMap::new(),
+    )
+    .unwrap();
+    let mut component = GlassCatalog::new().mount_instance(
+        "glass-dock",
+        &format!("@mesh/glass-dock#gradient-{}", std::process::id()),
+    );
+    component.motion_policy.reduced_motion = true;
+    let mut pixels = PixelBuffer::new(1920, 180);
+    component
+        .paint_raster(
+            &themed,
+            SurfaceExtent::unpadded(1920, 180),
+            &mut pixels,
+            1.0,
+        )
+        .unwrap();
+    let tree = component.last_tree.as_ref().unwrap();
+    let flare_node = first_node_by_class(tree, "flare").expect("dock flare");
+    assert!(
+        matches!(
+            &flare_node.computed_style.background_paint,
+            mesh_core_elements::style::BackgroundPaint::Gradient(_)
+        ),
+        "{:?}",
+        flare_node.computed_style.background_paint
+    );
+    let flare = flare_node.layout;
+    // The flare's 30px scoop removes the top-left quarter disc, so probe the
+    // visible crescent one pixel inside the right edge.
+    let x = (flare.x + flare.width - 1.0) as u32;
+    let above_band = (flare.y + 10.0) as u32;
+    let band_mid = (flare.y + 12.5) as u32;
+    let below_band = (flare.y + 23.0) as u32;
+    let mid = pixels.get_pixel(x, band_mid.min(179));
+    assert!(mid.a > 200, "band must be near-opaque: {mid:?}");
+    let above = pixels.get_pixel(x, above_band.min(179));
+    let below = pixels.get_pixel(x, below_band.min(179));
+    assert!(
+        mid.a > above.a + 100 && mid.a > below.a + 100,
+        "the band is positioned, not evenly spaced: {mid:?} vs {above:?}/{below:?}"
+    );
+}
+
 #[test]
 fn desktop_widgets_export_real_blur_and_do_not_draw_scrollbars() {
     let mut component = GlassCatalog::new().mount_instance(

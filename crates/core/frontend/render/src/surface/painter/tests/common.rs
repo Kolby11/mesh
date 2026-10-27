@@ -173,6 +173,7 @@ pub(super) fn painter_command_classes(commands: &[PainterCommand]) -> Vec<&'stat
             PainterCommand::DrawPath { .. } => "draw_path",
             PainterCommand::DrawImage { .. } => "draw_image",
             PainterCommand::DrawLinearGradient { .. } => "draw_linear_gradient",
+            PainterCommand::DrawGradient { .. } => "draw_gradient",
             PainterCommand::DrawShadow { .. } => "draw_shadow",
             PainterCommand::ApplyFilter { .. } => "apply_filter",
             PainterCommand::DrawBackdropRefraction { .. } => "draw_backdrop_refraction",

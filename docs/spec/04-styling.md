@@ -748,7 +748,8 @@ shape.
 ## 12. Background gradients and box shadows
 
 **Status: shipped.** `background` accepts a solid theme-compatible CSS color,
-`none`, a supported relative `url(...)`, or `linear-gradient(...)`.
+`none`, a supported relative `url(...)`, `linear-gradient(...)` or
+`radial-gradient(...)`.
 The shorthand resets both the background color and image/gradient; use
 `background-color` or `background-image` to change only that part.
 
@@ -760,12 +761,24 @@ GTK's model. Absolute paths, URL schemes, `data:` URIs, and paths escaping
 the declaring directory pass through untouched, and `var(--token)` /
 `prop(...)` references keep their runtime resolution order.
 
-Linear gradients run top to bottom (optionally written `to bottom`) and accept
-at least two evenly spaced color stops. Every stop uses the same CSS color parser
-as theme colors, including hex, named colors, transparent, and supported functional
-colors such as `rgb()`, `rgba()`, `hsl()` and `hsla()`. Functional-color commas do
-not separate stops. Explicit stop positions, other directions/angles, radial
-and repeating gradients, and multiple background layers are outside this profile.
+Gradients take at least two color stops. Every stop uses the same CSS color
+parser as theme colors, including hex, named colors, transparent, and
+supported functional colors such as `rgb()`, `rgba()`, `hsl()` and `hsla()`;
+functional-color commas do not separate stops. Each stop may carry one
+percentage position — the CSS defaults apply (first 0%, last 100%, unpinned
+middles evenly between their pinned neighbours) and a position at or below
+its predecessor pins equal to it, producing a hard band.
+
+Linear gradients default to `to bottom`; an explicit direction is one of
+`to top|right|bottom|left` and their two-keyword corners, or an angle in
+`deg` or `turn` (0deg points up, increasing clockwise). The plain
+`to bottom` form without authored positions keeps its legacy evenly spaced
+lowering. Radial gradients accept `[circle|ellipse]` and one extent keyword
+(`closest-side`, `closest-corner`, `farthest-side`, `farthest-corner` — the
+default), and an optional `at` position from `center`, the edge keywords,
+or percentage coordinates. Still outside this profile: repeating gradients,
+`conic-gradient`, length stop positions, explicit radial radii, and multiple
+background layers.
 
 `box-shadow` accepts comma-separated shadows, with the first painted on top.
 Each shadow has two offsets, optional blur and spread lengths (pixels or unitless

@@ -176,6 +176,31 @@ pub(super) fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher)
             hash_color(gradient.from, hasher);
             hash_color(gradient.to, hasher);
         }
+        BackgroundPaint::Gradient(gradient) => {
+            4_u8.hash(hasher);
+            match gradient.geometry {
+                GradientGeometry::Linear { angle_degrees } => {
+                    0_u8.hash(hasher);
+                    angle_degrees.to_bits().hash(hasher);
+                }
+                GradientGeometry::Radial {
+                    shape,
+                    extent,
+                    center,
+                } => {
+                    1_u8.hash(hasher);
+                    std::mem::discriminant(&shape).hash(hasher);
+                    std::mem::discriminant(&extent).hash(hasher);
+                    center.0.to_bits().hash(hasher);
+                    center.1.to_bits().hash(hasher);
+                }
+            }
+            gradient.stops.len().hash(hasher);
+            for stop in &gradient.stops {
+                hash_color(stop.color, hasher);
+                stop.position.to_bits().hash(hasher);
+            }
+        }
     }
     hash_color(style.border_color, hasher);
     hash_corners(style.border_radius, hasher);

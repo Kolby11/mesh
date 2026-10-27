@@ -3,7 +3,9 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use mesh_core_elements::WidgetNode;
-use mesh_core_elements::style::{BackgroundPaint, ComputedStyle, Visibility};
+use mesh_core_elements::style::{
+    BackgroundPaint, ComputedStyle, GradientGeometry, Visibility,
+};
 use mesh_core_resources::resource_revision;
 
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -267,6 +269,31 @@ fn hash_background_paint(paint: &BackgroundPaint, hasher: &mut impl Hasher) {
             2_u8.hash(hasher);
             hash_color(gradient.from, hasher);
             hash_color(gradient.to, hasher);
+        }
+        BackgroundPaint::Gradient(gradient) => {
+            4_u8.hash(hasher);
+            match gradient.geometry {
+                GradientGeometry::Linear { angle_degrees } => {
+                    0_u8.hash(hasher);
+                    angle_degrees.to_bits().hash(hasher);
+                }
+                GradientGeometry::Radial {
+                    shape,
+                    extent,
+                    center,
+                } => {
+                    1_u8.hash(hasher);
+                    std::mem::discriminant(&shape).hash(hasher);
+                    std::mem::discriminant(&extent).hash(hasher);
+                    center.0.to_bits().hash(hasher);
+                    center.1.to_bits().hash(hasher);
+                }
+            }
+            gradient.stops.len().hash(hasher);
+            for stop in &gradient.stops {
+                hash_color(stop.color, hasher);
+                stop.position.to_bits().hash(hasher);
+            }
         }
     }
 }

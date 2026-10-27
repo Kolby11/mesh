@@ -4,7 +4,7 @@ use std::path::Path;
 
 #[cfg(test)]
 use mesh_core_elements::BoxShadow;
-use mesh_core_elements::style::{BackgroundPaint, Color};
+use mesh_core_elements::style::{BackgroundPaint, Color, GradientGeometry};
 use mesh_core_elements::{AffineTransform, LayoutRect, WidgetNode};
 
 use crate::FractionalScale;
@@ -319,6 +319,34 @@ pub(super) fn hash_background_paint(paint: &BackgroundPaint, hasher: &mut Displa
             gradient.to.g.hash(hasher);
             gradient.to.b.hash(hasher);
             gradient.to.a.hash(hasher);
+        }
+        BackgroundPaint::Gradient(gradient) => {
+            4_u8.hash(hasher);
+            match gradient.geometry {
+                GradientGeometry::Linear { angle_degrees } => {
+                    0_u8.hash(hasher);
+                    angle_degrees.to_bits().hash(hasher);
+                }
+                GradientGeometry::Radial {
+                    shape,
+                    extent,
+                    center,
+                } => {
+                    1_u8.hash(hasher);
+                    std::mem::discriminant(&shape).hash(hasher);
+                    std::mem::discriminant(&extent).hash(hasher);
+                    center.0.to_bits().hash(hasher);
+                    center.1.to_bits().hash(hasher);
+                }
+            }
+            gradient.stops.len().hash(hasher);
+            for stop in &gradient.stops {
+                stop.color.r.hash(hasher);
+                stop.color.g.hash(hasher);
+                stop.color.b.hash(hasher);
+                stop.color.a.hash(hasher);
+                stop.position.to_bits().hash(hasher);
+            }
         }
     }
 }

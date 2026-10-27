@@ -332,6 +332,296 @@ fn skia_effect_linear_gradient_reuses_shader_for_moving_same_size_rects() {
     );
 }
 
+fn style_gradient(
+    geometry: mesh_core_elements::style::GradientGeometry,
+    stops: &[(Color, f32)],
+) -> mesh_core_elements::style::StyleGradient {
+    mesh_core_elements::style::StyleGradient {
+        geometry,
+        stops: stops
+            .iter()
+            .map(|(color, position)| mesh_core_elements::style::GradientStop {
+                color: *color,
+                position: *position,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn skia_effect_gradient_horizontal_angle_ramps_left_to_right() {
+    let mut buffer = PixelBuffer::new(12, 8);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawGradient {
+            gradient: style_gradient(
+                mesh_core_elements::style::GradientGeometry::Linear { angle_degrees: 90.0 },
+                &[
+                    (Color::from_hex("#ff0000").unwrap(), 0.0),
+                    (Color::from_hex("#0000ff").unwrap(), 1.0),
+                ],
+            ),
+            rect: ClipRect {
+                x: 0,
+                y: 0,
+                width: 12,
+                height: 8,
+            },
+            radii: mesh_core_elements::style::Corners::zero(),
+            clip: full_clip(12, 8),
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let left = pixel(&buffer, 1, 4);
+    let right = pixel(&buffer, 10, 4);
+    assert!(left.r > left.b, "{left:?}");
+    assert!(right.b > right.r, "{right:?}");
+    assert_eq!(pixel(&buffer, 1, 1), pixel(&buffer, 1, 7));
+}
+
+#[test]
+fn skia_effect_gradient_positioned_stops_hold_bands() {
+    let mut buffer = PixelBuffer::new(10, 20);
+    let mut diagnostics = Vec::new();
+    let white = Color::from_hex("#ffffff").unwrap();
+    let red = Color::from_hex("#ff0000").unwrap();
+    let blue = Color::from_hex("#0000ff").unwrap();
+
+    // Vertical with a hard band: red through 40%, blue from 40%.
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawGradient {
+            gradient: style_gradient(
+                mesh_core_elements::style::GradientGeometry::Linear { angle_degrees: 180.0 },
+                &[(red, 0.0), (red, 0.4), (blue, 0.4), (blue, 1.0)],
+            ),
+            rect: ClipRect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 20,
+            },
+            radii: mesh_core_elements::style::Corners::zero(),
+            clip: full_clip(10, 20),
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(pixel(&buffer, 5, 2), red);
+    assert_eq!(pixel(&buffer, 5, 7), red);
+    assert_eq!(pixel(&buffer, 5, 13), blue);
+    assert_eq!(pixel(&buffer, 5, 18), blue);
+
+    // A mid positioned stop changes the mid colour, not the ends.
+    let mut second = PixelBuffer::new(10, 20);
+    let mut second_diagnostics = Vec::new();
+    SkiaPaintBackend.execute_commands(
+        &mut second,
+        &[PainterCommand::DrawGradient {
+            gradient: style_gradient(
+                mesh_core_elements::style::GradientGeometry::Linear { angle_degrees: 180.0 },
+                &[(red, 0.0), (white, 0.5), (blue, 1.0)],
+            ),
+            rect: ClipRect {
+                x: 0,
+                y: 0,
+                width: 10,
+                height: 20,
+            },
+            radii: mesh_core_elements::style::Corners::zero(),
+            clip: full_clip(10, 20),
+        }],
+        &mut second_diagnostics,
+    );
+    assert!(second_diagnostics.is_empty(), "{second_diagnostics:?}");
+    let near_top = pixel(&second, 5, 0);
+    assert!(near_top.r == 255 && near_top.g < 25, "{near_top:?}");
+    let mid = pixel(&second, 5, 10);
+    assert!(
+        mid.r > 235 && mid.g > 235 && mid.b == 255,
+        "{mid:?} should be near-white at the 50% stop"
+    );
+    let near_bottom = pixel(&second, 5, 19);
+    assert!(near_bottom.b == 255 && near_bottom.r < 25, "{near_bottom:?}");
+}
+
+#[test]
+fn skia_effect_gradient_radial_paints_center_and_edge_colors() {
+    let mut buffer = PixelBuffer::new(20, 20);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawGradient {
+            gradient: style_gradient(
+                mesh_core_elements::style::GradientGeometry::Radial {
+                    shape: mesh_core_elements::style::RadialShape::Circle,
+                    extent: mesh_core_elements::style::RadialExtent::FarthestCorner,
+                    center: (0.5, 0.5),
+                },
+                &[
+                    (Color::from_hex("#ffffff").unwrap(), 0.0),
+                    (Color::from_hex("#000000").unwrap(), 1.0),
+                ],
+            ),
+            rect: ClipRect {
+                x: 0,
+                y: 0,
+                width: 20,
+                height: 20,
+            },
+            radii: mesh_core_elements::style::Corners::zero(),
+            clip: full_clip(20, 20),
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let center = pixel(&buffer, 10, 10);
+    let corner = pixel(&buffer, 1, 1);
+    let edge_mid = pixel(&buffer, 19, 10);
+    assert!(center.r > 200, "{center:?}");
+    assert!(corner.r < 60, "{corner:?}");
+    assert!(edge_mid.r > corner.r && edge_mid.r < center.r, "{edge_mid:?}");
+    assert_eq!(pixel(&buffer, 10, 19), edge_mid);
+}
+
+#[test]
+fn skia_effect_gradient_ellipse_radial_scales_per_axis() {
+    let mut buffer = PixelBuffer::new(24, 12);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawGradient {
+            gradient: style_gradient(
+                mesh_core_elements::style::GradientGeometry::Radial {
+                    shape: mesh_core_elements::style::RadialShape::Ellipse,
+                    extent: mesh_core_elements::style::RadialExtent::FarthestSide,
+                    center: (0.5, 0.5),
+                },
+                &[
+                    (Color::from_hex("#ffffff").unwrap(), 0.0),
+                    (Color::from_hex("#000000").unwrap(), 1.0),
+                ],
+            ),
+            rect: ClipRect {
+                x: 0,
+                y: 0,
+                width: 24,
+                height: 12,
+            },
+            radii: mesh_core_elements::style::Corners::zero(),
+            clip: full_clip(24, 12),
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let center = pixel(&buffer, 12, 6);
+    let side = pixel(&buffer, 23, 6);
+    let top = pixel(&buffer, 12, 11);
+    assert!(center.r > 200, "{center:?}");
+    assert!(side.r < 40, "{side:?}");
+    assert!(top.r < 40, "{top:?}");
+    // A quarter out along the wide axis is dimmer than a quarter out along
+    // the short axis: the ellipse is not a circle.
+    let quarter_x = pixel(&buffer, 18, 6);
+    let quarter_y = pixel(&buffer, 12, 3);
+    assert!(quarter_x.r < quarter_y.r, "{quarter_x:?} vs {quarter_y:?}");
+}
+
+#[test]
+fn skia_effect_gradient_with_rounded_radii_paints_clipped_shape() {
+    let mut buffer = PixelBuffer::new(20, 16);
+    let mut diagnostics = Vec::new();
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[PainterCommand::DrawGradient {
+            gradient: style_gradient(
+                mesh_core_elements::style::GradientGeometry::Linear { angle_degrees: 45.0 },
+                &[
+                    (Color::from_hex("#ff0000").unwrap(), 0.0),
+                    (Color::from_hex("#0000ff").unwrap(), 1.0),
+                ],
+            ),
+            rect: ClipRect {
+                x: 0,
+                y: 0,
+                width: 20,
+                height: 16,
+            },
+            radii: mesh_core_elements::style::Corners::all(5.0),
+            clip: full_clip(20, 16),
+        }],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(pixel(&buffer, 0, 0), Color::TRANSPARENT);
+    assert!(pixel(&buffer, 10, 8).a > 0);
+    assert!(pixel(&buffer, 17, 13).a > 0);
+}
+
+#[test]
+fn skia_effect_gradient_reuses_shader_for_moving_same_size_rects() {
+    super::super::super::backend::reset_gradient_shader_cache_for_tests();
+    let mut buffer = PixelBuffer::new(24, 20);
+    let mut diagnostics = Vec::new();
+    let gradient = style_gradient(
+        mesh_core_elements::style::GradientGeometry::Linear { angle_degrees: 90.0 },
+        &[
+            (Color::from_hex("#ff0000").unwrap(), 0.0),
+            (Color::from_hex("#0000ff").unwrap(), 1.0),
+        ],
+    );
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[
+            PainterCommand::DrawGradient {
+                gradient: gradient.clone(),
+                rect: ClipRect {
+                    x: 0,
+                    y: 0,
+                    width: 8,
+                    height: 12,
+                },
+                radii: mesh_core_elements::style::Corners::zero(),
+                clip: full_clip(24, 20),
+            },
+            PainterCommand::DrawGradient {
+                gradient: gradient.clone(),
+                rect: ClipRect {
+                    x: 12,
+                    y: 4,
+                    width: 8,
+                    height: 12,
+                },
+                radii: mesh_core_elements::style::Corners::zero(),
+                clip: full_clip(24, 20),
+            },
+        ],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let moved_left = pixel(&buffer, 13, 10);
+    let moved_right = pixel(&buffer, 19, 10);
+    assert!(moved_left.r > moved_left.b, "{moved_left:?}");
+    assert!(moved_right.b > moved_right.r, "{moved_right:?}");
+    assert_eq!(
+        super::super::super::backend::gradient_shader_creations_for_tests(),
+        1
+    );
+}
+
 #[test]
 fn skia_effect_image_draws_source_pixels() {
     let (_fixture, path) = write_effect_test_image("phase55-image-source.png");

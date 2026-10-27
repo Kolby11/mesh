@@ -81,9 +81,6 @@ October log.
 
 ## Theme materials (found 2026-10-27)
 
-- [ ] **Multi-stop, positioned and radial gradients:** `linear-gradient` accepts only evenly spaced stops top to bottom,
-      though `MultiStopLinearGradient` already carries intermediate colours. Parse stop positions, angles and
-      `radial-gradient`; skeuomorphic themes (the Frutiger Aero reflection band) need them.
 - [ ] **Backdrop grain:** add a procedural noise term to the glass backdrop shader (e.g. `grain(<opacity>)` in
       `backdrop-filter`, set per `--glass-backdrop-*` tier) to break gradient banding and read as frosted, as WinUI
       Acrylic's built-in noise does. No image texture layers.

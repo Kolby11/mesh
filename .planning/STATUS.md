@@ -7,13 +7,11 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
-- Nothing in flight. Asset-relative `url()` resolution shipped and closed
-  (2026-10-27 log entry); the seek-then-track-switch slider report is closed.
+- Nothing in flight.
 
 ## Next
 
-- Theme materials remainder: multi-stop/positioned/radial gradients, then
-  backdrop grain (Aero depends on both).
+- Theme materials remainder: backdrop grain.
 - Continue trusted live glass source work and the in-surface blur engine.
 
 ## Blocked / known baselines

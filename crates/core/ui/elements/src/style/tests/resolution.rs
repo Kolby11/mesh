@@ -195,7 +195,7 @@ fn style_background_image_unsupported_value_records_diagnostic() {
         selector: Selector::Class("panel".to_string()),
         declarations: vec![mesh_core_component::style::Declaration {
             property: "background-image".to_string(),
-            value: StyleValue::Literal("radial-gradient(#000, #fff)".to_string()),
+            value: StyleValue::Literal("repeating-linear-gradient(#000, #fff)".to_string()),
         }],
         container_query: None,
     }];
@@ -1558,5 +1558,162 @@ fn css_profile_paints_accept_theme_color_syntax() {
         "0 2px #ééé",
     ] {
         assert!(parse_box_shadows(invalid).is_empty(), "{invalid}");
+    }
+}
+
+#[test]
+fn positioned_angled_and_radial_gradients_lower_to_the_gradient_paint() {
+    use crate::style::parse::parse_background_image;
+    use crate::style::{GradientGeometry, GradientStop, StyleGradient};
+
+    let stops = |entries: &[(Color, f32)]| {
+        entries
+            .iter()
+            .map(|(color, position)| GradientStop {
+                color: *color,
+                position: *position,
+            })
+            .collect::<Vec<_>>()
+    };
+    let red = Color::from_css("red").unwrap();
+    let blue = Color::from_css("blue").unwrap();
+    let white = Color::from_css("white").unwrap();
+
+    // Angles and `to` directions leave the legacy vertical path.
+    for (value, angle) in [
+        ("linear-gradient(90deg, red, blue)", 90.0),
+        ("linear-gradient(0.25turn, red, blue)", 90.0),
+        ("linear-gradient(to right, red, blue)", 90.0),
+        ("linear-gradient(to top, red, blue)", 0.0),
+        ("linear-gradient(to bottom left, red, blue)", 225.0),
+        ("linear-gradient(to left, red, blue)", 270.0),
+    ] {
+        assert_eq!(
+            parse_background_image(value),
+            BackgroundPaint::Gradient(StyleGradient {
+                geometry: GradientGeometry::Linear { angle_degrees: angle },
+                stops: stops(&[(red, 0.0), (blue, 1.0)]),
+            }),
+            "{value}"
+        );
+    }
+
+    // Authored positions pin; unpinned ends default to 0/1 and unpinned
+    // middles space evenly between pinned neighbours.
+    assert_eq!(
+        parse_background_image("linear-gradient(to bottom, #ffffff 30%, #0000ff, #00ff00 90%)"),
+        BackgroundPaint::Gradient(StyleGradient {
+            geometry: GradientGeometry::Linear { angle_degrees: 180.0 },
+            stops: stops(&[
+                (Color::from_css("#ffffff").unwrap(), 0.3),
+                (Color::from_css("#0000ff").unwrap(), 0.6),
+                (Color::from_css("#00ff00").unwrap(), 0.9),
+            ]),
+        })
+    );
+    // Functional colors with inner spaces and commas split on the top-level
+    // space only.
+    assert_eq!(
+        parse_background_image("linear-gradient(to bottom, rgb(255, 0, 0) 50%, blue)"),
+        BackgroundPaint::Gradient(StyleGradient {
+            geometry: GradientGeometry::Linear { angle_degrees: 180.0 },
+            stops: stops(&[(red, 0.5), (blue, 1.0)]),
+        })
+    );
+    // Equal and descending positions clamp ascending: the CSS hard band.
+    assert_eq!(
+        parse_background_image("linear-gradient(to bottom, red 60%, blue 40%, white)"),
+        BackgroundPaint::Gradient(StyleGradient {
+            geometry: GradientGeometry::Linear { angle_degrees: 180.0 },
+            stops: stops(&[(red, 0.6), (blue, 0.6), (white, 1.0)]),
+        })
+    );
+    // `to bottom` without authored positions keeps the legacy variants.
+    assert_eq!(
+        parse_background_image("linear-gradient(to bottom, red, blue)"),
+        BackgroundPaint::LinearGradient(StyleLinearGradient { from: red, to: blue })
+    );
+    assert_eq!(
+        parse_background_image("linear-gradient(red, blue, white)"),
+        BackgroundPaint::MultiStopLinearGradient(vec![red, blue, white])
+    );
+
+    // Radial: default prelude, shape/extent keywords and `at` positions.
+    assert_eq!(
+        parse_background_image("radial-gradient(red, blue)"),
+        BackgroundPaint::Gradient(StyleGradient {
+            geometry: GradientGeometry::Radial {
+                shape: crate::style::RadialShape::Ellipse,
+                extent: crate::style::RadialExtent::FarthestCorner,
+                center: (0.5, 0.5),
+            },
+            stops: stops(&[(red, 0.0), (blue, 1.0)]),
+        })
+    );
+    for (value, center) in [
+        ("radial-gradient(circle at top, red, blue)", (0.5, 0.0)),
+        ("radial-gradient(at 25% 75%, red, blue)", (0.25, 0.75)),
+        (
+            "radial-gradient(circle closest-side at left bottom, red, blue)",
+            (0.0, 1.0),
+        ),
+        ("radial-gradient(ellipse farthest-side, red, blue)", (0.5, 0.5)),
+    ] {
+        let BackgroundPaint::Gradient(gradient) = parse_background_image(value) else {
+            panic!("{value} should lower to BackgroundPaint::Gradient");
+        };
+        let GradientGeometry::Radial {
+            shape,
+            extent,
+            center: parsed_center,
+        } = gradient.geometry
+        else {
+            panic!("{value} should lower to a radial geometry");
+        };
+        assert_eq!(parsed_center, center, "{value}");
+        assert_eq!(gradient.stops, stops(&[(red, 0.0), (blue, 1.0)]), "{value}");
+        assert_eq!(
+            shape,
+            if value.contains("circle") {
+                crate::style::RadialShape::Circle
+            } else {
+                crate::style::RadialShape::Ellipse
+            },
+            "{value}"
+        );
+        assert_eq!(
+            extent,
+            if value.contains("closest-side") {
+                crate::style::RadialExtent::ClosestSide
+            } else if value.contains("farthest-side") {
+                crate::style::RadialExtent::FarthestSide
+            } else if value.contains("closest-corner") {
+                crate::style::RadialExtent::ClosestCorner
+            } else {
+                crate::style::RadialExtent::FarthestCorner
+            },
+            "{value}"
+        );
+    }
+
+    // Outside the profile: repeating gradients, explicit radii, length
+    // positions, conic gradients and unparsable directions.
+    for invalid in [
+        "repeating-linear-gradient(red, blue)",
+        "conic-gradient(red, blue)",
+        "radial-gradient(circle 40px, red, blue)",
+        "linear-gradient(red 10px, blue)",
+        "linear-gradient(45grad, red, blue)",
+        "linear-gradient(to sideways, red, blue)",
+        "radial-gradient(at, red, blue)",
+        "radial-gradient(circle, red)",
+        "linear-gradient(90deg, red)",
+        "radial-gradient(#123, #456,)",
+    ] {
+        assert_eq!(
+            parse_background_image(invalid),
+            BackgroundPaint::None,
+            "{invalid}"
+        );
     }
 }

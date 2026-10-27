@@ -644,7 +644,12 @@ const STYLE_PROFILE_PROPERTIES: &[StyleProfileProperty] = &[
     StyleProfileProperty {
         property: "linear-gradient",
         category: "gradient",
-        status: StyleProfileStatus::Deferred,
+        status: StyleProfileStatus::Implemented,
+    },
+    StyleProfileProperty {
+        property: "radial-gradient",
+        category: "gradient",
+        status: StyleProfileStatus::Implemented,
     },
     StyleProfileProperty {
         property: "grid-template-columns",
@@ -1738,11 +1743,72 @@ pub enum BackgroundPaint {
     Image(StyleImageSource),
     LinearGradient(StyleLinearGradient),
     MultiStopLinearGradient(Vec<Color>),
+    /// An angle-directed, positioned or radial gradient. The plain
+    /// `to bottom` forms keep the dedicated variants above so existing
+    /// themes keep their render path; everything else lowers here.
+    Gradient(StyleGradient),
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StyleImageSource {
     pub path: String,
+}
+
+/// One gradient colour stop with its resolved position as a fraction of the
+/// gradient axis in `[0, 1]`. Unpinned stops take the CSS defaults (first 0,
+/// last 1, middles evenly between their pinned neighbours), and positions at
+/// or below a predecessor pin equal to it (the CSS hard-band rule).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GradientStop {
+    pub color: Color,
+    pub position: f32,
+}
+
+/// The gradient axis: an angle-directed line for linear gradients, or a
+/// shape/extent/centre triple for radial ones.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GradientGeometry {
+    /// CSS angle: `0deg` points up, increasing clockwise.
+    Linear { angle_degrees: f32 },
+    Radial {
+        shape: RadialShape,
+        extent: RadialExtent,
+        /// Centre as fractions of the box width/height.
+        center: (f32, f32),
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RadialShape {
+    #[default]
+    Ellipse,
+    Circle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RadialExtent {
+    ClosestSide,
+    ClosestCorner,
+    FarthestSide,
+    #[default]
+    FarthestCorner,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StyleGradient {
+    pub geometry: GradientGeometry,
+    pub stops: Vec<GradientStop>,
+}
+
+impl Default for StyleGradient {
+    fn default() -> Self {
+        Self {
+            geometry: GradientGeometry::Linear {
+                angle_degrees: 180.0,
+            },
+            stops: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

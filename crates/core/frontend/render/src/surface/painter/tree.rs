@@ -1644,6 +1644,14 @@ fn push_background_paint_command(
                 clip,
             });
         }
+        BackgroundPaint::Gradient(gradient) => {
+            commands.push(PainterCommand::DrawGradient {
+                gradient: gradient.clone(),
+                rect,
+                radii,
+                clip,
+            });
+        }
     }
 }
 

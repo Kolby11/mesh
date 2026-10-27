@@ -757,6 +757,10 @@ pub(super) fn parse_background_image(value: &str) -> BackgroundPaint {
         return gradient;
     }
 
+    if let Some(gradient) = parse_radial_gradient(trimmed) {
+        return gradient;
+    }
+
     BackgroundPaint::None
 }
 
@@ -766,6 +770,7 @@ pub(super) fn is_supported_background_image(value: &str) -> bool {
         || trimmed == "none"
         || parse_background_url(trimmed).is_some()
         || parse_linear_gradient(trimmed).is_some()
+        || parse_radial_gradient(trimmed).is_some()
 }
 
 fn parse_background_url(value: &str) -> Option<String> {
@@ -812,32 +817,308 @@ fn split_paint_list(value: &str) -> Option<Vec<String>> {
     (!parts.is_empty() && parts.iter().all(|part| !part.trim().is_empty())).then_some(parts)
 }
 
+/// The plain evenly spaced `to bottom` forms keep the dedicated legacy
+/// variants so existing themes keep their render path; an angle, another
+/// direction, or any authored stop position lowers to `BackgroundPaint::Gradient`.
 fn parse_linear_gradient(value: &str) -> Option<BackgroundPaint> {
     let inner = value
         .strip_prefix("linear-gradient(")
         .and_then(|rest| rest.strip_suffix(')'))?;
     let parts = split_paint_list(inner)?;
-    let colors = parts.iter().map(|part| part.trim()).collect::<Vec<_>>();
-    let colors = if colors.first() == Some(&"to bottom") {
-        &colors[1..]
-    } else {
-        &colors[..]
+    let parts = parts.iter().map(|part| part.trim()).collect::<Vec<_>>();
+    let (angle_degrees, stop_parts, plain_vertical) = match parts.first() {
+        Some(first) => match parse_linear_direction(first) {
+            Some(GradientDirection::ToBottom) => (180.0, &parts[1..], true),
+            Some(GradientDirection::Angle(degrees)) => (degrees, &parts[1..], false),
+            None => (180.0, parts.as_slice(), true),
+        },
+        None => return None,
     };
-    let colors = colors
-        .iter()
-        .map(|color| Color::from_css(color))
-        .collect::<Option<Vec<_>>>()?;
-    if colors.len() < 2 {
+    if stop_parts.len() < 2 {
         return None;
     }
-    Some(if colors.len() == 2 {
-        BackgroundPaint::LinearGradient(StyleLinearGradient {
-            from: colors[0],
-            to: colors[1],
-        })
+    let (colors, authored) = parse_gradient_stops(stop_parts)?;
+    if plain_vertical && authored.iter().all(Option::is_none) {
+        return Some(if colors.len() == 2 {
+            BackgroundPaint::LinearGradient(StyleLinearGradient {
+                from: colors[0],
+                to: colors[1],
+            })
+        } else {
+            BackgroundPaint::MultiStopLinearGradient(colors)
+        });
+    }
+    Some(BackgroundPaint::Gradient(StyleGradient {
+        geometry: GradientGeometry::Linear { angle_degrees },
+        stops: resolve_gradient_stops(colors, authored),
+    }))
+}
+
+fn parse_radial_gradient(value: &str) -> Option<BackgroundPaint> {
+    let inner = value
+        .strip_prefix("radial-gradient(")
+        .and_then(|rest| rest.strip_suffix(')'))?;
+    let parts = split_paint_list(inner)?;
+    let parts = parts.iter().map(|part| part.trim()).collect::<Vec<_>>();
+    let (shape, extent, center, stop_parts) = match parts.first() {
+        Some(first) => match parse_radial_prelude(first) {
+            Some(prelude) => (
+                prelude.shape,
+                prelude.extent,
+                prelude.center,
+                &parts[1..],
+            ),
+            None => (
+                RadialShape::Ellipse,
+                RadialExtent::FarthestCorner,
+                (0.5, 0.5),
+                parts.as_slice(),
+            ),
+        },
+        None => return None,
+    };
+    if stop_parts.len() < 2 {
+        return None;
+    }
+    let (colors, authored) = parse_gradient_stops(stop_parts)?;
+    Some(BackgroundPaint::Gradient(StyleGradient {
+        geometry: GradientGeometry::Radial { shape, extent, center },
+        stops: resolve_gradient_stops(colors, authored),
+    }))
+}
+
+enum GradientDirection {
+    ToBottom,
+    Angle(f32),
+}
+
+fn parse_linear_direction(token: &str) -> Option<GradientDirection> {
+    match token.trim() {
+        "to bottom" => Some(GradientDirection::ToBottom),
+        "to top" => Some(GradientDirection::Angle(0.0)),
+        "to right" => Some(GradientDirection::Angle(90.0)),
+        "to left" => Some(GradientDirection::Angle(270.0)),
+        "to top right" | "to right top" => Some(GradientDirection::Angle(45.0)),
+        "to bottom right" | "to right bottom" => Some(GradientDirection::Angle(135.0)),
+        "to bottom left" | "to left bottom" => Some(GradientDirection::Angle(225.0)),
+        "to top left" | "to left top" => Some(GradientDirection::Angle(315.0)),
+        _ => {
+            let degrees = token
+                .strip_suffix("deg")
+                .and_then(|rest| rest.trim().parse::<f32>().ok())
+                .or_else(|| {
+                    token
+                        .strip_suffix("turn")
+                        .and_then(|rest| rest.trim().parse::<f32>().ok())
+                        .map(|turns| turns * 360.0)
+                })?;
+            degrees.is_finite().then_some(GradientDirection::Angle(degrees))
+        }
+    }
+}
+
+struct RadialPrelude {
+    shape: RadialShape,
+    extent: RadialExtent,
+    center: (f32, f32),
+}
+
+/// `radial-gradient([circle|ellipse] [<extent>] [at <position>]?, ...)`.
+/// The whole part must match, so a part that is really a color stop fails and
+/// the caller treats every part as stops.
+/// Every prelude token is a keyword and never a color, so a first part made
+/// entirely of them is unambiguously a prelude; a real color stop never
+/// matches and the caller treats every part as stops.
+fn parse_radial_prelude(part: &str) -> Option<RadialPrelude> {
+    let mut prelude = RadialPrelude {
+        shape: RadialShape::Ellipse,
+        extent: RadialExtent::FarthestCorner,
+        center: (0.5, 0.5),
+    };
+    let tokens = part.split_whitespace().collect::<Vec<_>>();
+    let mut index = 0;
+    while index < tokens.len() {
+        match tokens[index] {
+            "circle" => prelude.shape = RadialShape::Circle,
+            "ellipse" => prelude.shape = RadialShape::Ellipse,
+            "closest-side" => prelude.extent = RadialExtent::ClosestSide,
+            "closest-corner" => prelude.extent = RadialExtent::ClosestCorner,
+            "farthest-side" => prelude.extent = RadialExtent::FarthestSide,
+            "farthest-corner" => prelude.extent = RadialExtent::FarthestCorner,
+            "at" => {
+                let (center, consumed) = parse_radial_position(&tokens[index + 1..])?;
+                prelude.center = center;
+                index += consumed;
+            }
+            _ => return None,
+        }
+        index += 1;
+    }
+    Some(prelude)
+}
+
+/// `<position>` after `at`: one or two of the box keywords or percentages,
+/// in either keyword order. Returns the centre as width/height fractions.
+fn parse_radial_position(tokens: &[&str]) -> Option<((f32, f32), usize)> {
+    let horizontal = |token: &str| match token {
+        "left" => Some(0.0),
+        "center" => Some(0.5),
+        "right" => Some(1.0),
+        _ => None,
+    };
+    let vertical = |token: &str| match token {
+        "top" => Some(0.0),
+        "center" => Some(0.5),
+        "bottom" => Some(1.0),
+        _ => None,
+    };
+    let percent = |token: &str| {
+        token
+            .strip_suffix('%')
+            .and_then(|rest| rest.trim().parse::<f32>().ok())
+            .map(|value| (value / 100.0).clamp(0.0, 1.0))
+    };
+    match tokens {
+        [one] => {
+            let center = horizontal(one)
+                .map(|x| (x, 0.5))
+                .or_else(|| vertical(one).map(|y| (0.5, y)))
+                .or_else(|| percent(one).map(|x| (x, 0.5)))?;
+            Some((center, 1))
+        }
+        [first, second, ..] => {
+            if let (Some(x), Some(y)) = (horizontal(first), vertical(second)) {
+                return Some(((x, y), 2));
+            }
+            if let (Some(y), Some(x)) = (vertical(first), horizontal(second)) {
+                return Some(((x, y), 2));
+            }
+            if let (Some(x), Some(y)) = (percent(first), percent(second)) {
+                return Some(((x, y), 2));
+            }
+            let (x, y) = if let Some(x) = horizontal(first) {
+                let y = vertical(second).or_else(|| percent(second))?;
+                (x, y)
+            } else if let Some(x) = percent(first) {
+                let y = vertical(second)?;
+                (x, y)
+            } else if let Some(y) = vertical(first) {
+                let x = horizontal(second).or_else(|| percent(second))?;
+                (x, y)
+            } else {
+                return None;
+            };
+            Some(((x, y), 2))
+        }
+        [] => None,
+    }
+}
+
+fn parse_gradient_stops(parts: &[&str]) -> Option<(Vec<Color>, Vec<Option<f32>>)> {
+    let mut colors = Vec::with_capacity(parts.len());
+    let mut positions = Vec::with_capacity(parts.len());
+    for part in parts {
+        let (color, position) = parse_gradient_stop(part)?;
+        colors.push(color);
+        positions.push(position);
+    }
+    Some((colors, positions))
+}
+
+/// One stop: a color optionally followed by one percentage position. The
+/// position is the last whitespace-separated token at paren depth zero, so
+/// functional colors with inner spaces or commas never split.
+fn parse_gradient_stop(part: &str) -> Option<(Color, Option<f32>)> {
+    let part = part.trim();
+    if let Some(index) = last_top_level_space(part) {
+        if let Some(position) = parse_stop_position(part[index..].trim()) {
+            let color = Color::from_css(part[..index].trim())?;
+            return Some((color, Some(position)));
+        }
+    }
+    Some((Color::from_css(part)?, None))
+}
+
+fn parse_stop_position(token: &str) -> Option<f32> {
+    let value = token
+        .strip_suffix('%')?
+        .trim()
+        .parse::<f32>()
+        .ok()?;
+    value
+        .is_finite()
+        .then(|| (value / 100.0).clamp(0.0, 1.0))
+}
+
+fn last_top_level_space(value: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut last = None;
+    for (index, ch) in value.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => depth = depth.checked_sub(1)?,
+            ch if ch.is_whitespace() && depth == 0 => last = Some(index),
+            _ => {}
+        }
+    }
+    last
+}
+
+/// Fill CSS stop-position defaults and clamp ascending: the first unpinned
+/// stop takes 0, the last 1, and unpinned middles space evenly between their
+/// pinned neighbours. A position at or below its predecessor pins equal to it
+/// (the CSS hard-band rule).
+fn resolve_gradient_stops(colors: Vec<Color>, authored: Vec<Option<f32>>) -> Vec<GradientStop> {
+    let count = colors.len();
+    let positions = if authored.iter().all(Option::is_none) {
+        (0..count)
+            .map(|index| index as f32 / count.saturating_sub(1).max(1) as f32)
+            .collect::<Vec<_>>()
     } else {
-        BackgroundPaint::MultiStopLinearGradient(colors)
-    })
+        let mut positions = authored;
+        positions[0] = Some(positions[0].unwrap_or(0.0));
+        positions[count - 1] = Some(positions[count - 1].unwrap_or(1.0));
+        let mut index = 1;
+        while index < count - 1 {
+            if positions[index].is_none() {
+                let start = index - 1;
+                let mut end = index;
+                while end + 1 < count - 1 && positions[end + 1].is_none() {
+                    end += 1;
+                }
+                let (from, to) = (
+                    positions[start].expect("run starts after a pinned stop"),
+                    positions[end + 1].expect("run ends before a pinned stop"),
+                );
+                let span = (end + 1 - start) as f32;
+                for offset in 0..=(end - index) {
+                    positions[index + offset] =
+                        Some(from + (to - from) * ((offset + 1) as f32 / span));
+                }
+                index = end + 1;
+            } else {
+                index += 1;
+            }
+        }
+        let mut previous = 0.0f32;
+        for position in positions.iter_mut() {
+            let resolved = position
+                .expect("every stop position resolves")
+                .clamp(0.0, 1.0)
+                .max(previous);
+            *position = Some(resolved);
+            previous = resolved;
+        }
+        positions
+            .into_iter()
+            .map(|position| position.expect("every stop position resolves"))
+            .collect()
+    };
+    colors
+        .into_iter()
+        .zip(positions)
+        .map(|(color, position)| GradientStop { color, position })
+        .collect()
 }
 
 pub(super) fn parse_box_shadows(value: &str) -> Vec<BoxShadow> {

@@ -1,6 +1,8 @@
 use super::*;
 use crate::surface::icon;
-use mesh_core_elements::style::{Color, CornerShapes, Corners, Edges};
+use mesh_core_elements::style::{
+    Color, CornerShapes, Corners, Edges, GradientGeometry, RadialExtent, RadialShape,
+};
 use mesh_core_elements::{AffineClip, AffineTransform, BoxShadow, VisualFilter};
 use skia_safe::{
     BlurStyle, Canvas, Color4f, Data, ImageInfo, MaskFilter, Matrix, PaintStyle, Path as SkiaPath,
@@ -61,6 +63,207 @@ const EFFECT_RASTER_CACHE_BYTES: usize = 32 * 1024 * 1024;
 type ShadowRasterKey = (i32, i32, [u32; 4], u32, u32);
 type GradientShaderCacheKey = (u32, u32, Vec<u32>, i32, i32);
 type RoundedGradientKey = (GradientShaderCacheKey, [u32; 4]);
+
+/// Keyed by geometry, every stop and its position, plus dimensions, so a
+/// moving same-sized gradient reuses its shader without conflating angles,
+/// radial shapes or positions.
+fn gradient_shader_cache_key(
+    gradient: &mesh_core_elements::style::StyleGradient,
+    width: i32,
+    height: i32,
+) -> GradientShaderCacheKey {
+    let mut stops = Vec::with_capacity(gradient.stops.len() * 2);
+    for stop in &gradient.stops {
+        stops.push(u32::from_be_bytes([
+            stop.color.r,
+            stop.color.g,
+            stop.color.b,
+            stop.color.a,
+        ]));
+        stops.push(stop.position.to_bits());
+    }
+    match gradient.geometry {
+        mesh_core_elements::style::GradientGeometry::Linear { angle_degrees } => {
+            stops.push(0);
+            stops.push(angle_degrees.to_bits());
+        }
+        mesh_core_elements::style::GradientGeometry::Radial {
+            shape,
+            extent,
+            center,
+        } => {
+            stops.push(1);
+            stops.push(match shape {
+                mesh_core_elements::style::RadialShape::Ellipse => 0_u32,
+                mesh_core_elements::style::RadialShape::Circle => 1_u32,
+            });
+            stops.push(match extent {
+                mesh_core_elements::style::RadialExtent::ClosestSide => 0_u32,
+                mesh_core_elements::style::RadialExtent::ClosestCorner => 1_u32,
+                mesh_core_elements::style::RadialExtent::FarthestSide => 2_u32,
+                mesh_core_elements::style::RadialExtent::FarthestCorner => 3_u32,
+            });
+            stops.push(center.0.to_bits());
+            stops.push(center.1.to_bits());
+        }
+    }
+    (0, 0, stops, width, height)
+}
+
+/// Build one Skia shader for a `StyleGradient` over `rect`, with the rect's
+/// origin as (0, 0).
+fn build_gradient_shader(
+    gradient: &mesh_core_elements::style::StyleGradient,
+    rect: Rect,
+) -> Option<skia_safe::Shader> {
+    // Skia wants strictly increasing positions. Equal authored positions are
+    // the CSS hard band, so nudge them apart by an invisible epsilon; at the
+    // far edge the earlier stop is zero-width and is dropped instead.
+    const POSITION_EPSILON: f32 = 1e-5;
+    let mut colors = Vec::with_capacity(gradient.stops.len());
+    let mut positions = Vec::with_capacity(gradient.stops.len());
+    for stop in &gradient.stops {
+        let mut position = stop.position.clamp(0.0, 1.0);
+        while let Some(last) = positions.last().copied() {
+            if position > last {
+                break;
+            }
+            let nudged = (last + POSITION_EPSILON).min(1.0);
+            if nudged > last {
+                position = nudged;
+                break;
+            }
+            // At the far edge the earlier stop is zero-width; keep the later
+            // colour so the band boundary stays at 1.
+            positions.pop();
+            colors.pop();
+            position = position.max(last);
+        }
+        colors.push(Color4f::from(crate::surface::buffer::skia_color(stop.color)));
+        positions.push(position);
+    }
+    if colors.len() < 2 {
+        return None;
+    }
+    let gradient_colors = skia_gradient::Colors::new(
+        colors.as_slice(),
+        Some(positions.as_slice()),
+        TileMode::Clamp,
+        None,
+    );
+    let shader_gradient =
+        skia_gradient::Gradient::new(gradient_colors, skia_gradient::Interpolation::default());
+    match gradient.geometry {
+        GradientGeometry::Linear { angle_degrees } => {
+            // CSS angles: 0deg points up, increasing clockwise. The gradient
+            // line passes through the box centre; its endpoints touch the box
+            // edges, so the line length is |W·sinθ| + |H·cosθ|.
+            let theta = angle_degrees.to_radians();
+            let (sin, cos) = (theta.sin(), theta.cos());
+            let (width, height) = (rect.width(), rect.height());
+            let length = (width * sin).abs() + (height * cos).abs();
+            let (center_x, center_y) = (width / 2.0, height / 2.0);
+            let direction = (sin, -cos);
+            skia_gradient::shaders::linear_gradient(
+                (
+                    Point::new(
+                        center_x - direction.0 * length / 2.0,
+                        center_y - direction.1 * length / 2.0,
+                    ),
+                    Point::new(
+                        center_x + direction.0 * length / 2.0,
+                        center_y + direction.1 * length / 2.0,
+                    ),
+                ),
+                &shader_gradient,
+                None,
+            )
+        }
+        GradientGeometry::Radial {
+            shape,
+            extent,
+            center,
+        } => {
+            let (width, height) = (rect.width(), rect.height());
+            let center_x = center.0 * width;
+            let center_y = center.1 * height;
+            // Per-axis side distances from the centre to the box edges.
+            let sides = (
+                center_x.min(width - center_x),
+                center_y.min(height - center_y),
+            );
+            let farthest_sides = (center_x.max(width - center_x), center_y.max(height - center_y));
+            let corner_distances = [
+                center_x.hypot(center_y),
+                (width - center_x).hypot(center_y),
+                center_x.hypot(height - center_y),
+                (width - center_x).hypot(height - center_y),
+            ];
+            let closest_corner = corner_distances.into_iter().fold(f32::INFINITY, f32::min);
+            let farthest_corner = corner_distances.into_iter().fold(0.0, f32::max);
+            let (radius_x, radius_y) = match (shape, extent) {
+                (RadialShape::Circle, RadialExtent::ClosestSide) => {
+                    let radius = sides.0.min(sides.1);
+                    (radius, radius)
+                }
+                (RadialShape::Circle, RadialExtent::FarthestSide) => {
+                    let radius = farthest_sides.0.max(farthest_sides.1);
+                    (radius, radius)
+                }
+                (RadialShape::Circle, RadialExtent::ClosestCorner) => {
+                    (closest_corner, closest_corner)
+                }
+                (RadialShape::Circle, RadialExtent::FarthestCorner) => {
+                    (farthest_corner, farthest_corner)
+                }
+                // An ellipse through a corner scales both side radii by the
+                // factor that puts that corner on the ellipse's edge.
+                (RadialShape::Ellipse, RadialExtent::ClosestSide) => sides,
+                (RadialShape::Ellipse, RadialExtent::FarthestSide) => farthest_sides,
+                (RadialShape::Ellipse, RadialExtent::ClosestCorner)
+                | (RadialShape::Ellipse, RadialExtent::FarthestCorner) => {
+                    let (base, distance) = if extent == RadialExtent::ClosestCorner {
+                        (sides, closest_corner)
+                    } else {
+                        (farthest_sides, farthest_corner)
+                    };
+                    let denominator = base.0.hypot(base.1);
+                    let factor = if denominator > 0.0 {
+                        distance / denominator
+                    } else {
+                        1.0
+                    };
+                    (base.0 * factor, base.1 * factor)
+                }
+            };
+            match shape {
+                RadialShape::Circle => skia_gradient::shaders::radial_gradient(
+                    (Point::new(center_x, center_y), radius_x.max(0.0)),
+                    &shader_gradient,
+                    None,
+                ),
+                RadialShape::Ellipse => {
+                    // Skia's radial shader is circular; an ellipse is the same
+                    // shader scaled per axis around its centre.
+                    let radius = radius_x.max(radius_y.max(1.0));
+                    let shader = skia_gradient::shaders::radial_gradient(
+                        (Point::new(center_x, center_y), radius),
+                        &shader_gradient,
+                        None,
+                    )?;
+                    let scale = Matrix::scale((
+                        radius_x.max(0.0) / radius,
+                        radius_y.max(0.0) / radius,
+                    ));
+                    let local = Matrix::translate((center_x, center_y))
+                        * scale
+                        * Matrix::translate((-center_x, -center_y));
+                    Some(shader.with_local_matrix(&local))
+                }
+            }
+        }
+    }
+}
 
 // Keyed by the `Arc<RgbaImage>` allocation's address. The weak reference keeps
 // that allocation from being reused at the same address, so a key never names
@@ -314,6 +517,12 @@ pub(crate) enum PainterCommand {
     },
     DrawLinearGradient {
         gradient: PainterLinearGradient,
+        rect: ClipRect,
+        radii: Corners,
+        clip: ClipRect,
+    },
+    DrawGradient {
+        gradient: mesh_core_elements::style::StyleGradient,
         rect: ClipRect,
         radii: Corners,
         clip: ClipRect,
@@ -897,6 +1106,20 @@ impl SkiaPaintBackend {
                     clip,
                 } => {
                     self.draw_linear_gradient_command(
+                        canvas,
+                        gradient.clone(),
+                        *rect,
+                        *radii,
+                        effective_clip(*clip, &clip_stack),
+                    );
+                }
+                PainterCommand::DrawGradient {
+                    gradient,
+                    rect,
+                    radii,
+                    clip,
+                } => {
+                    self.draw_gradient_command(
                         canvas,
                         gradient.clone(),
                         *rect,
@@ -1908,6 +2131,152 @@ impl SkiaPaintBackend {
             );
         }
         canvas.draw_rect(rect, &paint);
+        canvas.restore_to_count(save_count);
+    }
+
+    /// Angled, positioned-stop and radial gradients. Mirrors
+    /// `draw_linear_gradient_command` — damage clip, rounded-radii paths and
+    /// the same dimension-gated shader cache — with the geometry taken from
+    /// `StyleGradient` instead of a fixed top-to-bottom axis.
+    fn draw_gradient_command(
+        &self,
+        canvas: &Canvas,
+        gradient: mesh_core_elements::style::StyleGradient,
+        rect: ClipRect,
+        radii: Corners,
+        clip: ClipRect,
+    ) {
+        let clipped = intersect_clip(rect, clip);
+        if clipped.width <= 0 || clipped.height <= 0 {
+            return;
+        }
+        let cache_key = gradient_shader_cache_key(&gradient, rect.width, rect.height);
+        if corners_have_radius(radii) && crate::prepared_scene::recording_images() {
+            let save = canvas.save();
+            let bounds = Rect::from_xywh(
+                rect.x as f32,
+                rect.y as f32,
+                rect.width as f32,
+                rect.height as f32,
+            );
+            canvas.clip_rrect(rrect_from_corners(bounds, radii), None, true);
+            self.draw_gradient_command(canvas, gradient, rect, Corners::zero(), clip);
+            canvas.restore_to_count(save);
+            return;
+        }
+        if corners_have_radius(radii)
+            && rect.width <= MAX_SKIA_IMAGE_DIMENSION as i32
+            && rect.height <= MAX_SKIA_IMAGE_DIMENSION as i32
+        {
+            let key = (
+                cache_key.clone(),
+                [
+                    radii.top_left.to_bits(),
+                    radii.top_right.to_bits(),
+                    radii.bottom_right.to_bits(),
+                    radii.bottom_left.to_bits(),
+                ],
+            );
+            let image = ROUNDED_GRADIENT_CACHE.with(|cache| {
+                let mut cache = cache.borrow_mut();
+                if let Some(image) = cache.get(&key) {
+                    return Some(image.clone());
+                }
+                let info = ImageInfo::new(
+                    (rect.width, rect.height),
+                    skia_safe::ColorType::RGBA8888,
+                    skia_safe::AlphaType::Premul,
+                    None,
+                );
+                let mut surface = skia_safe::surfaces::raster(&info, None, None)?;
+                let local = ClipRect { x: 0, y: 0, ..rect };
+                rounded::clip(surface.canvas(), local, radii, CornerShapes::default());
+                self.draw_gradient_command(
+                    surface.canvas(),
+                    gradient.clone(),
+                    local,
+                    Corners::zero(),
+                    local,
+                );
+                let image = surface.image_snapshot();
+                cache.insert(
+                    key,
+                    image.clone(),
+                    (rect.width as usize)
+                        .saturating_mul(rect.height as usize)
+                        .saturating_mul(4),
+                );
+                Some(image)
+            });
+            if let Some(image) = image {
+                crate::prepared_scene::retain_image(&image);
+                let save = canvas.save();
+                canvas.clip_irect(
+                    skia_safe::IRect::from_xywh(
+                        clipped.x,
+                        clipped.y,
+                        clipped.width,
+                        clipped.height,
+                    ),
+                    None,
+                );
+                canvas.draw_image(image, (rect.x as f32, rect.y as f32), None);
+                canvas.restore_to_count(save);
+                return;
+            }
+        }
+        let cacheable =
+            rect.width <= MAX_GRADIENT_DIMENSION && rect.height <= MAX_GRADIENT_DIMENSION;
+        let save_count = canvas.save();
+        canvas.clip_rect(
+            Rect::from_xywh(
+                clipped.x as f32,
+                clipped.y as f32,
+                clipped.width as f32,
+                clipped.height as f32,
+            ),
+            None,
+            false,
+        );
+        canvas.translate((rect.x as f32, rect.y as f32));
+        let local = Rect::from_xywh(0.0, 0.0, rect.width as f32, rect.height as f32);
+        let cached_shader = cacheable
+            .then(|| GRADIENT_SHADER_CACHE.with(|c| c.borrow_mut().get(&cache_key).cloned()));
+        let cached_shader = cached_shader.flatten();
+        let shader = if let Some(shader) = cached_shader {
+            shader
+        } else {
+            let Some(new_shader) = build_gradient_shader(&gradient, local) else {
+                canvas.restore_to_count(save_count);
+                return;
+            };
+            #[cfg(test)]
+            GRADIENT_SHADER_CREATIONS.with(|count| count.set(count.get() + 1));
+            if cacheable {
+                GRADIENT_SHADER_CACHE.with(|c| {
+                    c.borrow_mut()
+                        .insert(cache_key, new_shader.clone(), GRADIENT_SHADER_ENTRY_BYTES)
+                });
+            }
+            new_shader
+        };
+        let mut paint = skia_safe::Paint::default();
+        paint.set_anti_alias(true);
+        paint.set_shader(shader);
+        if corners_have_radius(radii) {
+            rounded::clip(
+                canvas,
+                ClipRect {
+                    x: 0,
+                    y: 0,
+                    width: local.width() as i32,
+                    height: local.height() as i32,
+                },
+                radii,
+                CornerShapes::default(),
+            );
+        }
+        canvas.draw_rect(local, &paint);
         canvas.restore_to_count(save_count);
     }
 
