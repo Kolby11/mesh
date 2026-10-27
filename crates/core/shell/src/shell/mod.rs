@@ -699,6 +699,7 @@ pub struct Shell {
     /// Last rendered snapshot sent through the authoritative theme interface.
     /// It is the baseline for deterministic revisioned token events.
     last_published_theme_snapshot: Option<mesh_core_theme::ThemeSnapshot>,
+    last_theme_change_details: Option<serde_json::Value>,
     components: Vec<ComponentRuntime>,
     /// The last render pass rendered a ready component but presented nothing.
     /// Ready render work then waits for the next deadline instead of keeping

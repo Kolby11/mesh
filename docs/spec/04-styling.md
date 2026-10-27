@@ -313,6 +313,15 @@ token read still returns the theme value.
 
 ## 6. Consuming tokens
 
+**Shipped:** themes and components share one restricted CSS lowering with
+absolute source spans, reference classification and keyframe stop representation.
+Component prop handling and validated animation easing are runtime projections.
+Successful lowerings share immutable storage in a per-thread LRU capped at 16
+sources and 8 MiB of retained source/AST payload. Inputs are limited to 2 MiB
+and 64 nested delimiters. Source text and source offset both participate in
+cache identity; failures never replace a valid cached lowering. Theme recipes
+retain authored spelling while component declarations use canonical CSS.
+
 **Shipped:** token aliases resolve within an immutable theme revision and retain
 scalar types. Unchanged snapshot clones share alias resolutions; mutation
 invalidates them. The style resolver shares parsed color and numeric token
@@ -331,6 +340,40 @@ Other property-specific token lowering remains a target.
   ([03 §3.2](03-components.md)).
 - Icon style (axes, sizes) and font roles are theme tokens too
   (`--icon-*`, `--font-*`) — see [05 §7](05-icons.md), [06 §3](06-fonts.md).
+
+### Bounded service snapshots and details
+
+**Shipped:** `mesh.theme` publishes an inline snapshot capped at 24 KiB of
+serialized JSON, leaving room inside the 64 KiB command envelope. Small states
+keep their existing fields. Large states omit `tokens` and `provenance` first;
+if necessary, catalogs and other fields also move out of line. An omitted field
+means “read details”, not an empty collection. Ordinary host token reads and
+rendering continue to use the complete committed theme.
+
+Every snapshot includes `details: { revision, bytes, chunk_bytes, encoding }`.
+The detail revision fingerprints the entire full document, including catalog,
+resource and durable-setting facts; it is distinct from the rendered theme's
+`revision`. With `theme.read`, call
+`read_details({ revision: state.details.revision, offset: 0, limit: 4096 })`.
+Responses contain `data` (a JSON text fragment), `next_offset` (a UTF-8 byte
+offset or null), `total_bytes` and `revision`. Concatenate fragments, then parse
+JSON to recover the complete original state, including every token value and
+provenance entry. Limits clamp to 4–4096 source bytes; escaping still leaves
+each response below 25 KiB. Invalid byte boundaries return `invalid_offset`.
+A changed document returns `stale_revision` and the current descriptor; restart
+from offset zero. No truncated token is presented as a complete value.
+
+`ThemeChanged` retains its full delta, including removals and provenance-only
+changes. Oversized events set `details_required: true` and include a descriptor;
+`read_details` with that descriptor retrieves the complete change document.
+The latest change document remains available until the next theme change;
+older descriptors return `stale_revision`, after which consumers resynchronize
+from the current snapshot. `changed_token_count` reports the complete delta
+size even when its inline `changed_tokens` array is omitted. `TokenChanged`
+still emits once for each changed token when observed; oversized values use
+the same change descriptor. If identity fields themselves exceed the inline
+budget, the event carries only its descriptor and `details_required`. Consumers
+must handle externalized fields in both snapshots and events.
 
 ## 6.1 Selector support & cascade order
 

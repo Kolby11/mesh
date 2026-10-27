@@ -137,15 +137,6 @@ evidence and test workloads are in the linked reports.
       validation already uses them. Keep raw declarations only behind explicit
       compatibility/tooling adapters. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/03-service-contracts.md)
 
-### Section 04 — Themes
-
-- [ ] **S04-PERF-002 / S04-PERF-003 / S04-DEAD-003:** Share one bounded CSS,
-      token, and keyframe representation across theme and component paths, then
-      measure typed token dependency resolution and reload reuse. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/04-themes.md)
-- [ ] **`mesh.theme` snapshot exceeds the 64 KiB command budget:** token values
-      and provenance still exceed the limit after font pagination; design bounded
-      snapshot/detail transport without losing token inspection or change events.
-
 ### Section 05 — Localization and i18n
 
 - [ ] **S05-PERF-001 / S05-PERF-002 / S05-PERF-003:** Measure catalog

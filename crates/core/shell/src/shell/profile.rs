@@ -27,6 +27,52 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn package_recovery_restores_the_published_theme_change_document() {
+        let mut shell = Shell::new();
+        shell.sync_theme_service_state().unwrap();
+        shell.theme.update_active(|theme| {
+            theme.set_token(
+                "test.restore",
+                mesh_core_theme::TokenValue::Number(1.0),
+                mesh_core_theme::ThemeProvenance::UserOverride,
+            );
+        });
+        shell.sync_theme_service_state().unwrap();
+        let committed = shell.last_theme_change_details.clone().unwrap();
+        let committed_details = mesh_core_theme::transport::detail_descriptor(&committed);
+        let rollback = super::PackageRuntimeRollback::capture(&shell);
+        shell.theme.update_active(|theme| {
+            theme.set_token(
+                "test.restore",
+                mesh_core_theme::TokenValue::Number(2.0),
+                mesh_core_theme::ThemeProvenance::UserOverride,
+            );
+        });
+        shell.sync_theme_service_state().unwrap();
+        let candidate_details = mesh_core_theme::transport::detail_descriptor(
+            shell.last_theme_change_details.as_ref().unwrap(),
+        );
+        rollback.restore(&mut shell);
+        assert_eq!(shell.last_theme_change_details.as_ref(), Some(&committed));
+        assert_eq!(
+            shell
+                .read_theme_details(&serde_json::json!({"revision":committed_details["revision"]}))
+                ["ok"],
+            true
+        );
+        assert_eq!(
+            shell
+                .read_theme_details(&serde_json::json!({"revision":candidate_details["revision"]}))
+                ["error"],
+            "stale_revision"
+        );
+        assert_eq!(
+            shell.theme.active().token("test.restore"),
+            Some(&mesh_core_theme::TokenValue::Number(1.0))
+        );
+    }
+
+    #[test]
     fn profile_preferences_layer_over_shared_settings_without_mutating_them() {
         let shared = SettingsStore::from_value(
             "/tmp/shared-settings.json",
@@ -463,6 +509,7 @@ pub(super) struct PackageRuntimeRollback {
     frontend_catalog: FrontendCatalogState,
     module_dirs: Vec<PathBuf>,
     last_published_theme_snapshot: Option<mesh_core_theme::ThemeSnapshot>,
+    last_theme_change_details: Option<serde_json::Value>,
     theme_watch: ThemeWatchState,
 }
 
@@ -486,6 +533,7 @@ impl PackageRuntimeRollback {
             frontend_catalog: shell.frontend_catalog.snapshot(),
             module_dirs: shell.module_dirs.clone(),
             last_published_theme_snapshot: shell.last_published_theme_snapshot.clone(),
+            last_theme_change_details: shell.last_theme_change_details.clone(),
             theme_watch: shell.theme_watch.clone(),
         }
     }
@@ -509,6 +557,7 @@ impl PackageRuntimeRollback {
             frontend_catalog,
             module_dirs,
             last_published_theme_snapshot,
+            last_theme_change_details,
             theme_watch,
         } = self;
 
@@ -546,6 +595,7 @@ impl PackageRuntimeRollback {
             .frontend_catalog
             .restore_if_current(current_catalog_version, frontend_catalog);
         shell.last_published_theme_snapshot = last_published_theme_snapshot;
+        shell.last_theme_change_details = last_theme_change_details;
         shell.theme_watch = theme_watch;
     }
 }

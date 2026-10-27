@@ -2,7 +2,6 @@ use super::ParseError;
 use crate::SourceSpan;
 use crate::style::{
     ContainerQuery, Declaration, KeyframeRule, KeyframeStop, StyleBlock, StyleRule, StyleValue,
-    classify_style_value,
 };
 
 /// Lower component CSS through the same restricted parser used by themes.
@@ -78,7 +77,7 @@ fn lower_rules(
 fn lower_declaration(declaration: &mesh_core_theme::css::Declaration) -> Declaration {
     Declaration {
         property: declaration.property.clone(),
-        value: classify_style_value(&declaration.value),
+        value: declaration.classified.clone(),
     }
 }
 
@@ -94,24 +93,13 @@ fn lower_keyframes_rule(
                 .iter()
                 .map(lower_declaration)
                 .collect::<Vec<_>>();
-            if let Some(declaration) = declarations.iter().find(|declaration| {
-                !mesh_core_theme::css::is_transition_safe_keyframe_property(&declaration.property)
-            }) {
-                return Err(ParseError::InvalidStyle {
-                    message: format!(
-                        "unsupported keyframe property '{}'",
-                        declaration.property
-                    ),
-                    span: to_source_span(stop.span),
-                });
-            }
             if declarations.iter().any(contains_keyframe_value_reference) {
                 return Err(ParseError::InvalidStyle {
                     message: format!(
                         "keyframes '{}' cannot use var() references in stop values (prop() references are also unavailable)",
                         source_rule.name
                     ),
-                    span: to_source_span(stop.span),
+                    span: to_source_span(source_rule.span),
                 });
             }
             let easing = stop
@@ -124,7 +112,7 @@ fn lower_keyframes_rule(
                             value.trim(),
                             source_rule.name
                         ),
-                        span: to_source_span(stop.span),
+                        span: to_source_span(source_rule.span),
                     })
                 })
                 .transpose()?;
@@ -417,5 +405,55 @@ pub(super) fn prop_type_matches(prop_type: crate::PropType, domain: PropCssDomai
             prop_type,
             PropType::Enum | PropType::String | PropType::Icon | PropType::Token
         ),
+    }
+}
+
+#[cfg(test)]
+mod shared_projection_tests {
+    use super::*;
+
+    #[test]
+    fn generated_selectors_aliases_and_keyframes_project_from_shared_lowering() {
+        for index in 0..24 {
+            let css = format!(
+                "button.item{index}:hover {{ color: var(--color-primary); opacity: .5; }} @keyframes fade{index} {{ from {{ opacity: 0; }} to {{ opacity: 1; }} }}"
+            );
+            let shared = mesh_core_theme::css::parse_stylesheet(&css, 100).unwrap();
+            let component = parse_style(&css, 100).unwrap();
+            let mesh_core_theme::css::Rule::Style(rule) = &shared.rules[0] else {
+                panic!()
+            };
+            assert_eq!(
+                component.rules[0].selector.to_string(),
+                rule.selectors[0].to_string()
+            );
+            assert_eq!(
+                component.rules[0].declarations[0].value,
+                rule.declarations[0].classified
+            );
+            let mesh_core_theme::css::Rule::Keyframes(rule) = &shared.rules[1] else {
+                panic!()
+            };
+            assert_eq!(component.keyframes[0].name, rule.name);
+            for (component, shared) in component.keyframes[0].stops.iter().zip(&rule.stops) {
+                assert_eq!(component.offset, shared.offset);
+                assert_eq!(
+                    component.declarations[0].value,
+                    shared.declarations[0].classified
+                );
+            }
+        }
+        for css in [
+            "button > label { opacity: 1; }",
+            "@keyframes bad { from { unsupported: 1; } }",
+            "button {",
+            "/* unfinished",
+        ] {
+            assert!(
+                mesh_core_theme::css::parse_stylesheet(css, 100).is_err(),
+                "{css}"
+            );
+            assert!(parse_style(css, 100).is_err(), "{css}");
+        }
     }
 }

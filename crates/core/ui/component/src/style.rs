@@ -236,14 +236,8 @@ pub struct KeyframeRule {
     pub stops: Vec<KeyframeStop>,
 }
 
-/// A single percentage stop within a keyframe rule.
-#[derive(Debug, Clone)]
-pub struct KeyframeStop {
-    pub offset: f32,
-    pub declarations: Vec<Declaration>,
-    /// Segment-local timing function starting at this stop.
-    pub easing: Option<TransitionEasing>,
-}
+/// A keyframe stop with component declarations and validated easing.
+pub type KeyframeStop = mesh_core_theme::css::KeyframeStop<Vec<Declaration>, TransitionEasing>;
 
 /// Reserved variable-store key prefix under which resolved component-prop values
 /// are published, so `StyleValue::Prop(name)` resolves through the same variable
@@ -255,39 +249,7 @@ pub fn prop_variable_key(name: &str) -> String {
     format!("{PROP_VAR_PREFIX}{name}")
 }
 
-/// A style value that may reference local or theme CSS variables.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum StyleValue {
-    /// A literal value: `#ff0000`, `16px`, `bold`.
-    Literal(String),
-    /// A variable reference: `var(--custom-prop)`.
-    Var(String),
-    /// A component-prop reference: `prop(name)`. Resolved against the per-instance
-    /// prop value map (published under `prop_variable_key(name)`).
-    Prop(String),
-}
-
-/// Classify one lowered CSS value while preserving the shared theme variable
-/// syntax. Embedded references remain literals and are resolved by the style
-/// resolver after component props and inherited custom properties are known.
-pub fn classify_style_value(value: &str) -> StyleValue {
-    let value = value.trim();
-    if let Some(name) = mesh_core_theme::css::variable_reference(value) {
-        StyleValue::Var(name)
-    } else if let Some(name) = standalone_prop_reference(value) {
-        StyleValue::Prop(name)
-    } else {
-        StyleValue::Literal(value.to_string())
-    }
-}
-
-fn standalone_prop_reference(value: &str) -> Option<String> {
-    let inner = value.strip_prefix("prop(")?.strip_suffix(')')?;
-    if inner.contains('(') || inner.contains(')') {
-        return None;
-    }
-    Some(inner.trim().to_string())
-}
+pub use mesh_core_theme::css::{StyleValue, classify_style_value};
 
 pub fn is_transition_safe_keyframe_property(property: &str) -> bool {
     mesh_core_theme::css::is_transition_safe_keyframe_property(property)

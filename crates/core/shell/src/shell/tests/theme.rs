@@ -1353,3 +1353,113 @@ fn user_part_stylesheet_reloads_atomically_from_profile_preferences() {
     shell.reload_locale_if_settings_changed().unwrap();
     assert!(shell.theme.active().user_stylesheet().is_empty());
 }
+
+#[test]
+fn large_theme_snapshot_details_are_authorized_revisioned_and_lossless() {
+    let mut shell = Shell::new();
+    shell.discover_modules();
+    let large = "\"\\\n🦀".repeat(20000);
+    shell.theme.update_active(|theme| {
+        theme.set_token(
+            "test.large",
+            mesh_core_theme::TokenValue::String(large.clone()),
+            mesh_core_theme::ThemeProvenance::UserOverride,
+        );
+    });
+    shell.sync_theme_service_state().unwrap();
+    let state = shell.authoritative_theme_service_payload();
+    assert!(serde_json::to_vec(&state).unwrap().len() < 32 * 1024);
+    assert!(state.get("tokens").is_none());
+    assert!(state["themes"].is_array());
+    let request = serde_json::json!({"revision":state["details"]["revision"]});
+    let denied = shell.dispatch_service_command(
+        "mesh.theme",
+        "read_details",
+        &request,
+        "@test/details",
+        &mesh_core_capability::CapabilitySet::default(),
+    );
+    assert_eq!(denied["error"], "capability_denied");
+    let read = mesh_core_capability::CapabilitySet::from_ids(["theme.read"]);
+    let mut offset = 0;
+    let mut text = String::new();
+    loop {
+        let page = shell.dispatch_service_command("mesh.theme", "read_details", &serde_json::json!({"revision":state["details"]["revision"], "offset":offset,"limit":4096}), "@test/details", &read);
+        assert_eq!(page["ok"], true, "{page}");
+        assert!(serde_json::to_vec(&page).unwrap().len() < 32 * 1024);
+        text.push_str(page["data"].as_str().unwrap());
+        let Some(next) = page["next_offset"].as_u64() else {
+            break;
+        };
+        offset = next;
+    }
+    let full: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(full["tokens"]["test.large"], large);
+    assert_eq!(full["provenance"]["test.large"], "UserOverride");
+    shell.theme.update_active(|theme| {
+        theme.set_token(
+            "test.large",
+            mesh_core_theme::TokenValue::Number(2.0),
+            mesh_core_theme::ThemeProvenance::UserOverride,
+        );
+    });
+    assert_eq!(
+        shell.read_theme_details(&request)["error"],
+        "stale_revision"
+    );
+}
+
+#[test]
+fn oversized_theme_changes_keep_inspectable_deltas_and_individual_events() {
+    let mut shell = Shell::new();
+    let seen_events = Arc::new(Mutex::new(Vec::new()));
+    shell
+        .components
+        .push(super::types::ComponentRuntime::new(Box::new(
+            RecordingComponent::new(seen_events.clone()),
+        )));
+    shell.sync_theme_service_state().unwrap();
+    shell.theme.update_active(|theme| {
+        theme.set_token(
+            "test.large",
+            mesh_core_theme::TokenValue::String("x".repeat(100000)),
+            mesh_core_theme::ThemeProvenance::UserOverride,
+        );
+    });
+    shell.sync_theme_service_state().unwrap();
+    let events = seen_events.lock().unwrap();
+    let mut count = 0;
+    for event in events.iter() {
+        if let ServiceEvent::InterfaceEvent { name, payload, .. } = event
+            && matches!(name.as_str(), "ThemeChanged" | "TokenChanged")
+        {
+            assert!(serde_json::to_vec(payload).unwrap().len() < 32 * 1024);
+            assert_eq!(payload["details_required"], true);
+            let page = shell.read_theme_details(
+                &serde_json::json!({"revision":payload["details"]["revision"]}),
+            );
+            assert_eq!(page["ok"], true);
+            count += 1;
+        }
+    }
+    assert_eq!(count, 2);
+    let change = shell.last_theme_change_details.as_ref().unwrap();
+    assert_eq!(change["changed_tokens"][0]["name"], "test.large");
+    assert_eq!(
+        change["changed_tokens"][0]["value"].as_str().unwrap().len(),
+        100000
+    );
+    let old_details = mesh_core_theme::transport::detail_descriptor(change);
+    drop(events);
+    shell.theme.update_active(|theme| {
+        theme.remove_tokens_with_prefix("test.");
+    });
+    shell.sync_theme_service_state().unwrap();
+    let removed = shell.last_theme_change_details.as_ref().unwrap();
+    assert_eq!(removed["changed_tokens"][0]["name"], "test.large");
+    assert!(removed["changed_tokens"][0]["value"].is_null());
+    assert_eq!(
+        shell.read_theme_details(&serde_json::json!({"revision":old_details["revision"]}))["error"],
+        "stale_revision"
+    );
+}

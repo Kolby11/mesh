@@ -11,6 +11,9 @@ This workspace keeps browser-like concerns split by crate:
 - `mesh-core-module` owns package install/uninstall plans, composition/profile
   persistence, and profile-aware settings projection; it depends on config,
   while config does not depend on module.
+- `mesh-core-theme` owns renderer-neutral restricted CSS lowering, reference
+  classification and generic keyframe stops shared with components, plus theme
+  composition and bounded theme detail transport.
 - `mesh-core-component` parses `.mesh` single-file components into source ASTs.
 - `mesh-core-frontend` compiles `.mesh` source and builds `WidgetNode` trees.
 - `mesh-core-animation` owns easing, interpolation, transitions, and keyframes.

@@ -7,6 +7,10 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- S04 shared CSS/value/keyframe lowering and bounded `mesh.theme` snapshot/detail
+  transport are implemented. Theme/component and focused shell/animation tests
+  pass; three release measurement runs are recorded in the performance log.
+
 - Settings pop-out sizing is fixed; the user confirms touchpad scrolling now
   works well in the live desktop. The scrolling follow-up is closed.
 - RT-04 implemented: synchronous `mesh.exec` uses Tokio worker handoff on

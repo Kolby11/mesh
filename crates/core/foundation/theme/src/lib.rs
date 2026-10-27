@@ -6,6 +6,7 @@
 mod contract;
 pub mod css;
 pub mod parts;
+pub mod transport;
 pub use contract::*;
 
 use serde::de::{MapAccess, Visitor};
@@ -18,7 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 const LEGACY_DEFAULT_SHELL_ANIMATION_PREFIX: &str = "animation.default.";
-pub const DEFAULT_MAX_THEME_SOURCE_BYTES: usize = 2 * 1024 * 1024;
+pub const DEFAULT_MAX_THEME_SOURCE_BYTES: usize = css::MAX_STYLESHEET_BYTES;
 static NEXT_THEME_REVISION: AtomicU64 = AtomicU64::new(1);
 
 fn next_theme_revision() -> u64 {
@@ -185,19 +186,10 @@ pub struct ThemeDefaults {
     pub components: HashMap<String, ComponentDefaults>,
 }
 
-/// A timeline offset in `[0.0, 1.0]` plus the raw declarations at that stop.
-/// Stored uninterpreted; consumers resolve `var()` and lower the properties.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct ThemeKeyframeStop {
-    pub offset: f32,
-    #[serde(default)]
-    pub declarations: ComponentDefaults,
-    /// Optional segment-local timing function, kept raw so the shell can
-    /// resolve theme token references before lowering it to the animation
-    /// engine's validated easing type.
-    #[serde(default)]
-    pub easing: Option<String>,
-}
+/// Theme keyframe recipes use the shared stop representation with ordered raw
+/// declarations and unresolved timing functions. Consumers lower these after
+/// theme token substitution.
+pub type ThemeKeyframeStop = css::KeyframeStop<ComponentDefaults, String>;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ThemeModule {
@@ -3310,6 +3302,78 @@ impl From<mesh_core_files::ContainedFileError> for ThemeSourceError {
                 path,
                 source: std::io::Error::new(std::io::ErrorKind::Interrupted, "read cancelled"),
             },
+        }
+    }
+}
+
+#[cfg(test)]
+mod dependency_measurements {
+    use super::*;
+
+    #[test]
+    #[ignore = "release workload measurement"]
+    fn typed_token_dependency_measurement() {
+        use std::{hint::black_box, time::Instant};
+        for count in [10, 100, 1000] {
+            for chain in [1, 5, 20] {
+                let chain = chain.min(count - 1);
+                let mut theme = Theme::new("bench", "Bench");
+                for index in 0..count {
+                    let value = if index < chain {
+                        TokenValue::String(format!("var(--bench-t{})", index + 1))
+                    } else {
+                        TokenValue::Number(8.0)
+                    };
+                    theme.set_token(
+                        format!("bench.t{index}"),
+                        value,
+                        ThemeProvenance::UserOverride,
+                    );
+                }
+                let before = theme.resolved_tokens.read().unwrap().len();
+                assert_eq!(before, 0);
+                assert_eq!(
+                    theme.resolve_token_value("bench.t0").unwrap(),
+                    Some(TokenValue::Number(8.0))
+                );
+                let clone = theme.clone();
+                assert!(Arc::ptr_eq(&theme.resolved_tokens, &clone.resolved_tokens));
+                for depth in [10, 50, 200] {
+                    let reads = depth * 100;
+                    let start = Instant::now();
+                    for _ in 0..reads {
+                        black_box(
+                            theme
+                                .resolve_named_token(black_box("bench.t0"), &mut Vec::new())
+                                .unwrap(),
+                        );
+                    }
+                    let recursive = start.elapsed();
+                    let start = Instant::now();
+                    for _ in 0..reads {
+                        black_box(clone.resolve_token_value(black_box("bench.t0")).unwrap());
+                    }
+                    eprintln!(
+                        "tokens={count} chain={chain} consumers={depth} reads={reads} recursive_us={} shared_typed_us={} entries={} hits={reads}",
+                        recursive.as_micros(),
+                        start.elapsed().as_micros(),
+                        theme.resolved_tokens.read().unwrap().len()
+                    );
+                }
+                theme.set_token(
+                    format!("bench.t{chain}"),
+                    TokenValue::Number(16.0),
+                    ThemeProvenance::UserOverride,
+                );
+                assert_eq!(
+                    theme.resolve_token_value("bench.t0").unwrap(),
+                    Some(TokenValue::Number(16.0))
+                );
+                assert_eq!(
+                    clone.resolve_token_value("bench.t0").unwrap(),
+                    Some(TokenValue::Number(8.0))
+                );
+            }
         }
     }
 }

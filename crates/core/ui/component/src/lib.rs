@@ -17,8 +17,8 @@ pub use token_usage::{ThemeTokenRead, unknown_theme_token_reads};
 /// ```
 ///
 /// This crate parses these blocks into a typed AST. It has no runtime
-/// dependencies — it does not depend on mesh-core-theme, mesh-core-service, or
-/// any other mesh crate.
+/// execution dependencies. CSS values and keyframe syntax come from the
+/// renderer-neutral shared styling layer in `mesh-core-theme`.
 pub mod template;
 
 pub use parser::{

@@ -9594,3 +9594,74 @@ for docked and 320–324 for window. The ranges overlap and the viewport differs
 these results do not diagnose or resolve the user's live GPU/presentation lag.
 That follow-up stays in `docs/BACKLOG.md`. Logs are under
 `/tmp/mesh-settings-scroll-{docked,window}-{1,2,3}.log`.
+
+## 2026-10-27 — S04 shared CSS/value/keyframe lowering and reload reuse
+
+The CSS parser already served themes and components; the remaining repeated
+work was source lowering during validation/reload and duplicate value/stop
+representations. `parse_stylesheet` now returns immutable shared lowerings from
+a per-thread LRU bounded to 16 entries and 8 MiB of retained source/AST payload.
+Source text and absolute source offset identify an entry; input is limited to
+2 MiB and 64 nested delimiters. Reference classification is stored once per
+lowered declaration. Components re-export that classification and both theme
+and component stops use one generic keyframe representation, with runtime
+projections retaining authored recipes or validated easing as appropriate.
+The duplicate component keyframe-property check is removed; shared lowering
+owns that validation. Existing typed token resolution and clone-detachment
+semantics remain in place rather than adding another graph/cache authority.
+
+**Measurement:** `nix develop`, Rust 1.98.1, workspace release profile (thin LTO,
+one codegen unit), three repeated runs of
+`cargo test --release -p mesh-core-theme --lib measurement -- --ignored --nocapture --test-threads=1`.
+The control forces the current lowering implementation to parse each time;
+the comparison warms one lowering then checks shared pointer identity on every
+read. These compare uncached/cached lowerings, not old/new full shell reloads.
+Each source has 30 control and 30 warmed reads per run. All seven tracked theme
+packs are included (both mesh-default modes: eight CSS files), plus generated
+1/10/100 KiB sources containing distinct simple selectors and two declarations.
+
+| Source/workload | Uncached p50 | Shared p50 | Uncached p95 | Shared p95 | Retained source/AST payload |
+| --- | --- | --- | --- | --- | --- |
+| Eight shipped CSS files, 11,332–13,833 bytes | 506.989–632.846 µs | 1.188–2.375 µs | 533.111–979.546 µs | 2.374–2.375 µs | 76,793–81,770 bytes/file |
+| Synthetic 1,062 bytes | 61.741–64.116 µs | 1.188 µs | 68.865–87.863 µs | 2.375 µs | 19,191 bytes |
+| Synthetic 10,243 bytes | 1.292–1.371 ms | 1.188–2.375 µs | 1.321–1.776 ms | 2.375 µs | 177,091 bytes |
+| Synthetic 102,446 bytes | 84.623–87.183 ms | 3.562 µs | 93.851–99.505 ms | 3.562–4.749 µs | 1,695,123 bytes |
+
+Warmed batches execute zero parser/lowering passes versus 30 in each control
+batch. Byte accounting uses string/vector capacities, excluding allocator
+headers and cache administrative storage. Allocation counts were not measured.
+The large synthetic cold parse remains expensive; this change removes repeated
+lowering rather than claiming to optimize that cold path. No speed threshold
+was added; `css_reload_reuse_measurement` is an ignored measurement workload.
+
+`typed_token_dependency_measurement` compares recursive scalar alias resolution
+with existing shared typed reads on cloned immutable themes. Matrix: 10/100/1,000
+tokens; requested chains 1/5/20 (clipped to nine links for the ten-token graph);
+10/50/200 synthetic consumers, each reading the same inherited alias 100 times.
+Consumers are repeated readers, not rendered/layout trees. Representative
+three-run elapsed ranges:
+
+| Tokens / links / consumers / reads | Recursive control | Shared typed reads |
+| --- | --- | --- |
+| 10 / 1 / 10 / 1,000 | 306–334 µs | 94–103 µs |
+| 100 / 5 / 50 / 5,000 | 4.065–4.131 ms | 263–277 µs |
+| 1,000 / 20 / 200 / 20,000 | 86.038–88.902 ms | 1.068–1.081 ms |
+
+Each warmed graph retains one alias entry and all measured reads hit it;
+results preserve numeric type. Mutation detaches the resolution cache and the
+unchanged clone retains its original typed result. These are parser/lookup
+measurements, not end-to-end theme switching, layout, frame-gap or allocation
+measurements. The rejected-experiments table and the October 13 D7 token-cache
+record were reviewed; no rejected computed-style sharing approach was revived.
+
+Validation: theme/component debug suites 48/109 passed, no failures; generated
+selector/alias/keyframe projection parity and invalid-source tests pass, with
+both entry-count and retained-byte eviction, exact offsets, invalid-edit reuse,
+source limits, clone sharing and mutation detachment covered. Both release
+measurement workloads passed three times. Shell theme tests: 32 passed, one
+ignored; component interaction/animation tests: 47 passed, two ignored.
+
+Final recovery verification: `package_recovery_restores_the_published_theme_change_document`
+passed, proving committed detail cursors survive rollback and candidate cursors
+become stale. The three transport regressions also passed after adding negative
+cursor rejection. `git diff --check` is clean for this change.

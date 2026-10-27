@@ -1879,24 +1879,25 @@ impl Shell {
         let mut theme_contract = builtin_contract(
             "mesh.theme",
             &[
-                ("current", "string"),
-                ("theme_id", "string"),
+                ("current", "string?"),
+                ("theme_id", "string?"),
                 ("mode", "string?"),
                 ("mode_policy", "object?"),
-                ("modes", "object[]"),
+                ("modes", "object[]?"),
                 ("color_scheme", "string?"),
                 ("contrast", "string?"),
+                ("details", "object"),
                 ("tokens", "object?"),
                 ("provenance", "object?"),
-                ("revision", "string"),
-                ("durable_revision", "string"),
+                ("revision", "string?"),
+                ("durable_revision", "string?"),
                 ("fingerprint", "int?"),
-                ("is_dark", "boolean"),
-                ("themes", "object[]"),
-                ("available", "string[]"),
-                ("scope", "string"),
-                ("can_pin", "boolean"),
-                ("system_resources", "object"),
+                ("is_dark", "boolean?"),
+                ("themes", "object[]?"),
+                ("available", "string[]?"),
+                ("scope", "string?"),
+                ("can_pin", "boolean?"),
+                ("system_resources", "object?"),
                 ("backdrop_image", "string?"),
             ],
             &[
@@ -1909,27 +1910,42 @@ impl Shell {
                     "list_font_families",
                     &[("offset", "int?"), ("limit", "int?")],
                 ),
+                (
+                    "read_details",
+                    &[
+                        ("revision", "string"),
+                        ("offset", "int?"),
+                        ("limit", "int?"),
+                    ],
+                ),
             ],
         );
         theme_contract
             .capabilities
             .methods
             .insert("list_font_families".into(), vec!["theme.read".into()]);
+        theme_contract
+            .capabilities
+            .methods
+            .insert("read_details".into(), vec!["theme.read".into()]);
         theme_contract.events = vec![
             mesh_core_service::InterfaceEvent {
                 name: "ThemeChanged".into(),
                 payload: [
-                    ("theme_id", "string"),
-                    ("mode", "string"),
-                    ("mode_policy", "object"),
-                    ("modes", "object[]"),
-                    ("color_scheme", "string"),
-                    ("contrast", "string"),
-                    ("revision", "string"),
-                    ("durable_revision", "string"),
-                    ("tokens", "object"),
-                    ("provenance", "object"),
-                    ("changed_tokens", "object[]"),
+                    ("theme_id", "string?"),
+                    ("mode", "string?"),
+                    ("mode_policy", "object?"),
+                    ("modes", "object[]?"),
+                    ("color_scheme", "string?"),
+                    ("contrast", "string?"),
+                    ("revision", "string?"),
+                    ("durable_revision", "string?"),
+                    ("tokens", "object?"),
+                    ("provenance", "object?"),
+                    ("changed_tokens", "object[]?"),
+                    ("changed_token_count", "int?"),
+                    ("details", "object?"),
+                    ("details_required", "boolean?"),
                 ]
                 .into_iter()
                 .map(|(name, arg_type)| mesh_core_service::InterfaceArgument {
@@ -1941,13 +1957,15 @@ impl Shell {
             mesh_core_service::InterfaceEvent {
                 name: "TokenChanged".into(),
                 payload: [
-                    ("theme_id", "string"),
-                    ("mode", "string"),
-                    ("name", "string"),
+                    ("theme_id", "string?"),
+                    ("mode", "string?"),
+                    ("name", "string?"),
+                    ("details", "object?"),
+                    ("details_required", "boolean?"),
                     ("value", "any?"),
                     ("provenance", "any?"),
-                    ("revision", "string"),
-                    ("durable_revision", "string"),
+                    ("revision", "string?"),
+                    ("durable_revision", "string?"),
                 ]
                 .into_iter()
                 .map(|(name, arg_type)| mesh_core_service::InterfaceArgument {
@@ -2140,6 +2158,7 @@ impl Shell {
             module_dirs,
             core: ShellCoreState::default(),
             last_published_theme_snapshot: None,
+            last_theme_change_details: None,
             components: Vec::new(),
             render_stalled: false,
             component_by_surface: HashMap::new(),

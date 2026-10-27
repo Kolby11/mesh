@@ -2304,6 +2304,8 @@ impl Shell {
             .or_else(|| core_service_request(interface, command, payload));
         let mut dispatch_result = if interface == "mesh.theme" && command == "list_font_families" {
             self.list_theme_font_families(payload)
+        } else if interface == "mesh.theme" && command == "read_details" {
+            self.read_theme_details(payload)
         } else if let Some(request) = core_request {
             // Inside the scheduler the request runs as a tracked follow-up and
             // the call is answered when it settles, not when it is queued.

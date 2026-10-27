@@ -233,6 +233,19 @@ fn system_resources_json(
 }
 
 impl Shell {
+    pub(in crate::shell) fn read_theme_details(
+        &self,
+        payload: &serde_json::Value,
+    ) -> serde_json::Value {
+        if let Some(change) = &self.last_theme_change_details
+            && payload["revision"]
+                == mesh_core_theme::transport::detail_descriptor(change)["revision"]
+        {
+            return mesh_core_theme::transport::read_details(change, payload);
+        }
+        mesh_core_theme::transport::read_details(&self.full_theme_service_payload(), payload)
+    }
+
     pub(in crate::shell) fn list_theme_font_families(
         &self,
         payload: &serde_json::Value,
@@ -867,6 +880,10 @@ impl Shell {
     }
 
     pub(in crate::shell) fn authoritative_theme_service_payload(&self) -> serde_json::Value {
+        mesh_core_theme::transport::bounded_snapshot(self.full_theme_service_payload())
+    }
+
+    fn full_theme_service_payload(&self) -> serde_json::Value {
         let snapshot = self.theme.active_snapshot();
         let theme_modes = |theme: &mesh_core_theme::Theme| {
             self.installed_module_graph
@@ -969,8 +986,9 @@ impl Shell {
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let snapshot = self.theme.active_snapshot().clone();
         let previous_snapshot = self.last_published_theme_snapshot.clone();
-        let payload = self.authoritative_theme_service_payload();
-        let modes = payload["modes"].clone();
+        let full_payload = self.full_theme_service_payload();
+        let modes = full_payload["modes"].clone();
+        let payload = mesh_core_theme::transport::bounded_snapshot(full_payload);
         let durable_revision = self.control_plane_revision.as_string();
         // The renderer owns this snapshot; a provider mirror is delivered
         // through the normal `mesh.theme` state channel below, not an
@@ -1003,38 +1021,47 @@ impl Shell {
                     })
                 })
                 .collect::<Vec<_>>();
+            let changed_token_count = changed_token_names.len();
             let revision = format!("{:016x}", snapshot.revision);
+            let change = serde_json::json!({
+                "theme_id": snapshot.id.clone(),
+                "mode": snapshot.mode.clone(),
+                "mode_policy": self.settings.theme.mode_policy.clone(),
+                "modes": modes,
+                "color_scheme": snapshot.color_scheme.clone(),
+                "contrast": snapshot.contrast.clone(),
+                "revision": revision.clone(),
+                "durable_revision": durable_revision.clone(),
+                "tokens": snapshot.tokens.clone(),
+                "provenance": snapshot.provenance.clone(),
+                "changed_tokens": changed_tokens,
+                "changed_token_count": changed_token_count,
+            });
+            let details = mesh_core_theme::transport::detail_descriptor(&change);
+            let event = mesh_core_theme::transport::bounded_event(change.clone(), &details);
+            self.last_theme_change_details = Some(change);
             requests.extend(self.broadcast_shell_interface_event(
                 "mesh.theme",
                 "ThemeChanged",
-                serde_json::json!({
-                    "theme_id": snapshot.id.clone(),
-                    "mode": snapshot.mode.clone(),
-                    "mode_policy": self.settings.theme.mode_policy.clone(),
-                    "modes": modes,
-                    "color_scheme": snapshot.color_scheme.clone(),
-                    "contrast": snapshot.contrast.clone(),
-                    "revision": revision.clone(),
-                    "durable_revision": durable_revision.clone(),
-                    "tokens": snapshot.tokens.clone(),
-                    "provenance": snapshot.provenance.clone(),
-                    "changed_tokens": changed_tokens,
-                }),
+                event,
             )?);
             if self.has_interface_event_observers("mesh.theme", "TokenChanged") {
                 for name in changed_token_names {
                     requests.extend(self.broadcast_shell_interface_event(
                         "mesh.theme",
                         "TokenChanged",
-                        serde_json::json!({
-                            "theme_id": snapshot.id.clone(),
-                            "mode": snapshot.mode.clone(),
-                            "name": name,
-                            "value": snapshot.tokens.get(&name),
-                            "provenance": snapshot.provenance.get(&name),
-                            "revision": revision.clone(),
-                            "durable_revision": durable_revision.clone(),
-                        }),
+                        mesh_core_theme::transport::bounded_event(
+                            serde_json::json!({
+                                "theme_id": snapshot.id.clone(),
+                                "mode": snapshot.mode.clone(),
+                                "name": name,
+                                "value": snapshot.tokens.get(&name),
+                                "provenance": snapshot.provenance.get(&name),
+                                "revision": revision.clone(),
+                                "durable_revision": durable_revision.clone(),
+                            }),
+                            &details,
+                        ),
                     )?);
                 }
             }

@@ -3,8 +3,8 @@
 //! This module is deliberately renderer-neutral. It parses CSS with one
 //! implementation, retains the restricted selector AST used by the element
 //! matcher, and lowers declarations/keyframes without depending on the UI
-//! component crate. Theme and component consumers apply their own runtime
-//! value classification after this point.
+//! component crate. Immutable source lowerings, value classification and
+//! keyframe stops are shared; consumers project runtime-specific types.
 
 use cssparser::{Parser, ParserInput, ToCss, Token};
 use lightningcss::{
@@ -22,6 +22,7 @@ use lightningcss::{
     traits::ToCss as LightningToCss,
 };
 use serde::{Deserialize, Serialize};
+use std::{cell::RefCell, collections::VecDeque, sync::Arc};
 
 /// The selector subset MESH can match against a single element node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +136,40 @@ pub fn variable_reference(value: &str) -> Option<String> {
     (depth == 0 && !inner.trim().is_empty()).then(|| inner.trim().to_string())
 }
 
+/// A style value that may reference local or theme CSS variables.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum StyleValue {
+    /// A literal value: `#ff0000`, `16px`, `bold`.
+    Literal(String),
+    /// A variable reference: `var(--custom-prop)`.
+    Var(String),
+    /// A component-prop reference: `prop(name)`. Resolved against the per-instance
+    /// prop value map (published under `prop_variable_key(name)`).
+    Prop(String),
+}
+
+/// Classify one lowered CSS value while preserving the shared theme variable
+/// syntax. Embedded references remain literals and are resolved by the style
+/// resolver after component props and inherited custom properties are known.
+pub fn classify_style_value(value: &str) -> StyleValue {
+    let value = value.trim();
+    if let Some(name) = variable_reference(value) {
+        StyleValue::Var(name)
+    } else if let Some(name) = standalone_prop_reference(value) {
+        StyleValue::Prop(name)
+    } else {
+        StyleValue::Literal(value.to_string())
+    }
+}
+
+fn standalone_prop_reference(value: &str) -> Option<String> {
+    let inner = value.strip_prefix("prop(")?.strip_suffix(')')?;
+    if inner.contains('(') || inner.contains(')') {
+        return None;
+    }
+    Some(inner.trim().to_string())
+}
+
 /// A byte range in the source passed to [`parse_stylesheet`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SourceSpan {
@@ -201,12 +236,16 @@ pub struct KeyframesRule {
     pub span: SourceSpan,
 }
 
-#[derive(Debug, Clone)]
-pub struct KeyframeStop {
+/// A shared keyframe stop, parameterized by declaration and easing lowering.
+/// Theme recipes retain strings; component projections carry validated easing.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(bound(deserialize = "D: Deserialize<'de> + Default, E: Deserialize<'de>"))]
+pub struct KeyframeStop<D = Vec<Declaration>, E = String> {
     pub offset: f32,
-    pub declarations: Vec<Declaration>,
-    pub easing: Option<String>,
-    pub span: SourceSpan,
+    #[serde(default)]
+    pub declarations: D,
+    #[serde(default)]
+    pub easing: Option<E>,
 }
 
 #[derive(Debug, Clone)]
@@ -218,8 +257,8 @@ pub struct CustomRule {
     pub span: SourceSpan,
 }
 
-/// A raw, ordered CSS declaration. Consumers classify `value` into their
-/// runtime value types, while retaining the exact lowered CSS spelling here.
+/// An ordered declaration with shared reference classification and both
+/// canonical and authored spelling for runtime-specific projections.
 #[derive(Debug, Clone)]
 pub struct Declaration {
     pub property: String,
@@ -228,6 +267,7 @@ pub struct Declaration {
     /// consumers normally use `value`; theme serialization uses this to keep
     /// token recipes and MESH-specific literals lossless.
     pub raw_value: String,
+    pub classified: StyleValue,
     pub span: SourceSpan,
 }
 
@@ -267,9 +307,136 @@ impl ContainerQuery {
     }
 }
 
-/// Parse and lower the restricted stylesheet shared by component and theme
-/// sources. Parser and lowering failures retain an absolute source span.
-pub fn parse_stylesheet(source: &str, source_base: usize) -> Result<Stylesheet, LoweringError> {
+/// Maximum accepted source size for both component and theme CSS.
+pub const MAX_STYLESHEET_BYTES: usize = 2 * 1024 * 1024;
+const MAX_CSS_CACHE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_CSS_CACHE_ENTRIES: usize = 16;
+
+struct CachedStylesheet {
+    source: String,
+    base: usize,
+    stylesheet: Arc<Stylesheet>,
+    bytes: usize,
+}
+
+#[derive(Default)]
+struct StylesheetCache {
+    entries: VecDeque<CachedStylesheet>,
+    bytes: usize,
+}
+
+thread_local! {
+    static STYLESHEETS: RefCell<StylesheetCache> = RefCell::default();
+}
+
+/// Parse restricted CSS once per source and absolute source offset. Successful
+/// lowerings share immutable storage in a thread-local LRU bounded by retained
+/// source/AST bytes and entry count. Errors are never retained.
+pub fn parse_stylesheet(
+    source: &str,
+    source_base: usize,
+) -> Result<Arc<Stylesheet>, LoweringError> {
+    if source.len() > MAX_STYLESHEET_BYTES || source_base.checked_add(source.len()).is_none() {
+        return Err(error(
+            "CSS source exceeds byte or span budget",
+            SourceSpan::new(source_base, source_base),
+        ));
+    }
+    if let Some(hit) = STYLESHEETS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let index = cache
+            .entries
+            .iter()
+            .position(|entry| entry.base == source_base && entry.source == source)?;
+        let entry = cache.entries.remove(index)?;
+        let hit = entry.stylesheet.clone();
+        cache.entries.push_back(entry);
+        Some(hit)
+    }) {
+        return Ok(hit);
+    }
+    let stylesheet = Arc::new(parse_stylesheet_uncached(source, source_base)?);
+    let bytes =
+        source.len() + rules_bytes(&stylesheet.rules) + std::mem::size_of::<CachedStylesheet>();
+    if bytes <= MAX_CSS_CACHE_BYTES {
+        STYLESHEETS.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            while cache.entries.len() >= MAX_CSS_CACHE_ENTRIES
+                || cache.bytes + bytes > MAX_CSS_CACHE_BYTES
+            {
+                let entry = cache
+                    .entries
+                    .pop_front()
+                    .expect("nonempty cache over budget");
+                cache.bytes -= entry.bytes;
+            }
+            cache.bytes += bytes;
+            cache.entries.push_back(CachedStylesheet {
+                source: source.into(),
+                base: source_base,
+                stylesheet: stylesheet.clone(),
+                bytes,
+            });
+        });
+    }
+    Ok(stylesheet)
+}
+
+fn declarations_bytes(declarations: &Vec<Declaration>) -> usize {
+    declarations.capacity() * std::mem::size_of::<Declaration>() + declarations.iter().map(|d| {
+        let (StyleValue::Literal(value) | StyleValue::Var(value) | StyleValue::Prop(value)) = &d.classified;
+        d.property.capacity() + d.value.capacity() + d.raw_value.capacity() + value.capacity()
+    }).sum::<usize>()
+}
+
+fn selector_bytes(selector: &Selector) -> usize {
+    match selector {
+        Selector::Tag(s) | Selector::Class(s) | Selector::Id(s) => s.capacity(),
+        Selector::State(tag, state) => tag.capacity() + state.capacity(),
+        Selector::Compound(parts) => {
+            parts.capacity() * std::mem::size_of::<Selector>()
+                + parts.iter().map(selector_bytes).sum::<usize>()
+        }
+        Selector::Universal => 0,
+    }
+}
+
+fn rules_bytes(rules: &Vec<Rule>) -> usize {
+    rules.capacity() * std::mem::size_of::<Rule>()
+        + rules
+            .iter()
+            .map(|rule| match rule {
+                Rule::Style(rule) => {
+                    declarations_bytes(&rule.declarations)
+                        + rule.selectors.capacity() * std::mem::size_of::<Selector>()
+                        + rule.selectors.iter().map(selector_bytes).sum::<usize>()
+                }
+                Rule::Container(rule) => rules_bytes(&rule.rules),
+                Rule::Keyframes(rule) => {
+                    rule.name.capacity()
+                        + rule.stops.capacity() * std::mem::size_of::<KeyframeStop>()
+                        + rule
+                            .stops
+                            .iter()
+                            .map(|stop| {
+                                declarations_bytes(&stop.declarations)
+                                    + stop.easing.as_ref().map_or(0, String::capacity)
+                            })
+                            .sum::<usize>()
+                }
+                Rule::Custom(rule) => {
+                    rule.name.capacity()
+                        + rule.prelude.capacity()
+                        + rule.block.as_ref().map_or(0, String::capacity)
+                }
+            })
+            .sum::<usize>()
+}
+
+fn parse_stylesheet_uncached(
+    source: &str,
+    source_base: usize,
+) -> Result<Stylesheet, LoweringError> {
     validate_source_structure(source, source_base)?;
     let stylesheet = StyleSheet::parse(
         source,
@@ -437,7 +604,6 @@ fn lower_keyframes_rule(
                 offset: lower_keyframe_selector(selector, stop_span)?,
                 declarations: declarations.clone(),
                 easing: easing.clone(),
-                span: stop_span,
             });
         }
     }
@@ -478,6 +644,7 @@ fn lower_declarations(
                 .unwrap_or_else(|| (value.clone(), span));
             Ok(Declaration {
                 property: property_name,
+                classified: classify_style_value(&value),
                 value,
                 raw_value,
                 span: value_span,
@@ -838,6 +1005,7 @@ pub(crate) fn validate_source_structure(
     let mut escaped = false;
     let mut last_close = None;
     let mut open_braces = Vec::new();
+    let mut delimiter_depth = 0usize;
     let bytes = source.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
@@ -869,6 +1037,17 @@ pub(crate) fn validate_source_structure(
         if bytes[index] == b'\\' {
             index += 2;
             continue;
+        }
+        if matches!(bytes[index], b'{' | b'(' | b'[') {
+            delimiter_depth += 1;
+            if delimiter_depth > 64 {
+                return Err(error(
+                    "CSS nesting exceeds 64 levels",
+                    SourceSpan::new(source_base + index, source_base + index + 1),
+                ));
+            }
+        } else if matches!(bytes[index], b'}' | b')' | b']') {
+            delimiter_depth = delimiter_depth.saturating_sub(1);
         }
         if bytes[index] == b'\'' || bytes[index] == b'"' {
             in_quote = Some(bytes[index]);
@@ -1157,4 +1336,137 @@ pub fn parse_color_rgba(value: &str) -> Option<[u8; 4]> {
     let color = CssColor::parse_string(value.trim()).ok()?;
     let rgba = RGBA::try_from(&color).ok()?;
     Some([rgba.red, rgba.green, rgba.blue, rgba.alpha])
+}
+
+#[cfg(test)]
+mod reuse_tests {
+    use super::*;
+
+    #[test]
+    fn shared_lowering_reuses_exact_source_and_preserves_spans() {
+        let source = ":root { --color-a: var(--color-b); } @keyframes fade { from { opacity: 0; } to { opacity: 1; } }";
+        let first = parse_stylesheet(source, 10).unwrap();
+        let second = parse_stylesheet(source, 10).unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+        let shifted = parse_stylesheet(source, 20).unwrap();
+        assert!(!Arc::ptr_eq(&first, &shifted));
+        let Rule::Style(rule) = &shifted.rules[0] else {
+            panic!()
+        };
+        assert_eq!(rule.span.start, 20);
+        assert_eq!(
+            rule.declarations[0].classified,
+            StyleValue::Var("--color-b".into())
+        );
+        assert!(parse_stylesheet("button {", 10).is_err());
+        assert!(Arc::ptr_eq(&first, &parse_stylesheet(source, 10).unwrap()));
+        assert!(parse_stylesheet(&" ".repeat(MAX_STYLESHEET_BYTES + 1), 0).is_err());
+        assert!(parse_stylesheet("a{}", usize::MAX).is_err());
+        assert!(parse_stylesheet(&format!("{}{}", "a{".repeat(65), "}".repeat(65)), 0).is_err());
+    }
+
+    #[test]
+    fn css_lru_evicts_old_entries_without_flushing_hot_sources() {
+        STYLESHEETS.with(|cache| *cache.borrow_mut() = StylesheetCache::default());
+        let cold = parse_stylesheet("button { opacity: 0; }", 0).unwrap();
+        let hot = parse_stylesheet("button { opacity: 1; }", 0).unwrap();
+        for index in 0..MAX_CSS_CACHE_ENTRIES * 2 {
+            parse_stylesheet(&format!(".item{index} {{ opacity: .5; }}"), 0).unwrap();
+            assert!(Arc::ptr_eq(
+                &hot,
+                &parse_stylesheet("button { opacity: 1; }", 0).unwrap()
+            ));
+        }
+        assert!(!Arc::ptr_eq(
+            &cold,
+            &parse_stylesheet("button { opacity: 0; }", 0).unwrap()
+        ));
+        STYLESHEETS.with(|cache| {
+            let cache = cache.borrow();
+            assert!(cache.entries.len() <= MAX_CSS_CACHE_ENTRIES);
+            assert!(cache.bytes <= MAX_CSS_CACHE_BYTES);
+        });
+    }
+
+    #[test]
+    fn css_cache_enforces_retained_byte_budget_before_entry_limit() {
+        STYLESHEETS.with(|cache| *cache.borrow_mut() = StylesheetCache::default());
+        for index in 0..5 {
+            let source = format!(".item{index} {{ --large: '{}'; }}", "x".repeat(512 * 1024));
+            parse_stylesheet(&source, 0).unwrap();
+        }
+        STYLESHEETS.with(|cache| {
+            let cache = cache.borrow();
+            assert!(cache.entries.len() < 5);
+            assert!(cache.bytes <= MAX_CSS_CACHE_BYTES);
+        });
+    }
+
+    #[test]
+    #[ignore = "release workload measurement"]
+    fn css_reload_reuse_measurement() {
+        use std::{hint::black_box, time::Instant};
+        let mut sources = Vec::new();
+        let themes =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../modules/themes");
+        for mode in ["dark", "light"] {
+            sources.push((
+                format!("mesh-default-{mode}"),
+                std::fs::read_to_string(themes.join("mesh-default").join(format!("{mode}.css")))
+                    .unwrap(),
+            ));
+        }
+        for name in [
+            "catppuccin-mocha",
+            "gruvbox-dark",
+            "nord",
+            "solarized-dark",
+            "tokyo-night",
+            "violet-glass",
+        ] {
+            sources.push((
+                name.into(),
+                std::fs::read_to_string(themes.join(name).join("theme.css")).unwrap(),
+            ));
+        }
+        for size in [1024, 10240, 102400] {
+            let mut css = String::new();
+            while css.len() < size {
+                css.push_str(&format!(
+                    ".item{} {{ color: var(--color-primary); padding: 8px; }}\n",
+                    css.len()
+                ));
+            }
+            sources.push((format!("synthetic-{size}"), css));
+        }
+        for (name, source) in sources {
+            let iterations = 30;
+            let mut uncached = Vec::new();
+            let mut reused = Vec::new();
+            for _ in 0..iterations {
+                let start = Instant::now();
+                black_box(parse_stylesheet_uncached(black_box(&source), 0).unwrap());
+                uncached.push(start.elapsed().as_nanos());
+            }
+            let first = parse_stylesheet(&source, 0).unwrap();
+            for _ in 0..iterations {
+                let start = Instant::now();
+                let hit = parse_stylesheet(black_box(&source), 0).unwrap();
+                assert!(Arc::ptr_eq(&first, &hit));
+                black_box(hit);
+                reused.push(start.elapsed().as_nanos());
+            }
+            uncached.sort_unstable();
+            reused.sort_unstable();
+            eprintln!(
+                "css {name}: bytes={} iterations={iterations} uncached_p50_ns={} uncached_p95_ns={} reused_p50_ns={} reused_p95_ns={} retained_bytes={} uncached_parses={iterations} reused_parses=0",
+                source.len(),
+                uncached[15],
+                uncached[28],
+                reused[15],
+                reused[28],
+                rules_bytes(&first.rules) + source.len()
+            );
+        }
+    }
 }
