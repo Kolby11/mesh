@@ -1539,3 +1539,35 @@ fn first_stand_in_paint_queries_output_without_measuring_it_as_content() {
         assert_eq!(bar.layout.height, 40.0);
     }
 }
+
+#[test]
+fn compositor_resize_updates_container_queries_with_pending_interaction() {
+    let mut component = test_frontend_component(
+        r#"
+<template><column><button>Focus</button><box class="responsive" /></column></template>
+<style>
+column { width: 100%; height: 100%; }
+button { width: 100px; height: 30px; }
+.responsive { width: 120px; height: 30px; }
+@container (max-width: 300px) { .responsive { width: 60px; } }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(400, 160);
+    for (width, expected) in [(400, 120.0), (260, 60.0), (400, 120.0)] {
+        component.invalidate_interaction_restyle();
+        component.surface_size_changed(width, 160);
+        component
+            .paint_raster(
+                &theme,
+                SurfaceExtent::unpadded(width, 160).bound_by_compositor(true),
+                &mut buffer,
+                1.0,
+            )
+            .unwrap();
+        let responsive =
+            first_node_by_class(component.last_tree.as_ref().unwrap(), "responsive").unwrap();
+        assert_eq!(responsive.layout.width, expected);
+    }
+}

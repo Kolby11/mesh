@@ -311,6 +311,11 @@ component author must know before setting `role: "window"`:
   pinning min to max is what stops a compositor from resizing the window at
   all.
 
+  Size and toplevel-state changes apply throughout the surface even when focus
+  or hover changes in the same frame. A role switch paints the replacement
+  surface in its resting styles, without interpolating its geometry from the
+  previous role.
+
 A window has no say in its position: xdg-shell gives the client none. Placement
 control comes from compositor window rules keyed on `appId`, which defaults to
 the module id.

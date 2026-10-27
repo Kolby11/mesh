@@ -9566,3 +9566,31 @@ closes and reopens on three clicks without pointer motion.
 Validation: shell lib 1,036 passed / 37 ignored (new
 `no_reserve_when_tooltips_can_be_popups`; the settings mount test now expects
 its 700 px layer instead of 900 px).
+
+
+## 2026-10-27 — Settings touchpad scrolling: docked versus window role
+
+area: Settings scroll attribution; no rendering optimization or speedup claim
+
+After the surface-state correctness fix, release, CPU raster, stage profiling
+disabled, `d9_settings_scroll_frame_gate` with `MESH_SCROLL_GLASS=1`. Three
+interleaved docked/window pairs on the development desktop.
+`MESH_SCROLL_WINDOWED=1` promotes the same component and binds paint to the
+920×900 extent. The docked role retains its authored 920×700 panel and margin;
+these are role comparisons with different visible extents, not an isolated
+before/after optimization measurement. The Appearance fixture seeds 240 icon
+themes and font families, displays bounded resource rows and theme cards, and
+drives 60 touchpad finger frames plus 30 momentum frames. Retained plans report
+168 nodes and 187 commands.
+
+| Role | Frame p50 across runs | Frame p90 across runs | Passes / frames | Restyles after ownership |
+| --- | --- | --- | --- | --- |
+| Docked | 4.522–6.772 ms | 7.047–10.597 ms | 90 / 90 | 0 |
+| Window | 6.182–9.891 ms | 8.450–14.131 ms | 90 / 90 | 0 |
+
+Every run passes the gate's one-paint-per-frame and no-restyle assertions. No
+display entries are rebuilt; commands rebuilt over the whole gesture are 324
+for docked and 320–324 for window. The ranges overlap and the viewport differs;
+these results do not diagnose or resolve the user's live GPU/presentation lag.
+That follow-up stays in `docs/BACKLOG.md`. Logs are under
+`/tmp/mesh-settings-scroll-{docked,window}-{1,2,3}.log`.

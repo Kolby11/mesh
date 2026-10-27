@@ -907,7 +907,7 @@ impl FrontendSurfaceComponent {
             // its already-laid-out content.
             reused_retained_layout = true;
         } else if targeted_interaction_restyle {
-            if affected_keys.affected.is_empty() {
+            if affected_keys.affected.is_empty() || !interaction_snapshot_valid {
                 if !interaction_snapshot_valid {
                     // First frame or no previous interaction state — fall back
                     // to full-tree restyle.
@@ -1593,6 +1593,8 @@ impl FrontendSurfaceComponent {
             return false;
         }
         self.last_surface_size = Some(size);
+        // Container queries can change outside the current hover/focus targets.
+        self.interaction_snapshot_valid = false;
         // The retained tree is deliberately kept: the STYLE|LAYOUT flags below
         // already force a full rebuild at the new size, and the stale tree is
         // the diff source for `previous_visual_styles` — dropping it here
@@ -1627,6 +1629,9 @@ impl FrontendSurfaceComponent {
             return false;
         }
         self.window_states = states;
+        // Surface pseudo-states apply to every node, including when a click
+        // has already queued a targeted interaction restyle for this frame.
+        self.interaction_snapshot_valid = false;
         self.measured_size = None;
         self.surface_pixels_invalid = true;
         self.invalidate(

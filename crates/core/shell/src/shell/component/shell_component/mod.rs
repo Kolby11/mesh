@@ -985,6 +985,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             return false;
         }
         self.pending_surface_role_change = None;
+        self.snap_transitions_once = true;
         let windowed = role == mesh_core_wayland::SurfaceRole::Window;
         self.surface_layout.role = role;
         self.surface_policy = self

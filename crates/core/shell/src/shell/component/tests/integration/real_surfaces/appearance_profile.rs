@@ -9,6 +9,45 @@ use crate::ShellComponent;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+#[test]
+fn settings_pop_out_fills_the_configured_window_after_a_docked_frame() {
+    let theme = default_theme();
+    let mut settings =
+        real_frontend_module_component("@mesh/settings", super::super::debug::settings_catalog());
+    let mut buffer = PixelBuffer::new(1200, 900);
+    settings
+        .paint_raster(&theme, SurfaceExtent::unpadded(944, 724), &mut buffer, 1.0)
+        .unwrap();
+    settings.invalidate_interaction_restyle();
+    assert!(settings.surface_role_changed(mesh_core_wayland::SurfaceRole::Window));
+    for (width, height) in [(1200, 900), (760, 820)] {
+        settings.invalidate_interaction_restyle();
+        settings.surface_size_changed(width, height);
+        settings
+            .paint_raster(
+                &theme,
+                SurfaceExtent::unpadded(width, height).bound_by_compositor(true),
+                &mut buffer,
+                1.0,
+            )
+            .unwrap();
+        let tree = settings.last_tree.as_ref().unwrap();
+        let panel = first_node_by_class(tree, "settings-shell").unwrap();
+        assert!(panel.state.window().windowed);
+        assert_eq!(
+            (panel.layout.width, panel.layout.height),
+            (width as f32, height as f32),
+            "style: {:?}/{:?}, margin: {:?}, attrs: {:?}, root: {:?}",
+            panel.computed_style.width,
+            panel.computed_style.height,
+            panel.computed_style.margin,
+            panel.attributes,
+            tree.layout
+        );
+        assert_eq!((panel.layout.x, panel.layout.y), (0.0, 0.0));
+    }
+}
+
 fn seed_large_resource_catalog(settings: &mut FrontendSurfaceComponent, count: usize) {
     let icon_themes = (0..count)
         .map(|index| {
@@ -390,7 +429,14 @@ fn render_loop_frame(
     let mut passes = 0;
     loop {
         settings
-            .paint_raster(theme, SurfaceExtent::unpadded(920, 900), buffer, 1.0)
+            .paint_raster(
+                theme,
+                SurfaceExtent::unpadded(920, 900).bound_by_compositor(
+                    settings.surface_role() == mesh_core_wayland::SurfaceRole::Window,
+                ),
+                buffer,
+                1.0,
+            )
             .unwrap();
         passes += 1;
         if !settings.wants_immediate_rerender() || passes >= 2 {
@@ -433,6 +479,7 @@ fn percentile(sorted: &[Duration], fraction: f64) -> Duration {
 ///
 // cargo test -p mesh-core-shell --release -- settings_scroll_frame_gate --ignored --nocapture
 // `MESH_SCROLL_GLASS=1` uses the glass material Settings has in the glass profile.
+// `MESH_SCROLL_WINDOWED=1` compares the promoted, compositor-sized window.
 #[test]
 #[ignore = "release-only Settings touchpad-scroll frame gate"]
 fn d9_settings_scroll_frame_gate() {
@@ -447,6 +494,9 @@ fn d9_settings_scroll_frame_gate() {
     };
     let mut buffer = PixelBuffer::new(920, 900);
     let mut settings = appearance_surface(&theme, &mut buffer);
+    if std::env::var_os("MESH_SCROLL_WINDOWED").is_some() {
+        settings.surface_role_changed(mesh_core_wayland::SurfaceRole::Window);
+    }
     for _ in 0..4 {
         render_loop_frame(&mut settings, &theme, &mut buffer);
     }
