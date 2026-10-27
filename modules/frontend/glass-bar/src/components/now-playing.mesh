@@ -36,7 +36,7 @@ end
 
 local function position_now()
     local position = media.position or 0
-    if media.state == "playing" then
+    if media.state.state == "playing" then
         position += os.time() - (media.updated_at or os.time())
     end
     local length = media.length or 0
@@ -45,7 +45,7 @@ end
 
 local function render()
     has_track = media.available == true and (media.title or "") ~= ""
-    playing = media.state == "playing"
+    playing = media.state.state == "playing"
     local text = media.title or ""
     title = #text > 26 and (string.sub(text, 1, 25) .. "…") or text
     art = media.art_path or ""

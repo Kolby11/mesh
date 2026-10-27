@@ -12,6 +12,11 @@ the rim highlight with shader-computed coverage, so partial and full repaints
 match. Promoted popups never sample the source. The live A/B over a moving
 window has not been run yet.
 
+The 2026-10-27 widget correction also routes the bottom layer through compositor
+blur and rim lighting. A static wallpaper image is not a trusted backdrop there
+when another client owns the visible wallpaper. Only background-layer wallpaper
+surfaces keep image sampling; phases 2–4 remain pending.
+
 ## Problem
 
 `backdrop-filter: blur() refract()` (04 §11) samples one static image: the

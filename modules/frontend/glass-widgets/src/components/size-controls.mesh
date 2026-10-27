@@ -1,42 +1,68 @@
 <template>
-    <popover class="size-popup" open={open} anchor-ref={anchor_ref} anchor="bottom" gravity="bottom" open-on="click" grab="click" aria-label={label}>
-        <column class="size-panel">
-            <text class="size-title">{label}</text>
-            <text>{t("resize.width")} · {width_value > 0 and width_value or default_width}px</text>
-            <slider class="size-slider" value={width_value > 0 and width_value or default_width} min={min_width} max="720" onchange={onWidth} aria-label={t("resize.width")} />
-            <text>{t("resize.height")} · {height_value > 0 and height_value or default_height}px</text>
-            <slider class="size-slider" value={height_value > 0 and height_value or default_height} min={min_height} max="480" onchange={onHeight} aria-label={t("resize.height")} />
-            <button class="size-reset" onclick={onReset}>{t("resize.reset")}</button>
-        </column>
-    </popover>
+    <box class="size-tools">
+        <button class="size-button" ref="resizeToggle" onclick={onToggle} aria-label={label} aria-pressed={resizing}><icon name="settings" size="14" /></button>
+        {#if resizing}
+            <column class="size-panel">
+                <text class="size-hint">{t("resize.hint")}</text>
+                <button class="size-reset" onclick={onReset}>{t("resize.reset")}</button>
+            </column>
+            <button class="size-handle" ref="resizeHandle" style:top={tostring(math.max(0, actual_height - 44)) .. "px"} onpointerdown={onDragStart} onpointermove={onDragMove} onpointerup={onDragEnd} onkeydown={onKey} aria-label={label}><icon name="window-restore" size="18" /></button>
+        {/if}
+    </box>
 </template>
 <script lang="luau">
-open = false
-anchor_ref = "sizeButton"
+resizing = false
 label = "Resize widget"
-width_value = 0
-height_value = 0
-default_width = 480
-default_height = 186
+actual_width = 480
+actual_height = 186
 min_width = 360
 min_height = 168
 onwidth = nil
 onheight = nil
 onreset = nil
-function onWidth(value)
-    if onwidth then onwidth(value) end
+local drag
+local function resize(width, height)
+    if onwidth then onwidth(math.clamp(width, min_width, 720)) end
+    if onheight then onheight(math.clamp(height, min_height, 480)) end
 end
-function onHeight(value)
-    if onheight then onheight(value) end
+function onToggle()
+    resizing = not resizing
+    drag = nil
+    if resizing then task.delay(0, function() refs.resizeHandle:focus() end) end
+end
+function onDragStart(event)
+    drag = { x = event.pointer.x, y = event.pointer.y, width = actual_width, height = actual_height }
+end
+function onDragMove(event)
+    if drag then resize(drag.width + event.pointer.x - drag.x, drag.height + event.pointer.y - drag.y) end
+end
+function onDragEnd(event)
+    onDragMove(event)
+    drag = nil
+end
+function onKey(event)
+    local step = event.modifiers.shift and 1 or 10
+    if event.key == "Escape" or event.key == "Enter" then
+        resizing = false
+        drag = nil
+        refs.resizeToggle:focus()
+    elseif event.key == "ArrowRight" then resize(actual_width + step, actual_height)
+    elseif event.key == "ArrowLeft" then resize(actual_width - step, actual_height)
+    elseif event.key == "ArrowDown" then resize(actual_width, actual_height + step)
+    elseif event.key == "ArrowUp" then resize(actual_width, actual_height - step)
+    end
 end
 function onReset()
+    drag = nil
     if onreset then onreset() end
 end
 </script>
 <style>
-    .size-popup { width: fit; height: fit; padding: 8px; background: transparent; transition: none; }
-    .size-panel { width: 280px; padding: 18px; gap: 10px; border-radius: 18px; background-image: var(--glass-surface-media); border: 1px solid var(--glass-rim); color: var(--glass-text); }
-    .size-title { font-weight: 600; }
-    .size-slider { width: 100%; height: 30px; }
+    .size-tools { position: relative; width: 28px; height: 28px; overflow: visible; transition: none; }
+    .size-button, .size-handle { width: 28px; height: 28px; padding: 5px; border-radius: 14px; background: var(--glass-fill-artwork); color: var(--glass-text-muted); }
+    .size-button:hover, .size-handle:hover { color: var(--glass-text-heading); }
+    .size-handle { position: absolute; right: 0; }
+    .size-panel { position: absolute; right: 36px; top: 0; width: 200px; padding: 12px; gap: 8px; border-radius: 14px; background-image: var(--glass-surface-media); border: 1px solid var(--glass-rim); color: var(--glass-text); overflow: hidden; }
+    .size-hint { width: 100%; height: fit-content; white-space: normal; }
     .size-reset { padding: 8px; border-radius: 10px; background-image: var(--glass-surface-control); }
 </style>

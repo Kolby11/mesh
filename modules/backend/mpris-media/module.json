@@ -13,7 +13,13 @@
         "exec.argv:playerctl:[\"play-pause\"]",
         "exec.argv:playerctl:[\"next\"]",
         "exec.argv:playerctl:[\"previous\"]",
-        "exec.argv:playerctl:[\"position\",\"*\"]"
+        "exec.argv:playerctl:[\"position\",\"*\"]",
+        "exec.argv:playerctl:[\"--follow\",\"status\"]",
+        "exec.argv:playerctl:[\"--player\",\"*\",\"metadata\",\"--format\",\"*\"]",
+        "exec.argv:playerctl:[\"--player\",\"*\",\"play-pause\"]",
+        "exec.argv:playerctl:[\"--player\",\"*\",\"next\"]",
+        "exec.argv:playerctl:[\"--player\",\"*\",\"previous\"]",
+        "exec.argv:playerctl:[\"--player\",\"*\",\"position\",\"*\"]"
       ],
       "optionalCapabilities": [
         "net.http"

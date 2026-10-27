@@ -4208,3 +4208,143 @@ async fn http_yields_the_backend_until_the_bounded_worker_completes() {
     assert_eq!(state["success"], true);
     assert_eq!(state["body"], "hello");
 }
+
+#[test]
+fn bundled_mpris_publishes_playback_before_art_and_keeps_latest_track() {
+    let script = bundled_backend_script("../../../../modules/backend/mpris-media/src/main.luau");
+    let mut ctx =
+        BackendScriptContext::new_with_capabilities("@mesh/mpris-media", ["net.http".into()]);
+    let contract: serde_json::Value = serde_json::from_str(&bundled_backend_script(
+        "../../../../modules/interfaces/media/module.json",
+    ))
+    .unwrap();
+    let contract = mesh_core_service::contract::parse_interface_contract(
+        "mesh.media",
+        "1.0",
+        &contract["mesh"]["interface"]["contract"],
+    )
+    .unwrap();
+    ctx.set_event_registry(BackendEventRegistry::from_contract(&contract));
+    ctx.load_script(&script).unwrap();
+    ctx.ensure_lua().unwrap().load(r#"
+        sample_line = "Playing\tplayer\t200000000\t42000000\thttps://example.test/first.png\tArtist\tAlbum\tFirst"
+        downloads = 0
+        streams = {}
+        mesh.exec_stream = function(program, args)
+            streams[#streams + 1] = args[2]
+            return { id = #streams, program = program }
+        end
+        last_args = {}
+        mesh.exec = function(program, args)
+            last_args = args
+            return { success = true, stdout = sample_line }
+        end
+        mesh.http_request = function(spec)
+            downloads += 1
+            return { success = true, path = "/cache/" .. spec.url:match("([^/]+)$") }
+        end
+    "#).exec().unwrap();
+    let initial = ctx.call_init().unwrap().unwrap();
+    assert_eq!(initial["title"], "First");
+    assert_eq!(initial["state"], "playing");
+    assert_eq!(initial["position"], 42.0);
+    assert_eq!(initial["art_path"], "");
+    assert_eq!(
+        ctx.ensure_lua()
+            .unwrap()
+            .globals()
+            .get::<u32>("downloads")
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        ctx.ensure_lua()
+            .unwrap()
+            .globals()
+            .get::<Table>("streams")
+            .unwrap()
+            .raw_len(),
+        2
+    );
+    let latest = ctx.run_stream_batch("playerctl", &[
+        "Playing\tplayer\t200000000\t1000000\thttps://example.test/old.png\tArtist\tAlbum\tOld".into(),
+        "Paused\tplayer\t200000000\t9000000\thttps://example.test/latest.png\tArtist\tAlbum\tLatest".into(),
+    ]).unwrap().unwrap();
+    assert_eq!(latest["title"], "Latest");
+    assert_eq!(latest["state"], "paused");
+    assert_eq!(latest["position"], 9.0);
+    let run = ctx.run_due_tasks(std::time::Instant::now() + std::time::Duration::from_millis(10));
+    assert!(run.errors.is_empty(), "{:?}", run.errors);
+    let art = run.state.unwrap();
+    assert_eq!(art["title"], "Latest");
+    assert_eq!(art["state"], "paused");
+    assert_eq!(art["art_path"], "/cache/latest.png");
+    assert_eq!(
+        ctx.ensure_lua()
+            .unwrap()
+            .globals()
+            .get::<u32>("downloads")
+            .unwrap(),
+        1
+    );
+    ctx.ensure_lua().unwrap().load(r#"
+        sample_line = "Playing\tplayer\t200000000\t10000000\tfile:///art/local%20cover.png\tArtist\tAlbum\tLatest"
+    "#).exec().unwrap();
+    let resumed = ctx
+        .run_stream_batch("playerctl", &["Playing".into()])
+        .unwrap()
+        .unwrap();
+    assert_eq!(resumed["state"], "playing");
+    let args = ctx.ensure_lua().unwrap().globals().get::<Table>("last_args").unwrap();
+    assert_eq!(args.get::<String>(1).unwrap(), "--player");
+    assert_eq!(args.get::<String>(2).unwrap(), "player");
+    let command = ctx.run_command_finished("play-pause", &serde_json::json!({})).unwrap();
+    assert_eq!(command.result["ok"], true);
+
+    assert_eq!(resumed["art_path"], "/art/local cover.png");
+    let gone = ctx
+        .run_stream_batch("playerctl", &["".into()])
+        .unwrap()
+        .unwrap();
+    assert_eq!(gone["available"], false);
+}
+
+#[test]
+fn bundled_cava_discards_superseded_frames_and_clears_on_exit() {
+    let script =
+        bundled_backend_script("../../../../modules/backend/cava-visualizer/src/main.luau");
+    let mut ctx = BackendScriptContext::new("@mesh/cava-visualizer");
+    ctx.load_script(&script).unwrap();
+    ctx.ensure_lua()
+        .unwrap()
+        .load(
+            r#"
+        mesh.exec_stream = function(program) return { id = 1, program = program } end
+    "#,
+        )
+        .exec()
+        .unwrap();
+    ctx.call_init().unwrap();
+    let frame = |level: u32| {
+        (0..24)
+            .map(|_| level.to_string())
+            .collect::<Vec<_>>()
+            .join(";")
+    };
+    let idle = ctx.run_stream_batch("sh", &[frame(0)]).unwrap().unwrap();
+    assert_eq!(idle["available"], true);
+    assert_eq!(idle["active"], false);
+    let latest = ctx
+        .run_stream_batch("sh", &[frame(1000), frame(250)])
+        .unwrap()
+        .unwrap();
+    assert_eq!(latest["active"], true);
+    assert_eq!(latest["bars"][0], 0.25);
+    let silent = ctx.run_stream_batch("sh", &[frame(0)]).unwrap().unwrap();
+    assert_eq!(silent["active"], false);
+    assert_eq!(silent["bars"][0], 0.0);
+    let handle = ctx.stream_state().register("sh".into(), vec![]).unwrap();
+    let closed = ctx.run_stream_closed(&handle, false).unwrap().unwrap();
+    assert_eq!(closed["available"], false);
+    assert_eq!(ctx.poll_interval_ms(), 5000);
+}

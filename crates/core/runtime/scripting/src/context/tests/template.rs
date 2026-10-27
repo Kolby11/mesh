@@ -411,3 +411,41 @@ fn template_expression_call_profile() {
         member_time.as_secs_f64() * 1e6 / member_calls,
     );
 }
+
+#[test]
+fn host_props_invalidate_cached_expressions_after_other_public_writes() {
+    for batch in [false, true] {
+        let mut ctx =
+            ScriptContext::new("@test/host-props-cache", CapabilitySet::default()).unwrap();
+        ctx.compile_and_execute_component(
+            "props = { width = 'auto' }; telemetry = 0; function tick() telemetry += 1 end",
+            &[],
+            &["props.width".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            ctx.evaluate_template_expression("props.width", &serde_json::Map::new())
+                .unwrap()
+                .0,
+            serde_json::json!("auto")
+        );
+        ctx.mark_template_dependencies_ready();
+        ctx.consume_template_changes();
+        ctx.call_handler("tick", &[]).unwrap();
+        let props = serde_json::json!({"width":"500px"});
+        if batch {
+            ctx.set_member_states(&HashMap::from([("props".into(), props)]), true)
+                .unwrap();
+        } else {
+            ctx.set_member_state("props", props).unwrap();
+        }
+        assert_eq!(
+            ctx.evaluate_template_expression("props.width", &serde_json::Map::new())
+                .unwrap()
+                .0,
+            serde_json::json!("500px"),
+            "batch={batch}: a host prop change must not reuse the old expression value"
+        );
+        assert!(ctx.dirty_state_affects_template());
+    }
+}

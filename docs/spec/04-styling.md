@@ -687,7 +687,7 @@ such rule; MESH has no descendant combinators for the usual wrapper workaround.
 
 ## 11. Liquid glass (`backdrop-filter: refract()`)
 
-**Status: shipped (in-surface Skia runtime shader on background/bottom-layer
+**Status: shipped (in-surface Skia runtime shader on background-layer
 surfaces; compositor blur plus rim elsewhere); multi-output, foreign exclusive
 zones and a source built from MESH's presented frames are targets.**
 
@@ -697,17 +697,19 @@ source**: the image at `shell.render.backdrop.image`, cover-fit to the output.
 A profile that uses liquid glass normally also paints that image as its
 wallpaper (`@mesh/glass-wallpaper`).
 
-The source stands for what is behind a surface only when nothing but layer
-surfaces can be there. Each surface is therefore routed by its layer:
+A wallpaper file is not evidence of what lies behind a desktop widget: another
+client may paint the active wallpaper, and compositor placement can differ from
+the predicted origin. Only background-layer surfaces retain the image route
+(for the wallpaper itself). Every other surface uses actual compositor blur:
 
 | Surface layer | `refract()` element |
 | --- | --- |
-| `background`, `bottom` (below every window) | Painted client-side from the source: blurred, refracted and dispersed. No compositor region. |
-| `top`, `overlay` (windows may be beneath) | Its `blur()` takes the ordinary backdrop route (§10): the compositor blurs the real backdrop and MESH blurs in-surface content beneath. MESH paints only the rim highlight; there is no displacement or dispersion. |
+| `background` (wallpaper) | Painted client-side from the configured source: blurred, refracted and dispersed. No compositor region. |
+| `bottom`, `top`, `overlay` | Its `blur()` takes the ordinary backdrop route (§10): the compositor blurs the real backdrop and MESH blurs in-surface content beneath. MESH paints only the rim highlight; there is no displacement or dispersion. |
 
-So glass above windows never shows a stale or misplaced image: it stays in sync
-with whatever is really behind it, at the cost of the bending. Promoted popups
-follow the `top` row.
+Desktop widgets and glass above windows follow the real backdrop without a
+wallpaper-image offset. Without a live source, they retain blur and rim lighting
+but omit displacement and dispersion. Promoted popups follow the same route.
 `mesh.theme.set_backdrop_image { path }` (`service.theme.control`) selects an
 absolute image file, writing where the other appearance settings go, and
 repaints every surface; `mesh.theme` state publishes it as `backdrop_image`.

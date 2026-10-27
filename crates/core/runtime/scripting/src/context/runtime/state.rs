@@ -4,6 +4,7 @@ use super::super::lookup::{lua_err, map_lua_error};
 use super::super::proxy::{
     channel_subscribers, dispatch_event_subscribers, interface_event_channel,
 };
+use super::sync::{record_changed_items, record_changed_public_member};
 use super::*;
 use mesh_core_elements::VariableStore;
 use mlua::{LuaSerdeExt, Value as LuaValue};
@@ -170,7 +171,12 @@ impl ScriptContext {
         self.ensure_initialized()?;
         let lua_value = self.lua().to_value(&value).map_err(lua_err)?;
         self.env().set(name, lua_value).map_err(map_lua_error)?;
+        let generation = self.state.mutation_generation();
         self.state.set(name.to_string(), value);
+        if self.state.mutation_generation() != generation {
+            record_changed_public_member(&mut self.changed_public_members, name);
+            record_changed_items(&mut self.changed_list_items, name, None);
+        }
         if name == "props" {
             self.attach_prop_introspection()?;
         }
@@ -183,6 +189,7 @@ impl ScriptContext {
     /// rejects a later write, both the raw environment tables and the Rust
     /// snapshot are restored, so callers never expose a partially published
     /// prop set to the renderer or to Luau.
+    /// Changed members invalidate template readers and cached expressions.
     pub fn set_member_states(
         &mut self,
         members: &HashMap<String, Value>,
@@ -252,7 +259,12 @@ impl ScriptContext {
 
         let republished_props = updates.iter().any(|(name, _, _)| name == "props");
         for (name, value, _) in updates {
-            self.state.set(name, value);
+            let generation = self.state.mutation_generation();
+            self.state.set(name.clone(), value);
+            if self.state.mutation_generation() != generation {
+                record_changed_public_member(&mut self.changed_public_members, &name);
+                record_changed_items(&mut self.changed_list_items, &name, None);
+            }
         }
         if republished_props {
             self.attach_prop_introspection()?;

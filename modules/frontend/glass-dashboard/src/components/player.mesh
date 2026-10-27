@@ -58,8 +58,9 @@ end
 
 local function position_now()
     local value = media.position or 0
-    if media.state == "playing" then
-        value += os.time() - (media.updated_at or os.time())
+    local sampled_at = tonumber(media.updated_at) or 0
+    if media.state.state == "playing" and sampled_at > 0 then
+        value += math.max(0, os.time() - sampled_at)
     end
     local total = media.length or 0
     return total > 0 and math.min(value, total) or value
@@ -72,7 +73,7 @@ end
 
 effect(function()
     has_track = media.available == true and (media.title or "") ~= ""
-    playing = has_track and media.state == "playing"
+    playing = has_track and media.state.state == "playing"
     title = has_track and media.title or t("player.idle")
     artist = has_track and (media.artist or "") or ""
     art = has_track and (media.art_path or "") or ""

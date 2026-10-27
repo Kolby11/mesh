@@ -724,15 +724,21 @@ impl FrontendSurfaceComponent {
             let Some(name) = animation.name.as_ref() else {
                 continue;
             };
-            let source = match self.keyframe_sources.get(name) {
+            let source_key = format!(
+                "{}\0{}\0{name}",
+                node.module_id()
+                    .unwrap_or(self.compiled.manifest.package.id.as_str()),
+                node.source_file().unwrap_or("")
+            );
+            let source = match self.keyframe_sources.get(&source_key) {
                 Some(source) => source.clone(),
                 None => {
                     let source = self
-                        .find_component_keyframe_rule(name)
+                        .find_component_keyframe_rule(node, name)
                         .map(|rule| rule.stops.clone())
                         .or_else(|| theme_keyframe_stops(theme, name))
                         .map(KeyframeSource::new);
-                    self.keyframe_sources.insert(name.clone(), source.clone());
+                    self.keyframe_sources.insert(source_key, source.clone());
                     source
                 }
             };
@@ -925,14 +931,42 @@ impl FrontendSurfaceComponent {
         hasher.finish()
     }
 
-    fn find_component_keyframe_rule(&self, name: &str) -> Option<&component_style::KeyframeRule> {
-        self.compiled
-            .component
+    fn find_component_keyframe_rule(
+        &self,
+        node: &WidgetNode,
+        name: &str,
+    ) -> Option<&component_style::KeyframeRule> {
+        let module_id = node
+            .module_id()
+            .unwrap_or(self.compiled.manifest.package.id.as_str());
+        let compiled = if module_id == self.compiled.manifest.package.id.as_str() {
+            &*self.compiled
+        } else {
+            &*self.frontend_catalog.modules.get(module_id)?.compiled
+        };
+        let source = node
+            .source_file()
+            .map(std::path::Path::new)
+            .unwrap_or(&compiled.source_path);
+        let component = compiled.component_at_source(source).or_else(|| {
+            self.frontend_catalog
+                .contribution_entries_for_host(module_id)
+                .into_iter()
+                .find_map(|entry| entry.component_at_source(source))
+        })?;
+        component
             .style
-            .as_ref()?
-            .keyframes
-            .iter()
-            .find(|rule| rule.name == name)
+            .as_ref()
+            .and_then(|style| style.keyframes.iter().find(|rule| rule.name == name))
+            .or_else(|| {
+                compiled
+                    .component
+                    .style
+                    .as_ref()?
+                    .keyframes
+                    .iter()
+                    .find(|rule| rule.name == name)
+            })
     }
 
     fn build_render_keyframe_rule(

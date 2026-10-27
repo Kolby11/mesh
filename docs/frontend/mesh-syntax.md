@@ -605,6 +605,9 @@ Common event attributes:
 | Attribute      | Fires when                 |
 | ------------- | ------------------------- |
 | `onclick`      | element is clicked         |
+| `onpointerdown` | primary pointer button pressed on the element |
+| `onpointermove` | pointer moves while the pressed element holds capture |
+| `onpointerup`   | primary pointer button released, including outside the pressed element |
 | `oninput`      | input value changes        |
 | `onchange`     | input value commits        |
 | `onkeydown`    | key pressed while focused  |
@@ -627,6 +630,13 @@ Common event attributes:
 | `onlongpress`  | touch held for 500 ms      |
 
 Do not use `@click=` or `:on*=` — those are not valid MESH syntax.
+
+Pointer drag handlers receive `event.pointer = { x, y }` in logical surface
+pixels, `event.current` and `event.current_target` geometry, and the primary
+button code. `onpointerdown` opts an element into press hit testing; moves and
+release stay with that target through resizing and movement outside its bounds.
+Capture ends on release or target removal. Native sliders and scrollbars retain
+their built-in drag behavior.
 
 #### Gesture and touch payloads
 

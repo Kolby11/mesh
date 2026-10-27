@@ -1,5 +1,12 @@
+<props>
+{
+    card_width = { type = "size", default = "auto" },
+    card_height = { type = "size", default = "auto" },
+}
+</props>
+
 <template>
-    <column class="weather-card" class:weather-card-idle={not available}>
+    <column style:width={props.card_width ~= "auto" and props.card_width or nil} style:height={props.card_height ~= "auto" and props.card_height or nil} class="weather-card" class:weather-card-idle={not available}>
         <row class="weather-top">
             <icon class="weather-hero" name={glyph} size="72" />
             <column class="weather-place">
@@ -93,18 +100,19 @@ end)
 
 <style>
     .weather-card {
-        width: var(--desktop-widget-width, 384px);
-        height: var(--desktop-widget-height, 268px);
+        width: 384px;
+        height: 268px;
         gap: 0;
         padding: 22px 24px;
         justify-content: space-between;
+        overflow: hidden;
         border-radius: 25px;
         border: 1px solid var(--glass-rim);
         background-image: var(--glass-surface-weather);
         box-shadow: var(--glass-shadow-card);
         backdrop-filter: var(--glass-backdrop-card);
         opacity: 1;
-        animation: weather-card-in 620 cubic-bezier(0.05, 0.7, 0.1, 1) both;
+        animation: weather-card-in 620ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
     }
 
 
@@ -251,6 +259,6 @@ end)
         border-color: var(--glass-rim-hover);
     }
     @container (max-width: 800px) {
-        .weather-card { width: var(--desktop-widget-width, 360px); height: var(--desktop-widget-height, 248px); }
+        .weather-card { width: 360px; height: 248px; }
     }
 </style>

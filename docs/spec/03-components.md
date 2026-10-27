@@ -115,6 +115,12 @@ invalidates its template binding even when JSON state did not change.
 Backend and interface props remain targets (§2); this function transport is
 for component callbacks.
 
+Primary pointer drag handlers (`onpointerdown`, `onpointermove`, `onpointerup`)
+use logical surface coordinates and retain the pressed target through release,
+including outside its bounds. Target removal ends capture. The
+[syntax guide](../frontend/mesh-syntax.md#keyboard-focus-and-traversal) describes
+focused keyboard input for the same controls.
+
 **Shipped two-way value bindings:** `bind:value="variable"` on inputs and
 sliders and `bind:checked="variable"` on checkboxes/switches assign user edits
 through ordinary Luau callbacks in the owning component scope. Text, numeric,
@@ -124,6 +130,12 @@ names; reactive public members notify template readers and effects. Loop-local
 snapshots, table paths, and unsupported element/attribute pairs are rejected.
 `input type="range"` and `input type="checkbox"` bindings lower to the native
 slider and checkbox controls. See the [syntax guide](../frontend/mesh-syntax.md#two-way-binding).
+
+Keyframe names resolve in the node's authoring component first, then the module
+entrypoint and active theme. Local/imported component source ownership is preserved
+through composition, and animation source caches include that ownership so matching
+names in separate components do not share rules. Animation durations use explicit
+CSS time units (`240ms`, `0.24s`); bare integers are iteration counts.
 
 ### 1.1 Popovers and escape-bounds UI
 

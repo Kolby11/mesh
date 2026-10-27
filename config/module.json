@@ -159,7 +159,13 @@
         "locale.read"
       ],
       "@mesh/mpris-media": [
+        "exec.argv:playerctl:[\"--player\",\"*\",\"metadata\",\"--format\",\"*\"]",
+        "exec.argv:playerctl:[\"--player\",\"*\",\"play-pause\"]",
+        "exec.argv:playerctl:[\"--player\",\"*\",\"next\"]",
+        "exec.argv:playerctl:[\"--player\",\"*\",\"previous\"]",
+        "exec.argv:playerctl:[\"--player\",\"*\",\"position\",\"*\"]",
         "net.http",
+        "exec.argv:playerctl:[\"--follow\",\"status\"]",
         "exec.argv:playerctl:[\"--follow\",\"metadata\",\"--format\",\"*\"]",
         "exec.argv:playerctl:[\"metadata\",\"--format\",\"*\"]",
         "exec.argv:playerctl:[\"next\"]",

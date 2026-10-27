@@ -531,6 +531,18 @@ impl CompiledFrontendModule {
         self.local_component_for(owner_source_path, alias).is_some()
     }
 
+    /// Resolve the component that authored a node by its canonical source path.
+    pub fn component_at_source(&self, source: &std::path::Path) -> Option<&ComponentFile> {
+        if self.source_path == source {
+            return Some(&self.component);
+        }
+        self.local_components.iter().find_map(|(key, component)| {
+            scoped_local_component_parts(key)
+                .filter(|(_, _, target)| std::path::Path::new(target) == source)
+                .map(|_| component)
+        })
+    }
+
     /// Iterate the recursive local-component records, falling back to the
     /// compatibility alias index for manually assembled fixtures.
     pub fn all_local_components(&self) -> Vec<&ComponentFile> {

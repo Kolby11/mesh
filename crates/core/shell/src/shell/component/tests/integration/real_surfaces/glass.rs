@@ -1025,9 +1025,17 @@ fn liquid_glass_desktop_cards_resize_live_independently_and_reset() {
     fn frame(component: &mut FrontendSurfaceComponent, width: u32, height: u32) {
         paint(component, width, height);
         if component.wants_immediate_rerender() {
-            component.invalidate_surface_config();
             paint(component, width, height);
         }
+        assert!(
+            !component
+                .display_list_paint_commands()
+                .iter()
+                .any(|command| {
+                    command.kind == mesh_core_render::DisplayPaintCommandKind::Scrollbars
+                }),
+            "resize controls and cards must not introduce overlapping scrollbars"
+        );
     }
     let mut component = GlassCatalog::new().mount_instance(
         "glass-widgets",
@@ -1145,35 +1153,399 @@ fn liquid_glass_desktop_cards_resize_live_independently_and_reset() {
         (384.0, 268.0)
     );
 
-    press(&mut component, "sizeButton", 1920, 1000);
-    let request = component
-        .child_surface_requests()
-        .into_iter()
-        .next()
-        .expect("size editor popup");
-    let (popup_width, popup_height) = request.content_size;
-    let mut popup_pixels = PixelBuffer::new(popup_width, popup_height);
-    component
-        .paint_child_surface_raster(&request.node_key, &mut popup_pixels, 1.0, (0, 0), false)
-        .unwrap();
-    let child = component
-        .child_surface_debug_tree(&request.node_key, (0.0, 0.0))
-        .unwrap();
-    let slider = first_node_by_class(&child, "size-slider").unwrap();
+    press(&mut component, "resizeToggle", 1920, 1000);
+    frame(&mut component, 1920, 1000);
+    assert!(component.child_surface_requests().is_empty());
+    let tree = component.last_tree.as_ref().unwrap();
+    let handle = first_node_with_ref(tree, "resizeHandle").expect("resize mode exposes a handle");
     let (left, top, right, bottom) =
-        find_node_bounds_by_key(&child, slider.mesh_key().unwrap(), 0.0, 0.0).unwrap();
-    let y = (top + bottom) / 2.0;
-    let slider_width = right - left;
-    let (w, h) = request.content_size;
+        find_node_bounds_by_key(tree, handle.mesh_key().unwrap(), 0.0, 0.0).unwrap();
+    let (x, y) = ((left + right) / 2.0, (top + bottom) / 2.0);
+    for input in [
+        ComponentInput::PointerButton {
+            x,
+            y,
+            button: 0x110,
+            pressed: true,
+        },
+        ComponentInput::PointerMove {
+            x: x + 80.0,
+            y: y + 40.0,
+        },
+    ] {
+        component.handle_input(&theme(), 1920, 1000, input).unwrap();
+        frame(&mut component, 1920, 1000);
+    }
+    let tree = component.last_tree.as_ref().unwrap();
+    let card = first_node_by_class(tree, "media-card").unwrap();
+    assert_eq!((card.layout.width, card.layout.height), (560.0, 226.0));
+    assert_eq!(
+        first_node_by_class(tree, "card-frame")
+            .unwrap()
+            .layout
+            .height,
+        226.0
+    );
     component
-        .handle_child_surface_input(
-            &request.node_key,
+        .handle_input(
             &theme(),
-            w,
-            h,
-            (0.0, 0.0),
+            1920,
+            1000,
             ComponentInput::PointerButton {
-                x: left + slider_width * 0.5,
+                x: x + 80.0,
+                y: y + 40.0,
+                button: 0x110,
+                pressed: false,
+            },
+        )
+        .unwrap();
+    component
+        .handle_input(
+            &theme(),
+            1920,
+            1000,
+            ComponentInput::KeyPressed {
+                key: "ArrowRight".into(),
+                modifiers: Default::default(),
+            },
+        )
+        .unwrap();
+    frame(&mut component, 1920, 1000);
+    let card = first_node_by_class(component.last_tree.as_ref().unwrap(), "media-card").unwrap();
+    assert_eq!((card.layout.width, card.layout.height), (570.0, 226.0));
+    component
+        .handle_input(
+            &theme(),
+            1920,
+            1000,
+            ComponentInput::KeyPressed {
+                key: "Escape".into(),
+                modifiers: Default::default(),
+            },
+        )
+        .unwrap();
+    frame(&mut component, 1920, 1000);
+    assert!(first_node_with_ref(component.last_tree.as_ref().unwrap(), "resizeHandle").is_none());
+}
+
+#[test]
+fn desktop_widgets_export_real_blur_and_do_not_draw_scrollbars() {
+    let mut component = GlassCatalog::new().mount_instance(
+        "glass-widgets",
+        &format!("@mesh/glass-widgets#blur-{}", std::process::id()),
+    );
+    component.motion_policy.reduced_motion = true;
+    for (width, height) in [(1920, 1000), (640, 1000)] {
+        paint(&mut component, width, height);
+        assert!(!component.display_list_blur_regions().is_empty());
+        assert!(
+            !component
+                .display_list_paint_commands()
+                .iter()
+                .any(|command| matches!(
+                    command.kind,
+                    mesh_core_render::display_list::DisplayPaintCommandKind::ApplyBackdropRefraction
+                        | mesh_core_render::display_list::DisplayPaintCommandKind::Scrollbars
+                ))
+        );
+    }
+}
+
+#[test]
+fn desktop_media_tracks_playback_position_and_direction() {
+    let mut component = GlassCatalog::new().mount_instance(
+        "glass-widgets",
+        &format!("@mesh/glass-widgets#playback-{}", std::process::id()),
+    );
+    component.motion_policy.reduced_motion = true;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let mut payload = serde_json::json!({
+        "available":true,"state":"playing","player":"test","title":"First","artist":"Artist",
+        "album":"Album","art_path":"","position":42,"length":215,"updated_at":now,
+    });
+    update(&mut component, "mesh.media", payload.clone());
+    paint(&mut component, 1920, 1000);
+    let tree = component.last_tree.as_ref().unwrap();
+    assert!(rendered_text(&component).contains(&"First".into()));
+    let glyph = first_node_by_class(tree, "media-ctl-glyph-main").unwrap();
+    assert_eq!(
+        glyph
+            .attributes
+            .get(mesh_core_elements::Prop::Name)
+            .map(String::as_str),
+        Some("media-playback-pause")
+    );
+    let seek = first_node_by_class(tree, "media-seek").unwrap();
+    let initial = seek
+        .attributes
+        .get(mesh_core_elements::Prop::Value)
+        .unwrap()
+        .parse::<f64>()
+        .unwrap();
+    assert!((42.0..=43.0).contains(&initial), "{initial}");
+    std::thread::sleep(Duration::from_millis(1100));
+    component
+        .run_due_script_tasks(std::time::Instant::now())
+        .unwrap();
+    paint(&mut component, 1920, 1000);
+    let progressed = first_node_by_class(component.last_tree.as_ref().unwrap(), "media-seek")
+        .unwrap()
+        .attributes
+        .get(mesh_core_elements::Prop::Value)
+        .unwrap()
+        .parse::<f64>()
+        .unwrap();
+    assert!(
+        progressed >= 43.0,
+        "timer must advance playback: {progressed}"
+    );
+    payload["state"] = serde_json::json!("paused");
+    payload["position"] = serde_json::json!(73);
+    update(&mut component, "mesh.media", payload.clone());
+    paint(&mut component, 1920, 1000);
+    let tree = component.last_tree.as_ref().unwrap();
+    assert_eq!(
+        first_node_by_class(tree, "media-ctl-glyph-main")
+            .unwrap()
+            .attributes
+            .get(mesh_core_elements::Prop::Name)
+            .map(String::as_str),
+        Some("media-playback-start")
+    );
+    assert!(rendered_text(&component).contains(&"01:13".into()));
+    let previous = first_node_by_class(tree, "media-ctl")
+        .unwrap()
+        .mesh_key()
+        .unwrap()
+        .to_owned();
+    component.focused_key = Some(previous);
+    component
+        .handle_input(
+            &theme(),
+            1920,
+            1000,
+            ComponentInput::KeyPressed {
+                key: "Enter".into(),
+                modifiers: Default::default(),
+            },
+        )
+        .unwrap();
+    payload["title"] = serde_json::json!("Previous");
+    payload["position"] = serde_json::json!(0);
+    update(&mut component, "mesh.media", payload.clone());
+    paint(&mut component, 1920, 1000);
+    let tree = component.last_tree.as_ref().unwrap();
+    assert!(first_node_by_class(tree, "track-previous-b").is_some());
+    payload["title"] = serde_json::json!("External next");
+    payload["state"] = serde_json::json!("playing");
+    update(&mut component, "mesh.media", payload);
+    paint(&mut component, 1920, 1000);
+    assert!(first_node_by_class(component.last_tree.as_ref().unwrap(), "track-next-a").is_some());
+    for (active, level) in [(true, 1.0), (true, 0.25), (false, 0.0)] {
+        update(
+            &mut component,
+            "mesh.visualizer",
+            serde_json::json!({"available":true,"active":active,"bars":vec![level;24]}),
+        );
+        paint(&mut component, 1920, 1000);
+        let tree = component.last_tree.as_ref().unwrap();
+        let bar = first_node_by_class(tree, "spectrum-bar").unwrap();
+        let expected = (56.0_f32 * level).max(4.0) / 56.0;
+        assert!(
+            (bar.computed_style.transform.scale_y - expected).abs() < 0.00001,
+            "spectrum should reflect latest sample: {:?}",
+            bar.computed_style.transform
+        );
+        assert_eq!(
+            first_node_by_class(tree, "spectrum-idle").is_some(),
+            !active
+        );
+    }
+    preview(&mut component, 1920, 1000, "widgets-playback");
+}
+
+#[test]
+fn desktop_widgets_resize_during_playback_without_forced_rebuilds() {
+    let mut component = GlassCatalog::new().mount_instance(
+        "glass-widgets",
+        &format!("@mesh/glass-widgets#live-resize-{}", std::process::id()),
+    );
+    let mut media = serde_json::json!({"available":true,"state":"playing","player":"test","title":"Track","artist":"Artist","position":10,"length":200,"updated_at":0});
+    update(&mut component, "mesh.media", media.clone());
+    paint(&mut component, 1920, 1000);
+    press(&mut component, "resizeToggle", 1920, 1000);
+    let tree = component.last_tree.as_ref().unwrap();
+    let handle = first_node_with_ref(tree, "resizeHandle").unwrap();
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(tree, handle.mesh_key().unwrap(), 0.0, 0.0).unwrap();
+    let (x, y) = ((left + right) / 2.0, (top + bottom) / 2.0);
+    component
+        .handle_input(
+            &theme(),
+            1920,
+            1000,
+            ComponentInput::PointerButton {
+                x,
+                y,
+                button: 0x110,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    for delta in [20.0, 40.0, 80.0, 120.0] {
+        component
+            .handle_input(
+                &theme(),
+                1920,
+                1000,
+                ComponentInput::PointerMove {
+                    x: x + delta,
+                    y: y + delta,
+                },
+            )
+            .unwrap();
+        media["position"] = serde_json::json!(10.0 + delta / 20.0);
+        update(&mut component, "mesh.media", media.clone());
+        update(
+            &mut component,
+            "mesh.visualizer",
+            serde_json::json!({"available":true,"active":true,"bars":vec![0.5;24]}),
+        );
+        update(
+            &mut component,
+            "mesh.weather",
+            serde_json::json!({"available":true,"location":"Bratislava","temperature":delta,"feels_like":delta,"unit":"C","condition":"clear","is_day":true,"hourly":[]}),
+        );
+        for _ in 0..3 {
+            paint(&mut component, 1920, 1000);
+            let tree = component.last_tree.as_ref().unwrap();
+            let card = first_node_by_class(tree, "media-card").unwrap();
+            let weather = first_node_by_class(tree, "weather-card").unwrap();
+            assert_eq!(
+                (weather.layout.width, weather.layout.height),
+                (384.0, 268.0),
+                "a weather update must preserve its responsive default dimensions"
+            );
+
+            assert_eq!(
+                (card.layout.width, card.layout.height),
+                (480.0 + delta, 186.0 + delta),
+                "delta={delta}; root={:?}; child={:?}; style={:?}",
+                component
+                    .runtime_state(component.root_instance_key())
+                    .map(|state| (
+                        state.get_ref("media_width").cloned(),
+                        state.get_ref("media_height").cloned(),
+                        state.get_ref("media_display_width").cloned()
+                    )),
+                card.template_bindings()
+                    .and_then(|bindings| component.runtime_state(&bindings.instance_key))
+                    .map(|state| state.get_ref("props").cloned()),
+                card.attributes.get(mesh_core_elements::Prop::Style)
+            );
+            let drawn = component
+                .display_list_paint_commands()
+                .iter()
+                .find(|command| {
+                    command.node.id == card.id
+                        && command.kind == mesh_core_render::DisplayPaintCommandKind::Node
+                })
+                .unwrap();
+            let expected_width = card.layout.width * card.computed_style.transform.scale_x;
+            let expected_height = card.layout.height * card.computed_style.transform.scale_y;
+            assert!(
+                (drawn.node.layout.width - expected_width).abs() < 0.01
+                    && (drawn.node.layout.height - expected_height).abs() < 0.01,
+                "paint command must resize with the card: {:?}",
+                drawn.node.layout
+            );
+        }
+    }
+}
+
+#[test]
+fn desktop_track_changes_resolve_and_run_component_keyframes() {
+    let mut component = GlassCatalog::new().mount_instance(
+        "glass-widgets",
+        &format!("@mesh/glass-widgets#motion-{}", std::process::id()),
+    );
+    let mut media = serde_json::json!({"available":true,"state":"playing","player":"test","title":"First","artist":"Artist","position":10,"length":200,"updated_at":0});
+    update(&mut component, "mesh.media", media.clone());
+    paint(&mut component, 1920, 1000);
+    media["title"] = serde_json::json!("Second");
+    update(&mut component, "mesh.media", media.clone());
+    paint(&mut component, 1920, 1000);
+    let body = first_node_by_class(component.last_tree.as_ref().unwrap(), "media-body").unwrap();
+    assert!(
+        component
+            .keyframe_animation_slots
+            .keys()
+            .any(|(id, _)| *id == body.id),
+        "track body must have a resolved animation, not just an animation class"
+    );
+    assert!(
+        body.computed_style.transform.translate_x > 1.0,
+        "new next track must enter from the right"
+    );
+    assert_eq!(body.computed_style.animations[0].duration_ms, 240);
+    press(&mut component, "previousTrack", 1920, 1000);
+    media["title"] = serde_json::json!("Previous");
+    update(&mut component, "mesh.media", media.clone());
+    paint(&mut component, 1920, 1000);
+    let body = first_node_by_class(component.last_tree.as_ref().unwrap(), "media-body").unwrap();
+    assert!(
+        body.computed_style.transform.translate_x < -1.0,
+        "previous track must enter from the left"
+    );
+    press(&mut component, "nextTrack", 1920, 1000);
+    media["title"] = serde_json::json!("Next again");
+    update(&mut component, "mesh.media", media);
+    paint(&mut component, 1920, 1000);
+    assert!(
+        first_node_by_class(component.last_tree.as_ref().unwrap(), "media-body")
+            .unwrap()
+            .computed_style
+            .transform
+            .translate_x
+            > 1.0
+    );
+}
+
+#[test]
+fn desktop_seek_drag_keeps_preview_until_release_and_acknowledgement() {
+    let mut component = GlassCatalog::new().mount_instance(
+        "glass-widgets",
+        &format!("@mesh/glass-widgets#seek-{}", std::process::id()),
+    );
+    Arc::make_mut(&mut component.settings)
+        .set_namespace("shell", serde_json::json!({"motion":{"reduced":true}}));
+    let mut media = serde_json::json!({"available":true,"state":"paused","player":"test","title":"Track","artist":"Artist","position":10,"length":200,"updated_at":0});
+    update(&mut component, "mesh.media", media.clone());
+    paint(&mut component, 1920, 1000);
+    let tree = component.last_tree.as_ref().unwrap();
+    let slider = first_node_by_class(tree, "media-seek").unwrap();
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(tree, slider.mesh_key().unwrap(), 0.0, 0.0).unwrap();
+    let y = (top + bottom) / 2.0;
+    let value = |component: &FrontendSurfaceComponent| {
+        first_node_by_class(component.last_tree.as_ref().unwrap(), "media-seek")
+            .unwrap()
+            .attributes
+            .get(mesh_core_elements::Prop::Value)
+            .unwrap()
+            .parse::<f64>()
+            .unwrap()
+    };
+    let requests = component
+        .handle_input(
+            &theme(),
+            1920,
+            1000,
+            ComponentInput::PointerButton {
+                x: left + (right - left) * 0.4,
                 y,
                 button: 0x110,
                 pressed: true,
@@ -1181,51 +1553,57 @@ fn liquid_glass_desktop_cards_resize_live_independently_and_reset() {
         )
         .unwrap();
     assert!(
-        component.active_slider_id.is_some(),
-        "size slider press must capture: left={left}, y={y}, width={slider_width}, popup={w}x{h}"
+        requests.is_empty(),
+        "pointer seeking commits only at release: {requests:?}"
     );
-    frame(&mut component, 1920, 1000);
-    let before = first_node_by_class(component.last_tree.as_ref().unwrap(), "media-card")
-        .unwrap()
-        .layout
-        .width;
-    component
-        .handle_child_surface_input(
-            &request.node_key,
-            &theme(),
-            w,
-            h,
-            (0.0, 0.0),
-            ComponentInput::PointerMove {
-                x: left + slider_width * 0.9,
-                y,
-            },
-        )
-        .unwrap();
-    frame(&mut component, 1920, 1000);
-    let during = first_node_by_class(component.last_tree.as_ref().unwrap(), "media-card")
-        .unwrap()
-        .layout
-        .width;
+    paint(&mut component, 1920, 1000);
+    assert!((value(&component) - 80.0).abs() < 0.1);
+    media["position"] = serde_json::json!(12);
+    update(&mut component, "mesh.media", media.clone());
+    paint(&mut component, 1920, 1000);
     assert!(
-        during > before,
-        "drag must resize before release: {before} -> {during}"
+        (value(&component) - 80.0).abs() < 0.1,
+        "incoming samples must not move a captured thumb"
     );
-    component
-        .handle_child_surface_input(
-            &request.node_key,
+    let x = left + (right - left) * 0.7;
+    let requests = component
+        .handle_input(&theme(), 1920, 1000, ComponentInput::PointerMove { x, y })
+        .unwrap();
+    assert!(requests.is_empty());
+    paint(&mut component, 1920, 1000);
+    assert!((value(&component) - 140.0).abs() < 0.1);
+    let requests = component
+        .handle_input(
             &theme(),
-            w,
-            h,
-            (0.0, 0.0),
+            1920,
+            1000,
             ComponentInput::PointerButton {
-                x: left + slider_width * 0.9,
+                x,
                 y,
                 button: 0x110,
                 pressed: false,
             },
         )
         .unwrap();
+    assert!(
+        format!("{requests:?}").contains("seek"),
+        "release sends the seek: {requests:?}"
+    );
+    update(&mut component, "mesh.media", media.clone());
+    paint(&mut component, 1920, 1000);
+    assert!(
+        (value(&component) - 140.0).abs() < 0.1,
+        "stale samples must not overwrite a pending seek"
+    );
+    for position in [140, 141] {
+        media["position"] = serde_json::json!(position);
+        update(&mut component, "mesh.media", media.clone());
+        paint(&mut component, 1920, 1000);
+        assert!(
+            (value(&component) - position as f64).abs() < 0.1,
+            "acknowledged playback resumes"
+        );
+    }
 }
 
 fn preview(component: &mut FrontendSurfaceComponent, width: u32, height: u32, label: &str) {
@@ -2139,7 +2517,10 @@ fn glass_exit_settles_before_the_root_opacity_duration() {
             .paint_raster(&theme, extent, &mut pixels, 1.0)
             .unwrap();
         let declared = std::time::Duration::from_millis(component.hide_transition_ms());
-        assert!(!declared.is_zero(), "{module}: root declares an opacity transition");
+        assert!(
+            !declared.is_zero(),
+            "{module}: root declares an opacity transition"
+        );
 
         component.set_surface_exiting(true);
         assert!(
@@ -2150,7 +2531,10 @@ fn glass_exit_settles_before_the_root_opacity_duration() {
         component
             .paint_raster(&theme, extent, &mut pixels, 1.0)
             .unwrap();
-        assert!(!component.exit_settled(), "{module}: the exit transitions are running");
+        assert!(
+            !component.exit_settled(),
+            "{module}: the exit transitions are running"
+        );
         while !component.exit_settled() && started.elapsed() < declared * 2 {
             std::thread::sleep(std::time::Duration::from_millis(8));
             component
@@ -2325,13 +2709,15 @@ fn exclusive_surface_takes_key_routing_and_dismisses_on_outside_press() {
         .presentation_engine
         .testing_set_surface_configured(&carousel_id, true);
     shell.render_components().unwrap();
-    shell.pending_wayland_events.push_back(mesh_core_presentation::WindowEvent::PointerButton {
-        surface_id: carousel_id.as_str().into(),
-        x: 10.0,
-        y: 5000.0,
-        button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
-        pressed: true,
-    });
+    shell
+        .pending_wayland_events
+        .push_back(mesh_core_presentation::WindowEvent::PointerButton {
+            surface_id: carousel_id.as_str().into(),
+            x: 10.0,
+            y: 5000.0,
+            button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+            pressed: true,
+        });
     shell.dispatch_wayland().unwrap();
     let state = &shell.core.surfaces[&carousel_id];
     assert!(
@@ -2360,11 +2746,15 @@ fn key_release_after_opening_exclusive_surface_stays_with_the_opener() {
     let mut dashboard = catalog.mount("glass-dashboard");
     paint(&mut dashboard, 1920, 1080);
     dashboard.focused_key = Some(
-        first_node_with_attr(dashboard.last_tree.as_ref().unwrap(), "aria-label", "Close dashboard")
-            .expect("close button")
-            .mesh_key()
-            .unwrap()
-            .to_owned(),
+        first_node_with_attr(
+            dashboard.last_tree.as_ref().unwrap(),
+            "aria-label",
+            "Close dashboard",
+        )
+        .expect("close button")
+        .mesh_key()
+        .unwrap()
+        .to_owned(),
     );
     let bar_id = bar.surface_id().to_owned();
     let dashboard_id = dashboard.surface_id().to_owned();
@@ -2424,7 +2814,10 @@ fn key_release_after_opening_exclusive_surface_stays_with_the_opener() {
         })
         .unwrap();
     shell.drain_requests(&mut emitted).unwrap();
-    assert_eq!(shell.keyboard_focus_surface.as_deref(), Some(bar_id.as_str()));
+    assert_eq!(
+        shell.keyboard_focus_surface.as_deref(),
+        Some(bar_id.as_str())
+    );
     assert_eq!(
         shell.presentation_engine.testing_keyboard_focus_requests(),
         [dashboard_id.clone(), bar_id.clone()],
@@ -2461,7 +2854,10 @@ fn surface_shown_without_user_gesture_leaves_the_keyboard() {
         })
         .unwrap();
     shell.drain_requests(&mut emitted).unwrap();
-    assert_eq!(shell.keyboard_focus_surface.as_deref(), Some(bar_id.as_str()));
+    assert_eq!(
+        shell.keyboard_focus_surface.as_deref(),
+        Some(bar_id.as_str())
+    );
     assert!(
         shell
             .presentation_engine
@@ -2507,12 +2903,14 @@ fn focus_surface_request_gives_visible_chrome_the_keyboard() {
 
     let mut emitted = shell
         .apply_request(
-            crate::shell::ipc::parse_ipc_command(&format!("shell:focus_surface:{bar_id}"))
-                .unwrap(),
+            crate::shell::ipc::parse_ipc_command(&format!("shell:focus_surface:{bar_id}")).unwrap(),
         )
         .unwrap();
     shell.drain_requests(&mut emitted).unwrap();
-    assert_eq!(shell.keyboard_focus_surface.as_deref(), Some(bar_id.as_str()));
+    assert_eq!(
+        shell.keyboard_focus_surface.as_deref(),
+        Some(bar_id.as_str())
+    );
     assert_eq!(
         shell.presentation_engine.testing_keyboard_focus_requests(),
         [bar_id.clone()]

@@ -530,7 +530,9 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
 
 pub(super) fn annotate_source_file(node: &mut WidgetNode, source_path: &str) {
     fn annotate(node: &mut WidgetNode, source_path: &std::sync::Arc<str>) {
-        node.set_source_file(source_path.clone());
+        if node.source_file().is_none() {
+            node.set_source_file(source_path.clone());
+        }
         for child in &mut node.children {
             annotate(child, source_path);
         }

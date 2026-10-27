@@ -40,7 +40,7 @@ local function publish(line)
         return
     end
     local active = sum > 0
-    if not active and not state.active then
+    if not active and not state.active and state.available then
         return
     end
     state = { available = true, active = active, bars = bars }
@@ -51,19 +51,17 @@ function start(self)
     mesh.service.set_poll_interval(launch() and 0 or RESTART_MS)
 end
 
-function on_stream_event(self, event)
-    if not source or event.stream.id ~= source.id then
-        return
+function on_stream_batch(self, program, lines)
+    if program == "sh" and source and #lines > 0 then
+        publish(lines[#lines])
     end
-    if event.type == "started" then
-        state = { available = true, active = false, bars = silent_bars() }
-    elseif event.type == "line" then
-        publish(event.line)
-    elseif event.type == "exited" then
-        source = nil
-        state = { available = false, active = false, bars = silent_bars() }
-        mesh.service.set_poll_interval(RESTART_MS)
-    end
+end
+
+function on_stream_closed(self, program, _success)
+    if program ~= "sh" then return end
+    source = nil
+    state = { available = false, active = false, bars = silent_bars() }
+    mesh.service.set_poll_interval(RESTART_MS)
 end
 
 function on_poll(self)

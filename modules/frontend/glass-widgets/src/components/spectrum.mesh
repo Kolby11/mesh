@@ -1,7 +1,13 @@
+<props>
+{
+    card_width = { type = "size", default = "auto" },
+}
+</props>
+
 <template>
-    <row class="spectrum-strip" class:spectrum-idle={not active} aria-hidden="true">
+    <row style:width={props.card_width ~= "auto" and props.card_width or nil} class="spectrum-strip" class:spectrum-idle={not active} aria-hidden="true">
         {#for bar in bars key={bar.key}}
-            <box class="spectrum-bar" style:height={bar.height} />
+            <box class="spectrum-bar" style:transform={bar.transform} />
         {/for}
     </row>
 </template>
@@ -24,7 +30,7 @@ effect(function()
         local level = math.clamp(tonumber(levels[index]) or 0, 0, 1)
         list[index] = {
             key = index,
-            height = tostring(math.max(4, math.floor(HEIGHT * level + 0.5))) .. "px",
+            transform = string.format("scaleY(%.6f)", math.max(4, math.floor(HEIGHT * level + 0.5)) / HEIGHT),
         }
     end
     bars = list
@@ -33,7 +39,7 @@ end)
 
 <style>
     .spectrum-strip {
-        width: var(--desktop-widget-width, 480px);
+        width: 480px;
         height: 80px;
         margin-top: 12px;
         padding: 12px 18px;
@@ -48,7 +54,7 @@ end)
         opacity: 1;
         transform: translateY(0px);
         transition-property: opacity, transform;
-        transition-duration: var(--animation-duration-long);
+        transition-duration: var(--animation-duration-short);
         transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
     }
 
@@ -58,13 +64,16 @@ end)
     }
 
     .spectrum-bar {
+        height: 56px;
         flex-grow: 1;
         flex-basis: 0;
+        transform-origin: center bottom;
+        transition: none;
         border-radius: 999px;
         background-image: var(--glass-meter-bar);
     }
 
     @container (max-width: 800px) {
-        .spectrum-strip { width: var(--desktop-widget-width, 360px); }
+        .spectrum-strip { width: 360px; }
     }
 </style>

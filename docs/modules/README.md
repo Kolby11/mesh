@@ -49,10 +49,18 @@ applies the wallpaper and closes it, and Escape closes it. Notification toasts
 anchor to the left edge so they sit under the bar's start islands.
 The media card grows a
 spectrum strip while audio plays. Desktop media and weather cards expose a size
-button with live width/height sliders and a reset action. Custom dimensions
+button that toggles resize mode: drag the bottom-right handle or focus it and
+use arrow keys (10 px, Shift for 1 px); Enter/Escape finishes, and Reset restores
+responsive defaults. Explicit component size inputs keep the painted card, its
+layout wrapper and the spectrum width synchronized. Custom dimensions
 persist per component instance and remain bounded by the output; the spectrum
 follows the media card width. Desktop widgets use the bottom layer, so wallpaper
-clients must use the background layer to stay behind them. Dashboard system meters and CPU history bars
+clients must use the background layer to stay behind them. Their frost uses the
+actual compositor backdrop rather than the configured wallpaper image. Media
+controls follow service playback state, progress advances while playing, and
+track changes swipe in the requested skip direction. Seeking previews the pointer
+position locally, commits once on release, and holds the preview until a matching
+playback sample arrives (with a bounded timeout); keyboard seeks commit immediately. Dashboard system meters and CPU history bars
 keep fixed layout boxes and animate their bottom-anchored vertical scale, so
 fill motion does not require layout on each frame. The dashboard's 24 spectrum
 bars also keep fixed 44 px boxes and apply bottom-anchored scale directly from
@@ -88,6 +96,13 @@ and easing, with separate entrance animations for islands, cards and popups.
 | `@mesh/proc-system` | backend | `src/main.luau` | `mesh.system` from `/proc`, hwmon and `df` |
 | `@mesh/cava-visualizer` | backend | `src/main.luau` | `mesh.visualizer` spectrum bars from `cava` |
 | `@mesh/wallpaper-directory` | backend | `src/main.luau` | `mesh.wallpapers` from one directory, with ImageMagick thumbnails and 16:9 panoramas |
+
+MPRIS follows metadata and playback status, resamples position every two seconds
+for external seeks, and downloads artwork separately from playback updates.
+Queries and controls target the player selected by the metadata stream; if it
+exits, sampling falls back to an available player.
+Queued metadata and cava frames publish the newest sample from each batch;
+stale artwork requests are cancelled when the track's art URL changes.
 
 ## Interfaces and resource packs
 

@@ -153,6 +153,33 @@ fn node_has_handler(node: &WidgetNode, event_name: &str) -> bool {
 }
 
 impl FrontendSurfaceComponent {
+    pub(super) fn dispatch_captured_pointer_handler(
+        &mut self,
+        tree: &WidgetNode,
+        name: &str,
+        x: f32,
+        y: f32,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let Some(target) = self.pointer_down_target.clone() else {
+            return Ok(Vec::new());
+        };
+        let Some(node) = find_node_by_key(tree, &target.key) else {
+            return Ok(Vec::new());
+        };
+        if !node.event_handlers.contains_key(name) {
+            return Ok(Vec::new());
+        }
+        let mut event = self.build_click_event_for_pressed_target_button(
+            tree,
+            &target,
+            x,
+            y,
+            mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+        );
+        event["type"] = serde_json::json!(name);
+        self.call_resolved_node_handler(node, name, &[event])
+    }
+
     pub(super) fn dispatch_text_input_value_handlers(
         &mut self,
         tree: &WidgetNode,

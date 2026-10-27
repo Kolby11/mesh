@@ -206,7 +206,7 @@ pub fn pointer_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<PointerHit>
 }
 
 /// Press targeting in one traversal: the deepest pointer-focusable node, or
-/// failing that the deepest ancestor with a click handler, plus its bounds.
+/// failing that the deepest ancestor with a click or pointerdown handler, plus its bounds.
 pub fn pointer_press_hit(node: &WidgetNode, x: f32, y: f32) -> PointerPressHit<'_> {
     let mut hit = pointer_press_hit_affine(
         node,
@@ -691,7 +691,10 @@ fn pointer_press_hit_affine<'a>(
         if hit.focusable.is_none() && crate::focus::node_is_pointer_focusable(node) {
             hit.focusable = Some(node_hit);
         }
-        if hit.target.is_none() && node.event_handlers.contains_key("click") {
+        if hit.target.is_none()
+            && (node.event_handlers.contains_key("click")
+                || node.event_handlers.contains_key("pointerdown"))
+        {
             hit.target = Some(node_hit);
         }
     }
@@ -1186,6 +1189,13 @@ mod tests {
             target.bounds,
             find_node_bounds_by_key(&root, "clickable", 0.0, 0.0).unwrap()
         );
+        root.children[0].event_handlers.remove("click");
+        root.children[0]
+            .event_handlers
+            .insert("pointerdown".into(), "startDrag".into());
+        let hit = pointer_press_hit(&root, 15.0, 10.0);
+        assert!(hit.focusable.is_none());
+        assert_eq!(hit.target.unwrap().key, "clickable");
     }
 
     #[test]

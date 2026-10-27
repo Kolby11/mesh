@@ -537,6 +537,7 @@ fn shell_registers_theme_provider_for_frontend_theme_proxy() {
             "modes",
             "color_scheme",
             "contrast",
+            "details",
             "tokens",
             "provenance",
             "revision",

@@ -11,7 +11,7 @@ use std::sync::atomic::Ordering;
 /// writes touch no template input never rebuilds, so pushing blindly would let
 /// a member that changes every frame grow the list without bound and make the
 /// gate's scan progressively slower.
-fn record_changed_public_member(changed: &mut Vec<String>, name: &str) {
+pub(super) fn record_changed_public_member(changed: &mut Vec<String>, name: &str) {
     if changed.iter().any(|recorded| recorded == name) {
         return;
     }
@@ -20,7 +20,7 @@ fn record_changed_public_member(changed: &mut Vec<String>, name: &str) {
 
 /// Merge one write's item delta into a member's pending delta. A write
 /// without one leaves the member with no item-local delta until consumed.
-fn record_changed_items(
+pub(super) fn record_changed_items(
     changed: &mut HashMap<String, Option<Vec<usize>>>,
     name: &str,
     delta: Option<Vec<usize>>,

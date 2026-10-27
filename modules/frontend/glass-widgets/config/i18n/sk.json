@@ -3,5 +3,6 @@
   "resize.height": "Výška",
   "resize.reset": "Obnoviť veľkosť",
   "resize.media": "Zmeniť veľkosť prehrávača",
-  "resize.weather": "Zmeniť veľkosť počasia"
+  "resize.weather": "Zmeniť veľkosť počasia",
+  "resize.hint": "Ťahajte roh alebo použite šípky. Shift: 1px. Enter/Esc: hotovo."
 }

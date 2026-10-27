@@ -1,13 +1,11 @@
 -- MPRIS media provider.
 --
--- One `playerctl --follow metadata` stream reports every track and status
--- change; consumers extrapolate the position from `updated_at` while playing,
--- so the provider never polls per second. A slow safety-net poll resamples the
--- position to correct drift after seeks made by other clients.
+-- Follow metadata for prompt track changes; periodic samples also cover status
+-- and external seeks on players that omit them from metadata notifications.
+-- Art downloads run separately so they cannot delay playback publications.
 
 local FORMAT = "{{status}}\t{{playerName}}\t{{mpris:length}}\t{{position}}\t{{mpris:artUrl}}\t{{xesam:artist}}\t{{xesam:album}}\t{{xesam:title}}"
-local FALLBACK_POLL_MS = 2000
-local SAFETY_POLL_MS = 15000
+local POSITION_POLL_MS = 2000
 
 local EMPTY = {
     available = false, state = "stopped", player = "", title = "", artist = "",
@@ -18,6 +16,8 @@ state = table.clone(EMPTY)
 
 -- Repeated metadata updates for the current track reuse its downloaded art.
 local art_url, art_path = "", ""
+local requested_art = ""
+local art_task
 
 local function now()
     return os.time()
@@ -38,17 +38,7 @@ local function url_decode(text)
 end
 
 -- Returns a local path, downloading once while this art URL remains current.
-local function local_art(url)
-    if url == "" then
-        return ""
-    end
-    local file = url:match("^file://(.+)$")
-    if file then
-        return url_decode(file)
-    end
-    if not url:match("^https?://") then
-        return ""
-    end
+local function download_art(url)
     if art_url == url then return art_path end
     if not mesh.service.has_capability("net.http") then
         return ""
@@ -79,54 +69,80 @@ local function parse(line)
         player = fields[2] or "",
         length = micros(fields[3]),
         position = micros(fields[4]),
-        art_path = local_art(fields[5] or ""),
+        art_path = "",
         artist = fields[6] or "",
         album = fields[7] or "",
         title = title,
         updated_at = now(),
-    }
+    }, fields[5] or ""
 end
 
-local function commit(self, next_state)
+local function commit(self, next_state, url)
     local track_changed = next_state.title ~= state.title or next_state.artist ~= state.artist
+    url = url or ""
+    local file = url:match("^file://(.+)$")
+    next_state.art_path = file and url_decode(file) or (url == art_url and art_path or "")
     state = next_state
+    if url ~= requested_art then
+        requested_art = url
+        if art_task then task.cancel(art_task) end
+        art_task = nil
+        if url:match("^https?://") then
+            art_task = task.delay(0, function()
+                local path = download_art(url)
+                if requested_art == url then
+                    local current = table.clone(state)
+                    current.art_path = path
+                    state = current
+                    if path == "" then requested_art = "" end
+                end
+            end)
+        end
+    end
     if track_changed and state.available and state.title ~= "" then
         self.TrackChanged:fire({ title = state.title, artist = state.artist })
     end
 end
 
-local function sample(self)
-    local result = mesh.exec("playerctl", { "metadata", "--format", FORMAT })
-    local line = result.success and (result.stdout or ""):gsub("\n+$", "") or ""
-    commit(self, line ~= "" and parse(line) or table.clone(EMPTY))
+local function player_args(args)
+    if state.player == "" then return args end
+    local selected = { "--player", state.player }
+    for _, arg in args do selected[#selected + 1] = arg end
+    return selected
 end
 
-local stream_active = false
+local function sample(self)
+    local args = { "metadata", "--format", FORMAT }
+    local result = mesh.exec("playerctl", player_args(args))
+    if not result.success and state.player ~= "" then
+        result = mesh.exec("playerctl", args)
+    end
+    local line = result.success and (result.stdout or ""):gsub("\n+$", "") or ""
+    local parsed, url = parse(line)
+    commit(self, parsed or table.clone(EMPTY), url)
+end
 
 function start(self)
-    mesh.service.set_poll_interval(FALLBACK_POLL_MS)
-    local args = { "--follow", "metadata", "--format", FORMAT }
-    if mesh.exec_stream("playerctl", args) then
-        stream_active = true
-        mesh.service.set_poll_interval(SAFETY_POLL_MS)
-    else
-        mesh.log.warn("[mpris-media] playerctl stream unavailable; polling")
+    mesh.service.set_poll_interval(POSITION_POLL_MS)
+    if not mesh.exec_stream("playerctl", { "--follow", "metadata", "--format", FORMAT }) then
+        mesh.log.warn("[mpris-media] metadata stream unavailable; polling")
+    end
+    if not mesh.exec_stream("playerctl", { "--follow", "status" }) then
+        mesh.log.warn("[mpris-media] status stream unavailable; polling")
     end
     sample(self)
 end
 
-function on_stream_line(self, program, line)
-    if program ~= "playerctl" then
-        return
-    end
-    -- `--follow` prints an empty line when the last player disappears.
-    if line == "" then
+function on_stream_batch(self, program, lines)
+    if program ~= "playerctl" or #lines == 0 then return end
+    local line = lines[#lines]
+    if line == "Playing" or line == "Paused" or line == "Stopped" then
+        sample(self)
+    elseif line == "" then
         commit(self, table.clone(EMPTY))
-        return
-    end
-    local parsed = parse(line)
-    if parsed then
-        commit(self, parsed)
+    else
+        local parsed, url = parse(line)
+        if parsed then commit(self, parsed, url) end
     end
 end
 
@@ -134,8 +150,7 @@ function on_stream_closed(self, program, _success)
     if program ~= "playerctl" then
         return
     end
-    stream_active = false
-    mesh.service.set_poll_interval(FALLBACK_POLL_MS)
+    sample(self)
 end
 
 function on_poll(self)
@@ -143,7 +158,7 @@ function on_poll(self)
 end
 
 local function control(self, args)
-    local result = mesh.exec("playerctl", args)
+    local result = mesh.exec("playerctl", player_args(args))
     sample(self)
     return { ok = result.success, error = result.stderr }
 end

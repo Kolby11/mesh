@@ -7,13 +7,16 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
-- Frutiger Aero light/dark modes and theme-controlled glass backdrop materials are
-  complete. Real-surface tests: 96 passed; token/material contract tests: 12 passed.
-  Both Aero Settings modes were rendered and visually checked.
+- Live widget follow-ups are complete: host-published props invalidate cached
+  template values; card/spectrum dimensions stay synchronized, seeking holds its
+  preview through stale samples, and component keyframes run with real durations.
+- Full shell suite (two threads): 1,050 passed, 37 ignored. Scripting: 383 passed,
+  7 ignored. Release binary rebuilt; GPU resized-card visuals checked in an isolated
+  preview, which has been stopped. Live music-control input remains unchecked.
 
 ## Next
 
-- Continue glass raster work and the in-surface blur engine.
+- Continue trusted live glass source work and the in-surface blur engine.
 
 ## Blocked / known baselines
 
@@ -24,3 +27,6 @@ measurements live in [`log/`](log/README.md).
 - GPU panel recorded-scene parity exceeds its pixel budget on the baseline.
 - NVIDIA as compositor main device and other compositor imports remain unchecked
   live.
+
+- Default-parallel shell checks have intermittent fractional-layout and debug
+  Surfaces assertions; isolated reruns and the complete two-thread run pass.

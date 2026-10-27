@@ -4,8 +4,8 @@
 //! so displacement ("liquid glass") cannot read the real backdrop. It samples
 //! one image MESH holds instead — the wallpaper the active profile paints —
 //! cover-fit to the output and placed at the surface's position on it. That
-//! image is what lies beneath only on surfaces below every window; elsewhere
-//! the compositor blurs the real backdrop and only the rim is painted here
+//! source remains available to background-layer wallpaper surfaces; other layers
+//! use compositor blur of the real backdrop and only the rim is painted here
 //! (spec 04 §11).
 
 use mesh_core_elements::VisualFilter;
@@ -25,9 +25,9 @@ use std::sync::{Arc, LazyLock, Mutex};
 pub struct BackdropFrame {
     pub origin: (f32, f32),
     pub output: (f32, f32),
-    /// The surface sits below every window (background or bottom layer), so
-    /// the source image stands for what lies beneath it. Only then does
-    /// `refract()` sample the source.
+    /// The caller explicitly permits sampling the configured image. The shell
+    /// enables this only for background-layer wallpaper surfaces; desktop
+    /// widgets use compositor blur because a foreign wallpaper may lie beneath.
     pub source_beneath: bool,
 }
 

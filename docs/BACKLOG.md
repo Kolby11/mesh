@@ -25,6 +25,12 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Recorded-scene panel GPU parity exceeds its pixel budget on the available
       driver; reproduced on unchanged `f6a68c5a` and the scene-retry candidate.
 
+- [ ] Investigate intermittent fractional retained-layout parity: the full shell matrix can disagree
+      with full layout at `fractional/1024/1024/0`, while an isolated rerun passes.
+
+- [ ] Investigate intermittent debug-inspector Surfaces rendering in the parallel shell suite;
+      the retained paint-counter test can miss the view heading while isolated reruns pass.
+
 ## Change-proportional frame pipeline — next implementation priority
 
 Frame cost scales with tree size times about ten passes, not with what
@@ -69,10 +75,9 @@ October log.
 
 ## Glass shell core gaps (found 2026-10-17)
 
-- [ ] **Backdrop placement beyond MESH:** refraction on background/bottom-layer surfaces predicts origins from MESH's own
-      surfaces; another client's exclusive zone (e.g. a quickshell bar) misaligns it. Multi-output backdrops are untested.
-      A foreign wallpaper layer above MESH's (`quickshell:background`) makes glass refract a different
-      image than the one on screen.
+- [ ] **Live refraction placement:** before restoring source-based refraction beyond the wallpaper,
+      use authoritative geometry and a source that accounts for foreign wallpaper layers and exclusive zones;
+      predicted origins cannot guarantee alignment. Multi-output source sampling remains untested.
 
 ## Theme materials (found 2026-10-27)
 
@@ -335,9 +340,9 @@ of payoff.
 
 ### Rendering and paint
 
-- [ ] Background/bottom-layer liquid glass still refracts a static wallpaper image, not
-      MESH's presented frames, so wallpaper transitions drift; top-layer glass has no bending
-      without a compositor glass protocol. Phases 2–4 of the [design](../.planning/todos/pending/2026-10-23-live-glass-backdrop.md).
+- [ ] Background-layer refraction still samples a static wallpaper image rather than presented frames;
+      desktop and top-layer glass use compositor blur plus rim lighting without bending.
+      Add a trusted live source and optional compositor glass protocol. Phases 2–4 of the [design](../.planning/todos/pending/2026-10-23-live-glass-backdrop.md).
 - [ ] Complete paint semantics for opacity layers, four-edge borders,
       four-corner radii, text physical scaling, and stable equal-z ordering;
       add retained and pixel regressions. [Section 12 audit](../.planning/log/sections/12-rendering-and-paint/improvements.md).

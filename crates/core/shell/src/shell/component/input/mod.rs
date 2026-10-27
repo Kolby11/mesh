@@ -413,6 +413,24 @@ impl FrontendSurfaceComponent {
                             focus_visible,
                         )?;
 
+                        if target.node.event_handlers.contains_key("pointerdown") {
+                            let mut event = self.build_click_event_for_button(
+                                tree,
+                                &node_key,
+                                Some(target.node),
+                                target.bounds,
+                                x,
+                                y,
+                                button,
+                            );
+                            event["type"] = serde_json::json!("pointerdown");
+                            requests.extend(self.call_resolved_node_handler(
+                                target.node,
+                                "pointerdown",
+                                &[event],
+                            )?);
+                        }
+
                         if target.node.tag == "slider" {
                             self.active_slider_id = Some(target.node.id);
                             self.update_slider_from_resolved_press(
@@ -478,8 +496,10 @@ impl FrontendSurfaceComponent {
                         }
                     }
                 } else {
+                    let pointer_requests =
+                        self.dispatch_captured_pointer_handler(tree, "pointerup", x, y)?;
                     self.release_pointer_capture(Some(button));
-                    let mut requests = Vec::new();
+                    let mut requests = pointer_requests;
                     if let Some(slider_key) = self
                         .active_slider_id
                         .and_then(|node_id| find_node_by_id(tree, node_id))
@@ -572,6 +592,15 @@ impl FrontendSurfaceComponent {
                 }
             }
             ComponentInput::PointerMove { x, y } => {
+                if self.active_slider_id.is_none()
+                    && self.active_scrollbar_drag.is_none()
+                    && self.pointer_down_target.as_ref().is_some_and(|target| {
+                        find_node_by_key(tree, &target.key)
+                            .is_some_and(|node| node.event_handlers.contains_key("pointermove"))
+                    })
+                {
+                    return self.dispatch_captured_pointer_handler(tree, "pointermove", x, y);
+                }
                 if let Some(drag) = self.active_scrollbar_drag {
                     let pointer = x * drag.axis_direction.0 + y * drag.axis_direction.1;
                     let thumb_range = (drag.track_extent - drag.thumb_extent).max(0.0);

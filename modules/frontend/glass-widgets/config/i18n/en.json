@@ -3,5 +3,6 @@
   "resize.height": "Height",
   "resize.reset": "Reset size",
   "resize.media": "Resize media widget",
-  "resize.weather": "Resize weather widget"
+  "resize.weather": "Resize weather widget",
+  "resize.hint": "Drag the corner or use arrow keys. Shift: 1px. Enter/Esc: finish."
 }

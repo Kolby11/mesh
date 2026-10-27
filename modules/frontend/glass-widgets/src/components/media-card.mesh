@@ -1,33 +1,42 @@
+<props>
+{
+    card_width = { type = "size", default = "auto" },
+    card_height = { type = "size", default = "auto" },
+}
+</props>
+
 <template>
-    <row class="media-card" class:media-card-idle={not has_track}>
-        <box class="media-art-frame">
+    <row style:width={props.card_width ~= "auto" and props.card_width or nil} style:height={props.card_height ~= "auto" and props.card_height or nil} class="media-card" class:media-card-idle={not has_track}>
+        <box class="media-art-frame" class:track-next-a={swipe == "next-a"} class:track-next-b={swipe == "next-b"} class:track-previous-a={swipe == "previous-a"} class:track-previous-b={swipe == "previous-b"}>
             <image class="media-art" src={art} alt="Album artwork" hidden={art == ""} />
             <icon class="media-art-glyph" name="audio-x-generic" size="44" hidden={art ~= ""} />
         </box>
-        <column class="media-body">
+        <column class="media-body" class:track-next-a={swipe == "next-a"} class:track-next-b={swipe == "next-b"} class:track-previous-a={swipe == "previous-a"} class:track-previous-b={swipe == "previous-b"}>
             <text class="media-title">{title}</text>
             <text class="media-artist">{artist}</text>
             <row class="media-progress">
                 <text class="media-time">{position_text}</text>
                 <slider
                     class="media-seek"
-                    value="{position}"
+                    value={position}
                     min="0"
-                    max="{length}"
+                    max={length}
+                    onpointerdown={onSeekStart}
                     onchange={onSeek}
+                    onrelease={onSeekRelease}
                     disabled={not has_track}
                     aria-label="Seek"
                 />
                 <text class="media-time">{length_text}</text>
             </row>
             <row class="media-controls">
-                <button class="media-ctl" onclick={onPrevious} disabled={not has_track} aria-label="Previous track">
+                <button class="media-ctl" ref="previousTrack" onclick={onPrevious} disabled={not has_track} aria-label="Previous track">
                     <icon class="media-ctl-glyph" name="media-skip-backward" size="16" />
                 </button>
                 <button class="media-ctl media-ctl-main" onclick={onToggle} disabled={not has_track} aria-label={playing and "Pause" or "Play"}>
                     <icon class="media-ctl-glyph media-ctl-glyph-main" name={playing and "media-playback-pause" or "media-playback-start"} size="16" />
                 </button>
-                <button class="media-ctl" onclick={onNext} disabled={not has_track} aria-label="Next track">
+                <button class="media-ctl" ref="nextTrack" onclick={onNext} disabled={not has_track} aria-label="Next track">
                     <icon class="media-ctl-glyph" name="media-skip-forward" size="16" />
                 </button>
             </row>
@@ -49,6 +58,15 @@ position = 0
 length = 1
 position_text = "00:00"
 length_text = "00:00"
+swipe = ""
+local last_track = ""
+local direction = "next"
+local swipe_count = 0
+local swipe_task
+local seek_dragging = false
+local seek_track
+local pending_seek
+local seek_timeout
 
 local function clock(seconds)
     seconds = math.max(0, math.floor(seconds or 0))
@@ -57,21 +75,45 @@ end
 
 local function position_now()
     local value = media.position or 0
-    if media.state == "playing" then
-        value += os.time() - (media.updated_at or os.time())
+    local sampled_at = tonumber(media.updated_at) or 0
+    if media.state.state == "playing" and sampled_at > 0 then
+        value += math.max(0, os.time() - sampled_at)
     end
     local total = media.length or 0
     return total > 0 and math.min(value, total) or value
 end
 
 local function update_progress()
-    position = math.floor(position_now())
+    if seek_dragging then return end
+    local actual = position_now()
+    if pending_seek then
+        if math.abs(actual - pending_seek) > 2 then return end
+        pending_seek = nil
+        if seek_timeout then task.cancel(seek_timeout) end
+        seek_timeout = nil
+    end
+    position = math.floor(actual)
     position_text = clock(position)
 end
 
 effect(function()
+    local track = table.concat({ media.player or "", media.title or "", media.artist or "", media.album or "" }, "\t")
+    if track ~= last_track then
+        seek_dragging = false
+        pending_seek = nil
+        if seek_timeout then task.cancel(seek_timeout) end
+        seek_timeout = nil
+        if last_track ~= "" and (media.title or "") ~= "" then
+            swipe_count += 1
+            swipe = direction .. (swipe_count % 2 == 0 and "-a" or "-b")
+            if swipe_task then task.cancel(swipe_task) end
+            swipe_task = task.delay(240, function() swipe = "" end)
+        end
+        last_track = track
+        direction = "next"
+    end
     has_track = media.available == true and (media.title or "") ~= ""
-    playing = has_track and media.state == "playing"
+    playing = has_track and media.state.state == "playing"
     title = has_track and media.title or "Nothing playing"
     artist = has_track and (media.artist or "") or ""
     album = media.album or ""
@@ -90,14 +132,54 @@ task.spawn(function()
     end
 end)
 
-function onSeek(value)
+local function seek_value(value)
     local target = tonumber(type(value) == "table" and value.value or value)
-    if target then
-        media.seek(target)
+    if not target or target ~= target then return nil end
+    return math.clamp(target, 0, length)
+end
+
+local function commit_seek(target)
+    pending_seek = target
+    position = target
+    position_text = clock(target)
+    if seek_timeout then task.cancel(seek_timeout) end
+    seek_timeout = task.delay(2500, function()
+        pending_seek = nil
+        seek_timeout = nil
+        update_progress()
+    end)
+    media.seek(target)
+end
+
+function onSeekStart()
+    seek_dragging = true
+    seek_track = last_track
+    pending_seek = nil
+    if seek_timeout then task.cancel(seek_timeout) end
+    seek_timeout = nil
+end
+
+function onSeek(value)
+    local target = seek_value(value)
+    if not target then return end
+    position = target
+    position_text = clock(target)
+    if not seek_dragging then commit_seek(target) end
+end
+
+function onSeekRelease(value)
+    local was_dragging = seek_dragging
+    seek_dragging = false
+    local target = seek_value(value)
+    if was_dragging and seek_track == last_track and target then
+        commit_seek(target)
+    else
+        update_progress()
     end
 end
 
 function onPrevious()
+    direction = "previous"
     media.previous()
 end
 
@@ -106,14 +188,15 @@ function onToggle()
 end
 
 function onNext()
+    direction = "next"
     media.next()
 end
 </script>
 
 <style>
     .media-card {
-        width: var(--desktop-widget-width, 480px);
-        height: var(--desktop-widget-height, 186px);
+        width: 480px;
+        height: 186px;
         gap: 18px;
         padding: 18px;
         align-items: center;
@@ -123,9 +206,31 @@ end
         box-shadow: var(--glass-shadow-card);
         backdrop-filter: var(--glass-backdrop-card);
         opacity: 1;
-        animation: media-card-in 520 cubic-bezier(0.05, 0.7, 0.1, 1) both;
+        overflow: hidden;
+        animation: media-card-in 520ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
     }
 
+
+    .track-next-a { animation: track-next-a 240ms cubic-bezier(0.05, 0.7, 0.1, 1) both; }
+    @keyframes track-next-a {
+        0% { opacity: 0; transform: translateX(32px); }
+        100% { opacity: 1; transform: translateX(0px); }
+    }
+    .track-next-b { animation: track-next-b 240ms cubic-bezier(0.05, 0.7, 0.1, 1) both; }
+    @keyframes track-next-b {
+        0% { opacity: 0; transform: translateX(32px); }
+        100% { opacity: 1; transform: translateX(0px); }
+    }
+    .track-previous-a { animation: track-previous-a 240ms cubic-bezier(0.05, 0.7, 0.1, 1) both; }
+    @keyframes track-previous-a {
+        0% { opacity: 0; transform: translateX(-32px); }
+        100% { opacity: 1; transform: translateX(0px); }
+    }
+    .track-previous-b { animation: track-previous-b 240ms cubic-bezier(0.05, 0.7, 0.1, 1) both; }
+    @keyframes track-previous-b {
+        0% { opacity: 0; transform: translateX(-32px); }
+        100% { opacity: 1; transform: translateX(0px); }
+    }
 
     .media-card-idle {
         opacity: 0.88;
@@ -133,7 +238,8 @@ end
 
     .media-art-frame {
         width: 142px;
-        height: 142px;
+        height: 100%;
+        max-height: 142px;
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
@@ -157,6 +263,7 @@ end
     }
 
     .media-body {
+        height: 100%;
         flex-grow: 1;
         min-width: 0;
         gap: 2px;
@@ -275,9 +382,13 @@ end
     .media-ctl-main { width: 56px; border-radius: 999px; background-image: var(--glass-surface-active); }
     .media-ctl-glyph-main { color: var(--glass-text-on-accent); }
     @container (max-width: 800px) {
-        .media-card { width: var(--desktop-widget-width, 360px); height: var(--desktop-widget-height, 168px); gap: 12px; padding: 14px; }
-        .media-art-frame, .media-art { width: 112px; height: 132px; }
-        .media-title { font-size: 18px; }
-        .media-controls { gap: 8px; }
+        .media-card { width: 360px; height: 168px; gap: 12px; padding: 14px; }
+        .media-art-frame { width: 112px; height: 100%; max-height: 132px; }
+        .media-art { width: 112px; height: 132px; }
+        .media-title { height: 30px; font-size: 18px; }
+        .media-artist { height: 22px; }
+        .media-progress { height: 28px; margin-top: 2px; }
+        .media-controls { height: 38px; margin-top: 2px; gap: 8px; }
+        .media-ctl { height: 36px; }
     }
 </style>

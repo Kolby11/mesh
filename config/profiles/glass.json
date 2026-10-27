@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "revision": 44,
+  "revision": 45,
   "from": {
     "module": "@mesh/glass"
   },
@@ -24,7 +24,7 @@
       },
       "render": {
         "backdrop": {
-          "image": "/home/kolby/Pictures/Wallpapers/forest.jpg"
+          "image": "/home/kolby/Pictures/Wallpapers/space-panels.png"
         }
       }
     }
