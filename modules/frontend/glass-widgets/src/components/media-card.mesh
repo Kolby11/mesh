@@ -36,6 +36,7 @@
 </template>
 
 <script lang="luau">
+
 local media = require("mesh.media")
 
 has_track = false
@@ -111,8 +112,8 @@ end
 
 <style>
     .media-card {
-        width: 480px;
-        height: 186px;
+        width: var(--desktop-widget-width, 480px);
+        height: var(--desktop-widget-height, 186px);
         gap: 18px;
         padding: 18px;
         align-items: center;
@@ -274,7 +275,7 @@ end
     .media-ctl-main { width: 56px; border-radius: 999px; background-image: var(--glass-surface-active); }
     .media-ctl-glyph-main { color: var(--glass-text-on-accent); }
     @container (max-width: 800px) {
-        .media-card { width: 360px; height: 168px; gap: 12px; padding: 14px; }
+        .media-card { width: var(--desktop-widget-width, 360px); height: var(--desktop-widget-height, 168px); gap: 12px; padding: 14px; }
         .media-art-frame, .media-art { width: 112px; height: 132px; }
         .media-title { font-size: 18px; }
         .media-controls { gap: 8px; }

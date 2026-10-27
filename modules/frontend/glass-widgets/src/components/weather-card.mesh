@@ -29,6 +29,7 @@
 </template>
 
 <script lang="luau">
+
 local weather = require("mesh.weather")
 
 local GLYPHS = {
@@ -92,8 +93,8 @@ end)
 
 <style>
     .weather-card {
-        width: 384px;
-        height: 268px;
+        width: var(--desktop-widget-width, 384px);
+        height: var(--desktop-widget-height, 268px);
         gap: 0;
         padding: 22px 24px;
         justify-content: space-between;
@@ -250,6 +251,6 @@ end)
         border-color: var(--glass-rim-hover);
     }
     @container (max-width: 800px) {
-        .weather-card { width: 360px; height: 248px; }
+        .weather-card { width: var(--desktop-widget-width, 360px); height: var(--desktop-widget-height, 248px); }
     }
 </style>

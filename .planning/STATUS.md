@@ -1,11 +1,17 @@
 # Status
 
-**Updated:** 2026-10-26
+**Updated:** 2026-10-27
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and
 measurements live in [`log/`](log/README.md).
 
 ## Now
+
+- **Desktop widgets and live resizing complete.** Quickshell's unlocked
+  wallpaper uses background, keeping bottom-layer widgets visible without
+  fullscreen. Independent media/weather size popups resize during slider drags,
+  persist per instance, respect responsive bounds and reset to defaults.
+  GPU-feature shell: 1,043 passed; token validation and rendered preview pass.
 
 - **Parallel backlog batch implemented (2026-10-26).** Graph diffs detect
   same-version manifest edits; activation snapshots reject mismatched names and

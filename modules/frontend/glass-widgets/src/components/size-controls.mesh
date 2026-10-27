@@ -1,0 +1,42 @@
+<template>
+    <popover class="size-popup" open={open} anchor-ref={anchor_ref} anchor="bottom" gravity="bottom" open-on="click" grab="click" aria-label={label}>
+        <column class="size-panel">
+            <text class="size-title">{label}</text>
+            <text>{t("resize.width")} · {width_value > 0 and width_value or default_width}px</text>
+            <slider class="size-slider" value={width_value > 0 and width_value or default_width} min={min_width} max="720" onchange={onWidth} aria-label={t("resize.width")} />
+            <text>{t("resize.height")} · {height_value > 0 and height_value or default_height}px</text>
+            <slider class="size-slider" value={height_value > 0 and height_value or default_height} min={min_height} max="480" onchange={onHeight} aria-label={t("resize.height")} />
+            <button class="size-reset" onclick={onReset}>{t("resize.reset")}</button>
+        </column>
+    </popover>
+</template>
+<script lang="luau">
+open = false
+anchor_ref = "sizeButton"
+label = "Resize widget"
+width_value = 0
+height_value = 0
+default_width = 480
+default_height = 186
+min_width = 360
+min_height = 168
+onwidth = nil
+onheight = nil
+onreset = nil
+function onWidth(value)
+    if onwidth then onwidth(value) end
+end
+function onHeight(value)
+    if onheight then onheight(value) end
+end
+function onReset()
+    if onreset then onreset() end
+end
+</script>
+<style>
+    .size-popup { width: fit; height: fit; padding: 8px; background: transparent; transition: none; }
+    .size-panel { width: 280px; padding: 18px; gap: 10px; border-radius: 18px; background-image: var(--glass-surface-media); border: 1px solid var(--glass-rim); color: var(--glass-text); }
+    .size-title { font-weight: 600; }
+    .size-slider { width: 100%; height: 30px; }
+    .size-reset { padding: 8px; border-radius: 10px; background-image: var(--glass-surface-control); }
+</style>

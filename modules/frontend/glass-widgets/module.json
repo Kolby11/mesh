@@ -47,6 +47,29 @@
     },
     "icons": {
       "ignore_shell_default": true
+    },
+    "i18n": {
+      "defaultLocale": "en"
+    },
+    "contributes": {
+      "i18n": [
+        {
+          "locale": "en",
+          "path": "config/i18n/en.json",
+          "id": "en"
+        },
+        {
+          "locale": "sk",
+          "path": "config/i18n/sk.json",
+          "id": "sk"
+        }
+      ]
+    },
+    "theme": {
+      "tokens": {
+        "desktop.widget.width": "480px",
+        "desktop.widget.height": "186px"
+      }
     }
   }
 }

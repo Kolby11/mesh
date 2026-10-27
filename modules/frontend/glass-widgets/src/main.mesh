@@ -5,17 +5,27 @@
 </props>
 
 <template>
-    <row class="desk">
-        <box class="gap-left" />
-        <column class="slot">
-            <MediaCard />
+    <row ref="widgetDesktop" class="desk" class:desk-resized={media_width > 0 or weather_width > 0}>
+        <box class="gap-left" class:gap-resized={media_width > 0 or weather_width > 0} />
+        <column class="slot slot-media" class:slot-media-default={media_display_width == 0} style:--desktop-widget-width={media_display_width > 0 and tostring(media_display_width) .. "px" or nil}>
+            <box class="card-frame" class:media-height-default={media_height == 0} style:--desktop-widget-height={media_height > 0 and tostring(media_height) .. "px" or nil}>
+                <MediaCard />
+                <box class="size-anchor">
+                    <button class="size-button" ref="sizeButton" title={t("resize.media")} aria-label={t("resize.media")} aria-haspopup="true"><icon name="settings" size="14" /></button>
+                    <SizeControls anchor_ref="sizeButton" label={t("resize.media")} width_value={media_width} height_value={media_height} onwidth={onMediaWidth} onheight={onMediaHeight} onreset={onMediaReset} />
+                </box>
+            </box>
             <Spectrum />
         </column>
-        <box class="gap-middle" />
-        <box class="slot slot-weather">
+        <box class="gap-middle" class:gap-resized={media_width > 0 or weather_width > 0} />
+        <box class="slot slot-weather" class:slot-weather-default={weather_display_width == 0} class:weather-height-default={weather_height == 0} class:weather-resized={media_width > 0 or weather_width > 0} style:--desktop-widget-width={weather_display_width > 0 and tostring(weather_display_width) .. "px" or nil} style:--desktop-widget-height={weather_height > 0 and tostring(weather_height) .. "px" or nil}>
             <WeatherCard />
+            <box class="size-anchor">
+                <button class="size-button" ref="weatherSize" title={t("resize.weather")} aria-label={t("resize.weather")} aria-haspopup="true"><icon name="settings" size="14" /></button>
+                <SizeControls anchor_ref="weatherSize" label={t("resize.weather")} width_value={weather_width} height_value={weather_height} default_width="384" default_height="268" min_width="320" min_height="248" onwidth={onWeatherWidth} onheight={onWeatherHeight} onreset={onWeatherReset} />
+            </box>
         </box>
-        <box class="gap-right" />
+        <box class="gap-right" class:gap-resized={media_width > 0 or weather_width > 0} />
     </row>
 </template>
 
@@ -23,6 +33,60 @@
 local MediaCard = require("./components/media-card.mesh")
 local WeatherCard = require("./components/weather-card.mesh")
 local Spectrum = require("./components/spectrum.mesh")
+local SizeControls = require("./components/size-controls.mesh")
+local saved
+media_width, media_height = 0, 0
+weather_width, weather_height = 0, 0
+
+local function dimension(value, minimum, maximum)
+    value = tonumber(type(value) == "table" and value.value or value)
+    if not value or value ~= value or value <= 0 then return 0 end
+    return math.clamp(math.floor(value + 0.5), minimum, maximum)
+end
+
+local function bounded_width(value)
+    if value <= 0 then return 0 end
+    local available = tonumber(refs.widgetDesktop.width) or 0
+    return available > 0 and math.min(value, math.max(1, available - 64)) or value
+end
+media_display_width, weather_display_width = 0, 0
+effect(function()
+    media_display_width = bounded_width(media_width)
+    weather_display_width = bounded_width(weather_width)
+end)
+
+function init(self)
+    saved = self.storage
+    media_width = dimension(saved.media_width, 360, 720)
+    media_height = dimension(saved.media_height, 168, 480)
+    weather_width = dimension(saved.weather_width, 320, 720)
+    weather_height = dimension(saved.weather_height, 248, 480)
+end
+function onMediaWidth(value)
+    media_width = dimension(value, 360, 720)
+    if saved then saved.media_width = media_width end
+end
+function onMediaHeight(value)
+    media_height = dimension(value, 168, 480)
+    if saved then saved.media_height = media_height end
+end
+function onWeatherWidth(value)
+    weather_width = dimension(value, 320, 720)
+    if saved then saved.weather_width = weather_width end
+end
+function onWeatherHeight(value)
+    weather_height = dimension(value, 248, 480)
+    if saved then saved.weather_height = weather_height end
+end
+function onMediaReset()
+    onMediaWidth(0)
+    onMediaHeight(0)
+end
+function onWeatherReset()
+    onWeatherWidth(0)
+    onWeatherHeight(0)
+end
+
 </script>
 
 <style>
@@ -36,6 +100,7 @@ local Spectrum = require("./components/spectrum.mesh")
         padding-inline: 32px;
         exclusive-zone: none;
         background: transparent;
+        transition: none;
     }
 
     .gap-left {
@@ -55,14 +120,34 @@ local Spectrum = require("./components/spectrum.mesh")
 
     .slot {
         flex-shrink: 0;
+        min-width: 0;
+        max-width: 100%;
+        position: relative;
+        transition: none;
     }
+    .size-button { width: 26px; height: 26px; padding: 5px; border-radius: 13px; background: var(--glass-fill-artwork); color: var(--glass-text-muted); }
+    .size-button:hover { color: var(--glass-text-heading); }
+    .size-anchor { position: absolute; right: 8px; top: 8px; }
+    .card-frame { --desktop-widget-height: 186px; position: relative; width: 100%; max-width: 100%; transition: none; }
+    .slot-media { --desktop-widget-width: 480px; width: var(--desktop-widget-width); }
+    .slot-weather { --desktop-widget-height: 268px; --desktop-widget-width: 384px; width: var(--desktop-widget-width); }
 
     .slot-weather {
         margin-top: 52px;
     }
+    @container (max-width: 1600px) {
+        .desk-resized { flex-direction: column; align-items: center; }
+        .gap-resized { display: none; }
+        .weather-resized { margin-top: 0; }
+    }
     @container (max-width: 1200px) {
         .desk { gap: 20px; padding-inline: 24px; }
         .gap-left, .gap-middle, .gap-right { display: none; }
+    }
+    @container (max-width: 800px) {
+        .slot-media-default, .slot-weather-default { --desktop-widget-width: 360px; }
+        .media-height-default { --desktop-widget-height: 168px; }
+        .weather-height-default { --desktop-widget-height: 248px; }
     }
     @container (max-height: 900px) {
         .desk { margin-top: 180px; }

@@ -48,7 +48,11 @@ PageUp/PageDown and the wheel; Enter, Space or a click on the centre card
 applies the wallpaper and closes it, and Escape closes it. Notification toasts
 anchor to the left edge so they sit under the bar's start islands.
 The media card grows a
-spectrum strip while audio plays. Dashboard system meters and CPU history bars
+spectrum strip while audio plays. Desktop media and weather cards expose a size
+button with live width/height sliders and a reset action. Custom dimensions
+persist per component instance and remain bounded by the output; the spectrum
+follows the media card width. Desktop widgets use the bottom layer, so wallpaper
+clients must use the background layer to stay behind them. Dashboard system meters and CPU history bars
 keep fixed layout boxes and animate their bottom-anchored vertical scale, so
 fill motion does not require layout on each frame. The dashboard's 24 spectrum
 bars also keep fixed 44 px boxes and apply bottom-anchored scale directly from

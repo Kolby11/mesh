@@ -150,6 +150,7 @@ impl GlassCatalog {
         let mut locale = mesh_core_locale::LocaleEngine::new("en");
         for module in [
             "glass-bar",
+            "glass-widgets",
             "glass-dock",
             "glass-dashboard",
             "glass-wallpapers",
@@ -174,6 +175,10 @@ impl GlassCatalog {
     }
 
     fn mount(&self, name: &str) -> FrontendSurfaceComponent {
+        self.mount_instance(name, &format!("@mesh/{name}"))
+    }
+
+    fn mount_instance(&self, name: &str, instance: &str) -> FrontendSurfaceComponent {
         let id = format!("@mesh/{name}");
         let entry = self.entries[&id].clone();
         let catalog = FrontendCatalog {
@@ -187,11 +192,12 @@ impl GlassCatalog {
             self.interfaces.clone(),
             test_settings_store(),
         );
+        component = component.with_instance_id(instance);
         component.locale = self.locale.snapshot();
         component
             .mount(ComponentContext {
-                component_id: id.clone(),
-                surface_id: id.clone(),
+                component_id: instance.into(),
+                surface_id: instance.into(),
                 diagnostics: Diagnostics::new(id),
             })
             .unwrap();
@@ -955,7 +961,10 @@ fn wallpaper_carousel_is_a_top_widget_driven_by_the_keyboard() {
 #[test]
 fn liquid_glass_desktop_cards_fit_laptop_and_large_outputs() {
     for width in [640, 800, 960, 1200, 1440, 1920, 2880] {
-        let mut component = host("glass-widgets");
+        let mut component = GlassCatalog::new().mount_instance(
+            "glass-widgets",
+            &format!("@mesh/glass-widgets#fit-{width}-{}", std::process::id()),
+        );
         update(
             &mut component,
             "mesh.weather",
@@ -985,7 +994,10 @@ fn liquid_glass_desktop_cards_fit_laptop_and_large_outputs() {
         let weather_card = first_node_by_class(tree, "weather-card").unwrap();
         assert_eq!(
             media_card.layout.width,
-            if width <= 800 { 360.0 } else { 480.0 }
+            if width <= 800 { 360.0 } else { 480.0 },
+            "{width}: slot={:?}, root={:?}",
+            media.layout,
+            tree.layout
         );
         assert_eq!(
             weather_card.layout.width,
@@ -999,6 +1011,214 @@ fn liquid_glass_desktop_cards_fit_laptop_and_large_outputs() {
         let texts = rendered_text(&component);
         assert!(texts.iter().any(|text| text == "Bratislava"), "{texts:?}");
     }
+}
+
+#[test]
+fn liquid_glass_desktop_cards_resize_live_independently_and_reset() {
+    fn frame(component: &mut FrontendSurfaceComponent, width: u32, height: u32) {
+        paint(component, width, height);
+        if component.wants_immediate_rerender() {
+            component.invalidate_surface_config();
+            paint(component, width, height);
+        }
+    }
+    let mut component = GlassCatalog::new().mount_instance(
+        "glass-widgets",
+        &format!("@mesh/glass-widgets#resize-{}", std::process::id()),
+    );
+    Arc::make_mut(&mut component.settings)
+        .set_namespace("shell", serde_json::json!({"motion":{"reduced":true}}));
+    component.motion_policy.reduced_motion = true;
+    frame(&mut component, 1920, 1000);
+    let instance_key = component.root_instance_key().to_owned();
+    let handler = |name: &str| format!("__mesh_embed__::{instance_key}::{name}");
+    for (name, value) in [
+        ("onMediaWidth", 600),
+        ("onMediaHeight", 280),
+        ("onWeatherWidth", 440),
+        ("onWeatherHeight", 340),
+    ] {
+        component
+            .call_namespaced_handler(&handler(name), &[serde_json::json!(value)])
+            .unwrap();
+        frame(&mut component, 1920, 1000);
+    }
+    let tree = component.last_tree.as_ref().unwrap();
+    let media = first_node_by_class(tree, "media-card").unwrap();
+    let weather = first_node_by_class(tree, "weather-card").unwrap();
+    assert_eq!((media.layout.width, media.layout.height), (600.0, 280.0));
+    assert_eq!(
+        (weather.layout.width, weather.layout.height),
+        (440.0, 340.0)
+    );
+    assert_eq!(
+        first_node_by_class(tree, "spectrum-strip")
+            .unwrap()
+            .layout
+            .width,
+        600.0
+    );
+    component.reload_source().unwrap();
+    frame(&mut component, 1920, 1000);
+    let tree = component.last_tree.as_ref().unwrap();
+    assert_eq!(
+        first_node_by_class(tree, "media-card")
+            .unwrap()
+            .layout
+            .width,
+        600.0
+    );
+    assert_eq!(
+        first_node_by_class(tree, "weather-card")
+            .unwrap()
+            .layout
+            .height,
+        340.0
+    );
+    for width in [640, 960, 1200] {
+        let mut small = GlassCatalog::new().mount_instance(
+            "glass-widgets",
+            &format!("@mesh/glass-widgets#resize-{width}-{}", std::process::id()),
+        );
+        frame(&mut small, width, 1000);
+        let key = small.root_instance_key().to_owned();
+        for (name, value) in [("onMediaWidth", 600), ("onWeatherWidth", 440)] {
+            small
+                .call_namespaced_handler(
+                    &format!("__mesh_embed__::{key}::{name}"),
+                    &[serde_json::json!(value)],
+                )
+                .unwrap();
+        }
+        frame(&mut small, width, 1000);
+        let tree = small.last_tree.as_ref().unwrap();
+        for class in ["media-card", "weather-card"] {
+            let card = first_node_by_class(tree, class).unwrap();
+            assert!(
+                card.layout.x >= 0.0 && card.layout.x + card.layout.width <= width as f32 + 1.0,
+                "{width}: {class}: {:?}",
+                card.layout
+            );
+        }
+    }
+    component
+        .call_namespaced_handler(&handler("onMediaWidth"), &[serde_json::json!(1)])
+        .unwrap();
+    component
+        .call_namespaced_handler(&handler("onWeatherHeight"), &[serde_json::json!(10000)])
+        .unwrap();
+    frame(&mut component, 1920, 1000);
+    let tree = component.last_tree.as_ref().unwrap();
+    assert_eq!(
+        first_node_by_class(tree, "media-card")
+            .unwrap()
+            .layout
+            .width,
+        360.0
+    );
+    assert_eq!(
+        first_node_by_class(tree, "weather-card")
+            .unwrap()
+            .layout
+            .height,
+        480.0
+    );
+    for name in ["onMediaReset", "onWeatherReset"] {
+        component
+            .call_namespaced_handler(&handler(name), &[])
+            .unwrap();
+    }
+    frame(&mut component, 1920, 1000);
+    let tree = component.last_tree.as_ref().unwrap();
+    let media = first_node_by_class(tree, "media-card").unwrap();
+    let weather = first_node_by_class(tree, "weather-card").unwrap();
+    assert_eq!((media.layout.width, media.layout.height), (480.0, 186.0));
+    assert_eq!(
+        (weather.layout.width, weather.layout.height),
+        (384.0, 268.0)
+    );
+
+    press(&mut component, "sizeButton", 1920, 1000);
+    let request = component
+        .child_surface_requests()
+        .into_iter()
+        .next()
+        .expect("size editor popup");
+    let (popup_width, popup_height) = request.content_size;
+    let mut popup_pixels = PixelBuffer::new(popup_width, popup_height);
+    component
+        .paint_child_surface_raster(&request.node_key, &mut popup_pixels, 1.0, (0, 0), false)
+        .unwrap();
+    let child = component
+        .child_surface_debug_tree(&request.node_key, (0.0, 0.0))
+        .unwrap();
+    let slider = first_node_by_class(&child, "size-slider").unwrap();
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(&child, slider.mesh_key().unwrap(), 0.0, 0.0).unwrap();
+    let y = (top + bottom) / 2.0;
+    let slider_width = right - left;
+    let (w, h) = request.content_size;
+    component
+        .handle_child_surface_input(
+            &request.node_key,
+            &theme(),
+            w,
+            h,
+            (0.0, 0.0),
+            ComponentInput::PointerButton {
+                x: left + slider_width * 0.5,
+                y,
+                button: 0x110,
+                pressed: true,
+            },
+        )
+        .unwrap();
+    assert!(
+        component.active_slider_id.is_some(),
+        "size slider press must capture: left={left}, y={y}, width={slider_width}, popup={w}x{h}"
+    );
+    frame(&mut component, 1920, 1000);
+    let before = first_node_by_class(component.last_tree.as_ref().unwrap(), "media-card")
+        .unwrap()
+        .layout
+        .width;
+    component
+        .handle_child_surface_input(
+            &request.node_key,
+            &theme(),
+            w,
+            h,
+            (0.0, 0.0),
+            ComponentInput::PointerMove {
+                x: left + slider_width * 0.9,
+                y,
+            },
+        )
+        .unwrap();
+    frame(&mut component, 1920, 1000);
+    let during = first_node_by_class(component.last_tree.as_ref().unwrap(), "media-card")
+        .unwrap()
+        .layout
+        .width;
+    assert!(
+        during > before,
+        "drag must resize before release: {before} -> {during}"
+    );
+    component
+        .handle_child_surface_input(
+            &request.node_key,
+            &theme(),
+            w,
+            h,
+            (0.0, 0.0),
+            ComponentInput::PointerButton {
+                x: left + slider_width * 0.9,
+                y,
+                button: 0x110,
+                pressed: false,
+            },
+        )
+        .unwrap();
 }
 
 fn preview(component: &mut FrontendSurfaceComponent, width: u32, height: u32, label: &str) {
