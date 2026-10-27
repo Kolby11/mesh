@@ -1606,6 +1606,79 @@ fn desktop_seek_drag_keeps_preview_until_release_and_acknowledgement() {
     }
 }
 
+#[test]
+fn desktop_seek_then_track_switch_resets_slider_and_elapsed_time() {
+    for acknowledge in [false, true] {
+        let mut component = GlassCatalog::new().mount_instance(
+            "glass-widgets",
+            &format!(
+                "@mesh/glass-widgets#seek-switch-{acknowledge}-{}",
+                std::process::id()
+            ),
+        );
+        Arc::make_mut(&mut component.settings)
+            .set_namespace("shell", serde_json::json!({"motion":{"reduced":true}}));
+        let mut media = serde_json::json!({"available":true,"state":"paused","player":"test","title":"First","artist":"Artist","album":"Album","position":0,"length":200,"updated_at":0});
+        update(&mut component, "mesh.media", media.clone());
+        paint(&mut component, 1920, 1000);
+        let tree = component.last_tree.as_ref().unwrap();
+        let slider = first_node_by_class(tree, "media-seek").unwrap();
+        let (left, top, right, bottom) =
+            find_node_bounds_by_key(tree, slider.mesh_key().unwrap(), 0.0, 0.0).unwrap();
+        let (x, y) = (left + (right - left) * 0.685, (top + bottom) / 2.0);
+        for pressed in [true, false] {
+            component
+                .handle_input(
+                    &theme(),
+                    1920,
+                    1000,
+                    ComponentInput::PointerButton {
+                        x,
+                        y,
+                        button: 0x110,
+                        pressed,
+                    },
+                )
+                .unwrap();
+            paint(&mut component, 1920, 1000);
+        }
+        if acknowledge {
+            media["position"] = serde_json::json!(137);
+            update(&mut component, "mesh.media", media.clone());
+            paint(&mut component, 1920, 1000);
+        }
+        media["title"] = serde_json::json!("Mai");
+        media["artist"] = serde_json::json!("Videoclub");
+        media["position"] = serde_json::json!(0);
+        media["length"] = serde_json::json!(218);
+        update(&mut component, "mesh.media", media.clone());
+        paint(&mut component, 1920, 1000);
+        for position in [0, 1, 2] {
+            media["position"] = serde_json::json!(position);
+            update(&mut component, "mesh.media", media.clone());
+            paint(&mut component, 1920, 1000);
+            let tree = component.last_tree.as_ref().unwrap();
+            let slider = first_node_by_class(tree, "media-seek").unwrap();
+            let actual = slider
+                .attributes
+                .get(mesh_core_elements::Prop::Value)
+                .unwrap()
+                .parse::<f64>()
+                .unwrap();
+            assert!(
+                (actual - position as f64).abs() < 0.1,
+                "acknowledged={acknowledge}, new position={position}, slider={actual}, text={:?}",
+                rendered_text(&component)
+            );
+            assert!(
+                rendered_text(&component)
+                    .iter()
+                    .any(|text| text == &format!("00:{position:02}"))
+            );
+        }
+    }
+}
+
 fn preview(component: &mut FrontendSurfaceComponent, width: u32, height: u32, label: &str) {
     let Some(dir) = std::env::var_os("MESH_GLASS_PREVIEW_DIR") else {
         return;
