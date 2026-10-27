@@ -34,3 +34,20 @@ fn chained_runtime_node_ids_are_deterministic_and_distinguish_siblings() {
     );
     assert_ne!(child_runtime_node_id(parent, 2), 0);
 }
+
+#[test]
+fn keyed_loop_and_invalid_segments_preserve_annotation_identity() {
+    let keyed = "root/2/@loop:alpha";
+    assert_eq!(
+        runtime_node_id_for_key(keyed),
+        stable_runtime_node_id(keyed)
+    );
+    assert_eq!(
+        runtime_node_id_for_key("root/2/@loop:alpha/3"),
+        child_runtime_node_id(stable_runtime_node_id(keyed), 3)
+    );
+    assert_eq!(
+        runtime_node_id_for_key("root/invalid"),
+        stable_runtime_node_id("root/invalid")
+    );
+}

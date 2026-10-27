@@ -30,13 +30,18 @@ static NEXT_SCRIPT_CONTEXT_GENERATION: std::sync::atomic::AtomicU64 =
 /// older catalog (or the reverse) between host calls.
 #[derive(Debug, Clone)]
 pub(super) struct LocaleCell {
-    pub(super) resolver: OwnedModuleTranslator,
+    pub(super) resolver: Arc<OwnedModuleTranslator>,
 }
 
 impl Default for LocaleCell {
     fn default() -> Self {
         Self {
-            resolver: OwnedModuleTranslator::new("@mesh/unknown", "en", HashMap::new(), 0),
+            resolver: Arc::new(OwnedModuleTranslator::new(
+                "@mesh/unknown",
+                "en",
+                HashMap::new(),
+                0,
+            )),
         }
     }
 }
@@ -416,14 +421,24 @@ impl ScriptContext {
             .into_iter()
             .map(|(key, value)| (key, mesh_core_locale::CatalogEntry::Text(value)))
             .collect();
-        cell.resolver = OwnedModuleTranslator::new(self.module_id.clone(), "en", entries, 0);
+        cell.resolver = Arc::new(OwnedModuleTranslator::new(
+            self.module_id.clone(),
+            "en",
+            entries,
+            0,
+        ));
     }
 
     /// Replace the catalog behind `mesh.i18n.t()` with the owning module's
     /// scoped translator snapshot.
     pub fn set_i18n_translator(&mut self, translator: &ModuleTranslator<'_>) {
+        self.set_shared_i18n_translator(Arc::new(translator.owned()));
+    }
+
+    /// Replace the scoped catalog with a shared immutable translator snapshot.
+    pub fn set_shared_i18n_translator(&mut self, translator: Arc<OwnedModuleTranslator>) {
         self.invalidate_reactive_effects();
-        self.locale_cell.lock().unwrap().resolver = translator.owned();
+        self.locale_cell.lock().unwrap().resolver = translator;
         // Template expressions containing t(...) can otherwise remain in the
         // pure-member cache when the script members themselves did not change.
         // A locale/catalog replacement changes their result even when all

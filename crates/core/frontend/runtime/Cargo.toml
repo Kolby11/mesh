@@ -1,0 +1,9 @@
+[package]
+name = "mesh-core-frontend-runtime"
+description = "Frontend component runtime for MESH"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mesh-core-elements = { workspace = true }

@@ -11,7 +11,27 @@ fn reference_lens_shader(
     filter: VisualFilter,
     backdrop: Shader,
 ) -> Option<Shader> {
-    REFERENCE_EFFECT.with(|effect| make_lens_shader(effect, rect, radii, filter, backdrop))
+    let uniforms = [
+        rect.left,
+        rect.top,
+        rect.width(),
+        rect.height(),
+        radii.top_left,
+        radii.top_right,
+        radii.bottom_right,
+        radii.bottom_left,
+        filter.refract_depth,
+        filter.refract_edge,
+        filter.dispersion,
+        rim_width(filter),
+    ];
+    let bytes: Vec<u8> = uniforms
+        .iter()
+        .flat_map(|value| value.to_ne_bytes())
+        .collect();
+    REFERENCE_EFFECT.with(|effect| {
+        effect.make_shader(Data::new_copy(&bytes), &[ChildPtr::Shader(backdrop)], None)
+    })
 }
 
 fn source() -> BackdropSource {
@@ -192,6 +212,7 @@ fn glass_raster_profile() {
         refract_edge: 30.0,
         dispersion: 4.0,
         blur_radius: 6.0,
+        grain: 0.0,
     };
     for size in [(1920, 1080), (3840, 2160)] {
         let started = Instant::now();
@@ -529,7 +550,7 @@ fn rim_band_clip_matches_shading_the_whole_rect() {
         assert!(draw_rim(banded.canvas(), rect, radii, filter));
         let mut whole = surfaces::raster_n32_premul((180, 116)).unwrap();
         whole.canvas().clear(gray);
-        let paint = rim_paint(rect, radii, rim_width(filter)).unwrap();
+        let paint = rim_paint(rect, radii, rim_width(filter), filter.grain).unwrap();
         whole
             .canvas()
             .draw_rect(rect.with_outset((1.0, 1.0)), &paint);
@@ -539,4 +560,51 @@ fn rim_band_clip_matches_shading_the_whole_rect() {
             "rect {rect:?} radii {radii:?} edge {edge}"
         );
     }
+}
+
+#[test]
+fn grain_textures_the_backdrop_and_repaints_consistently() {
+    let rect = Rect::from_xywh(8.0, 8.0, 80.0, 48.0);
+    let radii = Corners::zero();
+    let filter = VisualFilter {
+        grain: 0.2,
+        ..VisualFilter::NONE
+    };
+    let gray = skia_safe::Color::from_argb(255, 128, 128, 128);
+    let mut full = surfaces::raster_n32_premul((96, 64)).unwrap();
+    full.canvas().clear(gray);
+    assert!(draw_rim(full.canvas(), rect, radii, filter));
+    let full = pixels(&mut full);
+    let samples: Vec<u8> = (20..40).map(|x| full[(32 * 96 + x) * 4]).collect();
+    assert!(samples.iter().any(|v| *v < 128));
+    assert!(samples.iter().any(|v| *v > 128));
+    assert_eq!(full[(2 * 96 + 2) * 4], 128);
+    let mut clipped = surfaces::raster_n32_premul((96, 64)).unwrap();
+    clipped.canvas().clear(gray);
+    clipped
+        .canvas()
+        .clip_rect(Rect::from_xywh(20.0, 20.0, 30.0, 20.0), None, false);
+    assert!(draw_rim(clipped.canvas(), rect, radii, filter));
+    let clipped = pixels(&mut clipped);
+    for y in 20..40 {
+        for x in 20..50 {
+            let i = (y * 96 + x) * 4;
+            assert_eq!(&full[i..i + 4], &clipped[i..i + 4]);
+        }
+    }
+    let mut source_surface = surfaces::raster_n32_premul((96, 64)).unwrap();
+    source_surface.canvas().clear(gray);
+    let image = source_surface.image_snapshot();
+    assert!(draw_backdrop(
+        source_surface.canvas(),
+        rect,
+        radii,
+        filter,
+        backdrop(&image, (0.0, 0.0))
+    ));
+    let sampled = pixels(&mut source_surface);
+    assert_eq!(
+        &sampled[(32 * 96 + 20) * 4..(32 * 96 + 40) * 4],
+        &full[(32 * 96 + 20) * 4..(32 * 96 + 40) * 4]
+    );
 }

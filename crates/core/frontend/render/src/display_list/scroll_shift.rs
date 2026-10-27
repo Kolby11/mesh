@@ -86,6 +86,9 @@ pub(super) fn plan_scroll_shift(
                 .any(|region| region.node_id == command.node.id);
         if !paints_nothing && command_bounds(command).intersects(viewport) {
             if command.kind == DisplayPaintCommandKind::ApplyBackdropRim {
+                if command.node.style.backdrop_filter.grain > 0.0 {
+                    return None;
+                }
                 anchored.extend(rim_bands(command, viewport)?);
             } else {
                 anchored.extend(beneath_varying_parts(command, owner, viewport, axes)?);

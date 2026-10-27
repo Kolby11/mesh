@@ -167,6 +167,47 @@ fn display_list_reuses_unrelated_subtrees_for_transform_updates() {
 }
 
 #[test]
+fn alternating_changes_after_subtree_reuse_match_fresh_display_list() {
+    let mut root = node(1, "row", 0.0, 0.0, 160.0, 60.0);
+    for (parent, first, x) in [(2, 3, 0.0), (5, 6, 80.0)] {
+        let mut panel = node(parent, "box", x, 0.0, 70.0, 60.0);
+        panel
+            .children
+            .push(node(first, "box", 0.0, 0.0, 30.0, 30.0));
+        panel
+            .children
+            .push(node(first + 1, "box", 35.0, 0.0, 30.0, 30.0));
+        root.children.push(panel);
+    }
+    let mut retained = RetainedDisplayList::default();
+    retained.update(&root, 160, 60, false, true);
+    for branch in [0, 1, 0, 1] {
+        let parent = &mut root.children[branch];
+        parent.computed_style.transform.translate_x += 1.0;
+        let dirty_id = parent.id;
+        retained.update_with_dirty_nodes(
+            &root,
+            RenderObjectDirtySummary {
+                transform: 1,
+                ..Default::default()
+            },
+            &HashSet::from([dirty_id]),
+            160,
+            60,
+            false,
+            true,
+        );
+        let mut fresh = RetainedDisplayList::default();
+        fresh.update(&root, 160, 60, false, true);
+        assert_eq!(
+            command_debugs(retained.paint_commands(), &[1, 2, 3, 4, 5, 6, 7]),
+            command_debugs(fresh.paint_commands(), &[1, 2, 3, 4, 5, 6, 7]),
+            "branch {branch}"
+        );
+    }
+}
+
+#[test]
 fn subtree_generation_ignores_unrelated_surface_paint_changes() {
     let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
     let mut sibling = node(2, "box", 0.0, 0.0, 40.0, 40.0);
@@ -667,6 +708,16 @@ fn scroll_shift_plans_only_scopes_over_a_uniform_backdrop() {
     let mut root = scene(Some(
         mesh_core_elements::style::BackgroundPaint::LinearGradient(Default::default()),
     ));
+    let mut objects = crate::RenderObjectTree::default();
+    objects.update(&root);
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 200, 160, true, true);
+    list.mark_painted();
+    scroll(&mut root, &mut list, &mut objects, 8.0);
+    assert!(list.scroll_shifts().is_empty());
+
+    let mut root = scene(None);
+    root.computed_style.backdrop_filter.grain = 0.1;
     let mut objects = crate::RenderObjectTree::default();
     objects.update(&root);
     let mut list = RetainedDisplayList::default();

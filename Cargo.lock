@@ -2293,6 +2293,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mesh-core-frontend-runtime"
+version = "0.1.0"
+dependencies = [
+ "mesh-core-elements",
+]
+
+[[package]]
 name = "mesh-core-frontend-shell-adapter"
 version = "0.1.0"
 dependencies = [
@@ -2506,6 +2513,7 @@ dependencies = [
  "mesh-core-expression",
  "mesh-core-frontend",
  "mesh-core-frontend-abi",
+ "mesh-core-frontend-runtime",
  "mesh-core-frontend-shell-adapter",
  "mesh-core-icon",
  "mesh-core-interaction",

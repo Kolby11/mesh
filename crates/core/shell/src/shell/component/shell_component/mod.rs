@@ -1839,6 +1839,7 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn locale_changed(&mut self, locale: &LocaleEngine) -> Result<(), ComponentError> {
         tracing::debug!("locale_changed for component '{}'", self.id());
         self.locale = locale.snapshot();
+        self.i18n_translators.get_mut().clear();
         // Component memo entries contain localized attributes and text. Their
         // locale key is useful for normal reuse, but clearing them here also
         // covers a catalog snapshot replacement that keeps the same locale.
@@ -1847,8 +1848,8 @@ impl ShellComponent for FrontendSurfaceComponent {
         let mut generations = Vec::new();
         for (instance_key, runtime) in self.runtimes.lock().unwrap().iter_mut() {
             let module_id = runtime.script_ctx.module_id.clone();
-            let translator = self.locale.module_translator(&module_id);
-            runtime.script_ctx.set_i18n_translator(&translator);
+            let translator = self.shared_i18n_translator(&module_id);
+            runtime.script_ctx.set_shared_i18n_translator(translator);
             runtime.script_ctx.apply_service_payload("locale", &payload);
             if script_has_service_read(&runtime.script_ctx, "mesh.locale", "locale") {
                 apply_service_update_with_name(

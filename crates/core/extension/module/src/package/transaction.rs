@@ -459,6 +459,20 @@ impl PackageTransaction {
         paths.set_active_locked(profile_id, &self.control_plane_lock)
     }
 
+    /// Persist the pointer if it still matches the candidate's observed value.
+    pub fn set_active_profile_if_current(
+        &mut self,
+        paths: &ProfilePaths,
+        expected: Option<&str>,
+        profile_id: &str,
+    ) -> Result<bool, ModuleManifestError> {
+        if paths.active_profile_id()?.as_deref() != expected {
+            return Ok(false);
+        }
+        self.protect(&paths.active_profile_path())?;
+        paths.set_active_if_current_locked(expected, profile_id, &self.control_plane_lock)
+    }
+
     /// Archive and persist the next lock generation as part of this package
     /// transaction. The store snapshot is published before the lock bytes,
     /// and the transaction keeps the old durable state recoverable on error.

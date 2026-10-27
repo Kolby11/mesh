@@ -7,11 +7,11 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
-- Nothing in flight.
+- Extract the frontend component runtime from shell (SH-08).
 
 ## Next
 
-- Theme materials remainder: backdrop grain.
+- Investigate intermittent fractional retained-layout parity.
 - Continue trusted live glass source work and the in-surface blur engine.
 
 ## Blocked / known baselines

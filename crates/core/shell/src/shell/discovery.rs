@@ -2198,6 +2198,11 @@ impl Shell {
             pending_backend_runtimes: HashMap::new(),
             pending_resource_preparation: None,
             pending_profile_switch: None,
+            pending_graph_reconciliation: false,
+            active_profile_authoring: load_configured_profile(&graph_path)
+                .ok()
+                .flatten()
+                .and_then(|(id, profile)| serde_json::to_value(profile).ok().map(|value| (id, value))),
             pending_control_plane_commit: None,
             pending_profile_write: None,
             parked_durable_writes: Vec::new(),

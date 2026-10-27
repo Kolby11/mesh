@@ -602,6 +602,7 @@ impl Shell {
                 pending.extend(self.tick_components()?);
                 pending.extend(self.complete_due_surface_transitions()?);
                 pending.extend(self.poll_pending_resource_preparation());
+                pending.extend(self.retry_pending_graph_reconciliation());
                 self.enqueue_effects(std::mem::take(&mut pending));
                 self.process_effects();
                 self.flush_throttled_commands();
@@ -1049,15 +1050,14 @@ impl Shell {
                 );
             }
             ShellMessage::FilesystemChanged { generation } => {
-                if generation != self.file_watch_set.generation {
-                    tracing::debug!(
-                        generation,
-                        current_generation = self.file_watch_set.generation,
-                        "ignored filesystem event from retired watch generation"
-                    );
-                } else {
+                if generation <= self.file_watch_set.generation {
                     self.schedule_reload_checks_now();
-                    pending.extend(self.reconcile_installed_graph());
+                    if generation < self.file_watch_set.generation {
+                        self.pending_graph_reconciliation = true;
+                        pending.extend(self.retry_pending_graph_reconciliation());
+                    } else {
+                        pending.extend(self.reconcile_installed_graph());
+                    }
                 }
             }
             ShellMessage::FileWatcherStatus {
@@ -1331,7 +1331,7 @@ impl Shell {
     /// Reconcile the worker with the inputs of the latest active catalog,
     /// profile, resource snapshot, theme, and mounted component graph. The
     /// worker owns the inotify descriptors; this shell-side generation is the
-    /// authority used to reject delayed events from a retired set.
+    /// authority for watcher status; delayed change events remain reload hints.
     pub(in crate::shell) fn reconcile_file_watcher(&mut self) {
         let paths = file_watch::WatchSet::new(0, self.file_watch_paths()).paths;
         let paths_changed = self.file_watch_set.paths != paths;

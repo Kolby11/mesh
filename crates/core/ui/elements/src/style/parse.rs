@@ -100,6 +100,25 @@ pub fn parse_transform(value: &str) -> Transform2D {
                     transform.rotation += angle;
                 }
             }
+            "skew" => {
+                let mut angles = args_str
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(parse_transform_angle);
+                transform.skew_x += angles.next().unwrap_or(0.0);
+                transform.skew_y += angles.next().unwrap_or(0.0);
+            }
+            "skewX" => {
+                if let Some(angle) = angle_arg {
+                    transform.skew_x += angle;
+                }
+            }
+            "skewY" => {
+                if let Some(angle) = angle_arg {
+                    transform.skew_y += angle;
+                }
+            }
             _ => {}
         }
 
@@ -701,7 +720,7 @@ pub(super) fn parse_filter(value: &str) -> VisualFilter {
 }
 
 /// `backdrop-filter`: a space-separated list of `blur(<px>)`,
-/// `refract(<depth> [<edge>])` and `dispersion(<px>)`. An unknown function
+/// `refract(<depth> [<edge>])`, `dispersion(<px>)` and `grain(<opacity>)`. An unknown function
 /// rejects the whole value, like an invalid `filter`.
 pub(super) fn parse_backdrop_filter(value: &str) -> VisualFilter {
     let trimmed = value.trim();
@@ -736,6 +755,15 @@ pub(super) fn parse_backdrop_filter(value: &str) -> VisualFilter {
                 filter.refract_edge = edge.max(0.0);
             }
             ("dispersion", [amount]) => filter.dispersion = amount.max(0.0),
+            ("grain", [_]) => {
+                let Ok(amount) = rest[open + 1..close].trim().parse::<f32>() else {
+                    return VisualFilter::NONE;
+                };
+                if !amount.is_finite() {
+                    return VisualFilter::NONE;
+                }
+                filter.grain = amount.clamp(0.0, 1.0);
+            }
             _ => return VisualFilter::NONE,
         }
         rest = rest[close + 1..].trim_start();

@@ -1,6 +1,111 @@
 use super::*;
 
 #[test]
+fn settings_audio_static_import_keeps_unrelated_page_generations_stable() {
+    let theme = default_theme();
+    let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let source = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../modules/frontend/settings/src/components/audio-page.mesh"
+    ));
+    let direct = source.replace(
+        "local audio_ok, audio = pcall(require, \"mesh.audio@>=1.0\")\nif not audio_ok then audio = nil end",
+        "local audio = require(\"mesh.audio@>=1.0\")",
+    );
+    assert_ne!(direct, source);
+    std::sync::Arc::make_mut(&mut settings.frontend_catalog)
+        .modules
+        .get_mut("@mesh/settings")
+        .unwrap()
+        .compiled
+        .local_components
+        .insert("AudioPage".into(), parse_component(&direct).unwrap());
+    let extent = SurfaceExtent::unpadded(920, 900);
+    let mut buffer = PixelBuffer::new(920, 900);
+    settings
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
+        .unwrap();
+    settings
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+    let update = |settings: &mut FrontendSurfaceComponent, percent| {
+        settings
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.audio".into(),
+                source_module: "@mesh/pipewire-audio".into(),
+                payload: serde_json::json!({"percent": percent, "muted": false}),
+            })
+            .unwrap();
+    };
+    update(&mut settings, 10);
+    settings
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+    for _ in 0..2 {
+        settings.invalidate_script_state();
+        settings
+            .paint_raster(&theme, extent, &mut buffer, 1.0)
+            .unwrap();
+    }
+    let warm_hits = settings.component_memo_hit_count();
+    settings.invalidate_script_state();
+    settings
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+    let baseline_hits = settings.component_memo_hit_count() - warm_hits;
+    assert!(baseline_hits > 0);
+    let before = {
+        let runtimes = settings.runtimes.lock().unwrap();
+        assert!(
+            runtimes
+                .iter()
+                .any(|(key, runtime)| key.contains("AudioPage")
+                    && runtime.script_ctx.has_tracked_fields_for_service("audio")),
+            "audio page must observe the imported service"
+        );
+        runtimes
+            .iter()
+            .filter(|(key, _)| key.contains("/local:") && !key.contains("AudioPage"))
+            .map(|(key, runtime)| {
+                (
+                    key.to_string(),
+                    runtime.script_ctx.state().mutation_generation(),
+                )
+            })
+            .collect::<std::collections::HashMap<_, _>>()
+    };
+    assert!(
+        before.keys().any(|key| key.contains("AppearancePage")),
+        "{before:?}"
+    );
+    update(&mut settings, 20);
+    let runtimes = settings.runtimes.lock().unwrap();
+    for (key, generation) in before {
+        assert_eq!(
+            runtimes
+                .get(key.as_str())
+                .unwrap()
+                .script_ctx
+                .state()
+                .mutation_generation(),
+            generation,
+            "{key}"
+        );
+    }
+    drop(runtimes);
+    let hits = settings.component_memo_hit_count();
+    settings.invalidate_script_state();
+    settings
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+    assert!(
+        settings.component_memo_hit_count() - hits >= baseline_hits.saturating_sub(1),
+        "unrelated pages should reuse their memoized trees; baseline {baseline_hits}, after audio {}",
+        settings.component_memo_hit_count() - hits
+    );
+}
+
+#[test]
 fn settings_page_title_keeps_its_full_line_box() {
     let theme = default_theme();
     let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());

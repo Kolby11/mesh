@@ -62,6 +62,8 @@ impl Interpolate for Transform2D {
             // Take the shortest angular path so a hover-out reverses the
             // way it came rather than spinning the long way around.
             rotation: lerp_angle(self.rotation, other.rotation, progress),
+            skew_x: self.skew_x.lerp(other.skew_x, progress),
+            skew_y: self.skew_y.lerp(other.skew_y, progress),
         }
     }
 }

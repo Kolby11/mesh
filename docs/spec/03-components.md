@@ -48,8 +48,8 @@ Component rules (shipped):
   `import ItemRow from "…"` statements are unsupported and must migrate to
   `local ItemRow = require("…")`.
 - Bare non-local script assignments are public reactive members; templates
-  bind `{name}`. `local` is private. Hooks receive `self` (`self.meta`,
-  `self.storage`).
+  bind `{name}`. `local` is private. Scripts and hooks can access `self`
+  (`self.meta`, `self.storage`, and component event channels).
 - `bind:this={ref}` is a **live reference** into the child's environment (all
   current same-thread contexts share a single Lua realm, each in its own
   `_ENV`): reads see current values, calls are synchronous, and named event
@@ -103,8 +103,10 @@ migration diagnostic. Finer structural reconciliation remains a **target**.
 function values, including private locals, table members and inline closures.
 An outer call is deferred event-call sugar: authored arguments evaluate at
 invocation, followed by event arguments; method calls retain normal `self`.
-A `nil` value disables an optional handler; other non-function values are
-diagnosed. Loop locals are captured per rendered iteration. Component callback attributes
+A component's own event channel can also be bound directly, for example
+`onclick={self.Activated}`; dispatch forwards the event payload to its
+subscribers. A `nil` value disables an optional handler; other non-function
+values are diagnosed. Loop locals are captured per rendered iteration. Component callback attributes
 are actual Luau functions, callable and forwardable by the child without JSON
 serialization. They preserve the defining environment and grants; removal
 restores the child's authored binding. Opaque runtime leases expire on owner

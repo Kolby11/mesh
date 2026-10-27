@@ -454,9 +454,9 @@ impl BatchIndex {
     }
 }
 
-/// Scale and rotation pivot on the node's box; translation alone does not.
+/// Scale, rotation and skew pivot on the node's box; translation alone does not.
 pub(super) fn size_independent_transform(transform: mesh_core_elements::Transform2D) -> bool {
-    transform.scale_x == 1.0 && transform.scale_y == 1.0 && transform.rotation == 0.0
+    transform.is_translation_only()
 }
 
 fn material(

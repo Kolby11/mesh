@@ -1102,6 +1102,30 @@ impl ProfilePaths {
         }
     }
 
+    /// Update the pointer only if it still names the profile observed by the caller.
+    /// Returns false when another cooperating writer changed it.
+    pub fn set_active_if_current(
+        &self,
+        expected: Option<&str>,
+        profile_id: &str,
+    ) -> Result<bool, ModuleManifestError> {
+        let lock = self.acquire_control_plane_lock()?;
+        self.set_active_if_current_locked(expected, profile_id, &lock)
+    }
+
+    pub(super) fn set_active_if_current_locked(
+        &self,
+        expected: Option<&str>,
+        profile_id: &str,
+        lock: &ControlPlaneLock,
+    ) -> Result<bool, ModuleManifestError> {
+        if self.active_profile_id()?.as_deref() != expected {
+            return Ok(false);
+        }
+        self.set_active_locked(profile_id, lock)?;
+        Ok(true)
+    }
+
     pub fn set_active(&self, profile_id: &str) -> Result<(), ModuleManifestError> {
         let lock = self.acquire_control_plane_lock()?;
         self.set_active_locked(profile_id, &lock)
@@ -1916,6 +1940,30 @@ mod tests {
             ModuleManifestError::RevisionExhausted { .. }
         ));
         assert_eq!(paths.load("work").unwrap().revision, u64::MAX);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn active_profile_compare_and_set_rejects_stale_pointer() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-profile-cas-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let graph_path = root.join("module.json");
+        fs::write(&graph_path, "{}").unwrap();
+        let paths = ProfilePaths::from_root_graph(&graph_path).unwrap();
+        paths
+            .save_if_revision("old", &ShellProfile::new(), 0)
+            .unwrap();
+        paths
+            .save_if_revision("new", &ShellProfile::new(), 0)
+            .unwrap();
+        assert!(paths.set_active_if_current(None, "old").unwrap());
+        assert!(!paths.set_active_if_current(None, "new").unwrap());
+        assert_eq!(paths.active_profile_id().unwrap().as_deref(), Some("old"));
+        assert!(paths.set_active_if_current(Some("old"), "new").unwrap());
         fs::remove_dir_all(root).ok();
     }
 

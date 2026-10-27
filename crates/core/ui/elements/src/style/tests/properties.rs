@@ -367,8 +367,10 @@ fn keyframe_property_helper_rejects_unsupported_properties() {
 
 #[test]
 fn backdrop_filter_parses_blur_refraction_and_dispersion() {
-    let filter = parse::parse_backdrop_filter("blur(12px) refract(24px 18px) dispersion(2px)");
+    let filter =
+        parse::parse_backdrop_filter("blur(12px) refract(24px 18px) dispersion(2px) grain(0.12)");
     assert_eq!(filter.blur_radius, 12.0);
+    assert_eq!(filter.grain, 0.12);
     assert!(filter.has_refraction());
     assert_eq!(
         (filter.refract_depth, filter.refract_edge, filter.dispersion),
@@ -383,6 +385,10 @@ fn backdrop_filter_parses_blur_refraction_and_dispersion() {
     assert!(!plain.is_none());
 
     assert!(!parse::parse_backdrop_filter("blur(8px)").has_refraction());
+    assert_eq!(parse::parse_backdrop_filter("grain(2)").grain, 1.0);
+    assert!(!parse::parse_backdrop_filter("grain(0.1)").is_none());
+    assert!(parse::parse_backdrop_filter("grain(NaN)").is_none());
+    assert!(parse::parse_backdrop_filter("grain(1px)").is_none());
     assert!(parse::parse_backdrop_filter("blur(8px) wobble(2px)").is_none());
     assert!(
         !parse::parse_filter("refract(20px)").has_refraction(),

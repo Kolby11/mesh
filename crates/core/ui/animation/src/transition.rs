@@ -1021,6 +1021,7 @@ fn lerp_visual_filter(from: VisualFilter, to: VisualFilter, progress: f32) -> Vi
         refract_depth: from.refract_depth.lerp(to.refract_depth, progress),
         refract_edge: from.refract_edge.lerp(to.refract_edge, progress),
         dispersion: from.dispersion.lerp(to.dispersion, progress),
+        grain: from.grain.lerp(to.grain, progress),
     }
 }
 

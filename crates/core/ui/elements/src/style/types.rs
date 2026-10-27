@@ -1663,6 +1663,9 @@ pub struct Transform2D {
     pub scale_x: f32,
     pub scale_y: f32,
     pub rotation: f32,
+    /// `skewX`/`skewY` angles in radians.
+    pub skew_x: f32,
+    pub skew_y: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -1840,6 +1843,8 @@ pub struct VisualFilter {
     /// `dispersion(<px>)`: extra displacement of the red and blue channels at
     /// the rim, for chromatic fringing.
     pub dispersion: f32,
+    /// `grain(<opacity>)`: strength of the procedural backdrop texture.
+    pub grain: f32,
 }
 
 impl VisualFilter {
@@ -1849,6 +1854,7 @@ impl VisualFilter {
         refract_depth: 0.0,
         refract_edge: 0.0,
         dispersion: 0.0,
+        grain: 0.0,
     };
 
     pub const fn blur(blur_radius: f32) -> Self {
@@ -1859,7 +1865,7 @@ impl VisualFilter {
     }
 
     pub fn is_none(self) -> bool {
-        self.blur_radius <= 0.0 && !self.has_refraction()
+        self.blur_radius <= 0.0 && !self.has_refraction() && self.grain <= 0.0
     }
 
     /// Whether this backdrop samples the shell backdrop source.
@@ -1881,10 +1887,22 @@ impl Transform2D {
         scale_x: 1.0,
         scale_y: 1.0,
         rotation: 0.0,
+        skew_x: 0.0,
+        skew_y: 0.0,
     };
 
     pub fn is_identity(&self) -> bool {
         *self == Self::IDENTITY
+    }
+
+    /// True when the transform only translates, so it does not pivot on the
+    /// node's box.
+    pub fn is_translation_only(&self) -> bool {
+        self.scale_x == 1.0
+            && self.scale_y == 1.0
+            && self.rotation == 0.0
+            && self.skew_x == 0.0
+            && self.skew_y == 0.0
     }
 }
 

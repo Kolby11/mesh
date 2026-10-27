@@ -193,6 +193,11 @@ uniform float depth;
 uniform float edge;
 uniform float dispersion;
 uniform float rim;
+uniform float grain;
+
+float noise(float2 p) {
+    return fract(sin(dot(floor(p), float2(12.9898, 78.233))) * 43758.5453);
+}
 
 float sd(float2 p, float2 center, float2 half_size, float r) {
     float2 q = abs(p - center) - half_size + r;
@@ -233,6 +238,10 @@ half4 main(float2 p) {
         float light = clamp(dot(n, normalize(float2(-1.0, -1.4))), 0.0, 1.0);
         color.rgb += half3(band * band * (0.18 + 0.32 * light));
     }
+    if (grain > 0.0) {
+        float n = noise(p);
+        color.rgb = mix(color.rgb, half3(n >= 0.5 ? color.a : 0.0), half(grain * abs(n - 0.5) * 2.0));
+    }
     return color;
 }
 "#;
@@ -247,6 +256,11 @@ const GLASS_RIM_SKSL: &str = r#"
 uniform float4 bounds;
 uniform float4 radii;
 uniform float rim;
+uniform float grain;
+
+float noise(float2 p) {
+    return fract(sin(dot(floor(p), float2(12.9898, 78.233))) * 43758.5453);
+}
 
 float sd(float2 p, float2 center, float2 half_size, float r) {
     float2 q = abs(p - center) - half_size + r;
@@ -265,11 +279,15 @@ half4 main(float2 p) {
         sd(p + float2(0.0, 1.0), center, half_size, r) - sd(p - float2(0.0, 1.0), center, half_size, r));
     float glen = length(grad);
     float2 n = glen > 0.0001 ? grad / glen : float2(0.0);
-    float band = clamp(1.0 + dist / rim, 0.0, 1.0);
+    float band = rim > 0.0 ? clamp(1.0 + dist / rim, 0.0, 1.0) : 0.0;
     float light = clamp(dot(n, normalize(float2(-1.0, -1.4))), 0.0, 1.0);
     float coverage = clamp(0.5 - dist, 0.0, 1.0);
-    half a = half(min(band * band * (0.18 + 0.32 * light), 1.0) * coverage);
-    return half4(a, a, a, a);
+    float rim_alpha = min(band * band * (0.18 + 0.32 * light), 1.0);
+    float sample = grain > 0.0 ? noise(p) : 0.0;
+    float grain_alpha = grain * abs(sample - 0.5) * 2.0;
+    float alpha = grain_alpha + rim_alpha * (1.0 - grain_alpha);
+    float rgb = (sample >= 0.5 ? grain_alpha : 0.0) + rim_alpha * (1.0 - grain_alpha);
+    return half4(half3(rgb * coverage), half(alpha * coverage));
 }
 "#;
 
@@ -325,24 +343,26 @@ pub(crate) fn draw_refraction(
     draw_backdrop(canvas, rect, radii, filter, backdrop)
 }
 
-/// Paint only the rim highlight `refract()` gives the glass edge, over
-/// whatever is already beneath. `rect`, `radii` and `filter` are
-/// device-scaled. Returns false when the element has no rim.
+/// Paint the rim highlight and procedural grain over what is already beneath.
+/// `rect`, `radii` and `filter` are device-scaled. Returns false when both
+/// effects are disabled.
 pub(crate) fn draw_rim(canvas: &Canvas, rect: Rect, radii: Corners, filter: VisualFilter) -> bool {
     let rim = rim_width(filter);
-    if rim <= 0.0 || rect.is_empty() {
+    if (rim <= 0.0 && filter.grain <= 0.0) || rect.is_empty() {
         return false;
     }
-    let Some(paint) = rim_paint(rect, radii, rim) else {
+    let Some(paint) = rim_paint(rect, radii, rim, filter.grain) else {
         return false;
     };
-    // The shader is exactly zero where `dist <= -rim`. The raster backend
+    // With no grain, the shader is zero where `dist <= -rim`. The raster backend
     // interprets it per pixel, so a large panel would otherwise spend most of
     // a partial repaint shading interior pixels that it leaves unchanged.
     let save_count = canvas.save();
-    for interior in band_interior(rect, radii, rim) {
-        if !interior.is_empty() {
-            canvas.clip_rect(interior, ClipOp::Difference, false);
+    if filter.grain <= 0.0 {
+        for interior in band_interior(rect, radii, rim) {
+            if !interior.is_empty() {
+                canvas.clip_rect(interior, ClipOp::Difference, false);
+            }
         }
     }
     canvas.draw_rect(rect.with_outset((1.0, 1.0)), &paint);
@@ -350,8 +370,8 @@ pub(crate) fn draw_rim(canvas: &Canvas, rect: Rect, radii: Corners, filter: Visu
     true
 }
 
-fn rim_paint(rect: Rect, radii: Corners, rim: f32) -> Option<Paint> {
-    let uniforms: [f32; 9] = [
+fn rim_paint(rect: Rect, radii: Corners, rim: f32, grain: f32) -> Option<Paint> {
+    let uniforms: [f32; 10] = [
         rect.left,
         rect.top,
         rect.width(),
@@ -361,6 +381,7 @@ fn rim_paint(rect: Rect, radii: Corners, rim: f32) -> Option<Paint> {
         radii.bottom_right,
         radii.bottom_left,
         rim,
+        grain,
     ];
     let bytes: Vec<u8> = uniforms
         .iter()
@@ -424,7 +445,7 @@ fn draw_backdrop(
 ) -> bool {
     // With no rim or dispersion the lens evaluates to the input shader,
     // including its alpha. Wallpaper must not pay for an SDF per output pixel.
-    let shader = if filter.refract_edge <= 0.0 && filter.dispersion <= 0.0 {
+    let shader = if filter.refract_edge <= 0.0 && filter.dispersion <= 0.0 && filter.grain <= 0.0 {
         backdrop
     } else {
         let Some(shader) = lens_shader(rect, radii, filter, backdrop) else {
@@ -453,7 +474,7 @@ fn make_lens_shader(
     backdrop: Shader,
 ) -> Option<Shader> {
     let rim = rim_width(filter);
-    let uniforms: [f32; 12] = [
+    let uniforms: [f32; 13] = [
         rect.left,
         rect.top,
         rect.width(),
@@ -466,6 +487,7 @@ fn make_lens_shader(
         filter.refract_edge,
         filter.dispersion,
         rim,
+        filter.grain,
     ];
     let bytes: Vec<u8> = uniforms
         .iter()

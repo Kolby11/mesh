@@ -355,7 +355,7 @@ struct RenderObjectPaintData {
     fingerprint: RenderObjectFingerprint,
 }
 
-type TransformSlot = (u32, u32, u32, u32, u32, u32, u32, u32, u32);
+type TransformSlot = (u32, u32, u32, u32, u32, u32, u32, u32, u32, u32, u32);
 type GeometrySlot = (u32, u32, u32, u32, u32, u32, u32, u32);
 type ClipSlot = (bool, u32, u32, u32, u32, [u32; 4]);
 type AccessibilitySlot = (AccessibilityRoleSlot, Option<Arc<str>>, bool, bool);
@@ -568,6 +568,8 @@ fn transform_slot(transform: Transform2D, origin: TransformOrigin) -> TransformS
         transform.scale_x.to_bits(),
         transform.scale_y.to_bits(),
         transform.rotation.to_bits(),
+        transform.skew_x.to_bits(),
+        transform.skew_y.to_bits(),
         origin_x_kind,
         origin_x_value,
         origin_y_kind,

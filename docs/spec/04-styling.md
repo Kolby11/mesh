@@ -688,7 +688,7 @@ such rule; MESH has no descendant combinators for the usual wrapper workaround.
 ## 11. Liquid glass (`backdrop-filter: refract()`)
 
 **Status: shipped (in-surface Skia runtime shader on background-layer
-surfaces; compositor blur plus rim elsewhere); multi-output, foreign exclusive
+surfaces; compositor blur plus rim and grain elsewhere); multi-output, foreign exclusive
 zones and a source built from MESH's presented frames are targets.**
 
 Compositor blur (§10) can only blur what is behind a surface; it cannot bend
@@ -716,7 +716,7 @@ repaints every surface; `mesh.theme` state publishes it as `backdrop_image`.
 
 ```css
 .card {
-    backdrop-filter: blur(6px) refract(40px 30px) dispersion(4px);
+    backdrop-filter: blur(6px) refract(40px 30px) dispersion(4px) grain(0.06);
 }
 ```
 
@@ -725,11 +725,12 @@ repaints every surface; `mesh.theme` state publishes it as `backdrop_image`.
 | `blur(<px>)` | Blur of the sampled source. |
 | `refract(<depth> [<edge>])` | Inside an `edge`-wide rim the sample moves up to `depth` along the outward normal of the element's rounded rect, steepening toward the rim. `edge` defaults to `depth`. `refract(0px 0px)` paints the source unrefracted. |
 | `dispersion(<px>)` | Extra red/blue separation along the same normal for chromatic fringing. |
+| `grain(<opacity>)` | Procedural, stable device-pixel noise over the backdrop, clamped to 0–1. Zero disables it. |
 
 On a source-sampling surface, an element with `refract()` is painted
 client-side under its own background and border (`ApplyBackdropRefraction`)
 and is never exported as a compositor blur region. Elsewhere its rim
-highlight (`ApplyBackdropRim`) is painted over the blurred backdrop, under the
+highlight and grain (`ApplyBackdropRim`) are painted over the blurred backdrop, under the
 element's own background. Either way the rim gets a soft top-left highlight
 when `edge` is non-zero. Without a backdrop source, a source-sampling element
 paints only its own background.

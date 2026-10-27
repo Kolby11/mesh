@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+allocation-benchmark = []
+
 [dependencies]
 libc = { workspace = true }
 mesh-core-files = { workspace = true }

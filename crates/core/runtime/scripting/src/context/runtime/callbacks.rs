@@ -89,10 +89,30 @@ impl ScriptContext {
             }
             return Ok(None);
         }
-        let LuaValue::Function(function) = value else {
-            return Err(ScriptError::LuaError(format!(
-                "event binding `{source}` must produce a Luau function"
-            )));
+        let (function, value_pointer) = match value {
+            LuaValue::Function(function) => {
+                let pointer = function.to_pointer() as usize;
+                (function, pointer)
+            }
+            LuaValue::Table(channel) if self.is_self_event_channel(&channel) => {
+                let pointer = channel.to_pointer() as usize;
+                let fire: Function = channel.get("fire").map_err(map_lua_error)?;
+                let function = self
+                    .lua()
+                    .create_function(move |_, args: mlua::Variadic<LuaValue>| {
+                        fire.call::<()>((
+                            channel.clone(),
+                            args.first().cloned().unwrap_or(LuaValue::Nil),
+                        ))
+                    })
+                    .map_err(map_lua_error)?;
+                (function, pointer)
+            }
+            _ => {
+                return Err(ScriptError::LuaError(format!(
+                    "event binding `{source}` must produce a Luau function or self event channel"
+                )));
+            }
         };
         let key = (
             (
@@ -100,11 +120,7 @@ impl ScriptContext {
                 serde_json::to_string(locals)
                     .map_err(|error| ScriptError::LuaError(error.to_string()))?,
             ),
-            if call_binding {
-                0
-            } else {
-                function.to_pointer() as usize
-            },
+            if call_binding { 0 } else { value_pointer },
         );
         let mut cache = self.callbacks.lock().unwrap();
         let watch_key = key.0.clone();
@@ -204,6 +220,19 @@ impl ScriptContext {
         }))
     }
 
+    fn is_self_event_channel(&self, channel: &Table) -> bool {
+        self.env()
+            .raw_get::<Table>("__mesh_self_event_channels")
+            .ok()
+            .is_some_and(|registry| {
+                registry.pairs::<String, Table>().any(|entry| {
+                    entry.is_ok_and(|(_, registered)| {
+                        registered.to_pointer() == channel.to_pointer()
+                    })
+                })
+            })
+    }
+
     fn evaluate_handler_value(
         &self,
         expression: &CompiledExpression,
@@ -288,6 +317,9 @@ impl ScriptContext {
         for (key, expression, locals, previous) in watches {
             let pointer = match self.evaluate_handler_value(&expression, &locals) {
                 Ok((LuaValue::Function(function), _)) => function.to_pointer() as usize,
+                Ok((LuaValue::Table(channel), _)) if self.is_self_event_channel(&channel) => {
+                    channel.to_pointer() as usize
+                }
                 _ => 0,
             };
             if pointer != previous {

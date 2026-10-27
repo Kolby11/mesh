@@ -23,6 +23,7 @@ mesh-core-service = { workspace = true }
 mesh-core-frontend-shell-adapter = { workspace = true }
 mesh-core-frontend-abi = { workspace = true }
 mesh-core-frontend = { workspace = true }
+mesh-core-frontend-runtime = { workspace = true }
 mesh-core-expression = { workspace = true }
 mesh-core-surface-config = { workspace = true }
 mesh-core-surface-policy = { workspace = true }

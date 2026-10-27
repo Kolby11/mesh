@@ -163,6 +163,101 @@ label = ""
 }
 
 #[test]
+fn static_service_import_does_not_invalidate_unrelated_local_components() {
+    let mut component = test_frontend_component_with_local_components(
+        r#"
+<template><column>{#if audio.muted}<text>muted</text>{:else}<text>live</text>{/if}<Child /></column></template>
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+local Child = require("./components/child.mesh")
+</script>"#,
+        &[("Child", "<template><text>unchanged</text></template>")],
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 80);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    let update = |component: &mut FrontendSurfaceComponent, muted| {
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.audio".into(),
+                source_module: "@mesh/pipewire-audio".into(),
+                payload: serde_json::json!({"percent": 10, "muted": muted}),
+            })
+            .unwrap();
+    };
+    update(&mut component, false);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    rebuild(&mut component, 160, 80);
+    let hits = component.component_memo_hit_count();
+    update(&mut component, true);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    assert!(rendered_text(&component).iter().any(|text| text == "muted"));
+    assert!(
+        component.component_memo_hit_count() > hits,
+        "unchanged child should be reused"
+    );
+}
+
+#[test]
+fn child_static_service_import_does_not_invalidate_its_sibling() {
+    let mut component = test_frontend_component_with_local_components(
+        r#"
+<template><column><Reader /><Sibling /></column></template>
+<script lang="luau">
+local Reader = require("./components/reader.mesh")
+local Sibling = require("./components/sibling.mesh")
+</script>"#,
+        &[
+            (
+                "Reader",
+                r#"<template>{#if audio.muted}<text>muted</text>{:else}<text>live</text>{/if}</template>
+<script lang="luau">local audio = require("mesh.audio@>=1.0")</script>"#,
+            ),
+            ("Sibling", "<template><text>unchanged</text></template>"),
+        ],
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 80);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    let update = |component: &mut FrontendSurfaceComponent, muted| {
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.audio".into(),
+                source_module: "@mesh/pipewire-audio".into(),
+                payload: serde_json::json!({"percent": 10, "muted": muted}),
+            })
+            .unwrap();
+    };
+    update(&mut component, false);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    rebuild(&mut component, 160, 80);
+    let hits = component.component_memo_hit_count();
+    update(&mut component, true);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    assert!(rendered_text(&component).iter().any(|text| text == "muted"));
+    assert!(
+        component.component_memo_hit_count() > hits,
+        "unchanged sibling should be reused"
+    );
+}
+
+#[test]
 fn repeated_local_aliases_have_independent_runtimes_and_memo_entries() {
     let mut component = memo_surface(
         r#"
@@ -1053,4 +1148,138 @@ box { transition: none; }
         );
     }
     assert!(memo.component_memo_hit_count() > 0);
+}
+
+#[test]
+fn localized_children_share_resolver_and_replace_it_on_catalog_change() {
+    let source = r#"<template><column><Child /><Child /></column></template><script lang="luau">local Child = require("./components/child.mesh")</script>"#;
+    let mut surface = test_frontend_component_with_local_components(
+        source,
+        &[("Child", "<template><text>{t('message')}</text></template>")],
+        InterfaceCatalog::default(),
+        &["locale.read"],
+    );
+    let locale = |value: &str| {
+        let mut engine = mesh_core_locale::LocaleEngine::new("en");
+        engine.load_module_translations(
+            "@test/reactive-surface",
+            mesh_core_locale::TranslationSet {
+                locale: "en".into(),
+                messages: HashMap::from([("message".into(), value.into())]),
+            },
+        );
+        engine
+    };
+    surface.locale_changed(&locale("first")).unwrap();
+    let mut buffer = PixelBuffer::new(160, 80);
+    let extent = SurfaceExtent::unpadded(160, 80);
+    surface
+        .paint_raster(&default_theme(), extent, &mut buffer, 1.0)
+        .unwrap();
+    assert!(rendered_text(&surface).iter().any(|text| text == "first"));
+    let first = surface.shared_i18n_translator("@test/reactive-surface");
+    assert!(std::sync::Arc::ptr_eq(
+        &first,
+        &surface.shared_i18n_translator("@test/reactive-surface")
+    ));
+    assert!(!std::sync::Arc::ptr_eq(
+        &first,
+        &surface.shared_i18n_translator("@test/other-module")
+    ));
+    surface.locale_changed(&locale("second")).unwrap();
+    let second = surface.shared_i18n_translator("@test/reactive-surface");
+    assert!(!std::sync::Arc::ptr_eq(&first, &second));
+    surface
+        .paint_raster(&default_theme(), extent, &mut buffer, 1.0)
+        .unwrap();
+    assert!(rendered_text(&surface).iter().any(|text| text == "second"));
+}
+
+#[test]
+#[ignore = "release-only localized component mount workload"]
+fn localized_component_mount_workload() {
+    let theme = default_theme();
+    for key_count in [10, 100] {
+        for component_count in [1, 100, 1000] {
+            let children = "<Child />".repeat(component_count);
+            let source = format!(
+                "<template><column>{children}</column></template><script lang=\"luau\">local Child = require(\"./components/child.mesh\")</script>"
+            );
+            let child = "<template><text>{t('key0')}</text></template>";
+            let mut samples = [Vec::new(), Vec::new()];
+            #[cfg(feature = "allocation-profiling")]
+            let mut allocation_samples = [Vec::new(), Vec::new()];
+            for repetition in 0..5 {
+                let order = if repetition % 2 == 0 { [0, 1] } else { [1, 0] };
+                for mode in order {
+                    let mut surface = test_frontend_component_with_local_components(
+                        &source,
+                        &[("Child", child)],
+                        InterfaceCatalog::default(),
+                        &["locale.read"],
+                    );
+                    surface.disable_i18n_translator_cache = mode == 0;
+                    surface.update_test_locale(|locale| {
+                        locale.load_module_translations(
+                            "@test/reactive-surface",
+                            mesh_core_locale::TranslationSet {
+                                locale: "en".into(),
+                                messages: (0..key_count)
+                                    .map(|index| (format!("key{index}"), format!("value{index}")))
+                                    .collect(),
+                            },
+                        );
+                    });
+                    surface.runtimes.lock().unwrap().clear();
+                    surface.init_root_runtime().unwrap();
+                    #[cfg(feature = "allocation-profiling")]
+                    let allocation_before = mesh_core_debug::allocation::snapshot();
+                    let started = std::time::Instant::now();
+                    let tree = surface.build_tree(&theme, 640, 800);
+                    let elapsed = started.elapsed();
+                    #[cfg(feature = "allocation-profiling")]
+                    allocation_samples[mode].push(
+                        mesh_core_debug::allocation::snapshot().saturating_delta(allocation_before),
+                    );
+                    assert_eq!(surface.runtimes.lock().unwrap().len(), component_count + 1);
+                    assert!(rendered_text_from_node(&tree, "value0"));
+                    samples[mode].push(elapsed.as_secs_f64() * 1000.0);
+                }
+            }
+            for (mode, label) in ["uncached", "shared"].iter().enumerate() {
+                samples[mode].sort_by(f64::total_cmp);
+                println!(
+                    "localized mount {label} components={component_count} catalog_keys={key_count}: median={:.3}ms range={:.3}–{:.3}ms",
+                    samples[mode][2], samples[mode][0], samples[mode][4]
+                );
+                #[cfg(feature = "allocation-profiling")]
+                {
+                    allocation_samples[mode].sort_by_key(|sample| sample.allocation_count);
+                    let middle = allocation_samples[mode][2];
+                    println!(
+                        "localized mount allocations {label} components={component_count} catalog_keys={key_count}: count={} bytes={} reallocations={}",
+                        middle.allocation_count, middle.allocated_bytes, middle.reallocation_count
+                    );
+                }
+            }
+            if component_count == 1000 && key_count == 100 {
+                #[cfg(feature = "allocation-profiling")]
+                assert!(
+                    allocation_samples[1][2].allocation_count + 100_000
+                        < allocation_samples[0][2].allocation_count,
+                    "localized_mount_shared_resolver_allocation_gate"
+                );
+            }
+        }
+    }
+}
+
+fn rendered_text_from_node(node: &WidgetNode, value: &str) -> bool {
+    node.attributes
+        .get(Prop::Content)
+        .is_some_and(|content| content == value)
+        || node
+            .children
+            .iter()
+            .any(|child| rendered_text_from_node(child, value))
 }

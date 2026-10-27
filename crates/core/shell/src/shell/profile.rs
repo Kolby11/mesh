@@ -459,6 +459,8 @@ pub(super) struct PendingProfileSwitch {
     candidate_started: HashSet<String>,
     candidate_initial_states: HashMap<String, serde_json::Value>,
     persist_active_profile: bool,
+    initial_active_profile: Option<String>,
+    profile_authoring: Option<serde_json::Value>,
     rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
     /// A package mutation stays journaled until this prepared runtime is
     /// committed. Dropping it before that point restores the package state.
@@ -478,6 +480,8 @@ pub(super) struct PendingResourcePreparation {
     /// Keeping this bit with the pending work makes the same coordinator safe
     /// for both profile and no-profile graph deltas.
     persist_active_profile: bool,
+    initial_active_profile: Option<String>,
+    profile_authoring: Option<serde_json::Value>,
     pub(in crate::shell) rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
     /// The package journal spans asynchronous resource preparation as well as
     /// the later runtime activation commit.
@@ -796,6 +800,15 @@ impl Shell {
     /// path; module, provider, contribution, and resource deltas all enter the
     /// same activation coordinator.
     pub(in crate::shell) fn reconcile_installed_graph(&mut self) -> VecDeque<SourcedRequest> {
+        self.reconcile_installed_graph_inner(false)
+    }
+
+    fn reconcile_installed_graph_inner(&mut self, force: bool) -> VecDeque<SourcedRequest> {
+        if self.profile_transition_pending() || !self.pending_backend_runtimes.is_empty() {
+            self.pending_graph_reconciliation = true;
+            return VecDeque::new();
+        }
+        self.pending_graph_reconciliation = false;
         let candidate = match self.load_installed_module_graph_candidate() {
             Ok(candidate) => candidate,
             Err(error) => {
@@ -815,14 +828,103 @@ impl Shell {
                 return VecDeque::new();
             }
         };
-        if self
-            .installed_module_graph
-            .as_ref()
-            .is_some_and(|active| active.diff(&candidate).is_empty())
+        let profile_unchanged =
+            match super::discovery::load_configured_profile(&self.installed_module_graph_path()) {
+                Ok(Some((id, profile))) => {
+                    serde_json::to_value(profile).ok().is_some_and(|value| {
+                        self.active_profile_authoring.as_ref() == Some(&(id, value))
+                    })
+                }
+                Ok(None) => self.active_profile_authoring.is_none(),
+                Err(_) => false,
+            };
+        if !force
+            && profile_unchanged
+            && self
+                .installed_module_graph
+                .as_ref()
+                .is_some_and(|active| active.diff(&candidate).is_empty())
         {
             return VecDeque::new();
         }
         self.activate_graph_candidate(candidate)
+    }
+
+    pub(in crate::shell) fn retry_pending_graph_reconciliation(
+        &mut self,
+    ) -> VecDeque<SourcedRequest> {
+        if self.pending_graph_reconciliation
+            && !self.profile_transition_pending()
+            && self.pending_backend_runtimes.is_empty()
+        {
+            self.reconcile_installed_graph_inner(true)
+        } else {
+            VecDeque::new()
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::shell) fn hold_legacy_graph_candidate_for_test(
+        &mut self,
+        graph: InstalledModuleGraph,
+    ) {
+        let settings = self.settings_store.clone();
+        let locale = self.prepare_locale_for_graph(&graph).unwrap();
+        let resource_job = self
+            .start_resource_preparation_job(&graph, &settings)
+            .unwrap();
+        self.pending_resource_preparation = Some(PendingResourcePreparation {
+            profile_id: LEGACY_ACTIVATION_ID.to_string(),
+            profile: ShellProfile::new(),
+            graph,
+            locale,
+            settings,
+            resource_job,
+            persist_active_profile: false,
+            initial_active_profile: None,
+            profile_authoring: None,
+            rollback: None,
+            package_transaction: None,
+            package_rollback: None,
+            profile_switch_ack: None,
+        });
+    }
+
+    #[cfg(test)]
+    pub(in crate::shell) fn hold_profile_candidate_for_test(&mut self, profile_id: &str) {
+        let graph_path = self.installed_module_graph_path();
+        let paths = ProfilePaths::from_root_graph(&graph_path).unwrap();
+        let initial_active_profile = paths.active_profile_id().unwrap();
+        let profile = paths.load(profile_id).unwrap();
+        let profile_authoring = Some(serde_json::to_value(&profile).unwrap());
+        let graph = load_authoring_snapshot_for_profile(&graph_path, &profile).unwrap();
+        let profile = super::discovery::resolve_profile(&profile, &graph).unwrap();
+        let shared = SettingsStore::load().unwrap();
+        let mut settings =
+            super::discovery::effective_profile_settings(shared, Some(&profile)).unwrap();
+        super::discovery::register_graph_settings_schemas(&mut settings, &graph).unwrap();
+        let settings = Arc::new(settings);
+        let locale = self
+            .prepare_locale_for_settings(settings.shell(), &graph)
+            .unwrap();
+        let resource_job = self
+            .start_resource_preparation_job(&graph, &settings)
+            .unwrap();
+        self.pending_resource_preparation = Some(PendingResourcePreparation {
+            profile_id: profile_id.to_string(),
+            profile,
+            graph,
+            locale,
+            settings,
+            resource_job,
+            persist_active_profile: true,
+            initial_active_profile,
+            profile_authoring,
+            rollback: None,
+            package_transaction: None,
+            package_rollback: None,
+            profile_switch_ack: None,
+        });
     }
 
     pub(in crate::shell) fn begin_legacy_graph_activation(
@@ -851,6 +953,20 @@ impl Shell {
             );
             return VecDeque::new();
         }
+        let initial_active_profile =
+            match ProfilePaths::from_root_graph(&self.installed_module_graph_path())
+                .and_then(|paths| paths.active_profile_id())
+            {
+                Ok(profile) => profile,
+                Err(error) => {
+                    abort_package_transaction(package_transaction, package_rollback, self);
+                    if let Some(rollback) = rollback {
+                        restore_module_config(rollback);
+                    }
+                    self.reject_profile_switch(LEGACY_ACTIVATION_ID, error.to_string());
+                    return VecDeque::new();
+                }
+            };
         let settings = self.settings_store.clone();
         let locale = match self.prepare_locale_for_graph(&graph) {
             Ok(locale) => locale,
@@ -882,6 +998,8 @@ impl Shell {
             settings,
             resource_job,
             persist_active_profile: false,
+            initial_active_profile,
+            profile_authoring: None,
             rollback: rollback.take(),
             package_transaction,
             package_rollback,
@@ -950,6 +1068,21 @@ impl Shell {
                 return VecDeque::new();
             }
         };
+        let initial_active_profile = match paths.active_profile_id() {
+            Ok(profile) => profile,
+            Err(error) => {
+                abort_package_transaction(package_transaction, package_rollback, self);
+                if let Some(rollback) = rollback {
+                    restore_module_config(rollback);
+                }
+                self.reject_profile_switch_with_ack(
+                    profile_id,
+                    error.to_string(),
+                    profile_switch_ack.take(),
+                );
+                return VecDeque::new();
+            }
+        };
         let profile = match paths.load(profile_id) {
             Ok(profile) => profile,
             Err(error) => {
@@ -965,6 +1098,7 @@ impl Shell {
                 return VecDeque::new();
             }
         };
+        let profile_authoring = serde_json::to_value(&profile).ok();
         let (graph, profile) = match load_authoring_snapshot_for_profile(&graph_path, &profile)
             .and_then(|graph| {
                 let profile = super::discovery::resolve_profile(&profile, &graph)?;
@@ -1068,6 +1202,8 @@ impl Shell {
             settings,
             resource_job,
             persist_active_profile: true,
+            initial_active_profile,
+            profile_authoring,
             rollback,
             package_transaction,
             package_rollback,
@@ -1476,6 +1612,8 @@ impl Shell {
             settings,
             mut resource_job,
             persist_active_profile,
+            initial_active_profile,
+            profile_authoring,
             rollback,
             package_transaction,
             package_rollback,
@@ -1490,6 +1628,8 @@ impl Shell {
                 settings,
                 resource_job,
                 persist_active_profile,
+                initial_active_profile,
+                profile_authoring,
                 rollback,
                 package_transaction,
                 package_rollback,
@@ -1512,6 +1652,8 @@ impl Shell {
                     settings,
                     resources,
                     persist_active_profile,
+                    initial_active_profile,
+                    profile_authoring,
                     rollback,
                     package_transaction,
                     package_rollback,
@@ -1556,6 +1698,8 @@ impl Shell {
         settings: Arc<SettingsStore>,
         resources: super::discovery::PreparedResourceSnapshot,
         persist_active_profile: bool,
+        initial_active_profile: Option<String>,
+        profile_authoring: Option<serde_json::Value>,
         mut rollback: Option<crate::shell::module_config::ModuleConfigRollback>,
         mut package_transaction: Option<PackageTransaction>,
         mut package_rollback: Option<PackageRuntimeRollback>,
@@ -1835,6 +1979,8 @@ impl Shell {
             candidate_started: HashSet::new(),
             candidate_initial_states: HashMap::new(),
             persist_active_profile,
+            initial_active_profile,
+            profile_authoring,
             rollback: rollback.take(),
             package_transaction: package_transaction.take(),
             package_rollback: package_rollback.take(),
@@ -2043,25 +2189,44 @@ impl Shell {
         // Capture and update the durable active-profile pointer only for a
         // profile activation. Legacy graph activation uses this same commit
         // boundary but has no profile pointer to mutate.
-        let previous_active = if pending.persist_active_profile {
-            match paths.active_profile_id() {
-                Ok(previous) => previous,
+        let previous_active = match paths.active_profile_id() {
+            Ok(previous) => previous,
+            Err(error) => {
+                self.abort_profile_candidate(pending, error.to_string());
+                return VecDeque::new();
+            }
+        };
+        if previous_active != pending.initial_active_profile {
+            self.pending_graph_reconciliation = true;
+            self.abort_profile_candidate(
+                pending,
+                "active profile changed while preparing candidate".into(),
+            );
+            return VecDeque::new();
+        }
+        if pending.persist_active_profile && previous_active.as_deref() != Some(&plan.profile_id) {
+            let result = match pending.package_transaction.as_mut() {
+                Some(transaction) => transaction.set_active_profile_if_current(
+                    &paths,
+                    previous_active.as_deref(),
+                    &plan.profile_id,
+                ),
+                None => paths.set_active_if_current(previous_active.as_deref(), &plan.profile_id),
+            };
+            match result {
+                Ok(true) => {}
+                Ok(false) => {
+                    self.pending_graph_reconciliation = true;
+                    self.abort_profile_candidate(
+                        pending,
+                        "active profile changed while preparing candidate".into(),
+                    );
+                    return VecDeque::new();
+                }
                 Err(error) => {
                     self.abort_profile_candidate(pending, error.to_string());
                     return VecDeque::new();
                 }
-            }
-        } else {
-            None
-        };
-        if pending.persist_active_profile {
-            let result = match pending.package_transaction.as_mut() {
-                Some(transaction) => transaction.set_active_profile(&paths, &plan.profile_id),
-                None => paths.set_active(&plan.profile_id),
-            };
-            if let Err(error) = result {
-                self.abort_profile_candidate(pending, error.to_string());
-                return VecDeque::new();
             }
         }
         if let Err(error) = self.commit_resource_snapshot_for_settings(
@@ -2245,6 +2410,10 @@ impl Shell {
         }
 
         self.installed_module_graph = Some(plan.graph.clone());
+        self.active_profile_authoring = pending
+            .profile_authoring
+            .take()
+            .map(|value| (plan.profile_id.clone(), value));
         if pending.persist_active_profile {
             self.active_profile_id = Some(plan.profile_id.clone());
             self.composition_mode = ShellCompositionMode::ConfiguredProfile {

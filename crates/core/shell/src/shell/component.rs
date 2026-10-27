@@ -66,7 +66,7 @@ use mesh_core_elements::{
     StyleResolver, VariableStore, WidgetNode, WindowSurfaceState, element_snapshot_json,
 };
 use mesh_core_frontend::{CompiledFrontendModule, FrontendRenderMode, root_accessibility_role};
-use mesh_core_locale::{LocaleEngine, LocaleSnapshot};
+use mesh_core_locale::{LocaleEngine, LocaleSnapshot, OwnedModuleTranslator};
 use mesh_core_scripting::{
     LocaleBoundState, OperationRegistry, PublishedEvent, ScriptContext, ScriptInterfaceImport,
     ScriptState, SurfaceVm,
@@ -998,6 +998,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// coordinator. All component instances receive the same Arc for a
     /// generation; surfaces never read or parse catalog files themselves.
     locale: Arc<LocaleSnapshot>,
+    i18n_translators: RefCell<HashMap<String, Arc<OwnedModuleTranslator>>>,
+    #[cfg(test)]
+    disable_i18n_translator_cache: bool,
     interface_catalog: Arc<mesh_core_service::ResolvedServiceCatalog>,
     last_tree: Option<WidgetNode>,
     /// Immutable cross-phase hand-off produced after layout and semantic
@@ -1492,6 +1495,9 @@ impl FrontendSurfaceComponent {
             surface_pixels_invalid: true,
             paint_context: mesh_core_render::PaintContext::default(),
             locale: Arc::new(LocaleSnapshot::new("en", "en")),
+            i18n_translators: RefCell::new(HashMap::new()),
+            #[cfg(test)]
+            disable_i18n_translator_cache: false,
             interface_catalog: interface_catalog.into(),
             last_tree: None,
             last_frame_snapshot: None,
@@ -1776,7 +1782,25 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn with_locale_snapshot(mut self, snapshot: Arc<LocaleSnapshot>) -> Self {
         self.locale = snapshot;
+        self.i18n_translators.get_mut().clear();
         self
+    }
+
+    fn shared_i18n_translator(&self, module_id: &str) -> Arc<OwnedModuleTranslator> {
+        #[cfg(test)]
+        if self.disable_i18n_translator_cache {
+            return Arc::new(self.locale.module_translator(module_id).owned());
+        }
+        let mut cache = self.i18n_translators.borrow_mut();
+        if let Some(translator) = cache.get(module_id) {
+            return Arc::clone(translator);
+        }
+        if cache.len() >= 128 {
+            cache.clear();
+        }
+        let translator = Arc::new(self.locale.module_translator(module_id).owned());
+        cache.insert(module_id.to_owned(), Arc::clone(&translator));
+        translator
     }
 
     pub(super) fn with_deferred_declared_icon_diagnostics(mut self) -> Self {
@@ -1797,6 +1821,7 @@ impl FrontendSurfaceComponent {
         let mut engine = LocaleEngine::from_snapshot(self.locale.clone());
         update(&mut engine);
         self.locale = engine.snapshot();
+        self.i18n_translators.get_mut().clear();
     }
 
     pub(super) fn invalidate(&mut self, flags: ComponentDirtyFlags) {

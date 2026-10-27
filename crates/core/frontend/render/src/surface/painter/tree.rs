@@ -1714,6 +1714,7 @@ fn scaled_visual_filter(filter: VisualFilter, scale: f32) -> VisualFilter {
         refract_depth: filter.refract_depth * scale,
         refract_edge: filter.refract_edge * scale,
         dispersion: filter.dispersion * scale,
+        grain: filter.grain,
     }
 }
 

@@ -750,6 +750,8 @@ pub struct Shell {
     pending_backend_runtimes: HashMap<String, PendingBackendRuntime>,
     pending_resource_preparation: Option<profile::PendingResourcePreparation>,
     pending_profile_switch: Option<profile::PendingProfileSwitch>,
+    pending_graph_reconciliation: bool,
+    active_profile_authoring: Option<(String, serde_json::Value)>,
     pending_control_plane_commit: Option<runtime::PendingControlPlaneCommit>,
     pending_profile_write: Option<runtime::PendingProfileWrite>,
     /// Durable writes waiting for the pending one, keyed by the setting they

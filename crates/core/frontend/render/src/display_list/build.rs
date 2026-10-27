@@ -575,7 +575,9 @@ fn build_paint_subtree_with_transform(
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
-    if backdrop.has_refraction() && !samples_source && backdrop.refract_edge > 0.0 {
+    if !samples_source
+        && (backdrop.grain > 0.0 || (backdrop.has_refraction() && backdrop.refract_edge > 0.0))
+    {
         subtree.push_command(DisplayPaintCommand {
             node: Arc::clone(&paint_node),
             clip: node_clip,

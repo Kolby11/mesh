@@ -418,10 +418,10 @@ tooltip {
     --glass-shadow-artwork: 0 8px 22px #010a1473;
     --glass-text-on-error: #3b0805;
     --glass-surface-panel: linear-gradient(to bottom, #2a6a9a85, #06213a70);
-    --glass-backdrop-pill: blur(12px) refract(6px 5px) dispersion(0.5px);
-    --glass-backdrop-card: blur(20px) refract(9px 7px) dispersion(0.6px);
-    --glass-backdrop-dock: blur(18px) refract(9px 7px) dispersion(0.6px);
-    --glass-backdrop-panel: blur(28px) refract(11px 8px) dispersion(0.6px);
+    --glass-backdrop-pill: blur(12px) refract(6px 5px) dispersion(0.5px) grain(0.06);
+    --glass-backdrop-card: blur(20px) refract(9px 7px) dispersion(0.6px) grain(0.06);
+    --glass-backdrop-dock: blur(18px) refract(9px 7px) dispersion(0.6px) grain(0.06);
+    --glass-backdrop-panel: blur(28px) refract(11px 8px) dispersion(0.6px) grain(0.06);
     --glass-backdrop-flare: blur(10px) refract(0px 0px);
     --glass-backdrop-lens: refract(8px 8px);
   }

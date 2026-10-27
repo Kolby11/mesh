@@ -1,7 +1,5 @@
 mod annotate;
 mod fingerprint;
-mod node_id;
-mod service_deps;
 mod tree;
 
 #[cfg(test)]
@@ -9,8 +7,10 @@ mod tests;
 
 pub(in crate::shell::component) use annotate::*;
 use fingerprint::*;
-pub(in crate::shell::component) use node_id::*;
-pub(in crate::shell::component) use service_deps::*;
+pub(in crate::shell::component) use mesh_core_frontend_runtime::NodeServiceFieldDependencies;
+pub(in crate::shell::component) use mesh_core_frontend_runtime::{
+    child_runtime_node_id, runtime_node_id_for_key, stable_runtime_node_id,
+};
 pub(in crate::shell::component) use tree::*;
 
 use std::collections::{HashMap, HashSet};
@@ -18,8 +18,7 @@ use std::hash::{Hash, Hasher};
 
 use bitflags::bitflags;
 use mesh_core_elements::style::{
-    BackgroundPaint, Color, ComputedStyle, Corners, Dimension, Edges, GradientGeometry,
-    Transform2D,
+    BackgroundPaint, Color, ComputedStyle, Corners, Dimension, Edges, GradientGeometry, Transform2D,
 };
 use mesh_core_elements::{
     AccessibilityRole, NodeId, NodeState, WidgetNode, WindowSurfaceState, element_snapshot_json,

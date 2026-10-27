@@ -62,6 +62,26 @@ local function private(event) count = count + event.amount end
 }
 
 #[test]
+fn self_event_channel_forwards_bound_event_and_reuses_callback() {
+    let (mut context, component) = context(
+        r#"
+<template><button onclick={self.Changed} /></template>
+<script lang="luau">
+received = 0
+local changed = self.Changed
+changed:on(function(event) received = event.amount end)
+</script>"#,
+    );
+    let first = handle(bind(&context, &component, 0, Map::new()));
+    let second = handle(bind(&context, &component, 0, Map::new()));
+    assert_eq!(first, second);
+    context
+        .call_callback(&first, &[json!({"amount": 7})])
+        .unwrap();
+    assert_eq!(context.state.get("received"), Some(json!(7)));
+}
+
+#[test]
 fn table_arguments_and_methods_use_real_luau_calls() {
     let (mut context, component) = context(
         r#"

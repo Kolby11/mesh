@@ -803,9 +803,8 @@ pub enum DisplayPaintCommandKind {
     /// compositor can only blur, never displace, what is behind a surface.
     /// Lowered only where the source is what lies beneath the surface.
     ApplyBackdropRefraction,
-    /// Paints a refracting element's rim highlight without sampling a source.
-    /// The element's blur goes through the selected backdrop-blur policy, so
-    /// the compositor blurs the real backdrop beneath it (04 §11).
+    /// Paints a glass rim highlight and grain without sampling a source.
+    /// Blur follows the selected backdrop-blur policy (04 §11).
     ApplyBackdropRim,
 }
 

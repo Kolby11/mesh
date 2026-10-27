@@ -681,7 +681,7 @@ fn file_watcher_stopped_message_is_a_noop_when_the_watcher_was_never_active() {
 }
 
 #[test]
-fn retired_file_watch_generation_cannot_trigger_a_reload() {
+fn retired_file_watch_generation_schedules_a_fresh_reload() {
     let mut shell = Shell::new();
     shell.file_watch_set = crate::shell::file_watch::WatchSet::new(2, Vec::new());
     let far_future = std::time::Instant::now() + std::time::Duration::from_secs(3600);
@@ -697,9 +697,9 @@ fn retired_file_watch_generation_cannot_trigger_a_reload() {
         )
         .unwrap();
 
-    assert_eq!(shell.next_theme_reload_check, far_future);
-    assert_eq!(shell.next_shell_settings_reload_check, far_future);
-    assert_eq!(shell.next_frontend_reload_check, far_future);
+    assert!(shell.next_theme_reload_check < far_future);
+    assert!(shell.next_shell_settings_reload_check < far_future);
+    assert!(shell.next_frontend_reload_check < far_future);
     assert!(pending.is_empty());
 }
 

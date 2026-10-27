@@ -108,6 +108,7 @@ fn hash_material(style: &ComputedStyle) -> u64 {
     backdrop.refract_depth.to_bits().hash(&mut hasher);
     backdrop.refract_edge.to_bits().hash(&mut hasher);
     backdrop.dispersion.to_bits().hash(&mut hasher);
+    backdrop.grain.to_bits().hash(&mut hasher);
     hasher.finish()
 }
 

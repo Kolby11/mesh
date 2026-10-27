@@ -28,8 +28,8 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Investigate intermittent fractional retained-layout parity: the full shell matrix can disagree
       with full layout at `fractional/1024/1024/0`, while an isolated rerun passes.
 
-- [ ] Investigate intermittent debug-inspector Surfaces rendering in the parallel shell suite;
-      the retained paint-counter test can miss the view heading while isolated reruns pass.
+- [ ] Prevent scheduler contention from exhausting the frontend callback wall-clock budget before
+      a component initializes; the inspector can render an error placeholder under CPU contention.
 
 ## Change-proportional frame pipeline — next implementation priority
 
@@ -54,7 +54,7 @@ October log.
 ### Priority 8 — Structural mechanics
 
 - [ ] **SH-08:** Extract `shell/component/**` into a `mesh-core-frontend-runtime`
-      crate.
+      crate. [Design](../.planning/todos/pending/2026-10-27-frontend-runtime-extraction.md).
 - [ ] **UI-09:** Per-element behaviour table in `mesh-core-interaction` (after
       SH-08), starting with input caret keys/selection and slider Home/End/Page.
 - [ ] **RT-06:** Per-context budget counters and heap attribution on the shared
@@ -74,12 +74,6 @@ October log.
       use authoritative geometry and a source that accounts for foreign wallpaper layers and exclusive zones;
       predicted origins cannot guarantee alignment. Multi-output source sampling remains untested.
 
-## Theme materials (found 2026-10-27)
-
-- [ ] **Backdrop grain:** add a procedural noise term to the glass backdrop shader (e.g. `grain(<opacity>)` in
-      `backdrop-filter`, set per `--glass-backdrop-*` tier) to break gradient banding and read as frosted, as WinUI
-      Acrylic's built-in noise does. No image texture layers.
-
 ## Authoring model
 
 Goal: components written as plain Luau, with the framework owning dependency
@@ -91,13 +85,6 @@ tracking, validation and scheduling.
 - [ ] Optimistic pending values on proxy methods, reconciled with emitted state
       through contract coalescing keys, replacing the hand-written
       set-then-reconcile pattern in sliders.
-- [ ] A top-level `local x = require("mesh.*")` becomes a static interface
-      import bound for the whole surface, so a service update invalidates every
-      memoized sibling component; settings keeps `pcall(require)` on
-      `mesh.audio` and `mesh.debug` to avoid it. Bind imports per component.
-- [ ] `self` at script top level, plus event forwarding in markup
-      (`onpointerenter={self.PopoverEnter}`), replacing `init` captures and
-      one-line forwarding handlers.
 
 ## Runtime architecture direction
 
@@ -145,8 +132,8 @@ evidence and test workloads are in the linked reports.
 
 ### Section 05 — Localization and i18n
 
-- [ ] **S05-PERF-001 / S05-PERF-002 / S05-PERF-003:** Measure catalog
-      parsing and bulk projection at realistic catalog sizes. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/05-localization-i18n.md)
+- [ ] Attribute and reduce localized component-mount allocation and setup cost;
+      the current whole-mount measurements do not isolate catalog overhead.
 
 ### Section 06 — Host resources and icon packs
 
@@ -210,9 +197,6 @@ evidence and test workloads are in the linked reports.
 - [ ] **X-LOGIC-02 / X-LOGIC-03:** Bind candidate module identities and
       `ActiveSnapshot` to committed activation/control-plane revisions, and
       refresh or replace retained roots when policy or catalog state changes. [Cross-section audit](../.planning/codebase/audits/2026-09-01-whole-codebase/cross-section-findings.md)
-- [ ] **X-LOGIC-04:** Retain the newest filesystem graph revision while
-      activation is pending and retry reconciliation after candidate completion
-      or abort. [Cross-section audit](../.planning/codebase/audits/2026-09-01-whole-codebase/cross-section-findings.md)
 - [ ] **S15-PERF-001 / S15-PERF-002:** Benchmark shell-loop fairness and
       profile/catalog preparation across module, surface, provider, and message
       loads before changing scheduling or sharing. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/15-shell-core-and-orchestration.md)
@@ -270,13 +254,11 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
 - [ ] Text draws one `draw_image_rect` per glyph; batch with `draw_atlas` per run,
       later Skia text blobs. Glyph pages re-upload the whole page on growth.
 - [ ] Icon tint is in every icon raster key, so colour changes re-rasterize;
-      cache A8 masks and tint at draw. File-icon misses rasterize twice, once on
-      the UI thread. Missing icons re-queue resolution jobs.
-- [ ] Images over 16 MB never enter `SKIA_IMAGE_CACHE` and are copied and
-      re-uploaded every paint; wrap the decoded `Arc` without copying.
+      cache A8 masks and tint at draw.
+- [ ] Images exceeding the 32 MiB `SKIA_IMAGE_CACHE` budget (including mipmaps)
+      are copied and re-uploaded every paint; wrap the decoded `Arc` without copying.
 - [ ] An icon-pack publish advances the shared resource revision and rebuilds
-      `FontSystem`; split font and icon revisions. `TextRenderer::new` does a
-      system font scan that is discarded on the first frame.
+      `FontSystem`; split font and icon revisions.
 - [ ] Service updates run Lua per message, not per frame.
 - [ ] Sparse frames still pay ~10 full passes (batch index rebuild, topology
       check, backdrop regions, layer-scope collection); the subtree reuse map

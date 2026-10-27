@@ -21,9 +21,7 @@ fn is_translation(transform: AffineTransform) -> bool {
 fn plain_content(node: &WidgetNode) -> bool {
     let style = &node.computed_style;
     style.position != Position::Fixed
-        && style.transform.scale_x == 1.0
-        && style.transform.scale_y == 1.0
-        && style.transform.rotation == 0.0
+        && style.transform.is_translation_only()
         && style.opacity == 1.0
         && style.mix_blend_mode == BlendMode::Normal
         && style.filter.blur_radius == 0.0

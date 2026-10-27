@@ -831,6 +831,59 @@ fn live_reload_keeps_a_module_whose_manifest_is_mid_edit() {
     }));
 }
 
+#[test]
+fn filesystem_graph_changes_are_retried_after_candidate_commit_or_abort() {
+    for commit in [true, false] {
+        let root = tempfile::tempdir().unwrap();
+        let (_settings, _graph, _lock) = isolated_settings_file(root.path());
+        let modules = root.path().join("modules");
+        fs::create_dir_all(&modules).unwrap();
+        fs::write(root.path().join("module.json"),
+            r#"{"name":"@test/config","version":"0.1.0","mesh":{"schemaVersion":1,"modulesDir":"modules","modules":{}}}"#).unwrap();
+        let mut shell = Shell::new();
+        shell.discover_modules();
+        let candidate = shell.load_installed_module_graph_candidate().unwrap();
+        shell.hold_legacy_graph_candidate_for_test(candidate);
+
+        for name in ["first", "latest"] {
+            let dir = modules.join(name);
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("module.json"), format!(
+                r#"{{"name":"@test/{name}","version":"0.1.0","mesh":{{"apiVersion":"0.1","kind":"library"}}}}"#
+            )).unwrap();
+            shell.reconcile_installed_graph();
+        }
+        assert!(shell.pending_graph_reconciliation);
+        assert!(shell.retry_pending_graph_reconciliation().is_empty());
+
+        if !commit {
+            shell
+                .pending_resource_preparation
+                .as_ref()
+                .unwrap()
+                .resource_job
+                .retire();
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let mut requests = shell.poll_pending_resource_preparation();
+            requests.extend(shell.retry_pending_graph_reconciliation());
+            shell.drain_requests(&mut requests).unwrap();
+            if !shell.pending_graph_reconciliation && !shell.profile_transition_pending() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "graph reconciliation did not finish"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let active = shell.installed_module_graph.as_ref().unwrap();
+        assert!(active.module("@test/first").is_some());
+        assert!(active.module("@test/latest").is_some());
+    }
+}
+
 fn composition_switch_fixture(dir: &Path) {
     let modules = dir.join("modules");
     let theme = modules.join("theme");
@@ -927,6 +980,168 @@ fn composition_switch_fixture(dir: &Path) {
         .unwrap();
     }
     fs::write(dir.join("active-profile"), "first\n").unwrap();
+}
+
+#[test]
+fn idle_profile_authoring_edits_reconcile_without_graph_changes() {
+    for change in ["pointer", "remove", "profile"] {
+        let dir = tempfile::tempdir().unwrap();
+        let (_settings, _graph, _lock) = isolated_settings_file(dir.path());
+        composition_switch_fixture(dir.path());
+        let mut shell = Shell::new();
+        shell.presentation_engine =
+            mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+        shell.discover_modules();
+        shell.resolve_modules().unwrap();
+        shell.load_frontend_components().unwrap();
+        let mut requests = shell.mount_components().unwrap();
+        shell.drain_requests(&mut requests).unwrap();
+        assert!(shell.reconcile_installed_graph().is_empty());
+        assert!(!shell.profile_transition_pending());
+        match change {
+            "pointer" => fs::write(dir.path().join("active-profile"), "second\n").unwrap(),
+            "remove" => fs::remove_file(dir.path().join("active-profile")).unwrap(),
+            "profile" => fs::write(
+                dir.path().join("profiles/first.json"),
+                serde_json::json!({"schemaVersion": 3, "revision": 7,
+                    "from": {"module": "@test/second-shell"}})
+                .to_string(),
+            )
+            .unwrap(),
+            _ => unreachable!(),
+        }
+        let mut requests = shell.reconcile_installed_graph();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            requests.extend(shell.poll_pending_resource_preparation());
+            requests.extend(shell.retry_pending_graph_reconciliation());
+            shell.drain_requests(&mut requests).unwrap();
+            if !shell.pending_graph_reconciliation && !shell.profile_transition_pending() {
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        match change {
+            "pointer" => assert_eq!(shell.active_profile_id.as_deref(), Some("second")),
+            "remove" => assert_eq!(shell.active_profile_id, None),
+            "profile" => assert_eq!(shell.components[0].surface_id, "@test/second#default"),
+            _ => unreachable!(),
+        }
+        assert!(shell.reconcile_installed_graph().is_empty());
+        assert!(!shell.profile_transition_pending());
+    }
+}
+
+#[test]
+fn retired_watcher_event_reconciles_current_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_settings, _graph, _lock) = isolated_settings_file(dir.path());
+    composition_switch_fixture(dir.path());
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    shell.discover_modules();
+    shell.resolve_modules().unwrap();
+    shell.load_frontend_components().unwrap();
+    let mut requests = shell.mount_components().unwrap();
+    shell.drain_requests(&mut requests).unwrap();
+    shell.file_watch_set = crate::shell::file_watch::WatchSet::new(2, Vec::new());
+    fs::write(dir.path().join("active-profile"), "second\n").unwrap();
+    let mut requests = VecDeque::new();
+    shell
+        .handle_shell_message(
+            &mut requests,
+            super::types::ShellMessage::FilesystemChanged { generation: 1 },
+        )
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        requests.extend(shell.poll_pending_resource_preparation());
+        requests.extend(shell.retry_pending_graph_reconciliation());
+        shell.drain_requests(&mut requests).unwrap();
+        if !shell.pending_graph_reconciliation && !shell.profile_transition_pending() {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(shell.active_profile_id.as_deref(), Some("second"));
+}
+
+#[test]
+fn deferred_profile_changes_survive_candidate_commit_and_abort() {
+    for commit in [true, false] {
+        for change in ["pointer", "remove", "profile"] {
+            let dir = tempfile::tempdir().unwrap();
+            let (_settings, _graph, _lock) = isolated_settings_file(dir.path());
+            composition_switch_fixture(dir.path());
+            let mut shell = Shell::new();
+            shell.presentation_engine =
+                mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+            shell.discover_modules();
+            shell.resolve_modules().unwrap();
+            shell.load_frontend_components().unwrap();
+            let mut requests = shell.mount_components().unwrap();
+            shell.drain_requests(&mut requests).unwrap();
+            shell.hold_profile_candidate_for_test("first");
+            match change {
+                "pointer" => fs::write(dir.path().join("active-profile"), "second\n").unwrap(),
+                "remove" => fs::remove_file(dir.path().join("active-profile")).unwrap(),
+                "profile" => fs::write(
+                    dir.path().join("profiles/first.json"),
+                    serde_json::json!({"schemaVersion": 3, "revision": 8,
+                        "from": {"module": "@test/second-shell"}})
+                    .to_string(),
+                )
+                .unwrap(),
+                _ => unreachable!(),
+            }
+            shell.reconcile_installed_graph();
+            if !commit {
+                shell
+                    .pending_resource_preparation
+                    .as_ref()
+                    .unwrap()
+                    .resource_job
+                    .retire();
+            }
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let mut requests = shell.poll_pending_resource_preparation();
+                requests.extend(shell.retry_pending_graph_reconciliation());
+                shell.drain_requests(&mut requests).unwrap();
+                if !shell.pending_graph_reconciliation && !shell.profile_transition_pending() {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "reconciliation did not finish for {change}"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            match change {
+                "pointer" => {
+                    assert_eq!(
+                        fs::read_to_string(dir.path().join("active-profile"))
+                            .unwrap()
+                            .trim(),
+                        "second"
+                    );
+                    assert_eq!(shell.active_profile_id.as_deref(), Some("second"));
+                }
+                "remove" => {
+                    assert!(!dir.path().join("active-profile").exists());
+                    assert_eq!(shell.active_profile_id, None);
+                }
+                "profile" => {
+                    assert_eq!(shell.active_profile_id.as_deref(), Some("first"));
+                    assert_eq!(shell.components[0].surface_id, "@test/second#default");
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
 }
 
 #[test]

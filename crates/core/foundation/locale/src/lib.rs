@@ -3088,3 +3088,6 @@ impl From<mesh_core_files::ContainedFileError> for LocaleCatalogLoadError {
         }
     }
 }
+
+#[cfg(test)]
+mod performance_tests;

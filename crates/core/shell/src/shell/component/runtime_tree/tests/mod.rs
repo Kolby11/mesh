@@ -1,8 +1,6 @@
 mod annotate;
 mod benchmarks;
 mod fingerprint;
-mod node_id;
-mod service_deps;
 mod tree;
 
 use super::*;

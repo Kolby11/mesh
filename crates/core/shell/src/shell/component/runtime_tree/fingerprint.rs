@@ -273,6 +273,7 @@ pub(super) fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher)
     style.backdrop_filter.refract_depth.to_bits().hash(hasher);
     style.backdrop_filter.refract_edge.to_bits().hash(hasher);
     style.backdrop_filter.dispersion.to_bits().hash(hasher);
+    style.backdrop_filter.grain.to_bits().hash(hasher);
     hash_option_f32(style.inset_top, hasher);
     hash_option_f32(style.inset_right, hasher);
     hash_option_f32(style.inset_bottom, hasher);
@@ -470,6 +471,8 @@ pub(super) fn hash_transform(value: Transform2D, hasher: &mut impl Hasher) {
     value.scale_x.to_bits().hash(hasher);
     value.scale_y.to_bits().hash(hasher);
     value.rotation.to_bits().hash(hasher);
+    value.skew_x.to_bits().hash(hasher);
+    value.skew_y.to_bits().hash(hasher);
 }
 
 pub(super) fn hash_option_f32(value: Option<f32>, hasher: &mut impl Hasher) {

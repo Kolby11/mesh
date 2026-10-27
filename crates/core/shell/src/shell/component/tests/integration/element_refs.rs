@@ -574,6 +574,34 @@ fn touchpad_scroll_is_pixel_precise_and_keeps_moving_after_a_flick() {
 }
 
 #[test]
+fn self_event_binding_forwards_click_to_subscribers() {
+    let mut component = test_frontend_component(
+        r#"
+<template><button ref="action" onclick={self.Activated}>Go</button></template>
+<script lang="luau">
+clicks = 0
+self.Activated:on(function(event) clicks = clicks + 1 end)
+function trigger() refs.action:click() end
+</script>
+"#,
+    );
+    let mut buffer = PixelBuffer::new(160, 60);
+    component
+        .paint_raster(
+            &default_theme(),
+            SurfaceExtent::unpadded(160, 60),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    component.call_namespaced_handler("trigger", &[]).unwrap();
+    assert_eq!(
+        runtime_value(&component, "clicks"),
+        Some(serde_json::json!(1))
+    );
+}
+
+#[test]
 fn refs_click_method_fires_the_nodes_onclick_handler() {
     // `refs.<name>:click()` synthesizes a click on the live node, routing through
     // the same dispatch a real pointer release uses, so the node's onclick runs.

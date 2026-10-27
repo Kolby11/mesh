@@ -37,5 +37,7 @@ pub fn compose(outer: Transform2D, inner: Transform2D) -> Transform2D {
         scale_x: outer.scale_x * inner.scale_x,
         scale_y: outer.scale_y * inner.scale_y,
         rotation: outer.rotation + inner.rotation,
+        skew_x: outer.skew_x + inner.skew_x,
+        skew_y: outer.skew_y + inner.skew_y,
     }
 }

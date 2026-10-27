@@ -67,6 +67,15 @@ impl AffineTransform {
         }
     }
 
+    /// CSS `skew(ax, ay)`: `x' = x + tan(ax)*y`, `y' = tan(ay)*x + y`.
+    pub fn skew(ax: f32, ay: f32) -> Self {
+        Self {
+            m12: ay.tan(),
+            m21: ax.tan(),
+            ..Self::IDENTITY
+        }
+    }
+
     /// Compose `local` after this transform.
     pub fn then(self, local: Self) -> Self {
         Self {
@@ -531,7 +540,8 @@ pub fn transformed_offset(node: &WidgetNode, offset_x: f32, offset_y: f32) -> (f
 
 /// Build the transform from a node's local border-box coordinates into its
 /// parent's coordinate space. Translation is applied in the parent space;
-/// scale and rotation use the resolved CSS transform origin in local space.
+/// rotation, skew and scale (in that order) use the resolved CSS transform
+/// origin in local space.
 pub fn local_transform(node: &WidgetNode) -> AffineTransform {
     AffineTransform::translation(node.layout.x, node.layout.y).then(node_transform_effect(node))
 }
@@ -543,6 +553,7 @@ fn node_transform_effect(node: &WidgetNode) -> AffineTransform {
     let origin_y = origin.y.resolve(node.layout.height);
     let geometric = AffineTransform::translation(origin_x, origin_y)
         .then(AffineTransform::rotation(transform.rotation))
+        .then(AffineTransform::skew(transform.skew_x, transform.skew_y))
         .then(AffineTransform::scale(
             transform.scale_x.max(0.0),
             transform.scale_y.max(0.0),
@@ -624,6 +635,10 @@ pub fn transformed_layout_for(
     let origin_y = layout.height * 0.5;
     let geometric = AffineTransform::translation(origin_x, origin_y)
         .then(AffineTransform::rotation(style_transform.rotation))
+        .then(AffineTransform::skew(
+            style_transform.skew_x,
+            style_transform.skew_y,
+        ))
         .then(AffineTransform::scale(
             style_transform.scale_x.max(0.0),
             style_transform.scale_y.max(0.0),

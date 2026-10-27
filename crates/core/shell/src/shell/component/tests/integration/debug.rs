@@ -326,7 +326,10 @@ fn debug_inspector_surfaces_view_renders_retained_paint_filtering_counters() {
         .unwrap();
 
     let text = rendered_text(&component);
-    assert!(text.iter().any(|line| line == "Surfaces"));
+    assert!(
+        text.iter().any(|line| line == "Surfaces"),
+        "Surfaces view missing; rendered text: {text:?}"
+    );
     assert!(
         text.iter()
             .any(|line| line == "Paint policy minimal_damage; fallbacks 0")

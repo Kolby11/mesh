@@ -16,6 +16,9 @@ This workspace keeps browser-like concerns split by crate:
   composition and bounded theme detail transport.
 - `mesh-core-component` parses `.mesh` single-file components into source ASTs.
 - `mesh-core-frontend` compiles `.mesh` source and builds `WidgetNode` trees.
+- `mesh-core-frontend-runtime` owns frontend runtime node identity and the
+  node-to-service-field index; extraction of the component host from shell is
+  in progress.
 - `mesh-core-animation` owns easing, interpolation, transitions, and keyframes.
 - `mesh-core-interaction` queries `WidgetNode` trees for hit testing, focus, tooltip, and scroll behavior.
 - `mesh-core-render` paints `WidgetNode` trees into `PixelBuffer`s.
@@ -39,6 +42,7 @@ Normal dependency direction should remain:
 surface-policy -> no runtime boundary crates
 render -> elements + icon
 frontend -> component + elements + module + theme
+frontend-runtime -> elements
 frontend-abi -> capability
 frontend-shell-adapter -> frontend-abi + capability + config + debug + diagnostics + elements + locale + render + scripting + theme + wayland
 animation -> elements

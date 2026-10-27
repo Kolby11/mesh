@@ -800,8 +800,8 @@ impl FrontendSurfaceComponent {
         // live cross-component reference rather than a snapshot.
         script_ctx.attach_shared_vm(&self.surface_vm);
         script_ctx.set_interface_catalog(self.interface_catalog.clone());
-        let translator = self.locale.module_translator(&manifest.package.id);
-        script_ctx.set_i18n_translator(&translator);
+        let translator = self.shared_i18n_translator(&manifest.package.id);
+        script_ctx.set_shared_i18n_translator(translator);
         script_ctx.set_optional_interfaces(
             manifest
                 .dependencies

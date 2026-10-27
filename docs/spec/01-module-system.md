@@ -1004,7 +1004,10 @@ explicitly pin a theme.
 Live profile switching is transactional: validate the candidate, diff it
 against the active graph, retain identical service instances, initialize new
 services and hidden surfaces, reveal the new roots, then remove orphaned
-objects. Failure before commit leaves the active profile untouched.
+objects. Failure before commit leaves the active profile untouched. Changes to
+the authored graph or active profile observed during preparation are reconciled
+after the candidate commits or aborts. Cooperating profile pointer writers use
+a control-plane lock to reject a pointer changed during preparation.
 
 `mesh-shell profile use <id>` requests that transaction from a running shell
 over its private IPC socket; when no shell is running it updates the pointer for

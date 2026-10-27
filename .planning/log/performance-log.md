@@ -9665,3 +9665,112 @@ Final recovery verification: `package_recovery_restores_the_published_theme_chan
 passed, proving committed detail cursors survive rollback and candidate cursors
 become stale. The three transport regressions also passed after adding negative
 cursor rejection. `git diff --check` is clean for this change.
+
+## 2026-10-27 — Locale catalog baseline (partial S05 measurement)
+
+Release `locale_catalog_workloads`, three consecutive runs, 30 samples each:
+JSON parse plus compilation for 100 / 1,000 / 4,000 keys (2,691 / 27,891 /
+114,891 bytes) had p50 ranges 0.025–0.045 / 0.335–0.359 / 1.440–1.478 ms
+and p95 ranges 0.037–0.069 / 0.385–0.559 / 1.775–1.856 ms. Bulk module
+projection with a two-locale chain at 4,000 keys took p50 0.590–0.595 ms
+(one layer) or 0.874–0.933 ms (five overlapping layers); p95 ranges were
+0.663–1.044 and 1.165–1.337 ms respectively. Preparing 4 / 40 / 400 catalog
+sources, each reading the same warm 100-key file, took p50 0.158–0.165 /
+1.532–1.591 / 16.454–19.375 ms over ten samples; p95 0.205–0.265 /
+1.642–2.087 / 19.230–22.653 ms. No before/after improvement or gate is claimed.
+
+The 2026-09 audit's proposed 10,000/100,000-key single catalogs exceed the
+current 4,096-entry admission bound. Module translators now borrow their IDs,
+and module projection traverses layers in precedence order instead of rebuilding
+an all-key set. Allocation counts, per-component mount costs, more fallback
+shapes and separate unchanged/one-file-edit reloads remain unmeasured; S05
+stays open.
+
+## 2026-10-27 — Locale translator and reload baseline
+
+Release `locale_catalog_workloads`, three runs. Constructing a borrowed module
+translator and resolving one key for 1,000 instances took p50 0.057–0.062 ms
+and p95 0.064–0.071 ms, with 10 or 100 catalog keys (30 samples each).
+Preparing 400 separate warm 100-key files took p50 17.378–19.578 ms and p95
+20.685–23.448 ms; rewriting one file before each preparation took p50
+18.580–19.168 ms and p95 20.988–25.299 ms (10 samples each; write excluded).
+Four and 40 files took unchanged p50 0.163–0.165 / 1.596–1.704 ms and edited
+p50 0.169–0.180 / 1.609–1.663 ms. The loader currently reparses every source
+in either case. This supplements the preceding baseline; allocation counts,
+peak memory and additional fallback shapes remain open. No optimization or
+gate is claimed.
+
+## 2026-10-27 — Locale workload process memory
+
+Three release runs of the complete `locale_catalog_workloads` test process
+under GNU `time` reported peak RSS of 9,924–10,060 KiB. This is a whole-process
+high-water mark across the combined workload, not per-case allocation or peak
+attribution; those measurements and additional fallback shapes remain open.
+
+## 2026-10-27 — Locale allocation and fallback measurements
+
+Release `locale_catalog_workloads`, three runs of 30 samples per case unless
+noted. A synthetic 100-key projection over 10 fallback locales and 20
+fully overlapping layers per locale took p50 0.268–0.277 ms and p95
+0.285–0.439 ms; the harness also measures 2/5/10 fallbacks and 1/5/20 layers.
+A 100,000-unique-key projection spread across 25 catalogs of 4,000 keys took
+p50 54.047–55.664 ms and p95 65.123–67.189 ms (10 samples). Those synthetic
+chains are stress shapes, not a claim about normal locale selection.
+
+With the opt-in counting allocator, each 4,000-key parse/compile made 16,679
+allocation/reallocation calls; a five-layer 4,000-key projection made 8,024,
+and the 100,000-key projection made 200,032. Constructing and querying 1,000
+borrowed translators made zero. Preparing 4/40/400 distinct 100-key catalog
+files made 1,771/17,686/176,809 calls for both unchanged and one-edited cases.
+Counts were stable at p50 and p95 across three runs. Timing baselines above
+were measured without allocator instrumentation. GNU `time` reported whole-
+process peak RSS 41,752–42,748 KiB for the expanded combined workload, not
+per-case peaks. These measurements close S05's parsing and projection baseline;
+full component-mount and per-case RSS attribution were not measured. No
+performance improvement or gate is claimed.
+
+## 2026-10-27 — S05 measurement scope clarification
+
+The preceding entry closes S05-PERF-001 and S05-PERF-003's catalog projection
+and reload measurements. S05-PERF-002 remains in the backlog: the borrowed
+translator microbenchmark does not measure full component mounting.
+
+## 2026-10-27 — Localized child-component mount baseline (S05-PERF-002)
+
+Release `localized_component_mount_workload`, three consecutive runs, five
+samples each: one / 100 / 1,000 sibling components, each resolving one key from
+its owning module's 10- or 100-key English catalog. The root runtime and
+catalog setup are excluded; the timed `build_tree` creates child runtimes,
+executes their templates, and builds the tree. For 10 keys, per-run medians
+were 0.578–1.197 / 52.024–112.936 / 1,164.502–1,176.720 ms; for 100 keys,
+1.256–1.554 / 121.496–135.730 / 1,234.663–1,245.880 ms. These are complete
+child-mount costs, not isolated translator costs. Samples were unpinned and the
+first one-component sample included cold font setup; no speedup or gate is
+claimed.
+
+Three separate allocation-profiling builds/runs, five samples each, counted
+thread-local allocation/reallocation calls during `build_tree`. At 1,000
+components, the per-run medians were 4,976,212–4,976,239 calls and
+1,078,710,888–1,079,152,608 allocated bytes with 10 keys, versus
+5,789,132–5,789,232 calls and 1,124,364,088–1,126,016,520 bytes with 100 keys.
+Those are cumulative allocated bytes, not resident or retained memory. The
+translator-only benchmark above showed zero allocations; these figures include
+all child runtime and tree setup and do not isolate the catalog's contribution.
+
+## 2026-10-27 — Share per-module locale resolvers within a surface
+
+Release `localized_component_mount_workload`: 1,000 sibling components each
+resolve one key from a shared 100-key module catalog. Three runs with five
+interleaved uncached/shared samples each had uncached per-run medians
+1,183.351–1,207.838 ms and shared medians 1,141.926–1,162.812 ms; individual
+sample ranges overlapped (uncached 1,164.731–1,251.901 ms; shared
+1,129.312–1,188.303 ms). Timing was unpinned and shows a modest, noisy
+improvement. Three separate allocation-instrumented runs of the same workload
+reported 5,791,159–5,791,190 allocation calls and 1,125,062,240–1,125,569,400
+cumulative allocated bytes uncached, versus 4,879,179–4,879,241 calls and
+1,071,845,440–1,072,843,328 bytes shared. The checked gate is
+`localized_mount_shared_resolver_allocation_gate`; cumulative allocated bytes
+are not retained memory. Cache entries are capped at 128 per surface and
+cleared when its locale/catalog snapshot changes. A test checks same-locale
+catalog replacement and module separation. Other child-runtime and tree setup
+still dominates mount cost; the broader attribution item stays open.

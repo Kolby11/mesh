@@ -546,6 +546,8 @@ end
                 );
                 let mut patched = test_frontend_component(&source);
                 let mut full = test_frontend_component(&source);
+                patched.motion_policy.reduced_motion = true;
+                full.motion_policy.reduced_motion = true;
                 full.force_full_template_build = true;
                 let (mut actual, mut expected) =
                     (PixelBuffer::new(320, 1100), PixelBuffer::new(320, 1100));
@@ -567,11 +569,23 @@ end
                     let (mut a, mut b) = (Vec::new(), Vec::new());
                     layouts(patched.last_tree.as_ref().unwrap(), &mut a);
                     layouts(full.last_tree.as_ref().unwrap(), &mut b);
+                    if mode == "fractional" && turn == 0 {
+                        assert_eq!(
+                            a[target + 1].1.width,
+                            21.0,
+                            "fractional mutation was not applied"
+                        );
+                    }
+                    let mismatch = a
+                        .iter()
+                        .zip(&b)
+                        .enumerate()
+                        .find(|(_, (actual, expected))| actual.1 != expected.1);
                     assert!(
-                        a.iter()
-                            .map(|(_, rect)| rect)
-                            .eq(b.iter().map(|(_, rect)| rect)),
-                        "{mode}/{siblings}/{target}/{turn}"
+                        a.len() == b.len() && mismatch.is_none(),
+                        "{mode}/{siblings}/{target}/{turn}: lengths {}/{}; first mismatch {mismatch:?}",
+                        a.len(),
+                        b.len()
                     );
                     let (mut a, mut b) = (Vec::new(), Vec::new());
                     metrics(patched.last_tree.as_ref().unwrap(), &mut a);
