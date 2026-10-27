@@ -1102,7 +1102,10 @@ default for a malformed argument.
   the next successful callback may publish those mutations. Later stream callbacks
   remain queued while a stream callback is suspended. Stop cancels previous tasks
   and has a two-second teardown deadline. Calls from contexts Luau cannot yield
-  from (metamethods, `table.sort` comparators) still block.
+  from (metamethods, `table.sort` comparators) still block their callback.
+  Synchronous `mesh.exec` waits release a multithreaded Tokio runtime's worker
+  so independent tasks can progress. Outside Tokio, or on a current-thread
+  runtime, they retain the ordinary blocking behavior.
 - **Shipped — native backend events.** Capability-gated D-Bus signals, PipeWire
   Node/Metadata invalidations, route netlink groups, wlr foreign-toplevel events,
   inotify watches and Unix socket streams use the bounded, generation-owned

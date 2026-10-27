@@ -2587,6 +2587,81 @@ fn backend_task_registration_requires_startup() {
     }
 }
 
+fn synchronous_exec_from_sort_returns_its_result() {
+    let mut ctx = BackendScriptContext::new_with_capabilities(
+        "@test/sync-exec-sort",
+        ["exec.argv:printf:[\"*\"]".into()],
+    );
+    ctx.load_script(
+        r#"
+state = {}
+function start(self)
+    table.sort({2, 1}, function(a, b)
+        local result = mesh.exec("printf", {"done"})
+        state.success = result.success
+        state.output = result.stdout
+        return a < b
+    end)
+end
+"#,
+    )
+    .unwrap();
+    let state = ctx.call_init().unwrap().unwrap();
+    assert_eq!(state["success"], true);
+    assert_eq!(state["output"], "done");
+}
+
+#[test]
+fn synchronous_exec_without_tokio_returns_its_result() {
+    synchronous_exec_from_sort_returns_its_result();
+}
+
+#[tokio::test]
+async fn synchronous_exec_on_current_thread_runtime_returns_its_result() {
+    synchronous_exec_from_sort_returns_its_result();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn synchronous_exec_releases_the_tokio_worker() {
+    let root = temp_storage_root("sync-exec-worker");
+    std::fs::create_dir_all(&root).unwrap();
+    let release = root.join("release");
+    let ready = std::sync::Arc::new(tokio::sync::Notify::new());
+    let release_ready = ready.clone();
+    let release_path = release.clone();
+    let independent = tokio::spawn(async move {
+        release_ready.notified().await;
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        std::fs::write(release_path, "ready").unwrap();
+    });
+    let backend = tokio::spawn(async move {
+        let mut ctx = BackendScriptContext::new_with_settings_and_capabilities(
+            "@test/sync-exec-worker",
+            serde_json::json!({"release": release}),
+            mesh_core_capability::CapabilitySet::from_ids(["exec.command"]),
+        );
+        ctx.load_script(r#"
+state = {}
+function start(self)
+    table.sort({2, 1}, function(a, b)
+        local result = mesh.exec("sh", {"-c", 'while [ ! -e "$1" ]; do sleep 0.01; done; printf done', "mesh-test", mesh.config().release})
+        state.success = result.success
+        state.output = result.stdout
+        state.error = result.stderr
+        return a < b
+    end)
+end
+"#).unwrap();
+        ready.notify_one();
+        ctx.call_init().unwrap().unwrap()
+    });
+    let state = backend.await.unwrap();
+    independent.await.unwrap();
+    let _ = std::fs::remove_dir_all(root);
+    assert_eq!(state["success"], true, "{state:?}");
+    assert_eq!(state["output"], "done");
+}
+
 #[tokio::test]
 async fn backend_exec_task_yields_while_independent_tasks_run() {
     let root = temp_storage_root("async-exec");

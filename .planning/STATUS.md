@@ -9,13 +9,14 @@ measurements live in [`log/`](log/README.md).
 
 - Settings pop-out sizing is fixed; the user confirms touchpad scrolling now
   works well in the live desktop. The scrolling follow-up is closed.
+- RT-04 implemented: synchronous `mesh.exec` uses Tokio worker handoff on
+  multithreaded runtimes. Single-worker fairness and compatibility tests pass;
+  full scripting suite: 380 passed, zero failures, seven ignored.
 - Desktop widget visibility and independent live sizing are complete. The final
   GPU-feature shell suite passed: 1,043 tests, zero failures, 37 ignored.
 
 ## Next
 
-- RT-04: prevent synchronous `mesh.exec` child waits from occupying a Tokio
-  worker; verify independent work progresses on a single-worker runtime.
 - Continue glass raster work and the in-surface blur engine.
 
 ## Blocked / known baselines

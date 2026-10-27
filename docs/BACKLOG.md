@@ -58,8 +58,6 @@ October log.
       SH-08), starting with input caret keys/selection and slider Home/End/Page.
 - [ ] **RT-06:** Per-context budget counters and heap attribution on the shared
       frontend VM.
-- [ ] **RT-04:** Stop blocking tokio workers in `mesh.exec`; later an async exec
-      host API.
 
 ## Glass shell follow-ups (found 2026-10-20)
 

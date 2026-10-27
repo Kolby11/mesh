@@ -462,7 +462,16 @@ pub(super) fn run_exec(
     let resources = &service.resources;
     let outcome = {
         let _frame_pause = resources.pause_frame_clock();
-        command_outcome(program, argv0, args, locale, service).map_err(mlua::Error::external)?
+        let wait = || command_outcome(program, argv0, args, locale, service);
+        // Non-yielding Luau calls still wait synchronously, but Tokio can move
+        // unrelated tasks to a replacement worker while the child runs.
+        let outcome = match tokio::runtime::Handle::try_current() {
+            Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(wait)
+            }
+            _ => wait(),
+        };
+        outcome.map_err(mlua::Error::external)?
     };
     let output_size = outcome.stdout.len().saturating_add(outcome.stderr.len());
     resources
