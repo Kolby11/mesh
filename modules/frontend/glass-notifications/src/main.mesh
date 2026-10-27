@@ -122,7 +122,7 @@ end
         border: 1px solid var(--glass-rim);
         background-image: var(--glass-surface-panel);
         box-shadow: var(--glass-shadow-card);
-        backdrop-filter: blur(16px) refract(18px 16px) dispersion(1px);
+        backdrop-filter: var(--glass-backdrop-card);
         animation: toast-in 420ms var(--animation-curves-bezier-emphasized-decelerate) both;
         transform: translateY(0px) scale(1);
         transition-property: transform, border-color;

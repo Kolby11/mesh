@@ -94,7 +94,7 @@ end
     .launcher-shell { width: fit; height: fit; padding: 18px; background: transparent; opacity: 1; transform: translateY(0px) scale(1); transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-short) var(--animation-curves-bezier-standard); }
     .launcher-shell.mesh-surface-entering { opacity: 0; transform: translateY(20px) scale(0.92); }
     .launcher-shell.mesh-surface-exiting { opacity: 0; transform: translateY(12px) scale(0.96); transition-duration: var(--animation-duration-fast); }
-    .launcher { width: 380px; padding: 22px; gap: 18px; border-radius: 28px; border: 1px solid var(--glass-rim); background-image: var(--glass-surface-panel); box-shadow: var(--glass-shadow-card); backdrop-filter: blur(20px) refract(22px 18px) dispersion(1px); }
+    .launcher { width: 380px; padding: 22px; gap: 18px; border-radius: 28px; border: 1px solid var(--glass-rim); background-image: var(--glass-surface-panel); box-shadow: var(--glass-shadow-card); backdrop-filter: var(--glass-backdrop-panel); }
     .heading { width: 100%; align-items: center; gap: 8px; }
     .heading-spacer { flex-grow: 1; }
     .view { width: 30px; height: 30px; padding: 0; justify-content: center; align-items: center; border-radius: 999px; border: 1px solid var(--glass-rim-inset); background: transparent; }

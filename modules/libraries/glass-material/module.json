@@ -56,7 +56,13 @@
         "glass.meter.disk": "linear-gradient(to bottom, var(--color-secondary), var(--color-info))",
         "glass.meter.temperature": "linear-gradient(to bottom, var(--color-error), var(--color-warning))",
         "glass.meter.bar": "linear-gradient(to bottom, var(--color-tertiary), color-mix(in srgb, var(--color-primary) 55%, transparent))",
-        "glass.scrim": "color-mix(in srgb, var(--color-scrim) 30%, transparent)"
+        "glass.scrim": "color-mix(in srgb, var(--color-scrim) 30%, transparent)",
+        "glass.backdrop.pill": "blur(10px) refract(6px 5px) dispersion(0.4px)",
+        "glass.backdrop.card": "blur(18px) refract(10px 8px) dispersion(0.6px)",
+        "glass.backdrop.dock": "blur(16px) refract(9px 7px) dispersion(0.6px)",
+        "glass.backdrop.panel": "blur(26px) refract(12px 9px) dispersion(0.6px)",
+        "glass.backdrop.flare": "blur(8px) refract(0px 0px)",
+        "glass.backdrop.lens": "refract(8px 8px)"
       }
     }
   }

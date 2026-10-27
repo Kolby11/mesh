@@ -174,7 +174,7 @@ end
         max-height: 100%;
         background: transparent;
         background-image: var(--glass-surface-panel);
-        backdrop-filter: blur(20px) refract(22px 18px) dispersion(1px);
+        backdrop-filter: var(--glass-backdrop-panel);
         box-shadow: var(--glass-shadow-card);
         color: var(--glass-text);
         border-width: 1px;

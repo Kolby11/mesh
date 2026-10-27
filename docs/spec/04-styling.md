@@ -215,6 +215,12 @@ share one vocabulary that is not part of the core contract (for example
 family tokens in the modules that use the family. A family that becomes
 widely shared is a candidate for a future contract minor version.
 
+The shipped `@mesh/glass-material` family exposes
+`--glass-backdrop-{pill,card,dock,panel,flare,lens}` as whole `backdrop-filter`
+values. Glass components consume those hooks for blur, refraction and dispersion;
+the active theme can tune each tier in its family block. Violet Glass and both
+Frutiger Aero modes provide overrides.
+
 ### 4.2 Theme tuning and component internals
 
 **Status: shipped.** A theme tunes a module or family with an `@module` block:

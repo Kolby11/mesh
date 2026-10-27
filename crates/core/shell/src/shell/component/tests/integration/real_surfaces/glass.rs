@@ -32,7 +32,14 @@ fn theme() -> Theme {
         module: material,
         families: Vec::new(),
     }];
-    for module in ["glass-bar", "glass-widgets", "glass-dock"] {
+    for module in [
+        "glass-bar",
+        "glass-widgets",
+        "glass-dock",
+        "glass-dashboard",
+        "glass-notifications",
+        "glass-wallpapers",
+    ] {
         layers.push(ThemeModuleLayer {
             module_id: format!("@mesh/{module}"),
             module: ThemeModule::default(),

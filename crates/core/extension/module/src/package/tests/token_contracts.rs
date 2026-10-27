@@ -423,7 +423,7 @@ fn shipped_glass_material_resolves_and_paints_under_every_theme_mode() {
     let rules = vec![mesh_core_component::StyleRule {
         selector: mesh_core_component::Selector::Universal,
         declarations: mesh_core_component::parse_inline_style(
-            "background-image: var(--glass-surface-pill); color: var(--glass-text); box-shadow: var(--glass-shadow-pill);"
+            "background-image: var(--glass-surface-pill); color: var(--glass-text); box-shadow: var(--glass-shadow-pill); backdrop-filter: var(--glass-backdrop-pill);"
         ).unwrap(),
         container_query: None,
     }];
@@ -501,7 +501,35 @@ fn shipped_glass_material_resolves_and_paints_under_every_theme_mode() {
                 assert!(gradient.to.a > 0 && gradient.to.a < 255);
                 assert_eq!(style.box_shadow.blur_radius, 14.0);
                 assert!(style.box_shadow.color.a > 0 && style.box_shadow.color.a < 255);
-                if declaration.id == "violet-glass" {
+                let expected_backdrop = match (declaration.id.as_str(), mode.as_str()) {
+                    ("frutiger-aero", "light") => (12.0, 5.0, 4.0, 0.3),
+                    ("frutiger-aero", "dark") => (12.0, 6.0, 5.0, 0.5),
+                    ("violet-glass", _) => (10.0, 6.0, 5.0, 0.5),
+                    _ => (10.0, 6.0, 5.0, 0.4),
+                };
+                let backdrop = style.backdrop_filter;
+                assert!(backdrop.refract);
+                assert_eq!(
+                    (
+                        backdrop.blur_radius,
+                        backdrop.refract_depth,
+                        backdrop.refract_edge,
+                        backdrop.dispersion,
+                    ),
+                    expected_backdrop,
+                    "{} {mode}",
+                    declaration.id
+                );
+                if declaration.id == "frutiger-aero" {
+                    let (from, to, foreground) = match mode.as_str() {
+                        "light" => ("#ffffffe0", "#d2efffa6", "#0b2e4a"),
+                        "dark" => ("#8fd8ff40", "#0a4a7a2e", "#effaff"),
+                        _ => panic!("unexpected Aero mode: {mode}"),
+                    };
+                    assert_eq!(gradient.from, Color::from_hex(from).unwrap());
+                    assert_eq!(gradient.to, Color::from_hex(to).unwrap());
+                    assert_eq!(style.color, Color::from_hex(foreground).unwrap());
+                } else if declaration.id == "violet-glass" {
                     assert_eq!(gradient.from, Color::from_hex("#d4b8ff36").unwrap());
                     assert_eq!(gradient.to, Color::from_hex("#44206e24").unwrap());
                     assert_eq!(style.color, Color::from_hex("#f5ecff").unwrap());

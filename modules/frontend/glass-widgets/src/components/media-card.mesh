@@ -121,7 +121,7 @@ end
         border: 1px solid var(--glass-rim);
         background-image: var(--glass-surface-media);
         box-shadow: var(--glass-shadow-card);
-        backdrop-filter: blur(14px) refract(22px 18px) dispersion(1.2px);
+        backdrop-filter: var(--glass-backdrop-card);
         opacity: 1;
         animation: media-card-in 520 cubic-bezier(0.05, 0.7, 0.1, 1) both;
     }

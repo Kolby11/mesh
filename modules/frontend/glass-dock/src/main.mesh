@@ -101,7 +101,7 @@ end
         border-color: var(--glass-rim);
         background-image: var(--glass-surface-dock);
         box-shadow: var(--glass-shadow-dock);
-        backdrop-filter: blur(14px) refract(18px 16px) dispersion(1.2px);
+        backdrop-filter: var(--glass-backdrop-dock);
     }
 
     /* Concave feet: squares of the same glass whose upper outer corner is
@@ -112,7 +112,7 @@ end
         flex-shrink: 0;
         corner-shape: scoop;
         background-image: var(--glass-surface-flare);
-        backdrop-filter: blur(8px) refract(0px 0px);
+        backdrop-filter: var(--glass-backdrop-flare);
     }
 
     .flare-left {
@@ -143,7 +143,7 @@ end
         background-color: var(--glass-fill-lens);
         background-image: var(--glass-surface-lens);
         box-shadow: var(--glass-shadow-lens);
-        backdrop-filter: refract(8px 8px);
+        backdrop-filter: var(--glass-backdrop-lens);
     }
 
     .tile-focused,

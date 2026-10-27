@@ -611,9 +611,14 @@ fn settings_glass_surfaces_follow_the_active_theme_palette() {
         .canonicalize()
         .unwrap();
     let mut surfaces = Vec::new();
-    for name in ["catppuccin-mocha", "violet-glass"] {
+    for (name, stylesheet, blur) in [
+        ("catppuccin-mocha", "theme.css", 26.0),
+        ("violet-glass", "theme.css", 26.0),
+        ("frutiger-aero", "light.css", 30.0),
+        ("frutiger-aero", "dark.css", 28.0),
+    ] {
         let pack = mesh_core_theme::load_theme_from_source(
-            &ThemeSourceHandle::new(root.join("modules/themes").join(name), "theme.css").unwrap(),
+            &ThemeSourceHandle::new(root.join("modules/themes").join(name), stylesheet).unwrap(),
             name,
             name,
         )
@@ -634,7 +639,7 @@ fn settings_glass_surfaces_follow_the_active_theme_palette() {
             shell.computed_style.background_paint,
             mesh_core_elements::style::BackgroundPaint::None
         );
-        assert_eq!(shell.computed_style.backdrop_filter.blur_radius, 20.0);
+        assert_eq!(shell.computed_style.backdrop_filter.blur_radius, blur);
         assert!(
             sidebar.computed_style.background_color.a > 0
                 && sidebar.computed_style.background_color.a < 255
@@ -648,16 +653,18 @@ fn settings_glass_surfaces_follow_the_active_theme_palette() {
             let dir = PathBuf::from(dir);
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(
-                dir.join(format!("settings-{name}-920x900.bgra")),
+                dir.join(format!("settings-{name}-{stylesheet}-920x900.bgra")),
                 buffer.data(),
             )
             .unwrap();
         }
     }
-    assert_ne!(
-        surfaces[0], surfaces[1],
-        "settings must follow the selected palette"
-    );
+    for pair in surfaces.windows(2) {
+        assert_ne!(
+            pair[0], pair[1],
+            "settings must follow the selected palette"
+        );
+    }
 }
 
 fn is_nav_tab(node: &WidgetNode) -> bool {

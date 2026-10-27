@@ -91,7 +91,7 @@ end
     .panel {
         width: 364px; padding: 24px; gap: 20px; border-radius: 28px;
         border: 1px solid var(--glass-rim); background-image: var(--glass-surface-panel);
-        box-shadow: var(--glass-shadow-card); backdrop-filter: blur(20px) refract(20px 18px) dispersion(1px);
+        box-shadow: var(--glass-shadow-card); backdrop-filter: var(--glass-backdrop-panel);
     }
     .heading { width: 100%; align-items: center; gap: 12px; }
     .heading-copy { flex-grow: 1; gap: 5px; }

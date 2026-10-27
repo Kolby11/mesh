@@ -261,7 +261,7 @@ end
         border: 1px solid var(--glass-rim);
         background-image: var(--glass-surface-panel);
         box-shadow: var(--glass-shadow-card);
-        backdrop-filter: blur(22px) refract(24px 20px) dispersion(1.2px);
+        backdrop-filter: var(--glass-backdrop-panel);
         opacity: 1;
         transform: translateY(0px) scale(1);
         transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);

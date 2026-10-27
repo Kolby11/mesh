@@ -80,7 +80,7 @@ function onToday() month_offset = 0 end
     .calendar-shell { width: fit; height: fit; padding: 16px; background: transparent; opacity: 1; transform: translateY(0px) scale(1); transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-short) var(--animation-curves-bezier-standard); }
     .calendar-shell.mesh-surface-entering { opacity: 0; transform: translateY(-12px) scale(0.94); }
     .calendar-shell.mesh-surface-exiting { opacity: 0; transform: translateY(-8px) scale(0.96); transition-duration: var(--animation-duration-fast); }
-    .calendar { width: 364px; padding: 24px; gap: 18px; border-radius: 28px; border: 1px solid var(--glass-rim); background-image: var(--glass-surface-panel); box-shadow: var(--glass-shadow-card); backdrop-filter: blur(20px) refract(20px 18px) dispersion(1px); }
+    .calendar { width: 364px; padding: 24px; gap: 18px; border-radius: 28px; border: 1px solid var(--glass-rim); background-image: var(--glass-surface-panel); box-shadow: var(--glass-shadow-card); backdrop-filter: var(--glass-backdrop-panel); }
     .today-label { height: 22px; font-size: 12px; color: var(--glass-text-muted); }
     .month-heading { width: 100%; gap: 5px; align-items: center; }
     .month-label { flex-grow: 1; height: 24px; font-size: 17px; font-weight: 600; color: var(--glass-text-heading); }

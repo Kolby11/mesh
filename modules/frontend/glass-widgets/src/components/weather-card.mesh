@@ -102,7 +102,7 @@ end)
         border: 1px solid var(--glass-rim);
         background-image: var(--glass-surface-weather);
         box-shadow: var(--glass-shadow-card);
-        backdrop-filter: blur(14px) refract(22px 18px) dispersion(1.2px);
+        backdrop-filter: var(--glass-backdrop-card);
         opacity: 1;
         animation: weather-card-in 620 cubic-bezier(0.05, 0.7, 0.1, 1) both;
     }

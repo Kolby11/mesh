@@ -7,17 +7,9 @@ measurements live in [`log/`](log/README.md).
 
 ## Now
 
-- S04 shared CSS/value/keyframe lowering and bounded `mesh.theme` snapshot/detail
-  transport are implemented. Theme/component and focused shell/animation tests
-  pass; three release measurement runs are recorded in the performance log.
-
-- Settings pop-out sizing is fixed; the user confirms touchpad scrolling now
-  works well in the live desktop. The scrolling follow-up is closed.
-- RT-04 implemented: synchronous `mesh.exec` uses Tokio worker handoff on
-  multithreaded runtimes. Single-worker fairness and compatibility tests pass;
-  full scripting suite: 380 passed, zero failures, seven ignored.
-- Desktop widget visibility and independent live sizing are complete. The final
-  GPU-feature shell suite passed: 1,043 tests, zero failures, 37 ignored.
+- Frutiger Aero light/dark modes and theme-controlled glass backdrop materials are
+  complete. Real-surface tests: 96 passed; token/material contract tests: 12 passed.
+  Both Aero Settings modes were rendered and visually checked.
 
 ## Next
 

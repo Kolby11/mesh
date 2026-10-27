@@ -103,7 +103,7 @@ end
         border: 1px solid var(--glass-rim);
         background-image: var(--glass-surface-pill);
         box-shadow: var(--glass-shadow-pill);
-        backdrop-filter: blur(5px) refract(12px 11px) dispersion(1.5px);
+        backdrop-filter: var(--glass-backdrop-pill);
     }
 
     .glyph-btn {

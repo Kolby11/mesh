@@ -1,0 +1,428 @@
+:root {
+  --icon-size-sm: 16px;
+  --icon-size-md: 20px;
+  --icon-size-lg: 24px;
+  --animation-curves-bezier-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --animation-curves-bezier-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --animation-curves-bezier-standard: cubic-bezier(0.2, 0, 0, 1);
+  --animation-curves-bezier-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
+  --animation-curves-bezier-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+  --animation-default-border-radius: border-radius var(--animation-duration-short)
+    var(--animation-curves-bezier-emphasized-decelerate);
+  --animation-default-opacity: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+  --animation-duration-extra-long: 500;
+  --animation-duration-fast: 110;
+  --animation-duration-instant: 0;
+  --animation-duration-long: 420;
+  --animation-duration-medium: 280;
+  --animation-duration-short: 180;
+  --animation-opacity-disabled: 0.38;
+  --animation-scale-hover: 1.04;
+  --animation-scale-press: 0.95;
+  --animation-lift-hover: -3px;
+  --animation-lift-press: -1px;
+  --color-focus-ring: #5fd4ff;
+  --effect-backdrop-blur-surface-radius: 24px;
+  --effect-backdrop-blur-popup-radius: 18px;
+  --effect-backdrop-blur-surface-background: rgba(8, 60, 104, 0.40);
+  --effect-backdrop-blur-popup-background: rgba(6, 44, 80, 0.58);
+  --base16-base00: #041a2e;
+  --base16-base01: #0a2a45;
+  --base16-base02: #14405f;
+  --base16-base03: #4a7594;
+  --base16-base04: #9cc7e0;
+  --base16-base05: #dff2fd;
+  --base16-base06: #effaff;
+  --base16-base07: #ffffff;
+  --base16-base08: #ff8a80;
+  --base16-base09: #ffb86b;
+  --base16-base0A: #ffe07a;
+  --base16-base0B: #8fe388;
+  --base16-base0C: #5ff2e6;
+  --base16-base0D: #5fd4ff;
+  --base16-base0E: #b0a8ff;
+  --base16-base0F: #e0b48a;
+  --border-style-default: solid;
+  --border-width-hairline: 1;
+  --border-width-medium: 2;
+  --border-width-none: 0;
+  --border-width-thick: 3;
+  --border-width-thin: 1;
+  --color-background: #041a2e;
+  --color-border: #2a5a7e;
+  --color-border-muted: #113352;
+  --color-disabled: #5f7f96;
+  --color-error: #ff8a80;
+  --color-error-container: #a3201c;
+  --color-info: #8cc4ff;
+  --color-info-container: #1d4f8f;
+  --color-inverse-on-surface: #0b2e4a;
+  --color-inverse-primary: #0077b6;
+  --color-inverse-surface: #dff2fd;
+  --color-link: #7fd8ff;
+  --color-on-background: #dff2fd;
+  --color-on-disabled: #1c3850;
+  --color-on-error: #3b0805;
+  --color-on-error-container: #ffe9e6;
+  --color-on-info: #06223a;
+  --color-on-info-container: #e6f1ff;
+  --color-on-link: #06223a;
+  --color-on-primary: #00253d;
+  --color-on-primary-container: #e3f6ff;
+  --color-on-primary-fixed: #00253d;
+  --color-on-primary-fixed-variant: #00253d;
+  --color-on-secondary: #0d2e0b;
+  --color-on-secondary-container: #e3fbdc;
+  --color-on-secondary-fixed: #0d2e0b;
+  --color-on-secondary-fixed-variant: #e3fbdc;
+  --color-on-success: #0d2e0b;
+  --color-on-success-container: #e3fbdc;
+  --color-on-surface: #dff2fd;
+  --color-on-surface-variant: #a9d0e8;
+  --color-on-tertiary: #00302e;
+  --color-on-tertiary-container: #dcfffb;
+  --color-on-tertiary-fixed: #00302e;
+  --color-on-tertiary-fixed-variant: #00302e;
+  --color-on-warning: #2e1c00;
+  --color-on-warning-container: #2e1c00;
+  --color-outline: #7fa9c6;
+  --color-outline-variant: #2a5a7e;
+  --color-primary: #5fd4ff;
+  --color-primary-container: #0a6ea8;
+  --color-primary-fixed: #5fd4ff;
+  --color-primary-fixed-dim: #2fb6ea;
+  --color-scrim: #000000;
+  --color-secondary: #8fe388;
+  --color-secondary-container: #2f7d2a;
+  --color-secondary-fixed: #8fe388;
+  --color-secondary-fixed-dim: #5fc458;
+  --color-selection-background: #2fb6ea;
+  --color-selection-foreground: #00253d;
+  --color-shadow: #010a14;
+  --color-success: #8fe388;
+  --color-success-container: #2f7d2a;
+  --color-surface: #06213a;
+  --color-surface-bright: #1d4c72;
+  --color-surface-container: #0d2e4c;
+  --color-surface-container-high: #143a5c;
+  --color-surface-container-highest: #1c476d;
+  --color-surface-container-low: #0a2742;
+  --color-surface-container-lowest: #041a2e;
+  --color-surface-dim: #041a2e;
+  --color-surface-tint: #5fd4ff;
+  --color-surface-variant: #143a5c;
+  --color-tertiary: #5ff2e6;
+  --color-tertiary-container: #00797a;
+  --color-tertiary-fixed: #5ff2e6;
+  --color-tertiary-fixed-dim: #2fd3c6;
+  --color-warning: #ffd36b;
+  --color-warning-container: #a87400;
+  --elevation-2xl: 12;
+  --elevation-lg: 6;
+  --elevation-md: 3;
+  --elevation-none: 0;
+  --elevation-sm: 1;
+  --elevation-xl: 8;
+  --radius-2xl: 30;
+  --radius-full: 9999;
+  --radius-lg: 16;
+  --radius-md: 10;
+  --radius-none: 0;
+  --radius-sm: 4;
+  --radius-xl: 24;
+  --shadow-colored-primary: 0 0 0 1px rgba(95, 212, 255, 0.40);
+  --shadow-umbra-lg: 0 10px 30px rgba(1, 10, 20, 0.55);
+  --shadow-umbra-md: 0 4px 14px rgba(1, 10, 20, 0.45);
+  --shadow-umbra-sm: 0 1px 4px rgba(1, 10, 20, 0.40);
+  --shape-corner-extra-large: 28;
+  --shape-corner-extra-small: 4;
+  --shape-corner-full: 9999;
+  --shape-corner-large: 16;
+  --shape-corner-medium: 12;
+  --shape-corner-small: 8;
+  --spacing-2xl: 40;
+  --spacing-3xl: 48;
+  --spacing-4xl: 64;
+  --spacing-inset-comfortable: 16;
+  --spacing-inset-compact: 12;
+  --spacing-inset-loose: 24;
+  --spacing-lg: 24;
+  --spacing-md: 16;
+  --spacing-sm: 8;
+  --spacing-xl: 32;
+  --spacing-xs: 4;
+  --state-dragged-opacity: 0.16;
+  --state-focus-opacity: 0.12;
+  --state-hover-opacity: 0.08;
+  --state-pressed-opacity: 0.12;
+  --typography-family: Noto Sans;
+  --typography-family-brand: Noto Sans;
+  --typography-family-plain: Noto Sans;
+  --typography-line-height-normal: 1.4;
+  --typography-line-height-relaxed: 1.6;
+  --typography-line-height-tight: 1.15;
+  --typography-scale-body-large-line-height: 24;
+  --typography-scale-body-large-size: 16;
+  --typography-scale-body-large-weight: 400;
+  --typography-scale-body-medium-line-height: 20;
+  --typography-scale-body-medium-size: 14;
+  --typography-scale-body-medium-weight: 400;
+  --typography-scale-body-small-line-height: 16;
+  --typography-scale-body-small-size: 12;
+  --typography-scale-body-small-weight: 400;
+  --typography-scale-display-large-line-height: 64;
+  --typography-scale-display-large-size: 57;
+  --typography-scale-display-large-weight: 400;
+  --typography-scale-display-medium-line-height: 52;
+  --typography-scale-display-medium-size: 45;
+  --typography-scale-display-medium-weight: 400;
+  --typography-scale-display-small-line-height: 44;
+  --typography-scale-display-small-size: 36;
+  --typography-scale-display-small-weight: 400;
+  --typography-scale-headline-large-line-height: 40;
+  --typography-scale-headline-large-size: 32;
+  --typography-scale-headline-large-weight: 400;
+  --typography-scale-headline-medium-line-height: 36;
+  --typography-scale-headline-medium-size: 28;
+  --typography-scale-headline-medium-weight: 400;
+  --typography-scale-headline-small-line-height: 32;
+  --typography-scale-headline-small-size: 24;
+  --typography-scale-headline-small-weight: 400;
+  --typography-scale-label-large-line-height: 20;
+  --typography-scale-label-large-size: 14;
+  --typography-scale-label-large-weight: 500;
+  --typography-scale-label-medium-line-height: 16;
+  --typography-scale-label-medium-size: 12;
+  --typography-scale-label-medium-weight: 500;
+  --typography-scale-label-small-line-height: 16;
+  --typography-scale-label-small-size: 11;
+  --typography-scale-label-small-weight: 500;
+  --typography-scale-title-large-line-height: 28;
+  --typography-scale-title-large-size: 22;
+  --typography-scale-title-large-weight: 500;
+  --typography-scale-title-medium-line-height: 24;
+  --typography-scale-title-medium-size: 16;
+  --typography-scale-title-medium-weight: 500;
+  --typography-scale-title-small-line-height: 20;
+  --typography-scale-title-small-size: 14;
+  --typography-scale-title-small-weight: 500;
+  --typography-size-2xl: 24;
+  --typography-size-3xl: 32;
+  --typography-size-lg: 16;
+  --typography-size-md: 14;
+  --typography-size-sm: 12;
+  --typography-size-xl: 20;
+  --typography-size-xs: 11;
+  --typography-tracking-normal: 0;
+  --typography-tracking-tight: -0.02;
+  --typography-tracking-wide: 0.02;
+  --typography-weight-bold: 700;
+  --typography-weight-light: 300;
+  --typography-weight-medium: 500;
+  --typography-weight-regular: 400;
+  --typography-weight-semibold: 600;
+}
+
+row {
+  flex-direction: row;
+  width: fit;
+  height: fit;
+  padding: 0;
+  gap: 8;
+  background: transparent;
+}
+
+column {
+  flex-direction: column;
+  width: fit;
+  height: fit;
+  padding: 0;
+  gap: 8;
+  background: transparent;
+}
+
+box {
+  width: fit;
+  height: fit;
+  background: transparent;
+}
+
+button {
+  flex-direction: row;
+  padding: 10;
+  gap: 8;
+  border-radius: 12;
+  background: #0d2e4c;
+}
+
+input {
+  flex-direction: row;
+  height: 44;
+  padding: 10;
+  gap: 8;
+  border-width: 1;
+  border-color: #2a5a7e;
+  border-radius: 10;
+  background: #041a2e;
+}
+
+slider {
+  flex-direction: row;
+  height: 36;
+  padding: 8;
+  gap: 8;
+}
+
+scroll {
+  flex-direction: column;
+  height: 220;
+  padding: 0;
+  gap: 8;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: transparent;
+}
+
+icon {
+  width: 18;
+  height: 18;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+text {
+  height: 22;
+  font-size: 14;
+  background: transparent;
+}
+
+span {
+  flex-direction: row;
+  align-self: start;
+  padding: 0;
+  gap: 0;
+  background: transparent;
+}
+
+popover {
+  padding: 0;
+  gap: 0;
+  background: transparent;
+}
+
+node {
+  display: flex;
+  width: auto;
+  height: auto;
+  padding: 0;
+  margin: 0;
+  gap: 0;
+  border-width: 0;
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-on-surface);
+  font-family: var(--typography-family);
+  font-size: var(--typography-size-md);
+  font-weight: var(--typography-weight-regular);
+  line-height: var(--typography-line-height-normal);
+  opacity: 1;
+  overflow: visible;
+  flex-direction: row;
+  flex-grow: 0;
+  flex-shrink: 1;
+  align-items: stretch;
+  align-self: auto;
+  justify-content: start;
+  transition:
+    background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+    color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+    border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+    opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate),
+    border-width var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    width var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    height var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    padding var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    margin var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+}
+
+tooltip {
+  animation: tooltip-enter var(--animation-duration-short) ease-out;
+  cursor-offset-x: 14;
+  cursor-offset-y: 18;
+  delay: 300;
+  gap: 6;
+  position: bottom;
+}
+
+/* Tooltip enter animation: expands outward from the box center while fading
+   in. Stops may declare `opacity` and `transform` (scale/translate). */
+@keyframes tooltip-enter {
+  from {
+    opacity: 0;
+    transform: scale(0);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Glass material: Aero Night: ocean-blue glass, ice text, aqua and lime accents. Glossy two-stop fills (the renderer resolves two-colour
+   gradients) with bright white rims standing in for the Aero horizon highlight. */
+@module "@mesh/glass-material" {
+  :root {
+    --glass-hover: #ffffff2e;
+    --glass-rim: #bfeaff66;
+    --glass-rim-hover: #e3f7ffb3;
+    --glass-text: #effaff;
+    --glass-text-muted: #c2e4f7;
+    --glass-text-heading: #f5fcff;
+    --glass-text-strong: #ffffff;
+    --glass-text-caption: #b5d8ec;
+    --glass-text-cool: #8fe9ff;
+    --glass-text-artwork: #d3ecfa;
+    --glass-text-control: #e8f7ff;
+    --glass-text-on-accent: #00253d;
+    --glass-indicator: #5fd4ff;
+    --glass-indicator-recording: #ff6b6b;
+    --glass-fill-subtle: #ffffff33;
+    --glass-fill-occupied: #5fd4ff80;
+    --glass-fill-hover: #5fd4ffc4;
+    --glass-fill-inset: #ffffff1f;
+    --glass-rim-accent: #ffffff70;
+    --glass-rim-inset: #ffffff33;
+    --glass-rim-control: #ffffff2e;
+    --glass-fill-artwork: #ffffff1a;
+    --glass-fill-lens: #ffffff05;
+    --glass-rim-focused: #5fd4ffb3;
+    --glass-surface-pill: linear-gradient(to bottom, #8fd8ff40, #0a4a7a2e);
+    --glass-surface-recording: linear-gradient(to bottom, #ff8a8099, #c6282866);
+    --glass-surface-weather: linear-gradient(to bottom, #7fd0ff38, #04304f33);
+    --glass-surface-media: linear-gradient(to bottom, #8fe9ff3d, #06385c33);
+    --glass-surface-active: linear-gradient(to bottom, #a6ecff, #2fb6ea);
+    --glass-surface-dock: linear-gradient(to bottom, #bfeaff4d, #3c8fc426);
+    --glass-surface-flare: linear-gradient(to bottom, #ffffff40, #ffffff1a);
+    --glass-surface-lens: linear-gradient(to bottom, #ffffff38, #ffffff12);
+    --glass-surface-focused: linear-gradient(to bottom, #5fd4ff80, #0a6ea859);
+    --glass-surface-battery: linear-gradient(to bottom, #c8f7a8, #5cc94a);
+    --glass-surface-battery-low: linear-gradient(to bottom, #ffb3a8, #e5533f);
+    --glass-surface-control: linear-gradient(to bottom, #8fe3884d, #2f7d2a33);
+    --glass-shadow-pill: 0 4px 14px #010a1459, 0 1px 1px #ffffff2e;
+    --glass-shadow-card: 0 18px 48px #010a1473, 0 1px 2px #ffffff33;
+    --glass-shadow-dock: 0 -6px 24px #010a1466;
+    --glass-shadow-lens: 0 4px 12px #010a1447;
+    --glass-shadow-artwork: 0 8px 22px #010a1473;
+    --glass-text-on-error: #3b0805;
+    --glass-surface-panel: linear-gradient(to bottom, #2a6a9a85, #06213a70);
+    --glass-backdrop-pill: blur(12px) refract(6px 5px) dispersion(0.5px);
+    --glass-backdrop-card: blur(20px) refract(9px 7px) dispersion(0.6px);
+    --glass-backdrop-dock: blur(18px) refract(9px 7px) dispersion(0.6px);
+    --glass-backdrop-panel: blur(28px) refract(11px 8px) dispersion(0.6px);
+    --glass-backdrop-flare: blur(10px) refract(0px 0px);
+    --glass-backdrop-lens: refract(8px 8px);
+  }
+}

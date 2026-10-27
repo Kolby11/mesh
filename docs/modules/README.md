@@ -109,8 +109,9 @@ and easing, with separate entrance animations for islands, cards and popups.
 | `@mesh/wallpapers-interface` | interface | `mesh.wallpapers` wallpaper library contract |
 | `@mesh/recorder-interface` | interface | `mesh.recorder` screen-recording contract |
 | `@mesh/violet-glass` | theme | Violet glass palette with monospace type; tunes `@mesh/glass-material` |
+| `@mesh/frutiger-aero` | theme | Frutiger Aero palette: frosted-white glass, sky and aqua blues, grass-green accents, Noto Sans; light (default) and dark modes; tunes `@mesh/glass-material` |
 | `@mesh/volume-presentation` | library | Luau `require("@mesh/volume-presentation/volume")`: level normalization, scroll steps and the semantic volume icon shared by every audio frontend |
-| `@mesh/glass-material` | library | Shared surface gradients, translucent fills, text, accents, rims, hovers and shadows; defaults derive from any theme, with Violet Glass tuning the original palette |
+| `@mesh/glass-material` | library | Shared surface gradients, translucent fills, text, accents, rims, hovers, shadows and `--glass-backdrop-{pill,card,dock,panel,flare,lens}` blur/refraction materials; defaults derive from any theme, with Violet Glass and Frutiger Aero tuning them |
 | `@mesh/shell-ui-interface` | interface | Named UI extension-point contracts a host surface renders foreign module UI into |
 | `@mesh/icons-default` | icon-pack | Default semantic icon mappings |
 | `@mesh/icons-material-symbols` | icon-pack | Material Symbols font and codepoint mappings |
