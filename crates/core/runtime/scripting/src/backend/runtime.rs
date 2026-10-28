@@ -831,6 +831,7 @@ impl BackendScriptContext {
             let Some((id, body)) = self.tasks.lock().unwrap().pop_due(now) else {
                 break;
             };
+            let _budget = self.policy.begin_callback();
             let mut ready = self.take_publications();
             if let Some(publications) = self.suspended_publications.remove(&id) {
                 self.restore_publications(publications);
@@ -841,7 +842,6 @@ impl BackendScriptContext {
             };
             self.runtime.lock().unwrap().current_payload = payload;
             let result = {
-                let _budget = self.policy.begin_callback();
                 let thread = match body {
                     TaskBody::Call(key) => lua
                         .registry_value::<Function>(&key)
@@ -1281,6 +1281,7 @@ impl BackendScriptContext {
     pub fn take_service_state_snapshot(
         &mut self,
     ) -> Result<Option<BackendState>, BackendScriptError> {
+        let _budget = self.policy.begin_callback();
         if let Some(payload) = self.take_pending_emit() {
             return Ok(Some(payload));
         }

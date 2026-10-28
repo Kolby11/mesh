@@ -676,6 +676,105 @@ fn command_handler_reads_payload_via_api() {
 }
 
 #[test]
+fn backend_output_accounting_survives_repeated_snapshot_exports() {
+    let mut ctx = BackendScriptContext::new("@test/snapshot-accounting");
+    ctx.load_script(
+        r#"
+state = { data = string.rep("x", 60000) }
+function start() end
+function on_poll() end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+
+    for iteration in 0..160 {
+        let state = ctx.take_service_state_snapshot().unwrap().unwrap();
+        assert_eq!(state["data"].as_str().unwrap().len(), 60000);
+        ctx.run_poll()
+            .unwrap_or_else(|error| panic!("poll {iteration}: {error}"));
+    }
+}
+
+#[test]
+fn backend_output_accounting_survives_repeated_task_completions() {
+    let mut ctx = BackendScriptContext::new("@test/task-output-accounting");
+    ctx.load_script(
+        r#"
+state = { data = string.rep("x", 60000) }
+function start() end
+function on_command_read()
+    task.sleep(0)
+    return { data = state.data }
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+
+    for iteration in 0..160 {
+        assert!(matches!(
+            ctx.run_command_with_result("read", &serde_json::json!({}))
+                .unwrap(),
+            BackendCommandRun::Suspended { .. }
+        ));
+        let run = ctx.run_due_tasks(std::time::Instant::now());
+        assert!(
+            run.errors.is_empty(),
+            "iteration {iteration}: {:?}",
+            run.errors
+        );
+        assert_eq!(run.commands.len(), 1);
+        let outcome = run.commands.into_iter().next().unwrap().1.unwrap();
+        assert!(outcome.error.is_none());
+        assert_eq!(outcome.result["data"].as_str().unwrap().len(), 60000);
+        assert!(run.state.is_some());
+    }
+}
+
+#[test]
+fn backend_output_accounting_includes_resumed_command_results() {
+    let mut ctx = BackendScriptContext::new("@test/task-output-limit");
+    ctx.load_script(
+        r#"
+function start() end
+function on_command_read()
+    task.sleep(0)
+    charge_output()
+    return { ok = true }
+end
+"#,
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+    let resources = ctx.session().resources().clone();
+    let output_limit = resources.config().output_budget as usize;
+    let lua = ctx.ensure_lua().unwrap();
+    lua.globals()
+        .set(
+            "charge_output",
+            lua.create_function(move |_, ()| {
+                resources
+                    .reserve_output(output_limit - 1)
+                    .map_err(|error| mlua::Error::external(error.to_string()))
+            })
+            .unwrap(),
+        )
+        .unwrap();
+    ctx.run_command_with_result("read", &serde_json::json!({}))
+        .unwrap();
+    let run = ctx.run_due_tasks(std::time::Instant::now());
+    assert!(run.errors.is_empty(), "{:?}", run.errors);
+    let error = run.commands.into_iter().next().unwrap().1.unwrap_err();
+    assert!(matches!(
+        error,
+        BackendScriptError::CommandResultConversionFailed { .. }
+    ));
+    assert!(error.to_string().contains("output budget exceeded"));
+    assert!(run.state.is_none());
+}
+
+#[test]
 fn backend_state_snapshot_reads_top_level_state() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(
@@ -4454,4 +4553,59 @@ fn bundled_cava_discards_superseded_frames_and_clears_on_exit() {
     let closed = ctx.run_stream_closed(&handle, false).unwrap().unwrap();
     assert_eq!(closed["available"], false);
     assert_eq!(ctx.poll_interval_ms(), 5000);
+}
+
+#[tokio::test]
+#[ignore = "requires a live MPRIS player and playerctl"]
+async fn live_mpris_publishes_playerctl_position() {
+    let manifest: serde_json::Value = serde_json::from_str(&bundled_backend_script(
+        "../../../../modules/backend/mpris-media/module.json",
+    ))
+    .unwrap();
+    let grants = manifest["mesh"]["uses"]["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    let mut ctx = BackendScriptContext::new_with_capabilities("@mesh/mpris-media", grants);
+    ctx.load_script(&bundled_backend_script(
+        "../../../../modules/backend/mpris-media/src/main.luau",
+    ))
+    .unwrap();
+    let mut initial = ctx.call_init().unwrap();
+    while ctx.start_pending() {
+        let run = settle(&mut ctx).await;
+        assert!(run.errors.is_empty(), "{:?}", run.errors);
+        initial = run.state.or(initial);
+    }
+    let initial = initial.unwrap();
+    println!("live MPRIS initial: {initial:?}");
+    assert_eq!(initial["available"], true);
+    let mut state = ctx.run_poll().unwrap();
+    while ctx.poll_in_flight() {
+        let run = settle(&mut ctx).await;
+        assert!(run.errors.is_empty(), "{:?}", run.errors);
+        state = run.state.or(state);
+    }
+    let state = state.unwrap();
+    println!("live MPRIS poll: {state:?}");
+    let player = state["player"].as_str().unwrap();
+    let sampled = std::process::Command::new("playerctl")
+        .args(["--player", player, "position"])
+        .output()
+        .unwrap();
+    assert!(sampled.status.success());
+    let actual = String::from_utf8(sampled.stdout)
+        .unwrap()
+        .trim()
+        .parse::<f64>()
+        .unwrap();
+    let reported = state["position"].as_f64().unwrap();
+    assert!(
+        (actual - reported).abs() < 2.0,
+        "playerctl={actual}, provider={reported}"
+    );
+    ctx.call_stop_async().await.unwrap();
+    ctx.shutdown_streams().await;
 }

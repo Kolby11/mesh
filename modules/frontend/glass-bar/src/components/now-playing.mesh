@@ -36,8 +36,9 @@ end
 
 local function position_now()
     local position = media.position or 0
-    if media.state.state == "playing" then
-        position += os.time() - (media.updated_at or os.time())
+    local sampled_at = tonumber(media.updated_at) or 0
+    if media.state.state == "playing" and sampled_at > 0 then
+        position += math.max(0, os.time() - sampled_at)
     end
     local length = media.length or 0
     return length > 0 and math.min(position, length) or position

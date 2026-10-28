@@ -734,3 +734,71 @@ fn file_watcher_status_is_generation_scoped() {
         .unwrap();
     assert!(!shell.file_watcher_active);
 }
+
+#[test]
+fn media_seek_does_not_mask_live_position_or_track_changes() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("modules/interfaces/media/module.json")).unwrap(),
+    )
+    .unwrap();
+    shell.interfaces.register_contract(
+        mesh_core_service::contract::parse_interface_contract(
+            "mesh.media",
+            "1.0",
+            &manifest["mesh"]["interface"]["contract"],
+        )
+        .unwrap(),
+    );
+    register_test_provider(&shell.interfaces, "mesh.media", "@mesh/mpris-media");
+    let (slot, mut rx) = backend_runtime_slot(&runtime, "mesh.media", "@mesh/mpris-media");
+    shell.replace_backend_runtime("mesh.media".into(), slot);
+    let mut state = serde_json::json!({"available":true,"state":"playing","player":"test",
+        "title":"First","artist":"Artist","album":"Album","art_path":"",
+        "position":42.0,"length":200.0,"updated_at":100.0});
+    shell
+        .broadcast_service_event(service_update(
+            "mesh.media",
+            "@mesh/mpris-media",
+            state.clone(),
+        ))
+        .unwrap();
+    let result = shell.dispatch_service_command(
+        "mesh.media",
+        "seek",
+        &serde_json::json!({"position":0.0}),
+        "@mesh/glass-widgets",
+        &mesh_core_capability::CapabilitySet::from_ids(["service.media.control"]),
+    );
+    assert_eq!(result["ok"], true);
+    let command = rx.try_recv().unwrap();
+    shell.settle_bound_service_state(command.call_id, "completed");
+    for (position, title) in [
+        (0.125, "First"),
+        (1.5, "First"),
+        (0.0, "Second"),
+        (2.25, "Second"),
+    ] {
+        state["position"] = serde_json::json!(position);
+        state["title"] = serde_json::json!(title);
+        state["updated_at"] = serde_json::json!(101.0 + position);
+        shell
+            .broadcast_service_event(service_update(
+                "mesh.media",
+                "@mesh/mpris-media",
+                state.clone(),
+            ))
+            .unwrap();
+        assert_eq!(
+            shell.latest_service_state["mesh.media"].state["title"],
+            title
+        );
+        assert_eq!(
+            shell.latest_service_state["mesh.media"].state["position"], position,
+            "a completed seek must not replace the player's newer position with its requested value"
+        );
+    }
+    assert!(shell.pending_bound_service_state.is_empty());
+}

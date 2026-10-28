@@ -61,8 +61,7 @@
           "previous": "() -> Result",
           "seek": {
             "signature": "(position: float) -> Result",
-            "coalesce": { "key": [] },
-            "stateBinding": { "field": "position", "fromArg": "position" }
+            "coalesce": { "key": [] }
           }
         },
         "events": { "TrackChanged": { "title": "string", "artist": "string" } },

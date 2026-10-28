@@ -105,6 +105,10 @@ MPRIS follows metadata and playback status, resamples position every two seconds
 for external seeks, and downloads artwork separately from playback updates.
 Queries and controls target the player selected by the metadata stream; if it
 exits, sampling falls back to an available player.
+Playback position stays provider-owned after a seek. The desktop slider previews
+its drag locally, then reconciles with playback; the seek command does not pin
+the shared position to its requested value, because playback may already have
+advanced when the next sample arrives.
 Queued metadata and cava frames publish the newest sample from each batch;
 stale artwork requests are cancelled when the track's art URL changes.
 

@@ -191,3 +191,74 @@ function render() error("legacy hook must not run") end
         == crate::ScriptDiagnosticCategory::Lifecycle
         && diagnostic.reason.contains("effect(fn)")));
 }
+
+#[test]
+fn bundled_media_views_follow_position_and_reconcile_unacknowledged_seeks() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("modules/interfaces/media/module.json")).unwrap(),
+    )
+    .unwrap();
+    let contract = mesh_core_service::contract::parse_interface_contract(
+        "mesh.media",
+        "1.0",
+        &manifest["mesh"]["interface"]["contract"],
+    )
+    .unwrap();
+    for path in [
+        "modules/frontend/glass-widgets/src/components/media-card.mesh",
+        "modules/frontend/glass-bar/src/components/now-playing.mesh",
+    ] {
+        let source = std::fs::read_to_string(root.join(path)).unwrap();
+        let script = source
+            .split_once("<script lang=\"luau\">")
+            .unwrap()
+            .1
+            .split_once("</script>")
+            .unwrap()
+            .0;
+        let mut ctx = ScriptContext::new(
+            path,
+            CapabilitySet::from_ids(["service.media.read", "service.media.control"]),
+        )
+        .unwrap();
+        let mut catalog = mesh_core_service::InterfaceCatalog::default();
+        catalog.register_contract(contract.clone());
+        ctx.set_interface_catalog(catalog);
+        let mut media = json!({"available":true,"state":"playing","player":"test",
+            "title":"Track","artist":"Artist","album":"Album","position":42,
+            "length":200,"updated_at":0});
+        ctx.apply_service_payload("media", &media);
+        ctx.load_script(script).unwrap();
+        assert!(ctx.run_reactive_effects().is_empty(), "{path}");
+        let field = if path.contains("media-card") {
+            "position_text"
+        } else {
+            "progress"
+        };
+        let expected = if field == "progress" {
+            "00:42 / 03:20"
+        } else {
+            "00:42"
+        };
+        assert_eq!(ctx.state().get(field), Some(json!(expected)), "{path}");
+        if field == "position_text" {
+            ctx.call_handler("onSeekStart", &[]).unwrap();
+            ctx.call_handler("onSeek", &[json!(100)]).unwrap();
+            ctx.call_handler("onSeekRelease", &[json!(100)]).unwrap();
+        }
+        media["state"] = json!("paused");
+        media["position"] = json!(7);
+        ctx.apply_service_payload("media", &media);
+        assert!(ctx.run_reactive_effects().is_empty());
+        let errors =
+            ctx.run_due_tasks(std::time::Instant::now() + std::time::Duration::from_secs(3));
+        assert!(errors.is_empty(), "{path}: {errors:?}");
+        let expected = if field == "progress" {
+            "00:07 / 03:20"
+        } else {
+            "00:07"
+        };
+        assert_eq!(ctx.state().get(field), Some(json!(expected)), "{path}");
+    }
+}

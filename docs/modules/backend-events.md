@@ -33,7 +33,10 @@ continue while a callback waits. Later stream callbacks wait until the current
 one completes. Adjacent legacy lines from the same handle form one ordered batch.
 Only successful completion publishes a snapshot or buffered provider events.
 Suspended callbacks and scheduled resumptions retain their own publications; failure or cancellation discards
-them. Runtime callback budgets apply to each resumption.
+them. Runtime callback budgets apply to each resumption, including its final
+command result and state snapshot. Transient output charges are released when
+the resumption ends; queued publications remain charged until consumed or
+discarded. Standalone snapshot exports have their own callback budget scope.
 
 Sources share the generation's stream admission, queue and byte budgets. Records
 are limited to 64 KiB; source-specific bounds allow 512 PipeWire Node/Metadata

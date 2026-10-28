@@ -550,6 +550,10 @@ contract-less binding.
   shell updates that field in the interface's canonical shared state,
   publishes it to every observer, retains it across stale provider snapshots,
   and releases the pending binding when the provider confirms the value.
+  Use this only for values the provider can confirm exactly. A continuously
+  advancing observation such as media playback position remains provider-owned;
+  its control method does not declare a `stateBinding`. Consumers may preview
+  a requested value locally while awaiting the provider's next observation.
 - **Shipped — blobs.** A `blob` value is a `mesh-blob:sha256-…` handle to
   immutable image bytes the provider registered with `mesh.blob.put`; bulk
   bytes never travel in state. A state snapshot pins the handles it references
@@ -1307,6 +1311,11 @@ Discovered → Resolved → Loaded → Initialized → Running ⇄ Suspended →
   locally with bounded failure handling; recovery, capability enforcement, and
   resource accounting are distinct obligations. This is not a guarantee against
   native process crashes or process-wide exhaustion.
+- **Backend output accounting:** each callback or task resumption includes
+  command-result and state-snapshot serialization in its output budget. Its
+  transient output charges are released when that execution window ends;
+  queued publications retain separate charges until consumed or discarded.
+  A standalone snapshot export uses its own execution window.
 - **Language direction:** Luau through `mlua` is current. Whether
   TypeScript/JavaScript replaces or supplements it is undecided. WASM and native
   Rust module tiers are not committed targets. Contracts remain declarative
