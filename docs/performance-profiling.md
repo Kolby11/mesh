@@ -475,3 +475,24 @@ Check the printed raster path: an unavailable EGL/dmabuf backend falls back to
 CPU/SHM. The replay namespace suffix isolates compositor rules; hyprglass rules
 for the ordinary widget namespace do not apply automatically. Commit intervals
 measure application presentation cadence, not physical display latency.
+
+For rules that match the ordinary MESH namespaces, set
+`MESH_RESIZE_NATIVE_NAMESPACE=1` for this focused replay. It briefly creates
+surfaces with the installed profile's namespaces, so prefer a desktop without
+another MESH instance when attributing compositor work. The default keeps the
+replay suffix. `MESH_RESIZE_FORCE_REBUILD=1` disables binding patches in this
+test binary for paired reference runs; compare the same executable and raster
+path. The begin/end drag markers delimit plugin-counter snapshots. Hyprglass
+statistics are compositor-wide: other matching surfaces can contribute, and
+GPU timing fields are usable only when `timersEnabled` is true.
+
+## Frontend host initialization
+
+```bash
+nix develop -c cargo test -p mesh-core-scripting --release --lib frontend_host_setup_workload -- --ignored --nocapture --test-threads=1
+```
+
+This attribution workload times seven batches of 1,000 context initializations
+with `locale.read`. Construction and storage opening are outside the timed
+region; each batch drops its contexts and collects the shared VM. It measures
+host setup alone, not complete component mounting, and has no latency gate.

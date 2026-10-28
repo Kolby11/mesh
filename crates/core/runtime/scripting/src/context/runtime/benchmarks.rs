@@ -297,3 +297,41 @@ impl ScriptContext {
             .swap(false, Ordering::AcqRel)
     }
 }
+
+#[test]
+#[ignore = "release-only frontend host setup attribution"]
+fn frontend_host_setup_workload() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    let root = std::env::temp_dir().join(format!("mesh-host-setup-{}", std::process::id()));
+    let mut samples = Vec::new();
+    for sample in 0..7 {
+        let sample_root = root.join(sample.to_string());
+        let mut contexts: Vec<_> = (0..1000)
+            .map(|index| {
+                ScriptContext::new_with_storage_scope(
+                    "@test/host-setup",
+                    "child",
+                    format!("{sample}-{index}"),
+                    mesh_core_capability::CapabilitySet::from_ids(["locale.read"]),
+                    &sample_root,
+                )
+                .unwrap()
+            })
+            .collect();
+        let started = std::time::Instant::now();
+        for context in &mut contexts {
+            context.ensure_initialized().unwrap();
+        }
+        samples.push(started.elapsed().as_secs_f64() * 1000.0);
+        std::hint::black_box(&contexts);
+        drop(contexts);
+        crate::pool::thread_vm().gc_collect().unwrap();
+        std::fs::remove_dir_all(sample_root).unwrap();
+    }
+    samples.sort_by(f64::total_cmp);
+    println!(
+        "frontend host setup 1000 contexts: median={:.3}ms range={:.3}–{:.3}ms",
+        samples[3], samples[0], samples[6]
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}

@@ -725,7 +725,7 @@ fn catalog_generation_rebinds_affected_slot_host_and_keeps_root_runtime() {
 }
 
 #[test]
-fn changed_prop_rebuilds_child_but_reuses_unchanged_sibling() {
+fn changed_prop_refreshes_child_without_visiting_unchanged_sibling() {
     let mut component = memo_surface(
         r#"
 <template>
@@ -780,9 +780,8 @@ label = ""
         .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
         .unwrap();
 
-    // The prop-changed child missed the memo and rebuilt with the new label;
-    // the untouched sibling was served from the memo.
-    assert_eq!(component.component_memo_hit_count(), hits_before + 1);
+    assert_eq!(component.component_memo_hit_count(), hits_before);
+    assert!(!component.take_invalidation_snapshot().unwrap().full_rebuild);
     assert_eq!(
         runtime_value(&component, &format!("{PARENT_ID}/local:Child"), "label"),
         Some(serde_json::json!("two"))
@@ -1312,5 +1311,373 @@ fn missing_instance_storage_dense_directory_allocation_gate() {
     assert!(
         allocations.allocation_count < 2_500_000,
         "missing_instance_storage_dense_directory_allocation_gate"
+    );
+}
+
+#[test]
+fn computed_component_props_refresh_child_without_rebuilding_parent() {
+    let mut component = memo_surface(
+        r#"<template><box><Child label={label(value)} count={value} /><text>{value}</text></box></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+value = 1
+function label(value) return "value:" .. tostring(value) end
+function change() value += 1 end
+</script>"#,
+        &[(
+            "Child",
+            r#"<props>{ label = { type = "string", default = "" }, count = { type = "number", default = 0 } }</props>
+<template><column><text>{props.label}</text><text>{props.count}</text><text>{privateValue}</text></column></template>
+<script lang="luau">privateValue = "retained"</script>"#,
+        )],
+    );
+    rebuild(&mut component, 160, 80);
+    let _ = component.take_invalidation_snapshot();
+    component
+        .call_namespaced_handler(&format!("__mesh_embed__::{PARENT_ID}::change"), &[])
+        .unwrap();
+    assert!(
+        !component.dirty_types.intersects(
+            ComponentDirtyFlags::SCRIPT
+                | ComponentDirtyFlags::TEXT
+                | ComponentDirtyFlags::SCRIPT_NARROW
+        ),
+        "child inputs should use retained parent"
+    );
+    component
+        .call_namespaced_handler(&format!("__mesh_embed__::{PARENT_ID}::change"), &[])
+        .unwrap();
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "value:1").is_some());
+    let mut buffer = PixelBuffer::new(160, 80);
+    component
+        .paint_raster(
+            &default_theme(),
+            SurfaceExtent::unpadded(160, 80),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "value:3").is_some());
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "3").is_some());
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "retained").is_some());
+    let count = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(format!("{PARENT_ID}/local:Child").as_str())
+        .unwrap()
+        .host_props["count"]
+        .as_f64();
+    assert_eq!(count, Some(3.0));
+    let snapshot = component.take_invalidation_snapshot().unwrap();
+    assert!(!snapshot.full_rebuild);
+    let patched = buffer.data().to_vec();
+    let full = rebuild(&mut component, 160, 80);
+    assert_eq!(patched, full.data());
+}
+
+#[test]
+fn component_service_props_refresh_nested_structure_and_preserve_child_state() {
+    let mut component = test_frontend_component_with_local_components(
+        r#"<template><column><Child label={tostring(audio.percent)} visible={audio.muted} /></column></template>
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+local Child = require("./components/child.mesh")
+</script>"#,
+        &[
+            (
+                "Child",
+                r#"<template><column>{#if visible}<GrandChild label={label} />{:else}<text>hidden</text>{/if}<text>{privateValue}</text></column></template>
+<script lang="luau">
+local GrandChild = require("./components/grand.mesh")
+label = ""
+visible = false
+privateValue = "original"
+function retain() privateValue = "preserved" end
+</script>"#,
+            ),
+            (
+                "GrandChild",
+                r#"<template><text>{label}</text></template><script lang="luau">label = ""</script>"#,
+            ),
+        ],
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 80);
+    let update = |component: &mut FrontendSurfaceComponent, percent, muted| {
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.audio".into(),
+                source_module: "@mesh/pipewire-audio".into(),
+                payload: serde_json::json!({"percent":percent,"muted":muted}),
+            })
+            .unwrap();
+    };
+    update(&mut component, 10, false);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    let root = component.root_instance_key().to_owned();
+    component
+        .call_namespaced_handler(&format!("__mesh_embed__::{root}/local:Child::retain"), &[])
+        .unwrap();
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    let _ = component.take_invalidation_snapshot();
+    update(&mut component, 40, true);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    assert!(!component.take_invalidation_snapshot().unwrap().full_rebuild);
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "40").is_some());
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "preserved").is_some());
+    let patched = buffer.data().to_vec();
+    let full = rebuild(&mut component, 160, 80);
+    assert_eq!(patched, full.data());
+}
+
+#[test]
+fn component_prop_expression_failure_keeps_last_good_tree_until_rebuild() {
+    let mut component = memo_surface(
+        r#"<template><column><Child label={label(value)} /><text>{value}</text></column></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+value = 1
+function label(value) if value > 1 then error("invalid label") end return "valid" end
+function change() value = 2 end
+</script>"#,
+        &[(
+            "Child",
+            r#"<template><text>{label}</text></template><script lang="luau">label = ""</script>"#,
+        )],
+    );
+    rebuild(&mut component, 160, 80);
+    component
+        .call_namespaced_handler(&format!("__mesh_embed__::{PARENT_ID}::change"), &[])
+        .unwrap();
+    assert!(
+        component
+            .dirty_types
+            .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+    );
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "valid").is_some());
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "1").is_some());
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "2").is_none());
+}
+
+#[test]
+fn component_prop_refresh_preserves_override_and_validates_host_values() {
+    let mut component = memo_surface(
+        r#"<template><column><Child count={value} /></column></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+value = 1
+function equivalent() value = 1.0 end
+function invalid() value = "invalid" end
+</script>"#,
+        &[(
+            "Child",
+            r#"<props>{ count = { type = "number", default = 0, min = 0, max = 10 } }</props>
+<template><text>{props.count}</text></template>
+<script lang="luau">function override() props.count = 7 end</script>"#,
+        )],
+    );
+    rebuild(&mut component, 160, 80);
+    component
+        .call_namespaced_handler(
+            &format!("__mesh_embed__::{PARENT_ID}/local:Child::override"),
+            &[],
+        )
+        .unwrap();
+    let mut buffer = PixelBuffer::new(160, 80);
+    component
+        .paint_raster(
+            &default_theme(),
+            SurfaceExtent::unpadded(160, 80),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    for handler in ["equivalent", "invalid"] {
+        component
+            .call_namespaced_handler(&format!("__mesh_embed__::{PARENT_ID}::{handler}"), &[])
+            .unwrap();
+        assert!(!component.dirty_types.intersects(
+            ComponentDirtyFlags::SCRIPT
+                | ComponentDirtyFlags::TEXT
+                | ComponentDirtyFlags::SCRIPT_NARROW
+        ));
+        component
+            .paint_raster(
+                &default_theme(),
+                SurfaceExtent::unpadded(160, 80),
+                &mut buffer,
+                1.0,
+            )
+            .unwrap();
+        assert!(node_with_content(component.last_tree.as_ref().unwrap(), "7").is_some());
+    }
+    let count = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(format!("{PARENT_ID}/local:Child").as_str())
+        .unwrap()
+        .host_props["count"]
+        .as_f64();
+    assert_eq!(count, Some(0.0));
+}
+
+#[test]
+fn unrecorded_component_prop_boundary_keeps_conservative_rebuild() {
+    let mut component = memo_surface(
+        r#"<template><Child /></template><script lang="luau">local Child = require("./components/child.mesh")</script>"#,
+        &[
+            (
+                "Child",
+                r#"<template><GrandChild label={value} /></template>
+<script lang="luau">
+local GrandChild = require("./components/grand.mesh")
+value = "before"
+function change() value = "after" end
+</script>"#,
+            ),
+            (
+                "GrandChild",
+                r#"<template><text>{label}</text></template><script lang="luau">label = ""</script>"#,
+            ),
+        ],
+    );
+    rebuild(&mut component, 160, 80);
+    component.template_binding_index =
+        crate::shell::component::template_patch::TemplateBindingIndex::build(
+            component.last_tree.as_ref().unwrap(),
+            &HashMap::new(),
+        );
+    component
+        .call_namespaced_handler(
+            &format!("__mesh_embed__::{PARENT_ID}/local:Child::change"),
+            &[],
+        )
+        .unwrap();
+    assert!(
+        component
+            .dirty_types
+            .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+    );
+    let mut buffer = PixelBuffer::new(160, 80);
+    component
+        .paint_raster(
+            &default_theme(),
+            SurfaceExtent::unpadded(160, 80),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "after").is_some());
+}
+
+#[test]
+fn child_structure_and_sibling_keyed_list_refresh_in_one_batch() {
+    let mut component = memo_surface(
+        r#"<template><column class="parent"><Child label={value} />{#for item in items key=item.id}<text>{item.label}</text>{/for}</column></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+value = ""
+items = {{ id = "parent", label = "before" }}
+function change() value = "after"; items[1].label = "updated" end
+</script><style>.parent { width: 160px; height: 80px; }</style>"#,
+        &[(
+            "Child",
+            r#"<template><column>{#if label == ""}{#for row in rows key=row.id}<text>{row.label}</text>{/for}{:else}<text>{label}</text>{/if}</column></template>
+<script lang="luau">
+label = ""
+rows = {{ id = "child", label = "child row" }}
+</script>"#,
+        )],
+    );
+    let mut buffer = rebuild(&mut component, 160, 80);
+    component
+        .call_namespaced_handler(&format!("__mesh_embed__::{PARENT_ID}::change"), &[])
+        .unwrap();
+    component
+        .paint_raster(
+            &default_theme(),
+            SurfaceExtent::unpadded(160, 80),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert!(!component.take_invalidation_snapshot().unwrap().full_rebuild);
+    let tree = component.last_tree.as_ref().unwrap();
+    assert!(node_with_content(tree, "after").is_some());
+    assert!(node_with_content(tree, "updated").is_some());
+    assert!(node_with_content(tree, "child row").is_none());
+    for _ in 0..3 {
+        if !component.wants_immediate_rerender() {
+            break;
+        }
+        component
+            .paint_raster(
+                &default_theme(),
+                SurfaceExtent::unpadded(160, 80),
+                &mut buffer,
+                1.0,
+            )
+            .unwrap();
+    }
+    let expected = rebuild(&mut component, 160, 80);
+    assert!(
+        buffer.data() == expected.data(),
+        "retained pixels must match full rebuild"
+    );
+}
+
+#[test]
+fn child_callbacks_batch_parent_prop_writes_without_rebuilding_parent() {
+    let mut component = memo_surface(
+        r#"<template><column class="parent"><Child value={value} onbump={bump} /><text>{value}</text></column></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+value = 1
+function bump() value += 1 end
+</script><style>.parent { width: 160px; height: 80px; }</style>"#,
+        &[(
+            "Child",
+            r#"<template><text>{value}</text></template>
+<script lang="luau">
+value = 0
+onbump = nil
+function click() onbump() end
+</script>"#,
+        )],
+    );
+    let mut buffer = rebuild(&mut component, 160, 80);
+    let handler = format!("__mesh_embed__::{PARENT_ID}/local:Child::click");
+    for _ in 0..2 {
+        component.call_namespaced_handler(&handler, &[]).unwrap();
+        assert!(
+            !component
+                .dirty_types
+                .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+        );
+    }
+    component
+        .paint_raster(
+            &default_theme(),
+            SurfaceExtent::unpadded(160, 80),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert!(!component.take_invalidation_snapshot().unwrap().full_rebuild);
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "3").is_some());
+    let expected = rebuild(&mut component, 160, 80);
+    assert!(
+        buffer.data() == expected.data(),
+        "callback patch must match full rebuild"
     );
 }

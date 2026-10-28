@@ -1217,6 +1217,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // their nodes still need the post-update style diagnostics.
         let patched_node_count = self.patched_binding_nodes.len() as u64;
         let bindings_patched = patched_node_count > 0;
+        let subtrees_replaced = self.component_subtrees_patched;
         let mut tree_was_rebuilt = false;
         let mut tree = if dirty_types.contains(ComponentDirtyFlags::SCRIPT_NARROW)
             && !combined_script_and_interaction_update
@@ -1252,10 +1253,12 @@ impl ShellComponent for FrontendSurfaceComponent {
                 &surface_css_props,
             )
         };
+        self.component_subtrees_patched = false;
+        let structure_rebuilt = tree_was_rebuilt || subtrees_replaced;
         self.effects_changed_templates = false;
         self.apply_pending_auto_focus(&tree);
         self.apply_pending_embedded_popover_focus(&tree);
-        let stable_interaction_inputs = !tree_was_rebuilt
+        let stable_interaction_inputs = !structure_rebuilt
             && bindings_patched
             && self
                 .layout_state
@@ -1263,7 +1266,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 .as_ref()
                 .is_some_and(HashSet::is_empty)
             && self.text_patch_preserves_interaction_targets(&tree);
-        if tree_was_rebuilt
+        if structure_rebuilt
             || (bindings_patched && !stable_interaction_inputs)
             || self.primitives_need_focus_refresh()
         {
@@ -1272,7 +1275,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         if !stable_interaction_inputs {
             self.prune_stale_interaction_targets(&tree);
         }
-        if tree_was_rebuilt || (bindings_patched && !stable_interaction_inputs) {
+        if structure_rebuilt || (bindings_patched && !stable_interaction_inputs) {
             self.refresh_disclosures(&tree);
         }
         #[cfg(test)]
@@ -1353,7 +1356,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             Some("rebuild"),
         );
         self.capture_finalized_frame(&tree);
-        if tree_was_rebuilt || bindings_patched {
+        if structure_rebuilt || bindings_patched {
             self.record_runtime_style_diagnostics_after_retained_update(
                 &mut tree,
                 theme,
@@ -1782,7 +1785,7 @@ impl ShellComponent for FrontendSurfaceComponent {
             &tree,
             self.last_frame_snapshot.as_ref(),
             &child_dirty,
-            tree_was_rebuilt
+            structure_rebuilt
                 || structural.inserted > 0
                 || structural.removed > 0
                 || structural.children > 0,
@@ -1796,8 +1799,24 @@ impl ShellComponent for FrontendSurfaceComponent {
                     pass = pass.as_str(), node_visits = visits, "frame node visits");
             }
         }
-        if tree_was_rebuilt {
-            self.template_binding_index = template_patch::TemplateBindingIndex::build(&tree);
+        if structure_rebuilt {
+            fn live_instances(node: &WidgetNode, ids: &mut HashSet<String>) {
+                if let Some(instance) = node.memo_instance() {
+                    ids.insert(instance.to_owned());
+                }
+                for child in &node.children {
+                    live_instances(child, ids);
+                }
+            }
+            let mut ids = HashSet::new();
+            live_instances(&tree, &mut ids);
+            self.component_prop_recipes
+                .borrow_mut()
+                .retain(|id, _| ids.contains(id.as_ref()));
+            self.template_binding_index = template_patch::TemplateBindingIndex::build(
+                &tree,
+                &self.component_prop_recipes.borrow(),
+            );
         }
         self.last_tree = Some(tree);
         self.frame_dirty.clear();
@@ -1807,7 +1826,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.last_tooltip_damage = current_tooltip_damage;
         self.surface_pixels_invalid = false;
         self.clear_runtime_dirty_states();
-        if paint_ran_effects || tree_was_rebuilt || bindings_patched {
+        if paint_ran_effects || structure_rebuilt || bindings_patched {
             let requests = self.drain_effect_side_channels();
             let requests = self.record_frontend_host_effects(requests);
             self.pending_paint_requests.extend(requests);
@@ -2183,6 +2202,9 @@ impl ShellComponent for FrontendSurfaceComponent {
         self.composition_occurrences.get_mut().clear();
         self.bound_children.get_mut().clear();
         self.component_callbacks.get_mut().clear();
+        self.component_prop_recipes.get_mut().clear();
+        self.pending_component_prop_refreshes.clear();
+        self.component_subtrees_patched = false;
         self.portal_hidden_bindings.get_mut().clear();
         self.pending_surface_states.get_mut().clear();
         self.ref_node_keys.get_mut().clear();

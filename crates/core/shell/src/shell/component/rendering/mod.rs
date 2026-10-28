@@ -461,6 +461,8 @@ impl FrontendSurfaceComponent {
             self.reactive_effects_pending = false;
         }
         self.refresh_active_theme(theme);
+        self.pending_component_prop_refreshes.clear();
+        self.component_subtrees_patched = false;
         let root_state = self
             .runtime_state(self.root_instance_key())
             .unwrap_or_default();
@@ -654,13 +656,51 @@ impl FrontendSurfaceComponent {
         let _span = tracing::debug_span!("restyle", surface = %self.id()).entered();
         let mut tree = self.last_tree.take()?;
         self.refresh_active_theme(theme);
+        let replaced = std::mem::take(&mut self.component_subtrees_patched);
+        // Input keeps the last painted geometry until paint commits the queued
+        // child refreshes; another pointer event may arrive before this frame.
+        let mut pending = std::mem::take(&mut self.pending_component_prop_refreshes);
+        pending.sort_by(|a, b| a.0.cmp(&b.0));
+        for (path, recipe) in pending {
+            let Some(node) = mesh_core_frontend::FrontendCompositionResolver::render_import(
+                self,
+                &recipe.host,
+                &recipe.parent,
+                recipe.owner.as_deref(),
+                &recipe.alias,
+                recipe.ordinal,
+                recipe.duplicate,
+                false,
+                None,
+                &recipe.props,
+                &recipe.handlers,
+                recipe.container.0,
+                recipe.container.1,
+            ) else {
+                self.last_tree = Some(tree);
+                return None;
+            };
+            let paths = [path.as_slice()];
+            let mut replacement = Some(node);
+            mesh_core_elements::for_each_node_at_paths_mut(&mut tree, &paths, |_, target| {
+                *target = replacement.take().expect("one child refresh target");
+            });
+        }
+        if replaced {
+            self.interaction_snapshot_valid = false;
+            self.layout_state.valid = false;
+        }
         self.finalize_tree(
             &mut tree,
             theme,
             width,
             height,
-            "restyle",
-            dirty_types,
+            if replaced { "rebuild" } else { "restyle" },
+            if replaced {
+                dirty_types | ComponentDirtyFlags::SCRIPT
+            } else {
+                dirty_types
+            },
             animation_only_frame,
             surface_css_props,
         );

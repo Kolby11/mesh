@@ -71,7 +71,10 @@ items' captured binding locals and handlers. A list read directly from a script 
 takes its changed items from the state sync, which records which array items differ
 when it stores the member, so only those items are compared and key-checked. Their property writes feed the same frame dirty
 set and restyle targets, including writes made by hover handlers. Inherited-value
-changes alone propagate beyond those targets. Binding writes stage only their target nodes, then commit parents before children
+changes alone propagate beyond those targets. Recorded one-way child prop bindings queue child-subtree refreshes for paint,
+retaining the parent template and child runtime. Callback and live-reference
+writes in neighboring instances join the same patch batch; structural child
+refreshes conservatively rebuild finalized indexes. Binding writes stage only their target nodes, then commit parents before children
 after all expressions succeed; failure leaves the live tree untouched without
 sharing its whole child vectors for rollback. Style diagnostics reuse that exact
 set across intervening animation frames. Structural list changes retain the rebuild

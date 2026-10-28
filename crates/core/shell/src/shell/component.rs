@@ -1104,6 +1104,9 @@ pub(super) struct FrontendSurfaceComponent {
     /// child is re-synced so values its parent mutated through the live proxy
     /// re-render. Refreshed every render by `bind_child_instance`.
     bound_children: RefCell<HashMap<Arc<str>, Vec<(String, Arc<str>)>>>,
+    component_prop_recipes: RefCell<HashMap<Arc<str>, composition::ComponentPropRecipe>>,
+    component_subtrees_patched: bool,
+    pending_component_prop_refreshes: Vec<(Vec<usize>, composition::ComponentPropRecipe)>,
     component_callbacks: RefCell<
         HashMap<Arc<str>, std::collections::BTreeMap<mesh_core_elements::AttrKey, HandlerTarget>>,
     >,
@@ -1310,6 +1313,7 @@ impl ElementMetricUsage {
 struct EmbeddedFrontendRuntime {
     module_id: String,
     unpatchable_template_expressions: HashSet<String>,
+    component_prop_binding_counts: HashMap<String, usize>,
     /// Source ownership for diagnostics emitted after the component has been
     /// compiled. Embedded runtimes may belong to a different file than the
     /// surface's primary module.
@@ -1552,6 +1556,9 @@ impl FrontendSurfaceComponent {
             last_surface_states: HashMap::new(),
             portal_hidden_bindings: RefCell::new(HashMap::new()),
             bound_children: RefCell::new(HashMap::new()),
+            component_prop_recipes: RefCell::new(HashMap::new()),
+            component_subtrees_patched: false,
+            pending_component_prop_refreshes: Vec::new(),
             component_callbacks: RefCell::new(HashMap::new()),
             ref_node_keys: RefCell::new(HashMap::new()),
             transitions: TransitionAnimator::new(),

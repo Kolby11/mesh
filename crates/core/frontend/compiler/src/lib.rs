@@ -234,6 +234,42 @@ fn patchable_keyed_loop(repetition: &mesh_core_component::template::ForNode) -> 
         && native(&repetition.children)
 }
 
+/// Count child-prop source occurrences so an element binding cannot mask an
+/// unsupported or currently absent component boundary reading the same source.
+pub fn collect_component_prop_binding_counts(
+    component: &ComponentFile,
+) -> std::collections::HashMap<String, usize> {
+    use mesh_core_component::template::{AttributeValue, TemplateNode};
+    fn visit(nodes: &[TemplateNode], counts: &mut std::collections::HashMap<String, usize>) {
+        for node in nodes {
+            match node {
+                TemplateNode::Component(component) => {
+                    for attribute in &component.props {
+                        if !attribute.name.starts_with("on")
+                            && let AttributeValue::Binding(source) = &attribute.value
+                        {
+                            *counts.entry(source.trim().to_owned()).or_default() += 1;
+                        }
+                    }
+                    visit(&component.children, counts);
+                }
+                TemplateNode::Element(element) => visit(&element.children, counts),
+                TemplateNode::If(branch) => {
+                    visit(&branch.then_children, counts);
+                    visit(&branch.else_children, counts);
+                }
+                TemplateNode::For(repeat) => visit(&repeat.children, counts),
+                _ => {}
+            }
+        }
+    }
+    let mut counts = std::collections::HashMap::new();
+    if let Some(template) = &component.template {
+        visit(&template.root, &mut counts);
+    }
+    counts
+}
+
 /// Expressions whose consumers require template evaluation rather than a
 /// property patch, even when the same source also occurs in an element binding.
 pub fn collect_unpatchable_template_expressions(component: &ComponentFile) -> HashSet<String> {
@@ -267,7 +303,12 @@ pub fn collect_unpatchable_template_expressions(component: &ComponentFile) -> Ha
                     visit(&element.children, unkeyed, out);
                 }
                 TemplateNode::Component(component) => {
-                    attributes(&component.props, true, out);
+                    attributes(&component.props, unkeyed || component.repeated_by_loop, out);
+                    for attribute in &component.props {
+                        if let AttributeValue::TwoWayBinding(source) = &attribute.value {
+                            out.insert(source.trim().to_owned());
+                        }
+                    }
                     visit(&component.children, unkeyed, out);
                 }
                 TemplateNode::If(condition) => {
@@ -916,6 +957,7 @@ mod tests {
             "AudioPage",
             "BluetoothPage",
             "DeviceInfoPage",
+            "KeyboardPage",
             "WifiPage",
         ] {
             assert!(
@@ -923,7 +965,7 @@ mod tests {
                 "settings should register {page}"
             );
         }
-        assert_eq!(compiled.watched_paths.len(), 7);
+        assert_eq!(compiled.watched_paths.len(), 8);
 
         let tree = compiled.build_preview_tree(&mesh_core_theme::default_theme(), 1280, 900);
         let settings_shell =

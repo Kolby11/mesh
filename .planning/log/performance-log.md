@@ -1487,6 +1487,7 @@ section noted.
 | 2026-10-18 | `Arc<[TransitionStyle]>` with a shared default instead of `Vec` in `ComputedStyle` | style | Appearance service frame restyle 2.673–2.723 ms vs 2.672–2.705 ms without it (three runs each, release): no measurable change. The one-entry default `Vec` clone is not a restyle cost driver. Reverted |
 | 2026-10-18 | Finalized memo styles while retaining compiler preliminary layout | component memo | Release, 550-node Appearance, three interleaved unpinned 60-update samples: 10.665–11.395 ms/frame baseline vs 25.345–26.575 ms/frame prototype; intrinsic shaping/font fallback returned in compiler layout. Final implementation defers that pass |
 | 2026-10-20 | Pin raster replay uploads by retaining `TextureFromImage` aliases | GPU residency | Rejected by backend-texture identity test before timing: the API creates uncached uploads; aliases do not pin the picture playback cache. Use immutable raster/page identities and Ganesh cache headroom |
+| 2026-10-28 | Preallocate Luau host environment/API/self table capacities | frontend setup | Three alternating release pairs, 1,000 context initializations: before median 110.206–116.736 ms vs candidate 113.892–115.791 ms; no repeatable improvement. Reverted; attribution workload retained |
 
 ## 2026-07-30 — element `filter: blur()` subtree layers
 
@@ -9877,3 +9878,110 @@ per case, 1/100/1,000 siblings and 10/100 catalog keys. Shared-resolver 1,000-ch
 the before binary was CPU-only and the after binary GPU-enabled, although this
 workload only builds trees. The overlap and feature difference preclude a
 whole-mount latency improvement claim. All six workload processes passed.
+
+## 2026-10-28 — Frontend host setup attribution and rejected preallocation
+
+Release, thin LTO / one codegen unit, Ryzen 7 7840HS, CPU 2 pinned. New ignored
+`frontend_host_setup_workload` measures seven samples of initializing 1,000
+frontend contexts with `locale.read`; constructors and storage opening are
+excluded. Contexts are destroyed and the shared VM collected between samples.
+Three alternating baseline/candidate process pairs measured per-run medians
+110.206–116.736 ms before versus 113.892–115.791 ms with known-capacity Luau
+host/environment/self tables. Individual samples spanned 99.486–120.467 ms
+versus 104.654–127.165 ms. Desktop and compilation remained active. There is
+no repeatable win; the candidate is reverted and the attribution workload
+retained. An earlier three-run baseline alone was noisier (122.949–130.754 ms
+medians) and is not the paired comparison. Lazy installation of `self.storage`
+was rejected before implementation because it changes `rawget`/`pairs` table
+shape. Neither experiment changes the shipped scripting API.
+
+## 2026-10-28 — Child-prop refresh and callback write batches
+
+Recorded non-loop child prop bindings now reevaluate typed inputs without
+running the parent template. Refresh recipes are indexed by persistent child
+instance identity, not pre-annotation node IDs. Repeated writes queue the latest
+child refresh until paint so intervening input retains painted geometry and
+node identities. Existing runtime prop normalization, precedence and callback
+routing remain authoritative. Child structural changes use conservative style,
+layout, interaction, semantic and retained-index reconciliation; the child
+subtree still rebuilds. Missing coverage, structural parent readers, loop
+component references, two-way props and handler changes retain the rebuild path.
+
+Cross-component callback/live-reference synchronization now returns the dirty
+neighbor instance keys and patches those writes in the same batch. Previously
+any such write forced narrow template evaluation even when its readers were
+covered. This is the callback path used by desktop size controls. Settings
+Audio again binds translated labels directly with `t(...)`, removing its
+identifier workaround. Remaining child-native patching stays in the backlog.
+
+Debug verification: 54 component-related tests pass (three ignored), including
+batched computed props, nested service-driven structure, child state, script
+overrides, invalid host values, expression failure, missing recipe coverage,
+mixed child/list changes, and two callback writes before one paint. Retained
+verification also passes 23 memo tests (two ignored), four live-binding tests,
+19 focus/pseudo-state tests, and the real Settings volume and widget playback/
+resize regressions. The compiler suite passes 94 tests; its Settings fixture
+now includes the already-shipped Keyboard page and eight watched files. Earlier
+failed assertions compared integer and float JSON encodings or expected the
+old sibling-memo visit; the list-pixel fixture now bounds its surface geometry
+instead of conflating a shrink/configure correction with list patching.
+
+An intermediate release candidate refreshed child boundaries but did not batch
+neighbor callback writes. Three alternating native/replay namespace pairs with
+and without the test-only forced-rebuild switch still recorded 61–78 parent
+builds per 100-step resize, so that candidate did not solve live rebuilds.
+Native patched render p90 was 13.882–16.516 ms versus native forced
+14.615–49.241 ms; GPU commit interval p90 48.732–55.361 versus 51.722–139.133 ms.
+These overlapping, contention-affected ranges do not establish an improvement.
+The callback batching fix follows this finding; final measurements follow.
+
+## 2026-10-28 — Live resize after callback write batching
+
+Release, GPU feature, thin LTO / one codegen unit, Ryzen 7 7840HS / Radeon 780M,
+Hyprland 0.56.2-b, hyprglass 7fc3280. Three alternating runs of each of four
+modes (native/replay namespace × patching/forced rebuild) use the same final
+binary, fixed service data and 100 one-pixel diagonal drag steps spaced by at
+least 16 ms. This compares binding patches enabled with the test-only
+`MESH_RESIZE_FORCE_REBUILD=1` reference, not two independently built commits.
+All twelve runs pass actual handle/card geometry and GPU-commit assertions.
+
+| Per-run metric range | Native reference | Native patched | Replay reference | Replay patched |
+| --- | --- | --- | --- | --- |
+| Parent template builds | 79–84 | 0–0 | 79–86 | 0–0 |
+| Widget render p90, ms | 12.072–13.555 | 11.773–16.103 | 12.789–14.713 | 11.125–14.587 |
+| GPU inter-commit p90, ms | 35.562–49.884 | 36.377–55.162 | 38.339–49.379 | 32.422–49.247 |
+| Widget GPU commits | 62–71 | 66–69 | 65–72 | 65–78 |
+| Plugin contour rebuilds in drag window | 119–121 | 104–146 | 0–0 | 0–0 |
+
+Parent `TreeBuild` stage mean was 2.704–3.232 ms native / 2.857–3.485 ms replay
+in the reference and absent with patching; child subtree construction still
+runs. The structural improvement is reproducible, but latency ranges overlap:
+no overall frame-time or physical display-latency improvement is claimed.
+Other builds and desktop activity remained active, and the replay driver is
+not a physical pointer-to-display latency measurement.
+
+In these final captures no other MESH layers were present (the independently
+running shell had stopped). Hyprglass reports active layer support and ready
+shaders. The native namespace records exactly three plugin glass-layer draws
+per compositor frame; replay-suffix runs record zero, confirming that installed
+rules exercise the plugin only in native mode. Earlier exploratory captures
+had another MESH instance and yielded six versus three draws per frame; those
+compositor-wide counters cannot isolate the widget. GPU stage-timer fields
+reported `timersEnabled=false` despite a runtime option request, so their zero
+values are discarded. The option was restored to its original zero value.
+Compositor GPU-stage attribution remains in the backlog.
+
+Final release verification passes 23 component memo tests (two ignored) and
+the real Settings volume regression with retained-tree verification enabled.
+The structural regression gate is
+`child_callbacks_batch_parent_prop_writes_without_rebuilding_parent`.
+
+Full current shared-tree debug shell run (`--test-threads=2`): 1,089 passed,
+two failed, 39 ignored. Navigation popup animation passes its isolated rerun.
+Sparse producer geometry fails again alone in debug on the forced-full reference
+(1,026 expected nodes versus a two-node tree, `grow/1024/1024/0`); the same
+regression passes in the final release GPU binary. The cause of that debug
+failure was not established here, and the full debug matrix is not claimed
+green. Other concurrent workspace edits were present during this validation.
+The final native surface capture was 2880×320 on a 2880×1800, scale-1,
+120.001-Hz eDP-1 output. Physical display latency remains unmeasured.

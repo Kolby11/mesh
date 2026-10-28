@@ -1148,9 +1148,20 @@ fn live_desktop_widget_resize() {
     let _sandbox = Sandbox::new();
     let mut shell = Shell::new();
     assert!(shell.presentation_engine.supports_blocking_dispatch());
-    shell
-        .presentation_engine
-        .set_layer_namespace_suffix(REPLAY_NAMESPACE_SUFFIX);
+    let native_namespace = std::env::var_os("MESH_RESIZE_NATIVE_NAMESPACE").is_some();
+    if !native_namespace {
+        shell
+            .presentation_engine
+            .set_layer_namespace_suffix(REPLAY_NAMESPACE_SUFFIX);
+    }
+    eprintln!(
+        "resize compositor rules: {}",
+        if native_namespace {
+            "native namespaces"
+        } else {
+            "isolated replay namespaces"
+        }
+    );
     let started = Instant::now();
     let result = Rc::new(RefCell::new((None, None, None::<String>)));
     let captured = Rc::clone(&result);
@@ -1247,6 +1258,7 @@ fn live_desktop_widget_resize() {
                                 });
                             shell.profiling.capture = Some(Vec::new());
                             captured.borrow_mut().0 = Some(now);
+                            eprintln!("resize drag window: begin");
                             stage = 3;
                         }
                     }
@@ -1290,6 +1302,7 @@ fn live_desktop_widget_resize() {
                     );
                     assert!(card.layout.width > initial_size.0, "live card must widen");
                     captured.borrow_mut().1 = Some(now);
+                    eprintln!("resize drag window: end");
                     shell.enqueue_effects([CoreRequest::Shutdown]);
                     return ReplayStep { wake_at: None };
                 }

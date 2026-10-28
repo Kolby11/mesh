@@ -82,9 +82,18 @@ references reuse validated keys when their dependencies are unchanged; complex
 keys retain runtime validation. Write-time indexed collection tracking remains
 a target. Template function calls can patch
 element properties, with conservative invalidation for captured public state.
+For recorded, non-loop child component boundaries, changed one-way prop
+bindings (including function calls) reevaluate the child inputs and refresh
+that child subtree at paint without evaluating the parent template. Repeated
+input writes coalesce while references keep the last painted geometry. Callback
+and live-reference writes in neighboring component instances join the same
+patch batch. The child runtime,
+prop validation and script-override precedence are preserved; structural child
+changes refresh layout, interaction and retained indexes conservatively. This
+is a child-subtree refresh, not an element-only patch inside the child.
 Readers in structural conditions, unsupported loop sources or keys, unkeyed loop bodies,
-component props, or handler bindings use template evaluation and
-retained diffing instead. Service updates and reactive-effect writes patch together;
+unrecorded component boundaries, two-way component props or handler bindings
+use template evaluation and retained diffing instead. Service updates and reactive-effect writes patch together;
 failed expressions retain the last good tree and use normal failure reporting.
 A service update whose changed fields no evaluated expression reads settles
 effects at delivery; when they write nothing a template reads, no frame is

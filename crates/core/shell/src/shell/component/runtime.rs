@@ -246,6 +246,9 @@ impl FrontendSurfaceComponent {
         self.failed_runtime_creations.get_mut().clear();
         self.child_settings_cache.get_mut().clear();
         self.component_callbacks.get_mut().clear();
+        self.component_prop_recipes.get_mut().clear();
+        self.pending_component_prop_refreshes.clear();
+        self.component_subtrees_patched = false;
         let runtimes = std::mem::take(&mut *self.runtimes.lock().unwrap());
         let mut runtimes = runtimes.into_iter().collect::<Vec<_>>();
         // Embedded children are torn down before their parents, while the
@@ -928,6 +931,8 @@ impl FrontendSurfaceComponent {
             module_id: component_id,
             unpatchable_template_expressions:
                 mesh_core_frontend::collect_unpatchable_template_expressions(component),
+            component_prop_binding_counts:
+                mesh_core_frontend::collect_component_prop_binding_counts(component),
             source_path: source_path.to_path_buf(),
             script_source_span: component.script.as_ref().map(|script| {
                 mesh_core_diagnostics::DiagnosticSourceSpan::new(script.span.start, script.span.end)
@@ -1471,7 +1476,7 @@ impl FrontendSurfaceComponent {
         drop(runtimes);
         self.sync_runtime_generation(&runtime_key, generation);
 
-        let (mut events, neighbors_dirty) = match explicit_instance {
+        let (mut events, dirty_neighbors) = match explicit_instance {
             Some(instance_key) => {
                 let mut events = self.drain_local_script_events(published);
                 events.extend(self.lower_shell_effects(shell_effects));
@@ -1487,7 +1492,7 @@ impl FrontendSurfaceComponent {
                 // dispatch.
                 let needs_neighbor_sync = self.has_binding_neighbors(self.root_instance_key());
                 if published.is_empty() && shell_effects.is_none() && !needs_neighbor_sync {
-                    (Vec::new(), false)
+                    (Vec::new(), Vec::new())
                 } else {
                     let instance_key = self.root_instance_key().to_string();
                     let mut events = self.drain_local_script_events(published);
@@ -1495,20 +1500,26 @@ impl FrontendSurfaceComponent {
                     let (neighbors_dirty, mut neighbor_events) = if needs_neighbor_sync {
                         self.resync_binding_neighbors(&instance_key)
                     } else {
-                        (false, Vec::new())
+                        (Vec::new(), Vec::new())
                     };
                     events.append(&mut neighbor_events);
                     (events, neighbors_dirty)
                 }
             }
         };
-        let deferred = state_affects_template
-            && !neighbors_dirty
-            && self.defer_template_patch_while_tree_held(&runtime_key);
-        let patched = deferred
-            || (state_affects_template
-                && !neighbors_dirty
-                && self.try_patch_template_writes(std::slice::from_ref(&runtime_key)));
+        let neighbors_dirty = !dirty_neighbors.is_empty();
+        let mut written: Vec<String> = dirty_neighbors
+            .into_iter()
+            .map(|key| key.to_string())
+            .collect();
+        if state_affects_template {
+            written.push(runtime_key);
+        }
+        let deferred = !written.is_empty()
+            && written
+                .iter()
+                .all(|key| self.defer_template_patch_while_tree_held(key));
+        let patched = deferred || (!written.is_empty() && self.try_patch_template_writes(&written));
         if (state_affects_template || neighbors_dirty) && !patched {
             // The retained-tree/display-list diff is authoritative for both
             // structural fallback and pixel damage. Handler writes therefore
@@ -1647,13 +1658,13 @@ impl FrontendSurfaceComponent {
     /// calling a child function through the proxy flags the child, and a child
     /// firing a `self.<Event>` channel into a parent's subscription flags the
     /// parent. Neighbours nothing touched are skipped.
-    fn resync_binding_neighbors(&mut self, instance_key: &str) -> (bool, Vec<CoreRequest>) {
+    fn resync_binding_neighbors(&mut self, instance_key: &str) -> (Vec<Arc<str>>, Vec<CoreRequest>) {
         let neighbor_keys = self.script_binding_neighbors(instance_key);
         if neighbor_keys.is_empty() {
-            return (false, Vec::new());
+            return (Vec::new(), Vec::new());
         }
 
-        let mut state_dirty = false;
+        let mut dirty_neighbors = Vec::new();
         let mut events = Vec::new();
         for neighbor_key in neighbor_keys {
             let mut runtimes = self.runtimes.lock().unwrap();
@@ -1671,7 +1682,7 @@ impl FrontendSurfaceComponent {
             Self::normalize_script_props(&self.diagnostics, neighbor);
             Self::drain_script_diagnostics(&self.diagnostics, neighbor);
             if neighbor.script_ctx.state().is_dirty() {
-                state_dirty = true;
+                dirty_neighbors.push(Arc::clone(&neighbor_key));
             }
             let published = neighbor.script_ctx.drain_published_events();
             let shell_effects = take_shell_effects(neighbor);
@@ -1681,7 +1692,7 @@ impl FrontendSurfaceComponent {
             events.extend(self.drain_local_script_events(published));
             events.extend(self.lower_shell_effects(shell_effects));
         }
-        (state_dirty, events)
+        (dirty_neighbors, events)
     }
 }
 

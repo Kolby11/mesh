@@ -4,8 +4,11 @@
 //! element bindings, the bound properties are re-evaluated and written into
 //! the retained tree in place. The template is not rebuilt and the retained
 //! tree is not diffed; the patched nodes go through the targeted restyle.
+//! Recorded child-prop bindings instead queue a child-subtree refresh at paint,
+//! preserving the parent template and the last painted geometry during input.
+//! Those refreshes use conservative structural reconciliation.
 //! Any member read by something a binding does not cover (a `{#if}`
-//! condition, a structural loop change, component props, or an unkeyed loop
+//! condition, a structural loop change, or an unkeyed loop
 //! body) leaves the frame on the narrow rebuild path.
 
 use super::*;
@@ -19,6 +22,8 @@ pub(super) struct TemplateBindingIndex {
     readers: HashMap<Arc<str>, HashMap<String, Vec<NodePath>>>,
     list_readers: HashMap<Arc<str>, HashMap<String, Vec<usize>>>,
     lists: Vec<IndexedTemplateList>,
+    components: Vec<(NodePath, super::composition::ComponentPropRecipe)>,
+    component_readers: HashMap<String, HashMap<String, Vec<usize>>>,
 }
 
 struct IndexedTemplateList {
@@ -29,16 +34,36 @@ struct IndexedTemplateList {
 }
 
 impl TemplateBindingIndex {
-    pub(super) fn build(tree: &WidgetNode) -> Self {
+    pub(super) fn build(
+        tree: &WidgetNode,
+        recipes: &HashMap<Arc<str>, super::composition::ComponentPropRecipe>,
+    ) -> Self {
         fn collect(
             node: &WidgetNode,
             path: &mut NodePath,
             index: &mut TemplateBindingIndex,
             lists: &mut HashMap<usize, usize>,
+            recipes: &HashMap<Arc<str>, super::composition::ComponentPropRecipe>,
         ) {
             mesh_core_elements::frame_work::visit(
                 mesh_core_elements::frame_work::Pass::BindingTargetDiscovery,
             );
+            if let Some(recipe) = node
+                .memo_instance()
+                .and_then(|instance| recipes.get(instance))
+            {
+                let component_index = index.components.len();
+                for (_, expression) in recipe.props.bindings.iter() {
+                    index
+                        .component_readers
+                        .entry(recipe.parent.clone())
+                        .or_default()
+                        .entry(expression.trim().to_owned())
+                        .or_default()
+                        .push(component_index);
+                }
+                index.components.push((path.clone(), recipe.clone()));
+            }
             if let Some(bindings) = node.template_bindings() {
                 for expression in bindings.expressions() {
                     index
@@ -80,12 +105,18 @@ impl TemplateBindingIndex {
             }
             for (child_index, child) in node.children.iter().enumerate() {
                 path.push(child_index);
-                collect(child, path, index, lists);
+                collect(child, path, index, lists, recipes);
                 path.pop();
             }
         }
         let mut index = Self::default();
-        collect(tree, &mut Vec::new(), &mut index, &mut HashMap::new());
+        collect(
+            tree,
+            &mut Vec::new(),
+            &mut index,
+            &mut HashMap::new(),
+            recipes,
+        );
         index
     }
 }
@@ -150,7 +181,7 @@ impl FrontendSurfaceComponent {
     }
 
     /// Apply pending service fields and public-member writes of `instance_keys` by patching
-    /// the bindings that read them. Returns `false`, changing nothing, when
+    /// the bindings that read them. Returns `false` without publishing a partial tree when
     /// any write needs the template rebuild.
     pub(super) fn try_patch_template_writes(&mut self, instance_keys: &[String]) -> bool {
         if (instance_keys.is_empty()
@@ -163,7 +194,8 @@ impl FrontendSurfaceComponent {
             return false;
         }
         #[cfg(test)]
-        if self.force_full_template_build {
+        if self.force_full_template_build || std::env::var_os("MESH_RESIZE_FORCE_REBUILD").is_some()
+        {
             return false;
         }
         let Some(tree) = self.last_tree.as_ref() else {
@@ -242,6 +274,7 @@ impl FrontendSurfaceComponent {
 
         let mut targets: Vec<NodePath> = Vec::new();
         let mut list_targets = HashSet::new();
+        let mut component_targets = HashSet::new();
         for (instance, expressions) in &readers {
             for expression in expressions {
                 let bindings = self
@@ -254,8 +287,31 @@ impl FrontendSurfaceComponent {
                     .list_readers
                     .get(instance.as_str())
                     .and_then(|readers| readers.get(expression));
-                if bindings.is_none() && lists.is_none() {
+                let components = self
+                    .template_binding_index
+                    .component_readers
+                    .get(instance)
+                    .and_then(|readers| readers.get(expression.trim()));
+                let expected = self
+                    .runtimes
+                    .lock()
+                    .unwrap()
+                    .get(instance.as_str())
+                    .and_then(|runtime| {
+                        runtime
+                            .component_prop_binding_counts
+                            .get(expression.trim())
+                            .copied()
+                    })
+                    .unwrap_or(0);
+                if expected != components.map_or(0, Vec::len) {
                     return false;
+                }
+                if bindings.is_none() && lists.is_none() && components.is_none() {
+                    return false;
+                }
+                if let Some(components) = components {
+                    component_targets.extend(components.iter().copied());
                 }
                 if let Some(bindings) = bindings {
                     targets.extend(bindings.iter().cloned());
@@ -345,6 +401,17 @@ impl FrontendSurfaceComponent {
         }
         targets.sort_unstable();
         targets.dedup();
+        let mut component_targets: Vec<_> = component_targets.into_iter().collect();
+        component_targets.sort_by(|a, b| {
+            self.template_binding_index.components[*a]
+                .0
+                .cmp(&self.template_binding_index.components[*b].0)
+        });
+        targets.retain(|path| {
+            !component_targets
+                .iter()
+                .any(|index| path.starts_with(&self.template_binding_index.components[*index].0))
+        });
 
         let mut tree = self.last_tree.take().expect("checked above");
         let mut staged = Vec::with_capacity(targets.len());
@@ -399,7 +466,7 @@ impl FrontendSurfaceComponent {
                 patched.insert(node.id);
                 changes.mark(node.id, patch.change);
             }
-            staged.push((path, node));
+            staged.push((path.clone(), node));
         }
         // A failing expression must not publish a partially evaluated tree;
         // the narrow rebuild owns failure handling and its diagnostics.
@@ -410,24 +477,108 @@ impl FrontendSurfaceComponent {
             self.last_tree = Some(tree);
             return false;
         }
+        let mut component_stages = Vec::new();
+        let mut component_targets: Vec<_> = component_targets.into_iter().collect();
+        component_targets.sort_by(|a, b| {
+            self.template_binding_index.components[*a]
+                .0
+                .cmp(&self.template_binding_index.components[*b].0)
+        });
+        for target in component_targets {
+            let (path, mut recipe) = self.template_binding_index.components[target].clone();
+            // An affected ancestor rebuilds all nested references using the
+            // refreshed runtime state. Do not publish an old descendant over it.
+            if component_stages.iter().any(
+                |(ancestor, _): &(NodePath, super::composition::ComponentPropRecipe)| {
+                    path.starts_with(ancestor)
+                },
+            ) {
+                continue;
+            }
+            let Some(state) = self.runtime_state(&recipe.parent) else {
+                self.last_tree = Some(tree);
+                return false;
+            };
+            for (name, source) in recipe.props.bindings.clone().iter() {
+                let Ok(expression) = mesh_core_expression::compile_expression(source) else {
+                    self.last_tree = Some(tree);
+                    return false;
+                };
+                let result =
+                    mesh_core_frontend::FrontendCompositionResolver::evaluate_template_expression(
+                        self,
+                        &recipe.parent,
+                        &expression,
+                        &serde_json::Map::new(),
+                    );
+                let Some(result) = result else {
+                    self.last_tree = Some(tree);
+                    return false;
+                };
+                mesh_core_elements::VariableStore::record_template_service_reads(
+                    &*state,
+                    &result.service_reads,
+                );
+                recipe.props.values.insert_value(name.clone(), result.value);
+            }
+            if self.has_template_expression_failure_for(&recipe.parent) {
+                self.last_tree = Some(tree);
+                return false;
+            }
+            component_stages.push((path, recipe));
+        }
+        component_stages.sort_by(|a, b| a.0.cmp(&b.0));
+        let mut replaced_paths: Vec<NodePath> = Vec::new();
+        for (path, recipe) in component_stages {
+            if replaced_paths
+                .iter()
+                .any(|ancestor| path.starts_with(ancestor))
+            {
+                continue;
+            }
+            let Some(node) = node_at_path(&tree, &path) else {
+                continue;
+            };
+            patched.insert(node.id);
+            changes.mark(
+                node.id,
+                mesh_core_elements::ChangeClass::LAYOUT
+                    | mesh_core_elements::ChangeClass::PAINT
+                    | mesh_core_elements::ChangeClass::HIT
+                    | mesh_core_elements::ChangeClass::A11Y,
+            );
+            self.pending_component_prop_refreshes
+                .retain(|(target, _)| !target.starts_with(&path));
+            if !self
+                .pending_component_prop_refreshes
+                .iter()
+                .any(|(ancestor, _)| path.starts_with(ancestor))
+            {
+                self.pending_component_prop_refreshes
+                    .push((path.clone(), recipe));
+            }
+            replaced_paths.push(path);
+        }
+        staged.sort_by(|a, b| a.0.cmp(&b.0));
         // Sorted paths put parents before descendants, so a staged parent
         // cannot overwrite a child that was committed earlier in this batch.
-        let (paths, nodes): (Vec<&[usize]>, Vec<WidgetNode>) = staged
-            .into_iter()
-            .map(|(path, node)| (path.as_slice(), node))
-            .unzip();
+        let (owned_paths, nodes): (Vec<NodePath>, Vec<WidgetNode>) = staged.into_iter().unzip();
+        let paths: Vec<&[usize]> = owned_paths.iter().map(Vec::as_slice).collect();
         let mut nodes = nodes.into_iter();
         mesh_core_elements::for_each_node_at_paths_mut(&mut tree, &paths, |_, node| {
             *node = nodes.next().expect("one staged node per path");
         });
-        if dependencies_changed {
-            self.node_service_field_deps = NodeServiceFieldDependencies::build(&tree);
-        }
         for (list_index, changes) in refreshed_lists {
             let values = &mut self.template_binding_index.lists[list_index].values;
             for (index, value) in changes {
                 values[index] = value;
             }
+        }
+        if !replaced_paths.is_empty() {
+            self.component_subtrees_patched = true;
+        }
+        if dependencies_changed {
+            self.node_service_field_deps = NodeServiceFieldDependencies::build(&tree);
         }
         self.last_tree = Some(tree);
         self.pending_service_template_nodes = None;
@@ -441,7 +592,7 @@ impl FrontendSurfaceComponent {
         }
         drop(runtimes);
 
-        if !patched.is_empty() {
+        if !patched.is_empty() || !replaced_paths.is_empty() {
             for (id, change) in changes.iter() {
                 self.frame_dirty.mark(id, change);
                 self.patched_binding_layout |=

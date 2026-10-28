@@ -9,6 +9,19 @@ use mesh_core_module::ModuleType;
 
 use super::{FrontendSurfaceComponent, memo};
 
+#[derive(Clone)]
+pub(super) struct ComponentPropRecipe {
+    pub host: mesh_core_module::Manifest,
+    pub parent: String,
+    pub owner: Option<std::path::PathBuf>,
+    pub alias: String,
+    pub ordinal: usize,
+    pub duplicate: Option<usize>,
+    pub props: ComponentCompositionProps,
+    pub handlers: BTreeMap<String, EventHandlerCall>,
+    pub container: (f32, f32),
+}
+
 impl FrontendSurfaceComponent {
     fn record_component_instance_build(
         &self,
@@ -137,6 +150,28 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
         container_width: f32,
         container_height: f32,
     ) -> Option<WidgetNode> {
+        let recipe =
+            (!repeated_by_loop && !props.bindings.is_empty()).then(|| ComponentPropRecipe {
+                host: host.clone(),
+                parent: host_instance_key.to_owned(),
+                owner: owner_source_path.map(std::path::Path::to_path_buf),
+                alias: alias.to_owned(),
+                ordinal: source_ordinal,
+                duplicate: duplicate_ordinal,
+                props: props.clone(),
+                handlers: prop_handler_calls.clone(),
+                container: (container_width, container_height),
+            });
+        let record_recipe = |node: &mut WidgetNode, instance: &std::sync::Arc<str>| {
+            if let Some(recipe) = &recipe {
+                self.component_prop_recipes
+                    .borrow_mut()
+                    .insert(std::sync::Arc::clone(instance), recipe.clone());
+                node.set_memo_instance(std::sync::Arc::clone(instance));
+            } else {
+                self.component_prop_recipes.borrow_mut().remove(instance);
+            }
+        };
         let loop_ordinal = self.next_loop_occurrence(
             host_instance_key,
             source_ordinal,
@@ -184,13 +219,14 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 .borrow_mut()
                 .insert(instance_key.clone(), props.callbacks.clone());
             let props_fingerprint = memo::component_props_fingerprint(props, prop_handler_calls);
-            if let Some(node) = self.lookup_component_memo(
+            if let Some(mut node) = self.lookup_component_memo(
                 &instance_key,
                 props_fingerprint,
                 container_width,
                 container_height,
             ) {
                 self.record_avoided_component_build();
+                record_recipe(&mut node, &instance_key);
                 return Some(node);
             }
             let marks_before = self.memo_effect_marks();
@@ -238,6 +274,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 &compiled.manifest.package.id,
                 build_started,
             );
+            record_recipe(&mut node, &instance_key);
             return Some(node);
         }
 
@@ -307,13 +344,14 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             .borrow_mut()
             .insert(instance_key.clone(), props.callbacks.clone());
         let props_fingerprint = memo::component_props_fingerprint(props, prop_handler_calls);
-        if let Some(node) = self.lookup_component_memo(
+        if let Some(mut node) = self.lookup_component_memo(
             &instance_key,
             props_fingerprint,
             container_width,
             container_height,
         ) {
             self.record_avoided_component_build();
+            record_recipe(&mut node, &instance_key);
             return Some(node);
         }
         let marks_before = self.memo_effect_marks();
@@ -361,6 +399,7 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             &mut node,
         );
         self.record_component_instance_build(&instance_key, &module_id, build_started);
+        record_recipe(&mut node, &instance_key);
         Some(node)
     }
 

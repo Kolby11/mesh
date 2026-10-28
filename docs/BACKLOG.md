@@ -19,7 +19,7 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 ---
 
 - [ ] Make liquid-glass Settings readable over applications with a light, translucent outer panel and calmer inner controls; the shared glass palette is too transparent.
-- [ ] Profile live desktop widget resizing through GPU presentation and hyprglass; offline CPU drag measurements show expensive repaint and repeated tree builds, but do not establish the live bottleneck.
+- [ ] Isolate hyprglass/compositor GPU cost during widget resize; native-namespace replay confirms plugin draws and removes parent rebuilds, but plugin stage timers remain disabled and display latency is unmeasured.
 - [ ] Investigate the desktop media seek slider remaining at its old position after a track change; the existing simulated track-switch regression passes, so the live trigger is not yet reproduced.
 - [ ] Continue the whole-codebase audit: sections 01–07 and 09 are reviewed; section 08 needs deeper logic/test coverage, and sections 10–16 plus cross-section review remain.
       Resume the three review layers and file coverage in [the audit inventory](../.planning/codebase/audits/2026-10-27-whole-codebase/00-coverage.md); [interim findings](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md) include component testing and profiling opportunities.
@@ -103,8 +103,7 @@ are from the retired milestone scheme and are kept only as rough sequencing.
       Plan, shell list and order: [reference shells](../.planning/todos/pending/2026-10-27-reference-shells.md).
 - [ ] Animate appearance switches: crossfade theme/mode changes, icon-theme changes and font-family changes instead of snapping, honouring reduced motion.
       Today each switch swaps tokens, icon resolutions or glyph metrics in one frame. Design: [appearance transitions](../.planning/todos/pending/2026-10-28-appearance-transitions.md).
-- [ ] Patch component prop bindings in place: a call expression such as `t(...)` bound to a child component's prop makes the parent rebuild instead of patching, so shared controls (`@mesh/glass-controls`) force workarounds on hot pages.
-      Found by `hidden_audio_page_volume_patches_without_rebuild`; the Audio page binds identifier props to avoid it.
+- [ ] Patch changed props through retained child bindings; parent-preserving child-subtree refresh is shipped, but the child template and conservative surface finalization still run.
 - [ ] Extend `<shape>` beyond sectors, arcs and polylines (curves, gradient or image fill, focus outline along the shape) for the ring gauges, graphs and sky arc in the reference shells.
 - [ ] Extend `mesh.weather` (sun times, high/low, humidity, wind, UV) and `mesh.system` (GPU, battery, CPU frequency, swap, network history) and their providers; reference-shell widgets need these fields.
 - [ ] Finish the keybind system: a settings page for `key_priority`, hint mode and corner; inline remap and "reassign all" in the help window; `mesh-shell keys help|hints` for compositor binds; ordinal keys for repeated items; verify key hints on a live GPU surface and in promoted popups. Design and status: [keybind system](../.planning/todos/pending/2026-10-28-keybind-system.md).
@@ -117,6 +116,7 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 - [ ] Investigate intermittent fractional retained-layout parity: the full shell matrix can disagree
       with full layout at `fractional/1024/1024/0`, while an isolated rerun passes.
+      Also diagnose forced-reference collapse at `grow/1024/1024/0` in debug; release passes.
 
 - [ ] Prevent scheduler contention from exhausting the frontend callback wall-clock budget before
       a component initializes; the inspector can render an error placeholder under CPU contention.

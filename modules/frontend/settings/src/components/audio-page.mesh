@@ -15,10 +15,10 @@
                     <text class="settings-section-copy">{t('audio.volume.copy')}</text>
                 </column>
                 <box hidden={muted_state}>
-                    <GlassButton label={mute_label} onclick={onToggleMute} />
+                    <GlassButton label={t('audio.mute')} onclick={onToggleMute} />
                 </box>
                 <box hidden={not muted_state}>
-                    <GlassButton label={unmute_label} variant="primary" onclick={onToggleMute} />
+                    <GlassButton label={t('audio.unmute')} variant="primary" onclick={onToggleMute} />
                 </box>
             </row>
             <row class="settings-card">
@@ -76,10 +76,6 @@ if not audio_ok then audio = nil end
 local t = import("mesh.i18n", "t")
 local volume_presentation = require("@mesh/volume-presentation/volume")
 
--- Component props are bound as plain identifiers: a call expression such as
--- `t(...)` in a prop stops the page from patching volume ticks in place.
-mute_label = t("audio.mute")
-unmute_label = t("audio.unmute")
 audio_status = "audio.waiting"
 service_pill = "common.unavailable"
 service_active = false
