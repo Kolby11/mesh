@@ -77,6 +77,12 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
         backend_only: true,
     },
     MeshApiEntry {
+        path: "blob.put",
+        signature: "mesh.blob.put(bytes: string | buffer | { number }, mime: string, meta: { width: number?, height: number?, stride: number? }?) -> string",
+        description: "Register image bytes and return the `mesh-blob:sha256-…` handle to put in state instead of the bytes. `mime` is image/png, image/jpeg, image/bmp, or a raw layout (image/x-mesh-argb32, image/x-mesh-rgba8, image/x-mesh-rgb8) that needs width and height. A blob unreferenced by state is released at the second state publication after it was put; state may only reference blobs this provider registered.",
+        backend_only: true,
+    },
+    MeshApiEntry {
         path: "service.set_poll_interval",
         signature: "mesh.service.set_poll_interval(ms: number)",
         description: "Set how often the backend module's poll cycle runs (in milliseconds).",

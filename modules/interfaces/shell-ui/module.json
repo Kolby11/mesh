@@ -10,29 +10,23 @@
         "version": "1.0",
         "description": "A public component that may be placed in an author-declared navigation region.",
         "multiple": true,
-        "props": []
+        "props": {}
       },
       "mesh.settings.page": {
         "version": "1.0",
         "description": "A settings page mounted into a settings frontend. Any module may contribute one; any settings frontend may host the point.",
         "multiple": true,
-        "props": [
-          {
-            "name": "namespace",
+        "props": {
+          "namespace": {
             "type": "string",
             "description": "Settings namespace the page reads and writes; defaults to the contributing module id"
           },
-          {
-            "name": "title",
-            "type": "string",
-            "description": "Page title shown by the host"
-          },
-          {
-            "name": "icon",
+          "title": { "type": "string", "description": "Page title shown by the host" },
+          "icon": {
             "type": "string?",
             "description": "Semantic icon name for the host's navigation"
           }
-        ]
+        }
       }
     }
   }

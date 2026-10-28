@@ -11,117 +11,49 @@
       "domain": "wm",
       "relationship": "base",
       "contract": {
-        "state": [
-          {
-            "name": "available",
+        "state": {
+          "available": {
             "type": "boolean",
             "description": "Whether the compositor is running and reachable"
           },
-          {
-            "name": "active_workspace",
+          "active_workspace": {
             "type": "int",
             "description": "Provider-local ID of the globally focused workspace, not its display index; meaningful when available."
           },
-          {
-            "name": "active_window",
+          "active_window": {
             "type": "object?",
             "description": "Focused window summary: title, app_id and/or class when supplied; nil when no window has focus."
           },
-          {
-            "name": "workspaces",
+          "workspaces": {
             "type": "Workspace[]",
             "description": "List of known workspaces"
           }
-        ],
-        "methods": [
-          {
-            "name": "focus_workspace",
-            "args": [
-              {
-                "name": "id",
-                "type": "int"
-              }
-            ],
-            "returns": "Result",
-            "stateBinding": {
-              "field": "active_workspace",
-              "fromArg": "id"
-            }
+        },
+        "methods": {
+          "focus_workspace": {
+            "signature": "(id: int) -> Result",
+            "stateBinding": { "field": "active_workspace", "fromArg": "id" }
           }
-        ],
-        "events": [
-          {
-            "name": "WorkspaceChanged",
-            "payload": [
-              {
-                "name": "id",
-                "type": "int"
-              },
-              {
-                "name": "name",
-                "type": "string"
-              }
-            ]
-          },
-          {
-            "name": "WindowChanged",
-            "payload": [
-              {
-                "name": "title",
-                "type": "string"
-              },
-              {
-                "name": "class",
-                "type": "string"
-              }
-            ]
-          }
-        ],
+        },
+        "events": {
+          "WorkspaceChanged": { "id": "int", "name": "string" },
+          "WindowChanged": { "title": "string", "class": "string" }
+        },
         "types": {
           "Workspace": {
-            "fields": [
-              {
-                "name": "id",
-                "type": "int"
-              },
-              {
-                "name": "name",
-                "type": "string"
-              },
-              {
-                "name": "windows",
-                "type": "int"
-              },
-              {
-                "name": "index",
-                "type": "int?"
-              },
-              {
-                "name": "output",
-                "type": "string?"
-              },
-              {
-                "name": "visible",
-                "type": "boolean?"
-              },
-              {
-                "name": "focused",
-                "type": "boolean?"
-              },
-              {
-                "name": "urgent",
-                "type": "boolean?"
-              }
-            ]
+            "id": "int",
+            "name": "string",
+            "windows": "int",
+            "index": "int?",
+            "output": "string?",
+            "visible": "boolean?",
+            "focused": "boolean?",
+            "urgent": "boolean?"
           }
         },
         "capabilities": {
-          "required": [
-            "service.wm.read"
-          ],
-          "optional": [
-            "service.wm.control"
-          ]
+          "required": ["service.wm.read"],
+          "optional": ["service.wm.control"]
         }
       }
     }

@@ -2442,6 +2442,7 @@ dependencies = [
  "libc",
  "mesh-core-files",
  "serde",
+ "sha2",
  "tempfile",
  "thiserror 2.0.18",
 ]
@@ -2467,6 +2468,7 @@ dependencies = [
  "mesh-core-expression",
  "mesh-core-frontend-abi",
  "mesh-core-locale",
+ "mesh-core-resources",
  "mesh-core-runtime",
  "mesh-core-service",
  "mesh-core-theme",
@@ -2489,6 +2491,7 @@ dependencies = [
 name = "mesh-core-service"
 version = "0.1.0"
 dependencies = [
+ "mesh-core-resources",
  "semver",
  "serde",
  "serde_json",

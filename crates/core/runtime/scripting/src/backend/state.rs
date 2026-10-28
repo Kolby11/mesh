@@ -1,9 +1,26 @@
 use crate::policy::{ResourceBudget, ResourceKind, ResourceLimit};
+use mesh_core_resources::blob::{BLOB_SCHEME, BlobError, BlobOwner};
 use serde_json::Value;
 use std::sync::LazyLock;
 
+#[derive(Debug, thiserror::Error)]
+pub enum BackendStateError {
+    #[error("{0}")]
+    Limit(ResourceLimit),
+    #[error(transparent)]
+    Blob(#[from] BlobError),
+}
+
+impl From<ResourceLimit> for BackendStateError {
+    fn from(limit: ResourceLimit) -> Self {
+        Self::Limit(limit)
+    }
+}
+
 /// An immutable service snapshot checked against the session and transport
-/// JSON limits. Construction also reserves the callback's output budget.
+/// JSON limits. Construction also reserves the callback's output budget and
+/// makes the snapshot's blob references the provider's pinned blobs; a
+/// reference the provider did not register rejects the snapshot.
 #[derive(Debug, Clone, PartialEq)]
 pub struct BackendState {
     payload: Value,
@@ -11,7 +28,11 @@ pub struct BackendState {
 }
 
 impl BackendState {
-    pub(super) fn new(payload: Value, budget: &ResourceBudget) -> Result<Self, ResourceLimit> {
+    pub(super) fn new(
+        payload: Value,
+        budget: &ResourceBudget,
+        blobs: &BlobOwner,
+    ) -> Result<Self, BackendStateError> {
         let config = budget.config();
         let max_bytes =
             (config.json_max_bytes as usize).min(mesh_core_runtime::DEFAULT_JSON_MAX_BYTES);
@@ -24,6 +45,9 @@ impl BackendState {
                     limit: max_bytes as u64,
                 })?;
         budget.reserve_output(bytes)?;
+        let mut references = Vec::new();
+        collect_blob_references(&payload, &mut references);
+        blobs.publish(references)?;
         static HASHER: LazyLock<ahash::RandomState> = LazyLock::new(ahash::RandomState::new);
         let fingerprint = HASHER.hash_one(&payload);
         Ok(Self {
@@ -39,6 +63,23 @@ impl BackendState {
 
     pub fn into_payload(self) -> Value {
         self.payload
+    }
+}
+
+fn collect_blob_references<'a>(value: &'a Value, references: &mut Vec<&'a str>) {
+    match value {
+        Value::String(text) if text.starts_with(BLOB_SCHEME) => references.push(text),
+        Value::Array(items) => {
+            for item in items {
+                collect_blob_references(item, references);
+            }
+        }
+        Value::Object(fields) => {
+            for field in fields.values() {
+                collect_blob_references(field, references);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -68,7 +109,7 @@ mod tests {
         config.json_max_bytes = 16;
         let budget = ResourceBudget::new(config);
         assert!(
-            BackendState::new(serde_json::json!({ "value": "x".repeat(20) }), &budget).is_err()
+            BackendState::new(serde_json::json!({ "value": "x".repeat(20) }), &budget, &BlobOwner::new()).is_err()
         );
 
         let mut config = SandboxConfig::default();
@@ -78,7 +119,8 @@ mod tests {
         assert!(
             BackendState::new(
                 Value::String("x".repeat(mesh_core_runtime::DEFAULT_JSON_MAX_BYTES)),
-                &budget
+                &budget,
+                &BlobOwner::new(),
             )
             .is_err()
         );
@@ -86,14 +128,14 @@ mod tests {
         for _ in 0..=mesh_core_runtime::DEFAULT_JSON_MAX_DEPTH {
             nested = serde_json::json!([nested]);
         }
-        assert!(BackendState::new(nested, &budget).is_err());
+        assert!(BackendState::new(nested, &budget, &BlobOwner::new()).is_err());
 
         let mut config = SandboxConfig::default();
         config.output_budget = 12;
         let budget = ResourceBudget::new(config);
         let _guard = budget.begin_callback();
-        BackendState::new(serde_json::json!({ "a": 1 }), &budget).unwrap();
-        assert!(BackendState::new(serde_json::json!({ "b": 2 }), &budget).is_err());
+        BackendState::new(serde_json::json!({ "a": 1 }), &budget, &BlobOwner::new()).unwrap();
+        assert!(BackendState::new(serde_json::json!({ "b": 2 }), &budget, &BlobOwner::new()).is_err());
     }
 
     #[test]
@@ -102,16 +144,19 @@ mod tests {
         let a = BackendState::new(
             serde_json::json!({ "a": [1, { "x": true }], "b": "c" }),
             &budget,
+            &BlobOwner::new(),
         )
         .unwrap();
         let b = BackendState::new(
             serde_json::json!({ "b": "c", "a": [1, { "x": true }] }),
             &budget,
+            &BlobOwner::new(),
         )
         .unwrap();
         let c = BackendState::new(
             serde_json::json!({ "a": [1, { "x": false }], "b": "c" }),
             &budget,
+            &BlobOwner::new(),
         )
         .unwrap();
         assert_eq!(a.fingerprint(), b.fingerprint());
@@ -158,6 +203,7 @@ mod tests {
             let payload = BackendState::new(
                 std::hint::black_box(&payloads[index % payloads.len()]).clone(),
                 &budget,
+                &BlobOwner::new(),
             )
             .unwrap();
             if last_fingerprint != Some(payload.fingerprint()) {

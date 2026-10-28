@@ -48,13 +48,9 @@ local function publish()
     for _, id in registered() do
         local entry = entries[id]
         if entry.item then
-            local item = table.clone(entry.item)
+            local item = entry.item
             local weight = 512
             for _, value in pairs(item) do if type(value) == "string" then weight += #value * 2 end end
-            if weight > remaining then
-                weight -= #item.icon_argb * 2
-                item.icon_argb, item.icon_width, item.icon_height = "", 0, 0
-            end
             if weight <= remaining then list[#list + 1] = item; remaining -= weight end
         end
     end
@@ -88,10 +84,11 @@ local function text(value, limit)
     return type(value) == "string" and value:sub(1, limit or 128):gsub("[%c]", " ") or ""
 end
 
+-- The pixmap closest to 32px becomes a blob; the shell scales it.
 local function pixmap(value)
-    if type(value) ~= "table" then return 0, 0, "" end
+    if type(value) ~= "table" then return nil end
     local best, best_size
-    for _, candidate in value or {} do
+    for _, candidate in value do
         local fields = plain(candidate)
         if type(fields) ~= "table" then continue end
         local width, height, bytes = plain(fields[1]), plain(fields[2]), plain(fields[3])
@@ -101,20 +98,9 @@ local function pixmap(value)
             if not best_size or distance < best_size then best, best_size = { width, height, bytes }, distance end
         end
     end
-    if not best then return 0, 0, "" end
-    local width, height = math.min(32, best[1]), math.min(32, best[2])
-    local chunks = {}
-    for y = 0, height - 1 do
-        for x = 0, width - 1 do
-            local index = (math.floor(y * best[2] / height) * best[1] + math.floor(x * best[1] / width)) * 4
-            for channel = 1, 4 do
-                local byte = plain(best[3][index + channel])
-                if type(byte) ~= "number" or byte < 0 or byte > 255 or byte % 1 ~= 0 then return 0, 0, "" end
-                chunks[#chunks + 1] = string.format("%02x", byte)
-            end
-        end
-    end
-    return width, height, table.concat(chunks)
+    if not best then return nil end
+    local ok, handle = pcall(mesh.blob.put, best[3], "image/x-mesh-argb32", { width = best[1], height = best[2] })
+    return ok and handle or nil
 end
 
 local PROPERTY_NAMES = { "Title", "Id", "Category", "Status", "IconName", "AttentionIconName", "OverlayIconName", "IconThemePath", "ToolTip", "ItemIsMenu", "Menu", "IconPixmap", "AttentionIconPixmap" }
@@ -151,8 +137,7 @@ local function refresh(entry)
         entry.item.icon_name = entry.item.attention_icon_name
     end
     local pixels = entry.item.status == "NeedsAttention" and props.AttentionIconPixmap or props.IconPixmap
-    entry.item.icon_width, entry.item.icon_height, entry.item.icon_argb = 0, 0, ""
-    if entry.item.icon_name == "" then entry.item.icon_width, entry.item.icon_height, entry.item.icon_argb = pixmap(pixels) end
+    if entry.item.icon_name == "" then entry.item.icon_pixmap = pixmap(pixels) end
     if not entry.subscription then
         entry.subscription = mesh.dbus_subscribe("session", {
             sender = entry.owner, path_namespace = entry.path, interface = entry.interface,

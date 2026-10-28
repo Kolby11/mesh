@@ -11,79 +11,52 @@
       "domain": "power",
       "relationship": "base",
       "contract": {
-        "state": [
-          {
-            "name": "available",
+        "state": {
+          "available": {
             "type": "boolean",
             "description": "Whether the power service is reachable and a battery is present"
           },
-          {
-            "name": "level",
+          "level": {
             "type": "float",
             "minimum": 0,
             "maximum": 100,
             "description": "Battery charge as a percentage (0.0-100.0)"
           },
-          {
-            "name": "charging",
+          "charging": {
             "type": "boolean",
             "description": "Whether the battery is currently charging"
           },
-          {
-            "name": "time_remaining_minutes",
+          "time_remaining_minutes": {
             "type": "float",
             "minimum": 0,
             "description": "Estimated minutes of remaining runtime on battery (0 if unknown/charging)"
           },
-          {
-            "name": "time_to_full_minutes",
+          "time_to_full_minutes": {
             "type": "float",
             "minimum": 0,
             "description": "Estimated minutes until full charge while charging (0 if unknown/discharging)"
           },
-          {
-            "name": "power_draw_watts",
+          "power_draw_watts": {
             "type": "float",
             "description": "Instantaneous power draw or charge rate in watts"
           },
-          {
-            "name": "energy_now_watt_hours",
+          "energy_now_watt_hours": {
             "type": "float",
             "description": "Current stored energy in watt-hours"
           },
-          {
-            "name": "energy_full_watt_hours",
+          "energy_full_watt_hours": {
             "type": "float",
             "description": "Full-charge energy capacity in watt-hours"
           },
-          {
-            "name": "health_percent",
+          "health_percent": {
             "type": "float",
             "minimum": 0,
             "maximum": 100,
             "description": "Battery health as a percentage of design capacity (0.0-100.0, 0 if unknown)"
           }
-        ],
-        "events": [
-          {
-            "name": "BatteryChanged",
-            "payload": [
-              {
-                "name": "level",
-                "type": "float"
-              },
-              {
-                "name": "charging",
-                "type": "boolean"
-              }
-            ]
-          }
-        ],
-        "capabilities": {
-          "required": [
-            "service.power.read"
-          ]
-        }
+        },
+        "events": { "BatteryChanged": { "level": "float", "charging": "boolean" } },
+        "capabilities": { "required": ["service.power.read"] }
       }
     }
   }

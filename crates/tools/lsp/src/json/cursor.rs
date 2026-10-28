@@ -174,6 +174,61 @@ pub fn context_at(source: &str, offset: usize) -> CursorContext {
     classify_outside_string(&stack)
 }
 
+/// The keys of every object at `path` (array steps as [`ARRAY_ELEMENT`]), in
+/// document order. Scanning stops at the first syntax error, so a document
+/// being typed yields the keys before the error.
+pub fn keys_at_path(source: &str, path: &[String]) -> Vec<String> {
+    let options = ScannerOptions {
+        allow_single_quoted_strings: false,
+        allow_hexadecimal_numbers: false,
+        allow_unary_plus_numbers: false,
+    };
+    let mut scanner = Scanner::new(source, &options);
+    let mut stack: Vec<Frame> = Vec::new();
+    let mut last_string: Option<String> = None;
+    let mut keys = Vec::new();
+    while let Ok(Some(token)) = scanner.scan() {
+        match token {
+            Token::OpenBrace | Token::OpenBracket => {
+                let path_key = pending_path_key(&mut stack);
+                let kind = if matches!(token, Token::OpenBrace) {
+                    FrameKind::Object
+                } else {
+                    FrameKind::Array
+                };
+                stack.push(Frame::new(kind, path_key));
+                last_string = None;
+            }
+            Token::CloseBrace | Token::CloseBracket => {
+                stack.pop();
+                last_string = None;
+            }
+            Token::Colon => {
+                if let Some(frame) = stack.last_mut()
+                    && matches!(frame.kind, FrameKind::Object)
+                    && let Some(key) = last_string.take()
+                {
+                    frame.current_key = Some(key.clone());
+                    frame.after_colon = true;
+                    if path_of(&stack) == path && !keys.contains(&key) {
+                        keys.push(key);
+                    }
+                }
+            }
+            Token::Comma => {
+                if let Some(frame) = stack.last_mut() {
+                    frame.current_key = None;
+                    frame.after_colon = false;
+                }
+                last_string = None;
+            }
+            Token::String(text) => last_string = Some(text.into_owned()),
+            _ => {}
+        }
+    }
+    keys
+}
+
 /// When entering a container, the linking key is the enclosing object's current
 /// key (consumed) or [`ARRAY_ELEMENT`] when the parent is an array.
 fn pending_path_key(stack: &mut [Frame]) -> Option<String> {
@@ -381,6 +436,15 @@ mod tests {
         assert_eq!(ctx.role, Role::Key);
         assert!(ctx.existing_keys.contains(&"name".to_string()));
         assert!(ctx.existing_keys.contains(&"version".to_string()));
+    }
+
+    #[test]
+    fn keys_at_path_collects_every_matching_object_in_order() {
+        let source = r#"{ "a": [ { "types": { "Item": {}, "Port": "x" } },
+            { "types": { "Device": {} } } ], "types": { "Top": 1 } }"#;
+        let path = ["a", ARRAY_ELEMENT, "types"].map(String::from);
+        assert_eq!(keys_at_path(source, &path), ["Item", "Port", "Device"]);
+        assert_eq!(keys_at_path("{ \"types\": { \"Ok\": 1, \"Bro", &["types".into()]), ["Ok"]);
     }
 
     #[test]

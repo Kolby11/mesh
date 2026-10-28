@@ -26,6 +26,7 @@
 ///   for one graph generation.
 pub mod compatibility;
 pub mod contract;
+pub mod descriptor;
 pub mod generator;
 pub mod interface;
 
@@ -42,11 +43,13 @@ pub use contract::{
     InterfaceEvent, InterfaceMethod, InterfaceTypeDef, RUNTIME_METADATA_STATE_FIELDS, StateBinding,
     SUPPORTS_MEMBER, TypeExpr, compile_interface_contract, contract_type_errors, json_type_name,
     negotiate_features, parse_compiled_contract, parse_compiled_contract_with_provenance,
-    parse_contract_version, parse_interface_contract, parse_version_req,
+    parse_contract_version, parse_interface_contract, parse_method_signature, parse_version_req,
 };
+pub use descriptor::{CONTRACT_DESCRIPTOR_REVISION, ContractDescriptor};
 pub use generator::{
     GeneratedContractArtifacts, generate_contract_artifacts, generate_contract_documentation,
-    generate_luau_consumer_types, generate_luau_mock, generate_luau_provider_stub, luau_type_of,
+    generate_luau_consumer_types, generate_luau_mock, generate_luau_provider_stub,
+    generate_rust_bindings, luau_type_of,
 };
 pub use interface::{
     InterfaceCatalog, InterfaceCatalogBuilder, InterfaceProvider, InterfaceResolution,

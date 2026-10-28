@@ -480,19 +480,9 @@ audio.$0
                     "percent": { "type": "float", "description": "Current volume." }
                 },
                 "methods": {
-                    "set_volume": {
-                        "args": [
-                            { "name": "device_id", "type": "string" },
-                            { "name": "percent", "type": "float" }
-                        ],
-                        "returns": "Result"
-                    }
+                    "set_volume": "(device_id: string, percent: float) -> Result"
                 },
-                "events": {
-                    "Changed": {
-                        "payload": [{ "name": "percent", "type": "float" }]
-                    }
-                },
+                "events": { "Changed": { "percent": "float" } },
                 "types": {}
             }),
         )

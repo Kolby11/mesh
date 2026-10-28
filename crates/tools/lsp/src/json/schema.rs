@@ -41,6 +41,21 @@ pub enum Kind {
     SuggestDiscovered(Vec<String>),
     /// A leaf scalar (string / number / bool / freeform). Accepts any JSON.
     Scalar,
+    /// A service-contract string in `syntax` whose type names complete from
+    /// the primitives and the contract's own `types`; when `fields` is not
+    /// empty, an object with those fields is accepted instead.
+    ContractText {
+        syntax: ContractSyntax,
+        fields: Vec<Field>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContractSyntax {
+    /// A type expression: `int`, `Item[]?`.
+    Type,
+    /// A method signature: `(id: int, label: string) -> Result`.
+    Signature,
 }
 
 /// A named property of an object node.
@@ -140,6 +155,9 @@ pub fn navigate<'a>(node: &'a Node, path: &[String]) -> Option<&'a Node> {
         ),
         Kind::Map(value) => Some(value.as_ref()),
         Kind::Array(element) if head == ARRAY_ELEMENT => Some(element.as_ref()),
+        Kind::ContractText { fields, .. } => {
+            fields.iter().find(|f| f.name == *head).map(|f| &f.node)
+        }
         _ => None,
     }?;
     navigate(next, rest)
@@ -149,6 +167,7 @@ pub fn navigate<'a>(node: &'a Node, path: &[String]) -> Option<&'a Node> {
 pub fn fields_of(node: &Node) -> Option<&[Field]> {
     match &node.kind {
         Kind::Object(fields) | Kind::OpenObject { fields, .. } => Some(fields),
+        Kind::ContractText { fields, .. } if !fields.is_empty() => Some(fields),
         _ => None,
     }
 }
@@ -166,6 +185,7 @@ pub fn field_node<'a>(container: &'a Node, key: &str) -> Option<&'a Node> {
                 .unwrap_or(other.as_ref()),
         ),
         Kind::Map(value) => Some(value.as_ref()),
+        Kind::ContractText { fields, .. } => fields.iter().find(|f| f.name == key).map(|f| &f.node),
         _ => None,
     }
 }

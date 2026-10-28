@@ -211,8 +211,11 @@ error. Each call is answered once; one the provider leaves unanswered gets
 `NoReply` after 25 seconds, and more than 64 unanswered calls are refused with
 `LimitsExceeded`. `mesh.dbus_emit(handle, member, args)` emits a declared signal.
 All three raise an error for malformed values and return `false` for a handle from
-another generation. Arrays longer than 1,024 items in a call body (raw pixel
-data, for example) arrive as `{ elided = <length> }`.
+another generation. Arrays longer than 1,024 items cannot travel in a call
+record. One whose items are all byte values (raw pixel data, for example) is
+registered as an `application/octet-stream` [blob](#blobs) owned by the provider
+and arrives as `{ blob = <handle>, len = <length> }`, which `mesh.blob.put`
+accepts in place of bytes; any other arrives as `{ elided = <length> }`.
 
 Service specs can also declare read-only properties as
 `properties = { Enabled = { signature = "b", value = false } }`. The host
@@ -239,12 +242,48 @@ forwards `activate`, `secondary_activate`, `context_menu` and `scroll` commands.
 Menu-only items activate through `ContextMenu`.
 
 Items expose semantic icon names (including attention and overlay names),
-tooltip text, a menu object path and icon-theme path. Pixmap-only items expose
-bounded hexadecimal ARGB32 network-order bytes with width/height, downsampled
-to at most 32×32. Names are preferred. Registration is bounded to 32 items;
-published state is bounded, dropping optional pixmaps before metadata when
-necessary. Consumers render these fields using their own modules; a composed
+tooltip text, a menu object path and icon-theme path. A pixmap-only item
+exposes `icon_pixmap`, a [blob](#blobs) of the pixmap closest to 32px (at most
+512×512) in `image/x-mesh-argb32`; pass it to `<image src>`. Names are
+preferred. Registration is bounded to 32 items, and published metadata is
+bounded. Consumers render these fields using their own modules; a composed
 DBusMenu UI is not included. See the [StatusNotifier specification](https://specifications.freedesktop.org/status-notifier-item/latest-single/).
+
+## Blobs
+
+Image bytes do not travel in service state. A provider registers them with
+`mesh.blob.put(bytes, mime, meta?)`, which returns a content-addressed handle,
+`mesh-blob:sha256-<64 hex digits>`, and puts that handle in state. Contracts
+type such fields `blob` (usually `blob?`); the shell rejects a value that is
+not a well-formed handle. Consumers pass the handle to `<image src>`. The
+renderer decodes and scales it on the resource worker, and only the elements
+showing it repaint when it is ready.
+
+```lua
+local icon = mesh.blob.put(pixels, "image/x-mesh-argb32", { width = 32, height = 32 })
+state = { items = { { id = "app", icon = icon } } }
+```
+
+`bytes` is a string, a `buffer`, an array of byte values (what D-Bus `ay`
+decodes to), or a `{ blob = handle }` record the host registered (see
+[D-Bus services](#d-bus-services)); the last gives the provider's own bytes a
+format without copying them through Luau. Accepted types are `image/png`,
+`image/jpeg`, `image/bmp`, and the raw layouts `image/x-mesh-argb32` (A, R, G, B
+bytes, the StatusNotifier layout), `image/x-mesh-rgba8` and `image/x-mesh-rgb8`.
+Raw layouts need `width` and `height` (1–4096) and take an optional row
+`stride`. `application/octet-stream` is accepted but never displayed. A blob
+holds at most 8 MiB and a provider at most 32 MiB; `put` raises an error past
+either limit or for malformed bytes.
+
+Lifetime follows published state. Each state snapshot pins exactly the handles
+it references; a snapshot that references a handle this provider did not
+register is rejected, so state never points at bytes that have not arrived. A
+blob no snapshot references is released by the second publication after its
+`put`, which leaves a callback time to register bytes before the state that
+uses them. Stopping or restarting the provider releases all of its blobs.
+Rendered images stay in the raster cache after release, so a surface keeps
+showing pixels it already painted until its state changes. Event payloads and
+command results do not pin blobs.
 
 ## Other protocol records
 

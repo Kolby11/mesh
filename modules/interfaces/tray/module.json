@@ -1,200 +1,50 @@
 {
   "name": "@mesh/tray-interface",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "StatusNotifier tray items and activation controls.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "interface",
     "interface": {
       "name": "mesh.tray",
-      "version": "1.0",
+      "version": "2.0",
       "domain": "tray",
       "relationship": "base",
       "contract": {
-        "state": [
-          {
-            "name": "available",
-            "type": "boolean"
-          },
-          {
-            "name": "items",
-            "type": "Item[]"
-          }
-        ],
-        "methods": [
-          {
-            "name": "activate",
-            "args": [
-              {
-                "name": "id",
-                "type": "string"
-              },
-              {
-                "name": "x",
-                "type": "int"
-              },
-              {
-                "name": "y",
-                "type": "int"
-              }
-            ],
-            "returns": "Result"
-          },
-          {
-            "name": "secondary_activate",
-            "args": [
-              {
-                "name": "id",
-                "type": "string"
-              },
-              {
-                "name": "x",
-                "type": "int"
-              },
-              {
-                "name": "y",
-                "type": "int"
-              }
-            ],
-            "returns": "Result"
-          },
-          {
-            "name": "context_menu",
-            "args": [
-              {
-                "name": "id",
-                "type": "string"
-              },
-              {
-                "name": "x",
-                "type": "int"
-              },
-              {
-                "name": "y",
-                "type": "int"
-              }
-            ],
-            "returns": "Result"
-          },
-          {
-            "name": "scroll",
-            "args": [
-              {
-                "name": "id",
-                "type": "string"
-              },
-              {
-                "name": "delta",
-                "type": "int"
-              },
-              {
-                "name": "orientation",
-                "type": "string"
-              }
-            ],
-            "returns": "Result"
-          }
-        ],
-        "events": [],
+        "state": { "available": "boolean", "items": "Item[]" },
+        "methods": {
+          "activate": "(id: string, x: int, y: int) -> Result",
+          "secondary_activate": "(id: string, x: int, y: int) -> Result",
+          "context_menu": "(id: string, x: int, y: int) -> Result",
+          "scroll": "(id: string, delta: int, orientation: string) -> Result"
+        },
+        "events": {},
         "types": {
           "Item": {
-            "fields": [
-              {
-                "name": "id",
-                "type": "string"
-              },
-              {
-                "name": "title",
-                "type": "string"
-              },
-              {
-                "name": "application_id",
-                "type": "string"
-              },
-              {
-                "name": "category",
-                "type": "string"
-              },
-              {
-                "name": "status",
-                "type": "string"
-              },
-              {
-                "name": "icon_name",
-                "type": "string"
-              },
-              {
-                "name": "attention_icon_name",
-                "type": "string"
-              },
-              {
-                "name": "overlay_icon_name",
-                "type": "string"
-              },
-              {
-                "name": "icon_theme_path",
-                "type": "string"
-              },
-              {
-                "name": "tooltip_title",
-                "type": "string"
-              },
-              {
-                "name": "tooltip_text",
-                "type": "string"
-              },
-              {
-                "name": "item_is_menu",
-                "type": "boolean"
-              },
-              {
-                "name": "menu",
-                "type": "string"
-              },
-              {
-                "name": "icon_width",
-                "type": "int"
-              },
-              {
-                "name": "icon_height",
-                "type": "int"
-              },
-              {
-                "name": "icon_argb",
-                "type": "string"
-              }
-            ]
+            "id": "string",
+            "title": "string",
+            "application_id": "string",
+            "category": "string",
+            "status": "string",
+            "icon_name": "string",
+            "attention_icon_name": "string",
+            "overlay_icon_name": "string",
+            "icon_theme_path": "string",
+            "tooltip_title": "string",
+            "tooltip_text": "string",
+            "item_is_menu": "boolean",
+            "menu": "string",
+            "icon_pixmap": "blob?"
           },
-          "Result": {
-            "fields": [
-              {
-                "name": "ok",
-                "type": "boolean"
-              },
-              {
-                "name": "error",
-                "type": "string"
-              }
-            ]
-          }
+          "Result": { "ok": "boolean", "error": "string" }
         },
         "capabilities": {
-          "read": [
-            "service.tray.read"
-          ],
+          "read": ["service.tray.read"],
           "methods": {
-            "activate": [
-              "service.tray.control"
-            ],
-            "secondary_activate": [
-              "service.tray.control"
-            ],
-            "context_menu": [
-              "service.tray.control"
-            ],
-            "scroll": [
-              "service.tray.control"
-            ]
+            "activate": ["service.tray.control"],
+            "secondary_activate": ["service.tray.control"],
+            "context_menu": ["service.tray.control"],
+            "scroll": ["service.tray.control"]
           },
           "permissions": {
             "service.tray.read": "standard",

@@ -863,11 +863,11 @@ fn contract_only_bluetooth_catalog() -> mesh_core_service::InterfaceCatalog {
             "mesh.bluetooth",
             "1.0",
             &serde_json::json!({
-                "state": [
-                    { "name": "available", "type": "boolean" },
-                    { "name": "powered", "type": "boolean", "default": false },
-                    { "name": "adapter", "type": "string?" }
-                ]
+                "state": {
+                    "available": "boolean",
+                    "powered": { "type": "boolean", "default": false },
+                    "adapter": "string?"
+                }
             }),
         )
         .unwrap(),
@@ -1058,7 +1058,7 @@ fn thermal_catalog(features: &[&str]) -> mesh_core_service::InterfaceCatalog {
                     "available": { "type": "boolean" },
                     "fans": { "type": "int?" }
                 },
-                "methods": { "calibrate": {}, "set_fan": {} },
+                "methods": { "calibrate": "()", "set_fan": "()" },
                 "features": { "fan-control": { "members": ["fans", "set_fan"] } },
                 "capabilities": {
                     "read": ["service.thermal.read"],

@@ -240,9 +240,9 @@ mod tests {
             "alice.thermal",
             "1.0",
             &serde_json::json!({
-                "state": [{ "name": "temperature", "type": "float" }],
-                "methods": [{ "name": "calibrate" }],
-                "events": [{ "name": "Changed" }],
+                "state": { "temperature": "float" },
+                "methods": { "calibrate": "()" },
+                "events": { "Changed": {} },
                 "capabilities": {
                     "read": ["alice.thermal.observe"],
                     "events": { "Changed": ["alice.thermal.subscribe"] },
@@ -295,8 +295,8 @@ mod tests {
             "mesh.theme",
             "1.0",
             &serde_json::json!({
-                "state": [{ "name": "theme_id", "type": "string" }],
-                "methods": [{ "name": "set_theme", "args": [{ "name": "theme_id", "type": "string" }] }],
+                "state": { "theme_id": "string" },
+                "methods": { "set_theme": "(theme_id: string)" }
             }),
         )
         .unwrap();

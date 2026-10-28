@@ -97,6 +97,30 @@ Each needs a design and a measured prototype before it is adopted.
       no JSON on the frame path. Validation, ranges/defaults and `.d.luau`
       generation have shipped, and LSP proxy types use the same mapping.
 
+## Native providers and bulk data channels
+
+Proposed direction, not yet in the spec: MESH stays a curated platform for shell
+experiences, adds out-of-process native providers, and adds typed bulk channels.
+[Design note](../.planning/todos/pending/2026-10-28-native-providers-and-bulk-channels.md)
+(scope, language evaluation, concerns to settle first, suggested order).
+
+- [ ] Accept or amend the direction and update 00 §7, 01 and `AGENTS.md`; the
+      spec still says module execution stays in-process and no native tier is committed.
+- [ ] Add a capability-gated host standard library for Luau (JSON, date/time,
+      regex, fuzzy matching, HTTP) and `require` of vendored pure-Luau packages;
+      Luau's library gap is the motivation for considering QuickJS + TypeScript.
+- [ ] Prototype QuickJS-ng + stripped TypeScript behind a language-neutral
+      script boundary only if the host library is not enough; needs benchmarks on existing gates.
+- [ ] Contract-declared sample streams bound directly to elements;
+      `cava-visualizer` republishes whole-array state through Luau every frame.
+- [ ] Windowed keyed collections for large lists, paired with the virtualized
+      list under Performance; providers currently publish whole lists as state.
+- [ ] Out-of-process native provider protocol and `mesh-provider` Rust SDK,
+      proven on `backlight-brightness`; contract-generated Rust bindings exist, but no
+      wire protocol, SDK runtime or native tier does.
+- [ ] Frame streams (dmabuf + fences, shared-memory fallback) and a live-texture element,
+      starting with window previews; needs a compositor-portable capture source and core-owned consent.
+
 
 ## 2026-09-01 whole-codebase audit — new open tasks
 

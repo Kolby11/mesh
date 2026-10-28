@@ -89,13 +89,14 @@ effect(function()
                 default_action = "default"
             end
         end
-        local picture = item.image ~= "" and item.image or item.app_icon or ""
+        -- Sender pixels (a blob) win over an image path, which wins over the app icon.
+        local path = item.image ~= "" and item.image or item.app_icon or ""
         list[#list + 1] = {
             id = item.id,
             app = item.app_name ~= "" and item.app_name or t("inbox.title"),
             summary = item.summary,
             body = item.body,
-            picture = string.sub(picture, 1, 1) == "/" and picture or "",
+            picture = item.image_data or (string.sub(path, 1, 1) == "/" and path or ""),
             default_action = default_action,
         }
     end

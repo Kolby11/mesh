@@ -17,6 +17,7 @@ mesh-core-capability = { workspace = true }
 mesh-core-frontend-abi = { workspace = true }
 mesh-core-service = { workspace = true }
 mesh-core-runtime = { workspace = true }
+mesh-core-resources = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }

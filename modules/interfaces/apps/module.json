@@ -11,26 +11,31 @@
       "domain": "apps",
       "relationship": "base",
       "contract": {
-        "state": [
-          { "name": "available", "type": "boolean", "description": "Whether application state is reachable" },
-          { "name": "apps", "type": "App[]", "description": "Pinned applications in order, followed by running unpinned ones" },
-          { "name": "installed", "type": "App[]", "description": "Every launchable desktop entry, sorted by name; empty until indexed" }
-        ],
-        "methods": [
-          { "name": "activate", "args": [{ "name": "id", "type": "string" }], "returns": "Result" }
-        ],
-        "events": [],
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether application state is reachable"
+          },
+          "apps": {
+            "type": "App[]",
+            "description": "Pinned applications in order, followed by running unpinned ones"
+          },
+          "installed": {
+            "type": "App[]",
+            "description": "Every launchable desktop entry, sorted by name; empty until indexed"
+          }
+        },
+        "methods": { "activate": "(id: string) -> Result" },
+        "events": {},
         "types": {
           "App": {
-            "fields": [
-              { "name": "id", "type": "string" },
-              { "name": "name", "type": "string" },
-              { "name": "icon", "type": "string" },
-              { "name": "pinned", "type": "boolean" },
-              { "name": "running", "type": "boolean" },
-              { "name": "focused", "type": "boolean" },
-              { "name": "windows", "type": "int" }
-            ]
+            "id": "string",
+            "name": "string",
+            "icon": "string",
+            "pinned": "boolean",
+            "running": "boolean",
+            "focused": "boolean",
+            "windows": "int"
           }
         },
         "capabilities": {

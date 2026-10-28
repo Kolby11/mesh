@@ -694,6 +694,113 @@ fn backend_state_snapshot_reads_top_level_state() {
 }
 
 #[test]
+fn blob_handles_in_state_must_be_registered_and_live_with_the_provider() {
+    use mesh_core_resources::blob::lookup_blob;
+    let mut ctx = BackendScriptContext::new("@test/blobs");
+    ctx.load_script(
+        r#"
+        function start()
+            local icon = mesh.blob.put({ 255, 0, 0, 255 }, "image/x-mesh-rgba8", { width = 1, height = 1 })
+            state = { icon = icon, again = mesh.blob.put(buffer.fromstring("\255\0\0\255"), "image/x-mesh-rgba8", { width = 1, height = 1 }) }
+        end
+        function on_poll()
+            state = { icon = "mesh-blob:sha256-" .. string.rep("0", 64) }
+        end
+        "#,
+    )
+    .unwrap();
+    let state = ctx.call_init().unwrap().unwrap();
+    let handle = state["icon"].as_str().unwrap().to_owned();
+    assert_eq!(state["again"], state["icon"], "content-addressed");
+    assert_eq!(lookup_blob(&handle).unwrap().bytes().as_ref(), [255, 0, 0, 255]);
+
+    let error = ctx.run_poll().unwrap_err().to_string();
+    assert!(error.contains("has not registered"), "{error}");
+    assert!(lookup_blob(&handle).is_some(), "a rejected snapshot changes nothing");
+
+    drop(ctx);
+    assert!(lookup_blob(&handle).is_none(), "provider teardown releases its blobs");
+}
+
+#[test]
+fn blob_put_retypes_host_registered_bytes_without_reading_them() {
+    use mesh_core_resources::blob::{BlobFormat, RawPixelLayout, lookup_blob};
+    let mut ctx = BackendScriptContext::new("@test/blob-records");
+    ctx.load_script(
+        r#"
+        function start() end
+        function on_command_show()
+            local record = mesh.service.payload().record
+            state = { image = mesh.blob.put(record, "image/x-mesh-rgb8", { width = 2, height = 2, stride = 8 }) }
+        end
+        "#,
+    )
+    .unwrap();
+    let bytes = ctx
+        .blob_owner()
+        .put(BlobFormat::Bytes, (0..14).collect())
+        .unwrap();
+    let state = ctx
+        .run_command(
+            "show",
+            &serde_json::json!({ "record": { "blob": &*bytes, "len": 14 } }),
+        )
+        .unwrap()
+        .unwrap();
+    let image = lookup_blob(state["image"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        image.format(),
+        BlobFormat::Raw {
+            layout: RawPixelLayout::Rgb8,
+            width: 2,
+            height: 2,
+            stride: 8,
+        }
+    );
+    assert_eq!(image.bytes().len(), 14);
+}
+
+#[test]
+fn blob_put_rejects_bad_bytes_and_formats() {
+    let mut ctx = BackendScriptContext::new("@test/blob-errors");
+    ctx.load_script(
+        r#"
+        function start()
+            local results = {}
+            for _, case in {
+                { { 256 }, "image/png" },
+                { "x", "image/gif" },
+                { "abc", "image/x-mesh-rgb8" },
+                { "ab", "image/x-mesh-rgb8", { width = 1, height = 1 } },
+                { 42, "image/png" },
+            } do
+                local ok, message = pcall(mesh.blob.put, case[1], case[2], case[3])
+                results[#results + 1] = if ok then "ok" else tostring(message)
+            end
+            state = { results = results }
+        end
+        "#,
+    )
+    .unwrap();
+    let state = ctx.call_init().unwrap().unwrap();
+    let results: Vec<_> = state["results"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap().to_owned())
+        .collect();
+    for (result, expected) in results.iter().zip([
+        "must be an integer in 0..=255",
+        "unsupported blob MIME type",
+        "requires width and height",
+        "needs at least 3",
+        "must be a string, buffer or byte array",
+    ]) {
+        assert!(result.contains(expected), "{result} lacks {expected}");
+    }
+}
+
+#[test]
 fn backend_state_snapshot_updates_after_poll() {
     let mut ctx = BackendScriptContext::new("@test/backend");
     ctx.load_script(

@@ -289,8 +289,21 @@ async fn tray_provider_registers_updates_activates_and_reuses_an_existing_watche
     harness
         .until(|h| h.item().is_some_and(|item| item["icon_name"] == ""))
         .await;
-    assert_eq!(harness.item().unwrap()["icon_argb"], "ffff0000ff0000ff");
-    assert_eq!(harness.item().unwrap()["icon_width"], 2);
+    let pixmap = harness.item().unwrap()["icon_pixmap"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let blob = mesh_core_resources::blob::lookup_blob(&pixmap).unwrap();
+    assert_eq!(blob.bytes().as_ref(), [255, 255, 0, 0, 255, 0, 0, 255]);
+    assert_eq!(
+        blob.format(),
+        mesh_core_resources::blob::BlobFormat::Raw {
+            layout: mesh_core_resources::blob::RawPixelLayout::Argb32,
+            width: 2,
+            height: 1,
+            stride: 8,
+        }
+    );
     harness.ctx.shutdown_streams().await;
     drop(dbus);
 

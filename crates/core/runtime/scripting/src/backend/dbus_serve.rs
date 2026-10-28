@@ -9,10 +9,13 @@
 //! The host validates call signatures against the declared methods, answers
 //! `Introspect` and `Ping`, and replies `NoReply` to calls the provider leaves
 //! unanswered, so a buggy provider cannot stall its clients past the D-Bus
-//! default timeout. Arrays longer than [`MAX_ARRAY_ITEMS`] (raw pixel data
-//! in notification hints, for example) are replaced by `{"elided": <len>}`
-//! so one large argument cannot push a call past the record limit. Dropping
-//! the stream drops the connection, which releases the name.
+//! default timeout. Arrays longer than [`MAX_ARRAY_ITEMS`] cannot travel in
+//! a record: one of byte values (raw pixel data in notification hints, for
+//! example) is registered as an `application/octet-stream` blob owned by the
+//! provider and replaced by `{"blob": <handle>, "len": <len>}`, which
+//! `mesh.blob.put` accepts in place of bytes; any other is replaced by
+//! `{"elided": <len>}`. Dropping the stream drops the connection, which
+//! releases the name.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
@@ -31,6 +34,7 @@ use super::exec_stream::{
     MAX_STREAM_LINE_BYTES, StreamEvent, StreamEventKind, StreamHandle, StreamId, StreamState,
 };
 use super::host_sources::{finish, spawn_source};
+use mesh_core_resources::blob::{BlobFormat, BlobOwner};
 
 /// Calls a provider may hold unanswered at once; further calls are refused.
 const MAX_PENDING_CALLS: usize = 64;
@@ -305,6 +309,7 @@ pub(super) fn spawn_service(
     services: &Arc<DbusServices>,
     bus: BusTarget,
     spec: ServiceSpec,
+    blobs: Arc<BlobOwner>,
 ) -> std::io::Result<StreamHandle> {
     spec.validate().map_err(std::io::Error::other)?;
     let spec = Arc::new(spec);
@@ -328,7 +333,7 @@ pub(super) fn spawn_service(
         move |state, stream, mut stop| async move {
             let result = tokio::select! {
                 _ = &mut stop => Ok(()),
-                result = serve(&state, &stream, bus, &task_spec, &task_properties, &task_pending, receiver) => result,
+                result = serve(&state, &stream, bus, &task_spec, &task_properties, &task_pending, &blobs, receiver) => result,
             };
             registry
                 .services
@@ -357,6 +362,7 @@ async fn serve(
     spec: &ServiceSpec,
     properties: &Mutex<BTreeMap<String, PropertySpec>>,
     pending_members: &Mutex<HashMap<u64, String>>,
+    blobs: &BlobOwner,
     mut commands: mpsc::UnboundedReceiver<Command>,
 ) -> Result<(), String> {
     let connection = bus
@@ -398,7 +404,7 @@ async fn serve(
                     return Err("D-Bus connection closed".into());
                 };
                 let message = message.map_err(error)?;
-                let Some(record) = route(&connection, spec, properties, &message).await.map_err(error)? else {
+                let Some(record) = route(&connection, spec, properties, blobs, &message).await.map_err(error)? else {
                     continue;
                 };
                 if pending.len() >= MAX_PENDING_CALLS {
@@ -524,6 +530,7 @@ async fn route(
     connection: &Connection,
     spec: &ServiceSpec,
     properties: &Mutex<BTreeMap<String, PropertySpec>>,
+    blobs: &BlobOwner,
     message: &Message,
 ) -> zbus::Result<Option<Json>> {
     let header = message.header();
@@ -596,7 +603,7 @@ async fn route(
     };
     let mut fields =
         serde_json::to_value(fields).map_err(|error| zbus::Error::Failure(error.to_string()))?;
-    elide_large_arrays(&mut fields);
+    move_large_arrays(&mut fields, blobs);
     Ok(Some(serde_json::json!({
         "type": "call",
         "member": member,
@@ -653,13 +660,25 @@ fn property_reply(
         .ok_or_else(|| invalid("empty property reply".into()))
 }
 
-fn elide_large_arrays(value: &mut Json) {
+fn move_large_arrays(value: &mut Json, blobs: &BlobOwner) {
     match value {
         Json::Array(items) if items.len() > MAX_ARRAY_ITEMS => {
-            *value = serde_json::json!({ "elided": items.len() });
+            let len = items.len();
+            let bytes = items
+                .iter()
+                .map(|item| item.as_u64().and_then(|byte| u8::try_from(byte).ok()))
+                .collect::<Option<Vec<u8>>>();
+            *value = match bytes.map(|bytes| blobs.put(BlobFormat::Bytes, bytes)) {
+                Some(Ok(handle)) => serde_json::json!({ "blob": &*handle, "len": len }),
+                _ => serde_json::json!({ "elided": len }),
+            };
         }
-        Json::Array(items) => items.iter_mut().for_each(elide_large_arrays),
-        Json::Object(entries) => entries.values_mut().for_each(elide_large_arrays),
+        Json::Array(items) => items
+            .iter_mut()
+            .for_each(|item| move_large_arrays(item, blobs)),
+        Json::Object(entries) => entries
+            .values_mut()
+            .for_each(|entry| move_large_arrays(entry, blobs)),
         _ => {}
     }
 }
@@ -729,7 +748,14 @@ mod tests {
         let state = StreamState::new();
         let services = Arc::new(DbusServices::default());
         let handle =
-            spawn_service(&state, &services, BusTarget::Address(bus.1.clone()), spec()).unwrap();
+            spawn_service(
+                &state,
+                &services,
+                BusTarget::Address(bus.1.clone()),
+                spec(),
+                Arc::default(),
+            )
+            .unwrap();
 
         let client = zbus::connection::Builder::address(bus.1.as_str())
             .unwrap()
@@ -926,7 +952,14 @@ mod tests {
         owner.request_name("org.mesh.Served").await.unwrap();
         let state = StreamState::new();
         let services = Arc::new(DbusServices::default());
-        spawn_service(&state, &services, BusTarget::Address(bus.1.clone()), spec()).unwrap();
+        spawn_service(
+                &state,
+                &services,
+                BusTarget::Address(bus.1.clone()),
+                spec(),
+                Arc::default(),
+            )
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(3);
         let failure = loop {
             let failed = state
@@ -946,14 +979,21 @@ mod tests {
     }
 
     #[test]
-    fn large_arrays_are_elided_from_call_records() {
+    fn large_byte_arrays_become_blobs_and_other_large_arrays_are_elided() {
+        let blobs = BlobOwner::new();
         let mut value = serde_json::json!({
-            "pixels": vec![0; MAX_ARRAY_ITEMS + 1],
+            "pixels": vec![7; MAX_ARRAY_ITEMS + 1],
+            "words": vec![256; MAX_ARRAY_ITEMS + 1],
             "small": [1, 2, 3],
         });
-        elide_large_arrays(&mut value);
+        move_large_arrays(&mut value, &blobs);
+        let handle = value["pixels"]["blob"].as_str().unwrap();
+        let blob = mesh_core_resources::blob::lookup_blob(handle).unwrap();
+        assert_eq!(blob.bytes().len(), MAX_ARRAY_ITEMS + 1);
+        assert_eq!(blob.format(), BlobFormat::Bytes);
+        assert_eq!(value["pixels"]["len"], MAX_ARRAY_ITEMS + 1);
         assert_eq!(
-            value["pixels"],
+            value["words"],
             serde_json::json!({ "elided": MAX_ARRAY_ITEMS + 1 })
         );
         assert_eq!(value["small"], serde_json::json!([1, 2, 3]));

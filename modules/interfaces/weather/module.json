@@ -11,28 +11,48 @@
       "domain": "weather",
       "relationship": "base",
       "contract": {
-        "state": [
-          { "name": "available", "type": "boolean", "description": "Whether current conditions have been fetched" },
-          { "name": "location", "type": "string", "description": "Display name of the forecast location" },
-          { "name": "temperature", "type": "float", "description": "Current temperature in the provider's unit" },
-          { "name": "feels_like", "type": "float", "description": "Apparent temperature in the provider's unit" },
-          { "name": "unit", "type": "string", "description": "\"C\" or \"F\"" },
-          { "name": "condition", "type": "string", "description": "Semantic condition: clear, partly-cloudy, cloudy, fog, drizzle, rain, snow or storm" },
-          { "name": "is_day", "type": "boolean", "description": "Whether the location is in daylight" },
-          { "name": "hourly", "type": "Forecast[]", "description": "Upcoming forecast points, nearest first" },
-          { "name": "updated_at", "type": "float", "description": "Unix time in seconds of the last successful fetch" }
-        ],
-        "methods": [
-          { "name": "refresh", "returns": "Result" }
-        ],
-        "events": [],
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether current conditions have been fetched"
+          },
+          "location": {
+            "type": "string",
+            "description": "Display name of the forecast location"
+          },
+          "temperature": {
+            "type": "float",
+            "description": "Current temperature in the provider's unit"
+          },
+          "feels_like": {
+            "type": "float",
+            "description": "Apparent temperature in the provider's unit"
+          },
+          "unit": { "type": "string", "description": "\"C\" or \"F\"" },
+          "condition": {
+            "type": "string",
+            "description": "Semantic condition: clear, partly-cloudy, cloudy, fog, drizzle, rain, snow or storm"
+          },
+          "is_day": {
+            "type": "boolean",
+            "description": "Whether the location is in daylight"
+          },
+          "hourly": {
+            "type": "Forecast[]",
+            "description": "Upcoming forecast points, nearest first"
+          },
+          "updated_at": {
+            "type": "float",
+            "description": "Unix time in seconds of the last successful fetch"
+          }
+        },
+        "methods": { "refresh": "() -> Result" },
+        "events": {},
         "types": {
           "Forecast": {
-            "fields": [
-              { "name": "time", "type": "float" },
-              { "name": "temperature", "type": "float" },
-              { "name": "condition", "type": "string" }
-            ]
+            "time": "float",
+            "temperature": "float",
+            "condition": "string"
           }
         },
         "capabilities": {

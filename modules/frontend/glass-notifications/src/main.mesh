@@ -58,14 +58,15 @@ effect(function()
                     actions[#actions + 1] = { key = action.key, label = action.label }
                 end
             end
-            local picture = item.image ~= "" and item.image or item.app_icon or ""
+            -- Sender pixels (a blob) win over an image path, which wins over the app icon.
+            local path = item.image ~= "" and item.image or item.app_icon or ""
             list[#list + 1] = {
                 id = item.id,
                 app = item.app_name ~= "" and item.app_name or t("toasts.label"),
                 age = age(item.time),
                 summary = item.summary,
                 body = item.body,
-                picture = string.sub(picture, 1, 1) == "/" and picture or "",
+                picture = item.image_data or (string.sub(path, 1, 1) == "/" and path or ""),
                 critical = item.urgency == 2,
                 actions = actions,
                 has_actions = #actions > 0,

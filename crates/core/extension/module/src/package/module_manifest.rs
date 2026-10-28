@@ -1485,9 +1485,72 @@ pub struct MeshExtensionPointDeclaration {
     #[serde(default = "default_true")]
     pub multiple: bool,
     /// Props the host passes to each contribution, typed with the same grammar
-    /// as interface contracts.
-    #[serde(default)]
+    /// as interface contracts. Written as `{ "name": "type" }`, or
+    /// `{ "name": { "type", "description" } }`.
+    #[serde(default, with = "extension_point_props")]
     pub props: Vec<MeshExtensionPointProp>,
+}
+
+mod extension_point_props {
+    use super::MeshExtensionPointProp;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::collections::BTreeMap;
+
+    #[derive(Deserialize, Serialize)]
+    #[serde(untagged)]
+    enum PropJson {
+        Type(String),
+        Detailed {
+            #[serde(rename = "type")]
+            prop_type: String,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            description: Option<String>,
+        },
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<MeshExtensionPointProp>, D::Error> {
+        let props = BTreeMap::<String, PropJson>::deserialize(deserializer)?;
+        Ok(props
+            .into_iter()
+            .map(|(name, prop)| match prop {
+                PropJson::Type(prop_type) => MeshExtensionPointProp {
+                    name,
+                    prop_type,
+                    description: None,
+                },
+                PropJson::Detailed {
+                    prop_type,
+                    description,
+                } => MeshExtensionPointProp {
+                    name,
+                    prop_type,
+                    description,
+                },
+            })
+            .collect())
+    }
+
+    pub fn serialize<S: Serializer>(
+        props: &[MeshExtensionPointProp],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        props
+            .iter()
+            .map(|prop| {
+                let value = match &prop.description {
+                    None => PropJson::Type(prop.prop_type.clone()),
+                    Some(description) => PropJson::Detailed {
+                        prop_type: prop.prop_type.clone(),
+                        description: Some(description.clone()),
+                    },
+                };
+                (prop.name.clone(), value)
+            })
+            .collect::<BTreeMap<_, _>>()
+            .serialize(serializer)
+    }
 }
 
 fn default_true() -> bool {

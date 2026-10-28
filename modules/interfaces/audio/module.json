@@ -11,102 +11,68 @@
       "domain": "audio",
       "relationship": "base",
       "contract": {
-        "state": [
-          {
-            "name": "available",
+        "state": {
+          "available": {
             "type": "boolean",
             "description": "Whether the audio service is reachable"
           },
-          {
-            "name": "percent",
+          "percent": {
             "type": "float",
             "minimum": 0,
             "maximum": 100,
             "description": "Current default output volume as a percentage (0.0-100.0)"
           },
-          {
-            "name": "muted",
+          "muted": {
             "type": "boolean",
             "description": "Whether the default output is muted"
           },
-          {
-            "name": "source_module",
+          "source_module": {
             "type": "string",
             "description": "Backend module ID that emitted this state (runtime-additive)"
           }
-        ],
-        "methods": [
-          {
-            "name": "set_volume",
-            "args": [
-              { "name": "device_id", "type": "string" },
-              { "name": "percent", "type": "float" }
-            ],
-            "returns": "Result",
+        },
+        "methods": {
+          "set_volume": {
+            "signature": "(device_id: string, percent: float) -> Result",
             "coalesce": { "key": ["device_id"] },
             "stateBinding": { "field": "percent", "fromArg": "percent" }
           },
-          {
-            "name": "set_muted",
-            "args": [
-              { "name": "device_id", "type": "string" },
-              { "name": "muted", "type": "boolean" }
-            ],
-            "returns": "Result",
+          "set_muted": {
+            "signature": "(device_id: string, muted: boolean) -> Result",
             "coalesce": { "key": ["device_id"] },
             "stateBinding": { "field": "muted", "fromArg": "muted" }
           },
-          { "name": "volume_up" },
-          { "name": "volume_down" },
-          {
-            "name": "toggle_mute",
+          "volume_up": "()",
+          "volume_down": "()",
+          "toggle_mute": {
+            "signature": "()",
             "stateBinding": { "field": "muted", "toggle": true }
           },
-          {
-            "name": "play_sound",
-            "args": [
-              { "name": "path", "type": "string" }
-            ],
-            "returns": "Result"
-          }
-        ],
-        "events": [
-          {
-            "name": "VolumeChanged",
-            "payload": [
-              { "name": "device_id", "type": "string" },
-              { "name": "level", "type": "float" }
-            ]
-          }
-        ],
+          "play_sound": "(path: string) -> Result"
+        },
+        "events": { "VolumeChanged": { "device_id": "string", "level": "float" } },
         "types": {
           "Device": {
-            "fields": [
-              { "name": "id", "type": "string" },
-              { "name": "name", "type": "string" },
-              { "name": "description", "type": "string" },
-              { "name": "is_default", "type": "boolean" },
-              { "name": "volume", "type": "float" },
-              { "name": "muted", "type": "boolean" }
-            ]
+            "id": "string",
+            "name": "string",
+            "description": "string",
+            "is_default": "boolean",
+            "volume": "float",
+            "muted": "boolean"
           },
           "Stream": {
-            "fields": [
-              { "name": "id", "type": "string" },
-              { "name": "name", "type": "string" },
-              { "name": "application", "type": "string" },
-              { "name": "volume", "type": "float" },
-              { "name": "muted", "type": "boolean" }
-            ]
+            "id": "string",
+            "name": "string",
+            "application": "string",
+            "volume": "float",
+            "muted": "boolean"
           }
         },
         "capabilities": {
           "required": ["service.audio.read"],
           "optional": ["service.audio.control"],
           "read": ["service.audio.read"],
-          "events": {
-            "VolumeChanged": ["service.audio.read"]
-          },
+          "events": { "VolumeChanged": ["service.audio.read"] },
           "methods": {
             "set_volume": ["service.audio.control"],
             "set_muted": ["service.audio.control"],

@@ -665,7 +665,7 @@ pub enum ContractError {
 /// A parsed type expression from the contract type grammar.
 ///
 /// Grammar: `base`, `base[]`, `base?`, `base[]?` where `base` is a primitive
-/// (`string`, `int`, `float`, `boolean`, `object`, `any`) or a named type
+/// (`string`, `int`, `float`, `boolean`, `blob`, `object`, `any`) or a named type
 /// declared in the contract's `types` map (plus the builtin `Result`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeExpr {
@@ -680,6 +680,8 @@ pub enum BaseType {
     Int,
     Float,
     Boolean,
+    /// A `mesh-blob:sha256-…` handle to bytes the provider registered.
+    Blob,
     Object,
     Any,
     Named(String),
@@ -692,6 +694,7 @@ impl std::fmt::Display for TypeExpr {
             BaseType::Int => f.write_str("int")?,
             BaseType::Float => f.write_str("float")?,
             BaseType::Boolean => f.write_str("boolean")?,
+            BaseType::Blob => f.write_str("blob")?,
             BaseType::Object => f.write_str("object")?,
             BaseType::Any => f.write_str("any")?,
             BaseType::Named(name) => f.write_str(name)?,
@@ -733,6 +736,7 @@ impl TypeExpr {
             "int" => BaseType::Int,
             "float" => BaseType::Float,
             "boolean" => BaseType::Boolean,
+            "blob" => BaseType::Blob,
             "object" => BaseType::Object,
             "any" => BaseType::Any,
             named => {
@@ -743,7 +747,7 @@ impl TypeExpr {
                     || !named.chars().all(|ch| ch.is_ascii_alphanumeric())
                 {
                     return Err(format!(
-                        "invalid type '{expr}': expected a primitive (string, int, float, boolean, object, any) or a PascalCase named type"
+                        "invalid type '{expr}': expected a primitive (string, int, float, boolean, blob, object, any) or a PascalCase named type"
                     ));
                 }
                 BaseType::Named(named.to_string())
@@ -770,6 +774,9 @@ impl TypeExpr {
             BaseType::Int => value.as_i64().is_some() || value.as_u64().is_some(),
             BaseType::Float => value.is_number(),
             BaseType::Boolean => value.is_boolean(),
+            BaseType::Blob => value
+                .as_str()
+                .is_some_and(mesh_core_resources::blob::is_blob_handle),
             BaseType::Object => value.is_object(),
             BaseType::Any => true,
             BaseType::Named(_) => value.is_object(),
@@ -824,6 +831,9 @@ impl TypeExpr {
             BaseType::Int => value.as_i64().is_some() || value.as_u64().is_some(),
             BaseType::Float => value.is_number(),
             BaseType::Boolean => value.is_boolean(),
+            BaseType::Blob => value
+                .as_str()
+                .is_some_and(mesh_core_resources::blob::is_blob_handle),
             BaseType::Object => value.is_object(),
             BaseType::Any => true,
             BaseType::Named(name) if name == BUILTIN_RESULT_TYPE => {
@@ -1299,6 +1309,7 @@ impl FingerprintBuilder {
                 self.bytes.push(7);
                 self.string(name);
             }
+            BaseType::Blob => self.bytes.push(8),
         }
         self.bool(value.array);
         self.bool(value.optional);
@@ -1434,17 +1445,12 @@ pub fn parse_interface_contract(
             message: "interface identity cannot be empty".to_string(),
         });
     }
-    let contract = normalize_keyed_contract_declarations(contract.clone()).map_err(|message| {
-        ContractError::Parse {
-            interface: interface_name.clone(),
-            message,
-        }
-    })?;
-    let parsed: ContractJson =
-        serde_json::from_value(contract).map_err(|source| ContractError::Parse {
-            interface: interface_name.clone(),
-            message: source.to_string(),
-        })?;
+    let parse_error = |message: String| ContractError::Parse {
+        interface: interface_name.clone(),
+        message,
+    };
+    let parsed: ContractJson = serde_json::from_value(contract.clone())
+        .map_err(|source| parse_error(source.to_string()))?;
 
     let version =
         parse_contract_version(interface_version).ok_or_else(|| ContractError::InvalidVersion {
@@ -1458,58 +1464,35 @@ pub fn parse_interface_contract(
         state_fields: parsed
             .state
             .into_iter()
-            .map(|field| ContractStateField {
-                name: field.name,
-                field_type: field.field_type,
-                description: field.description,
-                minimum: field.minimum,
-                maximum: field.maximum,
-                default: field.default,
-            })
-            .collect(),
+            .map(|(name, declaration)| state_field(name, declaration))
+            .collect::<Result<_, _>>()
+            .map_err(parse_error)?,
         methods: parsed
             .methods
             .into_iter()
-            .map(|method| InterfaceMethod {
-                name: method.name,
-                args: method
-                    .args
-                    .into_iter()
-                    .map(ContractFieldJson::into_argument)
-                    .collect(),
-                returns: method.returns,
-                coalesce: method.coalesce.clone(),
-                state_binding: method.state_binding.map(|value| StateBinding {
-                    field: value.field,
-                    from_arg: value.from_arg,
-                    toggle: value.toggle,
-                }),
-            })
-            .collect(),
+            .map(|(name, declaration)| method_declaration(name, declaration))
+            .collect::<Result<_, _>>()
+            .map_err(parse_error)?,
         events: parsed
             .events
             .into_iter()
-            .map(|event| InterfaceEvent {
-                name: event.name,
-                payload: event
-                    .payload
-                    .into_iter()
-                    .map(ContractFieldJson::into_argument)
-                    .collect(),
+            .map(|(name, payload)| {
+                Ok(InterfaceEvent {
+                    payload: field_map(&format!("events.{name}"), payload)?,
+                    name,
+                })
             })
-            .collect(),
+            .collect::<Result<_, String>>()
+            .map_err(parse_error)?,
         types: parsed
             .types
             .into_iter()
-            .map(|(name, def)| {
-                let fields = def
-                    .fields
-                    .into_iter()
-                    .map(ContractFieldJson::into_argument)
-                    .collect();
-                (name.clone(), InterfaceTypeDef { name, fields })
+            .map(|(name, fields)| {
+                let fields = field_map(&format!("types.{name}"), fields)?;
+                Ok((name.clone(), InterfaceTypeDef { name, fields }))
             })
-            .collect(),
+            .collect::<Result<_, String>>()
+            .map_err(parse_error)?,
         capabilities: ContractCapabilities {
             required: parsed.capabilities.required,
             optional: parsed.capabilities.optional,
@@ -1579,40 +1562,141 @@ pub fn compile_interface_contract(
 /// The compact external `contract.json` format keys state, methods, and
 /// events by their public names. Normalize it to the established array form so
 /// both authoring shapes compile through exactly the same validation path.
-fn normalize_keyed_contract_declarations(mut contract: JsonValue) -> Result<JsonValue, String> {
-    let object = contract
-        .as_object_mut()
-        .ok_or_else(|| "contract must be a JSON object".to_string())?;
-
-    for section in ["state", "methods", "events"] {
-        let Some(value) = object.get_mut(section) else {
-            continue;
-        };
-        let Some(entries) = value.as_object() else {
-            continue;
-        };
-        let mut normalized = Vec::with_capacity(entries.len());
-        for (name, declaration) in entries {
-            let Some(mut declaration) = declaration.as_object().cloned() else {
-                return Err(format!("contract {section}.{name} must be a JSON object"));
-            };
-            match declaration.get("name") {
-                Some(JsonValue::String(existing)) if existing == name => {}
-                Some(JsonValue::String(existing)) => {
-                    return Err(format!(
-                        "contract {section}.{name} names itself '{existing}', which does not match its key"
-                    ));
-                }
-                Some(_) => return Err(format!("contract {section}.{name}.name must be a string")),
-                None => {
-                    declaration.insert("name".into(), JsonValue::String(name.clone()));
-                }
-            }
-            normalized.push(JsonValue::Object(declaration));
+/// One `state` entry: a type string, or an object with `type` and optional
+/// `description`, `minimum`, `maximum` and `default`.
+fn state_field(name: String, declaration: JsonValue) -> Result<ContractStateField, String> {
+    match declaration {
+        JsonValue::String(field_type) => Ok(ContractStateField {
+            name,
+            field_type,
+            description: None,
+            minimum: None,
+            maximum: None,
+            default: None,
+        }),
+        JsonValue::Object(_) => {
+            let detail: ContractStateFieldJson = serde_json::from_value(declaration)
+                .map_err(|error| format!("state.{name}: {error}"))?;
+            Ok(ContractStateField {
+                name,
+                field_type: detail.field_type,
+                description: detail.description,
+                minimum: detail.minimum,
+                maximum: detail.maximum,
+                default: detail.default,
+            })
         }
-        *value = JsonValue::Array(normalized);
+        _ => Err(format!(
+            "state.{name} must be a type string such as \"int\", or an object with a \"type\""
+        )),
     }
-    Ok(contract)
+}
+
+/// A `{ "field": "type", … }` map: event payloads and named type fields.
+fn field_map(context: &str, declaration: JsonValue) -> Result<Vec<InterfaceArgument>, String> {
+    let JsonValue::Object(fields) = declaration else {
+        return Err(format!(
+            "{context} must be an object mapping field names to type strings"
+        ));
+    };
+    fields
+        .into_iter()
+        .map(|(name, field_type)| match field_type {
+            JsonValue::String(arg_type) => Ok(InterfaceArgument { name, arg_type }),
+            _ => Err(format!(
+                "{context}.{name} must be a type string such as \"string\" or \"Item[]\""
+            )),
+        })
+        .collect()
+}
+
+/// One `methods` entry: a signature string, or an object with `signature`
+/// and optional `coalesce` and `stateBinding`.
+fn method_declaration(name: String, declaration: JsonValue) -> Result<InterfaceMethod, String> {
+    let detail = match declaration {
+        JsonValue::String(signature) => ContractMethodJson {
+            signature,
+            coalesce: CommandCoalescing::default(),
+            state_binding: None,
+        },
+        JsonValue::Object(_) => serde_json::from_value(declaration)
+            .map_err(|error| format!("methods.{name}: {error}"))?,
+        _ => {
+            return Err(format!(
+                "methods.{name} must be a signature string such as \"(id: int) -> Result\", \
+                 or an object with a \"signature\""
+            ));
+        }
+    };
+    let (args, returns) = parse_method_signature(&detail.signature)
+        .map_err(|problem| format!("methods.{name}: {problem}"))?;
+    Ok(InterfaceMethod {
+        name,
+        args,
+        returns,
+        coalesce: detail.coalesce,
+        state_binding: detail.state_binding.map(|value| StateBinding {
+            field: value.field,
+            from_arg: value.from_arg,
+            toggle: value.toggle,
+        }),
+    })
+}
+
+/// Parse `(name: type, …)` with an optional `-> Type`. Argument order is the
+/// call order. Type expressions are checked later against the contract.
+pub fn parse_method_signature(
+    signature: &str,
+) -> Result<(Vec<InterfaceArgument>, Option<String>), String> {
+    let invalid = |problem: &str| {
+        format!("signature \"{signature}\" {problem}; expected \"(name: type, …) -> Type\"")
+    };
+    let rest = signature
+        .trim()
+        .strip_prefix('(')
+        .ok_or_else(|| invalid("must start with '('"))?;
+    let (params, tail) = rest
+        .split_once(')')
+        .ok_or_else(|| invalid("is missing ')'"))?;
+    let tail = tail.trim();
+    let returns = if tail.is_empty() {
+        None
+    } else {
+        let returns = tail
+            .strip_prefix("->")
+            .map(str::trim)
+            .filter(|returns| !returns.is_empty())
+            .ok_or_else(|| invalid("has text after ')' that is not '-> Type'"))?;
+        Some(returns.to_string())
+    };
+    if params.trim().is_empty() {
+        return Ok((Vec::new(), returns));
+    }
+    let args = params
+        .split(',')
+        .map(|param| {
+            let (name, arg_type) = param
+                .split_once(':')
+                .ok_or_else(|| invalid(&format!("has argument '{}' without ': type'", param.trim())))?;
+            let (name, arg_type) = (name.trim(), arg_type.trim());
+            let identifier = name
+                .chars()
+                .next()
+                .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+                && name.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_');
+            if !identifier {
+                return Err(invalid(&format!("has invalid argument name '{name}'")));
+            }
+            if arg_type.is_empty() {
+                return Err(invalid(&format!("has no type for argument '{name}'")));
+            }
+            Ok(InterfaceArgument {
+                name: name.to_string(),
+                arg_type: arg_type.to_string(),
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    Ok((args, returns))
 }
 
 fn check_type_expr(
@@ -1875,13 +1959,13 @@ pub fn parse_version_req(value: &str) -> Option<VersionReq> {
 #[serde(deny_unknown_fields)]
 struct ContractJson {
     #[serde(default)]
-    state: Vec<ContractStateFieldJson>,
+    state: serde_json::Map<String, JsonValue>,
     #[serde(default)]
-    methods: Vec<ContractMethodJson>,
+    methods: serde_json::Map<String, JsonValue>,
     #[serde(default)]
-    events: Vec<ContractEventJson>,
+    events: serde_json::Map<String, JsonValue>,
     #[serde(default)]
-    types: HashMap<String, ContractTypeJson>,
+    types: serde_json::Map<String, JsonValue>,
     #[serde(default)]
     capabilities: ContractCapabilitiesJson,
     #[serde(default)]
@@ -1899,7 +1983,6 @@ struct ContractFeatureJson {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ContractStateFieldJson {
-    name: String,
     #[serde(rename = "type")]
     field_type: String,
     #[serde(default)]
@@ -1915,11 +1998,7 @@ struct ContractStateFieldJson {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ContractMethodJson {
-    name: String,
-    #[serde(default)]
-    args: Vec<ContractFieldJson>,
-    #[serde(default)]
-    returns: Option<String>,
+    signature: String,
     #[serde(default)]
     coalesce: CommandCoalescing,
     #[serde(default, rename = "stateBinding")]
@@ -1934,29 +2013,6 @@ struct ContractStateBindingJson {
     from_arg: Option<String>,
     #[serde(default)]
     toggle: bool,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ContractEventJson {
-    name: String,
-    #[serde(default)]
-    payload: Vec<ContractFieldJson>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ContractTypeJson {
-    #[serde(default)]
-    fields: Vec<ContractFieldJson>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct ContractFieldJson {
-    name: String,
-    #[serde(rename = "type")]
-    arg_type: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -1976,15 +2032,6 @@ struct ContractCapabilitiesJson {
     permissions: BTreeMap<String, String>,
 }
 
-impl ContractFieldJson {
-    fn into_argument(self) -> InterfaceArgument {
-        InterfaceArgument {
-            name: self.name,
-            arg_type: self.arg_type,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     #[test]
@@ -2000,10 +2047,14 @@ mod tests {
 
     #[test]
     fn coalescing_keys_are_validated_and_preserved_in_compiled_metadata() {
-        let declaration = serde_json::json!({"methods":[{
-            "name":"set", "args":[{"name":"channel","type":"string"}],
-            "coalesce":{"key":["channel"]}
-        }]});
+        let declaration = serde_json::json!({
+            "methods": {
+                "set": {
+                    "signature": "(channel: string)",
+                    "coalesce": { "key": ["channel"] }
+                }
+            }
+        });
         let compiled = parse_compiled_contract("test.channels", "1.0", &declaration).unwrap();
         let policy = &compiled.methods[0].coalesce;
         assert_eq!(policy, &compiled.schemas.methods[0].coalesce);
@@ -2017,12 +2068,12 @@ mod tests {
             serde_json::json!(["channel", "channel"]),
         ] {
             let mut invalid = declaration.clone();
-            invalid["methods"][0]["coalesce"]["key"] = key;
+            invalid["methods"]["set"]["coalesce"]["key"] = key;
             assert!(parse_interface_contract("test.channels", "1.0", &invalid).is_err());
             assert!(parse_compiled_contract("test.channels", "1.0", &invalid).is_err());
         }
         let mut unkeyed = declaration;
-        unkeyed["methods"][0]["coalesce"] = serde_json::json!(true);
+        unkeyed["methods"]["set"]["coalesce"] = serde_json::json!(true);
         let unkeyed = parse_compiled_contract("test.channels", "1.0", &unkeyed).unwrap();
         assert_eq!(compiled.schema_fingerprint, unkeyed.schema_fingerprint);
         assert_ne!(compiled.behavior_fingerprint, unkeyed.behavior_fingerprint);
@@ -2084,19 +2135,15 @@ mod tests {
     #[test]
     fn compiles_immutable_schema_policy_and_provenance_artifact() {
         let contract = serde_json::json!({
-            "state": [{ "name": "percent", "type": "float" }],
-            "methods": [{
-                "name": "set_percent",
-                "args": [{ "name": "value", "type": "float" }],
-                "returns": "Result",
-                "coalesce": true,
-                "stateBinding": { "field": "percent", "fromArg": "value" }
-            }],
-            "types": {
-                "Reading": {
-                    "fields": [{ "name": "value", "type": "float" }]
+            "state": { "percent": "float" },
+            "methods": {
+                "set_percent": {
+                    "signature": "(value: float) -> Result",
+                    "coalesce": true,
+                    "stateBinding": { "field": "percent", "fromArg": "value" }
                 }
             },
+            "types": { "Reading": { "value": "float" } },
             "capabilities": {
                 "read": ["service.audio.read"],
                 "methods": { "set_percent": ["service.audio.control"] }
@@ -2136,28 +2183,19 @@ mod tests {
         let first = parse_compiled_contract(
             "mesh.audio",
             "1.0",
-            &serde_json::json!({
-                "state": [{ "name": "percent", "type": "float" }],
-                "capabilities": { "read": ["b", "a"] }
-            }),
+            &serde_json::json!({ "state": { "percent": "float" }, "capabilities": { "read": ["b", "a"] } }),
         )
         .unwrap();
         let reordered = parse_compiled_contract(
             "mesh.audio",
             "1.0",
-            &serde_json::json!({
-                "state": [{ "name": "percent", "type": "float" }],
-                "capabilities": { "read": ["a", "b"] }
-            }),
+            &serde_json::json!({ "state": { "percent": "float" }, "capabilities": { "read": ["a", "b"] } }),
         )
         .unwrap();
         let changed = parse_compiled_contract(
             "mesh.audio",
             "1.0",
-            &serde_json::json!({
-                "state": [{ "name": "percent", "type": "int" }],
-                "capabilities": { "read": ["a", "b"] }
-            }),
+            &serde_json::json!({ "state": { "percent": "int" }, "capabilities": { "read": ["a", "b"] } }),
         )
         .unwrap();
 
@@ -2172,10 +2210,8 @@ mod tests {
             "mesh.audio",
             "1.0",
             &serde_json::json!({
-                "state": [
-                    { "name": "percent", "type": "float" },
-                    { "name": "percent", "type": "float" }
-                ]
+                "state": { "percent": "float" },
+                "methods": { "percent": "()" }
             }),
         )
         .unwrap();
@@ -2195,31 +2231,14 @@ mod tests {
     #[test]
     fn parses_contract_json_shape() {
         let contract = serde_json::json!({
-            "methods": [
-                { "name": "sensors", "returns": "Sensor[]" },
-                {
-                    "name": "read",
-                    "args": [{ "name": "sensor_id", "type": "string" }],
-                    "returns": "float"
-                }
-            ],
-            "events": [
-                {
-                    "name": "TemperatureChanged",
-                    "payload": [
-                        { "name": "sensor_id", "type": "string" },
-                        { "name": "celsius", "type": "float" }
-                    ]
-                }
-            ],
-            "types": {
-                "Sensor": {
-                    "fields": [
-                        { "name": "id", "type": "string" },
-                        { "name": "name", "type": "string" }
-                    ]
-                }
+            "methods": {
+                "sensors": "() -> Sensor[]",
+                "read": "(sensor_id: string) -> float"
             },
+            "events": {
+                "TemperatureChanged": { "sensor_id": "string", "celsius": "float" }
+            },
+            "types": { "Sensor": { "id": "string", "name": "string" } },
             "capabilities": { "required": ["service.thermal.read"] }
         });
 
@@ -2228,7 +2247,12 @@ mod tests {
         assert_eq!(contract.interface, "alice.thermal");
         assert_eq!(contract.version.to_string(), "1.0.0");
         assert_eq!(contract.methods.len(), 2);
-        assert_eq!(contract.methods[0].returns.as_deref(), Some("Sensor[]"));
+        let method = |name: &str| contract.methods.iter().find(|m| m.name == name).unwrap();
+        let sensors = method("sensors");
+        assert_eq!(sensors.returns.as_deref(), Some("Sensor[]"));
+        let read = method("read");
+        assert_eq!(read.args[0].name, "sensor_id");
+        assert_eq!(read.returns.as_deref(), Some("float"));
         assert_eq!(contract.events[0].name, "TemperatureChanged");
         assert_eq!(contract.events[0].payload.len(), 2);
         assert_eq!(
@@ -2239,17 +2263,56 @@ mod tests {
     }
 
     #[test]
+    fn method_signatures_keep_argument_order_and_report_malformed_text() {
+        let (args, returns) =
+            parse_method_signature(" ( device_id : string,percent: float ) -> Result ").unwrap();
+        let names: Vec<_> = args.iter().map(|arg| arg.name.as_str()).collect();
+        assert_eq!(names, ["device_id", "percent"]);
+        assert_eq!(args[1].arg_type, "float");
+        assert_eq!(returns.as_deref(), Some("Result"));
+        assert_eq!(parse_method_signature("()").unwrap(), (Vec::new(), None));
+        for (signature, problem) in [
+            ("id: int", "must start with '('"),
+            ("(id: int", "is missing ')'"),
+            ("(id) -> Result", "without ': type'"),
+            ("(1id: int)", "invalid argument name '1id'"),
+            ("(id: )", "no type for argument 'id'"),
+            ("(id: int) Result", "is not '-> Type'"),
+            ("(id: int) ->", "is not '-> Type'"),
+        ] {
+            let error = parse_method_signature(signature).unwrap_err();
+            assert!(error.contains(problem), "{signature}: {error}");
+        }
+        let error = parse_interface_contract(
+            "mesh.test",
+            "1.0",
+            &serde_json::json!({ "methods": { "go": ["id: int"] } }),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("methods.go must be a signature string"), "{error}");
+        let error = parse_interface_contract(
+            "mesh.test",
+            "1.0",
+            &serde_json::json!({ "types": { "Item": { "id": { "type": "int" } } } }),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("types.Item.id must be a type string"), "{error}");
+    }
+
+    #[test]
     fn parses_keyed_contract_json_shape() {
         let contract = serde_json::json!({
-            "state": { "percent": { "type": "float" } },
+            "state": { "percent": "float" },
             "methods": {
                 "set_percent": {
-                    "args": [{ "name": "value", "type": "float" }],
+                    "signature": "(value: float)",
                     "stateBinding": { "field": "percent", "fromArg": "value" }
                 }
             },
-            "events": { "Changed": { "payload": [] } },
-            "types": { "Device": { "fields": [] } }
+            "events": { "Changed": {} },
+            "types": { "Device": {} }
         });
         let parsed = parse_interface_contract("mesh.audio", "1.0", &contract).unwrap();
         assert_eq!(parsed.state_fields[0].name, "percent");
@@ -2261,9 +2324,9 @@ mod tests {
     #[test]
     fn compiles_explicit_operation_capability_policy() {
         let contract = serde_json::json!({
-            "state": [{ "name": "temperature", "type": "float" }],
-            "methods": [{ "name": "calibrate", "returns": "Result" }],
-            "events": [{ "name": "Changed" }],
+            "state": { "temperature": "float" },
+            "methods": { "calibrate": "() -> Result" },
+            "events": { "Changed": {} },
             "capabilities": {
                 "read": ["alice.thermal.observe"],
                 "events": { "Changed": ["alice.thermal.subscribe"] },
@@ -2288,13 +2351,8 @@ mod tests {
     #[test]
     fn compiles_features_and_negotiates_provider_support() {
         let contract = serde_json::json!({
-            "state": {
-                "percent": { "type": "float" },
-                "apps": { "type": "object[]?" }
-            },
-            "methods": {
-                "set_app_volume": { "args": [{ "name": "app", "type": "string" }] }
-            },
+            "state": { "percent": "float", "apps": "object[]?" },
+            "methods": { "set_app_volume": "(app: string)" },
             "events": { "AppsChanged": {} },
             "features": {
                 "per-app-volume": {
@@ -2320,7 +2378,7 @@ mod tests {
         let reject = |features: serde_json::Value, state_type: &str| {
             let contract = serde_json::json!({
                 "state": { "level": { "type": state_type } },
-                "methods": { "boost": {} },
+                "methods": { "boost": "()" },
                 "features": features
             });
             parse_compiled_contract("mesh.audio", "1.0", &contract)
@@ -2338,7 +2396,7 @@ mod tests {
         .contains("belongs to both"));
         assert!(reject(serde_json::json!({ "Per App": { "members": ["boost"] } }), "float?")
             .contains("lowercase words"));
-        let reserved = serde_json::json!({ "methods": { "supports": {} } });
+        let reserved = serde_json::json!({ "methods": { "supports": "()" } });
         assert!(parse_compiled_contract("mesh.audio", "1.0", &reserved).is_err());
     }
 
@@ -2354,30 +2412,24 @@ mod tests {
     #[test]
     fn parses_command_state_binding() {
         let contract = serde_json::json!({
-            "state": [
-                {
-                    "name": "available",
+            "state": {
+                "available": {
                     "type": "boolean",
                     "description": "Whether the service is reachable"
                 },
-                { "name": "muted", "type": "boolean" }
-            ],
-            "methods": [
-                {
-                    "name": "set_muted",
-                    "args": [
-                        { "name": "device_id", "type": "string" },
-                        { "name": "muted", "type": "boolean" }
-                    ],
-                    "returns": "Result",
+                "muted": "boolean"
+            },
+            "methods": {
+                "set_muted": {
+                    "signature": "(device_id: string, muted: boolean) -> Result",
                     "coalesce": true,
                     "stateBinding": { "field": "muted", "fromArg": "muted" }
                 },
-                {
-                    "name": "toggle_mute",
+                "toggle_mute": {
+                    "signature": "()",
                     "stateBinding": { "field": "muted", "toggle": true }
                 }
-            ]
+            }
         });
 
         let contract = parse_interface_contract("mesh.audio", "1.0", &contract).unwrap();
@@ -2403,12 +2455,13 @@ mod tests {
     #[test]
     fn rejects_legacy_optimistic_annotation() {
         let contract = serde_json::json!({
-            "state": [{ "name": "level", "type": "float" }],
-            "methods": [{
-                "name": "set",
-                "args": [{ "name": "level", "type": "float" }],
-                "optimistic": { "field": "level", "fromArg": "level" }
-            }]
+            "state": { "level": "float" },
+            "methods": {
+                "set": {
+                    "signature": "(level: float)",
+                    "optimistic": { "field": "level", "fromArg": "level" }
+                }
+            }
         });
 
         let err = parse_interface_contract("mesh.brightness", "1.0", &contract).unwrap_err();
@@ -2419,12 +2472,13 @@ mod tests {
     #[test]
     fn rejects_state_binding_type_mismatch() {
         let contract = serde_json::json!({
-            "state": [{ "name": "level", "type": "float" }],
-            "methods": [{
-                "name": "set",
-                "args": [{ "name": "level", "type": "string" }],
-                "stateBinding": { "field": "level", "fromArg": "level" }
-            }]
+            "state": { "level": "float" },
+            "methods": {
+                "set": {
+                    "signature": "(level: string)",
+                    "stateBinding": { "field": "level", "fromArg": "level" }
+                }
+            }
         });
 
         let err = parse_interface_contract("mesh.brightness", "1.0", &contract).unwrap_err();
@@ -2435,11 +2489,13 @@ mod tests {
     #[test]
     fn rejects_toggle_binding_for_non_boolean_state() {
         let contract = serde_json::json!({
-            "state": [{ "name": "level", "type": "float" }],
-            "methods": [{
-                "name": "toggle",
-                "stateBinding": { "field": "level", "toggle": true }
-            }]
+            "state": { "level": "float" },
+            "methods": {
+                "toggle": {
+                    "signature": "()",
+                    "stateBinding": { "field": "level", "toggle": true }
+                }
+            }
         });
 
         let err = parse_interface_contract("mesh.brightness", "1.0", &contract).unwrap_err();
@@ -2449,9 +2505,7 @@ mod tests {
 
     #[test]
     fn rejects_undeclared_named_type() {
-        let contract = serde_json::json!({
-            "methods": [{ "name": "sensors", "returns": "Sensor[]" }]
-        });
+        let contract = serde_json::json!({ "methods": { "sensors": "() -> Sensor[]" } });
         let err = parse_interface_contract("alice.thermal", "1.0", &contract).unwrap_err();
         assert!(matches!(err, ContractError::InvalidType { .. }));
         assert!(err.to_string().contains("Sensor"));
@@ -2459,9 +2513,7 @@ mod tests {
 
     #[test]
     fn rejects_invalid_type_expression() {
-        let contract = serde_json::json!({
-            "state": [{ "name": "percent", "type": "[float]" }]
-        });
+        let contract = serde_json::json!({ "state": { "percent": "[float]" } });
         let err = parse_interface_contract("mesh.audio", "1.0", &contract).unwrap_err();
         assert!(matches!(err, ContractError::InvalidType { .. }));
     }
@@ -2493,6 +2545,15 @@ mod tests {
         assert!(expr.matches(&serde_json::json!(3)));
         assert!(!expr.matches(&serde_json::json!(3.5)));
 
+        let expr = TypeExpr::parse("blob?").unwrap();
+        assert_eq!(expr.base, BaseType::Blob);
+        assert_eq!(expr.to_string(), "blob?");
+        let handle = format!("mesh-blob:sha256-{}", "ab".repeat(32));
+        assert!(expr.matches_with_types(&serde_json::json!(handle), &HashMap::new()));
+        assert!(expr.matches_with_types(&serde_json::Value::Null, &HashMap::new()));
+        assert!(!expr.matches_with_types(&serde_json::json!("/tmp/icon.png"), &HashMap::new()));
+        assert!(!expr.matches(&serde_json::json!("mesh-blob:sha256-00")));
+
         assert!(TypeExpr::parse("lowercaseNamed").is_err());
         assert!(TypeExpr::parse("").is_err());
         assert!(TypeExpr::parse("[Sensor]").is_err());
@@ -2502,17 +2563,8 @@ mod tests {
     fn recursively_validates_named_arrays_optional_fields_and_results() {
         let contract = serde_json::json!({
             "types": {
-                "Reading": {
-                    "fields": [
-                        { "name": "label", "type": "string" },
-                        { "name": "unit", "type": "string?" }
-                    ]
-                },
-                "Batch": {
-                    "fields": [
-                        { "name": "readings", "type": "Reading[]" }
-                    ]
-                }
+                "Reading": { "label": "string", "unit": "string?" },
+                "Batch": { "readings": "Reading[]" }
             }
         });
         let parsed = parse_interface_contract("mesh.test", "1.0", &contract).unwrap();
@@ -2543,11 +2595,7 @@ mod tests {
 
     #[test]
     fn rejects_required_recursive_named_type_cycles() {
-        let contract = serde_json::json!({
-            "types": {
-                "Node": { "fields": [{ "name": "next", "type": "Node" }] }
-            }
-        });
+        let contract = serde_json::json!({ "types": { "Node": { "next": "Node" } } });
         let err = parse_interface_contract("mesh.test", "1.0", &contract).unwrap_err();
         assert!(matches!(err, ContractError::InvalidType { .. }));
         assert!(err.to_string().contains("recursive cycle"));
@@ -2557,11 +2605,11 @@ mod tests {
     fn finite_recursive_types_validate_values_and_keep_bounds() {
         let contract = serde_json::json!({
             "types": {
-                "MenuItem": { "fields": [
-                    { "name": "label", "type": "string" },
-                    { "name": "children", "type": "MenuItem[]" },
-                    { "name": "next", "type": "MenuItem?" }
-                ] }
+                "MenuItem": {
+                    "label": "string",
+                    "children": "MenuItem[]",
+                    "next": "MenuItem?"
+                }
             }
         });
         let parsed = parse_interface_contract("mesh.test", "1.0", &contract).unwrap();
@@ -2592,13 +2640,13 @@ mod tests {
             "mesh.test",
             "1.0",
             &serde_json::json!({
-                "state": [
-                    { "name": "percent", "type": "float", "minimum": 0, "maximum": 100 },
-                    { "name": "level", "type": "int", "minimum": 0, "maximum": 10 },
-                    { "name": "muted", "type": "boolean", "default": false },
-                    { "name": "label", "type": "string?" },
-                    { "name": "source_module", "type": "string" }
-                ]
+                "state": {
+                    "percent": { "type": "float", "minimum": 0, "maximum": 100 },
+                    "level": { "type": "int", "minimum": 0, "maximum": 10 },
+                    "muted": { "type": "boolean", "default": false },
+                    "label": "string?",
+                    "source_module": "string"
+                }
             }),
         )
         .unwrap()
@@ -2623,8 +2671,8 @@ mod tests {
         assert_eq!(
             warnings,
             [
-                "state field 'percent' for mesh.test expected float, got string",
                 "missing required state field 'level' for mesh.test",
+                "state field 'percent' for mesh.test expected float, got string",
             ]
         );
         assert_eq!(
@@ -2637,23 +2685,23 @@ mod tests {
     fn rejects_invalid_state_constraints() {
         for (field, message) in [
             (
-                serde_json::json!({ "name": "on", "type": "boolean", "minimum": 0 }),
+                serde_json::json!({ "type": "boolean", "minimum": 0 }),
                 "is not int or float",
             ),
             (
-                serde_json::json!({ "name": "n", "type": "int", "minimum": 5, "maximum": 1 }),
+                serde_json::json!({ "type": "int", "minimum": 5, "maximum": 1 }),
                 "is greater than maximum",
             ),
             (
-                serde_json::json!({ "name": "n", "type": "int", "default": "x" }),
+                serde_json::json!({ "type": "int", "default": "x" }),
                 "does not match its type",
             ),
             (
-                serde_json::json!({ "name": "n", "type": "float", "maximum": 1, "default": 2 }),
+                serde_json::json!({ "type": "float", "maximum": 1, "default": 2 }),
                 "outside its declared range",
             ),
         ] {
-            let contract = serde_json::json!({ "state": [field] });
+            let contract = serde_json::json!({ "state": { "n": field } });
             let err = parse_interface_contract("mesh.test", "1.0", &contract).unwrap_err();
             assert!(err.to_string().contains(message), "{err}");
         }
@@ -2664,7 +2712,7 @@ mod tests {
         let unbounded = parse_compiled_contract(
             "mesh.test",
             "1.0",
-            &serde_json::json!({ "state": [{ "name": "percent", "type": "float" }] }),
+            &serde_json::json!({ "state": { "percent": "float" } }),
         )
         .unwrap();
         assert_ne!(
@@ -2679,18 +2727,11 @@ mod tests {
             "mesh.audio",
             "1.0",
             &serde_json::json!({
-                "methods": [{
-                    "name": "set_volume",
-                    "args": [{ "name": "percent", "type": "float" }],
-                    "returns": "Result"
-                }],
-                "events": [
-                    { "name": "VolumeChanged", "payload": [
-                        { "name": "device_id", "type": "string" },
-                        { "name": "level", "type": "float" }
-                    ]},
-                    { "name": "Reset" }
-                ]
+                "methods": { "set_volume": "(percent: float) -> Result" },
+                "events": {
+                    "VolumeChanged": { "device_id": "string", "level": "float" },
+                    "Reset": {}
+                }
             }),
         )
         .unwrap();

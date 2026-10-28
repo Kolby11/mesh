@@ -69,6 +69,28 @@ local function local_path(value)
     return path:sub(1, 1) == "/" and path or ""
 end
 
+-- The image-data hint is (iiibiiay): width, height, rowstride, has_alpha,
+-- bits_per_sample, channels, data. Older senders use image_data or icon_data.
+local function image_data(hints)
+    local raw = plain(hints["image-data"] or hints.image_data or hints.icon_data)
+    if type(raw) ~= "table" then
+        return nil
+    end
+    local width, height, stride = plain(raw[1]), plain(raw[2]), plain(raw[3])
+    local alpha, bits, channels, bytes = plain(raw[4]), plain(raw[5]), plain(raw[6]), plain(raw[7])
+    if bits ~= 8 or type(bytes) ~= "table" then
+        return nil
+    end
+    local mime = if alpha and channels == 4 then "image/x-mesh-rgba8"
+        elseif not alpha and channels == 3 then "image/x-mesh-rgb8"
+        else nil
+    if not mime then
+        return nil
+    end
+    local ok, handle = pcall(mesh.blob.put, bytes, mime, { width = width, height = height, stride = stride })
+    return ok and handle or nil
+end
+
 local function find(id)
     for index, notification in state.notifications do
         if notification.id == id then
@@ -138,6 +160,7 @@ local function notify(args)
         app_name = tostring(app_name),
         app_icon = tostring(icon),
         image = image,
+        image_data = image_data(hints),
         summary = strip_markup(summary),
         body = strip_markup(body),
         urgency = urgency,

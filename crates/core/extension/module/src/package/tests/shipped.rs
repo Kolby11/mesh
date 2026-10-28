@@ -603,3 +603,20 @@ fn shipped_tray_and_http_providers_have_valid_contracts_and_host_grants() {
         graph.diagnostics()
     );
 }
+
+#[test]
+fn every_shipped_contract_generates_rust_bindings_and_a_descriptor() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let graph = crate::package::load_authoring_snapshot(&root.join("config/module.json"))
+        .expect("shipped graph loads");
+    assert!(!graph.interface_contracts().is_empty());
+    for (interface, contract) in graph.interface_contracts() {
+        let compiled = contract
+            .compile(mesh_core_service::DeclarationProvenance::unknown())
+            .unwrap_or_else(|error| panic!("{interface}: {error}"));
+        if let Err(error) = mesh_core_service::generate_rust_bindings(&compiled) {
+            panic!("{interface}: {error}");
+        }
+        serde_json::to_value(compiled.descriptor()).expect("descriptor serializes");
+    }
+}

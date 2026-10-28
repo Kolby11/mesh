@@ -3,6 +3,7 @@
 //! This crate describes what the desktop has installed. MESH resource-pack
 //! modules remain semantic mapping and composition units layered above it.
 
+pub mod blob;
 mod coverage;
 mod font;
 mod frozen_font;

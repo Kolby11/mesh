@@ -11,21 +11,63 @@
       "domain": "system",
       "relationship": "base",
       "contract": {
-        "state": [
-          { "name": "available", "type": "boolean", "description": "Whether load figures have been sampled" },
-          { "name": "cpu", "type": "float", "minimum": 0, "maximum": 100, "description": "Processor use in percent over the last sample interval" },
-          { "name": "cpu_history", "type": "float[]", "description": "Recent processor samples in percent, oldest first" },
-          { "name": "memory_used", "type": "float", "minimum": 0, "description": "Used memory in bytes (total minus available)" },
-          { "name": "memory_total", "type": "float", "minimum": 0, "description": "Total memory in bytes" },
-          { "name": "disk_used", "type": "float", "minimum": 0, "description": "Used bytes on the root filesystem" },
-          { "name": "disk_total", "type": "float", "minimum": 0, "description": "Size in bytes of the root filesystem" },
-          { "name": "temperature", "type": "float?", "description": "Hottest processor sensor in degrees Celsius; absent when unknown" },
-          { "name": "net_rx", "type": "float", "minimum": 0, "description": "Received bytes per second, all non-loopback interfaces" },
-          { "name": "net_tx", "type": "float", "minimum": 0, "description": "Sent bytes per second, all non-loopback interfaces" },
-          { "name": "uptime", "type": "float", "minimum": 0, "description": "Seconds since boot" }
-        ],
-        "methods": [],
-        "events": [],
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether load figures have been sampled"
+          },
+          "cpu": {
+            "type": "float",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Processor use in percent over the last sample interval"
+          },
+          "cpu_history": {
+            "type": "float[]",
+            "description": "Recent processor samples in percent, oldest first"
+          },
+          "memory_used": {
+            "type": "float",
+            "minimum": 0,
+            "description": "Used memory in bytes (total minus available)"
+          },
+          "memory_total": {
+            "type": "float",
+            "minimum": 0,
+            "description": "Total memory in bytes"
+          },
+          "disk_used": {
+            "type": "float",
+            "minimum": 0,
+            "description": "Used bytes on the root filesystem"
+          },
+          "disk_total": {
+            "type": "float",
+            "minimum": 0,
+            "description": "Size in bytes of the root filesystem"
+          },
+          "temperature": {
+            "type": "float?",
+            "description": "Hottest processor sensor in degrees Celsius; absent when unknown"
+          },
+          "net_rx": {
+            "type": "float",
+            "minimum": 0,
+            "description": "Received bytes per second, all non-loopback interfaces"
+          },
+          "net_tx": {
+            "type": "float",
+            "minimum": 0,
+            "description": "Sent bytes per second, all non-loopback interfaces"
+          },
+          "uptime": {
+            "type": "float",
+            "minimum": 0,
+            "description": "Seconds since boot"
+          }
+        },
+        "methods": {},
+        "events": {},
         "capabilities": {
           "required": ["service.system.read"],
           "permissions": { "service.system.read": "standard" }

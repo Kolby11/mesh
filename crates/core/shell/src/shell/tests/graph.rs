@@ -207,7 +207,7 @@ fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candid
                         "name": "test.example",
                         "version": "1.0",
                         "domain": "example",
-                        "contract": { "methods": [{ "name": "read", "returns": "boolean" }] }
+                        "contract": { "methods": { "read": "() -> boolean" } }
                     }
                 }
             }"#,
@@ -256,7 +256,7 @@ fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candid
                         "name": "test.example",
                         "version": "1.0",
                         "domain": "example",
-                        "contract": { "methods": [{ "name": "read", "returns": "boolean" }] }
+                        "contract": { "methods": { "read": "() -> boolean" } }
                     }
                 }
             }"#,

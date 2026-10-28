@@ -1,144 +1,55 @@
 {
   "name": "@mesh/notifications-interface",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Desktop notification contract: the current notification list, which ones are popped up, and do-not-disturb.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "interface",
     "interface": {
       "name": "mesh.notifications",
-      "version": "1.0",
+      "version": "1.1",
       "domain": "notifications",
       "relationship": "base",
       "contract": {
-        "state": [
-          {
-            "name": "available",
+        "state": {
+          "available": {
             "type": "boolean",
             "description": "Whether the provider is receiving notifications"
           },
-          {
-            "name": "notifications",
+          "notifications": {
             "type": "Notification[]",
             "description": "Open notifications, newest first"
           },
-          {
-            "name": "dnd",
+          "dnd": {
             "type": "boolean",
             "description": "Do not disturb: new notifications are listed but not popped up, except critical ones"
           }
-        ],
-        "methods": [
-          {
-            "name": "dismiss",
-            "args": [
-              {
-                "name": "id",
-                "type": "int"
-              }
-            ],
-            "returns": "Result"
-          },
-          {
-            "name": "invoke",
-            "args": [
-              {
-                "name": "id",
-                "type": "int"
-              },
-              {
-                "name": "action",
-                "type": "string"
-              }
-            ],
-            "returns": "Result"
-          },
-          {
-            "name": "hide_popup",
-            "args": [
-              {
-                "name": "id",
-                "type": "int"
-              }
-            ],
-            "returns": "Result"
-          },
-          {
-            "name": "clear",
-            "returns": "Result"
-          },
-          {
-            "name": "set_dnd",
-            "args": [
-              {
-                "name": "enabled",
-                "type": "boolean"
-              }
-            ],
-            "returns": "Result",
-            "stateBinding": {
-              "field": "dnd",
-              "fromArg": "enabled"
-            }
+        },
+        "methods": {
+          "dismiss": "(id: int) -> Result",
+          "invoke": "(id: int, action: string) -> Result",
+          "hide_popup": "(id: int) -> Result",
+          "clear": "() -> Result",
+          "set_dnd": {
+            "signature": "(enabled: boolean) -> Result",
+            "stateBinding": { "field": "dnd", "fromArg": "enabled" }
           }
-        ],
-        "events": [],
+        },
+        "events": {},
         "types": {
-          "Action": {
-            "fields": [
-              {
-                "name": "key",
-                "type": "string"
-              },
-              {
-                "name": "label",
-                "type": "string"
-              }
-            ]
-          },
+          "Action": { "key": "string", "label": "string" },
           "Notification": {
-            "fields": [
-              {
-                "name": "id",
-                "type": "int"
-              },
-              {
-                "name": "app_name",
-                "type": "string"
-              },
-              {
-                "name": "app_icon",
-                "type": "string"
-              },
-              {
-                "name": "image",
-                "type": "string"
-              },
-              {
-                "name": "summary",
-                "type": "string"
-              },
-              {
-                "name": "body",
-                "type": "string"
-              },
-              {
-                "name": "urgency",
-                "type": "int"
-              },
-              {
-                "name": "actions",
-                "type": "Action[]"
-              },
-              {
-                "name": "time",
-                "type": "float"
-              },
-              {
-                "name": "popup",
-                "type": "boolean"
-              }
-            ]
+            "id": "int",
+            "app_name": "string",
+            "app_icon": "string",
+            "image": "string",
+            "image_data": "blob?",
+            "summary": "string",
+            "body": "string",
+            "urgency": "int",
+            "actions": "Action[]",
+            "time": "float",
+            "popup": "boolean"
           }
         },
         "capabilities": {

@@ -7,7 +7,7 @@
 //! is performed by the runtime contracts in `manifest::diagnostics`, so this
 //! tree must not become a second runtime validation authority.
 
-use crate::json::schema::{Kind, Node, enumeration, field, obj, scalar};
+use crate::json::schema::{ContractSyntax, Kind, Node, enumeration, field, obj, scalar};
 
 /// Build a node from this file's `&'static str` literals.
 fn node(doc: &'static str, type_hint: &'static str, kind: Kind) -> Node {
@@ -632,17 +632,13 @@ fn extension_point_declaration_node() -> Node {
                 "props",
                 false,
                 node(
-                    "Props the host passes to each contribution.",
-                    "array",
-                    Kind::Array(Box::new(obj(
-                        "A declared prop.",
+                    "Props the host passes to each contribution, keyed by name.",
+                    "object<string, type | object>",
+                    Kind::Map(Box::new(contract_type(
+                        "The prop's type expression, or an object with `type` and \
+                         `description`.",
                         vec![
-                            field("name", true, scalar("Prop name.", "string")),
-                            field(
-                                "type",
-                                true,
-                                scalar("Type expression in the contract grammar.", "string"),
-                            ),
+                            field("type", true, contract_type(TYPE_EXPRESSION_DOC, Vec::new())),
                             field("description", false, scalar("What it carries.", "string")),
                         ],
                     ))),
@@ -1260,55 +1256,119 @@ fn interface_node() -> Node {
     )
 }
 
+fn contract_type(doc: &'static str, fields: Vec<crate::json::schema::Field>) -> Node {
+    node(
+        doc,
+        if fields.is_empty() {
+            "type"
+        } else {
+            "type | object"
+        },
+        Kind::ContractText {
+            syntax: ContractSyntax::Type,
+            fields,
+        },
+    )
+}
+
+const TYPE_EXPRESSION_DOC: &str = "Type expression: `string`, `int`, `float`, `boolean`, \
+     `blob`, `object`, `any`, `Result`, or a named type from `types`, with optional `[]` \
+     (array) and `?` (optional) suffixes.";
+
 fn contract_node() -> Node {
-    let typed_field = || {
-        obj(
-            "A named, typed field.",
-            vec![
-                field("name", true, scalar("Field name.", "string")),
-                field(
-                    "type",
-                    true,
-                    scalar(
-                        "Type expression: string, int, float, boolean, object, any, a named \
-                         type from `types`, with optional `[]` (array) and `?` (optional) \
-                         suffixes.",
-                        "string",
-                    ),
-                ),
-                field("description", false, scalar("Field description.", "string")),
-            ],
+    let field_map = |doc: &'static str| {
+        node(
+            doc,
+            "object<string, type>",
+            Kind::Map(Box::new(contract_type(TYPE_EXPRESSION_DOC, Vec::new()))),
         )
     };
-    let state_field = || {
-        let mut node = typed_field();
-        if let Kind::Object(fields) = &mut node.kind {
-            fields.extend([
-                field(
-                    "minimum",
-                    false,
-                    scalar(
-                        "Lowest value of an int or float field; providers are clamped to it.",
-                        "number",
-                    ),
+    let state_field = contract_type(
+        "A state field's type expression, or an object with `type` and optional \
+         `description`, `minimum`, `maximum` and `default`.",
+        vec![
+            field("type", true, contract_type(TYPE_EXPRESSION_DOC, Vec::new())),
+            field("description", false, scalar("Field description.", "string")),
+            field(
+                "minimum",
+                false,
+                scalar(
+                    "Lowest value of an int or float field; providers are clamped to it.",
+                    "number",
                 ),
-                field(
-                    "maximum",
-                    false,
-                    scalar(
-                        "Highest value of an int or float field; providers are clamped to it.",
-                        "number",
-                    ),
+            ),
+            field(
+                "maximum",
+                false,
+                scalar(
+                    "Highest value of an int or float field; providers are clamped to it.",
+                    "number",
                 ),
-                field(
-                    "default",
-                    false,
-                    scalar("Value used when a provider omits the field.", "any"),
-                ),
-            ]);
-        }
-        node
+            ),
+            field(
+                "default",
+                false,
+                scalar("Value used when a provider omits the field.", "any"),
+            ),
+        ],
+    );
+    let signature = || {
+        node(
+            "Method signature: `(name: type, …) -> Type`. Arguments are in call order; \
+             omit `-> Type` for a method without a declared return.",
+            "signature",
+            Kind::ContractText {
+                syntax: ContractSyntax::Signature,
+                fields: Vec::new(),
+            },
+        )
     };
+    let method = node(
+        "A signature string such as `(id: int) -> Result`, or an object with \
+         `signature` and optional `coalesce` and `stateBinding`.",
+        "signature | object",
+        Kind::ContractText {
+            syntax: ContractSyntax::Signature,
+            fields: vec![
+                field("signature", true, signature()),
+                field(
+                    "coalesce",
+                    false,
+                    scalar(
+                        "Replace queued calls with the newest: `true`, or \
+                         `{ \"key\": [args] }` to coalesce per argument values \
+                         (idempotent setters only).",
+                        "boolean | { key }",
+                    ),
+                ),
+                field(
+                    "stateBinding",
+                    false,
+                    obj(
+                        "Reactive command-to-state binding applied by the shell. \
+                         Declare exactly one of `fromArg` or `toggle: true`.",
+                        vec![
+                            field(
+                                "field",
+                                true,
+                                scalar("Shared service-state field to update.", "string"),
+                            ),
+                            field(
+                                "fromArg",
+                                false,
+                                scalar("Command argument supplying the bound value.", "string"),
+                            ),
+                            field(
+                                "toggle",
+                                false,
+                                scalar("Negate the current boolean state field.", "boolean"),
+                            ),
+                        ],
+                    ),
+                ),
+            ],
+        },
+    );
     obj(
         "Inline interface contract JSON: state fields, command methods, events, \
          named types, and consumer capabilities.",
@@ -1317,113 +1377,38 @@ fn contract_node() -> Node {
                 "state",
                 false,
                 node(
-                    "Public state fields every provider must emit; read through \
-                          the service proxy as plain field access.",
-                    "array",
-                    Kind::Array(Box::new(state_field())),
+                    "Public state fields every provider must emit, keyed by name; read \
+                     through the service proxy as plain field access.",
+                    "object<string, type | object>",
+                    Kind::Map(Box::new(state_field)),
                 ),
             ),
             field(
                 "methods",
                 false,
                 node(
-                    "Mutating command methods callable from frontend scripts.",
-                    "array",
-                    Kind::Array(Box::new(obj(
-                        "A command method declaration.",
-                        vec![
-                            field("name", true, scalar("Command name.", "string")),
-                            field(
-                                "args",
-                                false,
-                                node(
-                                    "Typed command arguments.",
-                                    "array",
-                                    Kind::Array(Box::new(typed_field())),
-                                ),
-                            ),
-                            field(
-                                "returns",
-                                false,
-                                scalar("Return type expression.", "string"),
-                            ),
-                            field(
-                                "coalesce",
-                                false,
-                                scalar(
-                                    "Coalesce queued duplicates to the most recent payload \
-                                     (idempotent setters only).",
-                                    "boolean",
-                                ),
-                            ),
-                            field(
-                                "stateBinding",
-                                false,
-                                obj(
-                                    "Reactive command-to-state binding applied by the shell. \
-                                     Declare exactly one of `fromArg` or `toggle: true`.",
-                                    vec![
-                                        field(
-                                            "field",
-                                            true,
-                                            scalar(
-                                                "Shared service-state field to update.",
-                                                "string",
-                                            ),
-                                        ),
-                                        field(
-                                            "fromArg",
-                                            false,
-                                            scalar(
-                                                "Command argument supplying the bound value.",
-                                                "string",
-                                            ),
-                                        ),
-                                        field(
-                                            "toggle",
-                                            false,
-                                            scalar(
-                                                "Negate the current boolean state field.",
-                                                "boolean",
-                                            ),
-                                        ),
-                                    ],
-                                ),
-                            ),
-                        ],
-                    ))),
+                    "Command methods callable from frontend scripts, keyed by name.",
+                    "object<string, signature | object>",
+                    Kind::Map(Box::new(method)),
                 ),
             ),
             field(
                 "events",
                 false,
                 node(
-                    "Named events with typed payload fields.",
-                    "array",
-                    Kind::Array(Box::new(obj(
-                        "An event declaration.",
-                        vec![
-                            field("name", true, scalar("Event name.", "string")),
-                            field(
-                                "payload",
-                                false,
-                                node(
-                                    "Typed payload fields.",
-                                    "array",
-                                    Kind::Array(Box::new(typed_field())),
-                                ),
-                            ),
-                        ],
-                    ))),
+                    "Events keyed by name; each maps payload field names to types.",
+                    "object<string, object<string, type>>",
+                    Kind::Map(Box::new(field_map("Payload fields of this event."))),
                 ),
             ),
             field(
                 "types",
                 false,
-                scalar(
-                    "Named record types referenced by type expressions, keyed by \
-                     PascalCase name; each has a `fields` array.",
-                    "object",
+                node(
+                    "Named record types keyed by PascalCase name; each maps field names \
+                     to types.",
+                    "object<string, object<string, type>>",
+                    Kind::Map(Box::new(field_map("Fields of this record type."))),
                 ),
             ),
             field(

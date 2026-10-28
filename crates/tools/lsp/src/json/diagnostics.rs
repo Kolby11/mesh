@@ -107,6 +107,23 @@ fn check_node(source: &str, node: &JNode, schema: &Node, origin: &str, out: &mut
         // Suggested-value strings are never validated (extensible vocabulary,
         // or a discovery that cannot see everything the runtime can).
         (JValue::String(_), Kind::Suggest(_) | Kind::SuggestDiscovered(_)) => {}
+        // Contract text is checked by the contract compiler, which knows the
+        // whole contract; the object form is checked like an object.
+        (JValue::String(_), Kind::ContractText { .. }) => {}
+        (JValue::Object(members), Kind::ContractText { fields, .. }) if !fields.is_empty() => {
+            for m in members {
+                match fields.iter().find(|f| f.name == m.key) {
+                    Some(field) => check_node(source, &m.value, &field.node, origin, out),
+                    None => out.push(warn(
+                        source,
+                        m.key_span.0,
+                        m.key_span.1,
+                        format!("unknown property `{}`", m.key),
+                        origin,
+                    )),
+                }
+            }
+        }
         // Structural mismatches: a container was expected but a scalar appeared
         // (or vice versa). Scalar schema nodes accept any JSON value.
         (actual, expected) => {
@@ -122,6 +139,8 @@ fn type_mismatch(actual: &JValue, expected: &Kind) -> Option<String> {
         Kind::Object(_) | Kind::OpenObject { .. } | Kind::Map(_) => "object",
         Kind::Array(_) => "array",
         Kind::Enum(_) => "string",
+        Kind::ContractText { fields, .. } if fields.is_empty() => "string",
+        Kind::ContractText { .. } => "string or object",
         Kind::Suggest(_) | Kind::SuggestDiscovered(_) | Kind::Scalar => return None,
     };
     let got = match actual {

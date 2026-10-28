@@ -700,12 +700,10 @@ mod tests {
     fn base() -> InterfaceContract {
         contract(
             r#"{
-                "state": [{"name":"percent","type":"float"},{"name":"muted","type":"boolean"}],
-                "methods": [{"name":"set_volume",
-                    "args":[{"name":"percent","type":"float"}],"returns":"Result"}],
-                "events": [{"name":"VolumeChanged",
-                    "payload":[{"name":"level","type":"float"}]}],
-                "capabilities": {"required":["service.audio.read"]}
+                "state": { "percent": "float", "muted": "boolean" },
+                "methods": { "set_volume": "(percent: float) -> Result" },
+                "events": { "VolumeChanged": { "level": "float" } },
+                "capabilities": { "required": ["service.audio.read"] }
             }"#,
         )
     }
@@ -721,12 +719,12 @@ mod tests {
     fn operation_policy_changes_are_breaking() {
         let candidate = contract(
             r#"{
-                "state": [{"name":"percent","type":"float"}],
-                "methods": [{"name":"set_volume","returns":"Result"}],
-                "events": [],
+                "state": { "percent": "float" },
+                "methods": { "set_volume": "() -> Result" },
+                "events": {},
                 "capabilities": {
-                    "required":["service.audio.read"],
-                    "read":["service.audio.observe"]
+                    "required": ["service.audio.read"],
+                    "read": ["service.audio.observe"]
                 }
             }"#,
         );
@@ -743,15 +741,17 @@ mod tests {
     fn additions_are_additive_not_breaking() {
         let candidate = contract(
             r#"{
-                "state": [{"name":"percent","type":"float"},{"name":"muted","type":"boolean"},
-                          {"name":"device","type":"string"}],
-                "methods": [{"name":"set_volume",
-                    "args":[{"name":"percent","type":"float"}],"returns":"Result"},
-                    {"name":"set_muted","args":[{"name":"muted","type":"boolean"}],
-                     "returns":"Result"}],
-                "events": [{"name":"VolumeChanged","payload":[{"name":"level","type":"float"}]},
-                           {"name":"DeviceChanged","payload":[]}],
-                "capabilities": {"required":["service.audio.read"]}
+                "state": {
+                    "percent": "float",
+                    "muted": "boolean",
+                    "device": "string"
+                },
+                "methods": {
+                    "set_volume": "(percent: float) -> Result",
+                    "set_muted": "(muted: boolean) -> Result"
+                },
+                "events": { "VolumeChanged": { "level": "float" }, "DeviceChanged": {} },
+                "capabilities": { "required": ["service.audio.read"] }
             }"#,
         );
         let diff = diff_contracts(&base(), &candidate);
@@ -763,11 +763,12 @@ mod tests {
     #[test]
     fn a_removed_state_field_is_breaking() {
         let candidate = contract(
-            r#"{"state":[{"name":"percent","type":"float"}],
-                "methods":[{"name":"set_volume",
-                    "args":[{"name":"percent","type":"float"}],"returns":"Result"}],
-                "events":[{"name":"VolumeChanged","payload":[{"name":"level","type":"float"}]}],
-                "capabilities":{"required":["service.audio.read"]}}"#,
+            r#"{
+                "state": { "percent": "float" },
+                "methods": { "set_volume": "(percent: float) -> Result" },
+                "events": { "VolumeChanged": { "level": "float" } },
+                "capabilities": { "required": ["service.audio.read"] }
+            }"#,
         );
         let diff = diff_contracts(&base(), &candidate);
         assert!(diff.is_breaking());
@@ -781,8 +782,8 @@ mod tests {
     fn widening_a_range_or_dropping_a_default_is_breaking() {
         let with = |percent: &str, muted: &str| {
             contract(&format!(
-                r#"{{"state":[{{"name":"percent","type":"float"{percent}}},
-                    {{"name":"muted","type":"boolean"{muted}}}]}}"#
+                r#"{{"state":{{"percent":{{"type":"float"{percent}}},
+                    "muted":{{"type":"boolean"{muted}}}}}}}"#
             ))
         };
         let locked = with(r#","minimum":0,"maximum":100"#, r#","default":false"#);
@@ -808,11 +809,12 @@ mod tests {
     #[test]
     fn a_changed_type_is_breaking() {
         let candidate = contract(
-            r#"{"state":[{"name":"percent","type":"int"},{"name":"muted","type":"boolean"}],
-                "methods":[{"name":"set_volume",
-                    "args":[{"name":"percent","type":"float"}],"returns":"Result"}],
-                "events":[{"name":"VolumeChanged","payload":[{"name":"level","type":"float"}]}],
-                "capabilities":{"required":["service.audio.read"]}}"#,
+            r#"{
+                "state": { "percent": "int", "muted": "boolean" },
+                "methods": { "set_volume": "(percent: float) -> Result" },
+                "events": { "VolumeChanged": { "level": "float" } },
+                "capabilities": { "required": ["service.audio.read"] }
+            }"#,
         );
         let diff = diff_contracts(&base(), &candidate);
         assert!(diff.is_breaking());
@@ -825,19 +827,22 @@ mod tests {
     #[test]
     fn a_removed_method_or_event_is_breaking() {
         let no_method = contract(
-            r#"{"state":[{"name":"percent","type":"float"},{"name":"muted","type":"boolean"}],
-                "methods":[],
-                "events":[{"name":"VolumeChanged","payload":[{"name":"level","type":"float"}]}],
-                "capabilities":{"required":["service.audio.read"]}}"#,
+            r#"{
+                "state": { "percent": "float", "muted": "boolean" },
+                "methods": {},
+                "events": { "VolumeChanged": { "level": "float" } },
+                "capabilities": { "required": ["service.audio.read"] }
+            }"#,
         );
         assert!(diff_contracts(&base(), &no_method).is_breaking());
 
         let no_event = contract(
-            r#"{"state":[{"name":"percent","type":"float"},{"name":"muted","type":"boolean"}],
-                "methods":[{"name":"set_volume",
-                    "args":[{"name":"percent","type":"float"}],"returns":"Result"}],
-                "events":[],
-                "capabilities":{"required":["service.audio.read"]}}"#,
+            r#"{
+                "state": { "percent": "float", "muted": "boolean" },
+                "methods": { "set_volume": "(percent: float) -> Result" },
+                "events": {},
+                "capabilities": { "required": ["service.audio.read"] }
+            }"#,
         );
         assert!(diff_contracts(&base(), &no_event).is_breaking());
     }
@@ -845,20 +850,26 @@ mod tests {
     #[test]
     fn a_new_required_argument_breaks_but_an_optional_one_does_not() {
         let required = contract(
-            r#"{"state":[{"name":"percent","type":"float"},{"name":"muted","type":"boolean"}],
-                "methods":[{"name":"set_volume","args":[{"name":"percent","type":"float"},
-                    {"name":"device_id","type":"string"}],"returns":"Result"}],
-                "events":[{"name":"VolumeChanged","payload":[{"name":"level","type":"float"}]}],
-                "capabilities":{"required":["service.audio.read"]}}"#,
+            r#"{
+                "state": { "percent": "float", "muted": "boolean" },
+                "methods": {
+                    "set_volume": "(percent: float, device_id: string) -> Result"
+                },
+                "events": { "VolumeChanged": { "level": "float" } },
+                "capabilities": { "required": ["service.audio.read"] }
+            }"#,
         );
         assert!(diff_contracts(&base(), &required).is_breaking());
 
         let optional = contract(
-            r#"{"state":[{"name":"percent","type":"float"},{"name":"muted","type":"boolean"}],
-                "methods":[{"name":"set_volume","args":[{"name":"percent","type":"float"},
-                    {"name":"device_id","type":"string?"}],"returns":"Result"}],
-                "events":[{"name":"VolumeChanged","payload":[{"name":"level","type":"float"}]}],
-                "capabilities":{"required":["service.audio.read"]}}"#,
+            r#"{
+                "state": { "percent": "float", "muted": "boolean" },
+                "methods": {
+                    "set_volume": "(percent: float, device_id: string?) -> Result"
+                },
+                "events": { "VolumeChanged": { "level": "float" } },
+                "capabilities": { "required": ["service.audio.read"] }
+            }"#,
         );
         let diff = diff_contracts(&base(), &optional);
         assert!(!diff.is_breaking());
@@ -868,11 +879,14 @@ mod tests {
     #[test]
     fn a_newly_required_consumer_capability_is_breaking() {
         let candidate = contract(
-            r#"{"state":[{"name":"percent","type":"float"},{"name":"muted","type":"boolean"}],
-                "methods":[{"name":"set_volume",
-                    "args":[{"name":"percent","type":"float"}],"returns":"Result"}],
-                "events":[{"name":"VolumeChanged","payload":[{"name":"level","type":"float"}]}],
-                "capabilities":{"required":["service.audio.read","service.audio.control"]}}"#,
+            r#"{
+                "state": { "percent": "float", "muted": "boolean" },
+                "methods": { "set_volume": "(percent: float) -> Result" },
+                "events": { "VolumeChanged": { "level": "float" } },
+                "capabilities": {
+                    "required": ["service.audio.read", "service.audio.control"]
+                }
+            }"#,
         );
         let diff = diff_contracts(&base(), &candidate);
         assert!(diff.is_breaking());
@@ -885,13 +899,15 @@ mod tests {
     #[test]
     fn features_over_new_members_are_additive_but_gating_existing_members_breaks() {
         let added = contract(
-            r#"{"state":[{"name":"percent","type":"float"},{"name":"muted","type":"boolean"}],
-                "methods":[{"name":"set_volume",
-                    "args":[{"name":"percent","type":"float"}],"returns":"Result"},
-                    {"name":"set_app_volume","args":[{"name":"percent","type":"float"}],
-                    "returns":"Result"}],
-                "events":[{"name":"VolumeChanged","payload":[{"name":"level","type":"float"}]}],
-                "features":{"per-app-volume":{"members":["set_app_volume"]}}}"#,
+            r#"{
+                "state": { "percent": "float", "muted": "boolean" },
+                "methods": {
+                    "set_volume": "(percent: float) -> Result",
+                    "set_app_volume": "(percent: float) -> Result"
+                },
+                "events": { "VolumeChanged": { "level": "float" } },
+                "features": { "per-app-volume": { "members": ["set_app_volume"] } }
+            }"#,
         );
         let diff = diff_contracts(&base(), &added);
         assert!(!diff.is_breaking());
@@ -914,11 +930,12 @@ mod tests {
     #[test]
     fn a_renamed_event_payload_field_is_breaking() {
         let candidate = contract(
-            r#"{"state":[{"name":"percent","type":"float"},{"name":"muted","type":"boolean"}],
-                "methods":[{"name":"set_volume",
-                    "args":[{"name":"percent","type":"float"}],"returns":"Result"}],
-                "events":[{"name":"VolumeChanged","payload":[{"name":"volume","type":"float"}]}],
-                "capabilities":{"required":["service.audio.read"]}}"#,
+            r#"{
+                "state": { "percent": "float", "muted": "boolean" },
+                "methods": { "set_volume": "(percent: float) -> Result" },
+                "events": { "VolumeChanged": { "volume": "float" } },
+                "capabilities": { "required": ["service.audio.read"] }
+            }"#,
         );
         assert!(diff_contracts(&base(), &candidate).is_breaking());
     }
@@ -927,16 +944,16 @@ mod tests {
     fn named_type_changes_are_diffed_transitively() {
         let locked = contract(
             r#"{
-                "state":[{"name":"volume","type":"Volume"}],
-                "types":{"Volume":{"fields":[{"name":"level","type":"float"}]}},
-                "capabilities":{"required":["service.audio.read"]}
+                "state": { "volume": "Volume" },
+                "types": { "Volume": { "level": "float" } },
+                "capabilities": { "required": ["service.audio.read"] }
             }"#,
         );
         let candidate = contract(
             r#"{
-                "state":[{"name":"volume","type":"Volume"}],
-                "types":{"Volume":{"fields":[{"name":"level","type":"int"}]}},
-                "capabilities":{"required":["service.audio.read"]}
+                "state": { "volume": "Volume" },
+                "types": { "Volume": { "level": "int" } },
+                "capabilities": { "required": ["service.audio.read"] }
             }"#,
         );
         let diff = diff_contracts(&locked, &candidate);
@@ -949,17 +966,22 @@ mod tests {
     fn behavioral_annotations_are_breaking_when_changed() {
         let locked = contract(
             r#"{
-                "state":[{"name":"muted","type":"boolean"}],
-                "methods":[{"name":"set_muted","args":[{"name":"muted","type":"boolean"}],"returns":"Result"}],
-                "capabilities":{"required":["service.audio.read"]}
+                "state": { "muted": "boolean" },
+                "methods": { "set_muted": "(muted: boolean) -> Result" },
+                "capabilities": { "required": ["service.audio.read"] }
             }"#,
         );
         let candidate = contract(
             r#"{
-                "state":[{"name":"muted","type":"boolean"}],
-                "methods":[{"name":"set_muted","args":[{"name":"muted","type":"boolean"}],"returns":"Result",
-                    "coalesce":true,"stateBinding":{"field":"muted","fromArg":"muted"}}],
-                "capabilities":{"required":["service.audio.read"]}
+                "state": { "muted": "boolean" },
+                "methods": {
+                    "set_muted": {
+                        "signature": "(muted: boolean) -> Result",
+                        "coalesce": true,
+                        "stateBinding": { "field": "muted", "fromArg": "muted" }
+                    }
+                },
+                "capabilities": { "required": ["service.audio.read"] }
             }"#,
         );
         let diff = diff_contracts(&locked, &candidate);
@@ -978,12 +1000,14 @@ mod tests {
         let locked = base();
         let candidate = contract(
             r#"{
-                "state":[{"name":"percent","type":"float"},{"name":"muted","type":"boolean"},
-                    {"name":"device","type":"string"}],
-                "methods":[{"name":"set_volume","args":[{"name":"percent","type":"float"}],"returns":"Result"}],
-                "events":[{"name":"VolumeChanged","payload":[{"name":"level","type":"float"},
-                    {"name":"device","type":"string"}]}],
-                "capabilities":{"required":["service.audio.read"]}
+                "state": {
+                    "percent": "float",
+                    "muted": "boolean",
+                    "device": "string"
+                },
+                "methods": { "set_volume": "(percent: float) -> Result" },
+                "events": { "VolumeChanged": { "level": "float", "device": "string" } },
+                "capabilities": { "required": ["service.audio.read"] }
             }"#,
         );
         let diffs = diff_contracts_bidirectional(&locked, &candidate);

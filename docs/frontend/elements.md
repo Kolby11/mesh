@@ -60,7 +60,7 @@ Display primitives:
 |-----|----------|
 | `text` | Text content. |
 | `icon` | Icon theme or source-backed icon. |
-| `image` | Image source with accessible alternate text. |
+| `image` | Image source with accessible alternate text. `src` is a file path or a service `blob` handle (`mesh-blob:sha256-…`); see [blobs](../modules/backend-events.md#blobs). |
 | `badge` | Compact status text. |
 | `progress` | Progress indicator metadata with `value`, `min`, `max`, and `indeterminate`. |
 | `tooltip` | Tooltip content or ownership metadata tied into the existing title/tooltip lookup path. |

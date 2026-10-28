@@ -1200,9 +1200,12 @@ mod tests {
         }
     }
 
-    const BASE_CONTRACT: &str = r#"{"state":[{"name":"percent","type":"float"}],
-        "methods":[{"name":"set_volume","args":[{"name":"percent","type":"float"}],
-        "returns":"Result"}],"events":[],"capabilities":{"required":["service.audio.read"]}}"#;
+    const BASE_CONTRACT: &str = r#"{
+        "state": { "percent": "float" },
+        "methods": { "set_volume": "(percent: float) -> Result" },
+        "events": {},
+        "capabilities": { "required": ["service.audio.read"] }
+    }"#;
 
     fn candidate(module_id: &str, version: &str, manifest: ModuleManifest) -> CandidateModule {
         CandidateModule {
@@ -1232,11 +1235,16 @@ mod tests {
             "@me/audio".to_string(),
             manifest("@me/audio", "1.0.0", &[], BASE_CONTRACT),
         )]);
-        let widened = r#"{"state":[{"name":"percent","type":"float"},
-            {"name":"muted","type":"boolean"},{"name":"device","type":"string"}],
-            "methods":[{"name":"set_volume","args":[{"name":"percent","type":"float"}],
-            "returns":"Result"}],"events":[],
-            "capabilities":{"required":["service.audio.read"]}}"#;
+        let widened = r#"{
+            "state": {
+                "percent": "float",
+                "muted": "boolean",
+                "device": "string"
+            },
+            "methods": { "set_volume": "(percent: float) -> Result" },
+            "events": {},
+            "capabilities": { "required": ["service.audio.read"] }
+        }"#;
         let mut plan = UpdatePlan {
             candidates: vec![candidate(
                 "@me/audio",
@@ -1268,8 +1276,12 @@ mod tests {
             "@me/audio".to_string(),
             manifest("@me/audio", "1.0.0", &[], BASE_CONTRACT),
         )]);
-        let narrowed = r#"{"state":[{"name":"percent","type":"float"}],"methods":[],
-            "events":[],"capabilities":{"required":["service.audio.read"]}}"#;
+        let narrowed = r#"{
+            "state": { "percent": "float" },
+            "methods": {},
+            "events": {},
+            "capabilities": { "required": ["service.audio.read"] }
+        }"#;
         let mut plan = UpdatePlan {
             candidates: vec![candidate(
                 "@me/audio",
@@ -1377,11 +1389,12 @@ mod tests {
         git(&root, &["add", "."]);
         git(&root, &["commit", "--quiet", "-m", "v1"]);
 
-        let widened = r#"{"state":[{"name":"percent","type":"float"},
-            {"name":"muted","type":"boolean"}],
-            "methods":[{"name":"set_volume","args":[{"name":"percent","type":"float"}],
-            "returns":"Result"}],"events":[],
-            "capabilities":{"required":["service.audio.read"]}}"#;
+        let widened = r#"{
+            "state": { "percent": "float", "muted": "boolean" },
+            "methods": { "set_volume": "(percent: float) -> Result" },
+            "events": {},
+            "capabilities": { "required": ["service.audio.read"] }
+        }"#;
         write_manifest("1.1.0", widened);
         git(&root, &["add", "."]);
         git(&root, &["commit", "--quiet", "-m", "v2"]);
@@ -1420,7 +1433,12 @@ mod tests {
         git(&root, &["add", "."]);
         git(&root, &["commit", "--quiet", "-m", "v1"]);
 
-        let narrowed = r#"{"state":[{"name":"percent","type":"float"}],"methods":[],"events":[],"capabilities":{"required":["service.audio.read"]}}"#;
+        let narrowed = r#"{
+            "state": { "percent": "float" },
+            "methods": {},
+            "events": {},
+            "capabilities": { "required": ["service.audio.read"] }
+        }"#;
         write_revision("2.0.0", narrowed);
         git(&root, &["add", "."]);
         git(&root, &["commit", "--quiet", "-m", "v2"]);

@@ -10,6 +10,10 @@ use crate::contract::{
 };
 use std::fmt::Write;
 
+mod rust;
+
+pub use rust::generate_rust_bindings;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneratedContractArtifacts {
     pub consumer_types: String,
@@ -383,7 +387,7 @@ pub fn luau_type_of(contract_type: &str) -> String {
 
 fn luau_type(expr: &TypeExpr) -> String {
     let base = match &expr.base {
-        BaseType::String => "string".to_string(),
+        BaseType::String | BaseType::Blob => "string".to_string(),
         BaseType::Int | BaseType::Float => "number".to_string(),
         BaseType::Boolean => "boolean".to_string(),
         BaseType::Object => "{ [string]: unknown }".to_string(),
@@ -409,6 +413,7 @@ fn luau_default_value(expr: &TypeExpr) -> &'static str {
     }
     match &expr.base {
         BaseType::String => "\"\"",
+        BaseType::Blob => "nil",
         BaseType::Int | BaseType::Float => "0",
         BaseType::Boolean => "false",
         BaseType::Object | BaseType::Named(_) => "{}",
@@ -487,16 +492,18 @@ mod tests {
             "mesh.audio",
             "1.0",
             &serde_json::json!({
-                "state": [
-                    { "name": "percent", "type": "float", "minimum": 0, "maximum": 100,
-                      "description": "Output volume" },
-                    { "name": "muted", "type": "boolean", "default": false },
-                    { "name": "extra", "type": "object?" }
-                ],
-                "methods": [{ "name": "set_volume",
-                    "args": [{ "name": "percent", "type": "float" }], "returns": "Result" }],
-                "events": [{ "name": "VolumeChanged",
-                    "payload": [{ "name": "level", "type": "float" }] }]
+                "state": {
+                    "percent": {
+                        "type": "float",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Output volume"
+                    },
+                    "muted": { "type": "boolean", "default": false },
+                    "extra": "object?"
+                },
+                "methods": { "set_volume": "(percent: float) -> Result" },
+                "events": { "VolumeChanged": { "level": "float" } }
             }),
         )
         .unwrap();

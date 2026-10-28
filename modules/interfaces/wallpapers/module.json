@@ -11,64 +11,35 @@
       "domain": "wallpapers",
       "relationship": "base",
       "contract": {
-        "state": [
-          {
-            "name": "available",
+        "state": {
+          "available": {
             "type": "boolean",
             "description": "Whether the wallpaper directory could be read"
           },
-          {
-            "name": "directory",
+          "directory": {
             "type": "string",
             "description": "Absolute path of the wallpaper directory"
           },
-          {
-            "name": "wallpapers",
+          "wallpapers": {
             "type": "Wallpaper[]",
             "description": "Images in the directory, sorted by name"
           }
-        ],
-        "methods": [
-          {
-            "name": "refresh",
-            "returns": "Result"
-          }
-        ],
-        "events": [],
+        },
+        "methods": { "refresh": "() -> Result" },
+        "events": {},
         "types": {
           "Wallpaper": {
-            "fields": [
-              {
-                "name": "path",
-                "type": "string"
-              },
-              {
-                "name": "name",
-                "type": "string"
-              },
-              {
-                "name": "thumbnail",
-                "type": "string"
-              },
-              {
-                "name": "panorama",
-                "type": "string"
-              },
-              {
-                "name": "color",
-                "type": "string"
-              }
-            ]
+            "path": "string",
+            "name": "string",
+            "thumbnail": "string",
+            "panorama": "string",
+            "color": "string"
           }
         },
         "capabilities": {
           "required": ["service.wallpapers.read"],
-          "methods": {
-            "refresh": ["service.wallpapers.read"]
-          },
-          "permissions": {
-            "service.wallpapers.read": "standard"
-          }
+          "methods": { "refresh": ["service.wallpapers.read"] },
+          "permissions": { "service.wallpapers.read": "standard" }
         }
       }
     }

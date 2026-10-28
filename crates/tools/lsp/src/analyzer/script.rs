@@ -103,6 +103,7 @@ static CALL_PARAMS: &[(&str, &str)] = &[
     ("service.emit_json", "($1)"),
     ("service.emit_unavailable", "()"),
     ("service.set_poll_interval", "($1)"),
+    ("blob.put", "($1, \"$2\")"),
     ("service.payload", "()"),
     ("service.has_capability", "(\"$1\")"),
     ("interfaces.get", "(\"$1\")"),

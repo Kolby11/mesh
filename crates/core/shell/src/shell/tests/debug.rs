@@ -577,23 +577,23 @@ fn shell_registers_interface_contracts_and_providers_from_installed_graph() {
     let interface = LoadedModuleManifest {
         manifest: ModuleManifest::from_json_str(
             r#"{
-                  "name": "@mesh/example-interface",
-                  "version": "1.0.0",
-                  "mesh": {
+                "name": "@mesh/example-interface",
+                "version": "1.0.0",
+                "mesh": {
                     "apiVersion": "0.1",
                     "kind": "interface",
                     "interface": {
-                      "name": "mesh.example",
-                      "version": "1.0",
-                      "domain": "example",
-                      "relationship": "base",
-                      "contract": {
-                        "methods": [{ "name": "read", "returns": "boolean" }],
-                        "capabilities": { "required": ["service.example.read"] }
-                      }
+                        "name": "mesh.example",
+                        "version": "1.0",
+                        "domain": "example",
+                        "relationship": "base",
+                        "contract": {
+                            "methods": { "read": "() -> boolean" },
+                            "capabilities": { "required": ["service.example.read"] }
+                        }
                     }
-                  }
-                }"#,
+                }
+            }"#,
         )
         .unwrap(),
         path: interface_dir.path().join("module.json"),
@@ -876,31 +876,29 @@ fn malformed_graph_interface_contract_is_diagnosed_not_silently_dropped() {
             }"#,
     )
     .unwrap();
-    // Two methods sharing the name "read" is an InvalidDeclaration at
-    // compile time (duplicate declaration), simulating a malformed
+    // A state field and a method both named "read" is an InvalidDeclaration
+    // at compile time (overlapping symbols), simulating a malformed
     // module-supplied contract.
     let interface = LoadedModuleManifest {
         manifest: ModuleManifest::from_json_str(
             r#"{
-                  "name": "@mesh/broken-interface",
-                  "version": "1.0.0",
-                  "mesh": {
+                "name": "@mesh/broken-interface",
+                "version": "1.0.0",
+                "mesh": {
                     "apiVersion": "0.1",
                     "kind": "interface",
                     "interface": {
-                      "name": "mesh.broken",
-                      "version": "1.0",
-                      "domain": "broken",
-                      "relationship": "base",
-                      "contract": {
-                        "methods": [
-                          { "name": "read", "returns": "boolean" },
-                          { "name": "read", "returns": "string" }
-                        ]
-                      }
+                        "name": "mesh.broken",
+                        "version": "1.0",
+                        "domain": "broken",
+                        "relationship": "base",
+                        "contract": {
+                            "state": { "read": "string" },
+                            "methods": { "read": "() -> string" }
+                        }
                     }
-                  }
-                }"#,
+                }
+            }"#,
         )
         .unwrap(),
         path: interface_dir.path().join("module.json"),

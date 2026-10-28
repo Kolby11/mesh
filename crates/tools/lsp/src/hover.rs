@@ -235,12 +235,7 @@ audio.set_volume()
                 "state": {
                     "percent": { "type": "float", "description": "Current volume." }
                 },
-                "methods": {
-                    "set_volume": {
-                        "args": [{ "name": "percent", "type": "float" }],
-                        "returns": "Result"
-                    }
-                },
+                "methods": { "set_volume": "(percent: float) -> Result" },
                 "events": {},
                 "types": {}
             }),

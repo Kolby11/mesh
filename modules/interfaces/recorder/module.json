@@ -11,18 +11,26 @@
       "domain": "recorder",
       "relationship": "base",
       "contract": {
-        "state": [
-          { "name": "available", "type": "boolean", "description": "Whether a recorder can be started" },
-          { "name": "recording", "type": "boolean", "description": "Whether a recording is in progress" },
-          { "name": "started_at", "type": "float", "description": "Unix time in seconds the current recording began; 0 when idle" },
-          { "name": "output", "type": "string", "description": "Path of the current or last recording" }
-        ],
-        "methods": [
-          { "name": "toggle", "returns": "Result" }
-        ],
-        "events": [
-          { "name": "RecordingSaved", "payload": [{ "name": "path", "type": "string" }] }
-        ],
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether a recorder can be started"
+          },
+          "recording": {
+            "type": "boolean",
+            "description": "Whether a recording is in progress"
+          },
+          "started_at": {
+            "type": "float",
+            "description": "Unix time in seconds the current recording began; 0 when idle"
+          },
+          "output": {
+            "type": "string",
+            "description": "Path of the current or last recording"
+          }
+        },
+        "methods": { "toggle": "() -> Result" },
+        "events": { "RecordingSaved": { "path": "string" } },
         "capabilities": {
           "required": ["service.recorder.read"],
           "optional": ["service.recorder.control"],

@@ -999,14 +999,11 @@ mod tests {
         std::fs::write(
             dir.join("contract.json"),
             r#"{
-  "state": { "percent": { "type": "float" } },
-  "methods": { "set_volume": {
-    "args": [{ "name": "percent", "type": "float" }],
-    "returns": "Result"
-  } },
-  "events": {},
-  "types": {}
-}"#,
+                "state": { "percent": "float" },
+                "methods": { "set_volume": "(percent: float) -> Result" },
+                "events": {},
+                "types": {}
+            }"#,
         )
         .unwrap();
 

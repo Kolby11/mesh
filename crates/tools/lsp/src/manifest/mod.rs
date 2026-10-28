@@ -63,8 +63,75 @@ pub fn diagnostics(doc: &ManifestDocument) -> Vec<Diagnostic> {
     if !has_syntax_error && let Err(error) = canonical_validation(doc.flavor, source) {
         out.push(canonical_diagnostic(source, doc.flavor, error));
     }
+    if !has_syntax_error && doc.flavor == ManifestFlavor::Module {
+        out.extend(contract_diagnostics(source));
+    }
 
     out
+}
+
+/// Compile every inline contract (`mesh.interface` and `mesh.interfaces[]`)
+/// the way the module graph will, so a bad type or signature is marked while
+/// it is typed rather than when the graph loads.
+fn contract_diagnostics(source: &str) -> Vec<Diagnostic> {
+    let Ok(manifest) = serde_json::from_str::<serde_json::Value>(source) else {
+        return Vec::new();
+    };
+    let mesh = &manifest["mesh"];
+    let declarations = std::iter::once(&mesh["interface"])
+        .chain(mesh["interfaces"].as_array().into_iter().flatten());
+    let mut out = Vec::new();
+    for declaration in declarations {
+        let contract = &declaration["contract"];
+        if !contract.is_object() {
+            continue;
+        }
+        let name = declaration["name"].as_str().unwrap_or("contract");
+        let version = declaration["version"].as_str().unwrap_or("1.0");
+        if let Err(error) = mesh_core_service::parse_compiled_contract(name, version, contract) {
+            let message = error.to_string();
+            out.push(Diagnostic {
+                range: contract_error_range(source, &message),
+                severity: Some(DiagnosticSeverity::ERROR),
+                source: Some("mesh-runtime".into()),
+                code: Some(NumberOrString::String("mesh.manifest.contract".into())),
+                message,
+                ..Default::default()
+            });
+        }
+    }
+    out
+}
+
+/// The source text a contract error names: the longest quoted token or
+/// `section.member` path from the message found after the first `contract`
+/// key, else that key.
+fn contract_error_range(source: &str, message: &str) -> Range {
+    let contract_key = json::diagnostics::find_key_range(source, "contract");
+    let start = source.find("\"contract\"").unwrap_or(0);
+    let mut candidates = Vec::new();
+    for quote in ['\'', '"'] {
+        candidates.extend(message.split(quote).skip(1).step_by(2).map(str::to_string));
+    }
+    for section in ["state.", "methods.", "events.", "types."] {
+        for (index, _) in message.match_indices(section) {
+            let rest = &message[index + section.len()..];
+            let member: String = rest
+                .chars()
+                .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '_')
+                .collect();
+            candidates.push(format!("\"{member}\""));
+        }
+    }
+    candidates.retain(|token| token.trim_matches('"').len() >= 2);
+    candidates.sort_by_key(|token| std::cmp::Reverse(token.len()));
+    for token in candidates {
+        if let Some(offset) = source[start..].find(&token) {
+            let offset = start + offset;
+            return json::diagnostics::range_at(source, offset, offset + token.len());
+        }
+    }
+    contract_key.unwrap_or_else(|| json::diagnostics::range_at(source, 0, 1))
 }
 
 fn canonical_validation(
@@ -254,6 +321,77 @@ mod tests {
         .into_iter()
         .map(|i| i.label)
         .collect()
+    }
+
+    const CONTRACT_PREFIX: &str = r#"{ "name": "@a/i", "version": "1.0.0", "mesh": {
+        "apiVersion": "0.1", "kind": "interface",
+        "interface": { "name": "a.i", "version": "1.0", "contract": {
+            "types": { "Action": { "key": "string" }, "Notification": { "id": "int" } },"#;
+
+    fn contract_completion(body: &str) -> Vec<String> {
+        complete_at(&format!("{CONTRACT_PREFIX}{body} }} }} }} }}"))
+    }
+
+    #[test]
+    fn contract_type_strings_suggest_declared_types_and_primitives() {
+        let labels = contract_completion(r#""state": { "items": "No|" }"#);
+        assert_eq!(labels, ["Notification"]);
+        let labels = contract_completion(r#""state": { "items": "|" }"#);
+        for expected in ["Action", "Notification", "string", "int", "blob", "Result"] {
+            assert!(labels.contains(&expected.to_string()), "{expected}: {labels:?}");
+        }
+        let labels =
+            contract_completion(r#""types": { "Item": { "tags": "Act|" } }, "x": 1"#);
+        assert_eq!(labels, ["Action"]);
+        let labels = contract_completion(r#""events": { "Changed": { "id": "in|" } }"#);
+        assert_eq!(labels, ["int"]);
+        let labels =
+            contract_completion(r#""state": { "level": { "type": "fl|" } }"#);
+        assert_eq!(labels, ["float"]);
+        let labels = contract_completion(r#""state": { "level": { "|" } }"#);
+        assert!(labels.contains(&"minimum".to_string()), "{labels:?}");
+    }
+
+    #[test]
+    fn method_signatures_suggest_types_after_colons_and_arrows() {
+        assert_eq!(
+            contract_completion(r#""methods": { "go": "|" }"#),
+            ["(name: type) -> Result"]
+        );
+        assert_eq!(
+            contract_completion(r#""methods": { "go": "(id: in|" }"#),
+            ["int"]
+        );
+        assert!(
+            contract_completion(r#""methods": { "go": "(id: int) -> R|" }"#)
+                .contains(&"Result".to_string())
+        );
+        assert!(contract_completion(r#""methods": { "go": "(i|" }"#).is_empty());
+        assert_eq!(
+            contract_completion(r#""methods": { "go": { "signature": "(n: Notif|" } }"#),
+            ["Notification"]
+        );
+    }
+
+    #[test]
+    fn contract_errors_are_reported_at_the_offending_text() {
+        let source = format!(
+            "{CONTRACT_PREFIX} \"state\": {{ \"items\": \"Notifcation[]\" }} }} }} }} }}"
+        );
+        let found = diagnostics(&doc(&source));
+        let error = found
+            .iter()
+            .find(|d| d.code == Some(NumberOrString::String("mesh.manifest.contract".into())))
+            .expect("contract diagnostic");
+        assert!(error.message.contains("Notifcation"), "{}", error.message);
+        let start = crate::util::position_to_offset(&source, error.range.start);
+        assert!(source[start..].starts_with("Notifcation"), "{}", &source[start..]);
+        let clean = source.replace("Notifcation", "Notification");
+        assert!(
+            !diagnostics(&doc(&clean))
+                .iter()
+                .any(|d| d.code == Some(NumberOrString::String("mesh.manifest.contract".into())))
+        );
     }
 
     #[test]

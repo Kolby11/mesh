@@ -11,70 +11,52 @@
       "domain": "device",
       "relationship": "base",
       "contract": {
-        "state": [
-          {
-            "name": "available",
+        "state": {
+          "available": {
             "type": "boolean",
             "description": "Whether a device-information provider can report system details"
           },
-          {
-            "name": "hostname",
-            "type": "string",
-            "description": "Local system hostname"
-          },
-          {
-            "name": "os_name",
+          "hostname": { "type": "string", "description": "Local system hostname" },
+          "os_name": {
             "type": "string",
             "description": "Operating-system or distribution name"
           },
-          {
-            "name": "os_version",
+          "os_version": {
             "type": "string",
             "description": "Operating-system or distribution version"
           },
-          {
-            "name": "kernel",
-            "type": "string",
-            "description": "Running kernel release"
-          },
-          {
-            "name": "architecture",
+          "kernel": { "type": "string", "description": "Running kernel release" },
+          "architecture": {
             "type": "string",
             "description": "Kernel-reported machine architecture"
           },
-          {
-            "name": "desktop",
+          "desktop": {
             "type": "string",
             "description": "Desktop environment or session name"
           },
-          {
-            "name": "processor",
+          "processor": {
             "type": "string",
             "description": "Human-readable processor model"
           },
-          {
-            "name": "memory_total_bytes",
+          "memory_total_bytes": {
             "type": "int",
             "minimum": 0,
             "description": "Total physical memory in bytes"
           },
-          {
-            "name": "graphics",
+          "graphics": {
             "type": "string",
             "description": "Human-readable primary graphics adapter when available"
           },
-          {
-            "name": "uptime_seconds",
+          "uptime_seconds": {
             "type": "int",
             "minimum": 0,
             "description": "System uptime in seconds"
           },
-          {
-            "name": "source_module",
+          "source_module": {
             "type": "string",
             "description": "Backend module ID that emitted this state (runtime-additive)"
           }
-        ],
+        },
         "capabilities": {
           "required": ["service.device.read"],
           "read": ["service.device.read"]

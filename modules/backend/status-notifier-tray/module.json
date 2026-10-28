@@ -9,7 +9,7 @@
     "entry": "src/main.luau",
     "uses": {
       "modules": {
-        "@mesh/tray-interface": "^1.0.0"
+        "@mesh/tray-interface": "^2.0.0"
       },
       "capabilities": [
         "dbus.own:session:org.kde.StatusNotifierHost.mesh",
@@ -35,7 +35,7 @@
     "implements": [
       {
         "interface": "mesh.tray",
-        "version": "1.0",
+        "version": "2.0",
         "provider": "status-notifier",
         "label": "StatusNotifier (D-Bus)",
         "priority": 100

@@ -11,14 +11,14 @@
         "dbus.own:session:org.freedesktop.Notifications"
       ],
       "modules": {
-        "@mesh/notifications-interface": "^1.0.0"
+        "@mesh/notifications-interface": "^1.1.0"
       }
     },
     "entry": "src/main.luau",
     "implements": [
       {
         "interface": "mesh.notifications",
-        "version": "1.0",
+        "version": "1.1",
         "provider": "freedesktop",
         "label": "Desktop notifications (D-Bus)",
         "priority": 100

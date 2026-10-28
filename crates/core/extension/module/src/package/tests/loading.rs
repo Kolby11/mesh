@@ -63,13 +63,15 @@ fn module_loader_resolves_keyed_external_interface_contract() {
     fs::write(
         root.join("contract.json"),
         r#"{
-  "state": { "percent": { "type": "float" } },
-  "methods": { "set_percent": {
-    "args": [{ "name": "value", "type": "float" }],
-    "stateBinding": { "field": "percent", "fromArg": "value" }
-  } },
-  "events": { "Changed": { "payload": [] } }
-}"#,
+            "state": { "percent": "float" },
+            "methods": {
+                "set_percent": {
+                    "signature": "(value: float)",
+                    "stateBinding": { "field": "percent", "fromArg": "value" }
+                }
+            },
+            "events": { "Changed": {} }
+        }"#,
     )
     .unwrap();
 

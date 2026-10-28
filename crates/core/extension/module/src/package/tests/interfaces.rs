@@ -74,12 +74,8 @@ fn inline_backend_interface_declaration_registers_contract() {
             name: "mesh.wm".into(),
             version: Some("1.0".into()),
             contract: Some(serde_json::json!({
-                "state": [{ "name": "available", "type": "boolean" }],
-                "methods": [{
-                    "name": "focus_workspace",
-                    "args": [{ "name": "id", "type": "int" }],
-                    "returns": "Result"
-                }],
+                "state": { "available": "boolean" },
+                "methods": { "focus_workspace": "(id: int) -> Result" },
                 "capabilities": { "required": ["service.wm.read"] }
             })),
             domain: Some("wm".into()),
@@ -126,9 +122,7 @@ fn duplicate_interface_declaration_rejects_inline_copy() {
         Some(crate::package::module_manifest::MeshInterfaceDeclaration {
             name: "mesh.example".into(),
             version: Some("1.0".into()),
-            contract: Some(serde_json::json!({
-                "methods": [{ "name": "from_interface_module" }]
-            })),
+            contract: Some(serde_json::json!({ "methods": { "from_interface_module": "()" } })),
             domain: Some("example".into()),
             extends: None,
             relationship: Some(crate::package::module_manifest::InterfaceRelationship::Base),
@@ -153,9 +147,7 @@ fn duplicate_interface_declaration_rejects_inline_copy() {
         vec![crate::package::module_manifest::MeshInterfaceDeclaration {
             name: "mesh.example".into(),
             version: Some("1.0".into()),
-            contract: Some(serde_json::json!({
-                "methods": [{ "name": "from_inline_backend" }]
-            })),
+            contract: Some(serde_json::json!({ "methods": { "from_inline_backend": "()" } })),
             domain: Some("example".into()),
             extends: None,
             relationship: Some(crate::package::module_manifest::InterfaceRelationship::Base),
@@ -190,7 +182,9 @@ fn inline_example_backend(module_id: &str, priority: u32, method: &str) -> Loade
         vec![crate::package::module_manifest::MeshInterfaceDeclaration {
             name: "mesh.example".into(),
             version: Some("1.0".into()),
-            contract: Some(serde_json::json!({ "methods": [{ "name": method }] })),
+            contract: Some(serde_json::json!({
+                "methods": serde_json::Map::from_iter([(method.to_string(), "()".into())])
+            })),
             domain: Some("example".into()),
             extends: None,
             relationship: Some(crate::package::module_manifest::InterfaceRelationship::Base),
@@ -278,9 +272,7 @@ fn invalid_interface_contract_becomes_graph_diagnostic() {
             name: "mesh.test".into(),
             version: Some("1.0".into()),
             // References a named type that is never declared.
-            contract: Some(serde_json::json!({
-                "methods": [{ "name": "sensors", "returns": "Sensor[]" }]
-            })),
+            contract: Some(serde_json::json!({ "methods": { "sensors": "() -> Sensor[]" } })),
             domain: Some("test".into()),
             extends: None,
             relationship: Some(crate::package::module_manifest::InterfaceRelationship::Base),
@@ -414,9 +406,7 @@ end
     interface.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
         name: "mesh.example".into(),
         version: Some("1.0".into()),
-        contract: Some(serde_json::json!({
-            "events": [{ "name": "DeclaredChanged" }]
-        })),
+        contract: Some(serde_json::json!({ "events": { "DeclaredChanged": {} } })),
         domain: Some("example".into()),
         extends: None,
         relationship: Some(InterfaceRelationship::Base),
@@ -491,9 +481,7 @@ example.MissingChanged:on(function(_event) end)
     interface.manifest.mesh.interface = Some(MeshInterfaceDeclaration {
         name: "mesh.example".into(),
         version: Some("1.0".into()),
-        contract: Some(serde_json::json!({
-            "events": [{ "name": "DeclaredChanged" }]
-        })),
+        contract: Some(serde_json::json!({ "events": { "DeclaredChanged": {} } })),
         domain: Some("example".into()),
         extends: None,
         relationship: Some(InterfaceRelationship::Base),
@@ -872,7 +860,7 @@ fn interface_contracts_declare_owned_service_permissions() {
     ));
     backend.manifest.mesh.interfaces[0].domain = Some("weather".into());
     backend.manifest.mesh.interfaces[0].contract = Some(serde_json::json!({
-        "state": [{ "name": "temperature", "type": "float" }],
+        "state": { "temperature": "float" },
         "capabilities": {
             "read": ["service.acme.weather.read"],
             "permissions": {
@@ -1191,7 +1179,7 @@ fn providers_advertising_undeclared_features_get_a_diagnostic() {
             version: Some("1.0".into()),
             contract: Some(serde_json::json!({
                 "state": { "fans": { "type": "int?" } },
-                "methods": { "set_fan": {} },
+                "methods": { "set_fan": "()" },
                 "features": { "fan-control": { "members": ["fans", "set_fan"] } }
             })),
             domain: Some("thermal".into()),

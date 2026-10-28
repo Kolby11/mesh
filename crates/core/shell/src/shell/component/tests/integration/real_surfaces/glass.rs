@@ -139,9 +139,10 @@ impl GlassCatalog {
             mesh_core_service::contract::parse_interface_contract(
                 "mesh.packages",
                 "1.0",
-                &serde_json::json!({"state": [
-                {"name":"profiles","type":"string[]"}, {"name":"active_profile","type":"string"}
-            ], "methods": [{"name":"switch_profile", "args":[{"name":"profile_id","type":"string"}]}]}),
+                &serde_json::json!({
+                    "state": { "profiles": "string[]", "active_profile": "string" },
+                    "methods": { "switch_profile": "(profile_id: string)" }
+                }),
             )
             .unwrap(),
         );
@@ -149,8 +150,10 @@ impl GlassCatalog {
             mesh_core_service::contract::parse_interface_contract(
                 "mesh.theme",
                 "1.0",
-                &serde_json::json!({"state": [{"name":"backdrop_image","type":"string?"}],
-                    "methods": [{"name":"set_backdrop_image", "args":[{"name":"path","type":"string"}]}]}),
+                &serde_json::json!({
+                    "state": { "backdrop_image": "string?" },
+                    "methods": { "set_backdrop_image": "(path: string)" }
+                }),
             )
             .unwrap(),
         );

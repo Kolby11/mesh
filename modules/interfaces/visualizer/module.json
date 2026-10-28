@@ -11,13 +11,22 @@
       "domain": "visualizer",
       "relationship": "base",
       "contract": {
-        "state": [
-          { "name": "available", "type": "boolean", "description": "Whether the spectrum source is running" },
-          { "name": "active", "type": "boolean", "description": "Whether any audio is being analysed; false while silent" },
-          { "name": "bars", "type": "float[]", "description": "Bar levels from low to high frequency, each 0 to 1" }
-        ],
-        "methods": [],
-        "events": [],
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether the spectrum source is running"
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether any audio is being analysed; false while silent"
+          },
+          "bars": {
+            "type": "float[]",
+            "description": "Bar levels from low to high frequency, each 0 to 1"
+          }
+        },
+        "methods": {},
+        "events": {},
         "capabilities": {
           "required": ["service.visualizer.read"],
           "permissions": { "service.visualizer.read": "standard" }

@@ -15,6 +15,9 @@ use mesh_core_icon::MISSING_ICON_SVG;
 #[cfg(test)]
 use mesh_core_icon::resolve_icon_result;
 use mesh_core_icon::{IconResolution, ResolvedTarget};
+use mesh_core_resources::blob::{
+    BLOB_SCHEME, Blob, BlobFormat, EncodedImageFormat, RawPixelLayout, lookup_blob,
+};
 use mesh_core_resources::{
     ResourceByteReservation, ResourceFingerprint, resource_fingerprint, resource_revision,
 };
@@ -25,7 +28,7 @@ use skia_safe::{
 };
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -65,6 +68,8 @@ pub(crate) enum CachedResourceOpacity {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum RasterSourceKind {
     File,
+    /// A provider blob; its identity is the content-addressed handle.
+    Blob,
     #[cfg(test)]
     MissingIcon,
 }
@@ -679,13 +684,20 @@ pub fn icon_raster_jobs_pending() -> bool {
     pending || ICON_RASTER_RESULTS_READY.load(Ordering::Acquire)
 }
 
-/// Queue one file-backed icon for off-thread decode and rasterization.
-/// `None` means the worker could not be started; `Some(false)` means an
-/// equivalent job is already in flight or the bounded queue is full.
+/// Where a raster job reads its source pixels.
+#[cfg_attr(test, allow(dead_code))]
+enum RasterSource {
+    File { path: PathBuf, kind: IconFileKind },
+    Blob(Arc<Blob>),
+}
+
+/// Queue one file- or blob-backed icon for off-thread decode and
+/// rasterization. `None` means the worker could not be started;
+/// `Some(false)` means an equivalent job is already in flight or the bounded
+/// queue is full.
 fn schedule_icon_raster_job(
     key: RasterCacheKey,
-    path: &Path,
-    kind: IconFileKind,
+    source: RasterSource,
     width: u32,
     height: u32,
     tint: Color,
@@ -704,7 +716,6 @@ fn schedule_icon_raster_job(
     let result_key = key.clone();
     let cancellation_key = key.clone();
     let cancellation_sender = result_sender.clone();
-    let job_path = path.to_path_buf();
     let Some(broker) = ResourceBroker::global() else {
         queue.pending.remove(&key);
         return None;
@@ -716,13 +727,24 @@ fn schedule_icon_raster_job(
             let (variant, cacheable, linked_resources) = if !context.is_current() {
                 (None, false, Vec::new())
             } else {
-                match kind {
-                    IconFileKind::Bitmap => (
+                match source {
+                    RasterSource::Blob(blob) => (
+                        raster_blob_variant(&blob, width, height, tint, multicolor),
+                        true,
+                        Vec::new(),
+                    ),
+                    RasterSource::File {
+                        path: job_path,
+                        kind: IconFileKind::Bitmap,
+                    } => (
                         raster_bitmap_variant(&job_path, width, height, tint, multicolor),
                         true,
                         Vec::new(),
                     ),
-                    IconFileKind::Svg => match std::fs::read_to_string(&job_path) {
+                    RasterSource::File {
+                        path: job_path,
+                        kind: IconFileKind::Svg,
+                    } => match std::fs::read_to_string(&job_path) {
                         Ok(svg_data) => {
                             let linked_resources =
                                 linked_resource_fingerprints(&job_path, &svg_data);
@@ -1315,14 +1337,25 @@ fn raster_bitmap_variant(
     tint: Color,
     multicolor: bool,
 ) -> Option<RasterVariant> {
-    let pixel_bytes = icon_raster_bytes(width, height)?;
+    icon_raster_bytes(width, height)?;
     let img = get_or_load_sync(path)?;
+    scaled_rgba_variant(&img, width, height, tint, multicolor)
+}
+
+fn scaled_rgba_variant(
+    img: &image::RgbaImage,
+    width: u32,
+    height: u32,
+    tint: Color,
+    multicolor: bool,
+) -> Option<RasterVariant> {
+    let pixel_bytes = icon_raster_bytes(width, height)?;
     // For reductions of 2x and more (wallpaper thumbnails), area averaging is
     // within ~1/255 per channel of Lanczos3 at about a seventh of the cost.
     let scaled = if img.width() >= width * 2 && img.height() >= height * 2 {
-        image::imageops::thumbnail(img.as_ref(), width, height)
+        image::imageops::thumbnail(img, width, height)
     } else {
-        image::imageops::resize(img.as_ref(), width, height, FilterType::Lanczos3)
+        image::imageops::resize(img, width, height, FilterType::Lanczos3)
     };
     let mut pixels = Vec::with_capacity(pixel_bytes);
     for p in scaled.as_raw().chunks_exact(4) {
@@ -1333,6 +1366,140 @@ fn raster_bitmap_variant(
         }
     }
     Some(variant_from_bgra(width, height, pixels))
+}
+
+fn raster_blob_variant(
+    blob: &Blob,
+    width: u32,
+    height: u32,
+    tint: Color,
+    multicolor: bool,
+) -> Option<RasterVariant> {
+    icon_raster_bytes(width, height)?;
+    let image = decode_blob_rgba(blob)?;
+    scaled_rgba_variant(&image, width, height, tint, multicolor)
+}
+
+/// Decode a blob to straight-alpha RGBA, bounded like file images.
+fn decode_blob_rgba(blob: &Blob) -> Option<image::RgbaImage> {
+    let bytes = blob.bytes();
+    match blob.format() {
+        BlobFormat::Bytes => None,
+        BlobFormat::Encoded(format) => {
+            let format = match format {
+                EncodedImageFormat::Png => image::ImageFormat::Png,
+                EncodedImageFormat::Jpeg => image::ImageFormat::Jpeg,
+                EncodedImageFormat::Bmp => image::ImageFormat::Bmp,
+            };
+            let mut reader =
+                image::io::Reader::with_format(std::io::Cursor::new(bytes.as_ref()), format);
+            let mut limits = image::io::Limits::default();
+            limits.max_image_width = Some(MAX_SOURCE_IMAGE_DIMENSION);
+            limits.max_image_height = Some(MAX_SOURCE_IMAGE_DIMENSION);
+            limits.max_alloc = Some(MAX_SOURCE_IMAGE_BYTES as u64);
+            reader.limits(limits);
+            reader.decode().ok().map(|decoded| decoded.to_rgba8())
+        }
+        BlobFormat::Raw {
+            layout,
+            width,
+            height,
+            stride,
+        } => {
+            let pixel = layout.bytes_per_pixel() as usize;
+            let mut rgba = Vec::with_capacity(checked_pixel_bytes(width, height, 4)?);
+            for row in 0..height as usize {
+                let start = row * stride as usize;
+                let row = bytes.get(start..start + width as usize * pixel)?;
+                for source in row.chunks_exact(pixel) {
+                    rgba.extend_from_slice(&match layout {
+                        RawPixelLayout::Argb32 => [source[1], source[2], source[3], source[0]],
+                        RawPixelLayout::Rgba8 => [source[0], source[1], source[2], source[3]],
+                        RawPixelLayout::Rgb8 => [source[0], source[1], source[2], 255],
+                    });
+                }
+            }
+            image::RgbaImage::from_raw(width, height, rgba)
+        }
+    }
+}
+
+fn blob_raster_key(
+    handle: &str,
+    width: u32,
+    height: u32,
+    tint: Color,
+    multicolor: bool,
+) -> RasterCacheKey {
+    RasterCacheKey {
+        resource_revision: resource_revision(),
+        source_kind: RasterSourceKind::Blob,
+        source_identity: Arc::from(Path::new(handle)),
+        width,
+        height,
+        tint: encode_tint(tint),
+        multicolor,
+        freshness: None,
+    }
+}
+
+/// Resolve a `mesh-blob:` source. A rasterized variant outlives the blob in
+/// the raster cache, so a consumer still showing a released handle keeps its
+/// pixels until its state moves on.
+fn resolve_blob_variant(
+    handle: &str,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+    multicolor: bool,
+) -> FileVariant {
+    let Some((width, height)) = icon_dimensions(dest_w, dest_h) else {
+        return FileVariant::Unavailable;
+    };
+    let key = blob_raster_key(handle, width, height, tint, multicolor);
+    #[cfg(not(test))]
+    if let Some(variant) = take_ready_variant(&key) {
+        return FileVariant::Ready(variant);
+    }
+    if let Some(variant) = cached_variant(&key) {
+        profiling::record_raster_cache_hit(variant.fully_opaque);
+        return FileVariant::Ready(variant);
+    }
+    let Some(blob) = lookup_blob(handle) else {
+        return FileVariant::Unavailable;
+    };
+    #[cfg(not(test))]
+    {
+        let scheduled = schedule_icon_raster_job(
+            key.clone(),
+            RasterSource::Blob(Arc::clone(&blob)),
+            width,
+            height,
+            tint,
+            multicolor,
+        );
+        let repaint_pending = match scheduled {
+            Some(true) => true,
+            Some(false) => {
+                icon_raster_job_pending(&key)
+                    || ResourceBroker::global()
+                        .is_some_and(ResourceBroker::retry_after_next_completion)
+            }
+            None => false,
+        };
+        if repaint_pending {
+            return FileVariant::Pending;
+        }
+    }
+    let started = std::time::Instant::now();
+    let variant = raster_blob_variant(&blob, width, height, tint, multicolor);
+    profiling::record_icon_image_raster(started.elapsed());
+    let Some(variant) = variant else {
+        return FileVariant::Unavailable;
+    };
+    profiling::record_raster_cache_miss();
+    store_variant(key, variant.clone());
+    FileVariant::Ready(variant)
 }
 
 #[cfg(test)]
@@ -1500,6 +1667,9 @@ fn resolve_file_variant(
     multicolor: bool,
 ) -> FileVariant {
     drain_icon_raster_jobs();
+    if let Some(handle) = path.to_str().filter(|path| path.starts_with(BLOB_SCHEME)) {
+        return resolve_blob_variant(handle, dest_w, dest_h, tint, multicolor);
+    }
     #[cfg(test)]
     {
         resolve_file_variant_sync(path, dest_w, dest_h, tint, multicolor)
@@ -1598,8 +1768,12 @@ fn resolve_file_variant_async(
         return FileVariant::Ready(variant);
     }
 
+    let source = RasterSource::File {
+        path: path.to_path_buf(),
+        kind,
+    };
     let repaint_pending =
-        match schedule_icon_raster_job(key.clone(), path, kind, width, height, tint, multicolor) {
+        match schedule_icon_raster_job(key.clone(), source, width, height, tint, multicolor) {
             Some(true) => true,
             Some(false) => {
                 icon_raster_job_pending(&key)
@@ -2114,7 +2288,17 @@ mod tests {
         let key = raster_file_key(&path, 8, 8, tint(), false).unwrap();
 
         assert_eq!(
-            schedule_icon_raster_job(key.clone(), &path, IconFileKind::Svg, 8, 8, tint(), false,),
+            schedule_icon_raster_job(
+                key.clone(),
+                RasterSource::File {
+                    path: path.clone(),
+                    kind: IconFileKind::Svg
+                },
+                8,
+                8,
+                tint(),
+                false,
+            ),
             Some(true)
         );
 
@@ -2263,8 +2447,10 @@ mod tests {
         assert_eq!(
             schedule_icon_raster_job(
                 key.clone(),
-                &svg_path,
-                IconFileKind::Svg,
+                RasterSource::File {
+                    path: svg_path.clone(),
+                    kind: IconFileKind::Svg,
+                },
                 8,
                 8,
                 tint(),
@@ -2303,8 +2489,10 @@ mod tests {
         assert_eq!(
             schedule_icon_raster_job(
                 key.clone(),
-                &svg_path,
-                IconFileKind::Svg,
+                RasterSource::File {
+                    path: svg_path.clone(),
+                    kind: IconFileKind::Svg,
+                },
                 8,
                 8,
                 tint(),
@@ -2480,6 +2668,67 @@ mod tests {
         assert_eq!(pixel(&buffer, 0, 0).g, 0);
         assert_eq!(pixel(&buffer, 1, 0).r, 0);
         assert_eq!(pixel(&buffer, 1, 0).g, 255);
+    }
+
+    #[test]
+    fn blob_sources_decode_raw_and_encoded_pixels_and_survive_release_in_the_cache() {
+        use mesh_core_resources::blob::{BlobMeta, BlobOwner, MIME_ARGB32};
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let owner = BlobOwner::new();
+        let format = BlobFormat::from_mime(
+            MIME_ARGB32,
+            BlobMeta {
+                width: Some(2),
+                height: Some(1),
+                stride: None,
+            },
+        )
+        .unwrap();
+        // ARGB: opaque red, then opaque blue.
+        let handle = owner
+            .put(format, vec![255, 255, 0, 0, 255, 0, 0, 255])
+            .unwrap();
+        let path = Path::new(handle.as_ref());
+
+        let mut buffer = PixelBuffer::new(4, 2);
+        draw_icon_from_path_with_options(&mut buffer, path, 0, 0, 2, 1, tint(), true);
+        assert_eq!((pixel(&buffer, 0, 0).r, pixel(&buffer, 0, 0).b), (255, 0));
+        assert_eq!((pixel(&buffer, 1, 0).r, pixel(&buffer, 1, 0).b), (0, 255));
+
+        drop(owner);
+        let mut cached = PixelBuffer::new(4, 2);
+        draw_icon_from_path_with_options(&mut cached, path, 0, 0, 2, 1, tint(), true);
+        assert_eq!(pixel(&cached, 0, 0).r, 255, "rasterized variants outlive the blob");
+        let mut resized = PixelBuffer::new(4, 4);
+        draw_icon_from_path_with_options(&mut resized, path, 0, 0, 4, 2, tint(), true);
+        assert!(
+            non_transparent_pixels(&resized)
+                .iter()
+                .all(|(_, _, color)| *color != pixel(&buffer, 0, 0)),
+            "a released blob has no new variants"
+        );
+
+        let owner = BlobOwner::new();
+        let mut png = Vec::new();
+        ImageBuffer::from_pixel(1, 1, Rgba([0u8, 200, 0, 255]))
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let handle = owner
+            .put(BlobFormat::Encoded(EncodedImageFormat::Png), png)
+            .unwrap();
+        let mut buffer = PixelBuffer::new(2, 2);
+        draw_icon_from_path_with_options(
+            &mut buffer,
+            Path::new(handle.as_ref()),
+            0,
+            0,
+            1,
+            1,
+            tint(),
+            true,
+        );
+        assert_eq!(pixel(&buffer, 0, 0).g, 200);
     }
 
     #[test]

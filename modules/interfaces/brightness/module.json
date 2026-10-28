@@ -11,75 +11,31 @@
       "domain": "brightness",
       "relationship": "base",
       "contract": {
-        "state": [
-          {
-            "name": "available",
+        "state": {
+          "available": {
             "type": "boolean",
             "description": "Whether a controllable display backlight is available"
           },
-          {
-            "name": "level",
+          "level": {
             "type": "float",
             "minimum": 0,
             "maximum": 100,
             "description": "Current display brightness as a percentage (0.0-100.0)"
           }
-        ],
-        "methods": [
-          {
-            "name": "set",
-            "args": [
-              {
-                "name": "level",
-                "type": "float"
-              }
-            ],
-            "returns": "Result",
+        },
+        "methods": {
+          "set": {
+            "signature": "(level: float) -> Result",
             "coalesce": true,
-            "stateBinding": {
-              "field": "level",
-              "fromArg": "level"
-            }
+            "stateBinding": { "field": "level", "fromArg": "level" }
           },
-          {
-            "name": "increase",
-            "args": [
-              {
-                "name": "amount",
-                "type": "float"
-              }
-            ],
-            "returns": "Result"
-          },
-          {
-            "name": "decrease",
-            "args": [
-              {
-                "name": "amount",
-                "type": "float"
-              }
-            ],
-            "returns": "Result"
-          }
-        ],
-        "events": [
-          {
-            "name": "BrightnessChanged",
-            "payload": [
-              {
-                "name": "level",
-                "type": "float"
-              }
-            ]
-          }
-        ],
+          "increase": "(amount: float) -> Result",
+          "decrease": "(amount: float) -> Result"
+        },
+        "events": { "BrightnessChanged": { "level": "float" } },
         "capabilities": {
-          "required": [
-            "service.brightness.read"
-          ],
-          "optional": [
-            "service.brightness.control"
-          ]
+          "required": ["service.brightness.read"],
+          "optional": ["service.brightness.control"]
         }
       }
     }

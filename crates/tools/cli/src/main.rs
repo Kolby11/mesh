@@ -146,10 +146,12 @@ fn cmd_services() {
     }
 }
 
-/// Write `<interface>.d.luau` for every typed contract in the graph, or for
-/// the named interfaces only.
+/// Write one generated artifact per typed contract in the graph, or for the
+/// named interfaces only. Every target is generated from the same compiled
+/// contract.
 fn cmd_types(args: &[String]) {
     let mut out_dir = std::path::PathBuf::from("mesh-types");
+    let mut target = "luau".to_string();
     let mut wanted = Vec::new();
     let mut args = args.iter();
     while let Some(arg) = args.next() {
@@ -160,10 +162,42 @@ fn cmd_types(args: &[String]) {
                     .map(std::path::PathBuf::from)
                     .unwrap_or_else(|| exit_error("--out needs a directory"));
             }
+            "--target" => {
+                target = args
+                    .next()
+                    .cloned()
+                    .unwrap_or_else(|| exit_error("--target needs a name"));
+            }
             other if other.starts_with('-') => exit_error(format!("unknown types flag: {other}")),
             interface => wanted.push(mesh_core_service::canonical_interface_name(interface)),
         }
     }
+    let (extension, generate): (
+        &str,
+        fn(&mesh_core_service::CompiledContract) -> Result<String, String>,
+    ) = match target.as_str() {
+        "luau" => ("d.luau", |contract| {
+            Ok(mesh_core_service::generate_luau_consumer_types(contract))
+        }),
+        "luau-provider" => ("provider.luau", |contract| {
+            Ok(mesh_core_service::generate_luau_provider_stub(contract))
+        }),
+        "luau-mock" => ("mock.luau", |contract| {
+            Ok(mesh_core_service::generate_luau_mock(contract))
+        }),
+        "rust" => ("rs", mesh_core_service::generate_rust_bindings),
+        "descriptor" => ("json", |contract| {
+            serde_json::to_string_pretty(&contract.descriptor())
+                .map(|json| json + "\n")
+                .map_err(|error| error.to_string())
+        }),
+        "docs" => ("md", |contract| {
+            Ok(mesh_core_service::generate_contract_documentation(contract))
+        }),
+        other => exit_error(format!(
+            "unknown types target: {other} (luau, luau-provider, luau-mock, rust, descriptor, docs)"
+        )),
+    };
 
     let graph = load_authoring_snapshot();
     let mut contracts = graph
@@ -188,11 +222,10 @@ fn cmd_types(args: &[String]) {
         let compiled = contract
             .compile(mesh_core_service::DeclarationProvenance::unknown())
             .unwrap_or_else(|error| exit_error(format!("{interface}: {error}")));
-        let path = out_dir.join(format!("{interface}.d.luau"));
-        if let Err(error) = std::fs::write(
-            &path,
-            mesh_core_service::generate_luau_consumer_types(&compiled),
-        ) {
+        let generated =
+            generate(&compiled).unwrap_or_else(|error| exit_error(format!("{interface}: {error}")));
+        let path = out_dir.join(format!("{interface}.{extension}"));
+        if let Err(error) = std::fs::write(&path, generated) {
             exit_error(format!("failed to write {}: {error}", path.display()));
         }
         println!("{}", path.display());
@@ -1937,8 +1970,13 @@ fn cmd_help() {
     println!("  start     Start the shell (default)");
     println!("  list      List discovered modules");
     println!("  services  List available service backends");
-    println!("  types     Write <interface>.d.luau for each typed service contract");
-    println!("            [<interface>...] [--out <dir>]  (default dir: mesh-types)");
+    println!("  types     Generate artifacts from each typed service contract");
+    println!(
+        "            [<interface>...] [--out <dir>] [--target <name>]  (default dir: mesh-types)"
+    );
+    println!(
+        "            targets: luau (default), luau-provider, luau-mock, rust, descriptor, docs"
+    );
     println!("  debug     Toggle the debug overlay on the running shell");
     println!("            subcommands: profiling, tab");
     println!("  focus <surface-id>  Give a visible surface the keyboard (for compositor keybinds)");

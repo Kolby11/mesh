@@ -1,0 +1,54 @@
+{
+  "state": {
+    "percent": {
+      "type": "float",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Output volume"
+    },
+    "muted": { "type": "boolean", "default": false },
+    "devices": "Device[]",
+    "artPath": "string?",
+    "apps": "Device[]?",
+    "extra": "object?"
+  },
+  "methods": {
+    "set_volume": {
+      "signature": "(device_id: string, percent: float) -> Result",
+      "coalesce": { "key": ["device_id"] }
+    },
+    "toggle_mute": {
+      "signature": "() -> Result",
+      "stateBinding": { "field": "muted", "toggle": true }
+    },
+    "move": "(type: int?)",
+    "set_app_volume": "(app: string, percent: float) -> Device"
+  },
+  "events": {
+    "VolumeChanged": { "device_id": "string", "level": "float" },
+    "Reset": {}
+  },
+  "types": {
+    "Device": {
+      "id": "string",
+      "channels": "int",
+      "port": "Port?"
+    },
+    "Port": { "name": "string" }
+  },
+  "capabilities": {
+    "read": ["audio.read"],
+    "methods": {
+      "set_volume": ["audio.control"],
+      "toggle_mute": ["audio.control"],
+      "move": ["audio.control"],
+      "set_app_volume": ["audio.control"]
+    }
+  },
+  "features": {
+    "per-app-volume": {
+      "description": "Per-application volume",
+      "members": ["apps", "set_app_volume"]
+    }
+  }
+}
