@@ -11,6 +11,7 @@
         "@mesh/glass-widgets": ">=0.1.0",
         "@mesh/glass-dock": ">=0.1.0",
         "@mesh/settings": ">=0.1.0",
+        "@mesh/debug-inspector": { "version": ">=0.1.0", "optional": true },
         "@mesh/violet-glass": ">=0.1.0",
         "@mesh/glass-wallpaper": ">=0.1.0",
         "@mesh/glass-material": ">=0.1.0",
@@ -43,6 +44,11 @@
         },
         "@mesh/settings#default": {
           "module": "@mesh/settings",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/debug-inspector#default": {
+          "module": "@mesh/debug-inspector",
           "entrypoint": "main",
           "active": true
         },

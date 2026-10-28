@@ -2057,8 +2057,9 @@ impl Shell {
                     "debug overlay: {}",
                     if self.debug.enabled { "on" } else { "off" }
                 );
+                let surface_id = self.resolve_root_surface_id(DEBUG_INSPECTOR_SURFACE_ID.to_string());
                 self.set_surface_visibility(
-                    DEBUG_INSPECTOR_SURFACE_ID.to_string(),
+                    surface_id,
                     self.debug.enabled,
                 )
             }
@@ -2080,7 +2081,8 @@ impl Shell {
                 self.invalidate_debug_layout_bounds_targets();
                 if self.debug.element_picker_enabled && !self.debug.enabled {
                     self.debug.enabled = true;
-                    self.set_surface_visibility(DEBUG_INSPECTOR_SURFACE_ID.to_string(), true)
+                    let surface_id = self.resolve_root_surface_id(DEBUG_INSPECTOR_SURFACE_ID.to_string());
+                    self.set_surface_visibility(surface_id, true)
                 } else {
                     Ok(VecDeque::new())
                 }
@@ -3541,7 +3543,9 @@ impl Shell {
                 }
             }
         }
-        if surface_id == DEBUG_INSPECTOR_SURFACE_ID {
+        if surface_id == DEBUG_INSPECTOR_SURFACE_ID
+            || surface_id.starts_with(&format!("{DEBUG_INSPECTOR_SURFACE_ID}#"))
+        {
             self.debug.enabled = visible;
         }
         self.core

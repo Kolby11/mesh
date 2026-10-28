@@ -18,9 +18,10 @@
     },
     "entry": "src/main.mesh",
     "surface": {
-      "anchor": "right",
-      "layer": "overlay",
-      "keyboard_mode": "on_demand",
+      "role": "window",
+      "title": "MESH Debug Inspector",
+      "appId": "mesh.debug-inspector",
+      "resizable": true,
       "visible_on_start": false
     },
     "accessibility": {

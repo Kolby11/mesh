@@ -1028,14 +1028,34 @@ end)
 
     .inspector-shell {
         exclusive-zone: none;
-        width: 480px;
-        max-width: 480px;
+        width: 520px;
         min-height: 640px;
         background: var(--color-surface);
         color: var(--color-on-surface);
-        border-left-width: 1px;
-        border-left-style: solid;
-        border-left-color: var(--color-outline-variant);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--color-outline-variant);
+        border-radius: var(--radius-lg);
+    }
+
+    .inspector-shell:windowed {
+        width: 100%;
+        max-width: none;
+        height: 100%;
+        margin: 0;
+        border-radius: 0;
+        border-width: 0;
+    }
+
+    .inspector-shell:fullscreen,
+    .inspector-shell:maximized {
+        width: 100%;
+        max-width: none;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        border-width: 0;
+        border-radius: 0;
     }
 
     .inspector-root {

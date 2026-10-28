@@ -308,10 +308,22 @@ fn graph_interface_catalog_replaces_stale_providers_and_excludes_disabled_candid
 #[test]
 fn load_frontend_components_respects_disabled_debug_inspector() {
     let _lock = settings_env_lock();
+    let root = tempfile::tempdir().unwrap();
+    let mut graph: serde_json::Value = serde_json::from_slice(
+        &fs::read(crate::shell::discovery::test_module_graph_path()).unwrap(),
+    )
+    .unwrap();
+    graph["mesh"]["disabled"] = serde_json::json!(["@mesh/debug-inspector"]);
+    let graph_path = root.path().join("module.json");
+    fs::write(&graph_path, serde_json::to_vec(&graph).unwrap()).unwrap();
+
+    unsafe { std::env::set_var("MESH_MODULE_GRAPH_PATH", &graph_path) };
     let mut shell = Shell::new();
     shell.discover_modules();
     shell.resolve_modules().unwrap();
-    shell.load_frontend_components().unwrap();
+    let result = shell.load_frontend_components();
+    unsafe { std::env::remove_var("MESH_MODULE_GRAPH_PATH") };
+    result.unwrap();
 
     assert!(
         !shell
@@ -359,10 +371,13 @@ fn load_frontend_components_loads_enabled_debug_inspector() {
     let graph_path = root.path().join("module.json");
     fs::write(&graph_path, serde_json::to_vec(&graph).unwrap()).unwrap();
 
+    unsafe { std::env::set_var("MESH_MODULE_GRAPH_PATH", &graph_path) };
     let mut shell = Shell::new();
-    shell.discover_modules_at(&graph_path);
+    shell.discover_modules();
     shell.resolve_modules().unwrap();
-    shell.load_frontend_components().unwrap();
+    let result = shell.load_frontend_components();
+    unsafe { std::env::remove_var("MESH_MODULE_GRAPH_PATH") };
+    result.unwrap();
 
     assert!(
         shell

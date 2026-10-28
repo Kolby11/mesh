@@ -3118,7 +3118,8 @@ impl Shell {
                 visible: initial_visibility,
                 closing_until: None,
             });
-        self.surfaces.entry(surface_id.clone()).or_default();
+        let stub = self.surfaces.entry(surface_id.clone()).or_default();
+        stub.role = component.surface_role();
         let component_index = self.components.len();
         self.components.push(ComponentRuntime::new(component));
         self.component_by_surface

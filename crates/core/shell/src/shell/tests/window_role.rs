@@ -459,3 +459,76 @@ fn window_close_request_for_an_unknown_surface_is_ignored() {
         "a close request for an unknown surface must not invent surface state"
     );
 }
+
+#[test]
+fn debug_inspector_manifest_declares_window_role_and_toggles_in_shell() {
+    let _lock = settings_env_lock();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let manifest = mesh_core_module::package::ModuleManifest::from_path(
+        &root.join("modules/frontend/debug-inspector/module.json"),
+    )
+    .unwrap();
+    let surface = manifest
+        .mesh
+        .surface_layout
+        .as_ref()
+        .expect("surface declaration");
+    assert_eq!(surface.role.as_deref(), Some("window"));
+    assert!(matches!(
+        &surface.title,
+        Some(mesh_core_module::LocalizedText::Literal(t)) if t == "MESH Debug Inspector"
+    ));
+    assert_eq!(surface.app_id.as_deref(), Some("mesh.debug-inspector"));
+    assert_eq!(surface.resizable, Some(true));
+    assert_eq!(surface.visible_on_start, Some(false));
+
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    shell.discover_modules();
+    shell.resolve_modules().unwrap();
+    shell.load_frontend_components().unwrap();
+
+    let inspector_root = shell
+        .components
+        .iter()
+        .find(|runtime| runtime.component.id() == "@mesh/debug-inspector")
+        .expect("@mesh/debug-inspector must be loaded in the shell");
+    let surface_id = inspector_root.surface_id.clone();
+    assert_eq!(
+        shell.surfaces.get(&surface_id).map(|s| s.role),
+        Some(mesh_core_wayland::SurfaceRole::Window)
+    );
+    assert!(
+        shell
+            .core
+            .surfaces
+            .get(&surface_id)
+            .is_some_and(|state| !state.visible),
+        "debug inspector window starts hidden"
+    );
+
+    shell
+        .apply_request(CoreRequest::ToggleDebugOverlay)
+        .unwrap();
+    assert!(
+        shell
+            .core
+            .surfaces
+            .get(&surface_id)
+            .is_some_and(|state| state.visible),
+        "toggling debug overlay opens the debug inspector window"
+    );
+
+    shell
+        .apply_request(CoreRequest::ToggleDebugOverlay)
+        .unwrap();
+    assert!(
+        shell
+            .core
+            .surfaces
+            .get(&surface_id)
+            .is_some_and(|state| !state.visible),
+        "toggling debug overlay again closes the debug inspector window"
+    );
+}

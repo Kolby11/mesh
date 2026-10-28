@@ -2,7 +2,6 @@
   "mesh": {
     "disabled": [
       "@mesh/blur-test",
-      "@mesh/debug-inspector",
       "@mesh/language-popover",
       "@mesh/opacity-test",
       "@mesh/text-selection-proof",
