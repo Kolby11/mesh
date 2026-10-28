@@ -2697,3 +2697,60 @@ fn animation_target_coverage_requires_every_node_to_be_in_a_realized_popup() {
             .is_some()
     );
 }
+
+#[test]
+fn border_width_keyframes_keep_geometry_and_hit_bounds_in_sync() {
+    let mut component = test_frontend_component(
+        r#"
+<template><box class="panel"><button ref="target" onclick={activate} /></box></template>
+<script lang="luau">function activate() end</script>
+<style>
+.panel { width: 100px; height: 40px; animation: grow 1000ms linear forwards; }
+button { width: 20px; height: 10px; }
+@keyframes grow { 0% { border-width: 0px; } 100% { border-width: 10px; } }
+</style>
+"#,
+    );
+    let mut buffer = PixelBuffer::new(120, 40);
+    component
+        .paint_raster(
+            &default_theme(),
+            SurfaceExtent::unpadded(120, 40),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    for elapsed in [250, 500, 750, 1100] {
+        component.invalidate_animation_style_path(ComponentDirtyFlags::VISUAL_REPAINT);
+        paint_keyframe_frame_at(&mut component, Duration::from_millis(elapsed));
+        let tree = component.last_tree.as_ref().unwrap();
+        let mut expected = tree.clone();
+        mesh_core_elements::LayoutEngine::compute(&mut expected, 120.0, 40.0);
+        fn target(node: &WidgetNode) -> Option<&WidgetNode> {
+            if node
+                .attributes
+                .get(mesh_core_elements::Prop::Ref)
+                .is_some_and(|value| value == "target")
+            {
+                return Some(node);
+            }
+            node.children.iter().find_map(target)
+        }
+        let key = target(tree).unwrap().mesh_key().unwrap();
+        let actual = find_node_bounds_by_key(tree, key, 0.0, 0.0).unwrap();
+        let full = find_node_bounds_by_key(&expected, key, 0.0, 0.0).unwrap();
+        assert_eq!(actual, full, "elapsed={elapsed}");
+        let (l, t, r, b) = full;
+        assert_eq!(
+            mesh_core_interaction::pointer_hit_test(tree, (l + r) / 2.0, (t + b) / 2.0),
+            mesh_core_interaction::pointer_hit_test(&expected, (l + r) / 2.0, (t + b) / 2.0)
+        );
+        assert!(
+            l >= if elapsed >= 1000 {
+                10.0
+            } else {
+                elapsed as f32 / 100.0 - 1.0
+            }
+        );
+    }
+}

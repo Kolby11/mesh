@@ -217,13 +217,6 @@ fn animation_property_bucket_classifies_paint_only_properties() {
                 ..TransitionProperties::none()
             },
         ),
-        (
-            "border-width",
-            TransitionProperties {
-                border_width: true,
-                ..TransitionProperties::none()
-            },
-        ),
     ] {
         assert_eq!(
             properties.animation_bucket(),
@@ -271,6 +264,13 @@ fn animation_property_bucket_classifies_layer_effect_properties() {
 #[test]
 fn animation_property_bucket_classifies_layout_affecting_properties() {
     for (name, properties) in [
+        (
+            "border-width",
+            TransitionProperties {
+                border_width: true,
+                ..TransitionProperties::none()
+            },
+        ),
         (
             "width",
             TransitionProperties {

@@ -9787,3 +9787,93 @@ A third run reached the persisted size limit and is not comparable. This is
 an offline CPU test, not a live GPU or compositor measurement; no causal claim
 about the observed desktop lag or performance improvement is established.
 No gate or implementation change accompanies this investigation.
+
+## 2026-10-28 — Bound filesystem wildcard matching and recheck CPU gates
+
+Area: filesystem capability patterns. Recursive partition search is replaced by
+constant-space iterative wildcard matching; retries advance the input, bounding
+work polynomially. Literal path segments retain direct string equality.
+Generated short Unicode patterns match the former recursive reference, and
+32/128/512-length adversarial cases assert a comparison-count bound.
+
+Release (thin LTO, one codegen unit), this development machine, CPU 2 pinned,
+three runs of 100 synthetic 16-wildcard nonmatches: segment matching took
+148.465–151.891 ms with the recursive reference versus 0.003562 ms iterative;
+path matching took 72.252–77.016 ms versus 0.007124–0.008312 ms. The segment
+pattern repeats `*a` sixteen times followed by `b`, against sixteen `a`s;
+the path pattern uses sixteen `**/a` pairs followed by `b`, against sixteen
+`a` segments. Desktop and concurrent builds were active. These are adversarial
+measurements, not normal filesystem throughput. The capability release suite
+passes 17 tests (two ignored); `filesystem_glob_nonmatches_have_polynomial_work`
+is the structural gate.
+
+Separately, checkpoint `36b012fe` passes the existing CPU raster gates in three
+release runs pinned to CPU 2: `d9_glass_dashboard_open_p90_ms` 43.511–47.044 ms
+(budget 100), `d9_glass_dock_frame_p90_ms` 9.611–9.941 ms (budget 16.7), clock
+p90 4.354–5.003 ms. Dashboard uses twelve mount/service/first-raster samples at
+1920×1080; dock uses ten pinned and 150 installed apps, 2880×180, 53–55 frames.
+These are current baselines, not improvements attributed to this change.
+The stale dock/dashboard failure items leave the backlog. A grain-interior
+renderer candidate was discarded before performance claims because the current
+material has no grain; no renderer optimization is shipped here.
+
+## 2026-10-28 — Attribute missing-instance storage recovery allocations
+
+Area: localized component mounting and scoped storage. Sampling the combined
+mount workload attributed about 31% to opening storage and 27.5% to missing-file
+recovery (inclusive samples, not isolated phase timings). Recovery previously
+constructed a full path and lossy filename for every sibling before rejecting
+unrelated entries. It now checks the filename bytes first and only constructs
+paths for matching temporary recovery candidates. Recovery order, revision
+selection and validation are unchanged. Fifteen scripting storage tests pass,
+including unrelated newer temporary files and non-UTF-8 sibling filenames.
+
+Three paired allocation-count runs opening 1,000 missing frontend instance
+stores beside 1,000 sibling lock files counted exactly 4,055,900 calls and
+766,875,900 cumulative bytes before versus 2,055,900 calls and 178,875,900 bytes
+after. This isolated harness uses the actual storage filesystem implementation
+with the unused Luau adapter omitted, optimized rustc with debug dependency
+rlibs, and identical allocator instrumentation on both sides. These are
+allocation measurements, not release latency or retained-memory claims.
+The debug shell `allocation-profiling` gate
+`missing_instance_storage_dense_directory_allocation_gate` passes three fresh
+processes at 2,056,900 calls / 178,560,900 cumulative bytes; minor path-length
+variation changes byte totals. Its 2.5-million-call threshold excludes the
+old loop. Broader runtime and tree setup costs remain open in the backlog.
+
+## 2026-10-28 — Live widget resize GPU replay
+
+Added `live_desktop_widget_resize`: isolated shell, fixed service data, 100
+one-pixel diagonal moves at intervals of at least 16 ms, with handle and card
+geometry assertions. Release with GPU feature, current development desktop,
+Hyprland 0.56.2-b: one successful run recorded 92 tree rebuilds, 70 GPU commits,
+and 34.477 ms inter-commit p90. Widget render p90 was 11.270 ms; mean tree build
+2.710 ms, layout 0.271 ms and scene paint preparation 0.830 ms. This is a single
+baseline, not an improvement measurement. The replay namespace does not match
+the installed hyprglass rule, so hyprglass cost and physical display latency
+remain unmeasured and the live-resize investigation stays open. A first run
+outside the Nix environment used CPU/SHM because libEGL was unavailable; it
+must not be interpreted as GPU evidence. Running through `nix develop` enabled
+the successful GPU path. The profiling guide documents the command and limits.
+
+## 2026-10-28 — Integration verification after storage recovery change
+
+Current debug shell component memo suite passes 16 tests (two ignored), and
+interaction/animation passes 48 (two ignored). The Python performance-gate
+suite passes six tests and profile-report passes one. All pending planning
+notes remain linked from the backlog. The live-resize and broader component
+mount items remain open; this work fixes a measured allocation hotspot and an
+animation geometry defect rather than claiming those whole areas are complete.
+
+Machine for the preceding October 28 verification records: x86_64 AMD Ryzen 7
+7840HS with Radeon 780M Graphics, 8 cores / 16 threads, boost enabled.
+
+Supplementary whole-mount verification: three alternating release processes per
+side, fresh `XDG_STATE_HOME` for each process, five interleaved resolver modes
+per case, 1/100/1,000 siblings and 10/100 catalog keys. Shared-resolver 1,000-child,
+100-key per-run medians were 1,188.455–1,269.459 ms before versus
+1,036.672–1,259.845 ms after; sample ranges were 1,152.025–1,308.750 versus
+1,017.680–2,138.091 ms. Unpinned with concurrent compilation/desktop activity;
+the before binary was CPU-only and the after binary GPU-enabled, although this
+workload only builds trees. The overlap and feature difference preclude a
+whole-mount latency improvement claim. All six workload processes passed.

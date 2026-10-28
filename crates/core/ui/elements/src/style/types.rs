@@ -1604,24 +1604,7 @@ impl TransitionProperties {
     }
 
     pub fn animation_bucket(self) -> AnimationPropertyBucket {
-        if self.all
-            || self.width
-            || self.height
-            || self.min_width
-            || self.max_width
-            || self.min_height
-            || self.max_height
-            || self.padding
-            || self.margin
-            || self.font_size
-            || self.letter_spacing
-            || self.line_height
-            || self.gap
-            || self.inset_top
-            || self.inset_right
-            || self.inset_bottom
-            || self.inset_left
-        {
+        if self.affects_layout() {
             return AnimationPropertyBucket::LayoutAffecting;
         }
 
@@ -1630,7 +1613,6 @@ impl TransitionProperties {
         }
 
         if self.border_radius
-            || self.border_width
             || self.opacity
             || self.background_color
             || self.border_color

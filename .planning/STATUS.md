@@ -19,8 +19,6 @@ measurements live in [`log/`](log/README.md).
 
 - D1 compound-table write tracking remains deferred pending supported runtime
   observation; indirect list reads still compare every item.
-- CPU glass dashboard open remains over budget; the CPU dock budget remains
-  noisy at its edge.
 - GPU panel recorded-scene parity exceeds its pixel budget on the baseline.
 - NVIDIA as compositor main device and other compositor imports remain unchecked
   live.

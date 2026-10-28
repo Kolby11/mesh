@@ -1136,3 +1136,222 @@ fn live_glass_replay() {
 }
 
 mod popup_validation;
+
+#[test]
+#[ignore = "requires a live compositor and presents desktop widgets"]
+fn live_desktop_widget_resize() {
+    assert!(!cfg!(debug_assertions), "run with --release");
+    if !compositor_reachable() {
+        eprintln!("skipping live widget resize: no reachable compositor");
+        return;
+    }
+    let _sandbox = Sandbox::new();
+    let mut shell = Shell::new();
+    assert!(shell.presentation_engine.supports_blocking_dispatch());
+    shell
+        .presentation_engine
+        .set_layer_namespace_suffix(REPLAY_NAMESPACE_SUFFIX);
+    let started = Instant::now();
+    let result = Rc::new(RefCell::new((None, None, None::<String>)));
+    let captured = Rc::clone(&result);
+    let mut stage = 0;
+    let mut next = started;
+    let mut surface = String::new();
+    let mut origin = (0.0, 0.0);
+    let mut initial_size = (0.0, 0.0);
+    let mut step = 0;
+    shell.replay = Some(ReplayHarness {
+        suppress_backends: true,
+        wake_at: None,
+        driver: Box::new(move |shell| {
+            let now = Instant::now();
+            if now - started > Duration::from_secs(25) {
+                captured.borrow_mut().2 = Some(format!("resize replay timed out at stage {stage}"));
+                shell.enqueue_effects([CoreRequest::Shutdown]);
+                return ReplayStep { wake_at: None };
+            }
+            if now < next {
+                return ReplayStep {
+                    wake_at: Some(next),
+                };
+            }
+            fn tree_for<'a>(shell: &'a Shell, surface: &str) -> Option<&'a WidgetNode> {
+                shell
+                    .components
+                    .iter()
+                    .find(|entry| entry.surface_id == surface)
+                    .and_then(|entry| entry.component.last_widget_tree())
+            }
+            let center = |tree: &WidgetNode, reference: &str| {
+                let node = first_node_with_ref(tree, reference)?;
+                let (l, t, r, b) = find_node_bounds_by_key(tree, node.mesh_key()?, 0.0, 0.0)?;
+                Some(((l + r) / 2.0, (t + b) / 2.0))
+            };
+            match stage {
+                0 => {
+                    if let Some(entry) = shell
+                        .components
+                        .iter()
+                        .find(|entry| entry.surface_id.contains("glass-widgets"))
+                    {
+                        surface = entry.surface_id.to_string();
+                        shell.enqueue_effects([
+                            CoreRequest::ShowSurface {
+                                surface_id: surface.clone(),
+                            },
+                            CoreRequest::ToggleDebugProfiling,
+                        ]);
+                        for (interface, payload) in fixed_service_state() {
+                            let effects = shell
+                                .broadcast_service_event(service(interface, payload))
+                                .unwrap();
+                            shell.enqueue_effects(effects);
+                        }
+                        stage = 1;
+                        next = now + Duration::from_secs(3);
+                    }
+                }
+                1 => {
+                    if let Some((x, y)) =
+                        tree_for(shell, &surface).and_then(|tree| center(tree, "resizeToggle"))
+                    {
+                        for pressed in [true, false] {
+                            shell
+                                .pending_wayland_events
+                                .push_back(WindowEvent::PointerButton {
+                                    surface_id: surface.as_str().into(),
+                                    x,
+                                    y,
+                                    button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+                                    pressed,
+                                });
+                        }
+                        stage = 2;
+                        next = now + GAP;
+                    }
+                }
+                2 => {
+                    if let Some(tree) = tree_for(shell, &surface) {
+                        if let Some(point) = center(tree, "resizeHandle") {
+                            origin = point;
+                            let card = first_node_by_class(tree, "media-card").unwrap();
+                            initial_size = (card.layout.width, card.layout.height);
+                            shell
+                                .pending_wayland_events
+                                .push_back(WindowEvent::PointerButton {
+                                    surface_id: surface.as_str().into(),
+                                    x: point.0,
+                                    y: point.1,
+                                    button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+                                    pressed: true,
+                                });
+                            shell.profiling.capture = Some(Vec::new());
+                            captured.borrow_mut().0 = Some(now);
+                            stage = 3;
+                        }
+                    }
+                }
+                3 => {
+                    if step < 100 {
+                        step += 1;
+                        shell
+                            .pending_wayland_events
+                            .push_back(WindowEvent::PointerMove {
+                                surface_id: surface.as_str().into(),
+                                x: origin.0 + step as f32,
+                                y: origin.1 + step as f32,
+                            });
+                        next = now + MOVE_INTERVAL;
+                    } else {
+                        shell
+                            .pending_wayland_events
+                            .push_back(WindowEvent::PointerButton {
+                                surface_id: surface.as_str().into(),
+                                x: origin.0 + 100.0,
+                                y: origin.1 + 100.0,
+                                button: mesh_core_presentation::PRIMARY_POINTER_BUTTON,
+                                pressed: false,
+                            });
+                        stage = 4;
+                        next = now + GAP;
+                    }
+                }
+                _ => {
+                    let tree = tree_for(shell, &surface).expect("widgets must retain their tree");
+                    let handle = center(tree, "resizeHandle").unwrap();
+                    let card = first_node_by_class(tree, "media-card").unwrap();
+                    assert!(
+                        (handle.0 - origin.0 - 100.0).abs() < 5.0,
+                        "resize handle must follow live pointer"
+                    );
+                    assert!(
+                        (card.layout.height - initial_size.1 - 100.0).abs() < 2.0,
+                        "live card height must track drag"
+                    );
+                    assert!(card.layout.width > initial_size.0, "live card must widen");
+                    captured.borrow_mut().1 = Some(now);
+                    shell.enqueue_effects([CoreRequest::Shutdown]);
+                    return ReplayStep { wake_at: None };
+                }
+            }
+            ReplayStep {
+                wake_at: Some(next.max(now + Duration::from_millis(1))),
+            }
+        }),
+    });
+    shell.run().unwrap();
+    let result = result.borrow();
+    assert!(result.2.is_none(), "{:?}", result.2);
+    eprintln!("raster path: {}", shell.presentation_engine.render_path());
+    let records = shell.profiling.capture.as_deref().unwrap();
+    report_window(
+        records,
+        "widget_resize",
+        result.0.unwrap(),
+        result.1.unwrap(),
+    );
+    let commits = records
+        .iter()
+        .filter(|record| {
+            matches!(
+                record,
+                CapturedRecord::Stage {
+                    stage: ProfilingStage::PresentCommit,
+                    ..
+                }
+            )
+        })
+        .count();
+    metric("live_widget_resize_present_commits", commits as f64);
+    let builds = records.iter().filter(|record| matches!(record, CapturedRecord::Stage { surface_id, stage: ProfilingStage::TreeBuild, trigger, .. } if surface_id.contains("glass-widgets") && trigger.as_deref() == Some("rebuild"))).count();
+    metric("live_widget_resize_tree_rebuilds", builds as f64);
+    let completions: Vec<_> = records
+        .iter()
+        .filter_map(|record| match record {
+            CapturedRecord::SceneCompletion {
+                at,
+                surface_id,
+                presented: true,
+            } if surface_id.contains("glass-widgets") => Some(*at),
+            _ => None,
+        })
+        .collect();
+    metric("live_widget_resize_gpu_commits", completions.len() as f64);
+    if shell.presentation_engine.gpu_canvas_available() {
+        assert!(
+            !completions.is_empty(),
+            "GPU submissions must reach Wayland commit"
+        );
+        let mut intervals: Vec<_> = completions
+            .windows(2)
+            .map(|pair| (pair[1] - pair[0]).as_secs_f64() * 1000.0)
+            .collect();
+        intervals.sort_by(f64::total_cmp);
+        if !intervals.is_empty() {
+            metric(
+                "live_widget_resize_gpu_commit_interval_p90_ms",
+                percentile(&intervals, 0.9),
+            );
+        }
+    }
+}

@@ -461,3 +461,17 @@ The verifier is compiled only in tests and runs outside visit counters. Leave it
 disabled for timing profiles: its full-tree work is intentional verification,
 not production frame cost. `tools/check-performance` enables it for the dirty-set
 structural gates, including the layout gate at 16 and 1,024 clean siblings.
+
+## Live desktop widget resize replay
+
+```bash
+nix develop -c cargo test -p mesh-core-shell --features gpu --release --lib live_desktop_widget_resize -- --ignored --nocapture --test-threads=1
+```
+
+The ignored replay opens isolated widget surfaces and sends 100 one-pixel
+diagonal drag moves, checking that card geometry follows the handle. It reports
+CPU preparation stages, rebuilds, successful GPU commits and inter-commit p90.
+Check the printed raster path: an unavailable EGL/dmabuf backend falls back to
+CPU/SHM. The replay namespace suffix isolates compositor rules; hyprglass rules
+for the ordinary widget namespace do not apply automatically. Commit intervals
+measure application presentation cadence, not physical display latency.

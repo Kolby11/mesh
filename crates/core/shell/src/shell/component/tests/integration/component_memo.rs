@@ -1283,3 +1283,34 @@ fn rendered_text_from_node(node: &WidgetNode, value: &str) -> bool {
             .iter()
             .any(|child| rendered_text_from_node(child, value))
 }
+
+#[test]
+#[cfg(feature = "allocation-profiling")]
+fn missing_instance_storage_dense_directory_allocation_gate() {
+    use mesh_core_scripting::storage::{StorageManager, StorageScope};
+    let root = tempfile::tempdir().unwrap();
+    let manager = StorageManager::new(root.path());
+    let scopes: Vec<_> = (0..1000)
+        .map(|index| StorageScope::frontend("@test/mount", "child", format!("child-{index}")))
+        .collect();
+    for scope in &scopes {
+        assert!(manager.open(scope.clone()).diagnostics().is_empty());
+    }
+    let before = mesh_core_debug::allocation::snapshot();
+    let started = std::time::Instant::now();
+    for scope in &scopes {
+        let storage = manager.open(scope.clone());
+        assert!(storage.diagnostics().is_empty());
+        assert_eq!(storage.revision(), 0);
+    }
+    let elapsed = started.elapsed();
+    let allocations = mesh_core_debug::allocation::snapshot().saturating_delta(before);
+    println!(
+        "missing storage 1000 instances/1000 sibling locks: {elapsed:?}, {} allocations, {} bytes",
+        allocations.allocation_count, allocations.allocated_bytes
+    );
+    assert!(
+        allocations.allocation_count < 2_500_000,
+        "missing_instance_storage_dense_directory_allocation_gate"
+    );
+}

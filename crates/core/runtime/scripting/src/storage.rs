@@ -562,10 +562,14 @@ fn recover_temporary(
     let mut candidates = Vec::new();
     for entry in fs::read_dir(parent)? {
         let entry = entry?;
-        let candidate = entry.path();
-        if !entry.file_name().to_string_lossy().starts_with(&prefix) {
+        if !entry
+            .file_name()
+            .as_encoded_bytes()
+            .starts_with(prefix.as_bytes())
+        {
             continue;
         }
+        let candidate = entry.path();
         if let Ok(Some(document)) = read_storage_file(&candidate, max_document_bytes) {
             candidates.push((candidate, document));
         }
@@ -1276,6 +1280,20 @@ mod tests {
         .unwrap();
         file.sync_all().unwrap();
         drop(file);
+
+        let unrelated = path.parent().unwrap().join(".other.json.tmp-0-0");
+        fs::write(
+            unrelated,
+            serialized_document(&Map::from_iter([(String::from("version"), json!(99))]), 99)
+                .unwrap(),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let name = std::ffi::OsString::from_vec(b".unrelated-\xff.json.tmp-0-0".to_vec());
+            fs::write(path.parent().unwrap().join(name), b"invalid").unwrap();
+        }
 
         let recovered = manager.open(scope);
         assert_eq!(recovered.revision(), 2);

@@ -648,27 +648,56 @@ impl PathPattern {
 }
 
 fn glob_segments(pattern: &[&str], path: &[&str]) -> bool {
-    match pattern.split_first() {
-        None => path.is_empty(),
-        Some((&"**", rest)) => (0..=path.len()).any(|skip| glob_segments(rest, &path[skip..])),
-        Some((segment, rest)) => path
-            .split_first()
-            .is_some_and(|(first, tail)| glob_segment(segment, first) && glob_segments(rest, tail)),
-    }
+    wildcard_match(
+        pattern,
+        path,
+        |segment| *segment == "**",
+        |pattern, text| glob_segment(pattern, text),
+    )
 }
 
 fn glob_segment(pattern: &str, text: &str) -> bool {
-    match pattern.split_once('*') {
-        None => pattern == text,
-        Some((prefix, rest)) => {
-            let Some(text) = text.strip_prefix(prefix) else {
-                return false;
-            };
-            (0..=text.len())
-                .filter(|index| text.is_char_boundary(*index))
-                .any(|index| glob_segment(rest, &text[index..]))
+    if !pattern.contains('*') {
+        return pattern == text;
+    }
+    // A UTF-8 literal cannot begin at a continuation byte, so byte retries
+    // preserve the character-boundary semantics of substring matching.
+    wildcard_match(
+        pattern.as_bytes(),
+        text.as_bytes(),
+        |byte| *byte == b'*',
+        |a, b| a == b,
+    )
+}
+
+// Only the most recent wildcard needs retrying: it can absorb anything an
+// earlier wildcard could consume. Each retry advances the input, bounding
+// comparisons by pattern length times input length without recursion.
+fn wildcard_match<T>(
+    pattern: &[T],
+    text: &[T],
+    is_star: impl Fn(&T) -> bool,
+    equal: impl Fn(&T, &T) -> bool,
+) -> bool {
+    let (mut pattern_index, mut text_index) = (0, 0);
+    let mut retry = None;
+    while text_index < text.len() {
+        if pattern_index < pattern.len() && is_star(&pattern[pattern_index]) {
+            pattern_index += 1;
+            retry = Some((pattern_index, text_index));
+        } else if pattern_index < pattern.len() && equal(&pattern[pattern_index], &text[text_index])
+        {
+            pattern_index += 1;
+            text_index += 1;
+        } else if let Some((after_star, consumed)) = retry {
+            text_index = consumed + 1;
+            pattern_index = after_star;
+            retry = Some((after_star, text_index));
+        } else {
+            return false;
         }
     }
+    pattern[pattern_index..].iter().all(is_star)
 }
 
 /// Split an `fs.read:<pattern>` or `fs.watch:<pattern>` grant.
@@ -1159,6 +1188,138 @@ mod tests {
         assert!(home.matches("/home/alice/.config/app.json", Some("/home/alice")));
         assert!(!home.matches("/home/bob/.config/app.json", Some("/home/alice")));
         assert!(!home.matches("/home/alice/.config/app.json", None));
+    }
+
+    fn words(alphabet: &[&str], max: usize) -> Vec<String> {
+        let mut result = vec![String::new()];
+        let mut level = vec![String::new()];
+        for _ in 0..max {
+            level = level
+                .iter()
+                .flat_map(|prefix| {
+                    alphabet
+                        .iter()
+                        .map(move |suffix| format!("{prefix}{suffix}"))
+                })
+                .collect();
+            result.extend(level.iter().cloned());
+        }
+        result
+    }
+
+    #[test]
+    fn filesystem_globs_preserve_unicode_and_partition_semantics() {
+        let texts = words(&["a", "é"], 4);
+        for pattern in words(&["a", "é", "*"], 4) {
+            for text in &texts {
+                assert_eq!(
+                    glob_segment(&pattern, text),
+                    reference_glob_segment(&pattern, text),
+                    "{pattern:?} {text:?}"
+                );
+            }
+        }
+        let patterns = words(&["a/", "é/", "**/", "a*/"], 4);
+        let paths = words(&["a/", "é/"], 4);
+        for pattern in &patterns {
+            let pattern: Vec<_> = pattern.split_terminator('/').collect();
+            for path in &paths {
+                let path: Vec<_> = path.split_terminator('/').collect();
+                assert_eq!(
+                    glob_segments(&pattern, &path),
+                    reference_glob_segments(&pattern, &path),
+                    "{pattern:?} {path:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn filesystem_glob_nonmatches_have_polynomial_work() {
+        use std::cell::Cell;
+        for size in [32, 128, 512] {
+            let pattern = format!("*{}b", "a".repeat(size));
+            let text = "a".repeat(size * 2);
+            let comparisons = Cell::new(0usize);
+            assert!(!wildcard_match(
+                pattern.as_bytes(),
+                text.as_bytes(),
+                |c| *c == b'*',
+                |a, b| {
+                    comparisons.set(comparisons.get() + 1);
+                    a == b
+                }
+            ));
+            assert!(comparisons.get() <= pattern.len() * text.len());
+            let pattern = format!("/{}b", "**/a/".repeat(size));
+            let path = format!("/{}", vec!["a"; size * 2].join("/"));
+            assert!(!PathPattern::parse(&pattern).unwrap().matches(&path, None));
+        }
+    }
+
+    #[test]
+    #[ignore = "release adversarial filesystem glob timing"]
+    fn filesystem_glob_adversarial_profile() {
+        use std::hint::black_box;
+        use std::time::Instant;
+        assert!(!cfg!(debug_assertions), "run with --release");
+        for size in [8, 12, 16] {
+            let pattern = format!("{}b", "*a".repeat(size));
+            let text = "a".repeat(size);
+            let segments: Vec<_> = (0..size).flat_map(|_| ["**", "a"]).chain(["b"]).collect();
+            let path = vec!["a"; size];
+            for (name, old) in [("iterative", false), ("recursive", true)] {
+                let started = Instant::now();
+                for _ in 0..100 {
+                    assert!(!black_box(if old {
+                        reference_glob_segment(black_box(&pattern), black_box(&text))
+                    } else {
+                        glob_segment(black_box(&pattern), black_box(&text))
+                    }));
+                }
+                let single = started.elapsed();
+                let started = Instant::now();
+                for _ in 0..100 {
+                    assert!(!black_box(if old {
+                        reference_glob_segments(black_box(&segments), black_box(&path))
+                    } else {
+                        glob_segments(black_box(&segments), black_box(&path))
+                    }));
+                }
+                eprintln!(
+                    "glob {name} size={size} iterations=100 segment_us={:.3} path_us={:.3}",
+                    single.as_secs_f64() * 1e6,
+                    started.elapsed().as_secs_f64() * 1e6
+                );
+            }
+        }
+    }
+
+    fn reference_glob_segments(pattern: &[&str], path: &[&str]) -> bool {
+        match pattern.split_first() {
+            None => path.is_empty(),
+            Some((&"**", rest)) => {
+                (0..=path.len()).any(|skip| reference_glob_segments(rest, &path[skip..]))
+            }
+            Some((segment, rest)) => path.split_first().is_some_and(|(first, tail)| {
+                reference_glob_segment(segment, first)
+                    && reference_glob_segments(rest, tail)
+            }),
+        }
+    }
+
+    fn reference_glob_segment(pattern: &str, text: &str) -> bool {
+        match pattern.split_once('*') {
+            None => pattern == text,
+            Some((prefix, rest)) => {
+                let Some(text) = text.strip_prefix(prefix) else {
+                    return false;
+                };
+                (0..=text.len())
+                    .filter(|index| text.is_char_boundary(*index))
+                    .any(|index| reference_glob_segment(rest, &text[index..]))
+            }
+        }
     }
 
     #[test]

@@ -23,7 +23,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Investigate the desktop media seek slider remaining at its old position after a track change; the existing simulated track-switch regression passes, so the live trigger is not yet reproduced.
 - [ ] Continue the whole-codebase audit: sections 01–07 and 09 are reviewed; section 08 needs deeper logic/test coverage, and sections 10–16 plus cross-section review remain.
       Resume the three review layers and file coverage in [the audit inventory](../.planning/codebase/audits/2026-10-27-whole-codebase/00-coverage.md); [interim findings](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md) include component testing and profiling opportunities.
-- [ ] Classify border-width animations as layout-affecting and verify intermediate geometry and hit bounds against full layout. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Project documented icon axis custom properties into computed icon styles; generic custom-property handling currently bypasses their lowering. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Bound custom-property and prop-reference resolution depth and work; long acyclic chains recurse without a limit. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Include keyboard shortcuts in semantic snapshot diffs; shortcut-only changes currently produce no field change. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
@@ -39,7 +38,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Bound command pipe capture and shutdown when descendants outlive the direct child; retained pipes can block worker cleanup. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Retry Wayland flush after transient write backpressure; `WouldBlock` currently propagates as an error. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Preserve distinct, resolvable diagnostic issue identities when codes exceed the size limit; truncation currently breaks lookup and can merge issues. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
-- [ ] Bound filesystem capability glob matching and measure adversarial nonmatches; recursive wildcard partitioning can grow combinatorially. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Preserve error severity when diagnostics overflow; a full warning table can hide a later error. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Bind debug snapshot payloads to the generations they captured; a concurrent diagnostic update can leave stale data cached under a newer key. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/01-core-foundation-contracts.md).
 - [ ] Review and consolidate the unused public config diagnostic model and redundant settings accessors; repository consumers use the newer settings contracts. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/01-core-foundation-contracts.md).
@@ -114,10 +112,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Connect Orbit's market, activity and usage cards to real data sources and complete their reference visuals; those sources and graph/grid views are not implemented yet.
 - [ ] Verify Orbit's desktop-card appearance and component interactions on a clear Wayland desktop, including narrow outputs; live activation and profile switching work, but the cards were obscured by windows.
 
-- [ ] `d9_glass_dock_frame_p90_ms` straddles its 16.7 ms budget run to run (16.0–20.1 ms at
-      639d4dd7, 17.4–19.7 ms at ca8b18d1); the CPU dock animation fixture needs headroom.
-- [ ] The CPU glass dashboard open gate remains over budget; its raster drawing
-      needs attention.
 - [ ] Recorded-scene panel GPU parity exceeds its pixel budget on the available
       driver; reproduced on unchanged `f6a68c5a` and the scene-retry candidate.
 
@@ -252,8 +246,8 @@ evidence and test workloads are in the linked reports.
 
 ### Section 05 — Localization and i18n
 
-- [ ] Attribute and reduce localized component-mount allocation and setup cost;
-      the current whole-mount measurements do not isolate catalog overhead.
+- [ ] Reduce remaining localized component-mount runtime and tree setup cost;
+      storage recovery filtering is bounded, but host API installation and child runtime setup remain expensive.
 
 ### Section 06 — Host resources and icon packs
 

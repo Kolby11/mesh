@@ -675,7 +675,7 @@ measurements of their source and target styles. Reversing an interrupted
 transition shortens its duration by its eased progress, including repeated
 reversals; the authored target is restored when the transition completes.
 Animations are sampled before layout, so a layout-affecting value (width,
-padding, …) is laid out in the frame that samples it, and a transition that
+padding, border width, …) is laid out in the frame that samples it, and a transition that
 starts in a frame shows its start value in that frame. Layout positions remain
 rounded to whole logical pixels.
 
