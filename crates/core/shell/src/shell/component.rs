@@ -40,9 +40,7 @@ mod tooltip;
 pub(in crate::shell) use catalog::{
     FrontendCatalog, FrontendCatalogHandle, FrontendCatalogState, SharedCompiledFrontendModule,
 };
-use disclosure::{
-    DisclosureRegistry, node_matches_reference, popover_anchor_reference, popover_is_open,
-};
+use disclosure::{DisclosureRegistry, popover_anchor_reference, popover_is_open};
 #[cfg(test)]
 pub(crate) use input::KeybindResolutionSource;
 use input::ResolvedSurfaceShortcut;

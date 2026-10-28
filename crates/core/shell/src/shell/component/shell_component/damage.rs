@@ -253,10 +253,9 @@ pub(super) fn visual_damage_rect_for_widget_node(
     clip_damage(rect, surface)
 }
 
-/// Union of `node_visual_bounds` over `node` and its full subtree, in
-/// absolute layout space. Used to size a popover's popup buffer so
-/// descendant `box-shadow`/`filter` overshoot (e.g. a floating bubble
-/// button's shadow) isn't clipped at the buffer edge.
+/// Union of visual bounds over the full subtree in absolute layout space,
+/// including descendant shadow and filter extents.
+#[cfg(test)]
 pub(super) fn subtree_visual_bounds(node: &WidgetNode) -> (f32, f32, f32, f32) {
     mesh_core_render::display_list::widget_subtree_visual_bounds(node)
         .map(layout_bounds_tuple)

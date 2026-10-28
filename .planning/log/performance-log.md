@@ -9895,6 +9895,62 @@ medians) and is not the paired comparison. Lazy installation of `self.storage`
 was rejected before implementation because it changes `rawget`/`pairs` table
 shape. Neither experiment changes the shipped scripting API.
 
+## 2026-10-28 — Bounded date/time formatters and prepared theme details
+
+Area: locale clock formatting and theme service detail transport. Reviewed the
+rejected-experiments table and existing plural/decimal formatter caches first.
+Date/time formatting now reuses ICU objects per thread, locale key and style:
+five date styles and two time styles, each holding at most eight locale keys;
+keys longer than 256 bytes bypass retention. Wall-clock conversion and locale
+validation still run on every call. Outputs, hour-cycle extensions, error
+ordering and invalid inputs are checked against the former constructors.
+
+Theme transport exposes immutable `PreparedDetails` with shared serialized
+UTF-8 storage. The shell retains two source-validated slots, for the current
+snapshot and latest change. Each retains documents only up to 8 MiB of encoded
+source; larger documents remain readable without retention. Complete source
+Value equality includes catalog, settings and resource changes, and revalidates
+after profile recovery. This still assembles the full current snapshot Value
+on each snapshot page read; no whole-shell or change-proportional claim is made.
+
+**Measured:** Nix development environment, Rust 1.98.1, workspace release
+profile (thin LTO, one codegen unit), Ryzen 7 7840HS, root integration retiming
+pinned to CPU 2, three fresh processes per workload. Each process alternates
+seven baseline/candidate samples. Desktop activity and concurrent compilation
+remained active. Baselines reproduce the former implementation in the same
+executable; these are focused comparisons rather than old/new shell binaries.
+
+| Workload | Before per-run median range | After per-run median range |
+| --- | --- | --- |
+| 2,100 date/time calls: en-US/sk/ar, 100 clocks, five date/two time styles | 4.407–4.555 ms | 1.113–1.159 ms |
+| Theme: 16 tokens, 2,251 bytes, one page | 5–10 µs | 2 µs |
+| Theme: 512 tokens, 71,607 bytes, 18 pages | 2.494–4.447 ms | 0.093–0.147 ms |
+| Theme: 4,096 tokens, 576,463 bytes, 141 pages | 176.491–199.262 ms | 7.185–7.357 ms |
+
+Date/time per-run median ratios were 3.834–4.064×; large-theme ratios were
+24.562–27.209×. Formatter individual samples ranged 4.262–6.991 ms before
+and 1.109–1.895 ms after. Large-theme individual sweeps ranged
+167.200–235.772 ms before and 6.103–11.679 ms after. Theme preparation and
+source assembly are excluded; each candidate page includes complete source
+Value equality. Formatter timing starts after clocks are resolved. No retained
+memory or end-to-end UI latency measurement accompanies these figures.
+Logs: `/tmp/mesh-date-time-integrated-{1,2,3}.log` and
+`/tmp/mesh-theme-details-integrated-{1,2,3}.log`.
+
+**Gates:** `cached_date_time_formatter_speedup` and
+`prepared_theme_details_speedup`, both at least 2×, registered in
+`tools/check-performance` and `config/performance-baseline.tsv`.
+
+Validation: locale debug suite 30 passed / three ignored; theme debug and
+release suites each 50 passed / three ignored; shell `theme` filter at two
+threads 66 passed / two ignored. Coverage includes UTF-8 page boundaries,
+immutable document revisions, locale/style separation and eviction, uncached
+oversized documents, settings changes without a rendered-theme revision, and
+profile recovery after candidate details have populated the cache. All six
+root release workload processes pass. Shell-script syntax and `git diff --check`
+pass. Locale strict clippy reports existing warnings outside the changed logic;
+unrelated cleanup is left alone. The two completed audit items leave the backlog.
+
 ## 2026-10-28 — Child-prop refresh and callback write batches
 
 Recorded non-loop child prop bindings now reevaluate typed inputs without
@@ -9934,6 +9990,34 @@ Native patched render p90 was 13.882–16.516 ms versus native forced
 14.615–49.241 ms; GPU commit interval p90 48.732–55.361 versus 51.722–139.133 ms.
 These overlapping, contention-affected ranges do not establish an improvement.
 The callback batching fix follows this finding; final measurements follow.
+
+
+## 2026-10-28 — skip idle maintenance wait after shell shutdown
+
+`working tree` · area: shell event loop and shutdown scheduling
+
+An accepted shutdown effect previously completed the normal frame and entered
+the event wait before the loop condition was checked again. The loop now exits
+after dispatch or effect processing observes shutdown, before rendering and
+waiting. The scheduler also returns zero immediately for a shutting-down shell.
+Component, provider, presentation and worker teardown still use the existing path.
+
+**Measured.** Debug test profile (unoptimized with debuginfo), three isolated
+zero-component shells per side, one IPC shutdown message passed through the real
+message handler and effect scheduler, four maintenance deadlines parked two
+seconds away, and an empty eventfd passed through the real poll helper:
+2.000436–2.001317 s before versus 0.090236–0.237462 ms after. This isolates
+request processing plus the unnecessary scheduler wait; it excludes compositor
+work and provider teardown and is not a whole-process exit measurement.
+`shutdown_request_does_not_wait_for_idle_maintenance` asserts zero scheduled
+wait in every run; the baseline failed with three near-two-second deadlines.
+
+**Verified.** All five shutdown-filtered tests pass, covering signal delivery
+and wakeup, watcher shutdown, quiescing rejection, the new wait regression,
+and idempotent teardown through all phases. Architecture and lifecycle docs
+record prompt transition from accepted shutdown to teardown.
+The scheduler suite also passes (11 tests; two opt-in profiles ignored);
+`git diff --check` passes.
 
 ## 2026-10-28 — Live resize after callback write batching
 

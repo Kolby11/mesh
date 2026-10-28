@@ -52,6 +52,12 @@ mod tests {
         let candidate_details = mesh_core_theme::transport::detail_descriptor(
             shell.last_theme_change_details.as_ref().unwrap(),
         );
+        assert_eq!(
+            shell
+                .read_theme_details(&serde_json::json!({"revision":candidate_details["revision"]}))
+                ["ok"],
+            true
+        );
         rollback.restore(&mut shell);
         assert_eq!(shell.last_theme_change_details.as_ref(), Some(&committed));
         assert_eq!(

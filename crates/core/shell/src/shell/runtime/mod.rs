@@ -269,6 +269,9 @@ impl Shell {
         &self,
         shell_message_backlog_likely: bool,
     ) -> Duration {
+        if self.core.shutting_down {
+            return Duration::ZERO;
+        }
         let render_ready = self.components_have_ready_render_work();
         if shell_message_backlog_likely
             || self.effect_scheduler.has_pending()
@@ -598,6 +601,9 @@ impl Shell {
                 for message in shell_messages.into_vec() {
                     self.handle_shell_message(&mut pending, message)?;
                 }
+                if self.core.shutting_down {
+                    break;
+                }
 
                 pending.extend(self.tick_components()?);
                 pending.extend(self.complete_due_surface_transitions()?);
@@ -605,6 +611,9 @@ impl Shell {
                 pending.extend(self.retry_pending_graph_reconciliation());
                 self.enqueue_effects(std::mem::take(&mut pending));
                 self.process_effects();
+                if self.core.shutting_down {
+                    break;
+                }
                 self.flush_throttled_commands();
                 self.render_components_inner()?;
                 self.presentation_engine
@@ -1611,6 +1620,38 @@ mod tests {
         shell
             .apply_request(CoreRequest::ToggleDebugOverlay)
             .unwrap();
+    }
+
+    #[test]
+    fn shutdown_request_does_not_wait_for_idle_maintenance() {
+        let mut sleeps = Vec::new();
+        for run in 0..3 {
+            let mut shell = Shell::new();
+            let maintenance = std::time::Instant::now() + Duration::from_secs(2);
+            shell.next_frontend_reload_check = maintenance;
+            shell.next_theme_reload_check = maintenance;
+            shell.next_shell_settings_reload_check = maintenance;
+            shell.next_watch_reconcile = maintenance;
+            let eventfd = rustix::event::eventfd(0, EventfdFlags::NONBLOCK).unwrap();
+            let mut pending = VecDeque::new();
+
+            let started = std::time::Instant::now();
+            shell
+                .handle_shell_message(&mut pending, ShellMessage::Ipc(CoreRequest::Shutdown))
+                .unwrap();
+            shell.enqueue_effects(pending);
+            shell.process_effects();
+            let sleep = shell.next_runtime_sleep(false);
+            wait_for_eventfd(sleep, eventfd.as_fd());
+            eprintln!(
+                "shutdown idle wait run={run}: {:?}, deadline={sleep:?}",
+                started.elapsed()
+            );
+
+            assert!(shell.core.shutting_down);
+            sleeps.push(sleep);
+        }
+        assert_eq!(sleeps, vec![Duration::ZERO; 3]);
     }
 
     #[test]

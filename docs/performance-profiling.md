@@ -496,3 +496,19 @@ This attribution workload times seven batches of 1,000 context initializations
 with `locale.read`. Construction and storage opening are outside the timed
 region; each batch drops its contexts and collects the shared VM. It measures
 host setup alone, not complete component mounting, and has no latency gate.
+
+## Formatter and theme detail workloads
+
+```bash
+nix develop -c cargo test -p mesh-core-locale --release --lib cached_date_time_formatter_workload -- --ignored --nocapture --test-threads=1
+nix develop -c cargo test -p mesh-core-theme --release --lib prepared_theme_details_workload -- --ignored --nocapture --test-threads=1
+```
+
+The formatter workload alternates uncached ICU construction and bounded reuse
+for 2,100 calls across three locales and all seven date/time styles. The theme
+workload alternates complete paged reads with repeated serialization and
+prepared document reads, including complete source equality checks, at 16,
+512 and 4,096 tokens. Initial document preparation and shell payload assembly
+are excluded. Both report seven samples per mode and enforce a 2× relative
+gate through `tools/check-performance`. These measure formatting and detail
+transport, not whole-shell frame or compositor latency.

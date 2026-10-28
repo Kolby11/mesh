@@ -155,6 +155,8 @@ if ! "$workloads_only"; then
   run_benchmark mesh-core-shell keyframe_animation_frame_profile
   run_benchmark mesh-core-expression cold_expression_compile_profile
   run_benchmark mesh-core-locale cached_icu_formatter_profile
+  run_benchmark mesh-core-locale cached_date_time_formatter_workload
+  run_benchmark mesh-core-theme prepared_theme_details_workload
   run_benchmark mesh-core-elements finalized_memo_and_selector_dependency_profile
   run_benchmark mesh-core-elements typed_keyword_declaration_profile
   run_benchmark mesh-core-shell unbound_handler_write_eliminates_render_pipeline_benchmark

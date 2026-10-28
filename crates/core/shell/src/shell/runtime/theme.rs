@@ -5,6 +5,27 @@ const THEME_RELOAD_POLL_INTERVAL: std::time::Duration = std::time::Duration::fro
 const SHELL_SETTINGS_RELOAD_POLL_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(500);
 
+const THEME_DETAIL_CACHE_BYTES: u64 = 8 * 1024 * 1024;
+
+fn prepared_theme_details(
+    cached: &mut Option<(
+        serde_json::Value,
+        mesh_core_theme::transport::PreparedDetails,
+    )>,
+    full: &serde_json::Value,
+) -> mesh_core_theme::transport::PreparedDetails {
+    if let Some((source, prepared)) = cached
+        && source == full
+    {
+        return prepared.clone();
+    }
+    let prepared = mesh_core_theme::transport::PreparedDetails::new(full);
+    *cached = (prepared.descriptor()["bytes"].as_u64().unwrap_or(u64::MAX)
+        <= THEME_DETAIL_CACHE_BYTES)
+        .then(|| (full.clone(), prepared.clone()));
+    prepared
+}
+
 fn profile_shell_theme_object(
     settings: &mut serde_json::Value,
 ) -> &mut serde_json::Map<String, serde_json::Value> {
@@ -252,13 +273,19 @@ impl Shell {
         &self,
         payload: &serde_json::Value,
     ) -> serde_json::Value {
-        if let Some(change) = &self.last_theme_change_details
-            && payload["revision"]
-                == mesh_core_theme::transport::detail_descriptor(change)["revision"]
-        {
-            return mesh_core_theme::transport::read_details(change, payload);
+        let mut documents = self.theme_detail_documents.borrow_mut();
+        if let Some(change) = &self.last_theme_change_details {
+            let prepared = prepared_theme_details(&mut documents.change, change);
+            if payload["revision"] == prepared.descriptor()["revision"] {
+                return prepared.read(payload);
+            }
+        } else {
+            documents.change = None;
         }
-        mesh_core_theme::transport::read_details(&self.full_theme_service_payload(), payload)
+        // Include catalog and settings facts, which can change without advancing
+        // the rendered theme revision, and revalidate after activation rollback.
+        prepared_theme_details(&mut documents.snapshot, &self.full_theme_service_payload())
+            .read(payload)
     }
 
     pub(in crate::shell) fn list_theme_font_families(
@@ -1483,6 +1510,28 @@ impl Shell {
 #[cfg(test)]
 mod part_tests {
     use super::*;
+
+    #[test]
+    fn theme_detail_documents_retain_only_bounded_current_sources() {
+        let mut cached = None;
+        let first = serde_json::json!({"tokens":{"test":"first"}});
+        let prepared = prepared_theme_details(&mut cached, &first);
+        assert_eq!(cached.as_ref().unwrap().0, first);
+        let changed = serde_json::json!({"tokens":{"test":"changed"}});
+        let replacement = prepared_theme_details(&mut cached, &changed);
+        assert_eq!(cached.as_ref().unwrap().0, changed);
+        assert_eq!(
+            replacement.read(&serde_json::json!({"revision":prepared.descriptor()["revision"]}))["error"],
+            "stale_revision"
+        );
+        let oversized = serde_json::json!({"value":"x".repeat(THEME_DETAIL_CACHE_BYTES as usize)});
+        let transient = prepared_theme_details(&mut cached, &oversized);
+        assert!(cached.is_none());
+        assert_eq!(
+            transient.read(&serde_json::json!({"revision":transient.descriptor()["revision"]}))["ok"],
+            true
+        );
+    }
 
     #[test]
     fn releasing_a_theme_pin_preserves_profile_stylesheet() {

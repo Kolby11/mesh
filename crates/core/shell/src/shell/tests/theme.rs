@@ -1355,6 +1355,28 @@ fn user_part_stylesheet_reloads_atomically_from_profile_preferences() {
 }
 
 #[test]
+fn theme_detail_cache_revalidates_settings_without_a_theme_revision_change() {
+    let mut shell = Shell::new();
+    let state = shell.authoritative_theme_service_payload();
+    let request = serde_json::json!({"revision":state["details"]["revision"]});
+    assert_eq!(shell.read_theme_details(&request)["ok"], true);
+    let theme_revision = shell.theme.active().revision();
+    shell.settings.render.backdrop.image = Some("/tmp/theme-detail-backdrop.png".into());
+    assert_eq!(shell.theme.active().revision(), theme_revision);
+    assert_eq!(
+        shell.read_theme_details(&request)["error"],
+        "stale_revision"
+    );
+    let updated = shell.authoritative_theme_service_payload();
+    assert_eq!(
+        shell.read_theme_details(&serde_json::json!({"revision":updated["details"]["revision"]}))["ok"],
+        true
+    );
+    shell.settings.render.backdrop.image = None;
+    assert_eq!(shell.read_theme_details(&request)["ok"], true);
+}
+
+#[test]
 fn large_theme_snapshot_details_are_authorized_revisioned_and_lossless() {
     let mut shell = Shell::new();
     shell.discover_modules();

@@ -2,6 +2,8 @@
 //! fallback chains, and runtime locale switching.
 
 use fixed_decimal::Decimal;
+use icu_datetime::FixedCalendarDateTimeFormatter;
+use icu_datetime::fieldsets::{MD, T, YMD, YMDE};
 use icu_decimal::DecimalFormatter;
 use icu_locale_core::Locale as IcuLocale;
 use icu_plurals::{PluralCategory, PluralRules};
@@ -1046,13 +1048,24 @@ pub fn plural_category(locale: &str, value: &str) -> &'static str {
     }
 }
 
-/// Locales whose formatters each thread keeps; a shell usually needs one or
-/// two, and an unbounded key set would come from untrusted script input.
+/// Locale entries retained per formatter kind and style on each thread.
+/// Script-provided locale keys must not grow retained storage without a bound.
 const FORMATTER_CACHE_LOCALES: usize = 8;
+const FORMATTER_CACHE_KEY_BYTES: usize = 256;
 
 type FormatterCache<T> = std::cell::RefCell<Vec<(String, Option<T>)>>;
+type DateFormatter<F> =
+    Result<FixedCalendarDateTimeFormatter<icu_calendar::Gregorian, F>, LocaleFormatError>;
+type TimeFormatter = Result<icu_datetime::NoCalendarFormatter<T>, LocaleFormatError>;
 
 thread_local! {
+    static SHORT_DATES: FormatterCache<DateFormatter<YMD>> = const { std::cell::RefCell::new(Vec::new()) };
+    static MEDIUM_DATES: FormatterCache<DateFormatter<YMD>> = const { std::cell::RefCell::new(Vec::new()) };
+    static LONG_DATES: FormatterCache<DateFormatter<YMD>> = const { std::cell::RefCell::new(Vec::new()) };
+    static FULL_DATES: FormatterCache<DateFormatter<YMDE>> = const { std::cell::RefCell::new(Vec::new()) };
+    static MONTH_DAY_DATES: FormatterCache<DateFormatter<MD>> = const { std::cell::RefCell::new(Vec::new()) };
+    static SHORT_TIMES: FormatterCache<TimeFormatter> = const { std::cell::RefCell::new(Vec::new()) };
+    static MEDIUM_TIMES: FormatterCache<TimeFormatter> = const { std::cell::RefCell::new(Vec::new()) };
     static PLURAL_RULES: FormatterCache<PluralRules> = const { std::cell::RefCell::new(Vec::new()) };
     static DECIMAL_FORMATTERS: FormatterCache<Result<DecimalFormatter, LocaleFormatError>> =
         const { std::cell::RefCell::new(Vec::new()) };
@@ -1067,6 +1080,9 @@ fn with_cached_formatter<T, R>(
     build: impl FnOnce(&str) -> Option<T>,
     use_formatter: impl FnOnce(&T) -> R,
 ) -> Option<R> {
+    if locale.len() > FORMATTER_CACHE_KEY_BYTES {
+        return build(locale).as_ref().map(use_formatter);
+    }
     cache.with(|cache| {
         let mut cache = cache.borrow_mut();
         let index = match cache.iter().position(|(cached, _)| cached == locale) {
@@ -1210,27 +1226,42 @@ pub fn format_date_at(
     clock: WallClock,
     style: &str,
 ) -> Result<String, LocaleFormatError> {
-    use icu_datetime::FixedCalendarDateTimeFormatter;
-    use icu_datetime::fieldsets::{MD, YMD, YMDE};
     use icu_datetime::input::Date;
 
+    let locale_key = locale.trim();
     let locale = normalized_icu_locale(locale)?;
     let date = Date::try_new_gregorian(clock.year, clock.month, clock.day)
         .map_err(|_| LocaleFormatError::DateOutOfRange)?;
     let prefs: icu_datetime::DateTimeFormatterPreferences = (&locale).into();
     macro_rules! render {
-        ($fields:expr) => {
-            FixedCalendarDateTimeFormatter::<icu_calendar::Gregorian, _>::try_new(prefs, $fields)
-                .map(|formatter| formatter.format(&date).to_string())
-                .map_err(formatter_data_error)
+        ($cache:ident, $fields:expr) => {
+            with_cached_formatter(
+                &$cache,
+                locale_key,
+                |_| {
+                    Some(
+                        FixedCalendarDateTimeFormatter::<icu_calendar::Gregorian, _>::try_new(
+                            prefs, $fields,
+                        )
+                        .map_err(formatter_data_error),
+                    )
+                },
+                |formatter| {
+                    formatter
+                        .as_ref()
+                        .map(|formatter| formatter.format(&date).to_string())
+                        .map_err(Clone::clone)
+                },
+            )
+            .expect("date formatter cache stores every build result")
         };
     }
     match style {
-        "short" => render!(YMD::short()),
-        "medium" => render!(YMD::medium()),
-        "long" => render!(YMD::long()),
-        "full" => render!(YMDE::long()),
-        "month_day" => render!(MD::medium()),
+        "short" => render!(SHORT_DATES, YMD::short()),
+        "medium" => render!(MEDIUM_DATES, YMD::medium()),
+        "long" => render!(LONG_DATES, YMD::long()),
+        "full" => render!(FULL_DATES, YMDE::long()),
+        "month_day" => render!(MONTH_DAY_DATES, MD::medium()),
         _ => Err(LocaleFormatError::InvalidDateStyle {
             style: style.to_string(),
         }),
@@ -1255,13 +1286,13 @@ pub fn format_time_at(
     style: &str,
 ) -> Result<String, LocaleFormatError> {
     use icu_datetime::NoCalendarFormatter;
-    use icu_datetime::fieldsets::T;
     use icu_datetime::input::Time;
 
+    let locale_key = locale.trim();
     let locale = normalized_icu_locale(locale)?;
-    let fields = match style {
-        "short" => T::hm(),
-        "medium" => T::hms(),
+    let (cache, fields) = match style {
+        "short" => (&SHORT_TIMES, T::hm()),
+        "medium" => (&MEDIUM_TIMES, T::hms()),
         _ => {
             return Err(LocaleFormatError::InvalidDateStyle {
                 style: style.to_string(),
@@ -1270,9 +1301,23 @@ pub fn format_time_at(
     };
     let time = Time::try_new(clock.hour, clock.minute, clock.second, 0)
         .map_err(|_| LocaleFormatError::DateOutOfRange)?;
-    let formatter =
-        NoCalendarFormatter::try_new((&locale).into(), fields).map_err(formatter_data_error)?;
-    Ok(formatter.format(&time).to_string())
+    with_cached_formatter(
+        cache,
+        locale_key,
+        |_| {
+            Some(
+                NoCalendarFormatter::try_new((&locale).into(), fields)
+                    .map_err(formatter_data_error),
+            )
+        },
+        |formatter| {
+            formatter
+                .as_ref()
+                .map(|formatter| formatter.format(&time).to_string())
+                .map_err(Clone::clone)
+        },
+    )
+    .expect("time formatter cache stores every build result")
 }
 
 /// Format a percentage given in percent units (`55` is "55 %"), with the
@@ -2260,6 +2305,223 @@ mod tests {
         assert!(
             speedup >= 2.0,
             "cached ICU formatters should be at least 2x"
+        );
+    }
+
+    fn uncached_date_at(
+        locale: &str,
+        clock: WallClock,
+        style: &str,
+    ) -> Result<String, LocaleFormatError> {
+        let locale = normalized_icu_locale(locale)?;
+        let date = icu_datetime::input::Date::try_new_gregorian(clock.year, clock.month, clock.day)
+            .map_err(|_| LocaleFormatError::DateOutOfRange)?;
+        let prefs = (&locale).into();
+        macro_rules! render {
+            ($fields:expr) => {
+                FixedCalendarDateTimeFormatter::<icu_calendar::Gregorian, _>::try_new(
+                    prefs, $fields,
+                )
+                .map(|formatter| formatter.format(&date).to_string())
+                .map_err(formatter_data_error)
+            };
+        }
+        match style {
+            "short" => render!(YMD::short()),
+            "medium" => render!(YMD::medium()),
+            "long" => render!(YMD::long()),
+            "full" => render!(YMDE::long()),
+            "month_day" => render!(MD::medium()),
+            _ => Err(LocaleFormatError::InvalidDateStyle {
+                style: style.into(),
+            }),
+        }
+    }
+
+    fn uncached_time_at(
+        locale: &str,
+        clock: WallClock,
+        style: &str,
+    ) -> Result<String, LocaleFormatError> {
+        let locale = normalized_icu_locale(locale)?;
+        let fields = match style {
+            "short" => T::hm(),
+            "medium" => T::hms(),
+            _ => {
+                return Err(LocaleFormatError::InvalidDateStyle {
+                    style: style.into(),
+                });
+            }
+        };
+        let time = icu_datetime::input::Time::try_new(clock.hour, clock.minute, clock.second, 0)
+            .map_err(|_| LocaleFormatError::DateOutOfRange)?;
+        let formatter = icu_datetime::NoCalendarFormatter::try_new((&locale).into(), fields)
+            .map_err(formatter_data_error)?;
+        Ok(formatter.format(&time).to_string())
+    }
+
+    #[test]
+    fn date_time_cache_preserves_locales_styles_clocks_and_errors() {
+        let clocks = [
+            WallClock::utc(0).unwrap(),
+            WallClock {
+                year: 2024,
+                month: 2,
+                day: 29,
+                hour: 23,
+                minute: 59,
+                second: 58,
+            },
+            WallClock {
+                year: 2026,
+                month: 10,
+                day: 28,
+                hour: 12,
+                minute: 0,
+                second: 0,
+            },
+            WallClock {
+                year: 2026,
+                month: 2,
+                day: 30,
+                hour: 25,
+                minute: 0,
+                second: 0,
+            },
+        ];
+        for locale in [
+            "en-US",
+            "en-GB",
+            "en-US-u-hc-h23",
+            "en-GB-u-hc-h12",
+            "sk",
+            "de",
+            "ar",
+            "ja",
+            "th",
+            " en-US ",
+            "bad_locale",
+            " bad_locale ",
+        ] {
+            for style in ["short", "medium", "long", "full", "month_day", "invalid"] {
+                for clock in clocks {
+                    assert_eq!(
+                        format_date_at(locale, clock, style),
+                        uncached_date_at(locale, clock, style)
+                    );
+                    assert_eq!(
+                        format_time_at(locale, clock, style),
+                        uncached_time_at(locale, clock, style)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn date_time_formatter_caches_evict_and_skip_oversized_keys() {
+        SHORT_DATES.with(|cache| cache.borrow_mut().clear());
+        SHORT_TIMES.with(|cache| cache.borrow_mut().clear());
+        let clock = WallClock::utc(0).unwrap();
+        let locales = ["en", "sk", "de", "fr", "ar", "ja", "th", "ko", "es", "it"];
+        for locale in locales {
+            format_date_at(locale, clock, "short").unwrap();
+            format_time_at(locale, clock, "short").unwrap();
+        }
+        SHORT_DATES.with(|cache| {
+            let cache = cache.borrow();
+            assert_eq!(cache.len(), FORMATTER_CACHE_LOCALES);
+            assert_eq!(cache[0].0, "de");
+        });
+        SHORT_TIMES.with(|cache| assert_eq!(cache.borrow().len(), FORMATTER_CACHE_LOCALES));
+        thread_local! {
+            static PROBE: FormatterCache<usize> = const { std::cell::RefCell::new(Vec::new()) };
+        }
+        let builds = std::cell::Cell::new(0);
+        let build = |_: &str| {
+            builds.set(builds.get() + 1);
+            Some(42)
+        };
+        for _ in 0..2 {
+            assert_eq!(
+                with_cached_formatter(&PROBE, "en", build, |value| *value),
+                Some(42)
+            );
+        }
+        assert_eq!(builds.get(), 1);
+        for _ in 0..2 {
+            assert_eq!(
+                with_cached_formatter(
+                    &PROBE,
+                    &"x".repeat(FORMATTER_CACHE_KEY_BYTES + 1),
+                    build,
+                    |value| *value
+                ),
+                Some(42)
+            );
+        }
+        assert_eq!(builds.get(), 3);
+        PROBE.with(|cache| assert_eq!(cache.borrow().len(), 1));
+    }
+
+    #[test]
+    #[ignore = "release-only paired date/time formatter measurement"]
+    fn cached_date_time_formatter_workload() {
+        let locales = ["en-US", "sk", "ar"];
+        let clocks = (0..100)
+            .map(|tick| WallClock::utc(1_791_665_000 + tick).unwrap())
+            .collect::<Vec<_>>();
+        let run = |cached: bool| {
+            let started = std::time::Instant::now();
+            let mut bytes = 0;
+            for locale in locales {
+                for clock in &clocks {
+                    for style in ["short", "medium", "long", "full", "month_day"] {
+                        bytes += if cached {
+                            format_date_at(locale, *clock, style)
+                        } else {
+                            uncached_date_at(locale, *clock, style)
+                        }
+                        .unwrap()
+                        .len();
+                    }
+                    for style in ["short", "medium"] {
+                        bytes += if cached {
+                            format_time_at(locale, *clock, style)
+                        } else {
+                            uncached_time_at(locale, *clock, style)
+                        }
+                        .unwrap()
+                        .len();
+                    }
+                }
+            }
+            (started.elapsed(), std::hint::black_box(bytes))
+        };
+        run(true);
+        let mut uncached = Vec::new();
+        let mut cached = Vec::new();
+        for sample in 0..7 {
+            let (before, after) = if sample % 2 == 0 {
+                (run(false), run(true))
+            } else {
+                let after = run(true);
+                (run(false), after)
+            };
+            assert_eq!(before.1, after.1);
+            uncached.push(before.0.as_secs_f64() * 1000.0);
+            cached.push(after.0.as_secs_f64() * 1000.0);
+        }
+        uncached.sort_by(f64::total_cmp);
+        cached.sort_by(f64::total_cmp);
+        println!(
+            "date_time_formatter_workload calls=2100 samples=7 uncached_ms={uncached:?} cached_ms={cached:?}"
+        );
+        let speedup = uncached[3] / cached[3];
+        println!("MESH_PERF metric=cached_date_time_formatter_speedup value={speedup:.6}");
+        assert!(
+            speedup >= 2.0,
+            "date/time formatter reuse should be at least 2x: {speedup:.3}"
         );
     }
 

@@ -1,6 +1,8 @@
 mod cache;
 pub(in crate::shell::component) use cache::ChildSurfaceCache;
 
+#[cfg(test)]
+use super::super::disclosure::node_matches_reference;
 use super::*;
 use crate::shell::PopoverTriggerReference;
 use mesh_core_elements::Prop;
@@ -219,6 +221,7 @@ fn popover_anchor_attribute_value(popover: &WidgetNode) -> Option<&str> {
     None
 }
 
+#[cfg(test)]
 pub(super) fn find_node_bounds_by_reference(
     node: &WidgetNode,
     reference: &str,

@@ -653,6 +653,7 @@ fn shell_global_shortcut_request_with(
     }
 }
 
+#[cfg(test)]
 fn shell_global_shortcut_request(key: &str, ctrl: bool, shift: bool) -> Option<CoreRequest> {
     shell_global_shortcut_request_with(
         &mesh_core_config::KeyboardSettings::default(),
@@ -683,6 +684,18 @@ fn update_modifiers_for_key_release(modifiers: &mut KeyModifiers, key: &str) {
     } else if normalized.contains("alt") {
         modifiers.alt = false;
     }
+}
+
+#[derive(Default)]
+struct ThemeDetailDocuments {
+    snapshot: Option<(
+        serde_json::Value,
+        mesh_core_theme::transport::PreparedDetails,
+    )>,
+    change: Option<(
+        serde_json::Value,
+        mesh_core_theme::transport::PreparedDetails,
+    )>,
 }
 
 pub struct Shell {
@@ -732,6 +745,7 @@ pub struct Shell {
     /// It is the baseline for deterministic revisioned token events.
     last_published_theme_snapshot: Option<mesh_core_theme::ThemeSnapshot>,
     last_theme_change_details: Option<serde_json::Value>,
+    theme_detail_documents: std::cell::RefCell<ThemeDetailDocuments>,
     components: Vec<ComponentRuntime>,
     /// The last render pass rendered a ready component but presented nothing.
     /// Ready render work then waits for the next deadline instead of keeping

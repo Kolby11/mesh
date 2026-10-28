@@ -168,7 +168,9 @@ Unmapping destroys the layer or window role rather than committing a null
 buffer, and showing recreates it: a configure already in flight when wlroots
 unmaps a layer would otherwise be acked after the compositor discarded it.
 The event loop includes input-repeat, temporary focus-grab and pending-frame
-escape deadlines alongside component ticks and reload maintenance.
+escape deadlines alongside component ticks and reload maintenance. Accepted
+shutdown requests leave the current turn before rendering or waiting for another
+event; teardown runs immediately.
 
 Hot reload uses a managed filesystem watcher that blocks on inotify and a
 control eventfd; watch replacement and shutdown wake that wait directly. With

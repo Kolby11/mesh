@@ -2174,6 +2174,7 @@ impl Shell {
             core: ShellCoreState::default(),
             last_published_theme_snapshot: None,
             last_theme_change_details: None,
+            theme_detail_documents: std::cell::RefCell::default(),
             components: Vec::new(),
             render_stalled: false,
             component_by_surface: HashMap::new(),

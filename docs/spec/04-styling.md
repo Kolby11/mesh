@@ -369,6 +369,12 @@ each response below 25 KiB. Invalid byte boundaries return `invalid_offset`.
 A changed document returns `stale_revision` and the current descriptor; restart
 from offset zero. No truncated token is presented as a complete value.
 
+The shell reuses immutable serialized detail documents after checking their
+complete source values, including catalog, resource and settings facts. It
+retains at most the current snapshot and latest change, each capped at 8 MiB
+of serialized source; larger documents remain readable without retention.
+Profile recovery revalidates these sources before serving cached fragments.
+
 `ThemeChanged` retains its full delta, including removals and provenance-only
 changes. Oversized events set `details_required: true` and include a descriptor;
 `read_details` with that descriptor retrieves the complete change document.

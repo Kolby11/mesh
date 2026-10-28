@@ -76,6 +76,8 @@ effect_identity_single_pass_speedup      lower      1.50      0
 keyframe_compilations_per_instance       upper      1.00      0
 expression_parser_worker_speedup         lower      1.20      0
 cached_icu_formatter_speedup             lower      2.00      0
+cached_date_time_formatter_speedup       lower      2.00      0
+prepared_theme_details_speedup           lower      2.00      0
 settings_scroll_shifted_fraction         lower      0.90      0
 typed_keyword_declaration_speedup        lower      5.00      0
 finalized_memo_speedup                   lower      1.50      0

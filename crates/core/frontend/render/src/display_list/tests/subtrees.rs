@@ -1031,7 +1031,10 @@ fn geometry_command_patches_skip_siblings_and_match_full_build() {
                         "{effect}, {count}, {turn}, {id}"
                     );
                     assert_eq!(patched.local_bounds, rebuilt.local_bounds);
-                    assert_eq!(patched.child_bounds, rebuilt.child_bounds);
+                    assert_eq!(
+                        list.subtrees[&id].child_coverage.bounds(),
+                        full.subtrees[&id].child_coverage.bounds()
+                    );
                 }
                 assert!(metrics.damage_rect.width > 0, "{effect}, {count}, {turn}");
                 assert_eq!(list.entries, full.entries, "{effect}, {count}, {turn}");

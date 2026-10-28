@@ -483,6 +483,7 @@ fn producer_geometry_changes_match_full_commands_scroll_metrics_and_pixels() {
     }
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(320, 1100);
+    let filter = std::env::var("MESH_GEOMETRY_MATRIX_CASE").ok();
     for siblings in [16, 1024] {
         for target in [1, siblings / 2, siblings] {
             for mode in [
@@ -494,6 +495,10 @@ fn producer_geometry_changes_match_full_commands_scroll_metrics_and_pixels() {
                 "clip",
                 "fixed",
             ] {
+                let case = format!("{mode}/{siblings}/{target}");
+                if filter.as_deref().is_some_and(|filter| filter != case) {
+                    continue;
+                }
                 let root_style = match mode {
                     "wrap" => "flex-direction: row; flex-wrap: wrap; align-items: flex-start",
                     "grow" | "shrink" => "flex-direction: row; align-items: flex-start",
@@ -583,9 +588,10 @@ end
                         .find(|(_, (actual, expected))| actual.1 != expected.1);
                     assert!(
                         a.len() == b.len() && mismatch.is_none(),
-                        "{mode}/{siblings}/{target}/{turn}: lengths {}/{}; first mismatch {mismatch:?}",
+                        "{mode}/{siblings}/{target}/{turn}: lengths {}/{}; first mismatch {mismatch:?}; reference diagnostics: {:?}",
                         a.len(),
-                        b.len()
+                        b.len(),
+                        full.diagnostics.as_ref().map(|diagnostics| diagnostics.active_issues())
                     );
                     let (mut a, mut b) = (Vec::new(), Vec::new());
                     metrics(patched.last_tree.as_ref().unwrap(), &mut a);

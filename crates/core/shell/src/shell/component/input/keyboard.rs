@@ -25,7 +25,6 @@ struct SurfaceShortcutDeclaration {
     keybind_id: String,
     generic_trigger: mesh_core_module::KeybindTrigger,
     localized_triggers: HashMap<String, mesh_core_module::KeybindTrigger>,
-    scope: mesh_core_module::KeybindScope,
 }
 
 /// A keyboard target resolved in one tree traversal. Keyboard event payloads
@@ -699,7 +698,6 @@ impl FrontendSurfaceComponent {
                 keybind_id: keybind_id.clone(),
                 generic_trigger: action.trigger.clone(),
                 localized_triggers: action.localized_triggers.clone(),
-                scope: action.scope,
             })
             .collect()
     }
@@ -1138,7 +1136,6 @@ fn surface_shortcut_declarations_from_settings(
                     modifiers: Vec::new(),
                 },
                 localized_triggers: HashMap::new(),
-                scope: mesh_core_module::KeybindScope::Surface,
             })
         })
         .collect()

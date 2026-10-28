@@ -285,10 +285,6 @@ pub(super) fn build_text_selection(node: &WidgetNode) -> Option<DisplayTextSelec
     })
 }
 
-pub(super) fn attr_f32(node: &WidgetNode, key: Prop) -> f32 {
-    attr_f32_with_default(node, key, 0.0)
-}
-
 pub(super) fn attr_f32_with_default(node: &WidgetNode, key: Prop, default: f32) -> f32 {
     node.attributes
         .get(key)

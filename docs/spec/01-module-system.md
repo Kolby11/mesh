@@ -1305,6 +1305,9 @@ Discovered → Resolved → Loaded → Initialized → Running ⇄ Suspended →
   notified; repeated crashing disables the module until re-enabled.
 - UI modules are compiled at startup; dev hot-reload watches sources and
   settings.
+- **Shell shutdown:** an accepted shutdown request exits the event-loop turn
+  before rendering or idle waiting, then runs component, provider, presentation,
+  and worker teardown.
 - **Execution boundary:** modules run within the shell process, with private
   environments and explicit public communication. Current same-thread Luau
   contexts share a sandboxed VM. Script errors must be logged and displayed

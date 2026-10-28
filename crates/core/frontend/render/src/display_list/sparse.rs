@@ -396,7 +396,7 @@ impl RetainedDisplayList {
             for (child, bounds) in changed_children.remove(&id).unwrap_or_default() {
                 subtree.child_coverage.set(child, bounds)?;
             }
-            let mut child_bounds = subtree.child_coverage.bounds();
+            let child_bounds = subtree.child_coverage.bounds();
             let start = self.sparse_paint_index.starts.get(&id)?.start;
             let previous = self.subtrees.get(&id)?;
             let mut bounds = local_bounds.union(child_bounds);
@@ -461,13 +461,11 @@ impl RetainedDisplayList {
                     .iter()
                     .find(|(_, c)| c.kind == DisplayPaintCommandKind::Node)?;
                 bounds = command_bounds(&own.1).union(viewport);
-                child_bounds = viewport;
             }
             let subtree = updated.get_mut(&id)?;
             subtree.command_span = Some(RetainedSubtreeSpan {
                 bounds,
                 local_bounds,
-                child_bounds,
                 ..span
             });
             if let Some(parent) = depth_of[&id].1.filter(|_| span.bounds != bounds) {
