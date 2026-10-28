@@ -4,6 +4,8 @@
             <button
                 class="ws"
                 class:ws-active={workspace.active}
+                class:ws-active-right={workspace.active and direction == "right"}
+                class:ws-active-left={workspace.active and direction == "left"}
                 class:ws-occupied={workspace.occupied}
                 onclick={onSwitch(workspace.id)}
                 title={workspace.label}
@@ -21,10 +23,13 @@ local wm = require("mesh.wm")
 local SLOTS = 6
 
 items = {}
+direction = "right"
+local previous_active = nil
 
 effect(function()
     local occupied = {}
     local highest = SLOTS
+    local current_active = wm.active_workspace
     if wm.available then
         for _, workspace in wm.workspaces do
             if workspace.id > 0 then
@@ -33,12 +38,22 @@ effect(function()
             end
         end
     end
+
+    if previous_active ~= nil and current_active ~= nil and previous_active ~= current_active then
+        if current_active < previous_active then
+            direction = "left"
+        else
+            direction = "right"
+        end
+    end
+    previous_active = current_active
+
     local list = {}
     for id = 1, math.min(highest, 10) do
         list[#list + 1] = {
             id = id,
             label = "Workspace " .. tostring(id),
-            active = wm.active_workspace == id,
+            active = current_active == id,
             occupied = occupied[id] == true,
         }
     end
@@ -46,6 +61,13 @@ effect(function()
 end)
 
 function onSwitch(id)
+    if previous_active ~= nil and id ~= previous_active then
+        if id < previous_active then
+            direction = "left"
+        else
+            direction = "right"
+        end
+    end
     wm.focus_workspace(id)
 end
 
@@ -108,6 +130,7 @@ function onLeave() end
     .ws:hover {
         background-color: var(--glass-fill-hover);
         transform: scale(var(--animation-scale-hover));
+        transform-origin: center center;
     }
 
     .ws:focus-visible {
@@ -123,11 +146,46 @@ function onLeave() end
     which reads as the pill sliding; width rides the same token timing. */
     .ws {
         transition-property: width, transform, background-color, border-color, opacity;
+        transition-duration: var(--animation-duration-medium);
     }
 
     .ws-active,
     .ws-active:hover {
         width: 42px;
         background-image: var(--glass-surface-active);
+    }
+
+    .ws-active-right {
+        transform-origin: left center;
+        animation: ws-scale-right var(--animation-duration-medium) var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .ws-active-left {
+        transform-origin: right center;
+        animation: ws-scale-left var(--animation-duration-medium) var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    @keyframes ws-scale-right {
+        0% {
+            transform: scaleX(0.35) scaleY(0.7);
+        }
+        60% {
+            transform: scaleX(1.06) scaleY(1.06);
+        }
+        100% {
+            transform: scale(1);
+        }
+    }
+
+    @keyframes ws-scale-left {
+        0% {
+            transform: scaleX(0.35) scaleY(0.7);
+        }
+        60% {
+            transform: scaleX(1.06) scaleY(1.06);
+        }
+        100% {
+            transform: scale(1);
+        }
     }
 </style>

@@ -57,13 +57,14 @@ fn theme() -> Theme {
     .unwrap()
 }
 
-const GLASS_MODULES: [&str; 8] = [
+const GLASS_MODULES: [&str; 9] = [
     "glass-bar",
     "glass-widgets",
     "glass-dock",
     "glass-dashboard",
     "glass-wallpapers",
     "wallpaper-carousel",
+    "wallpaper-parallax",
     "profile-switcher",
     "profile-menu",
 ];
@@ -165,6 +166,7 @@ impl GlassCatalog {
             "glass-dashboard",
             "glass-wallpapers",
             "wallpaper-carousel",
+            "wallpaper-parallax",
         ] {
             let path = root()
                 .join("modules/frontend")
@@ -861,6 +863,123 @@ fn wallpaper_carousel_centres_the_selection_and_slides_its_cards() {
     }
     let (stage, _) = carousel_state(&component);
     assert!(card_label(first_node_by_class(&stage, "card-selected").unwrap()).contains("forest"));
+}
+
+fn sample_wallpapers(count: usize) -> serde_json::Value {
+    let wallpapers: Vec<_> = (0..count)
+        .map(|index| {
+            serde_json::json!({
+                "path": format!("/walls/w{index:02}.png"),
+                "name": format!("w{index:02}"),
+                "thumbnail": "",
+                "panorama": "",
+                "color": "",
+            })
+        })
+        .collect();
+    serde_json::json!({"available": true, "directory": "/walls", "wallpapers": wallpapers})
+}
+
+#[test]
+fn wallpaper_parallax_shows_five_slanted_cards_with_panning_pictures() {
+    let (width, height) = (1920, 1080);
+    let mut component = host("wallpaper-parallax");
+    update(&mut component, "mesh.wallpapers", sample_wallpapers(9));
+    paint(&mut component, width, height);
+    let (stage, cards) = carousel_state(&component);
+    // Two visible cards each side of the selection plus one buffer each.
+    assert_eq!(cards.len(), 7);
+    // Slots carry each card's position; the card inside carries its slant
+    // and scale.
+    let slot = stage
+        .children
+        .iter()
+        .find(|slot| first_node_by_class(slot, "card-selected").is_some())
+        .unwrap();
+    let selected = first_node_by_class(slot, "card-selected").unwrap();
+    let centre = slot.layout.x + slot.computed_style.transform.translate_x + slot.layout.width / 2.0;
+    assert!(
+        (centre - (stage.layout.x + stage.layout.width / 2.0)).abs() < 1.0,
+        "selected card is centred: {centre} in {:?}",
+        stage.layout
+    );
+    assert!(card_label(selected).contains("w00"));
+    assert!(
+        stage.layout.width < 5.0 * 240.0 + 120.0,
+        "the stage holds five cards, not the output width: {:?}",
+        stage.layout
+    );
+
+    // Equal slanted cards whose pictures are slanted back upright and pan
+    // against the card's distance from the centre.
+    let pans: Vec<f32> = cards
+        .iter()
+        .map(|card| {
+            let skew = card.computed_style.transform.skew_x;
+            assert!(skew < 0.0, "card is slanted: {skew}");
+            let picture = first_node_by_class(card, "panorama").unwrap();
+            let picture = picture.computed_style.transform;
+            assert!((picture.skew_x + skew).abs() < 1e-5, "picture is upright");
+            picture.translate_x
+        })
+        .collect();
+    assert_eq!(pans[3], 0.0);
+    let scales: Vec<f32> = cards
+        .iter()
+        .map(|card| card.computed_style.transform.scale_x)
+        .collect();
+    assert!(
+        scales[3] > 1.0 && scales.iter().enumerate().all(|(i, s)| i == 3 || *s == 1.0),
+        "only the centred card is enlarged: {scales:?}"
+    );
+    assert!(pans[1] > pans[2] && pans[2] > 0.0, "{pans:?}");
+    assert!(pans[5] < pans[4] && pans[4] < 0.0, "{pans:?}");
+    assert!(
+        component.child_surface_requests().is_empty(),
+        "off-stage buffer cards stay on the surface"
+    );
+
+    // Stepping slides the next card's node into the centre.
+    let next = cards[4].mesh_key().unwrap().to_owned();
+    let key = |component: &mut FrontendSurfaceComponent, name: &str| {
+        let requests = component
+            .handle_input(
+                &theme(),
+                width,
+                height,
+                ComponentInput::KeyPressed {
+                    key: name.into(),
+                    modifiers: Default::default(),
+                },
+            )
+            .unwrap();
+        paint(component, width, height);
+        format!("{requests:?}")
+    };
+    key(&mut component, "ArrowRight");
+    let (stage, _) = carousel_state(&component);
+    let selected = first_node_by_class(&stage, "card-selected").unwrap();
+    assert_eq!(selected.mesh_key(), Some(next.as_str()));
+    assert!(!component.transitions.is_empty(), "the strip must animate");
+    let grown = selected.computed_style.transform.scale_x;
+    assert!(
+        grown < 1.0 + (scales[3] - 1.0) / 2.0,
+        "the new centre card grows over the transition, not at once: {grown}"
+    );
+
+    key(&mut component, "ArrowLeft");
+    key(&mut component, "ArrowLeft");
+    assert!(carousel_selection(&component).contains("w08"));
+    // A page is the five visible cards.
+    key(&mut component, "PageDown");
+    assert!(carousel_selection(&component).contains("w04"));
+    let requests = key(&mut component, "Enter");
+    assert!(
+        requests.contains("set_backdrop_image")
+            && requests.contains("w04.png")
+            && requests.contains("wallpaper-parallax"),
+        "Enter applies and closes: {requests}"
+    );
 }
 
 fn carousel_selection(component: &FrontendSurfaceComponent) -> String {
@@ -2491,6 +2610,95 @@ fn glass_bar_pill_hover_is_stable_at_its_lifted_edge() {
     );
 }
 
+#[test]
+fn glass_bar_active_workspace_pill_scales_up_from_circle() {
+    const WIDTH: u32 = 1440;
+    const HEIGHT: u32 = 100;
+    let theme = theme();
+    let mut component = host("glass-bar");
+    let extent = SurfaceExtent::unpadded(WIDTH, HEIGHT);
+    let mut pixels = PixelBuffer::new(WIDTH, HEIGHT);
+    update(
+        &mut component,
+        "mesh.wm",
+        serde_json::json!({
+            "available": true,
+            "active_workspace": 1,
+            "active_window": null,
+            "workspaces": [
+                {"id": 1, "name": "1", "windows": 1},
+                {"id": 2, "name": "2", "windows": 0}
+            ]
+        }),
+    );
+    settle_dock(&mut component, &theme, extent, &mut pixels);
+    let tree = component.last_tree.as_ref().unwrap();
+    let pill = workspace_pill(tree).unwrap();
+    assert_eq!(pill.children[0].layout.width, 42.0);
+    assert_eq!(pill.children[1].layout.width, 13.0);
+
+    // 1 -> 2 (higher workspace): expand left-to-right (origin: left)
+    update(
+        &mut component,
+        "mesh.wm",
+        serde_json::json!({
+            "available": true,
+            "active_workspace": 2,
+            "active_window": null,
+            "workspaces": [
+                {"id": 1, "name": "1", "windows": 1},
+                {"id": 2, "name": "2", "windows": 0}
+            ]
+        }),
+    );
+    assert!(component.wants_render());
+    component.paint_raster(&theme, extent, &mut pixels, 1.0).unwrap();
+    let tree = component.last_tree.as_ref().unwrap();
+    let pill = workspace_pill(tree).unwrap();
+    let class2 = pill.children[1].attributes.get(Prop::Class).unwrap();
+    assert!(class2.contains("ws-active-right"), "class2 is {class2}");
+    assert_eq!(
+        pill.children[1]
+            .computed_style
+            .transform_origin
+            .x
+            .resolve(42.0),
+        0.0
+    );
+
+    // Settle at workspace 2
+    settle_dock(&mut component, &theme, extent, &mut pixels);
+
+    // 2 -> 1 (lower workspace): expand right-to-left (origin: right)
+    update(
+        &mut component,
+        "mesh.wm",
+        serde_json::json!({
+            "available": true,
+            "active_workspace": 1,
+            "active_window": null,
+            "workspaces": [
+                {"id": 1, "name": "1", "windows": 1},
+                {"id": 2, "name": "2", "windows": 0}
+            ]
+        }),
+    );
+    assert!(component.wants_render());
+    component.paint_raster(&theme, extent, &mut pixels, 1.0).unwrap();
+    let tree = component.last_tree.as_ref().unwrap();
+    let pill = workspace_pill(tree).unwrap();
+    let class1 = pill.children[0].attributes.get(Prop::Class).unwrap();
+    assert!(class1.contains("ws-active-left"), "class1 is {class1}");
+    assert_eq!(
+        pill.children[0]
+            .computed_style
+            .transform_origin
+            .x
+            .resolve(42.0),
+        42.0
+    );
+}
+
 fn first_open_report(label: &str, samples: &mut [Duration]) {
     samples.sort();
     eprintln!(
@@ -3489,3 +3697,5 @@ fn launcher_cells_leave_room_for_their_focus_outline() {
         );
     }
 }
+
+
