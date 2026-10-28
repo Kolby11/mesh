@@ -1,0 +1,129 @@
+<template>
+    <button
+        class="glass-button"
+        class:glass-button-primary={variant == "primary"}
+        class:glass-button-danger={variant == "danger"}
+        class:glass-button-ghost={variant == "ghost"}
+        class:glass-button-icon={label == ""}
+        class:glass-button-active={active}
+        onclick={onclick}
+        disabled={disabled}
+        hidden={hidden}
+        aria-label={aria_label ~= "" and aria_label or label}
+        aria-pressed={active}
+    >
+        <icon class="glass-button-glyph" name={icon} size={icon_size} hidden={icon == ""} />
+        <text class="glass-button-label" hidden={label == ""}>{label}</text>
+    </button>
+</template>
+
+<script lang="luau">
+-- Caller-facing surface. `variant` is "secondary" (default), "primary",
+-- "danger" or "ghost"; an empty `label` makes a round icon-only button, which
+-- then needs `aria_label`.
+label = ""
+icon = ""
+icon_size = "16"
+variant = "secondary"
+active = false
+disabled = false
+hidden = false
+aria_label = ""
+onclick = nil
+</script>
+
+<style>
+    /* Hover, focus and pressed change background, rim and shadow only. Foreground
+       colour stays fixed per variant so icons are not re-tinted (and
+       re-rasterized, which paints nothing while pending) on hover. */
+    .glass-button {
+        min-height: 34px;
+        flex-shrink: 0;
+        flex-direction: row;
+        align-items: center;
+        justify-content: center;
+        gap: var(--spacing-xs);
+        padding-inline: var(--spacing-md);
+        border-radius: var(--radius-full);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--glass-control-rim);
+        background: transparent;
+        background-image: var(--glass-surface-control);
+        color: var(--glass-control-text);
+        font-size: var(--typography-size-xs);
+        font-weight: 700;
+        box-shadow: var(--glass-control-shadow);
+        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                    border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+                    box-shadow var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .glass-button:hover {
+        background: var(--glass-control-fill-hover);
+        border-color: var(--glass-control-rim-hover);
+    }
+
+    .glass-button:active {
+        background: var(--glass-control-fill-pressed);
+        box-shadow: none;
+    }
+
+    .glass-button:focus-visible {
+        border-color: var(--glass-control-rim-focus);
+    }
+
+    /* Muted fill and colour rather than opacity: any non-opaque descendant
+       stops its scroll container from shifting retained pixels. */
+    .glass-button:disabled,
+    .glass-button-primary:disabled,
+    .glass-button-danger:disabled {
+        border-color: transparent;
+        background: var(--glass-control-fill-disabled);
+        background-image: none;
+        color: var(--glass-control-text-disabled);
+        box-shadow: none;
+    }
+
+    .glass-button-primary {
+        border-color: transparent;
+        background: transparent;
+        background-image: var(--glass-control-fill-primary);
+        color: var(--glass-control-text-primary);
+    }
+
+    .glass-button-primary:hover {
+        background: var(--glass-control-fill-primary-hover);
+        border-color: var(--glass-control-rim-hover);
+    }
+
+    .glass-button-danger {
+        background: transparent;
+        background-image: var(--glass-control-fill-danger);
+        color: var(--glass-control-text-danger);
+    }
+
+    .glass-button-ghost {
+        border-color: transparent;
+        background: transparent;
+        background-image: none;
+        box-shadow: none;
+    }
+
+    .glass-button-ghost:hover {
+        background: var(--glass-control-fill-hover);
+        border-color: var(--glass-control-rim);
+    }
+
+    .glass-button-icon {
+        width: 36px;
+        height: 36px;
+        padding-inline: 0;
+    }
+
+    .glass-button-active {
+        background: transparent;
+        background-image: var(--glass-control-fill-selected);
+        border-color: var(--glass-control-rim-focus);
+    }
+</style>

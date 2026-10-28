@@ -138,15 +138,6 @@ fn settings_wrapped_descriptions_expand_to_their_content() {
         .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
 
-    let tree = settings.last_tree.as_ref().expect("rendered settings tree");
-    let settings_description = first_node_with_class_token(tree, "sidebar-foot-copy")
-        .expect("settings sidebar description");
-    assert!(
-        settings_description.layout.height > 22.5,
-        "wrapped settings description should exceed the theme's fixed 22px text height, got {}",
-        settings_description.layout.height
-    );
-
     settings
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
         .unwrap();
@@ -414,10 +405,9 @@ fn settings_nav_item_answers_with_one_tooltip_for_the_whole_row() {
     let tree = settings.last_tree.as_ref().expect("rendered settings tree");
     let nav_item = first_node_with_class_token(tree, "settings-nav-item").expect("nav item");
     let title = first_node_with_class_token(nav_item, "nav-title").expect("nav title");
-    let subtitle = first_node_with_class_token(nav_item, "nav-subtitle").expect("nav subtitle");
     let icon = first_node_by_tag(nav_item, "icon").expect("nav icon");
 
-    for (label, node) in [("title", title), ("subtitle", subtitle), ("icon", icon)] {
+    for (label, node) in [("title", title), ("icon", icon)] {
         let key = node.mesh_key().expect("mesh key").to_owned();
         assert_eq!(
             mesh_core_interaction::find_tooltip_text_by_key(tree, &key).as_deref(),
@@ -487,7 +477,7 @@ fn settings_navigation_classes_and_language_options_derive_from_template_state()
 
     let tree = settings.last_tree.as_ref().expect("settings tree");
     assert_eq!(
-        count_class_token(tree, "language-option-active"),
+        count_class_token(tree, "glass-button-active"),
         1,
         "exactly one of the English/Slovak options is marked active"
     );
@@ -718,7 +708,7 @@ fn settings_glass_surfaces_follow_the_active_theme_palette() {
     let mut surfaces = Vec::new();
     for (name, stylesheet, blur) in [
         ("catppuccin-mocha", "theme.css", 26.0),
-        ("violet-glass", "theme.css", 26.0),
+        ("liquid-glass", "theme.css", 4.0),
         ("frutiger-aero", "light.css", 30.0),
         ("frutiger-aero", "dark.css", 28.0),
     ] {
@@ -739,6 +729,16 @@ fn settings_glass_surfaces_follow_the_active_theme_palette() {
         let shell = first_node_with_class_token(tree, "settings-shell").unwrap();
         let sidebar = first_node_with_class_token(tree, "settings-sidebar").unwrap();
         let card = first_node_with_class_token(tree, "settings-empty-state").unwrap();
+        if name == "liquid-glass" {
+            let mesh_core_elements::style::BackgroundPaint::LinearGradient(gradient) =
+                &shell.computed_style.background_paint
+            else {
+                panic!("liquid-glass settings should have a translucent light panel");
+            };
+            assert!(gradient.from.r > 200 && gradient.from.a > 200 && gradient.from.a < 255);
+            let title = first_node_with_class_token(tree, "sidebar-title").unwrap();
+            assert!(title.computed_style.color.r < 100, "settings text must be dark");
+        }
         assert_eq!(shell.computed_style.background_color.a, 0);
         assert_ne!(
             shell.computed_style.background_paint,

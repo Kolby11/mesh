@@ -3,9 +3,7 @@
         <column class="settings-section">
             <text class="settings-section-title">Layout customization</text>
             <text class="settings-section-copy">Arrange components inside regions exposed by shell modules.</text>
-            <button class="settings-secondary-button" onclick={openCompositionEditor}>
-                Open layout editor
-            </button>
+            <GlassButton label="Open layout editor" onclick={openCompositionEditor} />
         </column>
 
         <column class="settings-section">
@@ -19,13 +17,7 @@
                             <text class="settings-card-title">{row.interface}</text>
                             <text class="settings-card-meta">{row.provider}</text>
                         </column>
-                        <button
-                            class="settings-secondary-button"
-                            hidden={row.action_hidden}
-                            onclick={onProviderNext(row.interface, row.provider)}
-                        >
-                            {t('advanced.next_provider')}
-                        </button>
+                        <GlassButton label={t('advanced.next_provider')} onclick={onProviderNext(row.interface, row.provider)} hidden={row.action_hidden} />
                     </list-item>
                 {/for}
             </list>
@@ -76,19 +68,8 @@
                             {/if}
                         </column>
                         <column class="module-actions">
-                            <button
-                                class="settings-secondary-button"
-                                onclick={onModuleDetails(row.module_id)}
-                            >
-                                {t(row.details_action)}
-                            </button>
-                            <button
-                                class:settings-danger-button={row.enabled} class:settings-primary-button={not row.enabled}
-                                hidden={row.action_hidden}
-                                onclick={onModuleToggle(row.module_id, row.enabled)}
-                            >
-                                {t(row.action)}
-                            </button>
+                            <GlassButton label={t(row.details_action)} onclick={onModuleDetails(row.module_id)} />
+                            <GlassButton label={t(row.action)} variant={row.enabled and "danger" or "primary"} onclick={onModuleToggle(row.module_id, row.enabled)} hidden={row.action_hidden} />
                         </column>
                     </list-item>
                 {/for}
@@ -114,27 +95,11 @@
                             <text class="settings-card-title">{row.label}</text>
                             <text class="settings-card-meta">{row.module_id .. ' · ' .. row.name .. row.description}</text>
                         </column>
-                        <button
-                            class="settings-secondary-button settings-prop-scope"
-                            hidden={row.scope_hidden}
-                            onclick={onPropScopeNext(row.module_id, row.scope_instance_id, row.instances)}
-                        >
-                            {row.scope_label}
-                        </button>
+                        <GlassButton label={row.scope_label} onclick={onPropScopeNext(row.module_id, row.scope_instance_id, row.instances)} hidden={row.scope_hidden} />
                         {#if row.control == "bool"}
-                        <button
-                            class="settings-secondary-button settings-prop-control"
-                            onclick={onPropToggle(row.module_id, row.name, row.value, row.scope_instance_id)}
-                        >
-                            {row.value and t('common.enabled') or t('common.disabled')}
-                        </button>
+                        <GlassButton label={row.value and t('common.enabled') or t('common.disabled')} onclick={onPropToggle(row.module_id, row.name, row.value, row.scope_instance_id)} />
                         {:else if row.control == "enum"}
-                        <button
-                            class="settings-secondary-button settings-prop-control"
-                            onclick={onPropEnumNext(row.module_id, row.name, row.value, row.options, row.scope_instance_id)}
-                        >
-                            {row.display_value}
-                        </button>
+                        <GlassButton label={row.display_value} onclick={onPropEnumNext(row.module_id, row.name, row.value, row.options, row.scope_instance_id)} />
                         {:else if row.control == "number"}
                         <slider
                             class="settings-slider settings-prop-slider"
@@ -156,13 +121,7 @@
                         {#if row.control == "number"}
                         <text class="settings-value">{row.display_value}</text>
                         {/if}
-                        <button
-                            class="settings-secondary-button"
-                            hidden={row.reset_hidden}
-                            onclick={onPropReset(row.module_id, row.name, row.inherited_value, row.scope_instance_id)}
-                        >
-                            {t('common.reset')}
-                        </button>
+                        <GlassButton label={t('common.reset')} onclick={onPropReset(row.module_id, row.name, row.inherited_value, row.scope_instance_id)} hidden={row.reset_hidden} />
                     </list-item>
                 {/for}
             </list>
@@ -178,6 +137,7 @@
 </template>
 
 <script lang="luau">
+local GlassButton = require("@mesh/glass-controls")
 hidden = false
 
 local debug_service = require("mesh.debug")

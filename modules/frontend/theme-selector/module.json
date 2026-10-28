@@ -31,9 +31,6 @@
         "weather-clear-night"
       ]
     },
-    "icons": {
-      "ignore_shell_default": true
-    },
     "entry": "src/main.mesh",
     "i18n": {
       "defaultLocale": "en",

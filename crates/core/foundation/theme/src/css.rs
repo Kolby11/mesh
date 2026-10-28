@@ -1499,9 +1499,8 @@ mod reuse_tests {
             "catppuccin-mocha",
             "gruvbox-dark",
             "nord",
-            "solarized-dark",
             "tokyo-night",
-            "violet-glass",
+            "liquid-glass",
         ] {
             sources.push((
                 name.into(),

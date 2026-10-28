@@ -188,8 +188,9 @@ end)
         gap: var(--spacing-md);
         padding: var(--spacing-lg);
         border-radius: var(--radius-lg);
-        background: var(--color-secondary-container);
-        color: var(--color-on-secondary-container);
+        background: transparent;
+        background-image: var(--glass-surface-control);
+        color: var(--glass-settings-text);
     }
 
     .device-icon {
@@ -204,7 +205,7 @@ end)
     }
 
     .device-name {
-        color: var(--color-on-secondary-container);
+        color: var(--glass-settings-text);
         font-size: var(--typography-size-lg);
         font-weight: 750;
     }
@@ -222,11 +223,13 @@ end)
         border-radius: var(--radius-md);
         border-width: 1px;
         border-style: solid;
-        border-color: var(--color-outline-variant);
-        background: var(--color-surface-container-low);
+        border-color: var(--glass-settings-rim);
+        background: var(--glass-settings-inset);
     }
 
     .runtime-value {
+        height: auto;
+        flex-shrink: 0;
         color: var(--color-primary);
         font-size: 24px;
         font-weight: 800;

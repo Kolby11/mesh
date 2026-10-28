@@ -218,7 +218,7 @@ widely shared is a candidate for a future contract minor version.
 The shipped `@mesh/glass-material` family exposes
 `--glass-backdrop-{pill,card,dock,panel,flare,lens}` as whole `backdrop-filter`
 values. Glass components consume those hooks for blur, refraction and dispersion;
-the active theme can tune each tier in its family block. Violet Glass and both
+the active theme can tune each tier in its family block. Liquid Glass and both
 Frutiger Aero modes provide overrides.
 
 ### 4.2 Theme tuning and component internals
@@ -708,7 +708,17 @@ the predicted origin. Only background-layer surfaces retain the image route
 | `bottom`, `top`, `overlay` | Its `blur()` takes the ordinary backdrop route (§10): the compositor blurs the real backdrop and MESH blurs in-surface content beneath. MESH paints only the rim highlight; there is no displacement or dispersion. |
 
 Desktop widgets and glass above windows follow the real backdrop without a
-wallpaper-image offset. Without a live source, they retain blur and rim lighting
+wallpaper-image offset.
+
+**Compositor glass.** Real refraction of what lies behind a non-background
+surface can only be drawn by the compositor. On Hyprland the third-party
+[hyprglass](https://github.com/hyprnux/hyprglass) plugin does this for layer
+surfaces whitelisted by namespace; with `mask_mode = contour` every shape MESH
+draws gets its own lens edge. The shipped `liquid-glass` theme is written for
+it: its materials are `blur() refract(0px 0px)`, so MESH exports blur regions
+and paints no rim, grain or refraction of its own, fills keep an even alpha
+above the contour threshold and shadows stay below it. Without the plugin the
+same theme falls back to compositor blur. Without a live source, they retain blur and rim lighting
 but omit displacement and dispersion. Promoted popups follow the same route.
 `mesh.theme.set_backdrop_image { path }` (`service.theme.control`) selects an
 absolute image file, writing where the other appearance settings go, and
@@ -723,8 +733,8 @@ repaints every surface; `mesh.theme` state publishes it as `backdrop_image`.
 | Function | Meaning |
 | --- | --- |
 | `blur(<px>)` | Blur of the sampled source. |
-| `refract(<depth> [<edge>])` | Inside an `edge`-wide rim the sample moves up to `depth` along the outward normal of the element's rounded rect, steepening toward the rim. `edge` defaults to `depth`. `refract(0px 0px)` paints the source unrefracted. |
-| `dispersion(<px>)` | Extra red/blue separation along the same normal for chromatic fringing. |
+| `refract(<depth> [<edge>])` | A convex glass slab `depth` pixels thick with an `edge`-wide bezel (default `depth`). Inside the bezel the sample point is where a vertical ray, refracted at index 1.5 by the bezel's squircle slope, reaches the back face, so content bends strongly at the rim and the centre stays undistorted. `refract(0px 0px)` paints the source unrefracted. |
+| `dispersion(<px>)` | Red/blue channel separation proportional to the refraction displacement (about 3% per pixel), so fringing is strongest at the bezel and absent in the centre. |
 | `grain(<opacity>)` | Procedural, stable device-pixel noise over the backdrop, clamped to 0–1. Zero disables it. |
 
 On a source-sampling surface, an element with `refract()` is painted

@@ -14,9 +14,12 @@
                     <text class="settings-section-title">{t('audio.volume')}</text>
                     <text class="settings-section-copy">{t('audio.volume.copy')}</text>
                 </column>
-                <button class:settings-primary-button={muted_state} class:settings-secondary-button={not muted_state} onclick={onToggleMute} disabled={controls_disabled}>
-                    {t(mute_button_label)}
-                </button>
+                <box hidden={muted_state}>
+                    <GlassButton label={mute_label} onclick={onToggleMute} />
+                </box>
+                <box hidden={not muted_state}>
+                    <GlassButton label={unmute_label} variant="primary" onclick={onToggleMute} />
+                </box>
             </row>
             <row class="settings-card">
                 <icon name={volume_icon} size="22" />
@@ -65,6 +68,7 @@
 </template>
 
 <script lang="luau">
+local GlassButton = require("@mesh/glass-controls")
 hidden = false
 
 local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
@@ -72,13 +76,16 @@ if not audio_ok then audio = nil end
 local t = import("mesh.i18n", "t")
 local volume_presentation = require("@mesh/volume-presentation/volume")
 
+-- Component props are bound as plain identifiers: a call expression such as
+-- `t(...)` in a prop stops the page from patching volume ticks in place.
+mute_label = t("audio.mute")
+unmute_label = t("audio.unmute")
 audio_status = "audio.waiting"
 service_pill = "common.unavailable"
 service_active = false
 volume_percent = 0
 volume_label = "0%"
 volume_icon = "audio-volume-muted"
-mute_button_label = "audio.mute"
 muted_state = false
 controls_disabled = true
 output_name = t("audio.default_output")
@@ -102,11 +109,13 @@ local function sync_volume(percent, muted)
     volume_percent = clamp_percent(percent)
     volume_label = mesh.locale.format_percent(volume_percent)
     volume_icon = volume_presentation.icon(volume_percent, muted)
-    mute_button_label = muted and "audio.unmute" or "audio.mute"
     muted_state = muted
 end
 
 effect(function()
+    local mute, unmute = t("audio.mute"), t("audio.unmute")
+    if mute_label ~= mute then mute_label = mute end
+    if unmute_label ~= unmute then unmute_label = unmute end
     if not audio or audio.available == false then
         audio_status = "audio.install_backend"
         service_pill = "common.unavailable"

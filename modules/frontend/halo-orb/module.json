@@ -39,9 +39,6 @@
     "accessibility": {
       "role": "toolbar"
     },
-    "icons": {
-      "ignore_shell_default": true
-    },
     "contributes": {
       "keybinds": {
         "launcher": {

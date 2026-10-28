@@ -504,7 +504,7 @@ fn shipped_glass_material_resolves_and_paints_under_every_theme_mode() {
                 let expected_backdrop = match (declaration.id.as_str(), mode.as_str()) {
                     ("frutiger-aero", "light") => (12.0, 5.0, 4.0, 0.3),
                     ("frutiger-aero", "dark") => (12.0, 6.0, 5.0, 0.5),
-                    ("violet-glass", _) => (10.0, 6.0, 5.0, 0.5),
+                    ("liquid-glass", _) => (2.0, 0.0, 0.0, 0.0),
                     _ => (10.0, 6.0, 5.0, 0.4),
                 };
                 let backdrop = style.backdrop_filter;
@@ -529,13 +529,13 @@ fn shipped_glass_material_resolves_and_paints_under_every_theme_mode() {
                     assert_eq!(gradient.from, Color::from_hex(from).unwrap());
                     assert_eq!(gradient.to, Color::from_hex(to).unwrap());
                     assert_eq!(style.color, Color::from_hex(foreground).unwrap());
-                } else if declaration.id == "violet-glass" {
-                    assert_eq!(gradient.from, Color::from_hex("#d4b8ff36").unwrap());
-                    assert_eq!(gradient.to, Color::from_hex("#44206e24").unwrap());
-                    assert_eq!(style.color, Color::from_hex("#f5ecff").unwrap());
+                } else if declaration.id == "liquid-glass" {
+                    assert_eq!(gradient.from, Color::from_hex("#ffffff26").unwrap());
+                    assert_eq!(gradient.to, Color::from_hex("#0000000f").unwrap());
+                    assert_eq!(style.color, Color::from_hex("#ffffff").unwrap());
                     assert_eq!(
                         style.box_shadow.color,
-                        Color::from_hex("#10002045").unwrap()
+                        Color::from_hex("#00081f08").unwrap()
                     );
                 } else {
                     let surface = theme

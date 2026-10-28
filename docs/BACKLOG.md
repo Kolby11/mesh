@@ -18,6 +18,9 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---
 
+- [ ] Make liquid-glass Settings readable over applications with a light, translucent outer panel and calmer inner controls; the shared glass palette is too transparent.
+- [ ] Profile live desktop widget resizing through GPU presentation and hyprglass; offline CPU drag measurements show expensive repaint and repeated tree builds, but do not establish the live bottleneck.
+- [ ] Investigate the desktop media seek slider remaining at its old position after a track change; the existing simulated track-switch regression passes, so the live trigger is not yet reproduced.
 - [ ] Continue the whole-codebase audit: sections 01–07 and 09 are reviewed; section 08 needs deeper logic/test coverage, and sections 10–16 plus cross-section review remain.
       Resume the three review layers and file coverage in [the audit inventory](../.planning/codebase/audits/2026-10-27-whole-codebase/00-coverage.md); [interim findings](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md) include component testing and profiling opportunities.
 - [ ] Classify border-width animations as layout-affecting and verify intermediate geometry and hit bounds against full layout. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
@@ -100,6 +103,10 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Build interchangeable shell compositions, configurable `.mesh` components and independently switchable themes that can realize the diverse [shell references](reference/shells/); the full range is not yet available.
       Support live shell and theme switching and hot reload with a polished transition effect, respecting reduced-motion preferences.
       Plan, shell list and order: [reference shells](../.planning/todos/pending/2026-10-27-reference-shells.md).
+- [ ] Animate appearance switches: crossfade theme/mode changes, icon-theme changes and font-family changes instead of snapping, honouring reduced motion.
+      Today each switch swaps tokens, icon resolutions or glyph metrics in one frame. Design: [appearance transitions](../.planning/todos/pending/2026-10-28-appearance-transitions.md).
+- [ ] Patch component prop bindings in place: a call expression such as `t(...)` bound to a child component's prop makes the parent rebuild instead of patching, so shared controls (`@mesh/glass-controls`) force workarounds on hot pages.
+      Found by `hidden_audio_page_volume_patches_without_rebuild`; the Audio page binds identifier props to avoid it.
 - [ ] Extend `<shape>` beyond sectors, arcs and polylines (curves, gradient or image fill, focus outline along the shape) for the ring gauges, graphs and sky arc in the reference shells.
 - [ ] Extend `mesh.weather` (sun times, high/low, humidity, wind, UV) and `mesh.system` (GPU, battery, CPU frequency, swap, network history) and their providers; reference-shell widgets need these fields.
 - [ ] Finish the keybind system: a settings page for `key_priority`, hint mode and corner; inline remap and "reassign all" in the help window; `mesh-shell keys help|hints` for compositor binds; ordinal keys for repeated items; verify key hints on a live GPU surface and in promoted popups. Design and status: [keybind system](../.planning/todos/pending/2026-10-28-keybind-system.md).

@@ -65,6 +65,7 @@ end)
         align-items: center;
         border-radius: 999px;
         border: 1px solid var(--glass-rim);
+        background-color: transparent;
         background-image: var(--glass-surface-pill);
         box-shadow: var(--glass-shadow-pill);
         backdrop-filter: var(--glass-backdrop-pill);

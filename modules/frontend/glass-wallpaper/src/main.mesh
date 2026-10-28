@@ -4,13 +4,13 @@
 
 <style>
     /* The shell backdrop image (`shell.render.backdrop.image`), cover-fit and
-    unrefracted. Glass on the background and bottom layers refracts this same
-    image, so the wallpaper and what that glass bends agree. */
+    unrefracted. The refraction paints under the element's own background, so
+    the background stays transparent. */
     .wallpaper {
         width: 100%;
         height: 100%;
         exclusive-zone: ignore;
-        background: var(--color-background);
+        background: transparent;
         backdrop-filter: refract(0px 0px);
     }
 </style>

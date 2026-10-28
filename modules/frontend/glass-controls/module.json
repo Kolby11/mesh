@@ -1,0 +1,20 @@
+{
+  "name": "@mesh/glass-controls",
+  "version": "0.1.0",
+  "description": "Reusable glass buttons whose hover, focus, pressed and disabled states are defined once.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      },
+      "modules": {
+        "@mesh/glass-material": ">=0.1.0"
+      }
+    },
+    "entry": "components/glass-button.mesh"
+  }
+}

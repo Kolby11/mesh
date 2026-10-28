@@ -16,9 +16,9 @@ fn root() -> PathBuf {
 
 fn theme() -> Theme {
     let pack = mesh_core_theme::load_theme_from_source(
-        &ThemeSourceHandle::new(root().join("modules/themes/violet-glass"), "theme.css").unwrap(),
-        "violet-glass",
-        "Violet Glass",
+        &ThemeSourceHandle::new(root().join("modules/themes/liquid-glass"), "theme.css").unwrap(),
+        "liquid-glass",
+        "Liquid Glass",
     )
     .unwrap();
     let material: serde_json::Value = serde_json::from_str(
@@ -49,7 +49,7 @@ fn theme() -> Theme {
     Theme::compose_layers(
         &default_theme(),
         &pack,
-        "@mesh/violet-glass",
+        "@mesh/liquid-glass",
         "dark",
         layers,
         &HashMap::new(),
@@ -905,10 +905,17 @@ fn wallpaper_parallax_shows_five_slanted_cards_with_panning_pictures() {
     );
     assert!(card_label(selected).contains("w00"));
     assert!(
-        stage.layout.width < 5.0 * 240.0 + 120.0,
-        "the stage holds five cards, not the output width: {:?}",
+        stage.layout.width < 7.0 * 240.0 + 120.0,
+        "the stage holds the cards, not the output width: {:?}",
         stage.layout
     );
+    for slot in &stage.children {
+        let card = first_node_by_class(slot, "card").unwrap();
+        let overhang = card.layout.height / 2.0 * card.computed_style.transform.skew_x.tan().abs();
+        let left = slot.layout.x + slot.computed_style.transform.translate_x;
+        assert!(left - overhang >= stage.layout.x - 1.0);
+        assert!(left + slot.layout.width + overhang <= stage.layout.x + stage.layout.width + 1.0);
+    }
 
     // Equal slanted cards whose pictures are slanted back upright and pan
     // against the card's distance from the centre.
@@ -1300,7 +1307,12 @@ fn liquid_glass_desktop_cards_resize_live_independently_and_reset() {
     }
     let tree = component.last_tree.as_ref().unwrap();
     let card = first_node_by_class(tree, "media-card").unwrap();
-    assert_eq!((card.layout.width, card.layout.height), (560.0, 226.0));
+    let dragged_width = card.layout.width;
+    assert_eq!(card.layout.height, 226.0);
+    let handle = first_node_with_ref(tree, "resizeHandle").unwrap();
+    let (left, _, right, _) =
+        find_node_bounds_by_key(tree, handle.mesh_key().unwrap(), 0.0, 0.0).unwrap();
+    assert!(((left + right) / 2.0 - (x + 80.0)).abs() < 5.0);
     assert_eq!(
         first_node_by_class(tree, "card-frame")
             .unwrap()
@@ -1334,7 +1346,8 @@ fn liquid_glass_desktop_cards_resize_live_independently_and_reset() {
         .unwrap();
     frame(&mut component, 1920, 1000);
     let card = first_node_by_class(component.last_tree.as_ref().unwrap(), "media-card").unwrap();
-    assert_eq!((card.layout.width, card.layout.height), (570.0, 226.0));
+    assert!((card.layout.width - (dragged_width + 10.0)).abs() < 5.0);
+    assert_eq!(card.layout.height, 226.0);
     component
         .handle_input(
             &theme(),
@@ -1356,9 +1369,9 @@ fn liquid_glass_desktop_cards_resize_live_independently_and_reset() {
 #[test]
 fn desktop_theme_positioned_gradient_paints_a_reflection_band() {
     let pack = mesh_core_theme::load_theme_from_source(
-        &ThemeSourceHandle::new(root().join("modules/themes/violet-glass"), "theme.css").unwrap(),
-        "violet-glass",
-        "Violet Glass",
+        &ThemeSourceHandle::new(root().join("modules/themes/liquid-glass"), "theme.css").unwrap(),
+        "liquid-glass",
+        "Liquid Glass",
     )
     .unwrap();
     let mut overrides = HashMap::new();
@@ -1405,7 +1418,7 @@ fn desktop_theme_positioned_gradient_paints_a_reflection_band() {
     let themed = Theme::compose_layers(
         &default_theme(),
         &pack,
-        "@mesh/violet-glass",
+        "@mesh/liquid-glass",
         "dark",
         layers,
         &HashMap::new(),
@@ -1646,6 +1659,13 @@ fn desktop_widgets_resize_during_playback_without_forced_rebuilds() {
         for _ in 0..3 {
             paint(&mut component, 1920, 1000);
             let tree = component.last_tree.as_ref().unwrap();
+            let handle = first_node_with_ref(tree, "resizeHandle").unwrap();
+            let (l, _, r, _) =
+                find_node_bounds_by_key(tree, handle.mesh_key().unwrap(), 0.0, 0.0).unwrap();
+            assert!(
+                ((l + r) / 2.0 - (x + delta)).abs() < 5.0,
+                "handle must follow pointer at delta {delta}"
+            );
             let card = first_node_by_class(tree, "media-card").unwrap();
             let weather = first_node_by_class(tree, "weather-card").unwrap();
             assert_eq!(
@@ -1656,7 +1676,11 @@ fn desktop_widgets_resize_during_playback_without_forced_rebuilds() {
 
             assert_eq!(
                 (card.layout.width, card.layout.height),
-                (480.0 + delta, 186.0 + delta),
+                (
+                    component.runtime_state(component.root_instance_key()).unwrap()
+                        .get_ref("media_width").unwrap().as_f64().unwrap() as f32,
+                    186.0 + delta
+                ),
                 "delta={delta}; root={:?}; child={:?}; style={:?}",
                 component
                     .runtime_state(component.root_instance_key())

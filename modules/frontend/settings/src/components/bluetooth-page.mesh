@@ -5,9 +5,7 @@
                 <text class="settings-control-title">{t('nav.bluetooth')}</text>
                 <text class="settings-card-meta">{t(bluetooth_status)}</text>
             </column>
-            <button class:settings-primary-button={bluetooth_enabled} class:settings-secondary-button={not bluetooth_enabled} onclick={onToggleBluetooth} disabled={controls_disabled}>
-                {t(bluetooth_toggle_label)}
-            </button>
+            <GlassButton label={t(bluetooth_toggle_label)} variant={bluetooth_enabled and "primary" or "secondary"} onclick={onToggleBluetooth} disabled={controls_disabled} />
         </row>
 
         <column class="settings-section">
@@ -26,9 +24,7 @@
                             <text class="settings-card-title">{row.name}</text>
                             <text class="settings-card-meta">{t(row.details)}</text>
                         </column>
-                        <button class:settings-danger-button={row.connected} class:settings-secondary-button={not row.connected} onclick={onPairedAction(row.id, row.connected)}>
-                            {t(row.action)}
-                        </button>
+                        <GlassButton label={t(row.action)} variant={row.connected and "danger" or "secondary"} onclick={onPairedAction(row.id, row.connected)} />
                     </list-item>
                 {/for}
             </list>
@@ -47,7 +43,7 @@
                     <text class="settings-section-title">{t('bluetooth.nearby_devices')}</text>
                     <text class="settings-section-copy">{nearby_count .. t(nearby_summary)}</text>
                 </column>
-                <button class="settings-secondary-button" onclick={onScan} disabled={scan_disabled}>{t(scan_label)}</button>
+                <GlassButton label={t(scan_label)} onclick={onScan} disabled={scan_disabled} />
             </row>
             {#if #nearby_rows > 0}
             <list class="settings-list" label={t('bluetooth.nearby_bluetooth_devices')}>
@@ -58,7 +54,7 @@
                             <text class="settings-card-title">{row.name}</text>
                             <text class="settings-card-meta">{t(row.details)}</text>
                         </column>
-                        <button class="settings-primary-button" onclick={onPair(row.id)}>{t('bluetooth.pair')}</button>
+                        <GlassButton label={t('bluetooth.pair')} variant="primary" onclick={onPair(row.id)} />
                     </list-item>
                 {/for}
             </list>
@@ -82,6 +78,7 @@
 </template>
 
 <script lang="luau">
+local GlassButton = require("@mesh/glass-controls")
 hidden = false
 
 local bluetooth = require("mesh.bluetooth@>=1.0")

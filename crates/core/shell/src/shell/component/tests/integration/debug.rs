@@ -1073,7 +1073,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         "changing locale must translate and preserve the active Appearance settings page"
     );
     assert!(text.iter().any(|line| line == "Nastavenia"));
-    assert!(text.iter().any(|line| line == "Slovenčina (sk)"));
+    assert!(text.iter().any(|line| line == "Slovenčina"));
 
     component
         .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])

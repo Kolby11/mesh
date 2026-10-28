@@ -359,7 +359,7 @@ includes child allocation and painting; theme switching excludes theme file
 loading and persistent settings writes. Hover crossings may also disclose
 navigation popovers. Scroll retains its one-pass, no repeated restyle and
 retained-pixel-shift assertions. Frame pacing sleeps are outside scroll timing.
-The glass gates use the violet-glass theme with glass-material; the dashboard
+The glass gates use the liquid-glass theme with glass-material; the dashboard
 gate compiles its modules once outside the timed region. Clock ticks run at the
 clock task's own deadline, because task sleeps re-queue from the wall clock.
 

@@ -1,15 +1,15 @@
 {
-  "name": "@mesh/solarized-dark",
+  "name": "@mesh/liquid-glass",
   "version": "0.1.0",
-  "description": "Solarized Dark theme.",
+  "description": "Liquid glass theme: neutral translucent white glass over a deep blue base, system-blue accents and Inter type.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "theme",
     "contributes": {
       "themes": [
         {
-          "id": "solarized-dark",
-          "label": "Solarized Dark",
+          "id": "liquid-glass",
+          "label": "Liquid Glass",
           "modes": {
             "dark": "theme.css"
           },

@@ -17,6 +17,14 @@ blur and rim lighting. A static wallpaper image is not a trusted backdrop there
 when another client owns the visible wallpaper. Only background-layer wallpaper
 surfaces keep image sampling; phases 2–4 remain pending.
 
+2026-10-28: §4 is met on Hyprland by the third-party hyprglass plugin rather
+than a MESH-owned one. It reads `ext-background-effect-v1` state and, in
+`contour` mask mode, traces each drawn shape for its own lens edge. The
+`liquid-glass` theme targets it (spec 04 §11, "Compositor glass"). A
+bottom-layer shortcut that sampled the wallpaper image for desktop widgets was
+tried and reverted the same day: with the wallpaper surface not showing that
+image, the widgets refracted a picture that was not on screen.
+
 ## Problem
 
 `backdrop-filter: blur() refract()` (04 §11) samples one static image: the

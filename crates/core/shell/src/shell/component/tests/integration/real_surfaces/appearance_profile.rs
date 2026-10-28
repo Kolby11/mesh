@@ -446,7 +446,7 @@ fn render_loop_frame(
     }
 }
 
-/// Settings in the glass profile: the violet-glass pack under the glass
+/// Settings in the glass profile: the liquid-glass pack under the glass
 /// material Settings declares.
 fn glass_settings_theme() -> Theme {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -455,12 +455,12 @@ fn glass_settings_theme() -> Theme {
         .unwrap();
     let pack = mesh_core_theme::load_theme_from_source(
         &mesh_core_theme::ThemeSourceHandle::new(
-            root.join("modules/themes/violet-glass"),
+            root.join("modules/themes/liquid-glass"),
             "theme.css",
         )
         .unwrap(),
-        "violet-glass",
-        "violet-glass",
+        "liquid-glass",
+        "liquid-glass",
     )
     .unwrap();
     super::settings::settings_material_theme(&pack)

@@ -9774,3 +9774,16 @@ are not retained memory. Cache entries are capped at 128 per surface and
 cleared when its locale/catalog snapshot changes. A test checks same-locale
 catalog replacement and module separation. Other child-runtime and tree setup
 still dominates mount cost; the broader attribution item stays open.
+
+## 2026-10-28 — Desktop widget resize investigation
+
+Area: glass widgets, component rebuild and CPU raster. A temporary release-mode
+probe dragged the media resize handle over 100 one-pixel diagonal steps on a
+1920×1000 test surface, painting after each move. In two runs with 99 tree
+builds, input p50/p90 was 0.72–0.74/1.26–1.53 ms and CPU raster frame p50/p90
+was 33.47–35.10/40.27–42.94 ms. Profiling attributed 23.37–24.03 ms per frame
+to paint and 3.70–4.13 ms to tree build; layout was 0.29 ms in the second run.
+A third run reached the persisted size limit and is not comparable. This is
+an offline CPU test, not a live GPU or compositor measurement; no causal claim
+about the observed desktop lag or performance improvement is established.
+No gate or implementation change accompanies this investigation.

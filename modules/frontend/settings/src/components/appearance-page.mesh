@@ -4,7 +4,7 @@
             <text class="settings-section-title">{t('appearance.theme')}</text>
             <text class="settings-section-copy">{t('appearance.theme.copy')}</text>
             <text class="settings-card-meta">{theme_scope_label}</text>
-            <button class="settings-secondary-button" hidden={theme_pin_hidden} onclick={onThemePin}>{theme_pin_label}</button>
+            <GlassButton label={theme_pin_label} onclick={onThemePin} hidden={theme_pin_hidden} />
             <row class="theme-grid">
                 {#for row in theme_rows}
                     <button class="theme-option" class:theme-option-active={row.active} onclick={onThemeSelect(row.id)}>
@@ -46,7 +46,7 @@
                     </button>
                 {/for}
             </scroll>
-            <button class="settings-secondary-button" hidden={icon_more_hidden} onclick={onShowMoreIcons}>{t('appearance.show_more')}</button>
+            <GlassButton label={t('appearance.show_more')} onclick={onShowMoreIcons} hidden={icon_more_hidden} />
         </column>
 
         <column class="settings-section">
@@ -63,28 +63,16 @@
                     </button>
                 {/for}
             </scroll>
-            <button class="settings-secondary-button" hidden={font_more_hidden} onclick={onShowMoreFonts}>{t('appearance.show_more')}</button>
+            <GlassButton label={t('appearance.show_more')} onclick={onShowMoreFonts} hidden={font_more_hidden} />
         </column>
 
         <column class="settings-section">
             <text class="settings-section-title">{t('appearance.language')}</text>
             <text class="settings-section-copy">{t('appearance.language.copy')}</text>
-            <column class="settings-list">
-                <button class="language-option" class:language-option-active={not locale_slovak} onclick={onLocaleEnglish}>
-                    <column class="settings-card-copy">
-                        <text class="settings-card-title">{t('language.english.native')}</text>
-                        <text class="settings-card-meta">{t('language.english.detail')}</text>
-                    </column>
-                    <text class="language-check" hidden={locale_slovak}>{t('common.selected')}</text>
-                </button>
-                <button class="language-option" class:language-option-active={locale_slovak} onclick={onLocaleSlovak}>
-                    <column class="settings-card-copy">
-                        <text class="settings-card-title">{t('language.slovak.native')}</text>
-                        <text class="settings-card-meta">{t('language.slovak.detail')}</text>
-                    </column>
-                    <text class="language-check" hidden={not locale_slovak}>{t('common.selected')}</text>
-                </button>
-            </column>
+            <row class="settings-segmented" aria-label={t('appearance.language')}>
+                <GlassButton variant="ghost" active={not locale_slovak} label={t('language.english.native')} onclick={onLocaleEnglish} />
+                <GlassButton variant="ghost" active={locale_slovak} label={t('language.slovak.native')} onclick={onLocaleSlovak} />
+            </row>
         </column>
 
         <column class="settings-section">
@@ -112,6 +100,7 @@
 </template>
 
 <script lang="luau">
+local GlassButton = require("@mesh/glass-controls")
 hidden = false
 
 local theme = require("mesh.theme")
@@ -446,16 +435,31 @@ end
         gap: var(--spacing-sm);
         padding: var(--spacing-sm);
         border-radius: var(--radius-md);
-        border-width: 2px;
+        border-width: 1px;
         border-style: solid;
-        border-color: var(--color-outline-variant);
-        background: var(--color-surface-container-low);
-        color: var(--color-on-surface);
+        border-color: var(--glass-settings-rim);
+        background: var(--glass-settings-inset);
+        color: var(--glass-settings-text);
     }
 
-    .theme-option-active {
-        border-color: var(--color-primary);
-        background: var(--color-secondary-container);
+    .theme-option-active,
+    .theme-option-active:hover {
+        background: transparent;
+        background-image: var(--glass-settings-selected);
+        border-color: var(--glass-control-rim-focus);
+    }
+
+    .theme-option:hover {
+        background-image: linear-gradient(to bottom, var(--glass-control-fill-hover), var(--glass-control-fill-hover));
+        border-color: var(--glass-control-rim-hover);
+    }
+
+    .theme-option:active {
+        background: var(--glass-control-fill-pressed);
+    }
+
+    .theme-option:focus-visible {
+        border-color: var(--glass-control-rim-focus);
     }
 
     .theme-preview {
@@ -519,7 +523,7 @@ end
 
     .theme-check,
     .language-check {
-        color: var(--color-primary);
+        color: var(--glass-indicator);
         font-size: var(--typography-size-xs);
         font-weight: 800;
     }
@@ -534,15 +538,41 @@ end
         border-radius: var(--radius-md);
         border-width: 1px;
         border-style: solid;
-        border-color: var(--color-outline-variant);
-        background: var(--color-surface-container-low);
-        color: var(--color-on-surface);
+        border-color: var(--glass-settings-rim);
+        background: var(--glass-settings-inset);
+        color: var(--glass-settings-text);
         text-align: left;
     }
 
-    .language-option-active {
-        border-color: var(--color-primary);
-        background: var(--color-secondary-container);
+    .language-option:hover {
+        background-image: linear-gradient(to bottom, var(--glass-control-fill-hover), var(--glass-control-fill-hover));
+        border-color: var(--glass-control-rim-hover);
+    }
+
+    .language-option:active {
+        background: var(--glass-control-fill-pressed);
+    }
+
+    .language-option:focus-visible {
+        border-color: var(--glass-control-rim-focus);
+    }
+
+    .language-option-active,
+    .language-option-active:hover {
+        background: transparent;
+        background-image: var(--glass-settings-selected);
+        border-color: var(--glass-control-rim-focus);
+    }
+
+    .settings-segmented {
+        align-self: flex-start;
+        gap: var(--spacing-xs);
+        padding: var(--spacing-xs);
+        border-radius: var(--radius-full);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--glass-settings-rim);
+        background: var(--glass-settings-inset);
     }
 
     .resource-list {

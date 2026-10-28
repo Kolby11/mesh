@@ -5,9 +5,7 @@
                 <text class="settings-control-title">{t('nav.wifi')}</text>
                 <text class="settings-card-meta">{t(wifi_status)}</text>
             </column>
-            <button class:settings-primary-button={wifi_enabled} class:settings-secondary-button={not wifi_enabled} onclick={onToggleWifi} disabled={controls_disabled}>
-                {t(wifi_toggle_label)}
-            </button>
+            <GlassButton label={t(wifi_toggle_label)} variant={wifi_enabled and "primary" or "secondary"} onclick={onToggleWifi} disabled={controls_disabled} />
         </row>
 
         <column class="settings-section">
@@ -16,7 +14,7 @@
                     <text class="settings-section-title">{t('wifi.available_networks')}</text>
                     <text class="settings-section-copy">{network_count .. t(network_summary)}</text>
                 </column>
-                <button class="settings-secondary-button" onclick={onScan} disabled={scan_disabled}>{t('common.scan')}</button>
+                <GlassButton label={t('common.scan')} onclick={onScan} disabled={scan_disabled} />
             </row>
 
             {#if #network_rows > 0}
@@ -36,13 +34,7 @@
                         {#if row.connected}
                             <text class="settings-status-pill settings-status-pill-active">{t(row.action)}</text>
                         {:else}
-                            <button
-                                class="wifi-connect-button"
-                                onclick={onNetworkAction(row.id, row.connected)}
-                                disabled={row.disabled}
-                            >
-                                {t(row.action)}
-                            </button>
+                            <GlassButton label={t(row.action)} variant="primary" onclick={onNetworkAction(row.id, row.connected)} disabled={row.disabled} />
                         {/if}
                     </list-item>
                 {/for}
@@ -77,6 +69,7 @@
 </template>
 
 <script lang="luau">
+local GlassButton = require("@mesh/glass-controls")
 hidden = false
 
 local network = require("mesh.network@>=1.0")
@@ -234,35 +227,12 @@ end
     }
 
     .wifi-lock-icon {
-        color: var(--color-on-surface-variant);
+        color: var(--glass-settings-text-muted);
         flex-shrink: 0;
     }
 
     .wifi-signal-icon {
-        color: var(--color-on-surface);
+        color: var(--glass-settings-text);
         flex-shrink: 0;
-    }
-
-    .wifi-connect-button {
-        min-height: 32px;
-        flex-shrink: 0;
-        padding-inline: var(--spacing-md);
-        border-radius: var(--radius-full);
-        border-width: 0;
-        background: var(--color-primary);
-        color: var(--color-on-primary);
-        font-size: var(--typography-size-xs);
-        font-weight: 700;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .wifi-connect-button:hover {
-        background: var(--color-primary-container);
-        color: var(--color-on-primary-container);
-    }
-
-    .wifi-connect-button:disabled {
-        opacity: 0.4;
     }
 </style>

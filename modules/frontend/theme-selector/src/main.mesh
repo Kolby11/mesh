@@ -73,7 +73,7 @@ local THEME_GRUVBOX = "gruvbox-dark"
 local THEME_NORD = "nord"
 local THEME_MOCHA = "catppuccin-mocha"
 local THEME_TOKYO = "tokyo-night"
-local THEME_SOLARIZED = "solarized-dark"
+local THEME_LIQUID = "liquid-glass"
 
 current_theme = THEME_DEFAULT
 
@@ -86,7 +86,7 @@ local THEME_OPTIONS = {
     { id = THEME_NORD, core = "bubble-option-core-nord", icon = "weather-snow" },
     { id = THEME_MOCHA, core = "bubble-option-core-mocha", icon = "palette" },
     { id = THEME_TOKYO, core = "bubble-option-core-tokyo", icon = "weather-clear-night" },
-    { id = THEME_SOLARIZED, core = "bubble-option-core-solarized", icon = "weather-clear" },
+    { id = THEME_LIQUID, core = "bubble-option-core-liquid", icon = "weather-clear" },
 }
 
 local THEME_LABELS = {
@@ -95,7 +95,7 @@ local THEME_LABELS = {
     [THEME_NORD] = "Nord",
     [THEME_MOCHA] = "Catppuccin Mocha",
     [THEME_TOKYO] = "Tokyo Night",
-    [THEME_SOLARIZED] = "Solarized Dark",
+    [THEME_LIQUID] = "Liquid Glass",
 }
 
 -- The bubble stage routes both the wheel's `scroll` and the trackpad's

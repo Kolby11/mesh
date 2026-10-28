@@ -425,20 +425,20 @@ end
         border-color: #bb9af7;
     }
 
-    .bubble-option-core-solarized {
-        background-color: #002b36;
-        color: #2aa198;
-        border-color: #17505d;
+    .bubble-option-core-liquid {
+        background-color: #1b3a63;
+        color: #ffffff;
+        border-color: #7fb4ff;
         animation-name: bubble-option-float-center;
         animation-delay: 400ms;
     }
 
-    .bubble-option-core-solarized-active {
-        border-color: #b58900;
+    .bubble-option-core-liquid-active {
+        border-color: #ffffff;
     }
 
-    .bubble-option-core-solarized:hover {
-        border-color: #268bd2;
+    .bubble-option-core-liquid:hover {
+        border-color: #0a84ff;
     }
 
     .bubble-option-core-language {

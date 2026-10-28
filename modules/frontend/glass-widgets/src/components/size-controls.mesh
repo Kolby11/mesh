@@ -31,10 +31,17 @@ function onToggle()
     if resizing then task.delay(0, function() refs.resizeHandle:focus() end) end
 end
 function onDragStart(event)
-    drag = { x = event.pointer.x, y = event.pointer.y, width = actual_width, height = actual_height }
+    drag = { x = event.pointer.x, y = event.pointer.y, width = actual_width, height = actual_height, handle_x = (refs.resizeHandle.left + refs.resizeHandle.right) / 2, factor = 0.5 }
 end
 function onDragMove(event)
-    if drag then resize(drag.width + event.pointer.x - drag.x, drag.height + event.pointer.y - drag.y) end
+    if not drag then return end
+    local handle_x = (refs.resizeHandle.left + refs.resizeHandle.right) / 2
+    local width_delta = actual_width - drag.width
+    if math.abs(width_delta) > 1 then
+        local factor = (handle_x - drag.handle_x) / width_delta
+        if factor > 0.1 and factor <= 1.1 then drag.factor = factor end
+    end
+    resize(actual_width + (event.pointer.x - handle_x) / drag.factor, drag.height + event.pointer.y - drag.y)
 end
 function onDragEnd(event)
     onDragMove(event)

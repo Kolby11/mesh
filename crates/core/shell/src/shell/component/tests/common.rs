@@ -1140,6 +1140,14 @@ pub(super) fn real_frontend_module_component(
     };
     let settings_compiled = compile_frontend_module(&settings_manifest, &settings_dir)
         .expect("settings module and its local pages should compile");
+    let glass_controls_dir = root.join("modules/frontend/glass-controls");
+    let glass_controls_manifest =
+        mesh_core_module::manifest::load_canonical_manifest(&glass_controls_dir)
+            .expect("glass controls manifest")
+            .manifest;
+    let glass_controls_compiled =
+        compile_frontend_module(&glass_controls_manifest, &glass_controls_dir)
+            .expect("glass controls module should compile");
 
     let mut catalog = FrontendCatalog {
         modules: HashMap::from([
@@ -1190,6 +1198,13 @@ pub(super) fn real_frontend_module_component(
                 FrontendCatalogEntry {
                     module_dir: settings_dir.clone(),
                     compiled: settings_compiled.clone().into(),
+                },
+            ),
+            (
+                "@mesh/glass-controls".into(),
+                FrontendCatalogEntry {
+                    module_dir: glass_controls_dir.clone(),
+                    compiled: glass_controls_compiled.clone().into(),
                 },
             ),
         ]),

@@ -180,11 +180,12 @@ impl BackdropSource {
     }
 }
 
-/// A rounded-rect lens. Inside an `edge`-wide rim the sample point moves along
-/// the outward surface normal by up to `depth`, with a profile that is flat in
-/// the middle and steepens toward the rim, so content just outside the glass
-/// appears bent into its edge. `dispersion` pulls red and blue apart along the
-/// same normal; a thin highlight lights the rim from the top-left.
+/// A rounded-rect lens modelled as a convex glass slab `depth` pixels thick
+/// whose bezel is `edge` pixels wide: the backdrop is sampled where a vertical
+/// ray, refracted by the bezel's slope, reaches the back face. The centre is
+/// flat and undistorted. `dispersion` spreads the red and blue samples in
+/// proportion to that displacement; a specular bevel and edge line light the
+/// rim from the top-left.
 const LIQUID_GLASS_SKSL: &str = r#"
 uniform shader backdrop;
 uniform float4 bounds;
@@ -217,26 +218,40 @@ half4 main(float2 p) {
     float glen = length(grad);
     float2 n = glen > 0.0001 ? grad / glen : float2(0.0);
 
-    float t = edge > 0.0 ? clamp(1.0 + dist / edge, 0.0, 1.0) : 0.0;
-    float k = t * t * t;
-    float2 offset = n * depth * k;
+    // Convex bezel: height h(u) = (1 - (1 - u)^4)^(1/4) rises from the rim to a
+    // flat top over `edge` pixels. A vertical ray refracts (n = 1.5) through the
+    // surface tilted by the slope of h and lands that far along the back face.
+    float bezel = max(edge, 1.0);
+    float u = clamp(-dist / bezel, 0.0, 1.0);
+    float inv = 1.0 - u;
+    float inv4 = inv * inv * inv * inv;
+    float body = max(1.0 - inv4, 0.0001);
+    float h = pow(body, 0.25);
+    float slope = inv * inv * inv * pow(body, -0.75);
+    float m = min(slope * depth / bezel, 8.0);
+    float3 normal = normalize(float3(n * m, 1.0));
+    float3 bent = refract(float3(0.0, 0.0, -1.0), normal, 0.6666667);
+    float2 lateral = edge > 0.0 && depth > 0.0 ? bent.xy / -bent.z * depth * (0.35 + h) : float2(0.0);
 
     half4 color;
     if (dispersion > 0.0) {
-        float2 split = n * dispersion * k;
+        float spread = 0.03 * dispersion;
         color = half4(
-            backdrop.eval(p + offset + split).r,
-            backdrop.eval(p + offset).g,
-            backdrop.eval(p + offset - split).b,
+            backdrop.eval(p + lateral * (1.0 + spread)).r,
+            backdrop.eval(p + lateral).g,
+            backdrop.eval(p + lateral * (1.0 - spread)).b,
             1.0);
     } else {
-        color = backdrop.eval(p + offset);
+        color = backdrop.eval(p + lateral);
     }
 
     if (rim > 0.0) {
-        float band = clamp(1.0 + dist / rim, 0.0, 1.0);
-        float light = clamp(dot(n, normalize(float2(-1.0, -1.4))), 0.0, 1.0);
-        color.rgb += half3(band * band * (0.18 + 0.32 * light));
+        float tilt = length(normal.xy);
+        float key = clamp(dot(n, normalize(float2(-1.0, -1.4))), 0.0, 1.0);
+        float bounce = clamp(dot(n, normalize(float2(1.0, 1.4))), 0.0, 1.0);
+        float line = clamp(1.0 - abs(dist + 0.75), 0.0, 1.0);
+        float bevel = tilt * tilt * (0.10 + 0.70 * key + 0.30 * bounce) * (1.0 - u);
+        color.rgb += half3(bevel * 0.5 + line * (0.14 + 0.28 * key));
     }
     if (grain > 0.0) {
         float n = noise(p);
@@ -280,9 +295,11 @@ half4 main(float2 p) {
     float glen = length(grad);
     float2 n = glen > 0.0001 ? grad / glen : float2(0.0);
     float band = rim > 0.0 ? clamp(1.0 + dist / rim, 0.0, 1.0) : 0.0;
-    float light = clamp(dot(n, normalize(float2(-1.0, -1.4))), 0.0, 1.0);
+    float key = clamp(dot(n, normalize(float2(-1.0, -1.4))), 0.0, 1.0);
+    float bounce = clamp(dot(n, normalize(float2(1.0, 1.4))), 0.0, 1.0);
+    float line = clamp(1.0 - abs(dist + 0.75), 0.0, 1.0);
     float coverage = clamp(0.5 - dist, 0.0, 1.0);
-    float rim_alpha = min(band * band * (0.18 + 0.32 * light), 1.0);
+    float rim_alpha = min(band * band * (0.10 + 0.55 * key + 0.25 * bounce) + line * 0.22, 1.0);
     float sample = grain > 0.0 ? noise(p) : 0.0;
     float grain_alpha = grain * abs(sample - 0.5) * 2.0;
     float alpha = grain_alpha + rim_alpha * (1.0 - grain_alpha);
@@ -430,7 +447,7 @@ fn band_interior(rect: Rect, radii: Corners, band: f32) -> [Rect; 2] {
 
 fn rim_width(filter: VisualFilter) -> f32 {
     if filter.refract_edge > 0.0 {
-        (filter.refract_edge * 0.12).clamp(1.0, 3.0)
+        (filter.refract_edge * 0.15).clamp(1.5, 5.0)
     } else {
         0.0
     }

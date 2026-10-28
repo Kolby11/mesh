@@ -102,7 +102,7 @@ local function selected_growth()
 end
 
 local function stage_centre()
-    return math.ceil(overhang() + props.side_cards * (CARD_WIDTH + GAP) + selected_growth())
+    return math.ceil(overhang() + (props.side_cards + BUFFER) * (CARD_WIDTH + GAP) + selected_growth())
 end
 
 -- The panorama is counter-slanted so it stays upright inside the card; what

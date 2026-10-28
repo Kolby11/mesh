@@ -127,10 +127,10 @@ stale artwork requests are cancelled when the track's art URL changes.
 | `@mesh/visualizer-interface` | interface | `mesh.visualizer` audio spectrum contract |
 | `@mesh/wallpapers-interface` | interface | `mesh.wallpapers` wallpaper library contract |
 | `@mesh/recorder-interface` | interface | `mesh.recorder` screen-recording contract |
-| `@mesh/violet-glass` | theme | Violet glass palette with monospace type; tunes `@mesh/glass-material` |
+| `@mesh/liquid-glass` | theme | Neutral white glass palette over a deep blue base with system-blue accents; tunes `@mesh/glass-material` |
 | `@mesh/frutiger-aero` | theme | Frutiger Aero palette: frosted-white glass, sky and aqua blues, grass-green accents, Noto Sans; light (default) and dark modes; tunes `@mesh/glass-material` |
 | `@mesh/volume-presentation` | library | Luau `require("@mesh/volume-presentation/volume")`: level normalization, scroll steps and the semantic volume icon shared by every audio frontend |
-| `@mesh/glass-material` | library | Shared surface gradients, translucent fills, text, accents, rims, hovers, shadows and `--glass-backdrop-{pill,card,dock,panel,flare,lens}` blur/refraction materials; defaults derive from any theme, with Violet Glass and Frutiger Aero tuning them |
+| `@mesh/glass-material` | library | Shared surface gradients, translucent fills, text, accents, rims, hovers, shadows and `--glass-backdrop-{pill,card,dock,panel,flare,lens}` blur/refraction materials; defaults derive from any theme, with Liquid Glass and Frutiger Aero tuning them |
 | `@mesh/shell-ui-interface` | interface | Named UI extension-point contracts a host surface renders foreign module UI into |
 | `@mesh/icons-default` | icon-pack | Default semantic icon mappings |
 | `@mesh/icons-material-symbols` | icon-pack | Material Symbols font and codepoint mappings |
@@ -144,7 +144,7 @@ desktop layout. See [module-system §5](../spec/01-module-system.md).
 | Module | Kind | Contribution |
 | --- | --- | --- |
 | `@mesh/halo` | composition | A bare desktop with one orb that opens the radial launcher |
-| `@mesh/glass` | composition | Liquid-glass desktop: glass bar, desktop cards, dock, notification toasts, dashboard and wallpaper carousel; recommends the violet glass theme |
+| `@mesh/glass` | composition | Liquid-glass desktop: glass bar, desktop cards, dock, notification toasts, dashboard and wallpaper carousel; recommends the liquid glass theme |
 | `@mesh/desk` | composition | The default desktop: a top navigation bar and a settings window, bound to the PipeWire and backlight providers |
 
 ## Module anatomy

@@ -22,9 +22,6 @@
     "i18n": {
       "defaultLocale": "en"
     },
-    "icons": {
-      "ignore_shell_default": true
-    },
     "iconRequirements": {
       "required": [
         "battery-empty",

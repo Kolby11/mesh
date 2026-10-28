@@ -998,6 +998,27 @@ fn composition_switch_fixture(dir: &Path) {
 }
 
 #[test]
+fn profile_scoped_settings_write_does_not_reactivate_the_graph() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_settings, _graph, _lock) = isolated_settings_file(dir.path());
+    composition_switch_fixture(dir.path());
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    shell.discover_modules();
+    shell.resolve_modules().unwrap();
+    shell.load_frontend_components().unwrap();
+    let mut requests = shell.mount_components().unwrap();
+    shell.drain_requests(&mut requests).unwrap();
+
+    let mut requests = shell.apply_set_locale("sk-SK").unwrap();
+    shell.drain_requests(&mut requests).unwrap();
+
+    assert!(shell.reconcile_installed_graph().is_empty());
+    assert!(!shell.profile_transition_pending());
+}
+
+#[test]
 fn idle_profile_authoring_edits_reconcile_without_graph_changes() {
     for change in ["pointer", "remove", "profile"] {
         let dir = tempfile::tempdir().unwrap();

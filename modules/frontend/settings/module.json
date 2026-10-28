@@ -49,14 +49,12 @@
       "modules": {
         "@mesh/shell-ui-interface": ">=1.0.0",
         "@mesh/glass-material": ">=0.1.0",
+        "@mesh/glass-controls": ">=0.1.0",
         "@mesh/volume-presentation": ">=0.1.0"
       }
     },
     "i18n": {
       "defaultLocale": "en"
-    },
-    "icons": {
-      "ignore_shell_default": true
     },
     "entry": "src/main.mesh",
     "iconRequirements": {

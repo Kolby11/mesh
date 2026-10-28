@@ -28,9 +28,6 @@
         "view-dual"
       ]
     },
-    "icons": {
-      "ignore_shell_default": true
-    },
     "entry": "src/main.mesh",
     "provides": {
       "extensionPoints": {

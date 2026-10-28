@@ -28,7 +28,7 @@ shell, and switching profiles replaces the whole shell live.
 Each new shell ships a composition module, a profile in `config/profiles/`,
 and a default theme pack when no existing one fits (Bubblegum, Hyper Aero,
 Tapedeck, Dockyard need one; Skyglass can start from `frutiger-aero`, Nocturne
-from `violet-glass` or a new dark pack). Shell components stay token-only, as
+from `liquid-glass` or a new dark pack). Shell components stay token-only, as
 the shipped glass and orbit modules already are (no literal colours), so any
 theme restyles any shell.
 

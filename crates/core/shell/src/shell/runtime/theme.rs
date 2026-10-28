@@ -113,6 +113,10 @@ pub(in crate::shell) struct ProfileSettingsCommit {
 pub(in crate::shell) struct ControlPlaneSettingsCommit {
     pub(in crate::shell) store: SettingsStore,
     pub(in crate::shell) revision: DurableControlPlaneRevision,
+    /// The profile document this commit wrote, so graph reconciliation does not
+    /// mistake the shell's own write for an external authoring change and
+    /// reactivate every surface.
+    pub(in crate::shell) profile_authoring: Option<(String, serde_json::Value)>,
 }
 
 fn persist_control_plane_settings(
@@ -130,6 +134,7 @@ fn persist_control_plane_settings(
         .check_revision(shared_revision)
         .map_err(|error| ShellRunError::Package(error.to_string()))?;
 
+    let mut profile_authoring = None;
     let revision = if let Some(commit) = profile_commit {
         let mut committed_shared = shared_revision;
         if let Some(mut shared) = shared_update {
@@ -151,6 +156,12 @@ fn persist_control_plane_settings(
         } else {
             commit.expected_revision
         };
+        profile_authoring = commit
+            .paths
+            .load(&commit.profile_id)
+            .ok()
+            .and_then(|saved| serde_json::to_value(saved).ok())
+            .map(|value| (commit.profile_id.clone(), value));
         DurableControlPlaneRevision::new(committed_shared, Some(profile_revision))
     } else {
         store
@@ -159,7 +170,11 @@ fn persist_control_plane_settings(
         DurableControlPlaneRevision::new(store.revision(), None)
     };
 
-    Ok(ControlPlaneSettingsCommit { store, revision })
+    Ok(ControlPlaneSettingsCommit {
+        store,
+        revision,
+        profile_authoring,
+    })
 }
 
 fn theme_source_fingerprint(shell: &Shell) -> Result<u64, mesh_core_theme::ThemeError> {
@@ -437,6 +452,9 @@ impl Shell {
         theme_effect: bool,
         locale_effect: bool,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
+        if let Some(authoring) = commit.profile_authoring {
+            self.active_profile_authoring = Some(authoring);
+        }
         self.settings_store = Arc::new(commit.store);
         self.settings =
             mesh_core_config::resolve_shell_locale_settings(self.settings_store.shell());
@@ -1281,6 +1299,7 @@ impl Shell {
         let commit = ControlPlaneSettingsCommit {
             store,
             revision: DurableControlPlaneRevision::new(shared_revision, profile_revision),
+            profile_authoring: None,
         };
         let result = self.commit_control_plane_batch(
             commit,

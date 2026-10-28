@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "revision": 61,
+  "revision": 90,
   "from": {
     "module": "@mesh/glass"
   },
@@ -12,23 +12,31 @@
   "settings": {
     "shell": {
       "fonts": {
-        "ui_family": "JetBrainsMono NFM"
+        "ui_family": "CaskaydiaCove NF"
       },
       "i18n": {
         "fallback_locale": "en",
-        "locale": "sk",
+        "locale": "en",
         "policy": "manual"
       },
       "icons": {
-        "default_pack": "Bibata-Modern-Classic-Right"
+        "default_pack": "Bibata-Modern-Ice"
+      },
+      "keyboard": {
+        "assigned": {
+          "@mesh/glass-dock#default": {
+            "radial": "a"
+          }
+        },
+        "hint_corner": "top-right"
       },
       "render": {
         "backdrop": {
-          "image": "/home/kolby/Pictures/Wallpapers/forest.jpg"
+          "image": "/home/kolby/Pictures/Wallpapers/silk-folds.jpeg"
         }
       },
       "theme": {
-        "active": "@mesh/violet-glass:violet-glass"
+        "active": "@mesh/liquid-glass:liquid-glass"
       }
     }
   }

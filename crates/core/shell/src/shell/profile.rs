@@ -2386,6 +2386,7 @@ impl Shell {
                 plan.settings.revision(),
                 plan.profile_revision,
             ),
+            profile_authoring: None,
         };
         match self.commit_control_plane_batch(
             control_plane,
