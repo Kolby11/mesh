@@ -1165,7 +1165,9 @@ impl FrontendRenderEngine {
         let h = bounds.height;
 
         node_commands.clear();
-        push_box_commands(node_commands, style, scale, bounds, clip, node_clip);
+        if !matches!(node.content, DisplayPaintContent::Shape(_)) {
+            push_box_commands(node_commands, style, scale, bounds, clip, node_clip);
+        }
         self.execute_painter_commands_in_session(session, node_commands);
         node_commands.clear();
 
@@ -1196,6 +1198,18 @@ impl FrontendRenderEngine {
             }
             DisplayPaintContent::Checkmark(mark) => {
                 self.render_display_checkmark_node(node, *mark, session, bounds, node_clip);
+            }
+            DisplayPaintContent::Shape(shape) => {
+                let commands = shape_commands(
+                    shape,
+                    node.style.background_color,
+                    node.style.border_color,
+                    node.style.border_width.top,
+                    scale,
+                    bounds,
+                    node_clip,
+                );
+                self.execute_painter_commands_in_session(session, &commands);
             }
             DisplayPaintContent::None => {}
         }
@@ -1269,7 +1283,8 @@ fn paint_command_class(
         DisplayPaintContent::Icon(_) => PaintCommandClass::Icon,
         DisplayPaintContent::Input(_)
         | DisplayPaintContent::Slider(_)
-        | DisplayPaintContent::Checkmark(_) => PaintCommandClass::Control,
+        | DisplayPaintContent::Checkmark(_)
+        | DisplayPaintContent::Shape(_) => PaintCommandClass::Control,
     }
 }
 
@@ -1519,6 +1534,51 @@ fn push_box_shadow_command(
 /// Builds the vector-path draw command for a `checkbox` tick or `radio` dot
 /// within `bounds`, tinted `color`. Returns `None` for an empty box or fully
 /// transparent color.
+/// Fill and stroke commands for a `<shape>`: the background colour fills a
+/// filled outline and the border colour strokes it with the border width.
+pub(super) fn shape_commands(
+    shape: &mesh_core_elements::ShapeGeometry,
+    fill: Color,
+    stroke: Color,
+    stroke_width: f32,
+    scale: f32,
+    bounds: ClipRect,
+    clip: ClipRect,
+) -> Vec<PainterCommand> {
+    use mesh_core_elements::ShapeOp;
+    let elements = shape
+        .outline()
+        .into_iter()
+        .map(|op| match op {
+            ShapeOp::Move(x, y) => {
+                PainterPathElement::MoveTo(bounds.x as f32 + x * scale, bounds.y as f32 + y * scale)
+            }
+            ShapeOp::Line(x, y) => {
+                PainterPathElement::LineTo(bounds.x as f32 + x * scale, bounds.y as f32 + y * scale)
+            }
+            ShapeOp::Close => PainterPathElement::Close,
+        })
+        .collect::<Vec<_>>();
+    let path = PainterPath { elements };
+    let mut commands = Vec::with_capacity(2);
+    if shape.is_filled() && fill.a > 0 {
+        commands.push(PainterCommand::DrawPath {
+            path: path.clone(),
+            paint: PainterPaint::fill(fill),
+            clip,
+        });
+    }
+    let stroke_width = stroke_width * scale;
+    if stroke_width > 0.0 && stroke.a > 0 {
+        commands.push(PainterCommand::DrawPath {
+            path,
+            paint: PainterPaint::stroke(stroke, stroke_width),
+            clip,
+        });
+    }
+    commands
+}
+
 fn checkmark_command(
     kind: CheckmarkKind,
     bounds: ClipRect,

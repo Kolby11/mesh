@@ -115,8 +115,10 @@ The running development shell resolves its installed graph from the repository
 under `config/profiles/`. The profile model and live switching are shipped.
 Profiles with `from` inherit composition roots, settings, resources and slots at
 startup and during live switches; keep only user deltas in the profile.
-Switch shells without restarting with `mesh-shell profile use desk` or
-`mesh-shell profile use glass`. The running shell acknowledges the committed
+Switch shells without restarting with `mesh-shell profile use desk`,
+`mesh-shell profile use glass`, or `mesh-shell profile use orbit`. Orbit provides
+a floating media and clock island, workspace controls, and desktop cards; its
+market, activity, and usage cards await data sources. The running shell acknowledges the committed
 switch; a rejected candidate leaves the current shell active. A composition's
 theme recommendation applies when no shared user theme is selected; pin a
 profile-specific theme in its `settings.shell.theme` when desired.

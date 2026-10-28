@@ -1,0 +1,75 @@
+{
+  "name": "@mesh/radial-launcher",
+  "version": "0.1.0",
+  "description": "Ring launcher of running and pinned apps around a clock hub with media controls.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "interfaces": {
+        "mesh.apps": ">=1.0"
+      },
+      "optionalInterfaces": {
+        "mesh.media": ">=1.0"
+      },
+      "capabilities": [
+        "shell.surface",
+        "theme.read",
+        "locale.read",
+        "service.apps.read",
+        "service.apps.launch",
+        "service.media.read",
+        "service.media.control"
+      ],
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      }
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "top",
+      "layer": "overlay",
+      "keyboard_mode": "exclusive",
+      "visible_on_start": false
+    },
+    "provides": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Radial launcher"
+        }
+      ]
+    },
+    "accessibility": {
+      "role": "dialog"
+    },
+    "icons": {
+      "ignore_shell_default": true
+    },
+    "i18n": {
+      "defaultLocale": "en"
+    },
+    "contributes": {
+      "i18n": [
+        { "id": "en", "locale": "en", "path": "config/i18n/en.json" }
+      ],
+      "keybinds": {
+        "search": {
+          "label": { "t": "keybind.search.label", "fallback": "Search applications" },
+          "description": { "t": "keybind.search.description", "fallback": "Filter the ring by application name" },
+          "category": { "t": "keybind.category", "fallback": "Radial launcher" },
+          "trigger": { "kind": "shortcut", "key": "f" }
+        },
+        "close": {
+          "label": { "t": "keybind.close.label", "fallback": "Close launcher" },
+          "description": { "t": "keybind.close.description", "fallback": "Hide the radial launcher" },
+          "category": { "t": "keybind.category", "fallback": "Radial launcher" },
+          "trigger": { "kind": "shortcut", "key": "Escape" }
+        }
+      }
+    }
+  }
+}

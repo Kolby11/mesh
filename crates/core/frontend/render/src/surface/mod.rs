@@ -24,7 +24,7 @@ pub use canvas::{RasterCanvas, RasterReplay, SurfaceCanvas};
 pub use debug_overlay::{DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot};
 pub use glyph::GlyphAxes;
 pub use painter::{
-    BlurQuality, FrontendRenderEngine, MAX_BLUR_PASSES, PainterBackendSnapshot,
+    BlurQuality, FrontendRenderEngine, KeyHint, KeyHintCorner, MAX_BLUR_PASSES, PainterBackendSnapshot,
     PainterCapabilitySnapshot, PainterDiagnosticSnapshot, TooltipPaintStyle,
 };
 pub use profiling::RasterMetrics;
@@ -805,6 +805,21 @@ mod tests {
             with_tooltip.traversal_micros
         );
     }
+}
+
+/// Paints key caps for `hints` after the display list, into the same session
+/// and clip as the frame, so it works on CPU and GPU canvases alike.
+pub fn paint_key_hints_in_session(
+    hints: &[KeyHint],
+    corner: KeyHintCorner,
+    session: &mut PixelCanvasSession<'_>,
+    scale: f32,
+    clip: Option<(u32, u32, u32, u32)>,
+    context: Option<&crate::PaintContext>,
+) {
+    with_paint_engine(context, |engine| {
+        engine.render_key_hints_in_session(hints, corner, session, scale, clip);
+    });
 }
 
 fn with_paint_engine<R>(

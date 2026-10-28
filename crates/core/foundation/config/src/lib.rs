@@ -10,6 +10,7 @@ pub use mesh_core_theme::ThemeModePolicy;
 mod control_plane;
 pub use control_plane::{ControlPlaneLock, default_module_graph_path};
 
+pub mod keybinds;
 pub mod settings;
 pub mod validate;
 
@@ -136,6 +137,17 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
             FieldSpec::new("slider_increment_keys", FieldKind::StrArray),
             // module id -> action name -> { key }; both levels are the user's
             // own vocabulary, so only the leaf shape is checked.
+            FieldSpec::new("key_priority", FieldKind::Str),
+            FieldSpec::new("hint_mode", FieldKind::Str),
+            FieldSpec::new("hint_corner", FieldKind::Str),
+            // action id -> { key }, for shell-owned actions such as `help`.
+            FieldSpec::new(
+                "shell_shortcuts",
+                FieldKind::Map(&FieldKind::Section(&[FieldSpec::new("key", FieldKind::Str)])),
+            ),
+            // surface id -> action id -> key; auto-assigned keys kept so they
+            // stay put when the surface gains actions.
+            FieldSpec::new("assigned", FieldKind::Map(&FieldKind::Map(&FieldKind::Str))),
             FieldSpec::new(
                 "surface_shortcuts",
                 FieldKind::Map(&FieldKind::Map(&FieldKind::Section(&[FieldSpec::new(
@@ -291,6 +303,19 @@ pub struct KeyboardSettings {
     pub slider_increment_keys: Vec<String>,
     #[serde(default)]
     pub surface_shortcuts: HashMap<String, HashMap<String, SurfaceShortcutOverride>>,
+    /// Keys for `auto` actions, most preferred first (`"qwertasd"`).
+    #[serde(default = "default_key_priority")]
+    pub key_priority: String,
+    /// `hold`, `toggle` or `both`.
+    #[serde(default = "default_hint_mode")]
+    pub hint_mode: String,
+    /// `top-left`, `top-right`, `bottom-left` or `bottom-right`.
+    #[serde(default = "default_hint_corner")]
+    pub hint_corner: String,
+    #[serde(default)]
+    pub shell_shortcuts: HashMap<String, SurfaceShortcutOverride>,
+    #[serde(default)]
+    pub assigned: HashMap<String, HashMap<String, String>>,
 }
 
 impl Default for KeyboardSettings {
@@ -301,6 +326,11 @@ impl Default for KeyboardSettings {
             slider_decrement_keys: default_slider_decrement_keys(),
             slider_increment_keys: default_slider_increment_keys(),
             surface_shortcuts: HashMap::new(),
+            key_priority: default_key_priority(),
+            hint_mode: default_hint_mode(),
+            hint_corner: default_hint_corner(),
+            shell_shortcuts: HashMap::new(),
+            assigned: HashMap::new(),
         }
     }
 }
@@ -567,6 +597,18 @@ fn default_toggle_activation_keys() -> Vec<String> {
 
 fn default_slider_decrement_keys() -> Vec<String> {
     vec!["ArrowLeft".into(), "ArrowDown".into()]
+}
+
+fn default_key_priority() -> String {
+    "asdfqwertzxcvbnm".into()
+}
+
+fn default_hint_mode() -> String {
+    "both".into()
+}
+
+fn default_hint_corner() -> String {
+    "top-right".into()
 }
 
 fn default_slider_increment_keys() -> Vec<String> {

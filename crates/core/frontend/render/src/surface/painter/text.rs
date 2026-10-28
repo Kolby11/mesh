@@ -1431,6 +1431,175 @@ impl FrontendRenderEngine {
             );
         });
     }
+
+    /// Draws a small key cap in a corner of each hinted control, styled like a
+    /// tooltip so every theme restyles it. `clip` limits painting to a damage
+    /// rectangle in device pixels.
+    pub fn render_key_hints_in_session(
+        &self,
+        hints: &[KeyHint],
+        corner: KeyHintCorner,
+        session: &mut PixelCanvasSession<'_>,
+        scale: f32,
+        clip: Option<(u32, u32, u32, u32)>,
+    ) {
+        let style = self.tooltip_style();
+        let font_family = self.tooltip_font_family();
+        let font_size = (style.font_size * 0.85 * scale).max(8.0);
+        let pad_h = (3.0 * scale).round() as i32;
+        let pad_v = (1.0 * scale).round() as i32;
+        let inset = (2.0 * scale).round() as i32;
+        let surface = ClipRect {
+            x: 0,
+            y: 0,
+            width: session.width() as i32,
+            height: session.height() as i32,
+        };
+        let paint_clip = clip
+            .map(|clip| {
+                intersect_clip(
+                    surface,
+                    ClipRect {
+                        x: clip.0 as i32,
+                        y: clip.1 as i32,
+                        width: clip.2 as i32,
+                        height: clip.3 as i32,
+                    },
+                )
+            })
+            .unwrap_or(surface);
+        if paint_clip.width <= 0 || paint_clip.height <= 0 {
+            return;
+        }
+        for hint in hints {
+            let (text_w, text_h) = self.text_renderer.measure_styled(
+                &hint.label,
+                &font_family,
+                font_size,
+                style.font_weight,
+                TooltipPaintStyle::LINE_HEIGHT,
+                None,
+            );
+            let box_w = text_w.ceil() as i32 + pad_h * 2;
+            let box_h = (text_h.ceil() as i32 + pad_v * 2).max(font_size as i32);
+            let (left, top) = (
+                (hint.x * scale).round() as i32,
+                (hint.y * scale).round() as i32,
+            );
+            let (width, height) = (
+                (hint.width * scale).round() as i32,
+                (hint.height * scale).round() as i32,
+            );
+            let x = if corner.is_right() {
+                left + width - box_w - inset
+            } else {
+                left + inset
+            }
+            .max(0);
+            let y = if corner.is_bottom() {
+                top + height - box_h - inset
+            } else {
+                top + inset
+            }
+            .max(0);
+            let rect = ClipRect {
+                x,
+                y,
+                width: box_w,
+                height: box_h,
+            };
+            let visible = intersect_clip(rect, paint_clip);
+            if visible.width <= 0 || visible.height <= 0 {
+                continue;
+            }
+            let mut commands = Vec::with_capacity(2);
+            let border_width = (style.border_width * scale).round().max(0.0) as i32;
+            if style.border.a > 0 && border_width > 0 {
+                commands.push(PainterCommand::DrawRoundedRect {
+                    rect: ClipRect {
+                        x: x - border_width,
+                        y: y - border_width,
+                        width: box_w + border_width * 2,
+                        height: box_h + border_width * 2,
+                    },
+                    radii: mesh_core_elements::style::Corners::all(
+                        style.radius * scale + border_width as f32,
+                    ),
+                    paint: PainterPaint::fill(style.border),
+                    clip: paint_clip,
+                });
+            }
+            commands.push(PainterCommand::DrawRoundedRect {
+                rect,
+                radii: mesh_core_elements::style::Corners::all(style.radius * scale),
+                paint: PainterPaint::fill(style.background),
+                clip: paint_clip,
+            });
+            self.execute_painter_commands_in_session(session, &commands);
+            let text_clip = (
+                visible.x.max(0) as u32,
+                visible.y.max(0) as u32,
+                (visible.x + visible.width).max(0) as u32,
+                (visible.y + visible.height).max(0) as u32,
+            );
+            session.with_canvas(|canvas| {
+                self.text_renderer.render_clipped_on_canvas(
+                    &hint.label,
+                    &font_family,
+                    font_size,
+                    style.font_weight,
+                    TooltipPaintStyle::LINE_HEIGHT,
+                    TextAlign::Left,
+                    style.foreground,
+                    canvas,
+                    (x + pad_h) as u32,
+                    (y + pad_v) as u32,
+                    text_clip,
+                    None,
+                );
+            });
+        }
+    }
+}
+
+/// A control that has a key binding, in surface logical pixels.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyHint {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+    pub label: String,
+}
+
+/// Which corner of its control a key hint sits in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KeyHintCorner {
+    TopLeft,
+    #[default]
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
+
+impl KeyHintCorner {
+    /// Parses `top-right` and friends; anything else is the default corner.
+    pub fn parse(source: &str) -> Self {
+        match source.trim() {
+            "top-left" => Self::TopLeft,
+            "bottom-left" => Self::BottomLeft,
+            "bottom-right" => Self::BottomRight,
+            _ => Self::TopRight,
+        }
+    }
+
+    fn is_right(self) -> bool {
+        matches!(self, Self::TopRight | Self::BottomRight)
+    }
+
+    fn is_bottom(self) -> bool {
+        matches!(self, Self::BottomLeft | Self::BottomRight)
+    }
 }
 
 #[cfg(test)]

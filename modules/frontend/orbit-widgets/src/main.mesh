@@ -1,0 +1,13 @@
+<template><row class="desktop"><box class="space" /><column class="cards"><MarketCard /><row class="pair"><ActivityCard /><UsageCard /></row></column></row></template>
+<script lang="luau">
+local MarketCard = require("./components/market-card.mesh")
+local ActivityCard = require("./components/activity-card.mesh")
+local UsageCard = require("./components/usage-card.mesh")
+</script>
+<style>
+.desktop { width: 100%; margin-top: 86px; padding-inline: 36px; gap: 16px; align-items: flex-start; background: transparent; exclusive-zone: none; }
+.space { flex-grow: 1; }
+.cards { width: 420px; gap: 16px; }
+.pair { gap: 16px; }
+@container (max-width: 700px) { .desktop { margin-top: 190px; padding-inline: 16px; } .cards { width: 100%; } }
+</style>

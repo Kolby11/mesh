@@ -16,6 +16,8 @@ pub(crate) enum KeybindResolutionSource {
     UserOverride,
     LocaleDefault { locale: String },
     ModuleDefault,
+    /// Assigned from the user's `shell.keyboard.key_priority`.
+    Auto,
 }
 
 #[derive(Debug, Clone)]
@@ -23,6 +25,7 @@ struct SurfaceShortcutDeclaration {
     keybind_id: String,
     generic_trigger: mesh_core_module::KeybindTrigger,
     localized_triggers: HashMap<String, mesh_core_module::KeybindTrigger>,
+    scope: mesh_core_module::KeybindScope,
 }
 
 /// A keyboard target resolved in one tree traversal. Keyboard event payloads
@@ -52,6 +55,21 @@ impl FrontendSurfaceComponent {
     }
 
     pub(super) fn handle_key_pressed(
+        &mut self,
+        tree: &WidgetNode,
+        key: String,
+        modifiers: KeyModifiers,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let keyboard_settings = self.current_keyboard_settings();
+        if self.key_hint_press(&keyboard_settings, &key, modifiers) {
+            return Ok(Vec::new());
+        }
+        let mut requests = self.handle_key_pressed_inner(tree, key, modifiers)?;
+        requests.extend(self.take_assigned_write());
+        Ok(requests)
+    }
+
+    fn handle_key_pressed_inner(
         &mut self,
         tree: &WidgetNode,
         key: String,
@@ -181,7 +199,7 @@ impl FrontendSurfaceComponent {
             }
 
             if let Some(focused_node) = find_node_by_key(tree, &focused_key)
-                && focused_node.tag == "button"
+                && matches!(focused_node.tag.as_str(), "button" | "shape")
                 && Self::key_matches_any_binding(&key, &keyboard_settings.button_activation_keys)
             {
                 self.clear_selection();
@@ -232,6 +250,7 @@ impl FrontendSurfaceComponent {
         // it, and releasing the keys of a compositor shortcut after clicking
         // a button must not paint that button's focus ring.
         let keyboard_settings = self.current_keyboard_settings();
+        self.key_hint_release(&keyboard_settings, &key);
         let normalized_focused_key = self.normalized_focused_key(tree);
         if let Some(focused_key) = normalized_focused_key {
             let mut requests = self.dispatch_focused_keyboard_handler(
@@ -244,7 +263,7 @@ impl FrontendSurfaceComponent {
             )?;
 
             if let Some(focused_node) = find_node_by_key(tree, &focused_key)
-                && focused_node.tag == "button"
+                && matches!(focused_node.tag.as_str(), "button" | "shape")
                 && Self::key_matches_any_binding(&key, &keyboard_settings.button_activation_keys)
             {
                 self.clear_selection();
@@ -516,19 +535,25 @@ impl FrontendSurfaceComponent {
             return Vec::new();
         }
 
-        let resolved = declarations
-            .into_iter()
-            .filter_map(|declaration| {
-                let override_key = overrides
-                    .and_then(|surface| surface.get(&declaration.keybind_id))
-                    .and_then(|shortcut| shortcut.key.clone());
-                self.resolve_surface_shortcut_declaration(
-                    &declaration,
-                    override_key,
-                    &active_locale,
-                )
-            })
-            .collect::<Vec<_>>();
+        let mut resolved = Vec::new();
+        let mut auto_actions = Vec::new();
+        for declaration in declarations {
+            let override_key = overrides
+                .and_then(|surface| surface.get(&declaration.keybind_id))
+                .and_then(|shortcut| shortcut.key.clone());
+            if declaration.generic_trigger.kind == mesh_core_module::KeybindTriggerKind::Auto
+                && override_key.is_none()
+            {
+                auto_actions.push(declaration.keybind_id);
+                continue;
+            }
+            resolved.extend(self.resolve_surface_shortcut_declaration(
+                &declaration,
+                override_key,
+                &active_locale,
+            ));
+        }
+        self.assign_auto_shortcuts(&mut resolved, &auto_actions, keyboard_settings);
 
         self.record_duplicate_surface_shortcut_diagnostics(&resolved);
         let mut shortcuts_by_keybind = HashMap::with_capacity(resolved.len());
@@ -547,6 +572,71 @@ impl FrontendSurfaceComponent {
             shortcuts_by_keybind,
         });
         resolved
+    }
+
+    /// Gives each auto action the first free key of the user's priority list
+    /// and queues the result for saving when it differs from the saved
+    /// assignment.
+    fn assign_auto_shortcuts(
+        &self,
+        resolved: &mut Vec<ResolvedSurfaceShortcut>,
+        auto_actions: &[String],
+        keyboard_settings: &mesh_core_config::KeyboardSettings,
+    ) {
+        use mesh_core_config::keybinds::{assign_auto_keys, normalize_key, parse_key_priority};
+        if auto_actions.is_empty() {
+            return;
+        }
+        let taken = resolved
+            .iter()
+            .filter(|shortcut| shortcut.modifiers.is_empty())
+            .map(|shortcut| normalize_key(&shortcut.key))
+            .collect::<HashSet<_>>();
+        let cached = keyboard_settings
+            .assigned
+            .get(self.surface_id())
+            .cloned()
+            .unwrap_or_default();
+        let assignment = assign_auto_keys(
+            auto_actions,
+            &taken,
+            &parse_key_priority(&keyboard_settings.key_priority),
+            &cached,
+        );
+        for action in auto_actions {
+            match assignment.keys.get(action) {
+                Some(key) => resolved.push(ResolvedSurfaceShortcut {
+                    keybind_id: action.clone(),
+                    key: key.clone(),
+                    modifiers: Vec::new(),
+                    trigger_kind: mesh_core_module::KeybindTriggerKind::Auto,
+                    source: KeybindResolutionSource::Auto,
+                }),
+                None => {
+                    self.record_keybind_diagnostic(
+                        action,
+                        "no free key left in shell.keyboard.key_priority for this auto action",
+                    );
+                }
+            }
+        }
+        if assignment.keys != cached {
+            *self.pending_assigned_write.borrow_mut() = Some(assignment.keys);
+        }
+    }
+
+    /// The saved-assignment write the last resolution queued, once per distinct
+    /// value.
+    pub(in crate::shell::component) fn take_assigned_write(&self) -> Option<CoreRequest> {
+        let keys = self.pending_assigned_write.borrow_mut().take()?;
+        if self.last_assigned_write.borrow().as_ref() == Some(&keys) {
+            return None;
+        }
+        *self.last_assigned_write.borrow_mut() = Some(keys.clone());
+        Some(CoreRequest::SetKeyboardSetting {
+            field: "assigned".into(),
+            value: serde_json::json!({ self.surface_id(): keys }),
+        })
     }
 
     fn surface_shortcut_declarations(&self) -> Vec<SurfaceShortcutDeclaration> {
@@ -609,6 +699,7 @@ impl FrontendSurfaceComponent {
                 keybind_id: keybind_id.clone(),
                 generic_trigger: action.trigger.clone(),
                 localized_triggers: action.localized_triggers.clone(),
+                scope: action.scope,
             })
             .collect()
     }
@@ -640,34 +731,55 @@ impl FrontendSurfaceComponent {
         modifiers: KeyModifiers,
         keyboard_settings: &mesh_core_config::KeyboardSettings,
     ) -> Result<Option<Vec<CoreRequest>>, ComponentError> {
-        let matched = self
+        let focused_key = self.normalized_focused_key(tree);
+        let mut candidates = self
             .resolved_surface_shortcuts(keyboard_settings)
             .into_iter()
-            .find(|shortcut| {
+            .filter(|shortcut| {
                 Self::key_matches_binding(key, &shortcut.key)
                     && shortcut_modifiers_match(&shortcut.modifiers, modifiers)
-            });
-        let Some(shortcut) = matched else {
-            return Ok(None);
-        };
-
-        let subscribers = self
-            .keybind_subscribers(tree)
-            .into_iter()
-            .filter(|subscriber| subscriber.keybind_id == shortcut.keybind_id)
-            .filter(|subscriber| {
-                mesh_core_interaction::active_modal_scope(tree).is_none_or(|scope| {
-                    mesh_core_interaction::scope_contains(scope, &subscriber.node_key)
-                })
             })
             .collect::<Vec<_>>();
-        if subscribers.is_empty() {
-            self.record_keybind_diagnostic(
-                &shortcut.keybind_id,
-                "resolved keybind has no runtime subscribers on focused surface",
-            );
+        // The narrowest scope answers first: a binding limited to the focused
+        // component beats a surface-wide one on the same key.
+        candidates.sort_by_key(|shortcut| !self.keybind_is_focus_scoped(&shortcut.keybind_id));
+        if candidates.is_empty() {
             return Ok(None);
         }
+
+        let mut chosen = None;
+        for shortcut in candidates {
+            let focus_scoped = self.keybind_is_focus_scoped(&shortcut.keybind_id);
+            let subscribers = self
+                .keybind_subscribers(tree)
+                .into_iter()
+                .filter(|subscriber| subscriber.keybind_id == shortcut.keybind_id)
+                .filter(|subscriber| {
+                    mesh_core_interaction::active_modal_scope(tree).is_none_or(|scope| {
+                        mesh_core_interaction::scope_contains(scope, &subscriber.node_key)
+                    })
+                })
+                .filter(|subscriber| {
+                    !focus_scoped
+                        || focused_key
+                            .as_deref()
+                            .is_some_and(|focused| focus_is_within(focused, &subscriber.node_key))
+                })
+                .collect::<Vec<_>>();
+            if !subscribers.is_empty() {
+                chosen = Some((shortcut, subscribers));
+                break;
+            }
+            if !focus_scoped {
+                self.record_keybind_diagnostic(
+                    &shortcut.keybind_id,
+                    "resolved keybind has no runtime subscribers on focused surface",
+                );
+            }
+        }
+        let Some((shortcut, subscribers)) = chosen else {
+            return Ok(None);
+        };
 
         let mut requests = Vec::new();
         for subscriber in subscribers {
@@ -681,6 +793,7 @@ impl FrontendSurfaceComponent {
                         "trigger_kind": match shortcut.trigger_kind {
                             mesh_core_module::KeybindTriggerKind::Shortcut => "shortcut",
                             mesh_core_module::KeybindTriggerKind::AccessKey => "access_key",
+                            mesh_core_module::KeybindTriggerKind::Auto => "auto",
                         },
                         "source": match shortcut.source.clone() {
                             KeybindResolutionSource::UserOverride => "user_override".to_string(),
@@ -688,6 +801,7 @@ impl FrontendSurfaceComponent {
                                 format!("locale:{locale}")
                             }
                             KeybindResolutionSource::ModuleDefault => "module_default".to_string(),
+                        KeybindResolutionSource::Auto => "auto".to_string(),
                         },
                     }),
                 );
@@ -725,6 +839,16 @@ impl FrontendSurfaceComponent {
                     .map_or((None, None), |(module, action)| (Some(module), Some(action)));
                 let module_id = declaring_module
                     .unwrap_or_else(|| self.compiled.manifest.package.id.clone());
+                let focus_scoped = self.keybind_is_focus_scoped(&shortcut.keybind_id);
+                let focus_active = self.last_tree.as_ref().is_some_and(|tree| {
+                    self.keybind_subscribers(tree).iter().any(|subscriber| {
+                        subscriber.keybind_id == shortcut.keybind_id
+                            && self
+                                .focused_key
+                                .as_deref()
+                                .is_some_and(|key| focus_is_within(key, &subscriber.node_key))
+                    })
+                });
                 let action = action.as_ref();
                 let label = action.and_then(|action| {
                     action.label.as_ref().map(|text| {
@@ -771,6 +895,7 @@ impl FrontendSurfaceComponent {
                     trigger_kind: match shortcut.trigger_kind {
                         mesh_core_module::KeybindTriggerKind::Shortcut => "shortcut".to_string(),
                         mesh_core_module::KeybindTriggerKind::AccessKey => "access_key".to_string(),
+                        mesh_core_module::KeybindTriggerKind::Auto => "auto".to_string(),
                     },
                     source: match shortcut.source.clone() {
                         KeybindResolutionSource::UserOverride => "user_override".to_string(),
@@ -778,8 +903,12 @@ impl FrontendSurfaceComponent {
                             format!("locale:{locale}")
                         }
                         KeybindResolutionSource::ModuleDefault => "module_default".to_string(),
+                        KeybindResolutionSource::Auto => "auto".to_string(),
                     },
                     accessibility_shortcut: format_shortcut_for_accessibility(&shortcut),
+                    scope: if focus_scoped { "focus" } else { "surface" }.to_string(),
+                    active: !focus_scoped || focus_active,
+                    focused: false,
                 }
             })
             .collect()
@@ -815,6 +944,128 @@ impl FrontendSurfaceComponent {
         resolve_surface_shortcut_declaration_without_override(declaration, active_locale, self)
     }
 
+    /// Handles the key-hint chord. Returns whether the press was consumed.
+    /// `Escape` also ends sticky hints.
+    fn key_hint_press(
+        &mut self,
+        keyboard_settings: &mesh_core_config::KeyboardSettings,
+        key: &str,
+        modifiers: KeyModifiers,
+    ) -> bool {
+        use mesh_core_config::keybinds::{normalize_key, shell_action_for_key};
+        if self.key_hints.sticky && normalize_key(key) == "escape" {
+            self.key_hints.sticky = false;
+            self.mark_key_hints_changed();
+            return true;
+        }
+        let is_hint_chord = shell_action_for_key(
+            &keyboard_settings.shell_shortcuts,
+            key,
+            modifiers.ctrl,
+            modifiers.shift,
+            modifiers.alt,
+        )
+        .is_some_and(|action| action.id == "hints");
+        if !is_hint_chord {
+            return false;
+        }
+        // Key repeat of a held chord arrives as further presses.
+        if self.key_hints.held || self.key_hints.down_at.is_some() {
+            return true;
+        }
+        match keyboard_settings.hint_mode.as_str() {
+            "toggle" => self.key_hints.sticky = !self.key_hints.sticky,
+            "hold" => {
+                self.key_hints.held = true;
+                self.key_hints.down_at = Some(std::time::Instant::now());
+            }
+            _ if self.key_hints.sticky => {
+                self.key_hints.sticky = false;
+                self.key_hints.down_at = Some(std::time::Instant::now());
+            }
+            _ => {
+                self.key_hints.held = true;
+                self.key_hints.down_at = Some(std::time::Instant::now());
+            }
+        }
+        self.mark_key_hints_changed();
+        true
+    }
+
+    /// Ends a held chord when either of its keys is released; a quick tap in
+    /// `both` mode leaves the hints on.
+    fn key_hint_release(
+        &mut self,
+        keyboard_settings: &mesh_core_config::KeyboardSettings,
+        key: &str,
+    ) {
+        use mesh_core_config::keybinds::{KeyChord, SHELL_ACTIONS, normalize_key, shell_action_chord};
+        let Some(down_at) = self.key_hints.down_at else {
+            return;
+        };
+        let Some(action) = SHELL_ACTIONS.iter().find(|action| action.id == "hints") else {
+            return;
+        };
+        let chord: KeyChord = shell_action_chord(action, &keyboard_settings.shell_shortcuts);
+        let key = normalize_key(key);
+        let part_of_chord = key == chord.key
+            || (chord.ctrl && (key.contains("control") || key == "ctrl"))
+            || (chord.shift && key.contains("shift"))
+            || (chord.alt && key.contains("alt"));
+        if !part_of_chord {
+            return;
+        }
+        self.key_hints.down_at = None;
+        let was_held = std::mem::take(&mut self.key_hints.held);
+        if was_held
+            && keyboard_settings.hint_mode != "hold"
+            && down_at.elapsed() < KEY_HINT_TAP_WINDOW
+        {
+            self.key_hints.sticky = true;
+        }
+        self.mark_key_hints_changed();
+    }
+
+    pub(in crate::shell::component) fn key_hints_visible(&self) -> bool {
+        self.key_hints.sticky || self.key_hints.held
+    }
+
+    fn mark_key_hints_changed(&mut self) {
+        self.key_hints.repaint = true;
+        self.invalidate_interaction_restyle();
+    }
+
+    /// Resolved shortcut text per action id, for key hints.
+    pub(in crate::shell::component) fn current_surface_shortcut_labels(
+        &self,
+    ) -> HashMap<String, Vec<String>> {
+        self.resolved_surface_shortcuts(&self.current_keyboard_settings());
+        self.resolved_surface_shortcuts_cache
+            .borrow()
+            .as_ref()
+            .map(|cache| cache.shortcuts_by_keybind.clone())
+            .unwrap_or_default()
+    }
+
+    /// A focus-scoped binding is only worth hinting while focus is inside the
+    /// control that subscribes to it.
+    pub(in crate::shell::component) fn key_hint_is_active(
+        &self,
+        keybind_id: &str,
+        node_key: &str,
+    ) -> bool {
+        !self.keybind_is_focus_scoped(keybind_id)
+            || self
+                .focused_key
+                .as_deref()
+                .is_some_and(|focused| focus_is_within(focused, node_key))
+    }
+
+    fn keybind_is_focus_scoped(&self, keybind_id: &str) -> bool {
+        self.keybind_declaration(keybind_id)
+            .is_some_and(|(_, action)| action.scope == mesh_core_module::KeybindScope::Focus)
+    }
+
     fn record_duplicate_surface_shortcut_diagnostics(&self, shortcuts: &[ResolvedSurfaceShortcut]) {
         let mut seen = HashMap::<(String, Vec<String>), String>::new();
         for shortcut in shortcuts {
@@ -835,6 +1086,29 @@ impl FrontendSurfaceComponent {
             }
         }
     }
+}
+
+/// A press-and-release shorter than this counts as a tap that keeps key hints
+/// on.
+const KEY_HINT_TAP_WINDOW: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// Whether key hints are showing and whether the surface owes a full repaint
+/// for the last change.
+#[derive(Debug, Default)]
+pub(in crate::shell::component) struct KeyHintState {
+    pub(in crate::shell::component) sticky: bool,
+    pub(in crate::shell::component) held: bool,
+    pub(in crate::shell::component) down_at: Option<std::time::Instant>,
+    pub(in crate::shell::component) repaint: bool,
+}
+
+/// Whether `focused` is `ancestor` itself or lies beneath it; node keys are
+/// slash-separated tree paths.
+fn focus_is_within(focused: &str, ancestor: &str) -> bool {
+    focused == ancestor
+        || focused
+            .strip_prefix(ancestor)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 fn surface_shortcut_declarations_from_settings(
@@ -864,6 +1138,7 @@ fn surface_shortcut_declarations_from_settings(
                     modifiers: Vec::new(),
                 },
                 localized_triggers: HashMap::new(),
+                scope: mesh_core_module::KeybindScope::Surface,
             })
         })
         .collect()

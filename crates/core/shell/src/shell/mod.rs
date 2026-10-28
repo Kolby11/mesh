@@ -623,12 +623,44 @@ fn read_host_resource_with_cancellation(
     Ok(bytes)
 }
 
-fn shell_global_shortcut_request(key: &str, ctrl: bool, shift: bool) -> Option<CoreRequest> {
-    match key.to_ascii_lowercase().as_str() {
-        "d" if ctrl && shift => Some(CoreRequest::ToggleDebugOverlay),
-        "c" if ctrl && shift => Some(CoreRequest::ToggleDebugElementPicker),
+/// Surface that lists every keybind; module `@mesh/keybind-help`.
+const KEYBIND_HELP_SURFACE: &str = "@mesh/keybind-help";
+
+/// The request a shell-owned key event maps to. `hints` is absent on purpose:
+/// the focused component owns the hold/toggle state, so that key event
+/// continues to it.
+fn shell_global_shortcut_request_with(
+    keyboard: &mesh_core_config::KeyboardSettings,
+    key: &str,
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+) -> Option<CoreRequest> {
+    let action = mesh_core_config::keybinds::shell_action_for_key(
+        &keyboard.shell_shortcuts,
+        key,
+        ctrl,
+        shift,
+        alt,
+    )?;
+    match action.id {
+        "help" => Some(CoreRequest::ToggleSurface {
+            surface_id: KEYBIND_HELP_SURFACE.into(),
+        }),
+        "debug_overlay" => Some(CoreRequest::ToggleDebugOverlay),
+        "debug_picker" => Some(CoreRequest::ToggleDebugElementPicker),
         _ => None,
     }
+}
+
+fn shell_global_shortcut_request(key: &str, ctrl: bool, shift: bool) -> Option<CoreRequest> {
+    shell_global_shortcut_request_with(
+        &mesh_core_config::KeyboardSettings::default(),
+        key,
+        ctrl,
+        shift,
+        false,
+    )
 }
 
 fn component_key_pressed_input(key: String, ctrl: bool, shift: bool, alt: bool) -> ComponentInput {
@@ -734,6 +766,10 @@ pub struct Shell {
     debug_overlay: DebugOverlay,
     active_key_modifiers: KeyModifiers,
     keyboard_focus_surface: Option<SurfaceId>,
+    /// Surface that held the keyboard when the keybind help window opened; its
+    /// bindings are listed first.
+    keybind_help_context: Option<SurfaceId>,
+    last_keybind_payload: Option<serde_json::Value>,
     /// The surface each held key's press went to. Its repeats and release
     /// follow it there even if key routing moves while it is held.
     held_key_surfaces: HashMap<String, SurfaceId>,

@@ -768,6 +768,9 @@ fn debug_snapshot_payload_includes_resolved_keybind_metadata() {
             trigger_kind: "shortcut".into(),
             source: "module_default".into(),
             accessibility_shortcut: "Control+m".into(),
+            scope: "surface".into(),
+            active: true,
+            focused: false,
         }],
     )));
 
@@ -797,8 +800,19 @@ fn debug_snapshot_payload_includes_resolved_keybind_metadata() {
             "trigger_kind": "shortcut",
             "source": "module_default",
             "accessibility_shortcut": "Control+m",
+            "scope": "surface",
+            "active": true,
+            "focused": false,
         })
     );
+    let shell_actions: Vec<_> = payload["keybinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["scope"] == "shell")
+        .map(|entry| entry["action_id"].as_str().unwrap())
+        .collect();
+    assert!(shell_actions.contains(&"help") && shell_actions.contains(&"hints"));
     assert!(
         payload["health"].is_array(),
         "debug payload should keep diagnostics health visible"

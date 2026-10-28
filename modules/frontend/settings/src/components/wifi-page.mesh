@@ -23,18 +23,27 @@
             <list class="settings-list" label={t('wifi.available_wifi_networks')}>
                 {#for row in network_rows}
                     <list-item class="settings-card">
-                        <icon name="wifi" size="20" />
+                        <icon name={row.icon} size="20" class="wifi-signal-icon" />
                         <column class="settings-card-copy">
-                            <text class="settings-card-title">{t(row.name)}</text>
-                            <text class="settings-card-meta">{t(row.details) .. row.details_suffix .. t(row.security)}</text>
+                            <row class="wifi-name-row">
+                                <text class="settings-card-title">{row.name}</text>
+                                {#if row.secured}
+                                    <icon name="lock" size="13" class="wifi-lock-icon" />
+                                {/if}
+                            </row>
+                            <text class="settings-card-meta">{t(row.details)}</text>
                         </column>
-                        <button
-                            class:settings-primary-button={row.connected} class:settings-secondary-button={not row.connected}
-                            onclick={onNetworkAction(row.id, row.connected)}
-                            disabled={row.disabled}
-                        >
-                            {t(row.action)}
-                        </button>
+                        {#if row.connected}
+                            <text class="settings-status-pill settings-status-pill-active">{t(row.action)}</text>
+                        {:else}
+                            <button
+                                class="wifi-connect-button"
+                                onclick={onNetworkAction(row.id, row.connected)}
+                                disabled={row.disabled}
+                            >
+                                {t(row.action)}
+                            </button>
+                        {/if}
                     </list-item>
                 {/for}
             </list>
@@ -52,7 +61,7 @@
             <column class="settings-card">
                 <row class="settings-info-row">
                     <text class="settings-info-label">{t('wifi.active_network')}</text>
-                    <text class="settings-info-value">{t(active_network)}</text>
+                    <text class="settings-info-value">{active_network}</text>
                 </row>
                 <row class="settings-info-row">
                     <text class="settings-info-label">{t('common.interface')}</text>
@@ -83,7 +92,7 @@ network_summary = "wifi.networks_waiting"
 network_rows = {}
 empty_title = "wifi.service_unavailable"
 empty_copy = "wifi.install_provider"
-active_network = "common.not_connected"
+active_network = t("common.not_connected")
 interface_name = "common.not_reported"
 provider_label = "common.no_provider"
 
@@ -96,18 +105,28 @@ local function bool_value(value)
 end
 
 local function network_name(entry)
-    return tostring(entry.ssid or entry.name or entry.id or "wifi.hidden_network")
+    local raw = entry.ssid or entry.name or entry.id
+    if raw and tostring(raw) ~= "" then
+        return tostring(raw)
+    end
+    return t("wifi.hidden_network")
 end
 
-local function signal_label(entry)
+local function signal_info(entry)
     local signal = tonumber(entry.signal or entry.strength or entry.quality)
-    if signal == nil then return "wifi.signal_unavailable", "" end
+    if signal == nil then
+        return "wifi.signal_unavailable", "network-wireless"
+    end
     signal = math.max(0, math.min(100, math.floor(signal + 0.5)))
-    local suffix = " · " .. mesh.locale.format_percent(signal)
-    if signal >= 75 then return "wifi.signal_excellent", suffix end
-    if signal >= 50 then return "wifi.signal_good", suffix end
-    if signal >= 25 then return "wifi.signal_fair", suffix end
-    return "wifi.signal_weak", suffix
+    if signal >= 75 then
+        return "wifi.signal_excellent", "network-wireless-signal-excellent"
+    elseif signal >= 50 then
+        return "wifi.signal_good", "network-wireless-signal-good"
+    elseif signal >= 25 then
+        return "wifi.signal_fair", "network-wireless-signal-ok"
+    else
+        return "wifi.signal_weak", "network-wireless-signal-weak"
+    end
 end
 
 effect(function()
@@ -121,7 +140,7 @@ effect(function()
         network_count = ""
         empty_title = "wifi.service_unavailable"
         empty_copy = "wifi.install_provider"
-        active_network = "common.not_connected"
+        active_network = t("common.not_connected")
         interface_name = "common.not_reported"
         provider_label = "common.no_provider"
         return
@@ -143,13 +162,13 @@ effect(function()
         for _, entry in ipairs(networks) do
             local connected = entry.connected == true or entry.active == true
             local secure = entry.secured == true or entry.security ~= nil
-            local details, details_suffix = signal_label(entry)
+            local details, signal_icon = signal_info(entry)
             network_rows[#network_rows + 1] = {
                 id = tostring(entry.id or entry.connection_id or entry.ssid or entry.name or ""),
                 name = network_name(entry),
+                icon = signal_icon,
                 details = details,
-                details_suffix = details_suffix .. (secure and " · " or ""),
-                security = secure and "wifi.secured" or "",
+                secured = secure,
                 connected = connected,
                 action = connected and "common.connected" or "common.connect",
                 disabled = connected or not control_allowed,
@@ -165,7 +184,7 @@ effect(function()
         empty_title = "wifi.turned_off"
         empty_copy = "wifi.turn_on_copy"
         network_summary = "wifi.scanning_paused"
-        active_network = "common.not_connected"
+        active_network = t("common.not_connected")
     elseif #network_rows == 0 then
         network_count = ""
         empty_title = "wifi.no_networks"
@@ -207,5 +226,43 @@ end
 <style>
     .settings-list {
         min-height: 0;
+    }
+
+    .wifi-name-row {
+        align-items: center;
+        gap: var(--spacing-xs);
+    }
+
+    .wifi-lock-icon {
+        color: var(--color-on-surface-variant);
+        flex-shrink: 0;
+    }
+
+    .wifi-signal-icon {
+        color: var(--color-on-surface);
+        flex-shrink: 0;
+    }
+
+    .wifi-connect-button {
+        min-height: 32px;
+        flex-shrink: 0;
+        padding-inline: var(--spacing-md);
+        border-radius: var(--radius-full);
+        border-width: 0;
+        background: var(--color-primary);
+        color: var(--color-on-primary);
+        font-size: var(--typography-size-xs);
+        font-weight: 700;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .wifi-connect-button:hover {
+        background: var(--color-primary-container);
+        color: var(--color-on-primary-container);
+    }
+
+    .wifi-connect-button:disabled {
+        opacity: 0.4;
     }
 </style>

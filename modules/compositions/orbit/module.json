@@ -1,0 +1,64 @@
+{
+  "name": "@mesh/orbit",
+  "version": "0.1.0",
+  "description": "A floating island and desktop cards inspired by the Orbit reference.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "composition",
+    "uses": {
+      "modules": {
+        "@mesh/orbit-bar": ">=0.1.0",
+        "@mesh/orbit-widgets": ">=0.1.0",
+        "@mesh/settings": ">=0.1.0",
+        "@mesh/debug-inspector": {
+          "version": ">=0.1.0",
+          "optional": true
+        },
+        "@mesh/keybind-help": ">=0.1.0"
+      }
+    },
+    "compose": {
+      "roots": {
+        "@mesh/orbit-bar#default": {
+          "module": "@mesh/orbit-bar",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/orbit-widgets#default": {
+          "module": "@mesh/orbit-widgets",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/settings#default": {
+          "module": "@mesh/settings",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/debug-inspector#default": {
+          "module": "@mesh/debug-inspector",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/keybind-help#default": {
+          "module": "@mesh/keybind-help",
+          "entrypoint": "main",
+          "active": true
+        }
+      },
+      "providers": {
+        "mesh.media": "@mesh/mpris-media",
+        "mesh.wm": "@mesh/hyprland-wm",
+        "mesh.network": "@mesh/networkmanager-network",
+        "mesh.power": "@mesh/upower-power",
+        "mesh.audio": "@mesh/pipewire-audio",
+        "mesh.brightness": "@mesh/backlight-brightness"
+      },
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols",
+          "@mesh/icons-default"
+        ]
+      }
+    }
+  }
+}

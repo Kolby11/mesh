@@ -73,6 +73,14 @@ impl CoreServiceRegistry {
                     commands: &THEME_COMMANDS,
                 },
                 CoreServiceProvider {
+                    interface: "mesh.keybinds",
+                    base_module: "@mesh/keybinds-interface",
+                    provider_module: "@mesh/shell",
+                    backend_name: "Shell Keybinds",
+                    priority: 200,
+                    commands: &KEYBIND_COMMANDS,
+                },
+                CoreServiceProvider {
                     interface: "mesh.locale",
                     base_module: "@mesh/locale-interface",
                     provider_module: "@mesh/shell",
@@ -168,6 +176,59 @@ const DEBUG_COMMANDS: [CoreServiceCommand; 6] = [
     },
 ];
 
+const KEYBIND_COMMANDS: [CoreServiceCommand; 3] = [
+    CoreServiceCommand {
+        name: "set_option",
+        translate: |payload| {
+            let name = required_text(payload, "name")?;
+            let value = required_text(payload, "value")?;
+            let allowed = match name.as_str() {
+                "key_priority" => !value.trim().is_empty(),
+                "hint_mode" => matches!(value.as_str(), "hold" | "toggle" | "both"),
+                "hint_corner" => matches!(
+                    value.as_str(),
+                    "top-left" | "top-right" | "bottom-left" | "bottom-right"
+                ),
+                _ => false,
+            };
+            allowed.then(|| CoreRequest::SetKeyboardSetting {
+                field: name,
+                value: serde_json::Value::String(value),
+            })
+        },
+    },
+    CoreServiceCommand {
+        name: "reassign",
+        // A null patch removes the saved assignments, so every auto action
+        // takes its key from the priority list again.
+        translate: |_| {
+            Some(CoreRequest::SetKeyboardSetting {
+                field: "assigned".into(),
+                value: serde_json::Value::Null,
+            })
+        },
+    },
+    CoreServiceCommand {
+    name: "remap",
+    translate: |payload| {
+        let surface = required_text(payload, "surface")?;
+        let action = required_text(payload, "action")?;
+        let key = required_text(payload, "key")?;
+        Some(if surface == "shell" {
+            CoreRequest::SetKeyboardSetting {
+                field: "shell_shortcuts".into(),
+                value: serde_json::json!({ action: { "key": key } }),
+            }
+        } else {
+            CoreRequest::SetKeyboardSetting {
+                field: "surface_shortcuts".into(),
+                value: serde_json::json!({ surface: { action: { "key": key } } }),
+            }
+        })
+    },
+    },
+];
+
 const THEME_COMMANDS: [CoreServiceCommand; 5] = [
     CoreServiceCommand {
         name: "set_theme",
@@ -254,7 +315,36 @@ mod tests {
         assert_eq!(registry.provider_id("mesh.theme"), Some("@mesh/shell"));
         assert_eq!(registry.provider_id("mesh.locale"), Some("@mesh/shell"));
         assert!(registry.is_provider("mesh.settings", "@mesh/shell"));
-        assert_eq!(registry.providers().count(), 6);
+        assert_eq!(registry.providers().count(), 7);
+    }
+
+    #[test]
+    fn keybind_commands_translate_to_keyboard_setting_writes() {
+        let registry = CoreServiceRegistry::builtin();
+        let request = |command: &str, payload: serde_json::Value| {
+            registry.request("mesh.keybinds", command, &payload)
+        };
+
+        assert!(matches!(
+            request("remap", serde_json::json!({ "surface": "shell", "action": "help", "key": "ctrl+/" })),
+            Some(CoreRequest::SetKeyboardSetting { field, value })
+                if field == "shell_shortcuts" && value["help"]["key"] == "ctrl+/"
+        ));
+        assert!(matches!(
+            request("remap", serde_json::json!({ "surface": "@mesh/dock", "action": "radial", "key": "r" })),
+            Some(CoreRequest::SetKeyboardSetting { field, value })
+                if field == "surface_shortcuts" && value["@mesh/dock"]["radial"]["key"] == "r"
+        ));
+        assert!(matches!(
+            request("set_option", serde_json::json!({ "name": "hint_mode", "value": "hold" })),
+            Some(CoreRequest::SetKeyboardSetting { field, .. }) if field == "hint_mode"
+        ));
+        assert!(request("set_option", serde_json::json!({ "name": "hint_mode", "value": "sometimes" })).is_none());
+        assert!(request("set_option", serde_json::json!({ "name": "shell_shortcuts", "value": "x" })).is_none());
+        assert!(matches!(
+            request("reassign", serde_json::json!({})),
+            Some(CoreRequest::SetKeyboardSetting { field, value }) if field == "assigned" && value.is_null()
+        ));
     }
 
     #[test]

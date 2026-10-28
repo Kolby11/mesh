@@ -1,0 +1,20 @@
+{
+  "picker.title": "Wallpapers",
+  "picker.empty": "No images found in {directory}",
+  "picker.unavailable": "The wallpaper folder could not be read",
+  "picker.use": "Use {name} as wallpaper",
+  "picker.current": "{name}, current wallpaper",
+  "prop.side_cards": "Cards on each side",
+  "prop.parallax": "Picture shift per card",
+  "prop.skew": "Card slant",
+  "prop.close_on_apply": "Close after choosing a wallpaper",
+  "prop.offset_top": "Distance below the bar",
+  "keybind.close": "Close wallpaper picker",
+  "keybind.previous": "Previous wallpaper",
+  "keybind.next": "Next wallpaper",
+  "keybind.page_previous": "Jump back a page",
+  "keybind.page_next": "Jump ahead a page",
+  "keybind.apply": "Use this wallpaper",
+  "keybind.select": "Use this wallpaper",
+  "keybind.category": "Wallpapers"
+}

@@ -2206,6 +2206,7 @@ impl FrontendSurfaceComponent {
                     serde_json::json!(match action.scope {
                         mesh_core_module::KeybindScope::Surface => "surface",
                         mesh_core_module::KeybindScope::Access => "access",
+                        mesh_core_module::KeybindScope::Focus => "focus",
                     }),
                 );
                 let label = action.label.clone().unwrap_or_else(|| {
@@ -2326,6 +2327,7 @@ fn keybind_trigger_descriptor(trigger: &mesh_core_module::KeybindTrigger) -> ser
         "kind": match trigger.kind {
             mesh_core_module::KeybindTriggerKind::Shortcut => "shortcut",
             mesh_core_module::KeybindTriggerKind::AccessKey => "access_key",
+            mesh_core_module::KeybindTriggerKind::Auto => "auto",
         },
         "key": trigger.key.clone(),
         "modifiers": trigger.modifiers.clone(),

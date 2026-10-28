@@ -213,6 +213,8 @@ pub(super) fn build_paint_content_with_previous(
             size: None,
             multicolor: true,
         }),
+        "shape" => mesh_core_elements::ShapeGeometry::from_node(node)
+            .map_or(DisplayPaintContent::None, DisplayPaintContent::Shape),
         "checkbox" if node_is_checked(node) => {
             DisplayPaintContent::Checkmark(DisplayCheckmarkPaint {
                 kind: CheckmarkKind::Check,

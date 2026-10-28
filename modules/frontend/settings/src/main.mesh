@@ -48,6 +48,13 @@
                             <text class="nav-subtitle">{t('nav.device.subtitle')}</text>
                         </column>
                     </tab>
+                    <tab class="settings-nav-item" selected={active_page == "keyboard"} onactivate={showKeyboard} title={t('nav.keyboard.tooltip')}>
+                        <icon class="nav-icon" name="input-keyboard" size="18" />
+                        <column class="nav-copy">
+                            <text class="nav-title">{t('nav.keyboard')}</text>
+                            <text class="nav-subtitle">{t('nav.keyboard.subtitle')}</text>
+                        </column>
+                    </tab>
                     <tab class="settings-nav-item" selected={active_page == "advanced"} onactivate={showAdvanced} title={t('nav.advanced.tooltip')}>
                         <icon class="nav-icon" name="settings" size="18" />
                         <column class="nav-copy">
@@ -102,6 +109,9 @@
                         <column class="settings-page-slot" hidden={active_page ~= "device"}>
                             <DeviceInfoPage />
                         </column>
+                        <column class="settings-page-slot" hidden={active_page ~= "keyboard"}>
+                            <KeyboardPage />
+                        </column>
                         <column class="settings-page-slot" hidden={active_page ~= "advanced"}>
                             <AdvancedPage />
                         </column>
@@ -118,6 +128,7 @@ local AppearancePage = require("./components/appearance-page.mesh")
 local AudioPage = require("./components/audio-page.mesh")
 local BluetoothPage = require("./components/bluetooth-page.mesh")
 local DeviceInfoPage = require("./components/device-info-page.mesh")
+local KeyboardPage = require("./components/keyboard-page.mesh")
 local WifiPage = require("./components/wifi-page.mesh")
 local t = import("mesh.i18n", "t")
 
@@ -135,6 +146,7 @@ function showAudio() activate("audio") end
 function showBluetooth() activate("bluetooth") end
 function showAppearance() activate("appearance") end
 function showDevice() activate("device") end
+function showKeyboard() activate("keyboard") end
 function showAdvanced() activate("advanced") end
 
 function onClose()
@@ -540,7 +552,7 @@ end
         min-height: 34px;
         flex-shrink: 0;
         padding-inline: var(--spacing-md);
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-full);
         font-size: var(--typography-size-xs);
         font-weight: 700;
     }

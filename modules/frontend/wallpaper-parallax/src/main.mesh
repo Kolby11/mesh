@@ -1,0 +1,363 @@
+<props>
+{
+    side_cards = { type = "int", default = 2, min = 1, max = 4, label = t("prop.side_cards", "Cards on each side") },
+    parallax = { type = "number", default = 60, min = 0, max = 100, unit = "px", label = t("prop.parallax", "Picture shift per card") },
+    skew = { type = "int", default = 12, min = 0, max = 20, unit = "deg", label = t("prop.skew", "Card slant") },
+    offset_top = { type = "size", default = "40px", label = t("prop.offset_top", "Distance below the bar") },
+    close_on_apply = { type = "bool", default = true, label = t("prop.close_on_apply", "Close after choosing a wallpaper") },
+}
+</props>
+
+<template>
+    <column class="widget" aria-label={t("picker.title")} keybind="close" onkeybind={onClose} onscroll={onScroll}>
+        <box class="track" hidden={not has_wallpapers} keybind="apply" onkeybind={onApply}>
+            <box class="track" keybind="select" onkeybind={onApply}>
+            <box class="track" keybind="page_previous" onkeybind={onPagePrevious}>
+                <box class="track" keybind="page_next" onkeybind={onPageNext}>
+                    <box class="track" keybind="previous" onkeybind={onPrevious}>
+                        <box class="stage" style:width={stage_width} keybind="next" onkeybind={onNext}>
+                            {#for card in cards key={card.key}}
+                                <box class="slot" class:slot-buffer={card.buffer} style:transform={card.position}>
+                                    <button
+                                        class="card"
+                                        class:card-selected={card.selected}
+                                        style:transform={card.transform}
+                                        onclick={onCard(card.rank)}
+                                        aria-label={card.label}
+                                        aria-pressed={card.current}
+                                        tabindex="-1"
+                                    >
+                                        <image class="panorama" src={card.panorama} alt="" style:transform={card.pan} />
+                                    </button>
+                                </box>
+                            {/for}
+                        </box>
+                    </box>
+                </box>
+            </box>
+            </box>
+        </box>
+        <box class="caption" hidden={not has_wallpapers}>
+            <text class="caption-text">{focused_name}</text>
+        </box>
+        <box class="caption" hidden={has_wallpapers}>
+            <text class="caption-text">{empty_label}</text>
+        </box>
+    </column>
+</template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local theme = require("mesh.theme")
+local wallpapers = require("mesh.wallpapers")
+
+local SURFACE = "@mesh/wallpaper-parallax"
+-- Must match `.card` and `.panorama` in the stylesheet.
+local CARD_WIDTH = 220
+local CARD_HEIGHT = 440
+local PANORAMA_WIDTH = 782
+local GAP = 8
+-- The centred card grows about its centre; the stage is tall enough to hold
+-- it, so `.stage` height and `.slot` top must match SELECTED_SCALE too.
+local SELECTED_SCALE = 1.15
+-- Cards past the visible ones on each side, transparent and outside the
+-- stage, so a card entering the strip slides and fades in instead of appearing.
+local BUFFER = 1
+local TWO_FINGER_NOTCH = 40
+
+-- The centred card's position in an endless strip; it wraps onto the list.
+step = 1
+cards = {}
+has_wallpapers = false
+stage_width = "0px"
+focused_name = ""
+empty_label = ""
+
+local two_finger_travel = 0
+
+local function list()
+    return wallpapers.wallpapers or {}
+end
+
+local function wrap(position, count)
+    return (position - 1) % count + 1
+end
+
+-- How far a slanted card's corners reach past its untransformed box.
+local function overhang()
+    return CARD_HEIGHT / 2 * math.tan(math.rad(props.skew))
+end
+
+local function side_count(count)
+    if count < 2 then
+        return 0
+    end
+    return math.clamp(math.floor((count - 1) / 2), 1, props.side_cards)
+end
+
+-- How far each neighbour moves outward to clear the grown centre card,
+-- including the extra reach of its taller slant.
+local function selected_growth()
+    return (SELECTED_SCALE - 1) * (CARD_WIDTH / 2 + overhang())
+end
+
+local function stage_centre()
+    return math.ceil(overhang() + props.side_cards * (CARD_WIDTH + GAP) + selected_growth())
+end
+
+-- The panorama is counter-slanted so it stays upright inside the card; what
+-- is left of its width after covering the slanted card bounds the pan.
+local function pan_limit()
+    return math.max(0, (PANORAMA_WIDTH - CARD_WIDTH) / 2 - overhang() - 2)
+end
+
+effect(function()
+    stage_width = (2 * stage_centre() + CARD_WIDTH) .. "px"
+end)
+
+-- Follow the wallpaper in use when it changes, by the shortest way round, so
+-- previews arriving later do not pull the strip back while browsing.
+local followed = nil
+effect(function()
+    local current = theme.backdrop_image
+    local items = list()
+    local count = #items
+    if current == followed or count == 0 then
+        return
+    end
+    for index, wallpaper in items do
+        if wallpaper.path == current then
+            followed = current
+            local delta = (index - wrap(step, count)) % count
+            if delta > count / 2 then
+                delta -= count
+            end
+            step += delta
+            return
+        end
+    end
+end)
+
+effect(function()
+    local items = list()
+    local count = #items
+    local current = theme.backdrop_image or ""
+    local parallax = props.parallax
+    local skew = props.skew
+    has_wallpapers = count > 0
+    empty_label = wallpapers.available
+        and t("picker.empty", { directory = wallpapers.directory or "" })
+        or t("picker.unavailable")
+    if count == 0 then
+        cards = {}
+        focused_name = ""
+        return
+    end
+
+    local side = side_count(count)
+    local span = side + BUFFER
+    local centre = stage_centre()
+    local limit = pan_limit()
+    local growth = selected_growth()
+    local visible = {}
+    for rank = -span, span do
+        local wallpaper = items[wrap(step + rank, count)]
+        local x = centre + rank * (CARD_WIDTH + GAP) + math.sign(rank) * growth
+        local is_current = wallpaper.path == current
+        visible[#visible + 1] = {
+            key = step + rank,
+            rank = rank,
+            panorama = wallpaper.panorama ~= nil and wallpaper.panorama ~= "" and wallpaper.panorama or wallpaper.path,
+            position = string.format("translateX(%.1fpx)", x),
+            transform = string.format("skewX(%ddeg) scale(%.2f)", -skew, rank == 0 and SELECTED_SCALE or 1),
+            pan = string.format("translateX(%.1fpx) skewX(%ddeg)", math.clamp(-rank * parallax, -limit, limit), skew),
+            selected = rank == 0,
+            buffer = math.abs(rank) > side,
+            current = is_current,
+            label = is_current and t("picker.current", { name = wallpaper.name })
+                or t("picker.use", { name = wallpaper.name }),
+        }
+    end
+    cards = visible
+    focused_name = items[wrap(step, count)].name
+end)
+
+local function move(delta)
+    if #list() > 0 and delta ~= 0 then
+        step += delta
+    end
+end
+
+local function apply()
+    local items = list()
+    if #items == 0 then
+        return
+    end
+    theme.set_backdrop_image(items[wrap(step, #items)].path)
+    if props.close_on_apply then
+        mesh.shell.hide_surface(SURFACE)
+    end
+end
+
+-- A wheel sends one event per notch; a trackpad streams small deltas, which
+-- are banked and spent one notch at a time so the strip does not spin.
+local function scroll_step(event)
+    local delta = event and event.delta or {}
+    local dx = tonumber(delta.x) or 0
+    local dy = tonumber(delta.y) or 0
+    local d = math.abs(dx) > math.abs(dy) and dx or dy
+    if event ~= nil and event.type == "twofingerscroll" then
+        if d == 0 then
+            return 0
+        end
+        if (d > 0) ~= (two_finger_travel > 0) then
+            two_finger_travel = 0
+        end
+        two_finger_travel += d
+        if math.abs(two_finger_travel) < TWO_FINGER_NOTCH then
+            return 0
+        end
+        local notch = two_finger_travel > 0 and 1 or -1
+        two_finger_travel -= notch * TWO_FINGER_NOTCH
+        return notch
+    end
+    return d >= 0 and 1 or -1
+end
+
+local function page()
+    return 2 * side_count(#list()) + 1
+end
+
+function onPrevious() move(-1) end
+function onNext() move(1) end
+function onPagePrevious() move(-page()) end
+function onPageNext() move(page()) end
+function onApply() apply() end
+
+function onCard(rank)
+    if math.abs(rank) > side_count(#list()) then
+        return
+    end
+    if rank == 0 then
+        apply()
+    else
+        move(rank)
+    end
+end
+
+function onScroll(event)
+    move(scroll_step(event))
+end
+
+function onClose()
+    mesh.shell.hide_surface(SURFACE)
+end
+</script>
+
+<style>
+    /* Content-sized and anchored to the top edge, so the compositor centres
+    it horizontally and windows stay usable around it. */
+    .widget {
+        width: fit;
+        margin-top: prop(offset_top);
+        padding: 12px 24px 28px;
+        gap: 14px;
+        align-items: center;
+        exclusive-zone: none;
+        background: transparent;
+        opacity: 1;
+        transform: translateY(0px) scale(1);
+        transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .widget.mesh-surface-entering { opacity: 0; transform: translateY(-24px) scale(0.94); }
+    .widget.mesh-surface-exiting { opacity: 0; transform: translateY(-12px) scale(0.97); transition-duration: var(--animation-duration-fast); }
+
+    .track {
+        align-items: center;
+        justify-content: center;
+    }
+
+    /* Every slot starts at the stage's left edge; its transform places it.
+    Clipping keeps the transparent buffer cards on this surface instead of
+    promoting each one to an overflow popup. */
+    .stage {
+        position: relative;
+        height: 506px;
+        flex-shrink: 0;
+        overflow: hidden;
+    }
+
+    /* The slot slides on a curve that covers most of the move at once, so the
+    strip keeps up with fast scrolling instead of bunching up on one side. That
+    curve makes a small scale change look like a jump, so the card inside
+    grows on a gentler one. */
+    .slot {
+        position: absolute;
+        top: 33px;
+        left: 0;
+        width: 220px;
+        height: 440px;
+        opacity: 1;
+        transition-property: transform, opacity;
+        transition-duration: var(--animation-duration-long);
+        transition-timing-function: var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .slot-buffer {
+        opacity: 0;
+    }
+
+    /* Slanted by its transform; overflow clips the picture to the slant. */
+    .card {
+        width: 220px;
+        height: 440px;
+        padding: 0;
+        border-radius: 0;
+        border: 3px solid var(--color-surface-container);
+        background: var(--color-surface-container);
+        overflow: hidden;
+        transition-property: transform, border-color;
+        transition-duration: var(--animation-duration-long);
+        transition-timing-function: var(--animation-curves-bezier-emphasized);
+    }
+
+    .card-selected {
+        border-color: var(--color-primary);
+    }
+
+    /* 16:9 at card height and centred on the card, so its opposite slant
+    cancels the card's about the same point and the parallax pans it. */
+    .panorama {
+        position: absolute;
+        top: 0;
+        left: -281px;
+        width: 782px;
+        height: 440px;
+        transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .caption {
+        height: 28px;
+        max-width: 420px;
+        padding: 0 14px;
+        align-items: center;
+        border-radius: var(--radius-full);
+        background: var(--color-surface-container-high);
+    }
+
+    .caption-text {
+        height: 18px;
+        font-size: 13px;
+        color: var(--color-on-surface);
+        text-overflow: ellipsis;
+    }
+
+    .card:hover {
+        border-color: var(--color-outline);
+    }
+
+    .card-selected:hover {
+        border-color: var(--color-primary);
+    }
+</style>

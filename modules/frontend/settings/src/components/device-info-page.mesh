@@ -5,8 +5,8 @@
                 <icon name="computer" size="34" />
             </box>
             <column class="settings-card-copy">
-                <text class="device-name">{t(device_name)}</text>
-                <text class="settings-card-meta">{t(device_summary)}</text>
+                <text class="device-name">{device_name}</text>
+                <text class="settings-card-meta">{device_summary}</text>
             </column>
             <text class="settings-status-pill" class:settings-status-pill-active={service_active}>{t(service_pill)}</text>
         </row>
@@ -16,19 +16,19 @@
             <column class="settings-card">
                 <row class="settings-info-row">
                     <text class="settings-info-label">{t('device.distribution')}</text>
-                    <text class="settings-info-value">{t(os_label)}</text>
+                    <text class="settings-info-value">{os_label}</text>
                 </row>
                 <row class="settings-info-row">
                     <text class="settings-info-label">{t('device.kernel')}</text>
-                    <text class="settings-info-value">{t(kernel_label)}</text>
+                    <text class="settings-info-value">{kernel_label}</text>
                 </row>
                 <row class="settings-info-row">
                     <text class="settings-info-label">{t('device.architecture')}</text>
-                    <text class="settings-info-value">{t(architecture_label)}</text>
+                    <text class="settings-info-value">{architecture_label}</text>
                 </row>
                 <row class="settings-info-row">
                     <text class="settings-info-label">{t('device.desktop_session')}</text>
-                    <text class="settings-info-value">{t(session_label)}</text>
+                    <text class="settings-info-value">{session_label}</text>
                 </row>
             </column>
         </column>
@@ -38,19 +38,19 @@
             <column class="settings-card">
                 <row class="settings-info-row">
                     <text class="settings-info-label">{t('device.processor')}</text>
-                    <text class="settings-info-value">{t(processor_label)}</text>
+                    <text class="settings-info-value">{processor_label}</text>
                 </row>
                 <row class="settings-info-row">
                     <text class="settings-info-label">{t('device.memory')}</text>
-                    <text class="settings-info-value">{t(memory_label)}</text>
+                    <text class="settings-info-value">{memory_label}</text>
                 </row>
                 <row class="settings-info-row">
                     <text class="settings-info-label">{t('device.graphics')}</text>
-                    <text class="settings-info-value">{t(graphics_label)}</text>
+                    <text class="settings-info-value">{graphics_label}</text>
                 </row>
                 <row class="settings-info-row">
                     <text class="settings-info-label">{t('device.uptime')}</text>
-                    <text class="settings-info-value">{t(uptime_label)}</text>
+                    <text class="settings-info-value">{uptime_label}</text>
                 </row>
             </column>
         </column>
@@ -83,18 +83,18 @@ local debug_service = require("mesh.debug")
 local device = require("mesh.device@>=1.0")
 local t = import("mesh.i18n", "t")
 
-device_name = "device.this_device"
-device_summary = "device.identity_unpublished"
+device_name = t("device.this_device")
+device_summary = t("device.identity_unpublished")
 service_pill = "device.partial"
 service_active = false
-os_label = "common.not_reported"
-kernel_label = "common.not_reported"
-architecture_label = "common.not_reported"
-session_label = "device.mesh_session"
-processor_label = "common.not_reported"
-memory_label = "common.not_reported"
-graphics_label = "common.not_reported"
-uptime_label = "common.not_reported"
+os_label = t("common.not_reported")
+kernel_label = t("common.not_reported")
+architecture_label = t("common.not_reported")
+session_label = t("device.mesh_session")
+processor_label = t("common.not_reported")
+memory_label = t("common.not_reported")
+graphics_label = t("common.not_reported")
+uptime_label = t("common.not_reported")
 module_count = "0"
 backend_count = "0"
 provider_count = "0"
@@ -104,11 +104,12 @@ device_backend_source = ""
 device_backend_period = ""
 
 local function value_or(value, fallback)
-    if value == nil or tostring(value) == "" then return fallback end
+    if value == nil or tostring(value) == "" then return t(fallback) end
     return tostring(value)
 end
 
 local function format_memory(bytes)
+    if bytes == nil then return t("common.not_reported") end
     if bytes > 1024 * 1024 * 1024 then
         return string.format("%.1f GB", bytes / (1024 * 1024 * 1024))
     end
@@ -119,6 +120,7 @@ local function format_memory(bytes)
 end
 
 local function format_uptime(seconds)
+    if seconds == nil then return t("common.not_reported") end
     local days = math.floor(seconds / 86400)
     local hours = math.floor((seconds % 86400) / 3600)
     local minutes = math.floor((seconds % 3600) / 60)

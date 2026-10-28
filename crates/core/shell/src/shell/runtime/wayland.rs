@@ -305,7 +305,21 @@ impl Shell {
                 });
 
             if let RoutedWindowEvent::KeyPressed { key, mods } = &event {
-                if let Some(request) = shell_global_shortcut_request(key, mods.ctrl, mods.shift) {
+                if let Some(request) = shell_global_shortcut_request_with(
+                    &self.settings.keyboard,
+                    key,
+                    mods.ctrl,
+                    mods.shift,
+                    mods.alt,
+                ) {
+                    let help_surface_id = self.resolve_root_surface_id(KEYBIND_HELP_SURFACE.into());
+                    if matches!(&request, CoreRequest::ToggleSurface { surface_id } if surface_id == KEYBIND_HELP_SURFACE || surface_id == &help_surface_id)
+                        && self.keyboard_focus_surface.as_deref() != Some(KEYBIND_HELP_SURFACE)
+                        && self.keyboard_focus_surface.as_deref() != Some(help_surface_id.as_str())
+                    {
+                        self.keybind_help_context = self.keyboard_focus_surface.clone();
+                        self.invalidate_debug_snapshot_cache();
+                    }
                     self.enqueue_effects(std::iter::once(request));
                     continue;
                 }

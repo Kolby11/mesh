@@ -1,0 +1,27 @@
+<template>
+    <row class="dock">
+        <row class="orb-shell">
+            <button class="orb" onclick={onToggle} keybind="launcher" onkeybind={onToggle} title="Applications" aria-label="Applications">
+                <icon class="orb-glyph" name="view-grid" size="24" />
+            </button>
+            <ProfileSwitcher />
+        </row>
+    </row>
+</template>
+
+<script lang="luau">
+local ProfileSwitcher = require("@mesh/profile-switcher")
+
+function onToggle()
+    mesh.shell.toggle_surface("@mesh/radial-launcher")
+end
+</script>
+
+<style>
+    .dock { width: 100%; padding-bottom: 14px; justify-content: center; align-items: flex-end; background: transparent; exclusive-zone: none; }
+    .orb-shell { padding: 6px; gap: 6px; align-items: center; border-radius: 999px; border: 1px solid var(--color-outline-variant); background: var(--color-surface); }
+    .orb { width: 48px; height: 48px; padding: 0; justify-content: center; align-items: center; border-radius: 999px; background: var(--color-primary); color: var(--color-on-primary); transform: scale(1); transition: transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate); }
+    .orb:hover, .orb:focus-visible { transform: scale(var(--animation-scale-hover)); }
+    .orb:active { transform: scale(var(--animation-scale-press)); }
+    .orb-glyph { width: 24px; height: 24px; color: var(--color-on-primary); }
+</style>

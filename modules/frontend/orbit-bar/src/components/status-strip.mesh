@@ -1,0 +1,59 @@
+<template>
+  <row class="strip">
+    <row class="indicator" title={network_label} aria-label={network_label}>
+      <icon name={network_icon} size="15" />
+    </row>
+    <row class="indicator" title={battery_label} aria-label={battery_label} hidden={not battery_available}>
+      <icon name={battery_icon} size="15" />
+    </row>
+    <button class="action" onclick={settings} aria-label="Settings" title="Settings"><icon name="settings" size="15" /></button>
+    <ProfileSwitcher />
+  </row>
+</template>
+<script lang="luau">
+local ProfileSwitcher = require("@mesh/profile-switcher")
+local network = require("mesh.network")
+local power = require("mesh.power")
+network_icon = "network-wireless-offline"
+network_label = "Network unavailable"
+battery_icon = "battery-full"
+battery_label = "Battery unavailable"
+battery_available = false
+
+effect(function()
+    if network.available ~= true or network.kind == "none" then
+        network_icon = "network-wireless-offline"
+        network_label = "Offline"
+    elseif network.kind == "ethernet" then
+        network_icon = "network-wired"
+        network_label = "Wired network"
+    else
+        local signal = network.signal or 0
+        network_icon = signal >= 66 and "network-wireless-signal-excellent"
+            or signal >= 33 and "network-wireless-signal-ok"
+            or "network-wireless-signal-weak"
+        network_label = (network.ssid or "Wi-Fi") .. " · " .. tostring(signal) .. "%"
+    end
+end)
+
+effect(function()
+    battery_available = power.available == true
+    if not battery_available then return end
+    local level = power.level or 0
+    if level <= 1 then level *= 100 end
+    level = math.clamp(math.floor(level + 0.5), 0, 100)
+    battery_icon = power.charging and "battery-full-charging"
+        or level >= 90 and "battery-full"
+        or level >= 50 and "battery-good"
+        or level >= 20 and "battery-low"
+        or "battery-caution"
+    battery_label = "Battery " .. tostring(level) .. "%" .. (power.charging and " · charging" or "")
+end)
+
+function settings() mesh.shell.show_surface("@mesh/settings") end
+</script>
+<style>
+.strip { margin-top: 6px; padding: 4px 8px; gap: 4px; height: 32px; align-items: center; border-radius: 999px; background: var(--color-surface); color: var(--color-on-surface); }
+.indicator, .action { width: 24px; height: 24px; padding: 0; align-items: center; justify-content: center; background: transparent; color: var(--color-on-surface); }
+.action:hover { background: var(--color-surface-variant); border-radius: 999px; }
+</style>

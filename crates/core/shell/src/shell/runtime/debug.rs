@@ -28,6 +28,102 @@ pub(in crate::shell) struct DebugSnapshotCache {
 }
 
 impl Shell {
+    /// Every effective keybind: each surface's own, then the shell's.
+    pub(in crate::shell) fn collect_keybind_entries(
+        &self,
+    ) -> Vec<mesh_core_debug::DebugKeybindEntry> {
+        let mut keybinds = self
+            .components
+            .iter()
+            .flat_map(|runtime| runtime.component.debug_keybinds())
+            .collect::<Vec<_>>();
+        for entry in &mut keybinds {
+            entry.focused =
+                self.keybind_help_context.as_deref() == Some(entry.surface_id.as_str());
+        }
+        keybinds.extend(self.shell_keybind_entries());
+        keybinds.sort_by(|left, right| {
+            left.surface_id
+                .cmp(&right.surface_id)
+                .then_with(|| left.action_id.cmp(&right.action_id))
+        });
+        keybinds
+    }
+
+    /// Publishes `mesh.keybinds` while the help window is showing, and only
+    /// when its content changed.
+    pub(in crate::shell) fn sync_keybind_service_state(
+        &mut self,
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
+        let help_surface_id = self.resolve_root_surface_id(KEYBIND_HELP_SURFACE.into());
+        let visible = self
+            .core
+            .surfaces
+            .get(&help_surface_id)
+            .is_some_and(|state| state.visible);
+        if !visible {
+            self.last_keybind_payload = None;
+            return Ok(VecDeque::new());
+        }
+        let entries = self.collect_keybind_entries();
+        let payload = serde_json::json!({
+            "entries": serde_json::to_value(&entries).unwrap_or_default(),
+            "revision": self.settings_store.revision().to_string(),
+        });
+        if self.last_keybind_payload.as_ref() == Some(&payload) {
+            return Ok(VecDeque::new());
+        }
+        self.last_keybind_payload = Some(payload.clone());
+        self.broadcast_service_event(ServiceEvent::Updated {
+            service: "mesh.keybinds".into(),
+            source_module: self.active_service_provider_or("mesh.keybinds", "@mesh/shell"),
+            payload,
+        })
+    }
+
+    /// The shell-owned actions with their effective chords, for the help window.
+    fn shell_keybind_entries(&self) -> Vec<mesh_core_debug::DebugKeybindEntry> {
+        use mesh_core_config::keybinds::{SHELL_ACTIONS, shell_action_chord};
+        let overrides = &self.settings.keyboard.shell_shortcuts;
+        SHELL_ACTIONS
+            .iter()
+            .map(|action| {
+                let chord = shell_action_chord(action, overrides);
+                let mut modifiers = Vec::new();
+                if chord.ctrl {
+                    modifiers.push("ctrl".to_string());
+                }
+                if chord.alt {
+                    modifiers.push("alt".to_string());
+                }
+                if chord.shift {
+                    modifiers.push("shift".to_string());
+                }
+                mesh_core_debug::DebugKeybindEntry {
+                    surface_id: "shell".into(),
+                    module_id: "@mesh/shell".into(),
+                    action_id: action.id.into(),
+                    label: Some(action.label.into()),
+                    description: Some(action.description.into()),
+                    category: Some("Shell".into()),
+                    key: chord.key.clone(),
+                    modifiers,
+                    trigger_kind: "shortcut".into(),
+                    source: if overrides.contains_key(action.id) {
+                        "user_override".into()
+                    } else {
+                        "module_default".into()
+                    },
+                    accessibility_shortcut: chord.display(),
+                    scope: "shell".into(),
+                    active: true,
+                    focused: false,
+                    ..Default::default()
+                }
+            })
+            .collect()
+    }
+
     #[cfg(test)]
     fn record_debug_snapshot_state(&mut self, payload: serde_json::Value) {
         // Synchronous snapshot reads need the latest state before the next
@@ -229,16 +325,7 @@ impl Shell {
         }));
         diagnostics = bound_debug_diagnostics(diagnostics);
 
-        let mut keybinds = self
-            .components
-            .iter()
-            .flat_map(|runtime| runtime.component.debug_keybinds())
-            .collect::<Vec<_>>();
-        keybinds.sort_by(|left, right| {
-            left.surface_id
-                .cmp(&right.surface_id)
-                .then_with(|| left.action_id.cmp(&right.action_id))
-        });
+        let keybinds = self.collect_keybind_entries();
 
         let mut backend_runtimes: Vec<BackendRuntimeEntry> = self
             .backend_runtime_statuses

@@ -1,7 +1,7 @@
 {
   "name": "@mesh/glass",
   "version": "0.1.0",
-  "description": "Liquid-glass desktop: floating top bar of glass pills, desktop player with spectrum and weather cards, a bottom dock with an app grid, notification toasts, a dashboard and a wallpaper carousel, in the violet glass theme.",
+  "description": "Liquid-glass desktop: floating top bar of glass pills, desktop player with spectrum and weather cards, a bottom dock with an app grid, notification toasts, a dashboard and a parallax wallpaper picker, in the violet glass theme.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "composition",
@@ -11,13 +11,18 @@
         "@mesh/glass-widgets": ">=0.1.0",
         "@mesh/glass-dock": ">=0.1.0",
         "@mesh/settings": ">=0.1.0",
-        "@mesh/debug-inspector": { "version": ">=0.1.0", "optional": true },
+        "@mesh/debug-inspector": {
+          "version": ">=0.1.0",
+          "optional": true
+        },
         "@mesh/violet-glass": ">=0.1.0",
         "@mesh/glass-wallpaper": ">=0.1.0",
         "@mesh/glass-material": ">=0.1.0",
         "@mesh/glass-notifications": ">=0.1.0",
         "@mesh/glass-dashboard": ">=0.1.0",
-        "@mesh/wallpaper-carousel": ">=0.1.0"
+        "@mesh/radial-launcher": ">=0.1.0",
+        "@mesh/wallpaper-parallax": ">=0.1.0",
+        "@mesh/keybind-help": ">=0.1.0"
       }
     },
     "compose": {
@@ -62,8 +67,18 @@
           "entrypoint": "main",
           "active": true
         },
-        "@mesh/wallpaper-carousel#default": {
-          "module": "@mesh/wallpaper-carousel",
+        "@mesh/radial-launcher#default": {
+          "module": "@mesh/radial-launcher",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/wallpaper-parallax#default": {
+          "module": "@mesh/wallpaper-parallax",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/keybind-help#default": {
+          "module": "@mesh/keybind-help",
           "entrypoint": "main",
           "active": true
         }

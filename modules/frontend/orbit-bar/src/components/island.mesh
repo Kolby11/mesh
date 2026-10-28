@@ -1,0 +1,52 @@
+<template>
+  <row class="island">
+    <box class="art"><image class="cover" src={art} alt="Album artwork" hidden={art == ""} /><icon name="audio-x-generic" size="36" hidden={art ~= ""} /></box>
+    <column class="track"><text class="title">{title}</text><text class="artist">{artist}</text>
+      <row class="controls"><button class="control" onclick={previous} disabled={not available} aria-label="Previous track"><icon name="media-skip-backward" size="16" /></button><button class="control" onclick={toggle} disabled={not available} aria-label={playing and "Pause" or "Play"}><icon name={playing and "media-playback-pause" or "media-playback-start"} size="18" /></button><button class="control" onclick={nextTrack} disabled={not available} aria-label="Next track"><icon name="media-skip-forward" size="16" /></button></row>
+    </column>
+    <column class="clock"><text class="time">{clock_time}</text><text class="date">{clock_day}</text><text class="date">{clock_date}</text></column>
+  </row>
+</template>
+<script lang="luau">
+local media = require("mesh.media")
+available = false
+playing = false
+title = "Nothing playing"
+artist = ""
+art = ""
+clock_time = ""
+clock_day = ""
+clock_date = ""
+effect(function()
+ available = media.available == true and (media.title or "") ~= ""
+ title = available and media.title or "Nothing playing"
+ artist = available and (media.artist or "") or ""
+ art = available and (media.art_path or "") or ""
+ playing = available and media.state.state == "playing"
+end)
+local function updateClock()
+ local now = os.date("*t")
+ clock_time = string.format("%02d:%02d", now.hour, now.min)
+ clock_day = string.upper(os.date("%A"))
+ clock_date = string.upper(os.date("%d %B"))
+end
+updateClock()
+task.spawn(function() while true do task.sleep((60 - os.time() % 60) * 1000) updateClock() end end)
+function previous() media.previous() end
+function toggle() media.play_pause() end
+function nextTrack() media.next() end
+</script>
+<style>
+.island { width: 620px; height: 164px; padding: 20px; gap: 16px; align-items: center; border-radius: 24px; background: var(--color-surface); color: var(--color-on-surface); }
+.art { width: 112px; height: 112px; flex-shrink: 0; border-radius: 20px; overflow: hidden; align-items: center; justify-content: center; background: var(--color-surface-variant); }
+.cover { width: 112px; height: 112px; }
+.track { flex-grow: 1; min-width: 0; gap: 2px; }
+.title { font-size: 15px; font-weight: 700; text-overflow: ellipsis; }
+.artist { font-size: 13px; color: var(--color-on-surface-variant); text-overflow: ellipsis; }
+.controls { gap: 8px; margin-top: 8px; }
+.control { width: 34px; height: 30px; padding: 0; border-radius: 8px; justify-content: center; align-items: center; background: transparent; color: var(--color-on-surface); }
+.control:hover { background: var(--color-surface-variant); }
+.clock { width: 190px; align-items: flex-end; justify-content: center; gap: 0; }
+.time { height: 65px; font-size: 59px; font-weight: 700; }
+.date { height: 19px; font-size: 15px; font-weight: 700; }
+</style>

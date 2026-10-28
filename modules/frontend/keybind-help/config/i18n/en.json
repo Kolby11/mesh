@@ -1,0 +1,15 @@
+{
+  "help.title": "Keyboard shortcuts",
+  "help.close": "Close",
+  "help.search": "Search shortcuts",
+  "help.placeholder": "Filter by name or key",
+  "help.here": "Here",
+  "help.shell": "Shell",
+  "help.press_key": "Press a key…",
+  "help.empty": "No shortcut matches",
+  "help.inactive": "Only while focus is inside this component",
+  "help.auto": "Assigned automatically",
+  "keybind.close.label": "Close help",
+  "keybind.close.description": "Hide the keyboard shortcuts window",
+  "keybind.category": "Keyboard help"
+}

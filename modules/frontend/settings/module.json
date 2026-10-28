@@ -12,7 +12,8 @@
         "mesh.locale": ">=1.0",
         "mesh.audio": ">=1.0",
         "mesh.settings": ">=1.0",
-        "mesh.packages": ">=1.0"
+        "mesh.packages": ">=1.0",
+        "mesh.keybinds": ">=1.0"
       },
       "optionalInterfaces": {
         "mesh.network": ">=1.0",
@@ -41,7 +42,9 @@
         "service.settings.read",
         "service.settings.control",
         "service.packages.read",
-        "service.packages.control"
+        "service.packages.control",
+        "service.keybinds.read",
+        "service.keybinds.control"
       ],
       "modules": {
         "@mesh/shell-ui-interface": ">=1.0.0",
@@ -70,7 +73,9 @@
         "audio-volume-high",
         "window-close",
         "window-new",
-        "window-restore"
+        "window-restore",
+        "input-keyboard",
+        "lock"
       ]
     },
     "surface": {

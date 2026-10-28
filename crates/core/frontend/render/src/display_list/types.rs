@@ -569,7 +569,10 @@ pub struct DisplayPaintNode {
 impl DisplayPaintNode {
     /// Whether this node paints through the backend's affine matrix rather
     /// than into its axis-aligned `layout` box. Any transform beyond a pure
-    /// translation qualifies, as does a rounded ancestor clip. A `scale()`
+    /// translation qualifies, as does a rounded ancestor clip or one that is
+    /// rotated or skewed: a counter-transformed child of a skewed card has a
+    /// plain translation itself, but only the affine path clips it to the
+    /// card's parallelogram rather than its bounding box. A `scale()`
     /// painted into `layout` snaps the box
     /// to whole device pixels and draws text at its unscaled size, so a
     /// scale transition makes text jump a pixel at a time instead of growing.
@@ -579,10 +582,11 @@ impl DisplayPaintNode {
             || self.transform.m21.abs() > EPSILON
             || (self.transform.m11 - 1.0).abs() > EPSILON
             || (self.transform.m22 - 1.0).abs() > EPSILON
-            || self
-                .ancestor_clips
-                .iter()
-                .any(|clip| clip.radii != mesh_core_elements::style::Corners::zero())
+            || self.ancestor_clips.iter().any(|clip| {
+                clip.radii != mesh_core_elements::style::Corners::zero()
+                    || clip.transform.m12.abs() > EPSILON
+                    || clip.transform.m21.abs() > EPSILON
+            })
     }
 
     /// Dimensions used by content layout. Translated nodes already have their
@@ -652,6 +656,9 @@ pub enum DisplayPaintContent {
     Slider(DisplaySliderPaint),
     Icon(DisplayIconPaint),
     Checkmark(DisplayCheckmarkPaint),
+    /// A vector `<shape>`, filled with the background colour and stroked with
+    /// the border colour; its box paints nothing of its own.
+    Shape(mesh_core_elements::ShapeGeometry),
 }
 
 /// The selected-state glyph for a `checkbox`/`radio` element, painted as a

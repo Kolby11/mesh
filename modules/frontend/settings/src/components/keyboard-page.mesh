@@ -1,0 +1,87 @@
+<template>
+    <column class="settings-page" hidden={hidden}>
+        <column class="settings-section">
+            <text class="settings-section-title">{t('keyboard.priority')}</text>
+            <text class="settings-section-copy">{t('keyboard.priority.copy')}</text>
+            <input class="settings-input" value={priority_draft} oninput={onPriorityInput} onkeydown={onPriorityKey} placeholder="asdfqwert" aria-label={t('keyboard.priority')} />
+            <text class="settings-card-meta">{t('keyboard.priority.hint')}</text>
+            <button class="settings-secondary-button" onclick={onReassign}>{t('keyboard.reassign')}</button>
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('keyboard.hint_mode')}</text>
+            <text class="settings-section-copy">{t('keyboard.hint_mode.copy')}</text>
+            <row class="settings-choice-row">
+                {#for row in hint_modes key={row.id}}
+                    <button class="language-option" class:language-option-active={row.id == hint_mode} onclick={onHintMode(row.id)}>
+                        <column class="settings-card-copy">
+                            <text class="settings-card-title">{t(row.label)}</text>
+                            <text class="settings-card-meta">{t(row.detail)}</text>
+                        </column>
+                        <text class="language-check" hidden={row.id ~= hint_mode}>{t('common.selected')}</text>
+                    </button>
+                {/for}
+            </row>
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('keyboard.hint_corner')}</text>
+            <text class="settings-section-copy">{t('keyboard.hint_corner.copy')}</text>
+            <row class="settings-choice-row">
+                {#for row in hint_corners key={row.id}}
+                    <button class="language-option" class:language-option-active={row.id == hint_corner} onclick={onHintCorner(row.id)}>
+                        <text class="settings-card-title">{t(row.label)}</text>
+                        <text class="language-check" hidden={row.id ~= hint_corner}>{t('common.selected')}</text>
+                    </button>
+                {/for}
+            </row>
+        </column>
+    </column>
+</template>
+
+<script lang="luau">
+hidden = false
+
+local t = import("mesh.i18n", "t")
+local settings = require("mesh.settings")
+local keybinds = require("mesh.keybinds")
+
+hint_modes = {
+    { id = "both", label = "keyboard.mode.both", detail = "keyboard.mode.both.detail" },
+    { id = "hold", label = "keyboard.mode.hold", detail = "keyboard.mode.hold.detail" },
+    { id = "toggle", label = "keyboard.mode.toggle", detail = "keyboard.mode.toggle.detail" },
+}
+hint_corners = {
+    { id = "top-left", label = "keyboard.corner.top_left" },
+    { id = "top-right", label = "keyboard.corner.top_right" },
+    { id = "bottom-left", label = "keyboard.corner.bottom_left" },
+    { id = "bottom-right", label = "keyboard.corner.bottom_right" },
+}
+
+priority_draft = "asdfqwertzxcvbnm"
+hint_mode = "both"
+hint_corner = "top-right"
+
+effect(function()
+    local shell = settings.namespaces and settings.namespaces.shell
+    local keyboard = shell and shell.keyboard or {}
+    priority_draft = keyboard.key_priority or "asdfqwertzxcvbnm"
+    hint_mode = keyboard.hint_mode or "both"
+    hint_corner = keyboard.hint_corner or "top-right"
+end)
+
+function onPriorityInput(value) priority_draft = tostring(value or "") end
+function onPriorityKey(event)
+    if event and event.key == "Enter" and priority_draft ~= "" then
+        keybinds.set_option("key_priority", priority_draft)
+    end
+end
+function onReassign() keybinds.reassign() end
+function onHintMode(id) keybinds.set_option("hint_mode", id) end
+function onHintCorner(id) keybinds.set_option("hint_corner", id) end
+</script>
+
+<style>
+    .settings-input { width: 100%; height: 40px; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--color-outline-variant); background: var(--color-surface-variant); color: var(--color-on-surface); }
+    .settings-choice-row { width: 100%; gap: 8px; flex-wrap: wrap; }
+</style>

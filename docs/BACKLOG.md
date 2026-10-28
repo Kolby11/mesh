@@ -18,6 +18,95 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---
 
+- [ ] Continue the whole-codebase audit: sections 01–07 and 09 are reviewed; section 08 needs deeper logic/test coverage, and sections 10–16 plus cross-section review remain.
+      Resume the three review layers and file coverage in [the audit inventory](../.planning/codebase/audits/2026-10-27-whole-codebase/00-coverage.md); [interim findings](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md) include component testing and profiling opportunities.
+- [ ] Classify border-width animations as layout-affecting and verify intermediate geometry and hit bounds against full layout. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Project documented icon axis custom properties into computed icon styles; generic custom-property handling currently bypasses their lowering. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Bound custom-property and prop-reference resolution depth and work; long acyclic chains recurse without a limit. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Include keyboard shortcuts in semantic snapshot diffs; shortcut-only changes currently produce no field change. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Align transition shorthand property selection with longhand; names such as `padding-left` and `row-gap` are currently dropped. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Convert scroll-to-view distances into the scroll owner's coordinates; transformed containers can overshoot or move in the wrong direction. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/09-interaction-and-motion.md).
+- [ ] Hit-test overlapping scrollbars in paint order; reverse insertion order can select a lower z-index sibling. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/09-interaction-and-motion.md).
+- [ ] Keep reverse and alternate stepped keyframe wake deadlines from missing changes immediately after boundaries. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/09-interaction-and-motion.md).
+- [ ] Make fork creation format-independent and transactional; valid minified manifests fail after leaving partial copies. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Classify removal of optional positional service arguments as breaking; existing callers can still supply them. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Preserve validated stylesheet image paths through style lowering; resolved relative URLs are rejected as absolute. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Make keyboard focus traversal reach offscreen scroll descendants and reveal the focused control. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Implement the standard easing keyword curves; current keywords use different polynomials. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Bound command pipe capture and shutdown when descendants outlive the direct child; retained pipes can block worker cleanup. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Retry Wayland flush after transient write backpressure; `WouldBlock` currently propagates as an error. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Preserve distinct, resolvable diagnostic issue identities when codes exceed the size limit; truncation currently breaks lookup and can merge issues. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Bound filesystem capability glob matching and measure adversarial nonmatches; recursive wildcard partitioning can grow combinatorially. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Preserve error severity when diagnostics overflow; a full warning table can hide a later error. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Bind debug snapshot payloads to the generations they captured; a concurrent diagnostic update can leave stale data cached under a newer key. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/01-core-foundation-contracts.md).
+- [ ] Review and consolidate the unused public config diagnostic model and redundant settings accessors; repository consumers use the newer settings contracts. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/01-core-foundation-contracts.md).
+- [ ] Use bounded, descriptor-relative catalog reads in authoring diagnostics; the current separate path check and unbounded read can race and exhaust memory. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Make fork rebases recoverable across partial writes and baseline replacement; failures can leave edits and upstream records out of sync. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Preserve explicitly added UI roots in composition-backed profiles; composition resolution currently treats them as orphaned overrides. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Bound authoring source-scan traversal and rejection records; source byte limits do not limit directory depth or entries. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Rewire forked root instance identities and dependent references; the current profile retains the upstream key and fails validation. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Bound and contain frontend entrypoint reads during contribution indexing; props extraction bypasses the source scan budget. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Verify the winning activation snapshot after a publication race; a different same-generation snapshot can currently be accepted. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Correct extension contribution isolation documentation; its per-VM claim conflicts with the shared-realm platform contract. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Make manifest normalization idempotent; runtime conversion duplicates binary dependencies and contribution lists. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Share the canonical settings merge between composition and profile resolution; the current duplicate implementations can drift. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Enforce provenance trust when resolving required module dependencies; closure activation can re-enable a trust-rejected module. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Account for tracked-fork mappings during uninstall reference checks and forced cleanup; dangling mappings can prevent profile loading. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Validate profile candidates before revision-checked persistence; invalid CLI settings namespaces can otherwise make a saved profile unloadable. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Remove orphaned node-slot overrides during profile prune; the command currently reports success without deleting them. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Check executable availability consistently with runtime resolution; regular non-executable files currently satisfy backend binary dependencies. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Validate extension-point host version requirements and fail closed on invalid ranges; malformed ranges currently admit contributions. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Enforce single-contribution extension points; overfill currently produces a diagnostic while all entries remain renderable. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Scope automatic extension contribution instance identities by source module; equal local IDs can collide in component state and memoization. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Bound and contain external interface contract reads during graph loading; oversized or replaced files bypass source-scan limits. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Resolve slot replacements to the target's actual contribution and metadata; changing only the source module can produce missing entries or stale props. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Measure per-module signature verification cost during graph loading; signed modules currently launch serial verifier processes. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Build an author-facing component test harness after SH-08, with deterministic services, time and input plus semantic, request and render assertions; current reusable fixtures are shell-private Rust tests. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Add repeatable component profiling scenarios and run metadata on existing profiling tools; arbitrary components lack a reusable workload and comparable samples. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Correlate input and service changes through surface preparation, GPU completion, commit and available presentation feedback; existing per-stage samples do not show end-to-end latency. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Support deactivating inherited profile roots through CLI commands and distinguish resetting an override from removing a root. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Recompute active dependency reachability after blocking roots; the resolver can retain dependencies reached only from a failed root. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Use exclusive no-follow temporary files for store pointer writes; predictable PID-based temporary paths can follow existing symlinks. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Validate extension-point prop type expressions and reject malformed declarations; resolution currently accepts parse failures. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Isolate detached-signature load failures to their modules; one malformed signature currently aborts graph loading. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Propagate interface-compatibility blocking through module dependency closure and retire no-longer-reachable dependencies. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Generate contract-valid service mocks or report unsupported schemas; current defaults and method returns can violate declared types. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Resolve service member collisions with proxy `state` and `events` namespaces; accepted names can be inaccessible to Luau consumers. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Classify required named-record field additions according to input/output compatibility; existing method inputs can fail after an additive classification. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Validate positional optional argument ordering or arity by position; an optional before a required argument can bypass the proxy's count check. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Ensure service symbols generate valid Luau for keywords and punctuation, with parser or runtime tests for generated artifacts. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Preserve correct rule provenance when module theme layers merge; appended rules currently reuse earlier indices. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Bound theme token alias and fallback resolution; long acyclic chains can recurse deeply and repeat linear cycle checks. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Share theme style-rule lowering between global and module scopes; duplicated token, default and selector logic can drift. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Measure and reduce repeated serialization of paged theme details while preserving revision and UTF-8 semantics. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Resolve scoped theme tokens for dotted module IDs; first-dot splitting misidentifies valid module names. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Preserve strict container query comparisons at threshold boundaries; strict and inclusive operators currently lower identically. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Align core translation point and bulk lookup fallback with argument-aware lookup; their English last-resort behavior differs. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Measure repeated ICU date/time formatter construction in clock components and bound any cache adopted after parity checks. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Reject unmatched closing braces throughout localized messages; validation currently misses braces before later placeholders. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Align icon coverage advice with live alias, dash fallback and owner-scoped resolution; advice can report gaps for icons that resolve. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Reject duplicate glyph names in JSON icon maps; parsing currently collapses duplicates before validation. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Resolve icon overrides through MESH pack-qualified mappings; current override lookup treats targets as file or XDG assets. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Preserve user resource precedence when XDG data home is absent; filtering currently lets a system directory occupy its ordering slot. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Include override-only font roles in renderer alias projection; registry resolution and rendered `font-family` can disagree. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Ignore template braces and directives inside XML comments while retaining accurate spans and editor recovery. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Use scoped expression references in standalone component validation; local function parameters can be reported as unknown globals. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Evaluate `style:` directive expressions once; lowering currently repeats stateful expressions during value checks. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Preserve accepted numeric prop values in CSS projection; large integral floats currently saturate during integer formatting. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Distinguish Luau `--[` line comments from valid long-comment openers in template expression scanning. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Decode Luau string literals consistently during component import analysis; escaped paths can differ from runtime values. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Distinguish generated expression markers from authored attribute literals; marker-shaped text can become a binding. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+
+- [ ] Build interchangeable shell compositions, configurable `.mesh` components and independently switchable themes that can realize the diverse [shell references](reference/shells/); the full range is not yet available.
+      Support live shell and theme switching and hot reload with a polished transition effect, respecting reduced-motion preferences.
+      Plan, shell list and order: [reference shells](../.planning/todos/pending/2026-10-27-reference-shells.md).
+- [ ] Extend `<shape>` beyond sectors, arcs and polylines (curves, gradient or image fill, focus outline along the shape) for the ring gauges, graphs and sky arc in the reference shells.
+- [ ] Extend `mesh.weather` (sun times, high/low, humidity, wind, UV) and `mesh.system` (GPU, battery, CPU frequency, swap, network history) and their providers; reference-shell widgets need these fields.
+- [ ] Finish the keybind system: a settings page for `key_priority`, hint mode and corner; inline remap and "reassign all" in the help window; `mesh-shell keys help|hints` for compositor binds; ordinal keys for repeated items; verify key hints on a live GPU surface and in promoted popups. Design and status: [keybind system](../.planning/todos/pending/2026-10-28-keybind-system.md).
+- [ ] Add one shell-switch keybind that works in any profile, and require the profile switcher in every new composition; today switching relies on each shell's own bar button.
+- [ ] Connect Orbit's market, activity and usage cards to real data sources and complete their reference visuals; those sources and graph/grid views are not implemented yet.
+- [ ] Verify Orbit's desktop-card appearance and component interactions on a clear Wayland desktop, including narrow outputs; live activation and profile switching work, but the cards were obscured by windows.
+
 - [ ] `d9_glass_dock_frame_p90_ms` straddles its 16.7 ms budget run to run (16.0–20.1 ms at
       639d4dd7, 17.4–19.7 ms at ca8b18d1); the CPU dock animation fixture needs headroom.
 - [ ] The CPU glass dashboard open gate remains over budget; its raster drawing

@@ -186,6 +186,25 @@
         "exec.argv:nmcli:[\"device\",\"wifi\",\"rescan\"]",
         "exec.argv:nmcli:[\"radio\",\"wifi\",\"*\"]"
       ],
+      "@mesh/keybind-help": [
+        "locale.read",
+        "service.keybinds.control",
+        "service.keybinds.read",
+        "shell.surface",
+        "theme.read"
+      ],
+      "@mesh/halo-orb": ["shell.surface", "theme.read"],
+      "@mesh/radial-launcher": [
+        "locale.read",
+        "service.apps.launch",
+        "service.apps.read",
+        "service.media.control",
+        "service.media.read",
+        "shell.surface",
+        "theme.read"
+      ],
+      "@mesh/orbit-bar": ["shell.surface", "theme.read", "service.media.read", "service.media.control", "service.wm.read", "service.wm.control", "service.network.read", "service.power.read"],
+      "@mesh/orbit-widgets": ["shell.surface", "theme.read"],
       "@mesh/opacity-test": ["shell.surface", "theme.read"],
       "@mesh/open-meteo-weather": ["net.http"],
       "@mesh/pipewire-audio": [
@@ -239,6 +258,8 @@
         "service.bluetooth.read",
         "service.debug.read",
         "service.device.read",
+        "service.keybinds.control",
+        "service.keybinds.read",
         "service.network.control",
         "service.network.read",
         "service.packages.control",
@@ -270,6 +291,13 @@
         "service.audio.read"
       ],
       "@mesh/wallpaper-carousel": [
+        "locale.read",
+        "service.theme.control",
+        "service.wallpapers.read",
+        "shell.surface",
+        "theme.read"
+      ],
+      "@mesh/wallpaper-parallax": [
         "locale.read",
         "service.theme.control",
         "service.wallpapers.read",

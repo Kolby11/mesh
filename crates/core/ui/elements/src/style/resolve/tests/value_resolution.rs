@@ -486,6 +486,19 @@ fn transform_resolution_matches_string_resolution_for_simple_references() {
 }
 
 #[test]
+fn transform_parses_skew_functions_in_degrees_and_turns() {
+    let transform = parse_transform("translateX(4px) skewX(-15deg) skewY(0.05turn)");
+    assert_eq!(transform.translate_x, 4.0);
+    assert!((transform.skew_x + 15f32.to_radians()).abs() < 1e-6);
+    assert!((transform.skew_y - 0.05 * std::f32::consts::TAU).abs() < 1e-6);
+    assert!(!transform.is_translation_only());
+
+    let both = parse_transform("skew(10deg, 5deg)");
+    assert!((both.skew_x - 10f32.to_radians()).abs() < 1e-6);
+    assert!((both.skew_y - 5f32.to_radians()).abs() < 1e-6);
+}
+
+#[test]
 fn box_shadow_resolution_matches_string_resolution_for_simple_references() {
     let mut theme = mesh_core_theme::default_theme();
     theme.tokens_mut().insert(

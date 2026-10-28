@@ -23,7 +23,7 @@
                     <list-item class="settings-card">
                         <icon name="bluetooth" size="20" />
                         <column class="settings-card-copy">
-                            <text class="settings-card-title">{t(row.name)}</text>
+                            <text class="settings-card-title">{row.name}</text>
                             <text class="settings-card-meta">{t(row.details)}</text>
                         </column>
                         <button class:settings-danger-button={row.connected} class:settings-secondary-button={not row.connected} onclick={onPairedAction(row.id, row.connected)}>
@@ -55,7 +55,7 @@
                     <list-item class="settings-card">
                         <icon name="bluetooth" size="20" />
                         <column class="settings-card-copy">
-                            <text class="settings-card-title">{t(row.name)}</text>
+                            <text class="settings-card-title">{row.name}</text>
                             <text class="settings-card-meta">{t(row.details)}</text>
                         </column>
                         <button class="settings-primary-button" onclick={onPair(row.id)}>{t('bluetooth.pair')}</button>
@@ -70,7 +70,7 @@
             <column class="settings-card">
                 <row class="settings-info-row">
                     <text class="settings-info-label">{t('bluetooth.adapter')}</text>
-                    <text class="settings-info-value">{t(adapter_name)}</text>
+                    <text class="settings-info-value">{adapter_name}</text>
                 </row>
                 <row class="settings-info-row">
                     <text class="settings-info-label">{t('common.provider')}</text>
@@ -101,11 +101,15 @@ paired_rows = {}
 nearby_rows = {}
 empty_title = "bluetooth.service_unavailable"
 empty_copy = "bluetooth.install_backend"
-adapter_name = "common.not_reported"
+adapter_name = t("common.not_reported")
 provider_label = "common.no_provider"
 
 local function device_name(entry)
-    return tostring(entry.alias or entry.name or entry.id or entry.address or "bluetooth.device")
+    local raw = entry.alias or entry.name or entry.id or entry.address
+    if raw and tostring(raw) ~= "" then
+        return tostring(raw)
+    end
+    return t("bluetooth.device")
 end
 
 local function device_id(entry)
@@ -125,7 +129,7 @@ effect(function()
         nearby_count = ""
         empty_title = "bluetooth.service_unavailable"
         empty_copy = "bluetooth.install_mesh_backend"
-        adapter_name = "common.not_reported"
+        adapter_name = t("common.not_reported")
         provider_label = "common.no_provider"
         return
     end
@@ -138,7 +142,8 @@ effect(function()
     bluetooth_toggle_label = enabled and "common.turn_off" or "common.turn_on"
     bluetooth_enabled = enabled
     bluetooth_status = enabled and "bluetooth.powered_on" or "bluetooth.powered_off"
-    adapter_name = tostring(bluetooth.adapter_name or bluetooth.adapter or "bluetooth.default_adapter")
+    local raw_adapter = bluetooth.adapter_name or bluetooth.adapter
+    adapter_name = (raw_adapter and tostring(raw_adapter) ~= "") and tostring(raw_adapter) or t("bluetooth.default_adapter")
     provider_label = tostring(bluetooth.source_module or "bluetooth.active_provider")
 
     paired_rows = {}

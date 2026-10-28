@@ -45,6 +45,7 @@ mod animation;
 mod diagnostics;
 mod disclosure;
 mod gestures;
+mod key_scopes;
 mod keybinds;
 mod navigation;
 mod policy;

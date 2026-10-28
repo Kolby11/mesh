@@ -29,11 +29,15 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/theme-selector` | embedded | `src/main.mesh` | Embeddable theme chooser |
 | `@mesh/glass-bar` | surface | `src/main.mesh` | Floating glass islands with clock/calendar, workspaces, media, recording, weather and a live audio/brightness control center |
 | `@mesh/glass-widgets` | surface | `src/main.mesh` | Responsive desktop media and weather cards with colour artwork and a three-point forecast |
+| `@mesh/keybind-help` | surface | `src/main.mesh` | Keyboard shortcuts window opened by `F1`, listing every binding by surface |
+| `@mesh/radial-launcher` | surface | `src/main.mesh` | Radial overlay: a ring of app wedges, a clock hub and media wedges, built from `<shape>` sectors |
+| `@mesh/halo-orb` | surface | `src/main.mesh` | Always-visible orb that toggles the radial launcher, with the shell switcher beside it |
 | `@mesh/glass-dock` | surface | `src/main.mesh` | Glass shelf with neighboring-icon magnification and a searchable launcher with grid and list views of installed applications |
 | `@mesh/glass-notifications` | surface | `src/main.mesh` | Glass notification toasts under the bar; shows itself while a notification is popped up |
 | `@mesh/glass-dashboard` | surface | `src/main.mesh` | Overlay with system meters and history, the current track with a live spectrum, notifications and weather |
 | `@mesh/glass-wallpapers` | surface | `src/main.mesh` | Overlay wallpaper picker: tilted carousel and colour strip; applies through `mesh.theme.set_backdrop_image`; not in the glass composition |
-| `@mesh/wallpaper-carousel` | surface | `src/main.mesh` | Wallpaper selector widget under the bar: endless strip of tall cards that slide, shrink with distance and pan across `mesh.wallpapers` panoramas; the glass composition's wallpaper selector |
+| `@mesh/wallpaper-carousel` | surface | `src/main.mesh` | Wallpaper selector widget under the bar: endless strip of tall cards that slide, shrink with distance and pan across `mesh.wallpapers` panoramas |
+| `@mesh/wallpaper-parallax` | surface | `src/main.mesh` | Wallpaper picker under the bar: endless strip of five slanted cards that slide while their upright `mesh.wallpapers` panoramas pan in parallax; the glass composition's wallpaper selector |
 | `@mesh/profile-switcher` | embedded | `src/main.mesh` | Shell switcher trigger; also a `mesh.navigation.item` contribution |
 | `@mesh/profile-menu` | embedded | `src/main.mesh` | Popover listing profiles; selecting one switches live via `mesh.packages` |
 
@@ -139,6 +143,7 @@ desktop layout. See [module-system §5](../spec/01-module-system.md).
 
 | Module | Kind | Contribution |
 | --- | --- | --- |
+| `@mesh/halo` | composition | A bare desktop with one orb that opens the radial launcher |
 | `@mesh/glass` | composition | Liquid-glass desktop: glass bar, desktop cards, dock, notification toasts, dashboard and wallpaper carousel; recommends the violet glass theme |
 | `@mesh/desk` | composition | The default desktop: a top navigation bar and a settings window, bound to the PipeWire and backlight providers |
 

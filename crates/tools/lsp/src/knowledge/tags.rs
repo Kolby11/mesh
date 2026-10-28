@@ -473,6 +473,34 @@ static PROGRESS_ATTRS: &[AttrDef] = &[
     },
 ];
 
+static SHAPE_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "type",
+        description: "Shape kind: sector (filled wedge or ring segment) | arc (stroked) | polygon | polyline",
+        values: &["sector", "arc", "polygon", "polyline"],
+    },
+    AttrDef {
+        name: "start",
+        description: "Start angle in degrees, clockwise from the top",
+        values: &[],
+    },
+    AttrDef {
+        name: "end",
+        description: "End angle in degrees, clockwise from the top",
+        values: &[],
+    },
+    AttrDef {
+        name: "inner",
+        description: "Sector inner radius as a fraction (0-1) of the outer radius",
+        values: &[],
+    },
+    AttrDef {
+        name: "points",
+        description: "Polygon or polyline vertices as 'x,y x,y' percentages of the box",
+        values: &[],
+    },
+];
+
 static BUTTON_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "variant",
@@ -982,6 +1010,14 @@ pub static TAG_DEFS: &[TagDef] = &[
         attributes: PROGRESS_ATTRS,
     },
     TagDef {
+        name: "shape",
+        category: TagCategory::Content,
+        self_closing: false,
+        description: "Vector shape (sector, arc, polygon, polyline). Fill is background-color, stroke is border-color; pointer hits follow the painted shape.",
+        bases: BASE_MESH,
+        attributes: SHAPE_ATTRS,
+    },
+    TagDef {
         name: "meter",
         category: TagCategory::Content,
         self_closing: true,
@@ -1423,6 +1459,7 @@ mod tests {
             "form-row",
             "badge",
             "progress",
+            "shape",
             "tooltip",
             "avatar",
             "shortcut",

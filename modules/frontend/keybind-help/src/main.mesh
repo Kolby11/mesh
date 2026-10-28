@@ -1,0 +1,175 @@
+<template>
+    <box class="overlay">
+        <button class="scrim" onclick={onClose} keybind="close" onkeybind={onClose} aria-label={t("help.close")} tabindex="-1" />
+        <column class="panel" aria-label={t("help.title")}>
+            <row class="header">
+                <text class="title">{t("help.title")}</text>
+                <box class="spacer" />
+                <button class="close" onclick={onClose} aria-label={t("help.close")} title={t("help.close")}>
+                    <icon class="close-glyph" name="window-close" size="18" />
+                </button>
+            </row>
+            <input class="search" ref="search" value={query} oninput={onQuery} placeholder={t("help.placeholder")} aria-label={t("help.search")} />
+            <scroll class="body">
+                <column class="groups">
+                    {#for group in groups key={group.id}}
+                        <column class="group">
+                            <text class="group-title">{group.title}</text>
+                            {#for row in group.rows key={row.id}}
+                                <button class="row" class:row-inactive={row.inactive} class:row-capturing={row.id == capturing} title={row.hint} onclick={onCapture(row.id)} onkeydown={onRowKey(row)}>
+                                    <column class="row-copy">
+                                        <text class="row-label">{row.label}</text>
+                                        <text class="row-description" hidden={row.description == ""}>{row.description}</text>
+                                    </column>
+                                    <text class="keycap">{row.id == capturing and t("help.press_key") or row.chord}</text>
+                                </button>
+                            {/for}
+                        </column>
+                    {/for}
+                    <text class="empty" hidden={has_rows}>{t("help.empty")}</text>
+                </column>
+            </scroll>
+        </column>
+    </box>
+</template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local keybinds = require("mesh.keybinds")
+
+local SURFACE = "@mesh/keybind-help"
+
+query = ""
+capturing = ""
+groups = {}
+has_rows = false
+
+local function chordText(entry)
+    local text = entry.accessibility_shortcut or entry.key or ""
+    text = string.gsub(text, "Control", "Ctrl")
+    local parts = {}
+    for part in string.gmatch(text, "[^+]+") do
+        parts[#parts + 1] = #part == 1 and string.upper(part) or part
+    end
+    return table.concat(parts, "+")
+end
+
+local function shortName(surface)
+    return (string.gsub(surface or "", "^@[^/]*/", ""))
+end
+
+local function matches(needle, row)
+    if needle == "" then return true end
+    local haystack = string.lower(table.concat({ row.label, row.description, row.chord, row.surface }, " "))
+    return string.find(haystack, needle, 1, true) ~= nil
+end
+
+effect(function()
+    local needle = string.lower(query)
+    local by_id, order = {}, {}
+    for _, entry in keybinds.entries or {} do
+        local id, title
+        if entry.scope == "shell" then
+            id, title = "1-shell", t("help.shell")
+        elseif entry.focused then
+            id, title = "0-here", t("help.here") .. " · " .. shortName(entry.surface_id)
+        else
+            id, title = "2-" .. entry.surface_id, shortName(entry.surface_id)
+        end
+        local row = {
+            id = entry.surface_id .. ":" .. entry.action_id,
+            surface_id = entry.surface_id,
+            action_id = entry.action_id,
+            scope = entry.scope,
+            surface = shortName(entry.surface_id),
+            label = entry.label or entry.action_id,
+            description = entry.description or "",
+            chord = chordText(entry),
+            inactive = entry.active == false,
+            hint = entry.active == false and t("help.inactive")
+                or entry.trigger_kind == "auto" and t("help.auto") or "",
+        }
+        if matches(needle, row) then
+            if not by_id[id] then
+                by_id[id] = { id = id, title = title, rows = {} }
+                order[#order + 1] = id
+            end
+            local rows = by_id[id].rows
+            rows[#rows + 1] = row
+        end
+    end
+    table.sort(order)
+    local list = {}
+    for _, id in order do list[#list + 1] = by_id[id] end
+    groups = list
+    has_rows = #list > 0
+end)
+
+local RESERVED = {
+    Tab = true, Enter = true, Return = true, Space = true, Escape = true, Backspace = true, Delete = true,
+    Home = true, End = true, PageUp = true, PageDown = true,
+    ArrowUp = true, ArrowDown = true, ArrowLeft = true, ArrowRight = true,
+    Shift = true, Control = true, Alt = true, Super = true, Meta = true,
+}
+
+function onCapture(id)
+    capturing = capturing == id and "" or id
+end
+
+-- The next key pressed on the row being captured becomes its binding. Shell
+-- actions keep modifiers (`ctrl+h`); surface actions take the bare key.
+function onRowKey(row)
+    return function(event)
+        if capturing ~= row.id or not event or not event.key then return end
+        local key = event.key
+        if RESERVED[key] or string.sub(key, 1, 7) == "Shift_L" or string.find(key, "^Control") or string.find(key, "^Alt") then
+            return
+        end
+        local binding = string.lower(key)
+        if row.scope == "shell" then
+            local mods = event.modifiers or {}
+            if mods.shift then binding = "shift+" .. binding end
+            if mods.alt then binding = "alt+" .. binding end
+            if mods.ctrl then binding = "ctrl+" .. binding end
+        end
+        keybinds.remap(row.surface_id, row.action_id, binding)
+        capturing = ""
+    end
+end
+
+function onQuery(value) query = tostring(value or "") end
+function onClose() mesh.shell.hide_surface(SURFACE) end
+</script>
+
+<style>
+    .overlay { position: relative; width: 100%; height: 100%; justify-content: center; align-items: center; exclusive-zone: ignore; background: transparent; }
+    .scrim { position: absolute; left: 0; top: 0; width: 100%; height: 100%; padding: 0; border-radius: 0; background: var(--color-scrim); opacity: 0.5; transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard); }
+    .scrim.mesh-surface-entering { opacity: 0; }
+    .scrim.mesh-surface-exiting { opacity: 0; transition-duration: var(--animation-duration-fast); }
+
+    .panel { width: 640px; height: 560px; padding: 22px; gap: 14px; border-radius: 24px; border: 1px solid var(--color-outline-variant); background: var(--color-surface); color: var(--color-on-surface); opacity: 1; transform: translateY(0px) scale(1); transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-short) var(--animation-curves-bezier-standard); }
+    .panel.mesh-surface-entering { opacity: 0; transform: translateY(20px) scale(0.96); }
+    .panel.mesh-surface-exiting { opacity: 0; transform: translateY(10px) scale(0.98); transition-duration: var(--animation-duration-fast); }
+
+    .header { width: 100%; align-items: center; gap: 8px; }
+    .spacer { flex-grow: 1; }
+    .title { height: 28px; font-size: 20px; font-weight: 600; }
+    .close { width: 30px; height: 30px; padding: 0; justify-content: center; align-items: center; border-radius: 999px; background: transparent; color: var(--color-on-surface); }
+    .close:hover, .close:focus-visible { background: var(--color-surface-variant); }
+    .close-glyph { width: 18px; height: 18px; color: var(--color-on-surface); }
+    .search { width: 100%; height: 40px; padding: 10px 14px; border-radius: 14px; border: 1px solid var(--color-outline-variant); background: var(--color-surface-variant); color: var(--color-on-surface); }
+
+    .body { width: 100%; flex-grow: 1; overflow-y: auto; }
+    .groups { width: 100%; gap: 18px; padding: 4px; }
+    .group { width: 100%; gap: 4px; }
+    .group-title { height: 20px; font-size: 12px; font-weight: 700; color: var(--color-primary); }
+    .row { width: 100%; padding: 8px 10px; gap: 12px; align-items: center; border-radius: 12px; }
+    .row:hover { background: var(--color-surface-variant); }
+    .row-inactive { opacity: 0.55; }
+    .row-capturing { background: var(--color-surface-variant); border: 1px solid var(--color-primary); }
+    .row-copy { flex-grow: 1; min-width: 0; gap: 2px; }
+    .row-label { height: 20px; font-size: 14px; font-weight: 600; }
+    .row-description { height: 16px; font-size: 12px; color: var(--color-on-surface-variant); text-overflow: ellipsis; }
+    .keycap { height: 24px; padding: 2px 10px; font-size: 12px; font-weight: 700; border-radius: 8px; border: 1px solid var(--color-outline-variant); background: var(--color-surface-variant); }
+    .empty { width: 100%; height: 40px; font-size: 13px; color: var(--color-on-surface-variant); }
+</style>

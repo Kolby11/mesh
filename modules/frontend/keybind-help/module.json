@@ -1,0 +1,61 @@
+{
+  "name": "@mesh/keybind-help",
+  "version": "0.1.0",
+  "description": "Help window listing every keybind with its description, the focused component's first.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "interfaces": {
+        "mesh.keybinds": ">=1.0"
+      },
+      "capabilities": [
+        "shell.surface",
+        "theme.read",
+        "locale.read",
+        "service.keybinds.read",
+        "service.keybinds.control"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "iconRequirements": {
+      "optional": [
+        "window-close"
+      ]
+    },
+    "surface": {
+      "anchor": "top",
+      "layer": "overlay",
+      "keyboard_mode": "exclusive",
+      "visible_on_start": false
+    },
+    "provides": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Keybind help"
+        }
+      ]
+    },
+    "accessibility": {
+      "role": "dialog"
+    },
+    "i18n": {
+      "defaultLocale": "en"
+    },
+    "contributes": {
+      "i18n": [
+        { "id": "en", "locale": "en", "path": "config/i18n/en.json" }
+      ],
+      "keybinds": {
+        "close": {
+          "label": { "t": "keybind.close.label", "fallback": "Close help" },
+          "description": { "t": "keybind.close.description", "fallback": "Hide the keyboard shortcuts window" },
+          "category": { "t": "keybind.category", "fallback": "Keyboard help" },
+          "trigger": { "kind": "shortcut", "key": "Escape" }
+        }
+      }
+    }
+  }
+}

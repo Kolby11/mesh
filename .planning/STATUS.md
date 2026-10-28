@@ -1,12 +1,13 @@
 # Status
 
-**Updated:** 2026-10-27
+**Updated:** 2026-10-28
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and
 measurements live in [`log/`](log/README.md).
 
 ## Now
 
+- Continue the whole-codebase audit; sections 01–07 and 09 are reviewed, while section 08 needs deeper logic/test coverage. Sections 10–16 and cross-section review remain; resume from the coverage inventory.
 - Extract the frontend component runtime from shell (SH-08).
 
 ## Next

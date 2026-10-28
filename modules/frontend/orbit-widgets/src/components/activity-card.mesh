@@ -1,0 +1,13 @@
+<template>
+  <column class="card">
+    <text class="label">ACTIVITY</text>
+    <box class="space" />
+    <text class="caption">No activity source connected</text>
+  </column>
+</template>
+<style>
+.card { flex-grow: 1; width: 202px; height: 202px; padding: 20px; border-radius: 23px; background: var(--color-surface); color: var(--color-on-surface); }
+.label { font-size: 12px; font-weight: 700; }
+.space { flex-grow: 1; }
+.caption { font-size: 12px; color: var(--color-on-surface-variant); }
+</style>

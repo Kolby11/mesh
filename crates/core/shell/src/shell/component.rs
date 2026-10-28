@@ -1255,6 +1255,11 @@ pub(super) struct FrontendSurfaceComponent {
     /// declarations, checks overrides, and localizes triggers, so avoid doing
     /// that again for every key event when neither input changed.
     resolved_surface_shortcuts_cache: RefCell<Option<ResolvedSurfaceShortcutsCache>>,
+    /// Auto-assigned keys the last resolution derived and the saved
+    /// assignment lacks; sent as a settings write on the next key press.
+    pending_assigned_write: RefCell<Option<HashMap<String, String>>>,
+    key_hints: input::KeyHintState,
+    last_assigned_write: RefCell<Option<HashMap<String, String>>>,
     /// Annotation inputs whose projection and overflow extents the retained
     /// tree still carries; see [`RuntimeAnnotationInputs`].
     scoped_annotation_inputs: Option<RuntimeAnnotationInputs>,
@@ -1606,6 +1611,9 @@ impl FrontendSurfaceComponent {
             runtime_style_diagnostic_fingerprint: None,
             element_metric_usage,
             resolved_surface_shortcuts_cache: RefCell::new(None),
+            pending_assigned_write: RefCell::new(None),
+            key_hints: Default::default(),
+            last_assigned_write: RefCell::new(None),
             scoped_annotation_inputs: None,
             overflow_bounds: mesh_core_interaction::RetainedOverflow::default(),
             frame_restyled_nodes: None,

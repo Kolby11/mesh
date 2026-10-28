@@ -391,6 +391,67 @@ impl FrontendSurfaceComponent {
         )
     }
 
+    /// Key caps for every bound, eligible control on the surface.
+    pub(super) fn paint_key_hints(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        scale: f32,
+        tree: &WidgetNode,
+    ) {
+        let hints = self.collect_key_hints(tree);
+        if hints.is_empty() {
+            return;
+        }
+        let corner = mesh_core_render::KeyHintCorner::parse(
+            &self.current_keyboard_settings().hint_corner,
+        );
+        mesh_core_render::paint_key_hints_in_session(
+            &hints,
+            corner,
+            session,
+            scale,
+            None,
+            Some(&self.paint_context),
+        );
+    }
+
+    pub(in crate::shell::component) fn collect_key_hints(
+        &self,
+        tree: &WidgetNode,
+    ) -> Vec<mesh_core_render::KeyHint> {
+        let mut hints = Vec::new();
+        let shortcuts = self.current_surface_shortcut_labels();
+        self.collect_key_hints_from(tree, tree, &shortcuts, &mut hints);
+        hints
+    }
+
+    fn collect_key_hints_from(
+        &self,
+        root: &WidgetNode,
+        node: &WidgetNode,
+        shortcuts: &HashMap<String, Vec<String>>,
+        hints: &mut Vec<mesh_core_render::KeyHint>,
+    ) {
+        if let (Some(keybind_id), Some(key)) = (node.attributes.get(Prop::Keybind), node.mesh_key())
+            && let Some(shortcut) = shortcuts.get(keybind_id).and_then(|labels| labels.first())
+            && self.key_hint_is_active(keybind_id, key)
+            && let Some((left, top, right, bottom)) =
+                mesh_core_interaction::find_node_bounds_by_key(root, key, 0.0, 0.0)
+        {
+            let label = mesh_core_config::keybinds::KeyChord::parse(shortcut)
+                .map_or_else(|| shortcut.to_string(), |chord| chord.display());
+            hints.push(mesh_core_render::KeyHint {
+                x: left,
+                y: top,
+                width: right - left,
+                height: bottom - top,
+                label,
+            });
+        }
+        for child in &node.children {
+            self.collect_key_hints_from(root, child, shortcuts, hints);
+        }
+    }
     pub(super) fn paint_selected_pixels(
         &self,
         session: &mut PixelCanvasSession<'_>,

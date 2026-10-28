@@ -1,0 +1,51 @@
+{
+  "name": "@mesh/orbit-bar",
+  "version": "0.1.0",
+  "description": "Orbit island and floating controls",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "optionalInterfaces": {
+        "mesh.media": ">=1.0",
+        "mesh.wm": ">=1.0",
+        "mesh.network": ">=1.0",
+        "mesh.power": ">=1.0"
+      },
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      },
+      "capabilities": [
+        "shell.surface",
+        "theme.read",
+        "service.media.read",
+        "service.media.control",
+        "service.wm.read",
+        "service.wm.control",
+        "service.network.read",
+        "service.power.read"
+      ],
+      "modules": {
+        "@mesh/profile-switcher": ">=0.1.0"
+      }
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "top",
+      "layer": "top",
+      "keyboard_mode": "on_demand",
+      "visible_on_start": true
+    },
+    "provides": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Orbit island and floating controls"
+        }
+      ]
+    }
+  }
+}

@@ -2,7 +2,7 @@
 
 > Part of the [MESH Specification](README.md).
 
-Keyboard behavior has three layers, each with one owner: **traversal and
+Keyboard behavior has four layers, each with one owner: **traversal and
 activation** (shell-owned, uniform everywhere), **keybind actions**
 (module-declared contributions, user-remappable), and **focus policy per
 surface** (`keyboard_mode` + runtime focus transfers, shell-owned).
@@ -107,6 +107,76 @@ conflicts across the installed graph. Resolved bindings surface as
 accessibility shortcut metadata ([09 §1](09-accessibility.md)) and in
 `mesh.debug.keybinds`.
 
+### 2.1 Scopes
+
+**Status: shipped.**
+
+An action's `scope` says where it is active. A narrower scope answers first when
+two actions share a key.
+
+| Scope | Declared by | Active when |
+| ----- | ----------- | ----------- |
+| `focus` | module manifest (`"scope": "focus"`) | focus is inside the element that subscribes to the action |
+| `surface` | module manifest (default) | the declaring surface holds the keyboard |
+| shell | core (table below) | any MESH surface holds the keyboard; resolved before the surface |
+
+A `focus` action subscribes on a container
+(`<column keybind="volume.step" onkeybind={…}>`) and is silent while focus is
+elsewhere. Reserved keys (Tab, Enter, Space, Escape, arrows, Home/End,
+PageUp/PageDown, Backspace, Delete) are never given to an auto action.
+
+### 2.2 Automatic keys
+
+**Status: shipped.**
+
+`"trigger": { "kind": "auto" }` declares an action with no fixed key. The shell
+gives it the first free key in the user's `shell.keyboard.key_priority` (for
+example `"qwertasd"`), skipping keys that explicit bindings, overrides and other
+auto actions hold. Actions are taken in action-id order. Assignments are saved
+to `shell.keyboard.assigned[surface][action]` and reused while still valid, so
+adding an action never moves existing keys. An action that finds no free key is
+left unbound with a diagnostic and is listed as such in the help window.
+Single unmodified printable keys never fire while an editable text control has
+focus.
+
+### 2.3 Shell actions
+
+**Status: shipped.**
+
+Core declares these and resolves them before any surface; each is remappable
+under `shell.keyboard.shell_shortcuts` (`{ "help": { "key": "ctrl+/" } }`).
+
+| Action | Default | Effect |
+| ------ | ------- | ------ |
+| `help` | `F1` | Toggle the keybind help window (`@mesh/keybind-help`) |
+| `hints` | `Ctrl+H` | Show each bound control's key on the control |
+| `debug_overlay` | `Ctrl+Shift+D` | Toggle the developer overlay |
+| `debug_picker` | `Ctrl+Shift+C` | Pick an element to inspect |
+
+### 2.4 Key hints
+
+**Status: shipped.**
+
+The `hints` chord draws a small key cap in a corner of every control that has a
+binding on the focused surface, styled like a tooltip so any theme restyles it.
+`shell.keyboard.hint_mode` is `hold` (visible while the chord is down), `toggle`
+(each press flips them) or `both` (default: hold to peek, tap within 250 ms to
+keep them on). `Escape` clears sticky hints. `shell.keyboard.hint_corner` is
+`top-left`, `top-right` (default), `bottom-left` or `bottom-right`. A
+`focus`-scoped action is hinted only while focus is inside its component. Hints
+repaint the whole surface and cost nothing while off.
+
+### 2.5 Help window
+
+**Status: shipped.**
+
+`F1` opens `@mesh/keybind-help`, an ordinary module reading the core
+`mesh.keybinds` service (`entries`, `revision`; method `remap(surface, action,
+key)`). It lists the surface that held the keyboard when it opened first
+("Here"), then the shell actions, then every other surface, with label,
+description and binding, and filters by name or key. Focus-scoped actions whose
+component is not focused are dimmed.
+
 ## 3. Surface keyboard policy (`keyboard_mode`)
 
 **Status: shipped.**
@@ -182,12 +252,18 @@ All keyboard user configuration lives in the settings store
     "slider_increment_keys": ["ArrowRight", "ArrowUp"],
     "surface_shortcuts": {
       "@mesh/navigation-bar": { "mute": { "key": "u" } }
-    }
+    },
+    "key_priority": "qwertasd",
+    "hint_mode": "both",
+    "hint_corner": "top-right",
+    "shell_shortcuts": { "help": { "key": "F1" } },
+    "assigned": { "@mesh/glass-dock": { "radial": "a" } }
   }
 }
 ```
 
-The generated settings UI lists every module's declared actions (label,
+`key_priority` defaults to `"asdfqwertzxcvbnm"`. `assigned` is written by the
+shell. The generated settings UI lists every module's declared actions (label,
 category, current effective binding, conflicts) and writes
 `surface_shortcuts` entries.
 

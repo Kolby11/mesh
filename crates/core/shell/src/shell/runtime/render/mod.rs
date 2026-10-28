@@ -102,6 +102,8 @@ impl Shell {
             self.font_renderer_revision = font_revision;
         }
 
+        let mut keybind_requests = self.sync_keybind_service_state()?;
+        self.enqueue_effects(std::mem::take(&mut keybind_requests));
         if self.debug.enabled {
             let mut debug_requests = self.publish_debug_snapshot()?;
             self.enqueue_effects(std::mem::take(&mut debug_requests));

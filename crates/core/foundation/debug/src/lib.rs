@@ -65,6 +65,12 @@ pub struct DebugKeybindEntry {
     pub trigger_kind: String,
     pub source: String,
     pub accessibility_shortcut: String,
+    /// `shell`, `surface` or `focus`: where the binding is active.
+    pub scope: String,
+    /// False for a focus-scoped binding while focus is outside its component.
+    pub active: bool,
+    /// The surface had keyboard focus when the help window was opened.
+    pub focused: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]

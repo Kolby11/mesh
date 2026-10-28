@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "revision": 45,
+  "revision": 61,
   "from": {
     "module": "@mesh/glass"
   },
@@ -12,20 +12,23 @@
   "settings": {
     "shell": {
       "fonts": {
-        "ui_family": "FiraCode Nerd Font Mono"
+        "ui_family": "JetBrainsMono NFM"
       },
       "i18n": {
         "fallback_locale": "en",
-        "locale": "en",
+        "locale": "sk",
         "policy": "manual"
       },
       "icons": {
-        "default_pack": "Bibata-Modern-Ice-Right"
+        "default_pack": "Bibata-Modern-Classic-Right"
       },
       "render": {
         "backdrop": {
-          "image": "/home/kolby/Pictures/Wallpapers/space-panels.png"
+          "image": "/home/kolby/Pictures/Wallpapers/forest.jpg"
         }
+      },
+      "theme": {
+        "active": "@mesh/violet-glass:violet-glass"
       }
     }
   }

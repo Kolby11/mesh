@@ -818,6 +818,54 @@ impl Shell {
         self.commit_control_plane_settings(candidate, Some((theme, watch)), None, true, false)
     }
 
+    /// Merge a patch into `shell.keyboard.<field>`. Losing the write to a
+    /// concurrent settings commit only delays it: the component derives the same
+    /// value again, so the failure is logged rather than raised.
+    pub(in crate::shell) fn apply_set_keyboard_setting(
+        &mut self,
+        field: &str,
+        value: serde_json::Value,
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
+        let remove = value.is_null();
+        let patch = serde_json::json!({ "keyboard": { field: value } });
+        let candidate = match self.prepare_control_plane_settings(|shared, profile| {
+            if let Some(profile) = profile {
+                let target = profile
+                    .settings
+                    .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+                    .or_insert_with(|| serde_json::json!({}));
+                if remove {
+                    if let Some(keyboard) = target
+                        .get_mut("keyboard")
+                        .and_then(serde_json::Value::as_object_mut)
+                    {
+                        keyboard.remove(field);
+                    }
+                } else {
+                    mesh_core_config::merge_json(target, &patch);
+                }
+            } else if remove {
+                shared.unset_namespace_field(mesh_core_config::SHELL_NAMESPACE, "keyboard", field);
+            } else {
+                shared.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
+            }
+            Ok(())
+        }) {
+            Ok(candidate) => candidate,
+            Err(error) => {
+                tracing::warn!("keyboard setting '{field}' not saved: {error}");
+                return Ok(VecDeque::new());
+            }
+        };
+        match self.commit_control_plane_settings(candidate, None, None, false, false) {
+            Ok(requests) => Ok(requests),
+            Err(error) => {
+                tracing::warn!("keyboard setting '{field}' not saved: {error}");
+                Ok(VecDeque::new())
+            }
+        }
+    }
+
     /// Select the image `refract()` samples and the glass wallpaper paints.
     /// The path must name a readable image file; the write lands where the
     /// other appearance settings do (the active profile, else shared).

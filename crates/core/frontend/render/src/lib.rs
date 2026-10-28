@@ -49,7 +49,7 @@ pub use proof::{
 pub use render_object::{RenderObjectDirtySummary, RenderObjectFingerprint, RenderObjectTree};
 pub use surface::{
     BackdropFrame, BlurQuality, DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot,
-    FrontendRenderEngine, GlyphAxes, MAX_BLUR_PASSES, PaintCommandAttribution, PaintCommandClass,
+    FrontendRenderEngine, GlyphAxes, KeyHint, KeyHintCorner, paint_key_hints_in_session, MAX_BLUR_PASSES, PaintCommandAttribution, PaintCommandClass,
     PaintCommandClassMetrics, PaintProfilingMetrics, PainterBackendSnapshot,
     PainterCapabilitySnapshot, PainterDiagnosticSnapshot, PixelBuffer, PixelCanvasSession,
     RasterCanvas, RasterMetrics, RasterReplay, ResourcePaintConsumer, ResourcePaintScope,

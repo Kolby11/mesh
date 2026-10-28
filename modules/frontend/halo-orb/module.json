@@ -1,0 +1,58 @@
+{
+  "name": "@mesh/halo-orb",
+  "version": "0.1.0",
+  "description": "Always-visible orb that opens the radial launcher, with the shell switcher beside it.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      },
+      "capabilities": [
+        "shell.surface",
+        "theme.read"
+      ],
+      "modules": {
+        "@mesh/profile-switcher": ">=0.1.0",
+        "@mesh/radial-launcher": ">=0.1.0"
+      }
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "bottom",
+      "layer": "top",
+      "keyboard_mode": "on_demand",
+      "visible_on_start": true
+    },
+    "provides": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Halo orb"
+        }
+      ]
+    },
+    "accessibility": {
+      "role": "toolbar"
+    },
+    "icons": {
+      "ignore_shell_default": true
+    },
+    "contributes": {
+      "keybinds": {
+        "launcher": {
+          "label": "Open the radial launcher",
+          "description": "Show or hide the radial launcher of apps",
+          "category": "Halo",
+          "trigger": {
+            "kind": "auto"
+          }
+        }
+      }
+    }
+  }
+}

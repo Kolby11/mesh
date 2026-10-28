@@ -587,6 +587,13 @@ pub struct KeybindTrigger {
 impl KeybindTrigger {
     fn validate(&self, action_id: &str, field_path: &str) -> Result<(), String> {
         match self.kind {
+            KeybindTriggerKind::Auto => {
+                if self.key.is_some() {
+                    return Err(format!(
+                        "{field_path}.{action_id}.trigger.key must be omitted for an auto trigger"
+                    ));
+                }
+            }
             KeybindTriggerKind::Shortcut | KeybindTriggerKind::AccessKey => {
                 if self.key.as_ref().is_some_and(|key| key.trim().is_empty()) {
                     return Err(format!(
@@ -626,6 +633,8 @@ pub enum KeybindScope {
     #[default]
     Surface,
     Access,
+    /// Active only while focus is inside the subscribing element.
+    Focus,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -634,6 +643,8 @@ pub enum KeybindTriggerKind {
     #[default]
     Shortcut,
     AccessKey,
+    /// No fixed key: the shell assigns one from the user's key priority list.
+    Auto,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

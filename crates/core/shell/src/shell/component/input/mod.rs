@@ -2,6 +2,7 @@ use super::*;
 
 mod focus;
 mod keyboard;
+pub(in crate::shell::component) use keyboard::KeyHintState;
 mod widgets;
 
 use focus::selectable_text_target_key;

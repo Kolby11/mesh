@@ -18,6 +18,7 @@ pub enum UiTag {
     Scroll,
     Icon,
     Image,
+    Shape,
     List,
     ListItem,
     Separator,
@@ -40,6 +41,7 @@ impl UiTag {
             UiTag::Scroll => "scroll",
             UiTag::Icon => "icon",
             UiTag::Image => "image",
+            UiTag::Shape => "shape",
             UiTag::List => "column",
             UiTag::ListItem => "row",
             UiTag::Separator => "box",
@@ -61,6 +63,7 @@ impl UiTag {
             "scroll" => Self::Scroll,
             "icon" => Self::Icon,
             "image" => Self::Image,
+            "shape" => Self::Shape,
             _ => Self::Unknown,
         }
     }

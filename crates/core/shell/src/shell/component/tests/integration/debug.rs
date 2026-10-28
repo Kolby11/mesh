@@ -514,6 +514,7 @@ pub(in crate::shell) fn settings_catalog() -> InterfaceCatalog {
         "mesh.packages",
         "mesh.theme",
         "mesh.locale",
+        "mesh.keybinds",
     ] {
         for contract in builtins.contracts_for(interface) {
             catalog.register_contract(contract);

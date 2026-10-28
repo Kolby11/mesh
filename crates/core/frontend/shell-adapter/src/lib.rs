@@ -609,6 +609,12 @@ pub enum CoreRequest {
     SetIconTheme {
         theme_id: String,
     },
+    /// Merge `value` into `shell.keyboard.<field>` (a patch, so nested maps
+    /// keep their other entries). Used to persist auto-assigned keys.
+    SetKeyboardSetting {
+        field: String,
+        value: serde_json::Value,
+    },
     SetFontFamily {
         family: String,
     },

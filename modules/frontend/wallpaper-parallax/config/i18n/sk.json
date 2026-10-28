@@ -1,0 +1,20 @@
+{
+  "picker.title": "Tapety",
+  "picker.empty": "V {directory} nie sú žiadne obrázky",
+  "picker.unavailable": "Priečinok s tapetami sa nedá prečítať",
+  "picker.use": "Použiť {name} ako tapetu",
+  "picker.current": "{name}, aktuálna tapeta",
+  "prop.side_cards": "Karty na každej strane",
+  "prop.parallax": "Posun obrázka na kartu",
+  "prop.skew": "Sklon kariet",
+  "prop.close_on_apply": "Zavrieť po výbere tapety",
+  "prop.offset_top": "Vzdialenosť pod panelom",
+  "keybind.close": "Zavrieť výber tapiet",
+  "keybind.previous": "Predchádzajúca tapeta",
+  "keybind.next": "Ďalšia tapeta",
+  "keybind.page_previous": "O stranu späť",
+  "keybind.page_next": "O stranu ďalej",
+  "keybind.apply": "Použiť túto tapetu",
+  "keybind.select": "Použiť túto tapetu",
+  "keybind.category": "Tapety"
+}

@@ -77,6 +77,7 @@ fn canonical_fallback(name: &str) -> Option<&'static str> {
         "wifi" => "network-wireless",
         "volume" => "audio-volume-high",
         "volume-off" => "audio-volume-muted",
+        "lock" => "system-lock-screen",
         _ => return None,
     })
 }

@@ -333,6 +333,9 @@ pub(super) fn parse_ipc_command(command: &str) -> Option<CoreRequest> {
         });
     }
     match command {
+        "shell:keys_help" => Some(CoreRequest::ToggleSurface {
+            surface_id: crate::shell::KEYBIND_HELP_SURFACE.into(),
+        }),
         "shell:debug_overlay" => Some(CoreRequest::ToggleDebugOverlay),
         "shell:debug_layout_bounds" => Some(CoreRequest::ToggleDebugLayoutBounds),
         "shell:debug_element_picker" => Some(CoreRequest::ToggleDebugElementPicker),

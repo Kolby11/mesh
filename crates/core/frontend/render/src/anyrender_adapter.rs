@@ -181,7 +181,8 @@ pub fn encode_command_to_scene(
         }
         DisplayPaintContent::Slider(_)
         | DisplayPaintContent::Input(_)
-        | DisplayPaintContent::Checkmark(_) => {
+        | DisplayPaintContent::Checkmark(_)
+        | DisplayPaintContent::Shape(_) => {
             // DEFERRED per Phase 49 D-10: controls stay on the software painter
             // until their full lossless command subset is specified.
         }

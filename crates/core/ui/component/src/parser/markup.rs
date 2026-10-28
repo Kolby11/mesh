@@ -1085,6 +1085,7 @@ fn is_reserved_pascal_primitive(tag: &str) -> bool {
             | "Badge"
             | "Progress"
             | "Meter"
+            | "Shape"
             | "Tooltip"
             | "Avatar"
             | "Shortcut"
@@ -1167,6 +1168,7 @@ fn lowercase_primitive_name(tag: &str) -> &'static str {
         "Badge" => "badge",
         "Progress" => "progress",
         "Meter" => "meter",
+        "Shape" => "shape",
         "Tooltip" => "tooltip",
         "Avatar" => "avatar",
         "Shortcut" => "shortcut",

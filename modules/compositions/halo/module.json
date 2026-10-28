@@ -1,0 +1,62 @@
+{
+  "name": "@mesh/halo",
+  "version": "0.1.0",
+  "description": "A bare desktop with one orb that opens a radial launcher of apps, a clock hub and media wedges.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "composition",
+    "uses": {
+      "modules": {
+        "@mesh/halo-orb": ">=0.1.0",
+        "@mesh/radial-launcher": ">=0.1.0",
+        "@mesh/settings": ">=0.1.0",
+        "@mesh/debug-inspector": {
+          "version": ">=0.1.0",
+          "optional": true
+        },
+        "@mesh/keybind-help": ">=0.1.0"
+      }
+    },
+    "compose": {
+      "roots": {
+        "@mesh/halo-orb#default": {
+          "module": "@mesh/halo-orb",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/radial-launcher#default": {
+          "module": "@mesh/radial-launcher",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/settings#default": {
+          "module": "@mesh/settings",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/debug-inspector#default": {
+          "module": "@mesh/debug-inspector",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/keybind-help#default": {
+          "module": "@mesh/keybind-help",
+          "entrypoint": "main",
+          "active": true
+        }
+      },
+      "providers": {
+        "mesh.apps": "@mesh/hyprland-apps",
+        "mesh.media": "@mesh/mpris-media",
+        "mesh.wm": "@mesh/hyprland-wm",
+        "mesh.audio": "@mesh/pipewire-audio"
+      },
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols",
+          "@mesh/icons-default"
+        ]
+      }
+    }
+  }
+}

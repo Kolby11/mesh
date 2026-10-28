@@ -822,6 +822,28 @@ mod tests {
     }
 
     #[test]
+    fn skew_pivots_on_the_transform_origin_and_inverts_for_hit_testing() {
+        let mut node = WidgetNode::new("box");
+        node.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 20.0,
+            height: 40.0,
+        };
+        node.computed_style.transform.skew_x = std::f32::consts::FRAC_PI_4;
+        let world = node_transform(root_transform(0.0, 0.0), &node);
+        let (top_x, _) = world.transform_point(0.0, 0.0);
+        let (centre_x, _) = world.transform_point(10.0, 20.0);
+        let (bottom_x, _) = world.transform_point(0.0, 40.0);
+        assert!((top_x + 20.0).abs() < 0.001);
+        assert!((centre_x - 10.0).abs() < 0.001);
+        assert!((bottom_x - 20.0).abs() < 0.001);
+        let (local_x, local_y) = world.inverse().unwrap().transform_point(bottom_x, 40.0);
+        assert!(local_x.abs() < 0.001);
+        assert!((local_y - 40.0).abs() < 0.001);
+    }
+
+    #[test]
     fn affine_transform_uses_origin_and_inverse_for_rotated_geometry() {
         let mut node = WidgetNode::new("box");
         node.layout = LayoutRect {

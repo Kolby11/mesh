@@ -12,6 +12,7 @@ pub mod lru;
 pub mod popover;
 pub mod prop;
 pub mod pseudo_state;
+pub mod shape;
 pub mod style;
 /// Element model and UI algorithms for MESH.
 ///
@@ -67,6 +68,7 @@ pub use popover::{
     PopoverPlacementField,
 };
 pub use prop::{ChangeClass, Prop, PropType};
+pub use shape::{ShapeGeometry, ShapeKind, ShapeOp};
 pub use pseudo_state::{
     PSEUDO_STATE_TABLE, PseudoState, PseudoStateKind, PseudoStateSpec, authored_element_state,
     pseudo_state_mask, pseudo_state_specs,

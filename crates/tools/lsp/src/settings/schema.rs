@@ -246,6 +246,15 @@ fn doc_for(path: &str) -> &'static str {
         "shell.keyboard.toggle_activation_keys" => "Keys that flip a focused toggle.",
         "shell.keyboard.slider_decrement_keys" => "Keys that decrease a focused slider.",
         "shell.keyboard.slider_increment_keys" => "Keys that increase a focused slider.",
+        "shell.keyboard.key_priority" => {
+            "Keys handed to `auto` keybind actions, most preferred first, e.g. `\"qwertasd\"`."
+        }
+        "shell.keyboard.hint_mode" => "Key hints: `hold`, `toggle` or `both` (tap toggles, hold shows).",
+        "shell.keyboard.hint_corner" => "Corner of a control that shows its key hint.",
+        "shell.keyboard.shell_shortcuts" => {
+            "Overrides for shell-owned actions: action id → `{ \"key\": \"ctrl+h\" }`."
+        }
+        "shell.keyboard.assigned" => "Auto-assigned keys kept per surface: surface id → action id → key.",
         "shell.keyboard.surface_shortcuts" => {
             "Per-module keybind overrides: module id → action name → `{ \"key\": … }`."
         }

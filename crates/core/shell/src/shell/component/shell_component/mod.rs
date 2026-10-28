@@ -1486,6 +1486,16 @@ impl ShellComponent for FrontendSurfaceComponent {
         {
             effective_damage.rect = bounding_damage_rect(&effective_damage.rects, surface_damage);
         }
+        // Key caps sit on top of the surface's pixels, so showing, moving or
+        // removing them repaints the whole surface.
+        if (self.key_hints_visible() || self.key_hints.repaint) && !effective_damage.full_surface {
+            effective_damage = EffectiveDamage {
+                rects: vec![surface_damage],
+                rect: Some(surface_damage),
+                full_surface: true,
+                policy: DisplayListRepaintPolicy::FullSurface,
+            };
+        }
         let complete_scene = canvas.is_scene();
         let has_parent_damage = !effective_damage.rects.is_empty();
         if has_parent_damage && let SurfaceCanvas::Scene(scene) = canvas {
@@ -1659,7 +1669,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         let paint_metrics = session
             .as_mut()
             .map(|session| {
-                self.paint_pixel_regions(
+                let metrics = self.paint_pixel_regions(
                     theme,
                     session,
                     scale,
@@ -1668,9 +1678,14 @@ impl ShellComponent for FrontendSurfaceComponent {
                     paint_bounding_rect,
                     tooltip.as_ref(),
                     current_tooltip_damage,
-                )
+                );
+                if record_damage.full_surface && self.key_hints_visible() {
+                    self.paint_key_hints(session, scale, &tree);
+                }
+                metrics
             })
             .unwrap_or_default();
+        self.key_hints.repaint = false;
         self.advance_interaction_frame(mesh_core_interaction::InteractionFramePhase::PaintReady);
         self.retained_display_list.mark_painted();
         if effective_damage.full_surface {

@@ -118,7 +118,17 @@ pub(crate) fn node_contains_with_transform(
         return false;
     };
     let (local_x, local_y) = inverse.transform_point(x, y);
-    local_x >= 0.0 && local_x < node.layout.width && local_y >= 0.0 && local_y < node.layout.height
+    if !(local_x >= 0.0
+        && local_x < node.layout.width
+        && local_y >= 0.0
+        && local_y < node.layout.height)
+    {
+        return false;
+    }
+    match mesh_core_elements::ShapeGeometry::from_node(node) {
+        Some(shape) => shape.contains(local_x, local_y),
+        None => true,
+    }
 }
 
 pub(crate) fn node_world_transform(parent: AffineTransform, node: &WidgetNode) -> AffineTransform {

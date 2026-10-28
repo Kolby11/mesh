@@ -15,6 +15,12 @@
                 </button>
                 <box class="dot" />
             </column>
+            <column class="slot">
+                <button class="tile" aria-label={t("launcher.radial")} title={t("launcher.radial")} onclick={onRadial} keybind="radial" onkeybind={onRadial}>
+                    <icon class="launcher-glyph" name="view-grid" size="30" />
+                </button>
+                <box class="dot" />
+            </column>
             <box class="dock-divider" />
             {#for app in apps key={app.id}}
                 <column class="slot">
@@ -70,6 +76,7 @@ end)
 
 function onHover(index) hovered_index = index end
 function onLeave() hovered_index = 0 end
+function onRadial() mesh.shell.toggle_surface("@mesh/radial-launcher") end
 
 function onActivate(id)
     apps_service.activate(id)

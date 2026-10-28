@@ -8,5 +8,9 @@
   "launcher.no_match": "No matching applications",
   "launcher.list": "List view",
   "launcher.grid": "Grid view",
-  "launcher.installed": "Installed"
+  "launcher.installed": "Installed",
+  "launcher.radial": "Radial launcher",
+  "keybind.radial.label": "Radial launcher",
+  "keybind.radial.description": "Show or hide the radial launcher of apps",
+  "keybind.category": "Dock"
 }

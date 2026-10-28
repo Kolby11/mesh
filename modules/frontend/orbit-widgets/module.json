@@ -1,0 +1,37 @@
+{
+  "name": "@mesh/orbit-widgets",
+  "version": "0.1.0",
+  "description": "Orbit desktop cards",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "optionalInterfaces": {},
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      },
+      "capabilities": [
+        "shell.surface",
+        "theme.read"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "top",
+      "layer": "bottom",
+      "keyboard_mode": "on_demand",
+      "visible_on_start": true
+    },
+    "provides": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Orbit desktop cards"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,11 @@
+<template>
+    <row class="bar"><WorkspaceStrip /><Island /><StatusStrip /></row>
+</template>
+<script lang="luau">
+local WorkspaceStrip = require("./components/workspace-strip.mesh")
+local Island = require("./components/island.mesh")
+local StatusStrip = require("./components/status-strip.mesh")
+</script>
+<style>
+.bar { width: 100%; height: 164px; align-items: flex-start; justify-content: center; gap: 8px; background: transparent; exclusive-zone: none; }
+</style>

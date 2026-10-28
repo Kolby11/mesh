@@ -1463,3 +1463,31 @@ fn oversized_theme_changes_keep_inspectable_deltas_and_individual_events() {
         "stale_revision"
     );
 }
+
+#[test]
+fn keyboard_settings_merge_and_a_null_patch_removes_the_saved_assignments() {
+    let _env_lock = settings_env_lock();
+    let dir = tempfile::tempdir().unwrap();
+    let settings_path = dir.path().join("settings.json");
+    fs::write(&settings_path, r#"{"shell":{"keyboard":{"hint_mode":"hold"}}}"#).unwrap();
+    let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
+    let _graph_path = isolated_module_graph(dir.path());
+    let mut shell = Shell::new();
+
+    shell
+        .apply_set_keyboard_setting(
+            "assigned",
+            serde_json::json!({ "@mesh/dock": { "radial": "q" } }),
+        )
+        .unwrap();
+    let persisted = mesh_core_config::SettingsStore::load_from(&settings_path).unwrap();
+    assert_eq!(persisted.shell().keyboard.assigned["@mesh/dock"]["radial"], "q");
+    assert_eq!(persisted.shell().keyboard.hint_mode, "hold", "sibling fields survive");
+
+    shell
+        .apply_set_keyboard_setting("assigned", serde_json::Value::Null)
+        .unwrap();
+    let persisted = mesh_core_config::SettingsStore::load_from(&settings_path).unwrap();
+    assert!(persisted.shell().keyboard.assigned.is_empty());
+    assert_eq!(persisted.shell().keyboard.hint_mode, "hold");
+}

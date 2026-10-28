@@ -136,6 +136,7 @@ props! {
     Default = "default": Bool, STYLE | A11Y;
     Description = "description": Text, A11Y;
     Destructive = "destructive": Bool, STYLE;
+    End = "end": Number, PAINT | HIT;
     Disabled = "disabled": Bool, STYLE | PAINT | A11Y | HIT;
     Expanded = "expanded": Bool, STYLE | A11Y;
     FocusScope = "focus-scope": Bool, HIT;
@@ -149,6 +150,7 @@ props! {
     Href = "href": Text, A11Y | HIT;
     Id = "id": Text, STYLE | A11Y | STRUCTURE;
     Indeterminate = "indeterminate": Bool, STYLE | PAINT | A11Y;
+    Inner = "inner": Number, PAINT | HIT;
     Inert = "inert": Bool, A11Y | HIT;
     Invalid = "invalid": Bool, STYLE | A11Y;
     Justify = "justify": Text, LAYOUT;
@@ -176,6 +178,7 @@ props! {
     OverflowX = "overflow-x": Text, LAYOUT | PAINT;
     OverflowY = "overflow-y": Text, LAYOUT | PAINT;
     Part = "part": Text, STYLE;
+    Points = "points": Text, PAINT | HIT;
     Placeholder = "placeholder": Text, PAINT | A11Y;
     Pressed = "pressed": Bool, STYLE | A11Y;
     Readonly = "readonly": Bool, STYLE | A11Y;
@@ -191,6 +194,7 @@ props! {
     Selected = "selected": Bool, STYLE | PAINT | A11Y;
     Shortcut = "shortcut": Text, A11Y;
     Size = "size": Number, LAYOUT | PAINT;
+    Start = "start": Number, PAINT | HIT;
     Slot = "slot": Text, STRUCTURE;
     Spacing = "spacing": Number, LAYOUT;
     Src = "src": Text, LAYOUT | PAINT;

@@ -1,0 +1,926 @@
+# Coverage inventory
+
+Inventory from `rg --files` on 2026-10-27 and workspace metadata via `nix develop`. Each listed file has one primary section; cross-section callers are inspected as needed. Documentation and binary/image/font assets are excluded from the assignment but relevant specifications and historical reports are review inputs. Build output, ignored files, vendored dependencies and `.git` are excluded. Counts and review status are provisional while the audit is in progress. New workspace crates `files`, `expression`, `frontend/abi`, `frontend/runtime`, `frontend/shell-adapter`, and `surface-policy` are assigned to their closest owning sections.
+
+## Section 01 — 14 files
+
+Inspected: 14. Remaining: 0. [Section report](sections/01-core-foundation-contracts.md).
+
+- `crates/core/foundation/config/Cargo.toml`
+- `crates/core/foundation/diagnostics/Cargo.toml`
+- `crates/core/foundation/config/src/lib.rs`
+- `crates/core/foundation/config/src/validate.rs`
+- `crates/core/foundation/config/src/settings.rs`
+- `crates/core/foundation/config/src/control_plane.rs`
+- `crates/core/foundation/files/Cargo.toml`
+- `crates/core/foundation/diagnostics/src/lib.rs`
+- `crates/core/foundation/files/src/lib.rs`
+- `crates/core/foundation/capability/Cargo.toml`
+- `crates/core/foundation/capability/src/lib.rs`
+- `crates/core/foundation/debug/Cargo.toml`
+- `crates/core/foundation/debug/src/lib.rs`
+- `crates/core/foundation/debug/src/allocation.rs`
+
+## Section 02 — 131 files
+
+Inspected: 131 across the three review layers. Remaining: 0. Manifest review
+and external callers have the limits described in the [section report](sections/02-module-system-and-installation.md).
+
+- `modules/themes/tokyo-night/module.json`
+- `modules/themes/violet-glass/module.json`
+- `modules/themes/solarized-dark/module.json`
+- `modules/themes/frutiger-aero/module.json`
+- `modules/interfaces/power/module.json`
+- `modules/themes/nord/module.json`
+- `modules/interfaces/tray/module.json`
+- `modules/themes/gruvbox-dark/module.json`
+- `modules/interfaces/recorder/module.json`
+- `modules/themes/catppuccin-mocha/module.json`
+- `modules/interfaces/audio/module.json`
+- `modules/themes/mesh-default/module.json`
+- `modules/interfaces/notifications/module.json`
+- `modules/interfaces/brightness/module.json`
+- `modules/interfaces/weather/module.json`
+- `modules/interfaces/apps/module.json`
+- `modules/interfaces/network/module.json`
+- `modules/interfaces/media/module.json`
+- `modules/interfaces/visualizer/module.json`
+- `modules/interfaces/wallpapers/module.json`
+- `modules/interfaces/shell-ui/module.json`
+- `modules/interfaces/device/module.json`
+- `modules/interfaces/wm/module.json`
+- `modules/interfaces/system/module.json`
+- `modules/backend/cava-visualizer/module.json`
+- `modules/backend/freedesktop-notifications/module.json`
+- `modules/libraries/glass-material/module.json`
+- `modules/libraries/volume-presentation/module.json`
+- `modules/backend/backlight-brightness/module.json`
+- `modules/backend/wallpaper-directory/module.json`
+- `modules/backend/status-notifier-tray/module.json`
+- `modules/backend/networkmanager-network/module.json`
+- `modules/backend/upower-power/module.json`
+- `modules/backend/pipewire-audio/module.json`
+- `modules/backend/pulseaudio-audio/module.json`
+- `crates/core/extension/module/Cargo.toml`
+- `modules/backend/proc-system/module.json`
+- `modules/compositions/orbit/module.json`
+- `modules/backend/wf-recorder/module.json`
+- `modules/backend/hyprland-apps/module.json`
+- `crates/core/extension/module/src/lib.rs`
+- `modules/compositions/glass/module.json`
+- `modules/backend/device-info/module.json`
+- `modules/compositions/desk/module.json`
+- `modules/backend/open-meteo-weather/module.json`
+- `crates/core/extension/module/src/package.rs`
+- `modules/backend/hyprland-wm/module.json`
+- `crates/core/extension/module/src/manifest/tests.rs`
+- `crates/core/extension/module/src/manifest/model.rs`
+- `crates/core/extension/module/src/manifest/graph.rs`
+- `crates/core/extension/module/src/manifest/load.rs`
+- `crates/core/extension/module/src/manifest.rs`
+- `modules/frontend/language-widget/module.json`
+- `crates/core/extension/module/src/package/install_review.rs`
+- `crates/core/extension/module/src/package/module_manifest.rs`
+- `crates/core/extension/module/src/package/error.rs`
+- `crates/core/extension/module/src/package/trust.rs`
+- `crates/core/extension/module/src/package/profile.rs`
+- `crates/core/extension/module/src/package/authoring.rs`
+- `crates/core/extension/module/src/package/content_store.rs`
+- `crates/core/extension/module/src/package/root.rs`
+- `crates/core/extension/module/src/package/composition.rs`
+- `crates/core/extension/module/src/package/fork.rs`
+- `crates/core/extension/module/src/package/schema.rs`
+- `crates/core/extension/module/src/package/preferences.rs`
+- `crates/core/extension/module/src/package/management.rs`
+- `crates/core/extension/module/src/package/lock.rs`
+- `crates/core/extension/module/src/lifecycle.rs`
+- `crates/core/extension/module/src/package/resolution.rs`
+- `crates/core/extension/module/src/package/paths.rs`
+- `crates/core/extension/module/src/package/transaction.rs`
+- `crates/core/extension/module/src/package/util.rs`
+- `crates/core/extension/module/src/package/luau_scan.rs`
+- `modules/backend/mpris-media/module.json`
+- `modules/icon-packs/material-symbols/module.json`
+- `crates/core/extension/module/src/package/installed_graph/health.rs`
+- `crates/core/extension/module/src/package/installed_graph/mod.rs`
+- `crates/core/extension/module/src/package/installed_graph/diagnostics.rs`
+- `crates/core/extension/module/src/package/installed_graph/scan.rs`
+- `crates/core/extension/module/src/package/installed_graph/graph.rs`
+- `crates/core/extension/module/src/package/installed_graph/contributions.rs`
+- `crates/core/extension/module/src/package/installed_graph/token_diagnostics.rs`
+- `crates/core/extension/module/src/package/installed_graph/load.rs`
+- `crates/core/extension/module/src/package/tests/loading.rs`
+- `crates/core/extension/module/src/package/tests/token_contracts.rs`
+- `crates/core/extension/module/src/package/tests/manifest.rs`
+- `crates/core/extension/module/src/package/tests/common.rs`
+- `crates/core/extension/module/src/package/tests/graph.rs`
+- `crates/core/extension/module/src/package/tests/contributions.rs`
+- `crates/core/extension/module/src/package/tests/surfaces.rs`
+- `crates/core/extension/module/src/package/tests/extension_points.rs`
+- `modules/frontend/debug-inspector/module.json`
+- `crates/core/extension/module/src/package/tests/luau_scan.rs`
+- `crates/core/extension/module/src/package/tests/diagnostics.rs`
+- `crates/core/extension/module/src/package/tests/shipped.rs`
+- `modules/frontend/text-selection-proof/module.json`
+- `modules/icon-packs/default/module.json`
+- `crates/core/extension/module/src/package/tests/interfaces.rs`
+- `crates/core/extension/module/src/package/tests/mod.rs`
+- `modules/frontend/clock-widget/module.json`
+- `modules/frontend/orbit-bar/module.json`
+- `modules/frontend/navigation-bar/module.json`
+- `modules/frontend/theme-widget/module.json`
+- `modules/frontend/orbit-widgets/module.json`
+- `modules/frontend/glass-wallpaper/module.json`
+- `modules/frontend/profile-switcher/module.json`
+- `modules/frontend/workspaces-widget/module.json`
+- `modules/frontend/glass-wallpapers/module.json`
+- `modules/frontend/battery-widget/module.json`
+- `modules/frontend/wallpaper-parallax/module.json`
+- `modules/frontend/touch-gesture-proof/module.json`
+- `modules/frontend/quick-settings/module.json`
+- `modules/frontend/glass-bar/module.json`
+- `modules/frontend/wallpaper-carousel/module.json`
+- `modules/frontend/theme-selector/module.json`
+- `modules/frontend/audio-popover/module.json`
+- `modules/frontend/language-popover/module.json`
+- `modules/frontend/blur-test/module.json`
+- `modules/frontend/brightness-widget/module.json`
+- `modules/frontend/settings-widget/module.json`
+- `modules/frontend/window-title-widget/module.json`
+- `modules/frontend/shared/module.json`
+- `modules/frontend/profile-menu/module.json`
+- `modules/frontend/glass-dashboard/module.json`
+- `modules/frontend/glass-notifications/module.json`
+- `modules/frontend/glass-widgets/module.json`
+- `modules/frontend/settings/module.json`
+- `modules/frontend/composition-editor/module.json`
+- `modules/frontend/volume-widget/module.json`
+- `modules/frontend/glass-dock/module.json`
+- `modules/frontend/opacity-test/module.json`
+
+## Section 03 — 6 files
+
+Inspected: 6. Remaining: 0. [Section report](sections/03-service-contracts.md).
+
+- `crates/core/extension/service/Cargo.toml`
+- `crates/core/extension/service/src/lib.rs`
+- `crates/core/extension/service/src/interface.rs`
+- `crates/core/extension/service/src/compatibility.rs`
+- `crates/core/extension/service/src/contract.rs`
+- `crates/core/extension/service/src/generator.rs`
+
+## Section 04 — 18 files
+
+Inspected: 18. Remaining: 0. [Section report](sections/04-themes.md).
+
+- `modules/themes/tokyo-night/theme.css`
+- `modules/themes/violet-glass/theme.css`
+- `modules/themes/solarized-dark/theme.css`
+- `modules/themes/frutiger-aero/dark.css`
+- `modules/themes/frutiger-aero/light.css`
+- `modules/themes/nord/theme.css`
+- `modules/themes/gruvbox-dark/theme.css`
+- `modules/themes/catppuccin-mocha/theme.css`
+- `modules/themes/mesh-default/dark.css`
+- `modules/themes/mesh-default/light.css`
+- `crates/core/foundation/theme/Cargo.toml`
+- `crates/core/foundation/theme/src/lib.rs`
+- `crates/core/foundation/theme/src/transport.rs`
+- `crates/core/foundation/theme/src/contract.rs`
+- `crates/core/foundation/theme/src/platform-defaults.css`
+- `crates/core/foundation/theme/src/css.rs`
+- `crates/core/foundation/theme/src/semantic-tokens-v1.json`
+- `crates/core/foundation/theme/src/parts.rs`
+
+## Section 05 — 3 files
+
+Inspected: 3. Remaining: 0. [Section report](sections/05-localization-i18n.md).
+
+- `crates/core/foundation/locale/Cargo.toml`
+- `crates/core/foundation/locale/src/lib.rs`
+- `crates/core/foundation/locale/src/performance_tests.rs`
+
+## Section 06 — 15 files
+
+Inspected: 15. Remaining: 0. [Section report](sections/06-host-resources-and-icon-packs.md).
+
+- `crates/core/ui/icon/Cargo.toml`
+- `crates/core/ui/icon/src/lib.rs`
+- `crates/core/ui/icon/src/registry.rs`
+- `crates/core/ui/icon/src/bindings.rs`
+- `crates/core/ui/icon/src/fallback.rs`
+- `crates/core/ui/icon/src/xdg.rs`
+- `crates/core/foundation/resources/Cargo.toml`
+- `crates/core/foundation/resources/src/lib.rs`
+- `crates/core/foundation/resources/src/frozen_font.rs`
+- `crates/core/foundation/resources/src/coverage.rs`
+- `crates/core/foundation/resources/src/frozen_font/tests.rs`
+- `crates/core/foundation/resources/src/font.rs`
+- `modules/icon-packs/material-symbols/fetch-codepoints.sh`
+- `modules/icon-packs/material-symbols/codepoints.json`
+- `modules/icon-packs/material-symbols/LICENSE.google-material-icons`
+
+## Section 07 — 18 files
+
+Inspected across review layers: 18. Remaining: 0. The performance pass sampled
+some embedded test bodies; see the [section report](sections/07-component-language.md).
+
+- `crates/core/ui/component/Cargo.toml`
+- `crates/core/ui/component/src/lib.rs`
+- `crates/core/ui/component/src/style.rs`
+- `crates/core/ui/component/src/template.rs`
+- `crates/core/ui/component/src/parser/styles.rs`
+- `crates/core/ui/component/src/parser/luau_literal.rs`
+- `crates/core/ui/component/src/parser/script.rs`
+- `crates/core/ui/component/src/parser/semantic.rs`
+- `crates/core/ui/component/src/parser/markup.rs`
+- `crates/core/ui/component/src/parser/brace.rs`
+- `crates/core/ui/component/src/parser/props.rs`
+- `crates/core/ui/component/src/parser/handler.rs`
+- `crates/core/ui/component/src/parser.rs`
+- `crates/core/ui/component/src/token_usage.rs`
+- `crates/core/ui/component/src/color_literals.rs`
+- `crates/core/ui/component/src/parts.rs`
+- `crates/core/ui/expression/Cargo.toml`
+- `crates/core/ui/expression/src/lib.rs`
+
+## Section 08 — 56 files
+
+Triaged: 56 across all three layers; detailed body and test review remains partial.
+See the [section report](sections/08-ui-element-core.md) for limits and findings.
+
+- `crates/core/ui/elements/Cargo.toml`
+- `crates/core/ui/elements/src/attributes.rs`
+- `crates/core/ui/elements/src/frame_work.rs`
+- `crates/core/ui/elements/src/lib.rs`
+- `crates/core/ui/elements/src/layout/sparse.rs`
+- `crates/core/ui/elements/src/layout/mod.rs`
+- `crates/core/ui/elements/src/layout/tests.rs`
+- `crates/core/ui/elements/src/layout/lowering.rs`
+- `crates/core/ui/elements/src/layout/retained.rs`
+- `crates/core/ui/elements/src/layout/producer.rs`
+- `crates/core/ui/elements/src/prop.rs`
+- `crates/core/ui/elements/src/tree.rs`
+- `crates/core/ui/elements/src/frame.rs`
+- `crates/core/ui/elements/src/frame_dirty.rs`
+- `crates/core/ui/elements/src/bounds_index.rs`
+- `crates/core/ui/elements/src/element/contracts.rs`
+- `crates/core/ui/elements/src/element/mod.rs`
+- `crates/core/ui/elements/src/element/validate.rs`
+- `crates/core/ui/elements/src/element/tests.rs`
+- `crates/core/ui/elements/src/element/snapshot.rs`
+- `crates/core/ui/elements/src/accessibility.rs`
+- `crates/core/ui/elements/src/composition.rs`
+- `crates/core/ui/elements/src/interaction_contract.rs`
+- `crates/core/ui/elements/src/lru.rs`
+- `crates/core/ui/elements/src/popover.rs`
+- `crates/core/ui/elements/src/pseudo_state.rs`
+- `crates/core/ui/elements/src/style/resolve/matching.rs`
+- `crates/core/ui/elements/src/style/resolve/mod.rs`
+- `crates/core/ui/elements/src/style/resolve/cache.rs`
+- `crates/core/ui/elements/src/style/resolve/index.rs`
+- `crates/core/ui/elements/src/style/resolve/value.rs`
+- `crates/core/ui/elements/src/style/resolve/tests/mod.rs`
+- `crates/core/ui/elements/src/style/resolve/tests/typed_operations.rs`
+- `crates/core/ui/elements/src/style/resolve/tests/caching.rs`
+- `crates/core/ui/elements/src/style/resolve/tests/value_resolution.rs`
+- `crates/core/ui/elements/src/style/resolve/tests/theme_defaults.rs`
+- `crates/core/ui/elements/src/style/resolve/tests/application.rs`
+- `crates/core/ui/elements/src/style/resolve/tests/indexing.rs`
+- `crates/core/ui/elements/src/style/resolve/tests/common.rs`
+- `crates/core/ui/elements/src/style/resolve/attrs.rs`
+- `crates/core/ui/elements/src/style/resolve/literal.rs`
+- `crates/core/ui/elements/src/style/resolve/state.rs`
+- `crates/core/ui/elements/src/style/resolve/node.rs`
+- `crates/core/ui/elements/src/style/resolve/declaration.rs`
+- `crates/core/ui/elements/src/style/resolve/subtree.rs`
+- `crates/core/ui/elements/src/style/parse.rs`
+- `crates/core/ui/elements/src/style/mod.rs`
+- `crates/core/ui/elements/src/style/tests/animation.rs`
+- `crates/core/ui/elements/src/style/tests/fixtures.rs`
+- `crates/core/ui/elements/src/style/tests/mod.rs`
+- `crates/core/ui/elements/src/style/tests/diagnostics.rs`
+- `crates/core/ui/elements/src/style/tests/shorthands.rs`
+- `crates/core/ui/elements/src/style/tests/resolution.rs`
+- `crates/core/ui/elements/src/style/tests/properties.rs`
+- `crates/core/ui/elements/src/style/tests/common.rs`
+- `crates/core/ui/elements/src/style/types.rs`
+
+## Section 09 — 19 files
+
+Inspected: 19 across three layers; tests, utility branches and external callers
+were sampled as described in the [section report](sections/09-interaction-and-motion.md).
+
+- `crates/core/ui/interaction/Cargo.toml`
+- `crates/core/ui/interaction/src/lib.rs`
+- `crates/core/ui/interaction/src/scope.rs`
+- `crates/core/ui/interaction/src/frame.rs`
+- `crates/core/ui/interaction/src/transaction.rs`
+- `crates/core/ui/interaction/src/scroll.rs`
+- `crates/core/ui/interaction/src/scroll/overflow_cache.rs`
+- `crates/core/ui/interaction/src/focus.rs`
+- `crates/core/ui/interaction/src/hit_test.rs`
+- `crates/core/ui/animation/Cargo.toml`
+- `crates/core/ui/animation/src/instance.rs`
+- `crates/core/ui/animation/src/lib.rs`
+- `crates/core/ui/animation/src/box_shadow.rs`
+- `crates/core/ui/animation/src/policy.rs`
+- `crates/core/ui/animation/src/transition.rs`
+- `crates/core/ui/animation/src/interpolate.rs`
+- `crates/core/ui/animation/src/easing.rs`
+- `crates/core/ui/animation/src/keyframes.rs`
+- `crates/core/ui/animation/src/transform.rs`
+
+## Section 10 — 139 files
+
+Inspected: pending section review. Remaining: 139.
+
+- `crates/core/frontend/runtime/Cargo.toml`
+- `crates/core/frontend/runtime/src/lib.rs`
+- `crates/core/frontend/runtime/src/service_deps.rs`
+- `crates/core/frontend/runtime/src/tests.rs`
+- `crates/core/frontend/runtime/src/service_deps_tests.rs`
+- `crates/core/frontend/shell-adapter/Cargo.toml`
+- `crates/core/frontend/shell-adapter/src/lib.rs`
+- `crates/core/frontend/abi/Cargo.toml`
+- `crates/core/frontend/abi/src/lib.rs`
+- `crates/core/frontend/compiler/Cargo.toml`
+- `crates/core/frontend/compiler/tests/orbit.rs`
+- `crates/core/frontend/compiler/src/compile.rs`
+- `crates/core/frontend/compiler/src/lib.rs`
+- `crates/core/frontend/compiler/src/tags.rs`
+- `crates/core/frontend/compiler/src/style.rs`
+- `crates/core/frontend/compiler/src/bindings.rs`
+- `crates/core/frontend/compiler/src/accessibility.rs`
+- `crates/core/frontend/compiler/src/render/expr_eval.rs`
+- `crates/core/frontend/compiler/src/render/mod.rs`
+- `crates/core/frontend/compiler/src/render/style_context.rs`
+- `crates/core/frontend/compiler/src/render/tests/attributes.rs`
+- `crates/core/frontend/compiler/src/render/tests/styles.rs`
+- `crates/core/frontend/compiler/src/render/tests/mod.rs`
+- `crates/core/frontend/compiler/src/render/tests/accessibility.rs`
+- `crates/core/frontend/compiler/src/render/tests/tracking.rs`
+- `crates/core/frontend/compiler/src/render/tests/common.rs`
+- `crates/core/frontend/compiler/src/render/elements.rs`
+- `modules/libraries/volume-presentation/lib/volume.luau`
+- `modules/frontend/language-widget/config/i18n/en.json`
+- `modules/frontend/language-widget/config/i18n/sk.json`
+- `modules/frontend/language-widget/src/main.mesh`
+- `modules/frontend/debug-inspector/src/components/surfaces-view.mesh`
+- `modules/frontend/debug-inspector/src/components/elements-view.mesh`
+- `modules/frontend/debug-inspector/src/components/view-tabs.mesh`
+- `modules/frontend/debug-inspector/src/components/modules-view.mesh`
+- `modules/frontend/debug-inspector/src/components/backend-services-view.mesh`
+- `modules/frontend/debug-inspector/src/components/overview-view.mesh`
+- `modules/frontend/debug-inspector/src/components/benchmark-view.mesh`
+- `modules/frontend/debug-inspector/src/main.mesh`
+- `modules/frontend/text-selection-proof/src/main.mesh`
+- `modules/frontend/clock-widget/config/i18n/en.json`
+- `modules/frontend/theme-widget/config/i18n/en.json`
+- `modules/frontend/clock-widget/config/i18n/sk.json`
+- `modules/frontend/theme-widget/config/i18n/sk.json`
+- `modules/frontend/orbit-bar/src/components/workspace-strip.mesh`
+- `modules/frontend/orbit-bar/src/components/status-strip.mesh`
+- `modules/frontend/orbit-bar/src/components/island.mesh`
+- `modules/frontend/orbit-bar/src/main.mesh`
+- `modules/frontend/navigation-bar/src/main.mesh`
+- `modules/frontend/navigation-bar/src/settings.mesh`
+- `modules/frontend/theme-widget/src/main.mesh`
+- `modules/frontend/clock-widget/src/main.mesh`
+- `modules/frontend/orbit-widgets/src/components/usage-card.mesh`
+- `modules/frontend/orbit-widgets/src/components/market-card.mesh`
+- `modules/frontend/orbit-widgets/src/components/activity-card.mesh`
+- `modules/frontend/orbit-widgets/src/main.mesh`
+- `modules/frontend/glass-wallpaper/src/main.mesh`
+- `modules/frontend/glass-bar/config/i18n/en.json`
+- `modules/frontend/glass-bar/config/i18n/sk.json`
+- `modules/frontend/glass-wallpapers/config/i18n/en.json`
+- `modules/frontend/glass-wallpapers/config/i18n/sk.json`
+- `modules/frontend/workspaces-widget/src/main.mesh`
+- `modules/frontend/wallpaper-parallax/config/i18n/en.json`
+- `modules/frontend/wallpaper-parallax/config/i18n/sk.json`
+- `modules/frontend/glass-wallpapers/src/main.mesh`
+- `modules/frontend/profile-switcher/src/main.mesh`
+- `modules/frontend/wallpaper-carousel/config/i18n/en.json`
+- `modules/frontend/wallpaper-carousel/config/i18n/sk.json`
+- `modules/frontend/wallpaper-parallax/src/main.mesh`
+- `modules/frontend/touch-gesture-proof/src/main.mesh`
+- `modules/frontend/audio-popover/config/i18n/en.json`
+- `modules/frontend/audio-popover/config/i18n/sk.json`
+- `modules/frontend/glass-bar/src/components/recorder.mesh`
+- `modules/frontend/glass-bar/src/components/workspaces.mesh`
+- `modules/frontend/glass-bar/src/components/control-center.mesh`
+- `modules/frontend/glass-bar/src/components/now-playing.mesh`
+- `modules/frontend/glass-bar/src/components/status.mesh`
+- `modules/frontend/glass-bar/src/components/clock.mesh`
+- `modules/frontend/glass-bar/src/components/calendar.mesh`
+- `modules/frontend/glass-bar/src/components/weather.mesh`
+- `modules/frontend/glass-bar/src/main.mesh`
+- `modules/frontend/quick-settings/config/i18n/en.json`
+- `modules/frontend/quick-settings/config/i18n/sk.json`
+- `modules/frontend/language-popover/config/i18n/en.json`
+- `modules/frontend/wallpaper-carousel/src/main.mesh`
+- `modules/frontend/battery-widget/config/i18n/en.json`
+- `modules/frontend/language-popover/config/i18n/sk.json`
+- `modules/frontend/battery-widget/config/i18n/sk.json`
+- `modules/frontend/brightness-widget/config/i18n/en.json`
+- `modules/frontend/quick-settings/src/main.mesh`
+- `modules/frontend/brightness-widget/config/i18n/sk.json`
+- `modules/frontend/audio-popover/src/main.mesh`
+- `modules/frontend/settings-widget/config/i18n/en.json`
+- `modules/frontend/settings/config/i18n/en.json`
+- `modules/frontend/settings-widget/config/i18n/sk.json`
+- `modules/frontend/settings/config/i18n/sk.json`
+- `modules/frontend/language-popover/src/main.mesh`
+- `modules/frontend/battery-widget/src/main.mesh`
+- `modules/frontend/theme-selector/config/i18n/en.json`
+- `modules/frontend/theme-selector/config/i18n/sk.json`
+- `modules/frontend/glass-widgets/config/i18n/en.json`
+- `modules/frontend/glass-widgets/config/i18n/sk.json`
+- `modules/frontend/brightness-widget/src/main.mesh`
+- `modules/frontend/blur-test/src/main.mesh`
+- `modules/frontend/settings-widget/src/main.mesh`
+- `modules/frontend/theme-selector/src/main.mesh`
+- `modules/frontend/shared/components/bubble-options.mesh`
+- `modules/frontend/settings/src/components/audio-page.mesh`
+- `modules/frontend/settings/src/main.mesh`
+- `modules/frontend/settings/src/components/wifi-page.mesh`
+- `modules/frontend/settings/src/components/device-info-page.mesh`
+- `modules/frontend/settings/src/components/bluetooth-page.mesh`
+- `modules/frontend/window-title-widget/src/main.mesh`
+- `modules/frontend/settings/src/components/advanced-page.mesh`
+- `modules/frontend/glass-widgets/src/main.mesh`
+- `modules/frontend/settings/src/components/appearance-page.mesh`
+- `modules/frontend/glass-notifications/src/main.mesh`
+- `modules/frontend/composition-editor/src/main.mesh`
+- `modules/frontend/profile-menu/src/main.mesh`
+- `modules/frontend/glass-dashboard/src/main.mesh`
+- `modules/frontend/glass-widgets/src/components/spectrum.mesh`
+- `modules/frontend/glass-widgets/src/components/media-card.mesh`
+- `modules/frontend/volume-widget/src/main.mesh`
+- `modules/frontend/glass-widgets/src/components/size-controls.mesh`
+- `modules/frontend/glass-widgets/src/components/weather-card.mesh`
+- `modules/frontend/glass-dock/src/main.mesh`
+- `modules/frontend/glass-dashboard/config/i18n/sk.json`
+- `modules/frontend/glass-dashboard/src/components/inbox.mesh`
+- `modules/frontend/glass-dashboard/config/i18n/en.json`
+- `modules/frontend/opacity-test/src/main.mesh`
+- `modules/frontend/glass-dashboard/src/components/player.mesh`
+- `modules/frontend/glass-dashboard/src/components/stats.mesh`
+- `modules/frontend/glass-notifications/config/i18n/sk.json`
+- `modules/frontend/glass-notifications/config/i18n/en.json`
+- `modules/frontend/volume-widget/config/i18n/sk.json`
+- `modules/frontend/volume-widget/config/i18n/en.json`
+- `modules/frontend/glass-dock/src/components/launcher.mesh`
+- `modules/frontend/glass-dock/config/i18n/sk.json`
+- `modules/frontend/glass-dock/config/i18n/en.json`
+
+## Section 11 — 91 files
+
+Inspected: pending section review. Remaining: 91.
+
+- `crates/core/runtime/backend/Cargo.toml`
+- `crates/core/runtime/backend/src/lib.rs`
+- `crates/core/runtime/sandbox/Cargo.toml`
+- `crates/core/runtime/sandbox/src/lib.rs`
+- `crates/core/runtime/scripting/Cargo.toml`
+- `crates/core/runtime/scripting/tests/fixtures/shell-theme/src/main.luau`
+- `modules/backend/cava-visualizer/src/main.luau`
+- `crates/core/runtime/scripting/tests/fixtures/reference-media/src/main.luau`
+- `crates/core/runtime/scripting/src/lib.rs`
+- `modules/backend/freedesktop-notifications/src/main.luau`
+- `crates/core/runtime/scripting/src/json.rs`
+- `crates/core/runtime/scripting/src/session.rs`
+- `crates/core/runtime/scripting/src/backend.rs`
+- `crates/core/runtime/scripting/src/storage.rs`
+- `crates/core/runtime/scripting/tests/fixtures/networkmanager-network/src/main.luau`
+- `modules/backend/backlight-brightness/src/main.luau`
+- `modules/backend/wallpaper-directory/src/main.luau`
+- `modules/backend/status-notifier-tray/src/main.luau`
+- `crates/core/runtime/scripting/src/backend/exec_stream.rs`
+- `crates/core/runtime/scripting/src/backend/dbus_call.rs`
+- `crates/core/runtime/scripting/src/backend/event.rs`
+- `crates/core/runtime/scripting/src/backend/task_io.rs`
+- `crates/core/runtime/scripting/src/backend/wayland_workspace.rs`
+- `crates/core/runtime/scripting/src/operation.rs`
+- `crates/core/runtime/scripting/src/util.rs`
+- `crates/core/runtime/scripting/src/policy.rs`
+- `crates/core/runtime/scripting/src/pool.rs`
+- `crates/core/runtime/scripting/src/context.rs`
+- `crates/core/runtime/scripting/src/host_api.rs`
+- `crates/core/runtime/scripting/src/backend/state.rs`
+- `crates/core/runtime/scripting/src/backend/errors.rs`
+- `crates/core/runtime/scripting/src/backend/host_sources.rs`
+- `crates/core/runtime/scripting/src/backend/host_events.rs`
+- `crates/core/runtime/scripting/src/backend/logging.rs`
+- `crates/core/runtime/scripting/src/backend/dbus_serve.rs`
+- `crates/core/runtime/scripting/src/backend/runtime.rs`
+- `crates/core/runtime/scripting/src/backend/command.rs`
+- `crates/core/runtime/scripting/src/backend/pipewire_source.rs`
+- `crates/core/runtime/scripting/src/backend/tests.rs`
+- `crates/core/runtime/scripting/src/backend/tray_tests.rs`
+- `crates/core/runtime/scripting/src/backend/wayland_source.rs`
+- `crates/core/runtime/scripting/src/backend/http.rs`
+- `crates/core/runtime/scripting/src/backend/launch_app.rs`
+- `crates/core/runtime/scripting/src/backend/exec.rs`
+- `modules/backend/networkmanager-network/src/main.luau`
+- `modules/backend/pipewire-audio/src/main.luau`
+- `modules/backend/pulseaudio-audio/src/main.luau`
+- `modules/backend/upower-power/src/main.luau`
+- `modules/backend/proc-system/src/main.luau`
+- `modules/backend/hyprland-apps/src/main.luau`
+- `crates/core/runtime/scripting/src/context/runtime/vm.rs`
+- `crates/core/runtime/scripting/src/context/runtime/mod.rs`
+- `crates/core/runtime/scripting/src/context/runtime/helpers.rs`
+- `modules/backend/wf-recorder/src/main.luau`
+- `crates/core/runtime/scripting/src/context/runtime/template.rs`
+- `crates/core/runtime/scripting/src/context/runtime/libraries.rs`
+- `crates/core/runtime/scripting/src/context/runtime/sync.rs`
+- `modules/backend/device-info/src/main.luau`
+- `crates/core/runtime/scripting/src/context/runtime/effects.rs`
+- `crates/core/runtime/scripting/src/context/runtime/prop_layers.rs`
+- `crates/core/runtime/scripting/src/context/runtime/context.rs`
+- `crates/core/runtime/scripting/src/context/runtime/state.rs`
+- `crates/core/runtime/scripting/src/context/runtime/host_api.rs`
+- `crates/core/runtime/scripting/src/context/runtime/lifecycle.rs`
+- `crates/core/runtime/scripting/src/context/runtime/benchmarks.rs`
+- `crates/core/runtime/scripting/src/context/runtime/callbacks.rs`
+- `crates/core/runtime/scripting/src/context/runtime/tasks.rs`
+- `crates/core/runtime/scripting/src/context/runtime/shell_api.rs`
+- `crates/core/runtime/scripting/src/context/element_ref.rs`
+- `crates/core/runtime/scripting/src/context/proxy.rs`
+- `modules/backend/open-meteo-weather/src/main.luau`
+- `modules/backend/hyprland-wm/src/main.luau`
+- `crates/core/runtime/scripting/src/context/tests/mod.rs`
+- `crates/core/runtime/scripting/src/context/tests/events.rs`
+- `crates/core/runtime/scripting/src/context/tests/template.rs`
+- `crates/core/runtime/scripting/src/context/tests/sync.rs`
+- `crates/core/runtime/scripting/src/context/tests/effects.rs`
+- `crates/core/runtime/scripting/src/context/tests/refs.rs`
+- `crates/core/runtime/scripting/src/context/tests/state.rs`
+- `crates/core/runtime/scripting/src/context/tests/imports.rs`
+- `crates/core/runtime/scripting/src/context/tests/lifecycle.rs`
+- `crates/core/runtime/scripting/src/context/tests/shared_vm.rs`
+- `crates/core/runtime/scripting/src/context/tests/callbacks.rs`
+- `crates/core/runtime/scripting/src/context/tests/tasks.rs`
+- `crates/core/runtime/scripting/src/context/tests/interface_proxy.rs`
+- `crates/core/runtime/scripting/src/context/tests/storage.rs`
+- `crates/core/runtime/scripting/src/context/tests/common.rs`
+- `crates/core/runtime/scripting/src/context/state.rs`
+- `crates/core/runtime/scripting/src/context/errors.rs`
+- `crates/core/runtime/scripting/src/context/lookup.rs`
+- `modules/backend/mpris-media/src/main.luau`
+
+## Section 12 — 78 files
+
+Inspected: pending section review. Remaining: 78.
+
+- `crates/core/frontend/render/Cargo.toml`
+- `crates/core/frontend/render/tests/production_icon.rs`
+- `crates/core/frontend/render/tests/paint_perf_scenarios.rs`
+- `crates/core/frontend/render/src/anyrender_adapter.rs`
+- `crates/core/frontend/render/src/render_object.rs`
+- `crates/core/frontend/render/src/fractional_scale.rs`
+- `crates/core/frontend/render/src/lib.rs`
+- `crates/core/frontend/render/src/parley_adapter.rs`
+- `crates/core/frontend/render/src/device_damage.rs`
+- `crates/core/frontend/render/src/scene_thread/tests.rs`
+- `crates/core/frontend/render/src/prepared_scene.rs`
+- `crates/core/frontend/render/src/surface/buffer.rs`
+- `crates/core/frontend/render/src/surface/mod.rs`
+- `crates/core/frontend/render/src/surface/text.rs`
+- `crates/core/frontend/render/src/surface/glyph_pages.rs`
+- `crates/core/frontend/render/src/prepared_scene/node_cache.rs`
+- `crates/core/frontend/render/src/prepared_scene/retained_tests.rs`
+- `crates/core/frontend/render/src/surface/painter/rounded.rs`
+- `crates/core/frontend/render/src/surface/painter/tree.rs`
+- `crates/core/frontend/render/src/surface/painter/text.rs`
+- `crates/core/frontend/render/src/surface/painter/tests/backends.rs`
+- `crates/core/frontend/render/src/surface/painter/tests/mod.rs`
+- `crates/core/frontend/render/src/surface/painter/tests/regions.rs`
+- `crates/core/frontend/render/src/surface/painter/tests/primitives.rs`
+- `crates/core/frontend/render/src/surface/painter/tests/diagnostics.rs`
+- `crates/core/frontend/render/src/surface/painter/tests/skia/selection.rs`
+- `crates/core/frontend/render/src/surface/painter/tests/skia/mod.rs`
+- `crates/core/frontend/render/src/surface/painter/tests/skia/helpers.rs`
+- `crates/core/frontend/render/src/surface/painter/tests/skia/shapes.rs`
+- `crates/core/frontend/render/src/surface/painter/tests/skia/rounded_damage.rs`
+- `crates/core/frontend/render/src/surface/painter/tests/skia/scroll.rs`
+- `crates/core/frontend/render/src/surface/painter/tests/skia/filters.rs`
+- `crates/core/frontend/render/src/surface/painter/tests/common.rs`
+- `crates/core/frontend/render/src/surface/painter/geometry.rs`
+- `crates/core/frontend/render/src/surface/painter/widgets.rs`
+- `crates/core/frontend/render/src/surface/painter/backend.rs`
+- `crates/core/frontend/render/src/display_list/sparse.rs`
+- `crates/core/frontend/render/src/display_list/blur.rs`
+- `crates/core/frontend/render/src/display_list/build.rs`
+- `crates/core/frontend/render/src/display_list/coverage.rs`
+- `crates/core/frontend/render/src/display_list/mod.rs`
+- `crates/core/frontend/render/src/display_list/batch_index.rs`
+- `crates/core/frontend/render/src/display_list/spans.rs`
+- `crates/core/frontend/render/src/display_list/signature.rs`
+- `crates/core/frontend/render/src/display_list/scroll_shift.rs`
+- `crates/core/frontend/render/src/display_list/subtree.rs`
+- `crates/core/frontend/render/src/proof.rs`
+- `crates/core/frontend/render/src/display_list/sequence.rs`
+- `crates/core/frontend/render/src/display_list/types.rs`
+- `crates/core/frontend/render/src/display_list/scroll.rs`
+- `crates/core/frontend/render/src/display_list/paint_node.rs`
+- `crates/core/frontend/render/src/surface/backdrop.rs`
+- `crates/core/frontend/render/src/gpu.rs`
+- `crates/core/frontend/render/src/library_adapters.rs`
+- `crates/core/frontend/render/src/paint_input.rs`
+- `crates/core/frontend/render/src/accesskit_adapter.rs`
+- `crates/core/frontend/render/src/paint_context.rs`
+- `crates/core/frontend/render/src/scene_thread.rs`
+- `crates/core/frontend/render/src/surface/backdrop/tests.rs`
+- `crates/core/frontend/render/src/surface/backdrop/reference.sksl`
+- `crates/core/frontend/render/src/surface/painter.rs`
+- `crates/core/frontend/render/src/surface/canvas.rs`
+- `crates/core/frontend/render/src/surface/glyph.rs`
+- `crates/core/frontend/render/src/surface/image_pages.rs`
+- `crates/core/frontend/render/src/surface/icon.rs`
+- `crates/core/frontend/render/src/surface/resource_broker.rs`
+- `crates/core/frontend/render/src/surface/profiling.rs`
+- `crates/core/frontend/render/src/surface/debug_overlay.rs`
+- `crates/core/frontend/render/src/display_list/tests/payloads.rs`
+- `crates/core/frontend/render/src/display_list/tests/signatures.rs`
+- `crates/core/frontend/render/src/display_list/tests/mod.rs`
+- `crates/core/frontend/render/src/display_list/tests/damage.rs`
+- `crates/core/frontend/render/src/display_list/tests/subtrees.rs`
+- `crates/core/frontend/render/src/display_list/tests/entries.rs`
+- `crates/core/frontend/render/src/display_list/tests/common.rs`
+- `crates/core/frontend/render/src/gpu/tests.rs`
+- `crates/core/frontend/render/src/gpu/upload_probe.rs`
+- `crates/core/frontend/render/src/gpu/scene.rs`
+
+## Section 13 — 4 files
+
+Inspected: pending section review. Remaining: 4.
+
+- `crates/core/surface-policy/Cargo.toml`
+- `crates/core/surface-policy/src/lib.rs`
+- `crates/core/surface-config/Cargo.toml`
+- `crates/core/surface-config/src/lib.rs`
+
+## Section 14 — 28 files
+
+Inspected: pending section review. Remaining: 28.
+
+- `crates/core/presentation/Cargo.toml`
+- `crates/core/presentation/tests/live_compositor_matrix.rs`
+- `crates/core/presentation/src/lib.rs`
+- `crates/core/presentation/src/dev_window.rs`
+- `crates/core/platform/wayland/Cargo.toml`
+- `crates/core/presentation/src/wayland_surface/backend/shm.rs`
+- `crates/core/presentation/src/wayland_surface/backend/blur.rs`
+- `crates/core/presentation/src/wayland_surface/backend/gpu.rs`
+- `crates/core/presentation/src/wayland_surface/backend/mod.rs`
+- `crates/core/presentation/src/wayland_surface/backend/damage.rs`
+- `crates/core/presentation/src/wayland_surface/backend/present.rs`
+- `crates/core/presentation/src/wayland_surface/backend/events.rs`
+- `crates/core/platform/wayland/src/lib.rs`
+- `crates/core/presentation/src/wayland_surface/backend/tests/scale.rs`
+- `crates/core/presentation/src/wayland_surface/backend/tests/shm.rs`
+- `crates/core/presentation/src/wayland_surface/backend/tests/mod.rs`
+- `crates/core/presentation/src/wayland_surface/backend/tests/damage.rs`
+- `crates/core/presentation/src/wayland_surface/backend/tests/config.rs`
+- `crates/core/presentation/src/wayland_surface/backend/tests/entry.rs`
+- `crates/core/presentation/src/wayland_surface/backend/tests/benchmarks.rs`
+- `crates/core/presentation/src/wayland_surface/backend/config.rs`
+- `crates/core/presentation/src/wayland_surface/backend/surfaces.rs`
+- `crates/core/presentation/src/wayland_surface/backend/entry.rs`
+- `crates/core/presentation/src/wayland_surface/backend/protocol.rs`
+- `crates/core/presentation/src/wayland_surface/mod.rs`
+- `crates/core/presentation/src/wayland_surface/state.rs`
+- `crates/core/presentation/src/wayland_surface/handlers.rs`
+- `crates/core/presentation/src/wayland_surface/popup.rs`
+
+## Section 15 — 156 files
+
+Inspected: pending section review. Remaining: 156.
+
+- `config/settings.json`
+- `config/performance-baseline.tsv`
+- `config/profiles/orbit.json`
+- `config/profiles/desk.json`
+- `config/profiles/glass.json`
+- `config/modules/@mesh/shell-theme/package.json`
+- `config/modules/@mesh/quick-settings/package.json`
+- `config/modules/@mesh/pipewire-audio/package.json`
+- `config/modules/@mesh/upower/package.json`
+- `config/modules/@mesh/networkmanager/package.json`
+- `config/modules/@mesh/panel/package.json`
+- `config/modules/@mesh/pulseaudio-audio/package.json`
+- `config/module.json`
+- `config/active-profile`
+- `crates/core/shell/Cargo.toml`
+- `crates/core/shell/src/lib.rs`
+- `crates/core/shell/src/shell/discovery.rs`
+- `crates/core/shell/src/shell/file_watch.rs`
+- `crates/core/shell/src/shell/backend/mod.rs`
+- `crates/core/shell/src/shell/backend/supervision.rs`
+- `crates/core/shell/src/shell/backend/spawn.rs`
+- `crates/core/shell/src/shell/backend/candidates.rs`
+- `crates/core/shell/src/shell/backend/lifecycle.rs`
+- `crates/core/shell/src/shell/sounds.rs`
+- `crates/core/shell/src/shell/runtime/service_state.rs`
+- `crates/core/shell/src/shell/runtime/reload.rs`
+- `crates/core/shell/src/shell/runtime/mod.rs`
+- `crates/core/shell/src/shell/runtime/debug.rs`
+- `crates/core/shell/src/shell/runtime/request.rs`
+- `crates/core/shell/src/shell/runtime/render/mod.rs`
+- `crates/core/shell/src/shell/runtime/render/child.rs`
+- `crates/core/shell/src/shell/runtime/render/tests.rs`
+- `crates/core/shell/src/shell/runtime/render/performance_tests.rs`
+- `crates/core/shell/src/shell/runtime/render/backdrop.rs`
+- `crates/core/shell/src/shell/runtime/render/popup.rs`
+- `crates/core/shell/src/shell/runtime/wayland.rs`
+- `crates/core/shell/src/shell/runtime/profiling.rs`
+- `crates/core/shell/src/shell/runtime/theme.rs`
+- `crates/core/shell/src/shell/mod.rs`
+- `crates/core/shell/src/shell/tests/discovery.rs`
+- `crates/core/shell/src/shell/tests/service_state.rs`
+- `crates/core/shell/src/shell/tests/mod.rs`
+- `crates/core/shell/src/shell/tests/debug.rs`
+- `crates/core/shell/src/shell/tests/input.rs`
+- `crates/core/shell/src/shell/tests/service_contract.rs`
+- `crates/core/shell/src/shell/tests/surface_layout.rs`
+- `crates/core/shell/src/shell/tests/window_role.rs`
+- `crates/core/shell/src/shell/tests/child_surface.rs`
+- `crates/core/shell/src/shell/tests/backend_lifecycle.rs`
+- `crates/core/shell/src/shell/tests/graph.rs`
+- `crates/core/shell/src/shell/tests/benchmarks.rs`
+- `crates/core/shell/src/shell/tests/profiling.rs`
+- `crates/core/shell/src/shell/tests/theme.rs`
+- `crates/core/shell/src/shell/tests/commands.rs`
+- `crates/core/shell/src/shell/tests/request_drain.rs`
+- `crates/core/shell/src/shell/tests/popover.rs`
+- `crates/core/shell/src/shell/tests/common.rs`
+- `crates/core/shell/src/shell/tests/service_delivery.rs`
+- `crates/core/shell/src/shell/tests/scheduler.rs`
+- `crates/core/shell/src/shell/ipc.rs`
+- `crates/core/shell/src/shell/surface_layout.rs`
+- `crates/core/shell/src/shell/profile.rs`
+- `crates/core/shell/src/shell/package.rs`
+- `crates/core/shell/src/shell/service.rs`
+- `crates/core/shell/src/shell/signals.rs`
+- `crates/core/shell/src/shell/core_provider.rs`
+- `crates/core/shell/src/shell/module_config.rs`
+- `crates/core/shell/src/shell/types.rs`
+- `crates/core/shell/src/shell/component.rs`
+- `crates/core/shell/src/shell/replay_hooks.rs`
+- `crates/core/shell/src/shell/component/animation.rs`
+- `crates/core/shell/src/shell/component/memo.rs`
+- `crates/core/shell/src/shell/component/template_patch.rs`
+- `crates/core/shell/src/shell/component/primitives.rs`
+- `crates/core/shell/src/shell/component/tests/restyle/selection.rs`
+- `crates/core/shell/src/shell/component/tests/restyle/metrics.rs`
+- `crates/core/shell/src/shell/component/tests/restyle/preservation.rs`
+- `crates/core/shell/src/shell/component/tests/restyle/cleanup.rs`
+- `crates/core/shell/src/shell/component/tests/mod.rs`
+- `crates/core/shell/src/shell/component/tests/invalidation/sparse_geometry.rs`
+- `crates/core/shell/src/shell/component/tests/invalidation/basic.rs`
+- `crates/core/shell/src/shell/component/tests/invalidation/narrow_script.rs`
+- `crates/core/shell/src/shell/component/tests/invalidation/service_fanout.rs`
+- `crates/core/shell/src/shell/component/tests/invalidation/profiling.rs`
+- `crates/core/shell/src/shell/component/tests/integration.rs`
+- `crates/core/shell/src/shell/component/tests/common.rs`
+- `crates/core/shell/src/shell/component/diagnostics.rs`
+- `crates/core/shell/src/shell/component/rendering/mod.rs`
+- `crates/core/shell/src/shell/component/rendering/tests.rs`
+- `crates/core/shell/src/shell/component/rendering/interaction_changed_key_tests.rs`
+- `crates/core/shell/src/shell/component/rendering/annotate.rs`
+- `crates/core/shell/src/shell/component/tooltip.rs`
+- `crates/core/shell/src/shell/component/composition.rs`
+- `crates/core/shell/src/shell/component/interaction_state.rs`
+- `crates/core/shell/src/shell/component/disclosure.rs`
+- `crates/core/shell/src/shell/component/tests/integration/debug.rs`
+- `crates/core/shell/src/shell/component/tests/integration/element_refs.rs`
+- `crates/core/shell/src/shell/component/tests/integration/service.rs`
+- `crates/core/shell/src/shell/component/tests/integration/bind_live.rs`
+- `crates/core/shell/src/shell/component/tests/integration/props.rs`
+- `crates/core/shell/src/shell/component/runtime_tree/tree.rs`
+- `crates/core/shell/src/shell/component/runtime_tree/mod.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/transitions.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/brightness.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/navigation_profile.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/bubbles.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/mod.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/raster.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/inspector.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/settings.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/audio.rs`
+- `crates/core/shell/src/shell/component/input/mod.rs`
+- `crates/core/shell/src/shell/component/input/keyboard.rs`
+- `crates/core/shell/src/shell/component/input/widgets.rs`
+- `crates/core/shell/src/shell/component/input/focus.rs`
+- `crates/core/shell/src/shell/component/catalog.rs`
+- `crates/core/shell/src/shell/component/tests/interaction/activation.rs`
+- `crates/core/shell/src/shell/component/tests/interaction/disclosure.rs`
+- `crates/core/shell/src/shell/component/tests/interaction/pseudo.rs`
+- `crates/core/shell/src/shell/component/tests/interaction.rs`
+- `crates/core/shell/src/shell/component/tests/invalidation.rs`
+- `crates/core/shell/src/shell/component/tests/restyle.rs`
+- `crates/core/shell/src/shell/component/tests/interaction/diagnostics.rs`
+- `crates/core/shell/src/shell/component/tests/interaction/keybinds.rs`
+- `crates/core/shell/src/shell/component/tests/interaction/gestures.rs`
+- `crates/core/shell/src/shell/component/tests/interaction/policy.rs`
+- `crates/core/shell/src/shell/component/tests/interaction/navigation.rs`
+- `crates/core/shell/src/shell/component/tests/interaction/primitives.rs`
+- `crates/core/shell/src/shell/component/tests/interaction/reflow.rs`
+- `crates/core/shell/src/shell/component/tests/interaction/animation.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/commands.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/layout.rs`
+- `crates/core/shell/src/shell/component/tests/integration/quick_settings.rs`
+- `crates/core/shell/src/shell/component/tests/integration/scroll_contract.rs`
+- `crates/core/shell/src/shell/component/tests/integration/component_memo.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/appearance_profile.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/unavailable_interface.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/hover.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/glass.rs`
+- `crates/core/shell/src/shell/component/runtime.rs`
+- `crates/core/shell/src/shell/component/runtime_tree/tests/annotate.rs`
+- `crates/core/shell/src/shell/component/runtime_tree/fingerprint.rs`
+- `crates/core/shell/src/shell/component/runtime_tree/annotate.rs`
+- `crates/core/shell/src/shell/component/shell_component/internals.rs`
+- `crates/core/shell/src/shell/component/shell_component/child_surface.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/glass/cpu_timing.rs`
+- `crates/core/shell/src/shell/component/runtime_tree/tests/fingerprint.rs`
+- `crates/core/shell/src/shell/component/runtime_tree/tests/benchmarks.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/glass/live_replay.rs`
+- `crates/core/shell/src/shell/component/runtime_tree/tests/mod.rs`
+- `crates/core/shell/src/shell/component/runtime_tree/tests/tree.rs`
+- `crates/core/shell/src/shell/component/tests/integration/real_surfaces/glass/live_replay/popup_validation.rs`
+- `crates/core/shell/src/shell/component/shell_component/mod.rs`
+- `crates/core/shell/src/shell/component/shell_component/damage.rs`
+- `crates/core/shell/src/shell/component/shell_component/child_surface/cache.rs`
+- `crates/core/shell/src/shell/component/shell_component/tests.rs`
+
+## Section 16 — 58 files
+
+Inspected: pending section review. Remaining: 58.
+
+- `Cargo.toml`
+- `flake.lock`
+- `scripts/codex-backlog-runner.schema.json`
+- `scripts/claude-backlog-runner.schema.json`
+- `scripts/codex-backlog-runner.sh`
+- `scripts/claude-backlog-runner.sh`
+- `Cargo.lock`
+- `flake.nix`
+- `editors/vscode/syntaxes/mesh.tmLanguage.json`
+- `editors/vscode/language-configuration.json`
+- `tools/test-profile-report.py`
+- `tools/profile-report`
+- `tools/test-performance-gates.py`
+- `tools/check-performance`
+- `tools/check-gpu-performance`
+- `tools/profile-shell`
+- `editors/vscode/src/extension.ts`
+- `editors/vscode/package-lock.json`
+- `editors/vscode/package.json`
+- `editors/vscode/tsconfig.json`
+- `crates/tools/lsp/Cargo.toml`
+- `crates/tools/lsp/tests/real_settings.rs`
+- `crates/tools/lsp/tests/real_manifests.rs`
+- `opencode.json`
+- `crates/tools/cli/Cargo.toml`
+- `crates/tools/cli/build.rs`
+- `crates/tools/lsp/src/lib.rs`
+- `crates/tools/lsp/src/format.rs`
+- `crates/tools/lsp/src/document.rs`
+- `crates/tools/lsp/src/semantic_tokens.rs`
+- `crates/tools/cli/src/main.rs`
+- `crates/tools/cli/src/update.rs`
+- `crates/tools/lsp/src/json/mod.rs`
+- `crates/tools/lsp/src/json/cursor.rs`
+- `crates/tools/lsp/src/json/diagnostics.rs`
+- `crates/tools/lsp/src/json/complete.rs`
+- `crates/tools/lsp/src/json/schema.rs`
+- `crates/tools/lsp/src/json/hover.rs`
+- `crates/tools/lsp/src/util.rs`
+- `crates/tools/lsp/src/module_registry.rs`
+- `crates/tools/lsp/src/diagnostics.rs`
+- `crates/tools/lsp/src/knowledge/tags.rs`
+- `crates/tools/lsp/src/knowledge/mod.rs`
+- `crates/tools/lsp/src/knowledge/css.rs`
+- `crates/tools/lsp/src/knowledge/mesh_api.rs`
+- `crates/tools/lsp/src/definition.rs`
+- `crates/tools/lsp/src/settings/mod.rs`
+- `crates/tools/lsp/src/settings/schema.rs`
+- `crates/tools/lsp/src/settings/parts.rs`
+- `crates/tools/lsp/src/main.rs`
+- `crates/tools/lsp/src/hover.rs`
+- `crates/tools/lsp/src/backend.rs`
+- `crates/tools/lsp/src/manifest/mod.rs`
+- `crates/tools/lsp/src/manifest/schema.rs`
+- `crates/tools/lsp/src/analyzer/mod.rs`
+- `crates/tools/lsp/src/analyzer/style.rs`
+- `crates/tools/lsp/src/analyzer/template.rs`
+- `crates/tools/lsp/src/analyzer/script.rs`
+
+## Unassigned — 0
+
+None.
+

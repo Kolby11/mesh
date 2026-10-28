@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 3,
+  "revision": 1,
+  "from": {
+    "module": "@mesh/orbit"
+  },
+  "roots": {},
+  "backgroundServices": [],
+  "providers": {},
+  "resources": {},
+  "nodeSlots": {},
+  "settings": {}
+}

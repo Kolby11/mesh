@@ -1987,6 +1987,9 @@ impl Shell {
             CoreRequest::SetLocale { locale } => self.apply_set_locale(&locale),
             CoreRequest::SetIconTheme { theme_id } => self.apply_set_icon_theme(&theme_id),
             CoreRequest::SetFontFamily { family } => self.apply_set_font_family(&family),
+            CoreRequest::SetKeyboardSetting { field, value } => {
+                self.apply_set_keyboard_setting(&field, value)
+            }
             CoreRequest::SetBackdropImage { path } => self.apply_set_backdrop_image(&path),
             CoreRequest::SetProvider {
                 interface,
@@ -3040,7 +3043,7 @@ impl Shell {
     /// Profiles name root surfaces by instance (`@mesh/settings#default`)
     /// while modules address another module's surface by its id; a module
     /// with more than one root instance stays ambiguous and is left as is.
-    fn resolve_root_surface_id(&self, surface_id: SurfaceId) -> SurfaceId {
+    pub(in crate::shell) fn resolve_root_surface_id(&self, surface_id: SurfaceId) -> SurfaceId {
         if self.surfaces.contains_key(&surface_id) {
             return surface_id;
         }
@@ -3737,6 +3740,7 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::SetThemeMode { .. } => "set_mode",
         CoreRequest::SetIconTheme { .. } => "set_icon_theme",
         CoreRequest::SetFontFamily { .. } => "set_font_family",
+        CoreRequest::SetKeyboardSetting { .. } => "set_keyboard_setting",
         CoreRequest::SetBackdropImage { .. } => "set_backdrop_image",
         CoreRequest::SetLocale { .. } => "set_locale",
         CoreRequest::SetProvider { .. } => "set_provider",
@@ -3795,6 +3799,7 @@ fn durable_write_key(request: &CoreRequest) -> Option<String> {
         CoreRequest::SetLocale { .. } => "locale".into(),
         CoreRequest::SetIconTheme { .. } => "icon_theme".into(),
         CoreRequest::SetFontFamily { .. } => "font_family".into(),
+        CoreRequest::SetKeyboardSetting { field, .. } => format!("keyboard:{field}"),
         CoreRequest::SetBackdropImage { .. } => "backdrop_image".into(),
         CoreRequest::SetProvider { interface, .. } => format!("provider:{interface}"),
         CoreRequest::SetModuleEnabled { module_id, .. } => format!("enabled:{module_id}"),

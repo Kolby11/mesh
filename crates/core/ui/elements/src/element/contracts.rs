@@ -416,7 +416,12 @@ macro_rules! schema_attributes {
             attr("key", ElementAttributeType::String, "Shortcut key label"),
             attr("tooltip", ElementAttributeType::String, "Tooltip text"),
             attr("tooltip-for", ElementAttributeType::String, "Tooltip owner element id"),
-            attr("indeterminate", ElementAttributeType::Boolean, "Progress has no determinate value")
+            attr("indeterminate", ElementAttributeType::Boolean, "Progress has no determinate value"),
+            attr("type", ElementAttributeType::String, "Shape kind: sector, arc, polygon or polyline"),
+            attr("start", ElementAttributeType::Number, "Shape start angle in degrees clockwise from the top"),
+            attr("end", ElementAttributeType::Number, "Shape end angle in degrees clockwise from the top"),
+            attr("inner", ElementAttributeType::Number, "Inner radius of a sector as a fraction of the outer radius"),
+            attr("points", ElementAttributeType::String, "Polygon or polyline vertices as percentages of the box")
         )
     };
     (Action) => {
@@ -518,6 +523,7 @@ macro_rules! element_schema {
             (Badge, "badge", "text", "TextElement", Display, AccessibilityRole::Status, false, false, TEXT_FIELDS, NO_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
             (Progress, "progress", "text", "ProgressElement", Display, AccessibilityRole::ProgressBar, false, false, EMPTY_FIELDS, NO_EVENTS, PROGRESS_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
             (Meter, "meter", "text", "MeterElement", Display, AccessibilityRole::ProgressBar, false, false, EMPTY_FIELDS, NO_EVENTS, PROGRESS_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
+            (Shape, "shape", "shape", "ShapeElement", Display, AccessibilityRole::Image, false, false, EMPTY_FIELDS, ACTION_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
             (Tooltip, "tooltip", "text", "TooltipElement", Display, AccessibilityRole::Alert, false, false, EMPTY_FIELDS, NO_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
             (Avatar, "avatar", "icon", "AvatarElement", Display, AccessibilityRole::Image, false, false, ICON_FIELDS, NO_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),
             (Shortcut, "shortcut", "text", "TextElement", Display, AccessibilityRole::Label, false, false, TEXT_FIELDS, NO_EVENTS, DISPLAY_STYLE_HOOKS, None, NO_DEFAULT_ATTRIBUTES),

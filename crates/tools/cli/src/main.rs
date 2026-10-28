@@ -33,6 +33,7 @@ fn main() {
         Some("debug") => cmd_debug(&args[2..]),
         Some("ipc") => cmd_ipc(&args[2..]),
         Some("focus") => cmd_focus(&args[2..]),
+        Some("keys") => cmd_keys(&args[2..]),
         Some("ipc-socket-path") => cmd_ipc_socket_path(),
         Some("config") => cmd_config(&args[2..]),
         Some("profile") => cmd_profile(&args[2..]),
@@ -588,6 +589,16 @@ fn cmd_focus(args: &[String]) {
         std::process::exit(1);
     };
     send_ipc_command(&format!("shell:focus_surface:{surface_id}"));
+}
+
+fn cmd_keys(args: &[String]) {
+    match args.first().map(String::as_str) {
+        Some("help") => send_ipc_command("shell:keys_help"),
+        _ => {
+            eprintln!("usage: mesh-shell keys help");
+            std::process::exit(1);
+        }
+    }
 }
 
 fn send_ipc_command(command: &str) {

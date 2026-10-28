@@ -10,7 +10,8 @@
         "mesh.apps": ">=1.0"
       },
       "modules": {
-        "@mesh/glass-material": ">=0.1.0"
+        "@mesh/glass-material": ">=0.1.0",
+        "@mesh/radial-launcher": ">=0.1.0"
       },
       "capabilities": [
         "shell.surface",
@@ -59,7 +60,26 @@
           "locale": "sk",
           "path": "config/i18n/sk.json"
         }
-      ]
+      ],
+      "keybinds": {
+        "radial": {
+          "label": {
+            "t": "keybind.radial.label",
+            "fallback": "Radial launcher"
+          },
+          "description": {
+            "t": "keybind.radial.description",
+            "fallback": "Show or hide the radial launcher of apps"
+          },
+          "category": {
+            "t": "keybind.category",
+            "fallback": "Dock"
+          },
+          "trigger": {
+            "kind": "auto"
+          }
+        }
+      }
     },
     "icons": {
       "ignore_shell_default": true

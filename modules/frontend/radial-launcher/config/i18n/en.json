@@ -1,0 +1,15 @@
+{
+  "launcher.title": "Applications",
+  "launcher.close": "Close launcher",
+  "launcher.previous": "Previous track",
+  "launcher.next": "Next track",
+  "launcher.play": "Play",
+  "launcher.pause": "Pause",
+  "keybind.close.label": "Close launcher",
+  "keybind.close.description": "Hide the radial launcher",
+  "keybind.category": "Radial launcher",
+  "launcher.search": "Search applications",
+  "launcher.placeholder": "Find an app",
+  "keybind.search.label": "Search applications",
+  "keybind.search.description": "Filter the ring by application name"
+}

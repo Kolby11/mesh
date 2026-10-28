@@ -1014,8 +1014,13 @@ Transitions currently interpolate `background-color`, `border-color`,
 `border-radius`, `border-width`, `color`, `opacity`, `width`, `height`,
 `padding`, `margin`, and `transform`. `transition-timing-function` accepts the
 standard easing keywords plus `cubic-bezier(...)`. `transform` parses
-`translate(...)`, `scale(...)`, and `rotate(...)`, but only translation is
-painted and hit-tested today.
+`translate(...)`, `scale(...)`, `rotate(...)`, `skew(...)`, `skewX(...)` and
+`skewY(...)`; paint, clipping and hit-testing share one affine matrix. The
+functions compose in a fixed order regardless of how they are written:
+translation, then rotation, skew and scale about `transform-origin`. Repeated
+functions accumulate. A child skewed opposite to an `overflow: hidden` parent
+about the same centre stays upright while clipped to the parent's
+parallelogram.
 
 Component `<style>` selectors share one cascade across the surface's component
 tree, including local/imported components and extension-point contributions.

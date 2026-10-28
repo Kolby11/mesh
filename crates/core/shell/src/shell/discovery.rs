@@ -2012,6 +2012,21 @@ impl Shell {
         register_builtin_contract(
             &mut builtin_interface_catalog,
             builtin_contract(
+                "mesh.keybinds",
+                &[("entries", "any"), ("revision", "string")],
+                &[
+                    (
+                        "remap",
+                        &[("surface", "string"), ("action", "string"), ("key", "string")],
+                    ),
+                    ("set_option", &[("name", "string"), ("value", "string")]),
+                    ("reassign", &[]),
+                ],
+            ),
+        );
+        register_builtin_contract(
+            &mut builtin_interface_catalog,
+            builtin_contract(
                 "mesh.settings",
                 &[
                     ("revision", "string"),
@@ -2187,6 +2202,8 @@ impl Shell {
             debug_overlay: DebugOverlay::new(),
             active_key_modifiers: KeyModifiers::default(),
             keyboard_focus_surface: None,
+            keybind_help_context: None,
+            last_keybind_payload: None,
             held_key_surfaces: HashMap::new(),
             user_activation: None,
             surface_openers: HashMap::new(),

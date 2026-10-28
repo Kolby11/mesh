@@ -1,7 +1,7 @@
 use super::super::super::*;
 use super::super::common::*;
 use mesh_core_elements::layout::LayoutRect;
-use mesh_core_elements::style::{Corners, Edges};
+use mesh_core_elements::style::{Corners, Edges, Overflow};
 use std::path::PathBuf;
 
 #[test]
@@ -947,6 +947,126 @@ fn skia_paint_uses_cumulative_affine_transform_instead_of_aabb_fill() {
     assert_eq!(pixel(&buffer, 50, 24), Color::TRANSPARENT);
     assert_eq!(pixel(&buffer, 30, 45), Color::TRANSPARENT);
     assert_eq!(pixel(&buffer, 50, 45), Color::TRANSPARENT);
+}
+
+#[test]
+fn skia_skewed_overflow_clips_to_a_parallelogram_and_counter_skew_keeps_content_upright() {
+    let skew = 20f32.to_radians();
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 80.0,
+        },
+        Color::TRANSPARENT,
+    );
+    // 40x60 card centred on (50, 40); skewX(-20deg) shifts its top edge
+    // right and its bottom edge left by 30 * tan(20deg) ~ 10.9px.
+    let mut card = node(
+        "box",
+        LayoutRect {
+            x: 30.0,
+            y: 10.0,
+            width: 40.0,
+            height: 60.0,
+        },
+        Color::TRANSPARENT,
+    );
+    card.computed_style.transform.skew_x = -skew;
+    card.computed_style.overflow_x = Overflow::Hidden;
+    card.computed_style.overflow_y = Overflow::Hidden;
+    // Wide enough to cover the slanted corners and sharing the card's centre,
+    // so its opposite skew cancels the card's and it paints axis-aligned.
+    let mut picture = node(
+        "box",
+        LayoutRect {
+            x: 18.0,
+            y: 10.0,
+            width: 64.0,
+            height: 60.0,
+        },
+        Color::from_hex("#00ff00").unwrap(),
+    );
+    picture.computed_style.transform.skew_x = skew;
+    picture.children.push(node(
+        "box",
+        LayoutRect {
+            x: 48.0,
+            y: 10.0,
+            width: 4.0,
+            height: 60.0,
+        },
+        Color::from_hex("#ff0000").unwrap(),
+    ));
+    card.children.push(picture);
+    root.children.push(card);
+
+    let mut buffer = PixelBuffer::new(100, 80);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    let green = Color::from_hex("#00ff00").unwrap();
+    let red = Color::from_hex("#ff0000").unwrap();
+    assert_eq!(pixel(&buffer, 78, 12), green, "top edge is shifted right");
+    assert_eq!(pixel(&buffer, 22, 68), green, "bottom edge is shifted left");
+    assert_eq!(pixel(&buffer, 32, 12), Color::TRANSPARENT, "slanted top-left is clipped");
+    assert_eq!(pixel(&buffer, 68, 68), Color::TRANSPARENT, "slanted bottom-right is clipped");
+    assert_eq!(pixel(&buffer, 49, 15), red, "stripe stays vertical at the top");
+    assert_eq!(pixel(&buffer, 49, 65), red, "stripe stays vertical at the bottom");
+}
+
+#[test]
+fn skia_counter_skewed_image_paints_inside_a_skewed_card() {
+    let (_fixture, path) = write_effect_test_image("skewed-card.png");
+    let skew = 20f32.to_radians();
+    let mut root = node(
+        "box",
+        LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 80.0,
+        },
+        Color::TRANSPARENT,
+    );
+    let mut card = node(
+        "button",
+        LayoutRect {
+            x: 30.0,
+            y: 10.0,
+            width: 40.0,
+            height: 60.0,
+        },
+        Color::TRANSPARENT,
+    );
+    card.computed_style.transform.skew_x = -skew;
+    card.computed_style.overflow_x = Overflow::Hidden;
+    card.computed_style.overflow_y = Overflow::Hidden;
+    let mut picture = node(
+        "image",
+        LayoutRect {
+            x: 18.0,
+            y: 10.0,
+            width: 64.0,
+            height: 60.0,
+        },
+        Color::TRANSPARENT,
+    );
+    picture.computed_style.transform.skew_x = skew;
+    picture
+        .attributes
+        .insert(mesh_core_elements::Prop::Src, path.clone());
+    card.children.push(picture);
+    root.children.push(card);
+
+    let mut buffer = PixelBuffer::new(100, 80);
+    FrontendRenderEngine::new().render_tree(&root, &mut buffer, 1.0);
+
+    assert!(pixel(&buffer, 78, 12).a > 200, "picture fills the slanted top");
+    assert!(pixel(&buffer, 22, 68).a > 200, "picture fills the slanted bottom");
+    assert_eq!(pixel(&buffer, 32, 12), Color::TRANSPARENT);
+    assert_eq!(pixel(&buffer, 68, 68), Color::TRANSPARENT);
 }
 
 #[test]

@@ -194,6 +194,14 @@ pub(super) fn hash_paint_content_attributes(
         "checkbox" | "radio" => {
             hash_attribute(node, Prop::Checked, hasher);
         }
+        "shape" => {
+            hash_attribute(node, Prop::Type, hasher);
+            hash_attribute(node, Prop::Start, hasher);
+            hash_attribute(node, Prop::End, hasher);
+            hash_attribute(node, Prop::Inner, hasher);
+            hash_attribute(node, Prop::Points, hasher);
+            node.computed_style.border_width.top.to_bits().hash(hasher);
+        }
         _ => {}
     }
 }

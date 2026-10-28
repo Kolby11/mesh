@@ -1121,6 +1121,14 @@ fn keybind_node() -> Node {
         "A declarative keybind definition.",
         vec![
             field(
+                "scope",
+                false,
+                scalar(
+                    "Where the binding is active: `surface` (default), `focus` (only while focus is inside the subscribing element) or `access`.",
+                    "string",
+                ),
+            ),
+            field(
                 "label",
                 false,
                 localized_text("Localized label for the shortcut."),
@@ -1144,7 +1152,10 @@ fn keybind_node() -> Node {
                         field(
                             "kind",
                             false,
-                            scalar("Trigger kind, e.g. `shortcut`.", "string"),
+                            scalar(
+                                "Trigger kind: `shortcut`, `access_key` or `auto` (the shell assigns a key from `shell.keyboard.key_priority`).",
+                                "string",
+                            ),
                         ),
                         field("key", false, scalar("Key, e.g. `m`.", "string")),
                         field(

@@ -2,6 +2,7 @@ mod backend;
 mod geometry;
 mod rounded;
 mod text;
+pub use text::{KeyHint, KeyHintCorner};
 mod tree;
 mod widgets;
 

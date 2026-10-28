@@ -1,0 +1,9 @@
+<template><column class="card"><row class="heading"><icon name="utilities-system-monitor" size="24" /><text class="label">USAGE</text></row><box class="space" /><text class="value">—</text><text class="caption">No usage source connected</text></column></template>
+<style>
+.card { flex-grow: 1; width: 202px; height: 202px; padding: 20px; border-radius: 23px; background: var(--color-surface); color: var(--color-on-surface); }
+.heading { justify-content: space-between; align-items: center; }
+.label { font-size: 11px; color: var(--color-on-surface-variant); }
+.space { flex-grow: 1; }
+.value { font-size: 32px; font-weight: 700; }
+.caption { font-size: 12px; color: var(--color-on-surface-variant); }
+</style>
