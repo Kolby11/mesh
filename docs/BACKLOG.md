@@ -92,7 +92,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Bound theme token alias and fallback resolution; long acyclic chains can recurse deeply and repeat linear cycle checks. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Share theme style-rule lowering between global and module scopes; duplicated token, default and selector logic can drift. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Resolve scoped theme tokens for dotted module IDs; first-dot splitting misidentifies valid module names. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
-- [ ] Preserve strict container query comparisons at threshold boundaries; strict and inclusive operators currently lower identically. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Align core translation point and bulk lookup fallback with argument-aware lookup; their English last-resort behavior differs. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Reject unmatched closing braces throughout localized messages; validation currently misses braces before later placeholders. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Align icon coverage advice with live alias, dash fallback and owner-scoped resolution; advice can report gaps for icons that resolve. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).

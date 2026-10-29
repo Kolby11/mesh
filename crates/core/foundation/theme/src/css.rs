@@ -901,31 +901,24 @@ fn apply_container_bound(
     operator: MediaFeatureComparison,
     value: f32,
 ) {
-    match (axis, operator) {
-        (ContainerAxis::Width, MediaFeatureComparison::GreaterThan)
-        | (ContainerAxis::Width, MediaFeatureComparison::GreaterThanEqual) => {
-            query.min_width = Some(query.min_width.map_or(value, |current| current.max(value)));
-        }
-        (ContainerAxis::Width, MediaFeatureComparison::LessThan)
-        | (ContainerAxis::Width, MediaFeatureComparison::LessThanEqual) => {
-            query.max_width = Some(query.max_width.map_or(value, |current| current.min(value)));
-        }
-        (ContainerAxis::Width, MediaFeatureComparison::Equal) => {
-            query.min_width = Some(query.min_width.map_or(value, |current| current.max(value)));
-            query.max_width = Some(query.max_width.map_or(value, |current| current.min(value)));
-        }
-        (ContainerAxis::Height, MediaFeatureComparison::GreaterThan)
-        | (ContainerAxis::Height, MediaFeatureComparison::GreaterThanEqual) => {
-            query.min_height = Some(query.min_height.map_or(value, |current| current.max(value)));
-        }
-        (ContainerAxis::Height, MediaFeatureComparison::LessThan)
-        | (ContainerAxis::Height, MediaFeatureComparison::LessThanEqual) => {
-            query.max_height = Some(query.max_height.map_or(value, |current| current.min(value)));
-        }
-        (ContainerAxis::Height, MediaFeatureComparison::Equal) => {
-            query.min_height = Some(query.min_height.map_or(value, |current| current.max(value)));
-            query.max_height = Some(query.max_height.map_or(value, |current| current.min(value)));
-        }
+    // Bounds are inclusive, so a strict comparison moves to the adjacent
+    // representable length: `width > 100px` is `min-width: next_up(100)`.
+    let (min, max) = match operator {
+        MediaFeatureComparison::GreaterThan => (Some(value.next_up()), None),
+        MediaFeatureComparison::GreaterThanEqual => (Some(value), None),
+        MediaFeatureComparison::LessThan => (None, Some(value.next_down())),
+        MediaFeatureComparison::LessThanEqual => (None, Some(value)),
+        MediaFeatureComparison::Equal => (Some(value), Some(value)),
+    };
+    let (query_min, query_max) = match axis {
+        ContainerAxis::Width => (&mut query.min_width, &mut query.max_width),
+        ContainerAxis::Height => (&mut query.min_height, &mut query.max_height),
+    };
+    if let Some(value) = min {
+        *query_min = Some(query_min.map_or(value, |current| current.max(value)));
+    }
+    if let Some(value) = max {
+        *query_max = Some(query_max.map_or(value, |current| current.min(value)));
     }
 }
 
@@ -1445,6 +1438,28 @@ pub fn parse_color_rgba(value: &str) -> Option<[u8; 4]> {
 #[cfg(test)]
 mod reuse_tests {
     use super::*;
+
+    fn container_query(condition: &str) -> ContainerQuery {
+        let source = format!("@container ({condition}) {{ .a {{ color: red; }} }}");
+        let sheet = parse_stylesheet(&source, 0).unwrap();
+        let Rule::Container(rule) = &sheet.rules[0] else {
+            panic!("expected a container rule");
+        };
+        rule.query
+    }
+
+    #[test]
+    fn strict_container_comparisons_exclude_the_threshold() {
+        let strict_min = container_query("width > 100px").min_width.unwrap();
+        assert!(strict_min > 100.0);
+        assert_eq!(container_query("width >= 100px").min_width, Some(100.0));
+        let strict_max = container_query("width < 100px").max_width.unwrap();
+        assert!(strict_max < 100.0);
+        assert_eq!(container_query("width <= 100px").max_width, Some(100.0));
+        let interval = container_query("100px < width <= 200px");
+        assert!(interval.min_width.unwrap() > 100.0);
+        assert_eq!(interval.max_width, Some(200.0));
+    }
 
     #[test]
     fn shared_lowering_reuses_exact_source_and_preserves_spans() {
