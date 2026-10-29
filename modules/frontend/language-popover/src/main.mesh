@@ -224,6 +224,12 @@ effect(function(self)
     -- frame would undo `onOptionScroll` before the scrolled window was ever
     -- painted, which is why scrolling the bubbles used to do nothing.
     local locale = current_locale()
+    if was_open and not open then
+        -- A pick the service never confirmed (rejected, no-op or overridden
+        -- elsewhere) must not outlive the popover.
+        pending_locale = nil
+        pending_locale_replaced = nil
+    end
     if pending_locale ~= nil then
         -- Hold our own pick until the service reports anything other than the
         -- locale it replaced: that is either the pick landing or a change made
