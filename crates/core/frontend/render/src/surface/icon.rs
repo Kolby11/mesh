@@ -1649,6 +1649,45 @@ const NEUTRAL_RASTER_TINT: Color = Color {
     a: 255,
 };
 
+/// Raster dimensions round up to this step. A box whose size jitters by a pixel
+/// or animates through intermediate sizes would otherwise ask for a new raster
+/// per size, and each one paints late.
+const RASTER_SIZE_STEP: i32 = 4;
+
+fn quantized_raster_dimension(pixels: f32) -> i32 {
+    let pixels = (pixels.ceil() as i32).max(1);
+    (pixels + RASTER_SIZE_STEP - 1) / RASTER_SIZE_STEP * RASTER_SIZE_STEP
+}
+
+const PAINTED_RASTER_CAPACITY: usize = 1024;
+
+/// The last raster of each file that painted, at whatever size. A file whose
+/// box changes size paints this stretched until the exact raster is ready.
+fn painted_rasters() -> &'static Mutex<HashMap<PathBuf, RasterVariant>> {
+    static PAINTED: OnceLock<Mutex<HashMap<PathBuf, RasterVariant>>> = OnceLock::new();
+    PAINTED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn remember_painted_raster(path: &Path, variant: &RasterVariant) {
+    let Ok(mut painted) = painted_rasters().lock() else {
+        return;
+    };
+    if painted
+        .get(path)
+        .is_some_and(|previous| Arc::ptr_eq(&previous.pixels, &variant.pixels))
+    {
+        return;
+    }
+    if painted.len() >= PAINTED_RASTER_CAPACITY {
+        painted.clear();
+    }
+    painted.insert(path.to_path_buf(), variant.clone());
+}
+
+fn last_painted_raster(path: &Path) -> Option<RasterVariant> {
+    painted_rasters().lock().ok()?.get(path).cloned()
+}
+
 fn draw_file_icon_on_canvas(
     canvas: &Canvas,
     path: &Path,
@@ -1667,60 +1706,41 @@ fn draw_file_icon_on_canvas(
         (NEUTRAL_RASTER_TINT, Some(tint))
     };
     let raster_scale = canvas_raster_scale(canvas);
-    let mut stretched = false;
-    let raster_w = (dest_w as f32 * raster_scale).ceil() as i32;
-    let raster_h = (dest_h as f32 * raster_scale).ceil() as i32;
+    let raster_w = quantized_raster_dimension(dest_w as f32 * raster_scale);
+    let raster_h = quantized_raster_dimension(dest_h as f32 * raster_scale);
+    let mut exact = true;
     let variant = match resolve_file_variant(path, raster_w, raster_h, raster_tint, multicolor) {
-        FileVariant::Ready(variant) => variant,
-        // A magnified raster is still being prepared: stretch the 1:1 raster
-        // already on screen instead of blinking the icon out until it lands.
-        FileVariant::Pending if raster_scale != 1.0 => {
-            match resolve_file_variant(path, dest_w, dest_h, raster_tint, multicolor) {
-                FileVariant::Ready(variant) => {
-                    tracing::debug!(target: "mesh_icon_trace", icon = %path.display(), raster_scale, "stretched 1x raster while magnified raster pends");
-                    stretched = true;
-                    variant
-                }
-                FileVariant::Pending | FileVariant::Unavailable => {
-                    tracing::debug!(target: "mesh_icon_trace", icon = %path.display(), raster_scale, "BLANK: magnified and 1x rasters both unavailable");
-                    return false;
-                }
+        FileVariant::Ready(variant) => {
+            remember_painted_raster(path, &variant);
+            variant
+        }
+        FileVariant::Pending => match last_painted_raster(path) {
+            Some(variant) => {
+                tracing::debug!(target: "mesh_icon_trace", icon = %path.display(), raster_w, raster_h, "stretched the last painted raster while this size pends");
+                exact = false;
+                variant
             }
-        }
-        FileVariant::Pending => {
-            tracing::debug!(target: "mesh_icon_trace", icon = %path.display(), "BLANK: 1x raster pending");
-            return false;
-        }
+            None => {
+                tracing::debug!(target: "mesh_icon_trace", icon = %path.display(), raster_w, raster_h, "BLANK: first raster pending");
+                return false;
+            }
+        },
         FileVariant::Unavailable => {
             draw_missing_icon_fallback_on_canvas(canvas, dest_x, dest_y, dest_w, dest_h, tint);
             return true;
         }
     };
-    if stretched {
-        let dest = Rect::from_xywh(
-            dest_x as f32,
-            dest_y as f32,
-            variant.width as f32,
-            variant.height as f32,
-        );
-        blit_variant_into_rect(canvas, &variant, dest, resampled_sampling(), draw_tint);
-    } else if raster_scale == 1.0 {
-        let dest = Rect::from_xywh(
-            dest_x as f32,
-            dest_y as f32,
-            variant.width as f32,
-            variant.height as f32,
-        );
-        blit_variant_into_rect(canvas, &variant, dest, SamplingOptions::default(), draw_tint);
+    let dest = Rect::from_xywh(dest_x as f32, dest_y as f32, dest_w as f32, dest_h as f32);
+    let one_to_one = exact
+        && raster_scale == 1.0
+        && variant.width as i32 == dest_w
+        && variant.height as i32 == dest_h;
+    let sampling = if one_to_one {
+        SamplingOptions::default()
     } else {
-        let dest = Rect::from_xywh(
-            dest_x as f32,
-            dest_y as f32,
-            variant.width as f32 / raster_scale,
-            variant.height as f32 / raster_scale,
-        );
-        blit_variant_into_rect(canvas, &variant, dest, resampled_sampling(), draw_tint);
-    }
+        resampled_sampling()
+    };
+    blit_variant_into_rect(canvas, &variant, dest, sampling, draw_tint);
     true
 }
 
@@ -2811,6 +2831,27 @@ mod tests {
     }
 
     #[test]
+    fn jittering_icon_boxes_share_quantized_raster_sizes() {
+        for width in [45.0, 46.0, 47.0, 48.0] {
+            assert_eq!(quantized_raster_dimension(width), 48, "{width}");
+        }
+        assert_eq!(quantized_raster_dimension(48.2), 52);
+        assert_eq!(quantized_raster_dimension(49.0), 52);
+        assert_eq!(quantized_raster_dimension(0.0), 4);
+        assert_eq!(quantized_raster_dimension(60.0), 60);
+    }
+
+    #[test]
+    fn a_painted_raster_is_kept_for_other_sizes_of_the_same_file() {
+        let path = Path::new("/nonexistent/painted-raster-test.svg");
+        assert!(last_painted_raster(path).is_none());
+        let variant = variant_from_bgra(2, 2, vec![255; 16]);
+        remember_painted_raster(path, &variant);
+        let kept = last_painted_raster(path).expect("a painted raster is remembered");
+        assert!(Arc::ptr_eq(&kept.pixels, &variant.pixels));
+    }
+
+    #[test]
     fn monochrome_canvas_icons_share_one_raster_across_tints() {
         let _guard = icon_test_lock();
         clear_icon_caches();
@@ -2821,16 +2862,16 @@ mod tests {
         let blue = Color { r: 10, g: 60, b: 230, a: 255 };
 
         let mut reference = PixelBuffer::new(24, 24);
-        draw_icon_from_path(&mut reference, &path, 4, 3, 14, 12, red);
+        draw_icon_from_path(&mut reference, &path, 4, 3, 16, 12, red);
 
         let mut tinted = PixelBuffer::new(24, 24);
         PixelCanvasSession::new(&mut tinted).with_canvas(|canvas| {
-            draw_icon_from_path_with_options_on_canvas(canvas, &path, 4, 3, 14, 12, red, false);
+            draw_icon_from_path_with_options_on_canvas(canvas, &path, 4, 3, 16, 12, red, false);
         });
         let entries = RASTER_CACHE.get().unwrap().lock().unwrap().len();
         let mut recolored = PixelBuffer::new(24, 24);
         PixelCanvasSession::new(&mut recolored).with_canvas(|canvas| {
-            draw_icon_from_path_with_options_on_canvas(canvas, &path, 4, 3, 14, 12, blue, false);
+            draw_icon_from_path_with_options_on_canvas(canvas, &path, 4, 3, 16, 12, blue, false);
         });
 
         assert_eq!(
