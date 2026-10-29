@@ -257,6 +257,12 @@ function init(self)
 end
 
 effect(function(self)
+    if was_open and not open then
+        -- A selection the service never confirmed (rejected or a no-op) must
+        -- not outlive the popover.
+        pending_theme = nil
+        pending_theme_replaced = nil
+    end
     local current = active_theme()
     set_current_theme(current)
     if not window_centred then
