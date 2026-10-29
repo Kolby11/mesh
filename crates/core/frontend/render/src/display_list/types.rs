@@ -583,10 +583,61 @@ impl DisplayPaintNode {
             || (self.transform.m11 - 1.0).abs() > EPSILON
             || (self.transform.m22 - 1.0).abs() > EPSILON
             || self.ancestor_clips.iter().any(|clip| {
-                clip.radii != mesh_core_elements::style::Corners::zero()
-                    || clip.transform.m12.abs() > EPSILON
+                clip.transform.m12.abs() > EPSILON
                     || clip.transform.m21.abs() > EPSILON
+                    || (clip.radii != mesh_core_elements::style::Corners::zero()
+                        && self.reaches_rounded_corner(clip))
             })
+    }
+
+    /// Whether this node can paint inside a corner square of a rounded,
+    /// axis-aligned clip. Elsewhere the rect clip already applied to every
+    /// command is exact, so the node avoids the per-node shader clip. A node
+    /// that paints beyond its box (shadow, outline, filters), scrolls with its
+    /// clip, or sits under a scaled clip is conservatively treated as reaching the corners.
+    fn reaches_rounded_corner(&self, clip: &AffineClip) -> bool {
+        const EPSILON: f32 = 0.0001;
+        const MARGIN: f32 = 2.0;
+        let style = &self.style;
+        if self.in_scroll_content
+            || (clip.transform.m11 - 1.0).abs() > EPSILON
+            || (clip.transform.m22 - 1.0).abs() > EPSILON
+            || style.box_shadow != BoxShadow::NONE
+            || !style.additional_box_shadows.is_empty()
+            || style.outline.width != 0.0
+            || style.filter != VisualFilter::NONE
+            || style.backdrop_filter != VisualFilter::NONE
+        {
+            return true;
+        }
+        let bounds = clip.bounds();
+        let (left, top) = (bounds.x, bounds.y);
+        let (right, bottom) = (bounds.x + bounds.width, bounds.y + bounds.height);
+        let node = self.layout;
+        let (node_right, node_bottom) = (node.x + node.width, node.y + node.height);
+        let corners = [
+            (left, top, clip.radii.top_left, 1.0, 1.0),
+            (right, top, clip.radii.top_right, -1.0, 1.0),
+            (right, bottom, clip.radii.bottom_right, -1.0, -1.0),
+            (left, bottom, clip.radii.bottom_left, 1.0, -1.0),
+        ];
+        corners.into_iter().any(|(cx, cy, radius, dx, dy)| {
+            if radius <= 0.0 {
+                return false;
+            }
+            let reach = radius + MARGIN;
+            let (x0, x1) = if dx > 0.0 {
+                (cx, cx + reach)
+            } else {
+                (cx - reach, cx)
+            };
+            let (y0, y1) = if dy > 0.0 {
+                (cy, cy + reach)
+            } else {
+                (cy - reach, cy)
+            };
+            node.x < x1 && node_right > x0 && node.y < y1 && node_bottom > y0
+        })
     }
 
     /// Dimensions used by content layout. Translated nodes already have their

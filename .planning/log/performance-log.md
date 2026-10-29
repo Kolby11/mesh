@@ -10069,3 +10069,16 @@ failure was not established here, and the full debug matrix is not claimed
 green. Other concurrent workspace edits were present during this validation.
 The final native surface capture was 2880×320 on a 2880×1800, scale-1,
 120.001-Hz eDP-1 output. Physical display latency remains unmeasured.
+
+## 2026-10-29 — Rounded overflow clips no longer force the affine path on every descendant
+
+Area: rendering, display list
+
+`DisplayPaintNode::requires_affine_paint` treated every node under a rounded
+`overflow` ancestor as affine, giving each a shader clip. A translated,
+unscaled node whose box stays clear of every corner square of an axis-aligned
+rounded clip (plus 2 px) now paints on the plain path: the rect clip already
+applied to its command is exact there. Nodes with shadows, outlines, filters,
+scroll-content coordinates or a scaled clip stay affine. Not benchmarked;
+correctness is covered by a display-list unit test and the 364 render lib
+tests. Measure with `navigation_hover_profile` before claiming a speedup.

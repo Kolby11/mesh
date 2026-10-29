@@ -160,6 +160,30 @@ fn display_list_paints_scaled_descendants_through_the_affine_matrix() {
 }
 
 #[test]
+fn display_list_paints_nodes_clear_of_rounded_clip_corners_without_the_affine_path() {
+    let mut card = node(1, "box", 0.0, 0.0, 200.0, 200.0);
+    card.computed_style.overflow_x = mesh_core_elements::style::Overflow::Hidden;
+    card.computed_style.overflow_y = mesh_core_elements::style::Overflow::Hidden;
+    card.computed_style.border_radius = mesh_core_elements::style::Corners::all(20.0);
+    card.children.push(node(2, "box", 60.0, 60.0, 80.0, 80.0));
+    card.children.push(node(3, "box", 0.0, 0.0, 80.0, 80.0));
+
+    let mut list = RetainedDisplayList::default();
+    list.update(&card, 200, 200, false, true);
+    let paint_node = |id| {
+        &list
+            .paint_commands()
+            .iter()
+            .find(|command| command.node.id == id && command.kind == DisplayPaintCommandKind::Node)
+            .expect("retained paint command")
+            .node
+    };
+
+    assert!(!paint_node(2).requires_affine_paint());
+    assert!(paint_node(3).requires_affine_paint());
+}
+
+#[test]
 fn display_list_rebuilds_descendant_geometry_after_ancestor_transform_changes() {
     let mut root = node(1, "box", 0.0, 0.0, 100.0, 80.0);
     root.computed_style.transform.rotation = std::f32::consts::FRAC_PI_4;

@@ -382,9 +382,6 @@ From a read-only code sweep on 2026-10-19; nothing below is measured yet.
 Verify each against `navigation_hover_profile`, `appearance_frame_cost_profile`
 or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
 
-- [ ] A rounded `overflow` ancestor sends every descendant down the affine path
-      with a shader clip per node (`display_list/types.rs:566`). Use a rect clip
-      for nodes missing the corner squares; longer term, push/pop clip scopes.
 - [ ] Multi-rect damage replays the selection once per rect when it contains a
       layer scope (`painter/tree.rs:363,596`); paint once under a canvas `clip_region`,
       not the rects' union, or translucent pixels between rects composite twice.
