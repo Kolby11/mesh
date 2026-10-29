@@ -414,6 +414,54 @@ fn appearance_frame_cost_profile() {
     );
 }
 
+// cargo test -p mesh-core-shell --release -- theme_switch_frame_cost_profile --ignored --nocapture
+#[test]
+#[ignore = "release-only theme switch frame-cost profile"]
+fn theme_switch_frame_cost_profile() {
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(920, 900);
+    let mut settings = appearance_surface(&theme, &mut buffer);
+    while settings.wants_render() {
+        settings
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .unwrap();
+    }
+
+    const SWITCHES: u32 = 10;
+    let mut changed = Duration::ZERO;
+    let mut painted = Duration::ZERO;
+    for _ in 0..SWITCHES {
+        let started = Instant::now();
+        settings.theme_changed().unwrap();
+        changed += started.elapsed();
+        let started = Instant::now();
+        settings
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .unwrap();
+        painted += started.elapsed();
+        while settings.wants_render() {
+            settings
+                .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+                .unwrap();
+        }
+    }
+    eprintln!(
+        "theme switch: theme_changed {:.3}ms, first paint {:.3}ms (mean of {SWITCHES})",
+        changed.as_secs_f64() * 1000.0 / SWITCHES as f64,
+        painted.as_secs_f64() * 1000.0 / SWITCHES as f64
+    );
+
+    settings.set_profiling_enabled(true);
+    let _ = settings.take_profiling_records();
+    for _ in 0..SWITCHES {
+        settings.theme_changed().unwrap();
+        settings
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .unwrap();
+    }
+    dump_stages("theme switch first paint", settings.take_profiling_records(), SWITCHES);
+}
+
 /// One presented frame as `Shell::render_components_inner` drives it for a
 /// settled surface: paint only when the component wants a frame, and take the
 /// loop's single corrective pass when `wants_immediate_rerender` asks for it.

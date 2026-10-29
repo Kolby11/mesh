@@ -1599,3 +1599,34 @@ fn keyboard_settings_merge_and_a_null_patch_removes_the_saved_assignments() {
     assert!(persisted.shell().keyboard.assigned.is_empty());
     assert_eq!(persisted.shell().keyboard.hint_mode, "hold");
 }
+
+// cargo test -p mesh-core-shell --release -- set_theme_cost_profile --ignored --nocapture
+#[test]
+#[ignore = "release-only theme switch preparation profile"]
+fn set_theme_cost_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    let css = fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../modules/themes/liquid-glass/theme.css"),
+    )
+    .unwrap();
+    fs::write(dir.path().join("theme.css"), css).unwrap();
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(
+        dir.path(),
+        "glass",
+        "theme.css",
+    ));
+    const SWITCHES: u32 = 10;
+    let started = std::time::Instant::now();
+    for _ in 0..SWITCHES {
+        shell
+            .apply_set_theme("@mesh/test-theme:glass", None)
+            .unwrap();
+    }
+    eprintln!(
+        "apply_set_theme: {:.3}ms mean of {SWITCHES}",
+        started.elapsed().as_secs_f64() * 1000.0 / SWITCHES as f64
+    );
+}

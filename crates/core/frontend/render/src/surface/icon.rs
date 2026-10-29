@@ -1614,6 +1614,19 @@ pub fn draw_icon_from_path_with_options_on_canvas(
     tint: Color,
     multicolor: bool,
 ) {
+    draw_file_icon_on_canvas(canvas, path, dest_x, dest_y, dest_w, dest_h, tint, multicolor);
+}
+
+fn draw_file_icon_on_canvas(
+    canvas: &Canvas,
+    path: &Path,
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+    multicolor: bool,
+) -> bool {
     let raster_scale = canvas_raster_scale(canvas);
     let mut stretched = false;
     let raster_w = (dest_w as f32 * raster_scale).ceil() as i32;
@@ -1628,13 +1641,13 @@ pub fn draw_icon_from_path_with_options_on_canvas(
                     stretched = true;
                     variant
                 }
-                FileVariant::Pending | FileVariant::Unavailable => return,
+                FileVariant::Pending | FileVariant::Unavailable => return false,
             }
         }
-        FileVariant::Pending => return,
+        FileVariant::Pending => return false,
         FileVariant::Unavailable => {
             draw_missing_icon_fallback_on_canvas(canvas, dest_x, dest_y, dest_w, dest_h, tint);
-            return;
+            return true;
         }
     };
     if stretched {
@@ -1656,6 +1669,7 @@ pub fn draw_icon_from_path_with_options_on_canvas(
         );
         blit_variant_into_rect(canvas, &variant, dest, resampled_sampling());
     }
+    true
 }
 
 enum FileVariant {
@@ -2020,13 +2034,15 @@ pub fn draw_named_icon_in_session(
     axes: GlyphAxes,
 ) {
     #[cfg(test)]
-    let resolution = resolve_icon_result(name, size);
+    {
+        let resolution = resolve_icon_result(name, size);
+        draw_icon_resolution_with_axes_in_session(
+            session, resolution, dest_x, dest_y, dest_w, dest_h, tint, axes,
+        );
+    }
     #[cfg(not(test))]
-    let Some(resolution) = resolve_icon_for_render("", name, size) else {
-        return;
-    };
-    draw_icon_resolution_with_axes_in_session(
-        session, resolution, dest_x, dest_y, dest_w, dest_h, tint, axes,
+    draw_named_icon_keeping_last_paint(
+        session, "", name, size, dest_x, dest_y, dest_w, dest_h, tint, axes,
     );
 }
 
@@ -2043,13 +2059,15 @@ pub fn draw_named_icon_for_module_in_session(
     axes: GlyphAxes,
 ) {
     #[cfg(test)]
-    let resolution = mesh_core_icon::resolve_icon_for_module(module_id, name, size);
+    {
+        let resolution = mesh_core_icon::resolve_icon_for_module(module_id, name, size);
+        draw_icon_resolution_with_axes_in_session(
+            session, resolution, dest_x, dest_y, dest_w, dest_h, tint, axes,
+        );
+    }
     #[cfg(not(test))]
-    let Some(resolution) = resolve_icon_for_render(module_id, name, size) else {
-        return;
-    };
-    draw_icon_resolution_with_axes_in_session(
-        session, resolution, dest_x, dest_y, dest_w, dest_h, tint, axes,
+    draw_named_icon_keeping_last_paint(
+        session, module_id, name, size, dest_x, dest_y, dest_w, dest_h, tint, axes,
     );
 }
 
@@ -2062,18 +2080,20 @@ fn draw_icon_resolution_with_axes_in_session(
     dest_h: i32,
     tint: Color,
     axes: GlyphAxes,
-) {
+) -> bool {
     match resolution {
         IconResolution::Found {
             target: ResolvedTarget::File(path),
             multicolor,
             ..
         } => {
-            session.with_canvas(|canvas| {
-                draw_icon_from_path_with_options_on_canvas(
-                    canvas, &path, dest_x, dest_y, dest_w, dest_h, tint, multicolor,
-                );
-            });
+            session
+                .with_canvas(|canvas| {
+                    draw_file_icon_on_canvas(
+                        canvas, &path, dest_x, dest_y, dest_w, dest_h, tint, multicolor,
+                    )
+                })
+                .unwrap_or(true)
         }
         IconResolution::Found {
             target:
@@ -2111,12 +2131,75 @@ fn draw_icon_resolution_with_axes_in_session(
                     );
                 });
             }
+            true
         }
         IconResolution::Missing { .. } => {
             session.with_canvas(|canvas| {
                 draw_missing_icon_fallback_on_canvas(canvas, dest_x, dest_y, dest_w, dest_h, tint);
             });
+            true
         }
+    }
+}
+
+/// Last resolution of each named icon that painted pixels. A resource
+/// revision (a theme switch that changes the icon pack) invalidates every
+/// resolution and raster, which are then prepared asynchronously; painting the
+/// previous result meanwhile keeps icons from blanking out and popping back.
+#[cfg(not(test))]
+type PaintedIcons = HashMap<(String, String, u32), (u64, IconResolution)>;
+
+#[cfg(not(test))]
+const PAINTED_ICON_CAPACITY: usize = 4096;
+
+#[cfg(not(test))]
+fn painted_icons() -> &'static Mutex<PaintedIcons> {
+    static PAINTED: OnceLock<Mutex<PaintedIcons>> = OnceLock::new();
+    PAINTED.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(not(test))]
+fn draw_named_icon_keeping_last_paint(
+    session: &mut PixelCanvasSession<'_>,
+    module_id: &str,
+    name: &str,
+    size: u32,
+    dest_x: i32,
+    dest_y: i32,
+    dest_w: i32,
+    dest_h: i32,
+    tint: Color,
+    axes: GlyphAxes,
+) {
+    let revision = resource_revision();
+    let key = (module_id.to_owned(), name.to_owned(), size);
+    if let Some(resolution) = resolve_icon_for_render(module_id, name, size) {
+        let remember = matches!(resolution, IconResolution::Found { .. })
+            && painted_icons()
+                .lock()
+                .is_ok_and(|painted| painted.get(&key).is_none_or(|(seen, _)| *seen != revision));
+        let remembered = remember.then(|| resolution.clone());
+        let painted = draw_icon_resolution_with_axes_in_session(
+            session, resolution, dest_x, dest_y, dest_w, dest_h, tint, axes,
+        );
+        if painted {
+            if let (Some(resolution), Ok(mut icons)) = (remembered, painted_icons().lock()) {
+                if icons.len() >= PAINTED_ICON_CAPACITY {
+                    icons.clear();
+                }
+                icons.insert(key, (revision, resolution));
+            }
+            return;
+        }
+    }
+    let previous = painted_icons()
+        .lock()
+        .ok()
+        .and_then(|icons| icons.get(&key).map(|(_, resolution)| resolution.clone()));
+    if let Some(previous) = previous {
+        draw_icon_resolution_with_axes_in_session(
+            session, previous, dest_x, dest_y, dest_w, dest_h, tint, axes,
+        );
     }
 }
 
