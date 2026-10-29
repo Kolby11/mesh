@@ -2775,6 +2775,29 @@ mod tests {
     }
 
     #[test]
+    fn source_icons_paint_through_the_session_entry_point() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("symbol.svg");
+        write_test_svg(&path);
+        let mut buffer = PixelBuffer::new(24, 24);
+        {
+            let mut session = PixelCanvasSession::new(&mut buffer);
+            draw_icon_from_path_in_session(&mut session, &path, 4, 3, 14, 12, tint(), true);
+        }
+        let pixels = non_transparent_pixels(&buffer);
+        assert!(!pixels.is_empty(), "the icon must paint");
+        assert!(
+            pixels
+                .iter()
+                .all(|(x, y, _)| *x >= 4 && *x < 18 && *y >= 3 && *y < 15),
+            "painted outside the destination: {:?}",
+            pixels.iter().map(|(x, y, _)| (*x, *y)).take(8).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn monochrome_canvas_icons_share_one_raster_across_tints() {
         let _guard = icon_test_lock();
         clear_icon_caches();
