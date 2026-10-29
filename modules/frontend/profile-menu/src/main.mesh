@@ -37,6 +37,8 @@ profiles = {}
 -- The profile this menu asked for, shown as pending until the transactional
 -- switch commits and `active_profile` reports it.
 local requested = nil
+local requested_from = nil
+local was_open = false
 
 local function label(id)
     local spaced = string.gsub(id, "[-_]", " ")
@@ -45,8 +47,13 @@ end
 
 effect(function()
     local active = packages.active_profile or ""
-    if requested == active then
+    -- Clear the marker once the switch lands, once another switch supersedes
+    -- it, or when the menu is reopened after a switch that never took effect.
+    local reopened = open and not was_open
+    was_open = open
+    if requested ~= nil and (requested == active or active ~= requested_from or reopened) then
         requested = nil
+        requested_from = nil
     end
     local list = {}
     for _, id in packages.profiles or {} do
@@ -66,6 +73,7 @@ function onSwitch(id)
         return
     end
     requested = id
+    requested_from = packages.active_profile or ""
     packages.switch_profile(id)
 end
 </script>

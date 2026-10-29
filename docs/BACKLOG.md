@@ -304,7 +304,6 @@ evidence and test workloads are in the linked reports.
 - [ ] Build theme-selector options from the installed theme catalog; its fixed list omits other installed themes and can offer absent ones. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Reconcile theme-selector optimistic state after failed or no-op selections; the pending theme can remain displayed indefinitely. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Align the frontend adapter's service authorization test with deferred contract-aware dispatch; its current assertion contradicts the ABI. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
-- [ ] Reconcile profile-menu pending state on failed or externally superseded switches; the pending marker can remain stale. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Localize glass-widget weather and idle-media text; hardcoded English bypasses the module catalogs. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] **S10-PERF-001 / S10-PERF-002 / S10-PERF-003:** Cache tree/style preparation and recursive imports by
       content revision, and narrow effect/state observation summaries after
