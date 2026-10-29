@@ -85,6 +85,49 @@ fn theme_write_target(
     }
 }
 
+/// Most user token overrides one `set_tokens` call may write.
+const MAX_TOKEN_PATCH_ENTRIES: usize = 64;
+
+/// Apply a token patch to a `shell` settings object: a value sets the
+/// override, `null` removes it, and an emptied `theme.tokens` is dropped so
+/// the document stays sparse.
+fn patch_theme_tokens(
+    shell: &mut serde_json::Value,
+    patch: &serde_json::Map<String, serde_json::Value>,
+) {
+    if !shell.is_object() {
+        *shell = serde_json::json!({});
+    }
+    let shell = shell.as_object_mut().expect("shell settings are an object");
+    let theme = shell
+        .entry("theme")
+        .or_insert_with(|| serde_json::json!({}));
+    if !theme.is_object() {
+        *theme = serde_json::json!({});
+    }
+    let theme = theme.as_object_mut().expect("theme settings are an object");
+    let tokens = theme
+        .entry("tokens")
+        .or_insert_with(|| serde_json::json!({}));
+    if !tokens.is_object() {
+        *tokens = serde_json::json!({});
+    }
+    let tokens = tokens.as_object_mut().expect("token overrides are an object");
+    for (name, value) in patch {
+        if value.is_null() {
+            tokens.remove(name);
+        } else {
+            tokens.insert(name.clone(), value.clone());
+        }
+    }
+    if tokens.is_empty() {
+        theme.remove("tokens");
+    }
+    if theme.is_empty() {
+        shell.remove("theme");
+    }
+}
+
 fn release_profile_theme(profile: &mut mesh_core_module::package::ShellProfile) {
     let Some(shell) = profile
         .settings
@@ -689,7 +732,27 @@ impl Shell {
             return Ok(VecDeque::new());
         };
         let theme_id = theme_id.to_owned();
-        let settings_candidate = self.prepare_control_plane_settings(|shared, profile| {
+        let recommended = graph
+            .theme_catalog()
+            .get(&theme_id)
+            .map(|descriptor| self.recommended_resource_patch(&descriptor.recommends))
+            .filter(|patch| !patch.as_object().is_some_and(serde_json::Map::is_empty));
+        let settings_candidate = self.prepare_control_plane_settings(|shared, mut profile| {
+            // Fonts and icons are written where an explicit pick would land, so
+            // a profile's own choice is replaced rather than left shadowing the
+            // shared one.
+            if let Some(patch) = &recommended {
+                match profile.as_deref_mut() {
+                    Some(profile) => {
+                        let target = profile
+                            .settings
+                            .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+                            .or_insert_with(|| serde_json::json!({}));
+                        mesh_core_config::merge_json(target, patch);
+                    }
+                    None => shared.merge_namespace(mesh_core_config::SHELL_NAMESPACE, patch),
+                }
+            }
             match theme_write_target(profile, scope) {
                 Some(profile) => {
                     let target = profile
@@ -788,25 +851,131 @@ impl Shell {
         )
     }
 
+    /// Write user theme token overrides (`shell.theme.tokens`, spec 04 §5)
+    /// where the active theme selection lives. Each value is a string, number
+    /// or boolean; `null` removes that override. An invalid patch is ignored
+    /// whole.
+    pub(in crate::shell) fn apply_set_theme_tokens(
+        &mut self,
+        tokens: serde_json::Map<String, serde_json::Value>,
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
+        if tokens.is_empty() || tokens.len() > MAX_TOKEN_PATCH_ENTRIES {
+            tracing::warn!(
+                "ignoring theme token patch with {} entries (1-{MAX_TOKEN_PATCH_ENTRIES} allowed)",
+                tokens.len()
+            );
+            return Ok(VecDeque::new());
+        }
+        if let Some((name, _)) = tokens.iter().find(|(name, value)| {
+            name.trim().is_empty()
+                || !matches!(
+                    value,
+                    serde_json::Value::Null
+                        | serde_json::Value::String(_)
+                        | serde_json::Value::Bool(_)
+                        | serde_json::Value::Number(_)
+                )
+        }) {
+            tracing::warn!("ignoring theme token patch: '{name}' is not a token override");
+            return Ok(VecDeque::new());
+        }
+        let Some(graph) = self.installed_module_graph.as_ref().cloned() else {
+            tracing::warn!("cannot set theme tokens without an installed module graph");
+            return Ok(VecDeque::new());
+        };
+        let settings_candidate = self.prepare_control_plane_settings(|shared, profile| {
+            match theme_write_target(profile, None) {
+                Some(profile) => {
+                    let shell = profile
+                        .settings
+                        .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+                        .or_insert_with(|| serde_json::json!({}));
+                    patch_theme_tokens(shell, &tokens);
+                }
+                None => {
+                    let mut shell = shared.to_value()[mesh_core_config::SHELL_NAMESPACE].clone();
+                    patch_theme_tokens(&mut shell, &tokens);
+                    shared.set_namespace(mesh_core_config::SHELL_NAMESPACE, shell);
+                }
+            }
+            Ok(())
+        })?;
+        let candidate_settings =
+            mesh_core_config::resolve_shell_locale_settings(settings_candidate.store.shell());
+        let prepared_theme = match prepare_theme_state_for_graph(&candidate_settings, &graph) {
+            Ok(Some(candidate)) => candidate,
+            Ok(None) => return Ok(VecDeque::new()),
+            Err(error) => {
+                tracing::warn!("cannot apply theme tokens: {error}");
+                return Ok(VecDeque::new());
+            }
+        };
+        let mut theme = prepared_theme.engine;
+        theme.update_active(|active| {
+            crate::shell::discovery::apply_font_registry_tokens(active, &self.font_registry);
+        });
+        self.commit_control_plane_settings(
+            settings_candidate,
+            Some((theme, prepared_theme.watch)),
+            None,
+            true,
+            false,
+        )
+    }
+
+    fn icon_resource_available(&self, id: &str) -> bool {
+        self.resource_snapshot
+            .host_catalog
+            .icon_themes
+            .iter()
+            .any(|theme| theme.id == id && !theme.hidden)
+            || self
+                .resource_explanation_snapshot()
+                .icons
+                .available
+                .iter()
+                .any(|candidate| candidate == id)
+    }
+
+    fn font_family_available(&self, family: &str) -> bool {
+        self.resource_snapshot
+            .host_catalog
+            .font_families
+            .iter()
+            .any(|candidate| candidate.name == family)
+    }
+
+    /// The `shell` settings patch that adopts a theme's recommended font and
+    /// icon theme: the first installed candidate of each list. A list with no
+    /// installed candidate leaves that setting as it is.
+    fn recommended_resource_patch(
+        &self,
+        recommends: &mesh_core_theme::ThemeRecommendations,
+    ) -> serde_json::Value {
+        let mut patch = serde_json::Map::new();
+        if let Some(family) = recommends
+            .fonts
+            .iter()
+            .find(|family| self.font_family_available(family))
+        {
+            patch.insert("fonts".into(), serde_json::json!({ "ui_family": family }));
+        }
+        if let Some(icons) = recommends
+            .icons
+            .iter()
+            .find(|id| self.icon_resource_available(id))
+        {
+            patch.insert("icons".into(), serde_json::json!({ "default_pack": icons }));
+        }
+        serde_json::Value::Object(patch)
+    }
+
     pub(in crate::shell) fn apply_set_icon_theme(
         &mut self,
         theme_id: &str,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let theme_id = theme_id.trim();
-        let available_host_theme = self
-            .resource_snapshot
-            .host_catalog
-            .icon_themes
-            .iter()
-            .any(|theme| theme.id == theme_id && !theme.hidden);
-        let available_resource_pack = self
-            .resource_explanation_snapshot()
-            .icons
-            .available
-            .iter()
-            .any(|candidate| candidate == theme_id);
-        let available = available_host_theme || available_resource_pack;
-        if !available {
+        if !self.icon_resource_available(theme_id) {
             tracing::warn!("cannot select unavailable icon resource '{theme_id}'");
             return Ok(VecDeque::new());
         }
@@ -832,13 +1001,7 @@ impl Shell {
         family: &str,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let family = family.trim();
-        let available = self
-            .resource_snapshot
-            .host_catalog
-            .font_families
-            .iter()
-            .any(|candidate| candidate.name == family);
-        if !available {
+        if !self.font_family_available(family) {
             tracing::warn!("cannot select unavailable system font family '{family}'");
             return Ok(VecDeque::new());
         }
@@ -1023,6 +1186,14 @@ impl Shell {
                 "modes": theme_modes(theme),
                 "palette": theme_preview_palette(theme),
                 "coverage": coverage,
+                "recommends": self
+                    .installed_module_graph
+                    .as_ref()
+                    .and_then(|graph| graph.theme_catalog().get(&theme.id))
+                    .map(|descriptor| serde_json::json!({
+                        "fonts": descriptor.recommends.fonts,
+                        "icons": descriptor.recommends.icons,
+                    })),
             })
         };
         let mut themes = self

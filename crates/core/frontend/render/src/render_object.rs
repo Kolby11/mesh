@@ -1119,26 +1119,4 @@ mod tests {
             "scroll updates should dirty the scrolled render object so retained paint can rebuild its subtree locally"
         );
     }
-
-    #[test]
-    fn render_object_tree_marks_slider_value_updates_as_primitive_dirty() {
-        let mut root = WidgetNode::new("slider");
-        root.id = 1;
-        root.attributes.insert(Prop::Min, "0".into());
-        root.attributes.insert(Prop::Max, "1".into());
-        root.attributes.insert(Prop::Value, "0.25".into());
-
-        let mut tree = RenderObjectTree::default();
-        tree.update(&root);
-
-        root.attributes.insert(Prop::Value, "0.735".into());
-        let dirty = tree.update(&root);
-
-        assert_eq!(dirty.primitive, 1);
-        assert_eq!(
-            tree.dirty_node_ids(),
-            &HashSet::from([1]),
-            "slider value updates should dirty the render object so retained paint rebuilds the thumb immediately"
-        );
-    }
 }

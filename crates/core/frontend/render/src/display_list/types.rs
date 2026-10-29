@@ -653,7 +653,6 @@ pub enum DisplayPaintContent {
     None,
     Text(DisplayTextPaint),
     Input(DisplayInputPaint),
-    Slider(DisplaySliderPaint),
     Icon(DisplayIconPaint),
     Checkmark(DisplayCheckmarkPaint),
     /// A vector `<shape>`, filled with the background colour and stroked with
@@ -725,14 +724,6 @@ impl PartialEq for DisplayInputPaint {
             && self.focused == other.focused
             && self.preedit == other.preedit
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DisplaySliderPaint {
-    pub min: f32,
-    pub max: f32,
-    pub value: f32,
-    pub vertical: bool,
 }
 
 #[derive(Debug, Clone)]

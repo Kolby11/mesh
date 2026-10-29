@@ -259,5 +259,16 @@
   "keyboard.corner.top_left": "Top left",
   "keyboard.corner.top_right": "Top right",
   "keyboard.corner.bottom_left": "Bottom left",
-  "keyboard.corner.bottom_right": "Bottom right"
+  "keyboard.corner.bottom_right": "Bottom right",
+  "appearance.theme.now": "Now",
+  "appearance.theme.recommends": "Recommends",
+  "appearance.glass": "Glass material",
+  "appearance.glass.copy": "How strongly glass surfaces blur and bend what is behind them. Theme keeps the active theme's own glass.",
+  "appearance.glass.style": "Material style",
+  "appearance.glass.style.theme": "Theme",
+  "appearance.glass.style.liquid": "Liquid glass",
+  "appearance.glass.style.soft": "Soft-light glass",
+  "appearance.glass.style.frosted": "Frosted glass",
+  "appearance.glass.blur": "Blur strength",
+  "appearance.glass.liquid": "Liquid strength"
 }

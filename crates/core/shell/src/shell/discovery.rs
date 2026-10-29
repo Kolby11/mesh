@@ -1905,6 +1905,7 @@ impl Shell {
                 ("set_mode", &[("mode", "string")]),
                 ("set_icon_theme", &[("theme_id", "string")]),
                 ("set_font_family", &[("family", "string")]),
+                ("set_tokens", &[("tokens", "object")]),
                 ("set_backdrop_image", &[("path", "string")]),
                 (
                     "list_font_families",

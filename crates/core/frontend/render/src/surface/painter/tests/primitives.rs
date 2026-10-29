@@ -375,9 +375,9 @@ fn compatibility_and_retained_input_paths_emit_same_classes() {
 }
 
 #[test]
-fn compatibility_and_retained_slider_paths_emit_same_classes() {
+fn compatibility_and_retained_control_paths_emit_same_classes() {
     let mut root = node(
-        "slider",
+        "checkbox",
         LayoutRect {
             x: 2.0,
             y: 2.0,
@@ -386,9 +386,7 @@ fn compatibility_and_retained_slider_paths_emit_same_classes() {
         },
         Color::TRANSPARENT,
     );
-    root.attributes.insert(Prop::Min, "0".into());
-    root.attributes.insert(Prop::Max, "100".into());
-    root.attributes.insert(Prop::Value, "40".into());
+    root.attributes.insert(Prop::Checked, "true".into());
     root.computed_style.color = Color::from_hex("#4a90e2").unwrap();
 
     let direct_backend = RecordingPaintBackend::default();
@@ -424,10 +422,7 @@ fn compatibility_and_retained_slider_paths_emit_same_classes() {
     );
     let retained_classes = painter_command_classes(&retained_recorded.recorded_commands());
 
-    assert_eq!(
-        direct_classes,
-        vec!["draw_rect", "draw_rect", "draw_rounded_rect"]
-    );
+    assert_eq!(direct_classes, vec!["draw_path"]);
     assert_eq!(retained_classes, direct_classes);
 }
 
@@ -664,18 +659,19 @@ fn display_list_primitive_mixed_tree_preserves_node_order_and_command_classes() 
     input.computed_style.color = Color::from_hex("#f5f5f5").unwrap();
     input.computed_style.padding = Edges::all(4.0);
 
-    let mut slider = node(
-        "slider",
+    // A control part paints as an ordinary rounded box.
+    let mut thumb = node(
+        "box",
         LayoutRect {
             x: 8.0,
             y: 76.0,
-            width: 128.0,
-            height: 30.0,
+            width: 16.0,
+            height: 16.0,
         },
-        Color::TRANSPARENT,
+        Color::from_hex("#4a90e2").unwrap(),
     );
-    slider.attributes.insert(Prop::Value, "60".into());
-    slider.computed_style.color = Color::from_hex("#4a90e2").unwrap();
+    thumb.set_control_part(mesh_core_elements::ControlPart::SliderThumb);
+    thumb.computed_style.border_radius = mesh_core_elements::style::Corners::all(8.0);
 
     let mut icon = node(
         "icon",
@@ -690,8 +686,8 @@ fn display_list_primitive_mixed_tree_preserves_node_order_and_command_classes() 
     icon.attributes.insert(Prop::Name, "mesh:search".into());
     icon.attributes.insert(Prop::Size, "20".into());
 
-    let expected_node_order = vec![root.id, text.id, input.id, slider.id, icon.id];
-    root.children = vec![text, input, slider, icon].into();
+    let expected_node_order = vec![root.id, text.id, input.id, thumb.id, icon.id];
+    root.children = vec![text, input, thumb, icon].into();
 
     let mut list = RetainedDisplayList::default();
     list.update(&root, 240, 140, true, true);
@@ -730,8 +726,8 @@ fn display_list_primitive_mixed_tree_preserves_node_order_and_command_classes() 
             .iter()
             .filter(|class| **class == "draw_rect")
             .count()
-            >= 6,
-        "box, text selection, input, and slider primitives should emit draw_rect commands"
+            >= 4,
+        "box, text selection and input primitives should emit draw_rect commands"
     );
 }
 

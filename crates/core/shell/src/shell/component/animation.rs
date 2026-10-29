@@ -157,13 +157,15 @@ impl FrontendSurfaceComponent {
     /// keyframe animation always needs sampling. Otherwise the pass exists to
     /// start transitions from restyled values, so a frame whose styles were
     /// not re-resolved (`styles_unchanged`, a paint-only retained frame)
-    /// cannot start one and skips it — though any rule declaring a transition,
-    /// as the default theme's `node {}` does, sets `has_animatable_style_rules`.
+    /// cannot start one and skips it. Otherwise any rule that can start one
+    /// runs it: the module's own (`has_animatable_style_rules`, known before
+    /// the first restyle) or any in the restyle set, theme rules included.
     pub(super) fn should_run_style_animation_pass(&self, styles_unchanged: bool) -> bool {
         !self.transitions.is_empty()
             || !self.keyframe_animations.is_empty()
             || self.has_active_keyframe_animation
-            || (self.has_animatable_style_rules && !styles_unchanged)
+            || ((self.has_animatable_style_rules || self.cached_restyle_rules_animate)
+                && !styles_unchanged)
     }
 
     #[cfg(test)]

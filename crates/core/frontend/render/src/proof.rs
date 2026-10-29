@@ -286,7 +286,7 @@ fn display_slot_for_command(command: &DisplayPaintCommand) -> &'static str {
         DisplayPaintContent::Icon(_) => "Icon",
         DisplayPaintContent::Checkmark(_) => "Checkmark",
         DisplayPaintContent::Shape(_) => "Generic",
-        DisplayPaintContent::Slider(_) | DisplayPaintContent::Input(_) => "Generic",
+        DisplayPaintContent::Input(_) => "Generic",
         DisplayPaintContent::None => {
             if command.node.style.border_width.top > 0.0
                 || command.node.style.border_width.right > 0.0

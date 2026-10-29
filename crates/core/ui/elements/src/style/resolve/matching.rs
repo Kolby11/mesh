@@ -35,7 +35,29 @@ pub(super) fn classify_theme_style_value(value: &str) -> StyleValue {
     }
 }
 
+/// Whether `selector` matches the node `attrs` describe. A `host::part`
+/// selector matches only that part of a matching host, and every other
+/// selector matches only ordinary nodes.
 pub fn selector_matches_attrs(selector: &Selector, attrs: &StyleNodeAttrs) -> bool {
+    match selector {
+        Selector::PseudoElement(host, part) => {
+            attrs.pseudo_element == Some(part.as_str()) && host_selector_matches(host, attrs)
+        }
+        _ => attrs.pseudo_element.is_none() && host_selector_matches(selector, attrs),
+    }
+}
+
+/// Whether `selector` matches the host element itself, or for a `host::part`
+/// selector, whether its host half does. Host-side dependency checks use
+/// this: a part rule's outcome changes exactly when its host half's does.
+pub(super) fn selector_matches_host(selector: &Selector, attrs: &StyleNodeAttrs) -> bool {
+    match selector {
+        Selector::PseudoElement(host, _) => host_selector_matches(host, attrs),
+        _ => host_selector_matches(selector, attrs),
+    }
+}
+
+fn host_selector_matches(selector: &Selector, attrs: &StyleNodeAttrs) -> bool {
     match selector {
         Selector::Universal => true,
         Selector::Tag(t) => t == attrs.tag,
@@ -47,7 +69,9 @@ pub fn selector_matches_attrs(selector: &Selector, attrs: &StyleNodeAttrs) -> bo
                 PseudoState::from_name(pseudo).is_some_and(|state| state.value(attrs.state));
             tag_matches && state_matches
         }
-        Selector::Compound(parts) => parts.iter().all(|s| selector_matches_attrs(s, attrs)),
+        Selector::Compound(parts) => parts.iter().all(|s| host_selector_matches(s, attrs)),
+        // A part cannot host another part.
+        Selector::PseudoElement(..) => false,
     }
 }
 
@@ -57,6 +81,19 @@ pub(super) fn rule_matches_attrs(
     context: StyleContext,
 ) -> bool {
     selector_matches_attrs(&rule.selector, attrs)
+        && rule
+            .container_query
+            .is_none_or(|query| query.matches(context.container_width, context.container_height))
+}
+
+/// [`rule_matches_attrs`] for a host's own dependencies: a `host::part`
+/// rule counts when its host half matches.
+pub(super) fn rule_matches_host(
+    rule: &StyleRule,
+    attrs: &StyleNodeAttrs,
+    context: StyleContext,
+) -> bool {
+    selector_matches_host(&rule.selector, attrs)
         && rule
             .container_query
             .is_none_or(|query| query.matches(context.container_width, context.container_height))
@@ -93,6 +130,7 @@ pub(super) fn inherit_retained_text_style(
 
 pub(super) fn selector_index_key(selector: &Selector) -> Option<SelectorIndexKey<'_>> {
     match selector {
+        Selector::PseudoElement(_, part) => Some(SelectorIndexKey::PseudoElement(part)),
         Selector::Tag(tag) => Some(SelectorIndexKey::Tag(tag)),
         Selector::Class(class) => Some(SelectorIndexKey::Class(class)),
         Selector::Id(id) => Some(SelectorIndexKey::Id(id)),
@@ -109,7 +147,7 @@ pub(super) fn selector_index_key(selector: &Selector) -> Option<SelectorIndexKey
                     }
                     Selector::Universal => {}
                     Selector::Tag(_) | Selector::State(_, _) => {}
-                    Selector::Compound(_) => return None,
+                    Selector::Compound(_) | Selector::PseudoElement(..) => return None,
                 }
             }
             best

@@ -1023,10 +1023,10 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
                 .any(|token| token == "theme-option")
         {
             assert!(node.event_handlers.contains_key("click"));
-            let id = first_node_by_class(node, "settings-card-meta")
-                .and_then(|meta| meta.attributes.get(Prop::Content))
-                .expect("theme card id");
-            options.push((id.clone(), class.clone()));
+            let title = first_node_by_class(node, "theme-title")
+                .and_then(|title| title.attributes.get(Prop::Content))
+                .expect("theme card title");
+            options.push((title.clone(), class.clone()));
         }
         for child in &node.children {
             collect_theme_options(child, options);
@@ -1043,8 +1043,8 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
     );
     assert_eq!(theme_options.len(), 3);
     assert!(
-        theme_options.iter().any(|(id, class)| {
-            id == "gruvbox-dark"
+        theme_options.iter().any(|(title, class)| {
+            title == "Gruvbox Dark"
                 && class
                     .split_whitespace()
                     .any(|token| token == "theme-option-active")
@@ -1052,8 +1052,8 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         "the exact current theme should be highlighted: {theme_options:?}"
     );
     assert!(
-        theme_options.iter().all(|(id, class)| {
-            id == "gruvbox-dark"
+        theme_options.iter().all(|(title, class)| {
+            title == "Gruvbox Dark"
                 || !class
                     .split_whitespace()
                     .any(|token| token == "theme-option-active")

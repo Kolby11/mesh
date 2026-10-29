@@ -1122,6 +1122,7 @@ fn build_element_node(
                 )]
             }
         })
+        .chain(mesh_core_elements::control_part_nodes(tag))
         .collect();
 
     node

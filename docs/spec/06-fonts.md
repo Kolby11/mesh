@@ -119,7 +119,8 @@ Via the settings store ([08](08-settings.md)):
 `shell.fonts.packs` prepends to every consumer's chain; `use_packs` replaces
 per module; `overrides` is the per-role user knob. `ui_family` is the shipped
 v1 "default UI font" setting and names an exact installed family; role-based
-values begin once font-pack mapping ships.
+values begin once font-pack mapping ships. Selecting a theme sets `ui_family` to the first installed
+family the theme recommends ([04 §2.2](04-styling.md#22-recommended-fonts-and-icons)).
 
 ## 6. Resolution order
 

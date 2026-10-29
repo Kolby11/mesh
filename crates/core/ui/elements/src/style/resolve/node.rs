@@ -370,7 +370,11 @@ impl<'a> StyleResolver<'a> {
         // no-diagnostics cache; the diagnostics path still builds its own copy
         // because it also carries per-resolution diagnostics.
         let mut shared = None;
-        let (mut style, default_variables) = if let Some(diagnostics) = diagnostics.as_mut() {
+        let (mut style, default_variables) = if let Some(initial) = attrs.part_initial {
+            // A part never takes its host tag's theme defaults (`slider { … }`
+            // sizes the control, not its thumb).
+            (initial.clone(), None)
+        } else if let Some(diagnostics) = diagnostics.as_mut() {
             let (style, variables, default_diagnostics) =
                 self.cached_theme_component_defaults_with_diagnostics(attrs.tag, attrs.module_id());
             diagnostics.extend(default_diagnostics);

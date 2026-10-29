@@ -63,6 +63,17 @@ pub enum CompileFrontendError {
         span: SourceSpan,
     },
 
+    #[error(
+        "unknown control part {selector} in component source {path} at bytes {span:?}; {host} exposes {known}"
+    )]
+    UnknownPseudoElement {
+        path: PathBuf,
+        selector: String,
+        host: String,
+        known: String,
+        span: SourceSpan,
+    },
+
     #[error("unknown element tag <{tag}> in component source {path} at bytes {span:?}")]
     UnknownElementTag {
         path: PathBuf,
@@ -127,6 +138,7 @@ impl CompileFrontendError {
             }
             Self::StandaloneComponentViolation { .. }
             | Self::UnsupportedPseudoState { .. }
+            | Self::UnknownPseudoElement { .. }
             | Self::UnknownElementTag { .. } => FrontendDiagnosticCategory::Validation,
         }
     }
@@ -139,6 +151,7 @@ impl CompileFrontendError {
             Self::ParseSource { span, .. }
             | Self::StandaloneComponentViolation { span, .. }
             | Self::UnsupportedPseudoState { span, .. }
+            | Self::UnknownPseudoElement { span, .. }
             | Self::UnknownElementTag { span, .. } => Some(*span),
             Self::NotFrontendModule { .. }
             | Self::MissingFrontendEntrypoint { .. }
@@ -157,6 +170,7 @@ impl CompileFrontendError {
             | Self::InvalidSourcePath { path, .. }
             | Self::StandaloneComponentViolation { path, .. }
             | Self::UnsupportedPseudoState { path, .. }
+            | Self::UnknownPseudoElement { path, .. }
             | Self::UnknownElementTag { path, .. } => Some(path),
             Self::ConflictingImportAlias { owner, .. } => Some(owner),
             Self::NotFrontendModule { .. }
@@ -470,6 +484,9 @@ mod parsed_component_cache {
     }
 }
 
+/// Elements that expose control parts, for validating untagged hosts.
+const CONTROL_PART_HOSTS: &[&str] = &["slider"];
+
 fn validate_component_pseudo_states(
     path: &Path,
     component: &ComponentFile,
@@ -496,11 +513,66 @@ fn validate_component_pseudo_states(
                 }
                 Ok(())
             }
+            mesh_core_component::style::Selector::PseudoElement(host, part) => {
+                visit(host, path, span)?;
+                validate_pseudo_element(selector, host, part, path, span)
+            }
             mesh_core_component::style::Selector::Universal
             | mesh_core_component::style::Selector::Tag(_)
             | mesh_core_component::style::Selector::Class(_)
             | mesh_core_component::style::Selector::Id(_) => Ok(()),
         }
+    }
+
+    /// A tagged host must expose the part; an untagged one (`.volume::thumb`)
+    /// must name a part some control exposes.
+    fn validate_pseudo_element(
+        selector: &mesh_core_component::style::Selector,
+        host: &mesh_core_component::style::Selector,
+        part: &str,
+        path: &Path,
+        span: SourceSpan,
+    ) -> Result<(), CompileFrontendError> {
+        use mesh_core_component::style::Selector;
+        let host_tag = match host {
+            Selector::Tag(tag) | Selector::State(tag, _) if tag != "*" => Some(tag.as_str()),
+            Selector::Compound(parts) => parts.iter().find_map(|part| match part {
+                Selector::Tag(tag) | Selector::State(tag, _) if tag != "*" => Some(tag.as_str()),
+                _ => None,
+            }),
+            _ => None,
+        };
+        let (known, host_name): (Vec<&str>, String) = match host_tag {
+            Some(tag) => (
+                mesh_core_elements::control_part_names(tag).to_vec(),
+                format!("<{tag}>"),
+            ),
+            None => (
+                CONTROL_PART_HOSTS
+                    .iter()
+                    .flat_map(|tag| mesh_core_elements::control_part_names(tag).iter().copied())
+                    .collect(),
+                "a control".to_string(),
+            ),
+        };
+        if known.contains(&part) {
+            return Ok(());
+        }
+        Err(CompileFrontendError::UnknownPseudoElement {
+            path: path.to_path_buf(),
+            selector: selector.to_string(),
+            host: host_name,
+            known: if known.is_empty() {
+                "no parts".to_string()
+            } else {
+                known
+                    .iter()
+                    .map(|name| format!("::{name}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            },
+            span,
+        })
     }
 
     let Some(style) = &component.style else {
@@ -1409,6 +1481,37 @@ box:value { opacity: 0.3; }
                 if state == "pressedly" && span == component.style.as_ref().unwrap().span
         ));
         assert!(error.source_span().is_some());
+    }
+
+    #[test]
+    fn control_parts_are_validated_against_their_host() {
+        let valid = component(
+            r#"
+<template><slider class="volume" /></template>
+<style>
+slider:active::thumb { width: 48px; }
+.volume::track { height: 6px; }
+</style>
+"#,
+        );
+        validate_component_pseudo_states(Path::new("/tmp/parts.mesh"), &valid).unwrap();
+
+        for (css, part) in [("slider::knob", "slider::knob"), ("button::thumb", "button::thumb")] {
+            let source = format!("<template><box /></template>\n<style>{css} {{ width: 1px; }}</style>");
+            let error = validate_component_pseudo_states(
+                Path::new("/tmp/parts.mesh"),
+                &component(&source),
+            )
+            .unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    CompileFrontendError::UnknownPseudoElement { ref selector, .. }
+                        if selector == part
+                ),
+                "{error}"
+            );
+        }
     }
 
     #[test]

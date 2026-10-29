@@ -19,6 +19,9 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 ---
 
 - [ ] Make liquid-glass Settings readable over applications with a light, translucent outer panel and calmer inner controls; the shared glass palette is too transparent.
+- [ ] **Styleable control parts:** extend `host::part` beyond `slider` to scrollbars, inputs, checkbox/radio/switch and progress; their looks are still hardcoded in the renderer. [Design](../.planning/todos/pending/2026-10-29-control-parts.md).
+- [ ] Fix retained scroll-shift parity on the redesigned Settings appearance page: `settings_scroll_shift_matches_full_paint` finds two pixels one channel off at a scroll frame (2026-10-29). Either half of the redesign alone passes, so it is a layout-dependent seam, likely the open fractional retained-layout parity issue.
+- [ ] Animate the slider value itself (thumb glide on click-to-jump and keyboard steps); the fill geometry is core-written, so transitions on it do not apply.
 - [ ] Isolate hyprglass/compositor GPU cost during widget resize; native-namespace replay confirms plugin draws and removes parent rebuilds, but plugin stage timers remain disabled and display latency is unmeasured.
 - [ ] Continue the whole-codebase audit: sections 01–07 and 09 are reviewed; section 08 needs deeper logic/test coverage, and sections 10–16 plus cross-section review remain.
       Resume the three review layers and file coverage in [the audit inventory](../.planning/codebase/audits/2026-10-27-whole-codebase/00-coverage.md); [interim findings](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md) include component testing and profiling opportunities.

@@ -9,33 +9,33 @@
                     <tabs class="sidebar-groups" aria-label={t('settings.categories')} aria-orientation="vertical">
                         <column class="settings-navigation">
                         <tab class="settings-nav-item" selected={active_page == "wifi"} hidden={not nav_visible("wifi")} onactivate={showWifi} title={t('nav.wifi.tooltip')}>
-                            <icon class="nav-icon" name="wifi" size="18" />
+                            <box class="nav-tile nav-tile-blue"><icon class="nav-icon" name="wifi" size="16" /></box>
                             <text class="nav-title">{t('nav.wifi')}</text>
                         </tab>
                         <tab class="settings-nav-item" selected={active_page == "audio"} hidden={not nav_visible("audio")} onactivate={showAudio} title={t('nav.audio.tooltip')}>
-                            <icon class="nav-icon" name="audio-volume-high" size="18" />
+                            <box class="nav-tile nav-tile-red"><icon class="nav-icon" name="audio-volume-high" size="16" /></box>
                             <text class="nav-title">{t('nav.audio')}</text>
                         </tab>
                         <tab class="settings-nav-item" selected={active_page == "bluetooth"} hidden={not nav_visible("bluetooth")} onactivate={showBluetooth} title={t('nav.bluetooth.tooltip')}>
-                            <icon class="nav-icon" name="bluetooth" size="18" />
+                            <box class="nav-tile nav-tile-indigo"><icon class="nav-icon" name="bluetooth" size="16" /></box>
                             <text class="nav-title">{t('nav.bluetooth')}</text>
                         </tab>
                         </column>
                         <column class="settings-navigation">
                         <tab class="settings-nav-item" selected={active_page == "appearance"} hidden={not nav_visible("appearance")} onactivate={showAppearance} title={t('nav.appearance.tooltip')}>
-                            <icon class="nav-icon" name="applications-graphics" size="18" />
+                            <box class="nav-tile nav-tile-purple"><icon class="nav-icon" name="applications-graphics" size="16" /></box>
                             <text class="nav-title">{t('nav.appearance')}</text>
                         </tab>
                         <tab class="settings-nav-item" selected={active_page == "device"} hidden={not nav_visible("device")} onactivate={showDevice} title={t('nav.device.tooltip')}>
-                            <icon class="nav-icon" name="computer" size="18" />
+                            <box class="nav-tile nav-tile-green"><icon class="nav-icon" name="computer" size="16" /></box>
                             <text class="nav-title">{t('nav.device')}</text>
                         </tab>
                         <tab class="settings-nav-item" selected={active_page == "keyboard"} hidden={not nav_visible("keyboard")} onactivate={showKeyboard} title={t('nav.keyboard.tooltip')}>
-                            <icon class="nav-icon" name="input-keyboard" size="18" />
+                            <box class="nav-tile nav-tile-orange"><icon class="nav-icon" name="input-keyboard" size="16" /></box>
                             <text class="nav-title">{t('nav.keyboard')}</text>
                         </tab>
                         <tab class="settings-nav-item" selected={active_page == "advanced"} hidden={not nav_visible("advanced")} onactivate={showAdvanced} title={t('nav.advanced.tooltip')}>
-                            <icon class="nav-icon" name="settings" size="18" />
+                            <box class="nav-tile nav-tile-grey"><icon class="nav-icon" name="settings" size="16" /></box>
                             <text class="nav-title">{t('nav.advanced')}</text>
                         </tab>
                         </column>
@@ -51,13 +51,13 @@
                     </column>
                     <row class="settings-header-actions">
                         <button class="header-button pop-out-button" onclick={onPopOut} aria-label={t('settings.pop_out')}>
-                            <icon name="window-new" size="18" />
+                            <icon class="header-glyph" name="window-new" size="10" />
                         </button>
                         <button class="header-button dock-back-button" onclick={onDockBack} aria-label={t('settings.dock_back')}>
-                            <icon name="window-restore" size="18" />
+                            <icon class="header-glyph" name="window-restore" size="10" />
                         </button>
                         <button class="header-button close-button" onclick={onClose} aria-label={t('settings.close')}>
-                            <icon name="window-close" size="18" />
+                            <icon class="header-glyph" name="window-close" size="10" />
                         </button>
                     </row>
                 </row>
@@ -254,12 +254,30 @@ end
         font-size: var(--typography-size-xs);
     }
 
-    /* The longest subtitle ("Blízke a spárované zariadenia") otherwise
-       squeezes its row's icon to nothing. */
+    /* Each page has a coloured tile, as in the system settings the glass
+       shell follows. The longest subtitle ("Blízke a spárované zariadenia")
+       otherwise squeezes the tile to nothing. */
+    .nav-tile {
+        width: 26px;
+        height: 26px;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        border-radius: 7px;
+        background: var(--color-primary);
+    }
+
+    .nav-tile-red { background: var(--color-error-container); }
+    .nav-tile-indigo { background: var(--color-info-container); }
+    .nav-tile-purple { background: var(--color-tertiary-container); }
+    .nav-tile-green { background: var(--color-success-container); }
+    .nav-tile-orange { background: var(--color-warning-container); }
+    .nav-tile-grey { background: var(--color-outline); }
+
     .nav-icon {
         flex-shrink: 0;
         background: transparent;
-        color: var(--color-primary);
+        color: var(--color-on-primary);
     }
 
     .sidebar-title {
@@ -378,15 +396,12 @@ end
 
     .settings-header {
         width: 100%;
-        min-height: 112px;
+        min-height: 96px;
         align-items: center;
         justify-content: space-between;
         gap: var(--spacing-lg);
         padding-inline: 28px;
         padding-block: var(--spacing-lg);
-        border-bottom-width: 1px;
-        border-bottom-style: solid;
-        border-bottom-color: var(--glass-settings-rim);
     }
 
     .page-title {
@@ -397,41 +412,46 @@ end
         font-weight: 750;
     }
 
+    /* Window controls are small coloured dots; the glyph only hints at the
+       action, the accessible label carries it. */
     .header-button {
-        width: 38px;
-        height: 38px;
+        width: 14px;
+        height: 14px;
         flex-shrink: 0;
         align-items: center;
         justify-content: center;
         border-radius: var(--radius-full);
         border-width: 1px;
         border-style: solid;
-        border-color: transparent;
-        background: var(--glass-settings-inset);
-        color: var(--glass-settings-text-muted);
-        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-                    border-color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+        border-color: #00000014;
+        background: var(--color-success);
+        transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
     }
 
     .header-button:hover {
-        background: var(--glass-control-fill-hover);
+        opacity: 0.85;
     }
 
     .header-button:active {
-        background: var(--glass-control-fill-pressed);
+        opacity: 0.7;
     }
 
-    .header-button:focus-visible {
-        border-color: var(--glass-control-rim-focus);
+    .header-glyph {
+        color: #00000080;
+    }
+
+    .dock-back-button {
+        background: var(--color-warning);
     }
 
     .settings-header-actions {
+        align-self: flex-start;
         align-items: center;
-        gap: var(--spacing-xs);
+        gap: 8px;
     }
 
-    .close-button:hover {
-        background: var(--color-error-container);
+    .close-button {
+        background: var(--color-error);
     }
 
     /* The role controls which of the two is present. `display: none` takes the

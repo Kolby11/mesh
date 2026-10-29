@@ -230,6 +230,7 @@ pub(super) fn selector_contains_state(selector: &mesh_core_component::style::Sel
     match selector {
         Selector::State(_, _) => true,
         Selector::Compound(parts) => parts.iter().any(selector_contains_state),
+        Selector::PseudoElement(host, _) => selector_contains_state(host),
         Selector::Tag(_) | Selector::Class(_) | Selector::Id(_) | Selector::Universal => false,
     }
 }
@@ -251,6 +252,8 @@ pub(super) fn collect_selector_state_dependencies(
                 collect_selector_state_dependencies(part, dependencies);
             }
         }
+        // `slider:active::thumb` restyles the host's parts on press.
+        Selector::PseudoElement(host, _) => collect_selector_state_dependencies(host, dependencies),
         Selector::Tag(_) | Selector::Class(_) | Selector::Id(_) | Selector::Universal => {}
     }
 }

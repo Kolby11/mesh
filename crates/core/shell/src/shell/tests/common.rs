@@ -236,6 +236,17 @@ pub(super) fn graph_with_theme_source(
     theme_id: &str,
     source_path: &str,
 ) -> InstalledModuleGraph {
+    graph_with_theme_recommending(module_root, theme_id, source_path, "{}")
+}
+
+/// [`graph_with_theme_source`] whose theme declares `recommends` (a JSON
+/// object with `fonts` and `icons` lists).
+pub(super) fn graph_with_theme_recommending(
+    module_root: &Path,
+    theme_id: &str,
+    source_path: &str,
+    recommends: &str,
+) -> InstalledModuleGraph {
     let module = format!(
         r#"{{
             "name": "@mesh/test-theme",
@@ -248,7 +259,8 @@ pub(super) fn graph_with_theme_source(
                         "id": "{theme_id}",
                         "label": "Test theme",
                         "modes": {{ "default": "{source_path}" }},
-                        "default_mode": "default"
+                        "default_mode": "default",
+                        "recommends": {recommends}
                     }}]
                 }}
             }}

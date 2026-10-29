@@ -1234,6 +1234,12 @@ pub(super) struct FrontendSurfaceComponent {
     /// use this to target only states that can change CSS for this surface.
     cached_restyle_state_dependencies: StyleStateDependencies,
     cached_layout_state_dependencies: StyleStateDependencies,
+    /// Whether any rule in the cached restyle set — imported modules,
+    /// contributions and the active theme's selector rules — declares a
+    /// transition or animation. Theme tag defaults (`node { transition: … }`)
+    /// do not count: they would animate every geometry change in modules that
+    /// declare no motion of their own.
+    cached_restyle_rules_animate: bool,
     /// Cached `StyleRuleIndex` built from `cached_restyle_rules`. Reused
     /// across restyle passes; `is_for()` verifies identity against the rules
     /// slice before each restyle so a rules rebuild forces a rebuild here too.
@@ -1611,6 +1617,7 @@ impl FrontendSurfaceComponent {
             cached_restyle_rules_contribution_count: 0,
             cached_restyle_state_dependencies: StyleStateDependencies::default(),
             cached_layout_state_dependencies: StyleStateDependencies::default(),
+            cached_restyle_rules_animate: false,
             cached_style_rule_index: None,
             style_rules_generation: 0,
             runtime_style_diagnostic_fingerprint: None,

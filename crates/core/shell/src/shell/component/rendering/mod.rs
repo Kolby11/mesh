@@ -75,6 +75,13 @@ fn state_rule_requires_layout<'a>(
         })
 }
 
+fn declares_motion(property: &str) -> bool {
+    property == "transition"
+        || property.starts_with("transition-")
+        || property == "animation"
+        || property.starts_with("animation-")
+}
+
 impl FrontendSurfaceComponent {
     pub(super) fn record_profiling_stage(
         &mut self,
@@ -263,6 +270,15 @@ impl FrontendSurfaceComponent {
                     );
                 }
             }
+            self.cached_restyle_rules_animate = rules.iter().any(|rule| {
+                rule.declarations
+                    .iter()
+                    .any(|declaration| declares_motion(&declaration.property))
+            }) || theme
+                .style_rules()
+                .iter()
+                .chain(theme.modules().values().flat_map(|module| &module.rules))
+                .any(|rule| rule.declarations.iter().any(|(property, _)| declares_motion(property)));
             self.cached_restyle_state_dependencies = state_dependencies;
             self.cached_layout_state_dependencies = layout_state_dependencies;
             rules.sort_by_key(|rule| selector_contains_state(&rule.selector));

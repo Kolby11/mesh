@@ -168,15 +168,6 @@ pub(super) fn build_paint_content_with_previous(
                 focused: node.state.contains(mesh_core_elements::NodeState::FOCUSED),
             })
         }
-        "slider" => DisplayPaintContent::Slider(DisplaySliderPaint {
-            min: attr_f32_with_default(node, Prop::Min, 0.0),
-            max: attr_f32_with_default(node, Prop::Max, 100.0),
-            value: attr_f32_with_default(node, Prop::Value, 50.0),
-            vertical: node
-                .attributes
-                .get(Prop::Orient)
-                .is_some_and(|value| value == "vertical"),
-        }),
         "icon" => DisplayPaintContent::Icon(DisplayIconPaint {
             src: retained_optional_display_str(
                 node.attributes.get(Prop::Src).map(String::as_str),
@@ -283,13 +274,6 @@ pub(super) fn build_text_selection(node: &WidgetNode) -> Option<DisplayTextSelec
         text_x: selection.text_origin.0,
         text_y: selection.text_origin.1,
     })
-}
-
-pub(super) fn attr_f32_with_default(node: &WidgetNode, key: Prop, default: f32) -> f32 {
-    node.attributes
-        .get(key)
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(default)
 }
 
 pub(super) fn union_display_clip(a: DisplayListClip, b: DisplayListClip) -> DisplayListClip {

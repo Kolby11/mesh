@@ -427,25 +427,6 @@ impl FrontendRenderEngine {
         );
     }
 
-    pub(super) fn fill_rounded_rect_clipped_in_session(
-        &self,
-        session: &mut PixelCanvasSession<'_>,
-        rect: ClipRect,
-        radius: f32,
-        color: Color,
-        clip: ClipRect,
-    ) {
-        self.execute_painter_commands_in_session(
-            session,
-            &[PainterCommand::DrawRoundedRect {
-                rect,
-                radii: Corners::all(radius),
-                paint: PainterPaint::fill(color),
-                clip,
-            }],
-        );
-    }
-
     pub fn reset_text_cache_metrics(&self) {
         self.text_renderer.reset_cache_metrics();
     }

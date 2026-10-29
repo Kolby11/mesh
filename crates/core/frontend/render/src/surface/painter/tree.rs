@@ -1178,11 +1178,6 @@ impl FrontendRenderEngine {
             DisplayPaintContent::Input(input) => {
                 self.render_display_input_node(node, input, session, scale, x, y, node_clip);
             }
-            DisplayPaintContent::Slider(slider) => {
-                self.render_display_slider_node_in_session(
-                    node, slider, session, scale, x, y, w, h, node_clip,
-                );
-            }
             DisplayPaintContent::Icon(icon) => {
                 self.render_display_icon_node(
                     node,
@@ -1282,7 +1277,6 @@ fn paint_command_class(
         DisplayPaintContent::Text(_) => PaintCommandClass::Text,
         DisplayPaintContent::Icon(_) => PaintCommandClass::Icon,
         DisplayPaintContent::Input(_)
-        | DisplayPaintContent::Slider(_)
         | DisplayPaintContent::Checkmark(_)
         | DisplayPaintContent::Shape(_) => PaintCommandClass::Control,
     }

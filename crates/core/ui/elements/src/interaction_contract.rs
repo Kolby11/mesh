@@ -378,7 +378,11 @@ impl NodeEligibility {
             && !node.is_closed_container();
         Self {
             visual_visible,
-            semantic_visible: visual_visible && !attributes.aria_hidden && !attributes.inert,
+            // A control's parts draw its value; the host carries the semantics.
+            semantic_visible: visual_visible
+                && !attributes.aria_hidden
+                && !attributes.inert
+                && node.control_part().is_none(),
             has_geometry: node_has_geometry(node),
             disabled: node.state.contains(NodeState::DISABLED)
                 || attributes.disabled

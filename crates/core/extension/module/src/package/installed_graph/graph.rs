@@ -993,6 +993,7 @@ impl InstalledModuleGraph {
                         },
                     ))
                 })
+                .and_then(|descriptor| descriptor.with_recommendations(theme.recommends.clone()))
                 .map_err(ModuleManifestError::Validation)
             })
             .collect::<Result<Vec<_>, _>>()?;

@@ -982,6 +982,7 @@ fn installed_module_graph_indexes_theme_icon_font_i18n_contributions() {
             modes,
             default_mode: Some("dark".into()),
             mode_metadata: HashMap::new(),
+            recommends: Default::default(),
         }],
         ..MeshContributes::default()
     };

@@ -83,7 +83,8 @@ button:hover { background: var(--color-primary-container); }
 ```
 
 Theme CSS supports a restricted selector surface: `:root`, `node`, semantic
-element selectors, and supported pseudo-states. Module-specific selectors
+element selectors, and supported pseudo-states. Native control parts (`slider::thumb`) are
+semantic too (§6.2). Module-specific selectors
 belong in module scopes (§4), not global theme rules. Components compose transitions from duration and curve tokens. Legacy
 `animation.default.*` shell recipes are retired and are outside the semantic
 contract.
@@ -130,6 +131,28 @@ strings do not count as reads. Dynamic names remain runtime lookups. Local CSS
 custom properties, module-declared scoped tokens and explicitly namespaced
 private references such as `@alice/widget.color.accent` are accepted without
 claiming a new public semantic role.
+
+### 2.2 Recommended fonts and icons
+
+**Status: shipped.** A theme contribution may name the resources it is designed
+around, most preferred first:
+
+```json
+"recommends": {
+  "fonts": ["SF Pro Display", "Inter", "Google Sans Flex", "Noto Sans"],
+  "icons": ["WhiteSur-dark", "Papirus-Dark"]
+}
+```
+
+Selecting the theme writes the first installed font family to
+`shell.fonts.ui_family` and the first available icon theme or icon pack to
+`shell.icons.default_pack`, in the same settings transaction as the theme and
+where an explicit font or icon pick would be written (the active profile, or
+the shared settings without one). A list with no installed entry leaves that
+setting unchanged. Picking a font or icon theme afterwards overrides the
+recommendation until the next theme selection; changing only the mode adopts
+nothing. Entries are exact fontconfig family names and XDG icon-theme or pack
+ids. `mesh.theme.themes[].recommends` publishes each theme's lists.
 
 ## 3. The load-time cascade
 
@@ -312,7 +335,12 @@ Through the settings store ([08](08-settings.md)), generated UI, and CLI:
 }
 ```
 
-`tokens` is the sparse user override layer of the cascade (§3). Per-component
+`tokens` is the sparse user override layer of the cascade (§3). An override of a
+token family entry (`@mesh/glass-material.glass.backdrop.panel`) reaches every
+module that uses the family. `mesh.theme.set_tokens({ name: value | null })`
+patches this layer where the active theme selection lives (`null` removes an
+entry; at most 64 entries per call) and recomposes the theme in the same
+transaction. Per-component
 overrides stay in component styles (`.my-widget { --color-primary:
 var(--color-tertiary); }`) and cascade like CSS variables; the registry-level
 token read still returns the theme value.
@@ -424,6 +452,7 @@ Component `<style>` blocks support a deliberate selector subset: tag, `.class`,
 `#id`, `*`, pseudo-states (`:hover`, `:focus`, `:focus-visible`, `:active`,
 `:disabled`, `:checked`, the window states below, …), and compounds of those
 (`button.primary:hover`).
+A native control's parts are addressed as `host::part` (§6.2).
 Descendant/child combinators (`.parent .child`, `a > b`) and relational
 pseudo-classes (`:has()`) are **not** supported and are rejected at compile
 time with a diagnostic — scope styles with classes on the target elements
@@ -505,6 +534,58 @@ logical size of all advertised outputs when placement is still unknown.
 Unavailable or differing output geometries provide no initial hint. The hint
 does not size content or constrain the compositor's buffers; a configured or
 measured content axis takes precedence.
+
+## 6.2 Control parts (`host::part`)
+
+**Status: shipped for `slider`; target for other controls.** A native control
+keeps its behaviour in core — value range, pointer and keyboard input, focus
+and accessibility — while everything it draws is CSS on named parts. Themes and
+components restyle a control with ordinary rules, transitions, keyframes and
+`backdrop-filter`; the renderer paints no control-specific appearance.
+
+```css
+slider::track { height: 6px; border-radius: 3px; }
+slider::fill  { background-color: var(--color-primary); }
+slider::thumb { width: 38px; height: 24px; border-radius: 12px;
+                background-color: #fbfcfe;
+                transition: width 260ms, height 260ms, background-color 200ms; }
+slider:active::thumb { width: 52px; height: 32px; background-color: #ffffff1a;
+                       backdrop-filter: refract(6px 5px); }
+.volume::fill { background-color: var(--glass-indicator); }
+```
+
+- The host half is the ordinary single-node subset, so states belong to the
+  host (`slider:active::thumb`, `slider:disabled::fill`). The pseudo-element
+  ends the selector. An unknown part name, or a part its tagged host does not
+  expose, is a compile-time diagnostic.
+- Part rules apply in the same cascade as every other rule: theme pack rules,
+  then component rules in source order. Ordinary rules never match parts, and
+  a host tag's theme defaults (`slider { … }`) size the host, not its parts.
+  Parts inherit text values and custom properties from their host.
+- Parts are real nodes with layout, so their sizes and margins lay out with
+  flexbox. Core owns only the geometry that follows from behaviour: the fill
+  ends at the value and the thumb stays centred on it at any size, including
+  while a transition animates it.
+- A press anywhere on a part lands on the host. Parts are never focusable and
+  have no semantic node.
+- Without part rules a control looks as it did before parts existed; the
+  defaults are tinted with the host's `color`.
+
+| Host | Parts |
+| --- | --- |
+| `slider` | `::track` (the bar), `::fill` (the track up to the value), `::thumb` (the handle) |
+
+Part styles are written for a horizontal slider. With `orient="vertical"`,
+widths and heights, and the start/end and cross-axis margins and padding, swap
+automatically, and the fill grows from the bottom.
+
+Not to be confused with `::part(name)` in user stylesheets (§4.4), which
+targets parts a module exposes on its own markup.
+
+**Target:** `scrollbar::track`/`::thumb`, `input::placeholder`/`::selection`/
+`::caret`, `checkbox::indicator` (also `radio`, `switch`) and `progress::fill`.
+A pressed thumb's `refract()` samples the backdrop image (§11), so it does not
+yet magnify the track drawn in the same surface.
 
 ## 7. Theme coherence enforcement
 

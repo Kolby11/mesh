@@ -109,6 +109,7 @@ end
     .value { height: 20px; font-size: 12px; color: var(--glass-text); }
     .slider-row { width: 100%; align-items: center; gap: 12px; }
     .level-slider { flex-grow: 1; height: 28px; padding: 0; color: var(--glass-indicator); }
+    .level-slider::fill { background-color: var(--glass-indicator); }
     .footer { width: 100%; align-items: center; gap: 8px; }
     .spacer { flex-grow: 1; }
     .settings-link { padding: 5px 8px; border-radius: 10px; background: transparent; }

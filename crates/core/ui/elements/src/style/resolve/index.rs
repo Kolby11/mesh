@@ -30,6 +30,9 @@ pub struct StyleRuleIndex {
     /// in `state` used for forward candidate-rule lookup.
     pub(super) state_to_rules: HashMap<u32, Vec<usize>>,
     pub(super) fallback: Vec<usize>,
+    /// `host::part` rules by part name. Only part nodes consult these, and
+    /// part nodes consult nothing else.
+    pub(super) pseudo_element: HashMap<String, Vec<usize>>,
     pub(super) no_diagnostics_declarations: Vec<Vec<IndexedDeclaration>>,
     pub(super) selector_diagnostics: Vec<String>,
 }
@@ -90,6 +93,7 @@ impl StyleRuleIndex {
             state: Vec::new(),
             state_to_rules: HashMap::new(),
             fallback: Vec::new(),
+            pseudo_element: HashMap::new(),
             no_diagnostics_declarations: rules
                 .iter()
                 .map(|rule| {
@@ -123,6 +127,7 @@ impl StyleRuleIndex {
                     self.index_class_dependencies(idx, part);
                 }
             }
+            Selector::PseudoElement(host, _) => self.index_class_dependencies(idx, host),
             _ => {}
         }
     }
@@ -141,9 +146,11 @@ impl StyleRuleIndex {
         if !self.is_for(rules) || old.tag != new.tag || old.id != new.id {
             return false;
         }
+        // A host's part rules restyle its parts, so their host half counts
+        // as one of the host's own dependencies.
         let unchanged = |idx: usize| {
-            rule_matches_attrs(&rules[idx], old, context)
-                == rule_matches_attrs(&rules[idx], new, context)
+            rule_matches_host(&rules[idx], old, context)
+                == rule_matches_host(&rules[idx], new, context)
         };
         for class in old.classes.iter().chain(new.classes.iter()) {
             if old.has_class(class) != new.has_class(class)
@@ -188,6 +195,12 @@ impl StyleRuleIndex {
         attrs: &StyleNodeAttrs,
         mut visit: impl FnMut(&'a [usize]),
     ) {
+        if let Some(part) = attrs.pseudo_element {
+            if let Some(rules) = self.pseudo_element.get(part) {
+                visit(rules);
+            }
+            return;
+        }
         if !self.fallback.is_empty() {
             visit(&self.fallback);
         }
@@ -293,6 +306,11 @@ impl StyleRuleIndex {
             }
             Some(SelectorIndexKey::Id(id)) => self.id.entry(id.to_string()).or_default().push(idx),
             Some(SelectorIndexKey::State(state)) => self.index_state_selector(idx, state),
+            Some(SelectorIndexKey::PseudoElement(part)) => self
+                .pseudo_element
+                .entry(part.to_string())
+                .or_default()
+                .push(idx),
             None => self.fallback.push(idx),
         }
     }
@@ -337,6 +355,7 @@ fn selector_state_dependencies(selector: &Selector) -> u32 {
         Selector::Compound(parts) => parts
             .iter()
             .fold(0, |mask, part| mask | selector_state_dependencies(part)),
+        Selector::PseudoElement(host, _) => selector_state_dependencies(host),
         _ => 0,
     }
 }
@@ -531,6 +550,7 @@ pub(super) enum SelectorIndexKey<'a> {
     Class(&'a str),
     Id(&'a str),
     State(&'a str),
+    PseudoElement(&'a str),
 }
 
 pub(super) fn ensure_index<'cache>(

@@ -619,6 +619,24 @@ pub struct ThemeModeDescriptor {
     pub metadata: ThemeMetadata,
 }
 
+/// Resources a theme pack is designed around, in preference order. Each list
+/// names exact host resources (fontconfig families, XDG icon-theme ids or icon
+/// pack ids); selecting the theme adopts the first one installed. Packs that
+/// recommend nothing leave the user's font and icon choices untouched.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ThemeRecommendations {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fonts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub icons: Vec<String>,
+}
+
+impl ThemeRecommendations {
+    pub fn is_empty(&self) -> bool {
+        self.fonts.is_empty() && self.icons.is_empty()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemePackDescriptor {
     /// Canonical graph-scoped identity (`owner-module:local-id`).
@@ -628,6 +646,7 @@ pub struct ThemePackDescriptor {
     pub label: Option<String>,
     pub modes: BTreeMap<String, ThemeModeDescriptor>,
     pub default_mode: String,
+    pub recommends: ThemeRecommendations,
 }
 
 impl ThemePackDescriptor {
@@ -685,7 +704,26 @@ impl ThemePackDescriptor {
             label,
             modes: descriptors,
             default_mode,
+            recommends: ThemeRecommendations::default(),
         })
+    }
+
+    /// Attach the pack's preferred fonts and icon themes. Blank entries are
+    /// rejected so a typo cannot silently fall through to the next candidate.
+    pub fn with_recommendations(
+        mut self,
+        recommends: ThemeRecommendations,
+    ) -> Result<Self, String> {
+        for (kind, entries) in [("font", &recommends.fonts), ("icon", &recommends.icons)] {
+            if entries.iter().any(|entry| entry.trim().is_empty()) {
+                return Err(format!(
+                    "theme {} recommends an empty {kind} resource",
+                    self.id
+                ));
+            }
+        }
+        self.recommends = recommends;
+        Ok(self)
     }
 
     /// Attach explicit color-scheme and contrast metadata to declared modes.
@@ -1079,9 +1117,9 @@ impl Theme {
             composed.modules.insert(module_id.to_string(), target);
         }
         merge_theme_modules(&mut composed, pack, &pack_provenance);
-        share_token_families(&mut composed, &module_layers);
-
-        flatten_module_tokens_into(&mut composed.tokens, &composed.modules);
+        // Overrides land before families are shared, so overriding a family
+        // token (`@mesh/glass-material.glass.rim`) reaches every module that
+        // uses the family, not only the family's own entry.
         let mut overrides = user_overrides.iter().collect::<Vec<_>>();
         overrides.sort_by(|left, right| left.0.cmp(right.0));
         for (token, value) in overrides {
@@ -1089,6 +1127,9 @@ impl Theme {
                 composed.user_override_diagnostics.push(error.to_string());
             }
         }
+        share_token_families(&mut composed, &module_layers);
+
+        flatten_module_tokens_into(&mut composed.tokens, &composed.modules);
         composed.invalidate_style_snapshot();
         Ok(composed)
     }
@@ -2984,6 +3025,60 @@ mod tests {
             Some(&ThemeProvenance::ModuleContribution {
                 module_id: "@mesh/bar".into(),
             })
+        );
+    }
+
+    #[test]
+    fn user_overrides_of_family_tokens_reach_family_consumers() {
+        let pack = parse_theme_css(
+            "pack",
+            "Pack",
+            r#"@module "@mesh/material" { :root { --glass-backdrop-panel: blur(4px); } }"#,
+        )
+        .unwrap();
+        let declared = |tokens: &[(&str, &str)]| ThemeModule {
+            tokens: tokens
+                .iter()
+                .map(|(name, value)| ((*name).into(), TokenValue::String((*value).into())))
+                .collect(),
+            ..ThemeModule::default()
+        };
+        let layers = [
+            ThemeModuleLayer {
+                module_id: "@mesh/material".into(),
+                module: declared(&[("glass.backdrop.panel", "blur(26px)")]),
+                families: Vec::new(),
+            },
+            ThemeModuleLayer {
+                module_id: "@mesh/settings".into(),
+                module: ThemeModule::default(),
+                families: vec!["@mesh/material".into()],
+            },
+        ];
+        let overrides = HashMap::from([(
+            "@mesh/material.glass.backdrop.panel".to_string(),
+            TokenValue::String("blur(12px) refract(6px 4px)".into()),
+        )]);
+        let composed = Theme::compose_layers(
+            &default_theme(),
+            &pack,
+            "@mesh/pack:pack",
+            "dark",
+            layers,
+            &overrides,
+        )
+        .unwrap();
+        assert!(composed.user_override_diagnostics().is_empty());
+        for module in ["@mesh/material", "@mesh/settings"] {
+            assert_eq!(
+                composed.modules()[module].tokens["glass.backdrop.panel"].to_string(),
+                "blur(12px) refract(6px 4px)",
+                "{module}"
+            );
+        }
+        assert_eq!(
+            composed.provenance_for("@mesh/settings.glass.backdrop.panel"),
+            Some(&ThemeProvenance::UserOverride)
         );
     }
 

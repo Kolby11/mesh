@@ -180,12 +180,6 @@ pub(super) fn hash_paint_content_attributes(
                 .hash(hasher);
             node.input_preedit.hash(hasher);
         }
-        "slider" => {
-            hash_attribute(node, Prop::Min, hasher);
-            hash_attribute(node, Prop::Max, hasher);
-            hash_attribute(node, Prop::Value, hasher);
-            hash_attribute(node, Prop::Orient, hasher);
-        }
         "icon" | "image" => {
             hash_attribute(node, Prop::Src, hasher);
             hash_attribute(node, Prop::Name, hasher);
@@ -259,7 +253,7 @@ pub(super) fn hash_batch_material(
 pub(super) fn hash_generic_batch_material(node: &WidgetNode, hasher: &mut DisplaySignatureHasher) {
     match node.tag.as_str() {
         "input" => hash_text_batch_material(node, hasher),
-        "slider" | "checkbox" | "radio" => hash_color(node.computed_style.color, hasher),
+        "checkbox" | "radio" => hash_color(node.computed_style.color, hasher),
         _ => {}
     }
 }

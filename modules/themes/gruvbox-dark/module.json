@@ -20,7 +20,20 @@
               "contrast": "normal"
             }
           },
-          "tokenContract": "1.1"
+          "tokenContract": "1.1",
+          "recommends": {
+            "fonts": [
+              "JetBrainsMono NF",
+              "JetBrainsMono Nerd Font",
+              "JetBrains Mono",
+              "Hack",
+              "Noto Sans"
+            ],
+            "icons": [
+              "Gruvbox-Plus-Dark",
+              "Papirus-Dark"
+            ]
+          }
         }
       ]
     }

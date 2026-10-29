@@ -754,6 +754,92 @@ fn set_theme_loads_css_package_and_updates_runtime_setting() {
 }
 
 #[test]
+fn set_theme_adopts_the_first_installed_recommended_font_and_icon_theme() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    fs::write(dir.path().join("theme.css"), ":root { }").unwrap();
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_recommending(
+        dir.path(),
+        "glassy",
+        "theme.css",
+        r#"{"fonts":["Missing Sans","Installed Sans"],"icons":["Missing Icons","Installed Icons"]}"#,
+    ));
+    let catalog = Arc::make_mut(&mut Arc::make_mut(&mut shell.resource_snapshot).host_catalog);
+    catalog.font_families = ["Other Sans", "Installed Sans"]
+        .into_iter()
+        .map(|name| mesh_core_resources::SystemFontFamily {
+            name: name.into(),
+            face_count: 1,
+            monospace: false,
+        })
+        .collect();
+    catalog.icon_themes = vec![mesh_core_resources::SystemIconTheme {
+        id: "Installed Icons".into(),
+        name: "Installed Icons".into(),
+        path: dir.path().join("icons"),
+        inherits: Vec::new(),
+        hidden: false,
+    }];
+
+    shell
+        .apply_set_theme("@mesh/test-theme:glassy", None)
+        .unwrap();
+
+    assert_eq!(shell.settings.fonts.ui_family.as_deref(), Some("Installed Sans"));
+    assert_eq!(shell.settings.icons.default_pack.as_deref(), Some("Installed Icons"));
+    assert_eq!(
+        shell
+            .theme
+            .active()
+            .token("typography.family")
+            .map(ToString::to_string),
+        Some("Installed Sans".into())
+    );
+    let state = &shell.latest_service_state["mesh.theme"].state;
+    let entry = state["themes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|theme| theme["id"] == "@mesh/test-theme:glassy")
+        .unwrap();
+    assert_eq!(entry["recommends"]["fonts"][1], "Installed Sans");
+
+    // A later explicit pick is the user's to keep until the next theme switch.
+    shell.apply_set_font_family("Other Sans").unwrap();
+    assert_eq!(shell.settings.fonts.ui_family.as_deref(), Some("Other Sans"));
+}
+
+#[test]
+fn set_theme_without_installed_recommendations_keeps_the_user_choices() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    fs::write(dir.path().join("theme.css"), ":root { }").unwrap();
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_recommending(
+        dir.path(),
+        "glassy",
+        "theme.css",
+        r#"{"fonts":["Missing Sans"],"icons":["Missing Icons"]}"#,
+    ));
+    let catalog = Arc::make_mut(&mut Arc::make_mut(&mut shell.resource_snapshot).host_catalog);
+    catalog.font_families = vec![mesh_core_resources::SystemFontFamily {
+        name: "Chosen Sans".into(),
+        face_count: 1,
+        monospace: false,
+    }];
+    shell.apply_set_font_family("Chosen Sans").unwrap();
+    let icons_before = shell.settings.icons.default_pack.clone();
+
+    shell
+        .apply_set_theme("@mesh/test-theme:glassy", None)
+        .unwrap();
+
+    assert_eq!(shell.settings.fonts.ui_family.as_deref(), Some("Chosen Sans"));
+    assert_eq!(shell.settings.icons.default_pack, icons_before);
+}
+
+#[test]
 fn theme_selection_follows_the_user_across_profiles_unless_pinned() {
     let _env_lock = settings_env_lock();
     let dir = tempfile::tempdir().unwrap();

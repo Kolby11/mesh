@@ -11,7 +11,7 @@
 //! single non-fatal `FocusedProofDiagnostic` and return 0.
 //!
 //! Deferred lossless subset per Phase 49 D-10 (PAINT-01 "documented subset"):
-//! `DisplayPaintContent::Slider`, `DisplayPaintContent::Input`, and
+//! `DisplayPaintContent::Input` and
 //! `DisplayPaintCommandKind::Scrollbars` are intentionally NOT encoded.
 //! Never panics.
 
@@ -179,8 +179,7 @@ pub fn encode_command_to_scene(
             #[cfg(feature = "renderer-parley")]
             let _ = diagnostics;
         }
-        DisplayPaintContent::Slider(_)
-        | DisplayPaintContent::Input(_)
+        DisplayPaintContent::Input(_)
         | DisplayPaintContent::Checkmark(_)
         | DisplayPaintContent::Shape(_) => {
             // DEFERRED per Phase 49 D-10: controls stay on the software painter
@@ -199,7 +198,7 @@ mod tests {
     use crate::display_list::DisplayTextPaint;
     use crate::display_list::{
         DisplayIconPaint, DisplayInputPaint, DisplayListClip, DisplayPaintNode, DisplayPaintStyle,
-        DisplayScrollbars, DisplaySliderPaint,
+        DisplayScrollbars,
     };
     use mesh_core_elements::style::{
         BackgroundPaint, BlendMode, Color, Edges, FontStyle, Overflow, TextAlign, TextDirection,
@@ -324,21 +323,7 @@ mod tests {
     }
 
     #[test]
-    fn anyrender_skips_slider_input_with_documented_comment() {
-        let slider = DisplaySliderPaint {
-            min: 0.0,
-            max: 100.0,
-            value: 50.0,
-            vertical: false,
-        };
-        let c = cmd(
-            DisplayPaintContent::Slider(slider),
-            DisplayPaintCommandKind::Node,
-        );
-        let mut diagnostics = Vec::new();
-        assert_eq!(encode_command_to_scene(&c, &mut diagnostics), 0);
-        assert!(diagnostics.is_empty());
-
+    fn anyrender_skips_input_with_documented_comment() {
         let input = DisplayInputPaint {
             value: "".into(),
             placeholder: "".into(),

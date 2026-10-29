@@ -135,6 +135,10 @@ impl<'a> StyleResolver<'a> {
         parent_style: Option<&ParentInheritedStyle>,
     ) {
         crate::frame_work::visit(crate::frame_work::Pass::RestyleScan);
+        if node.control_part().is_some() {
+            // Styled with its host by `restyle_control_parts`.
+            return;
+        }
         let (reuse_node, reuse_subtree) =
             self.finalized_style_reuse(node, rules, index, context, parent_style);
         if reuse_subtree {
@@ -158,6 +162,7 @@ impl<'a> StyleResolver<'a> {
                 inherit_retained_text_style(&mut node.computed_style, parent);
             }
         }
+        self.restyle_control_parts(node, rules, index, context, None, None);
 
         let parent = ParentInheritedStyle::from(&node.computed_style);
         for child in &mut node.children {
@@ -176,6 +181,10 @@ impl<'a> StyleResolver<'a> {
         attribution: &mut StyleRuleAttribution,
     ) {
         crate::frame_work::visit(crate::frame_work::Pass::RestyleScan);
+        if node.control_part().is_some() {
+            // Styled with its host by `restyle_control_parts`.
+            return;
+        }
         let (reuse_node, reuse_subtree) =
             self.finalized_style_reuse(node, rules, index, context, parent_style);
         if reuse_subtree {
@@ -199,6 +208,7 @@ impl<'a> StyleResolver<'a> {
                 inherit_retained_text_style(&mut node.computed_style, parent);
             }
         }
+        self.restyle_control_parts(node, rules, index, context, None, None);
         let parent = ParentInheritedStyle::from(&node.computed_style);
         for child in &mut node.children {
             self.restyle_subtree_with_index_profiled(
@@ -337,6 +347,10 @@ impl<'a> StyleResolver<'a> {
         layout_changed: &mut bool,
     ) {
         crate::frame_work::visit(crate::frame_work::Pass::RestyleScan);
+        if node.control_part().is_some() {
+            // Styled with its host by `restyle_control_parts`.
+            return;
+        }
         node.finalized_style_valid = false;
         restyled.insert(node.id);
         let was_pristine = node.finalized_style_pristine;
@@ -384,6 +398,16 @@ impl<'a> StyleResolver<'a> {
                 }
             }
         }
+        // A host whose own rules are unchanged may still have changed part
+        // rules (`slider:active::thumb`), so its parts restyle either way.
+        self.restyle_control_parts(
+            node,
+            rules,
+            index,
+            context,
+            Some(restyled),
+            Some(layout_changed),
+        );
         self.remember_finalized_style(node, index, context, parent_style);
         node.finalized_style_pristine = !reuse_node || was_pristine;
         node.finalized_style_valid = false;
@@ -453,6 +477,10 @@ impl<'a> StyleResolver<'a> {
         inherited_dirty: bool,
     ) {
         crate::frame_work::visit(crate::frame_work::Pass::RestyleScan);
+        if node.control_part().is_some() {
+            // Styled with its host by `restyle_control_parts`.
+            return;
+        }
         node.finalized_style_valid = false;
         let is_target = target_ids.contains(&node.id);
         // A node should have its style recomputed if it is a direct target or
@@ -527,6 +555,7 @@ impl<'a> StyleResolver<'a> {
             }
         }
         if should_restyle {
+            self.restyle_control_parts(node, rules, index, context, None, None);
             self.remember_finalized_style(node, index, context, parent_style);
             node.finalized_style_pristine = !reuse_node || was_pristine;
             node.finalized_style_valid = false;
@@ -546,6 +575,10 @@ impl<'a> StyleResolver<'a> {
         attribution: &mut StyleRuleAttribution,
     ) {
         crate::frame_work::visit(crate::frame_work::Pass::RestyleScan);
+        if node.control_part().is_some() {
+            // Styled with its host by `restyle_control_parts`.
+            return;
+        }
         node.finalized_style_valid = false;
         let should_restyle = target_ids.contains(&node.id) || inherited_dirty;
         let was_pristine = node.finalized_style_pristine;
@@ -604,11 +637,109 @@ impl<'a> StyleResolver<'a> {
             }
         }
         if should_restyle {
+            self.restyle_control_parts(node, rules, index, context, None, None);
             self.remember_finalized_style(node, index, context, parent_style);
             node.finalized_style_pristine = !reuse_node || was_pristine;
             node.finalized_style_valid = false;
         }
     }
+
+    /// Style `host`'s control-part subtree from the host's matching inputs:
+    /// `host::part` rules over each part's initial style, then the geometry
+    /// core owns. Restyled parts join `restyled`; `layout_changed` is raised
+    /// when one changes a layout input. A host without parts is untouched.
+    fn restyle_control_parts(
+        &self,
+        host: &mut crate::tree::WidgetNode,
+        rules: &[StyleRule],
+        index: &StyleRuleIndex,
+        context: StyleContext,
+        mut restyled: Option<&mut std::collections::HashSet<crate::tree::NodeId>>,
+        mut layout_changed: Option<&mut bool>,
+    ) {
+        if !host
+            .children
+            .first()
+            .is_some_and(|child| child.control_part().is_some())
+        {
+            return;
+        }
+        let host_attrs = ControlHostAttrs::of(host);
+        let geometry = crate::control_parts::SliderGeometry::of(host);
+        crate::control_parts::apply_host_layout(&mut host.computed_style, geometry);
+        let scope = ControlPartScope {
+            host_attrs: &host_attrs,
+            host_style: &host.computed_style.clone(),
+            geometry,
+            rules,
+            index,
+            context,
+        };
+        let parent = ParentInheritedStyle::from(scope.host_style);
+        for part in &mut host.children {
+            self.restyle_control_part(part, &scope, &parent, &mut restyled, &mut layout_changed);
+        }
+    }
+
+    fn restyle_control_part(
+        &self,
+        node: &mut crate::tree::WidgetNode,
+        scope: &ControlPartScope<'_>,
+        parent: &ParentInheritedStyle,
+        restyled: &mut Option<&mut std::collections::HashSet<crate::tree::NodeId>>,
+        layout_changed: &mut Option<&mut bool>,
+    ) {
+        let Some(part) = node.control_part() else {
+            return;
+        };
+        let initial = crate::control_parts::initial_part_style(part, scope.host_style);
+        let mut style = match part.name() {
+            Some(name) => self.resolve_node_style_with_attrs_indexed_inner(
+                scope.rules,
+                scope.index,
+                &scope.host_attrs.for_part(name, &initial),
+                scope.context,
+                None,
+                None,
+                Some(&parent.custom_properties),
+            ),
+            None => ComputedStyle {
+                custom_properties: parent.custom_properties.clone(),
+                ..initial
+            },
+        };
+        inherit_retained_text_style(&mut style, parent);
+        if scope.geometry.vertical {
+            crate::control_parts::transpose_for_vertical(&mut style);
+        }
+        crate::control_parts::apply_part_geometry(part, &mut style, scope.geometry);
+        if node.computed_style != style {
+            if let Some(layout_changed) = layout_changed.as_deref_mut() {
+                *layout_changed |= !node.computed_style.same_layout_inputs(&style);
+            }
+            if let Some(restyled) = restyled.as_deref_mut() {
+                restyled.insert(node.id);
+            }
+            node.computed_style = style;
+        }
+        // Parts have no semantics of their own, so they never hold back the
+        // host's finalized accessibility.
+        node.finalized_accessibility_valid = true;
+        let child_parent = ParentInheritedStyle::from(&node.computed_style);
+        for child in &mut node.children {
+            self.restyle_control_part(child, scope, &child_parent, restyled, layout_changed);
+        }
+    }
+}
+
+/// What every part of one control host is styled against.
+struct ControlPartScope<'a> {
+    host_attrs: &'a ControlHostAttrs,
+    host_style: &'a ComputedStyle,
+    geometry: crate::control_parts::SliderGeometry,
+    rules: &'a [StyleRule],
+    index: &'a StyleRuleIndex,
+    context: StyleContext,
 }
 
 /// Embedded component instances use a synthetic `surface` node to retain

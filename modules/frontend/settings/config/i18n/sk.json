@@ -258,5 +258,16 @@
   "keyboard.corner.top_left": "Vľavo hore",
   "keyboard.corner.top_right": "Vpravo hore",
   "keyboard.corner.bottom_left": "Vľavo dole",
-  "keyboard.corner.bottom_right": "Vpravo dole"
+  "keyboard.corner.bottom_right": "Vpravo dole",
+  "appearance.theme.now": "Teraz",
+  "appearance.theme.recommends": "Odporúča",
+  "appearance.glass": "Sklenený materiál",
+  "appearance.glass.copy": "Ako silno sklenené plochy rozmazávajú a lámu to, čo je za nimi. Téma ponechá vlastné sklo aktívnej témy.",
+  "appearance.glass.style": "Štýl materiálu",
+  "appearance.glass.style.theme": "Téma",
+  "appearance.glass.style.liquid": "Tekuté sklo",
+  "appearance.glass.style.soft": "Jemné sklo",
+  "appearance.glass.style.frosted": "Matné sklo",
+  "appearance.glass.blur": "Sila rozmazania",
+  "appearance.glass.liquid": "Sila lomu"
 }

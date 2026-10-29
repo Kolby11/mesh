@@ -150,19 +150,19 @@ fn batch_signature_uses_only_slot_material() {
 
 #[test]
 fn batch_signature_tracks_generic_content_material() {
-    let mut slider = node(1, "slider", 0.0, 0.0, 20.0, 20.0);
-    slider.computed_style.background_color.a = 0;
-    let original = batch_signature(&slider, DisplayPrimitiveSlot::Generic);
+    let mut checkbox = node(1, "checkbox", 0.0, 0.0, 20.0, 20.0);
+    checkbox.computed_style.background_color.a = 0;
+    let original = batch_signature(&checkbox, DisplayPrimitiveSlot::Generic);
 
-    slider.computed_style.font_size = 42.0;
+    checkbox.computed_style.font_size = 42.0;
     assert_eq!(
-        batch_signature(&slider, DisplayPrimitiveSlot::Generic),
+        batch_signature(&checkbox, DisplayPrimitiveSlot::Generic),
         original
     );
 
-    slider.computed_style.color = Color::from_hex("#336699").unwrap();
+    checkbox.computed_style.color = Color::from_hex("#336699").unwrap();
     assert_ne!(
-        batch_signature(&slider, DisplayPrimitiveSlot::Generic),
+        batch_signature(&checkbox, DisplayPrimitiveSlot::Generic),
         original
     );
 }

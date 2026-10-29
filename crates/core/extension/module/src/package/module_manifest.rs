@@ -1958,6 +1958,9 @@ pub struct ThemeContribution {
     /// from the source path so the shell never infers them from an ID.
     #[serde(default)]
     pub mode_metadata: HashMap<String, ThemeModeMetadata>,
+    /// Fonts and icon themes adopted when this theme is selected.
+    #[serde(default, skip_serializing_if = "mesh_core_theme::ThemeRecommendations::is_empty")]
+    pub recommends: mesh_core_theme::ThemeRecommendations,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]

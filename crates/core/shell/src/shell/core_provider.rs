@@ -229,7 +229,7 @@ const KEYBIND_COMMANDS: [CoreServiceCommand; 3] = [
     },
 ];
 
-const THEME_COMMANDS: [CoreServiceCommand; 5] = [
+const THEME_COMMANDS: [CoreServiceCommand; 6] = [
     CoreServiceCommand {
         name: "set_theme",
         translate: |payload| {
@@ -266,6 +266,14 @@ const THEME_COMMANDS: [CoreServiceCommand; 5] = [
         translate: |payload| {
             Some(CoreRequest::SetFontFamily {
                 family: required_text(payload, "family")?,
+            })
+        },
+    },
+    CoreServiceCommand {
+        name: "set_tokens",
+        translate: |payload| {
+            Some(CoreRequest::SetThemeTokens {
+                tokens: payload.get("tokens")?.as_object()?.clone(),
             })
         },
     },

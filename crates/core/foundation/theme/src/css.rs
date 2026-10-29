@@ -34,6 +34,9 @@ pub enum Selector {
     State(String, String),
     Compound(Vec<Selector>),
     Universal,
+    /// `host::name`: a named part of a native control (`slider::thumb`). The
+    /// host half matches the control element, including its states.
+    PseudoElement(Box<Selector>, String),
 }
 
 impl Selector {
@@ -43,6 +46,7 @@ impl Selector {
         match self {
             Self::Class(_) | Self::Id(_) => true,
             Self::Compound(parts) => parts.iter().any(Self::targets_internals),
+            Self::PseudoElement(host, _) => host.targets_internals(),
             Self::Tag(_) | Self::State(..) | Self::Universal => false,
         }
     }
@@ -58,6 +62,7 @@ impl std::fmt::Display for Selector {
             Self::State(tag, state) => write!(f, "{tag}:{state}"),
             Self::Compound(parts) => parts.iter().try_for_each(|part| write!(f, "{part}")),
             Self::Universal => write!(f, "*"),
+            Self::PseudoElement(host, name) => write!(f, "{host}::{name}"),
         }
     }
 }
@@ -82,6 +87,23 @@ pub fn parse_selector(source: &str) -> Result<Selector, String> {
             }
             Token::IDHash(id) => parts.push(Selector::Id(id.to_string())),
             Token::Colon => {
+                let before_second_colon = parser.state();
+                if matches!(parser.next_including_whitespace(), Ok(Token::Colon)) {
+                    let name = parser
+                        .expect_ident_cloned()
+                        .map_err(|error| format!("{error:?}"))?
+                        .to_string();
+                    if parser.next_including_whitespace().is_ok() {
+                        return Err(format!("::{name} must end the selector"));
+                    }
+                    let host = match parts.len() {
+                        0 => return Err(format!("::{name} needs a host element selector")),
+                        1 => parts.remove(0),
+                        _ => Selector::Compound(parts),
+                    };
+                    return Ok(Selector::PseudoElement(Box::new(host), name));
+                }
+                parser.reset(&before_second_colon);
                 let state = parser
                     .expect_ident_cloned()
                     .map_err(|error| format!("{error:?}"))?;
@@ -477,6 +499,9 @@ fn selector_bytes(selector: &Selector) -> usize {
                 + parts.iter().map(selector_bytes).sum::<usize>()
         }
         Selector::Universal => 0,
+        Selector::PseudoElement(host, name) => {
+            std::mem::size_of::<Selector>() + selector_bytes(host) + name.capacity()
+        }
     }
 }
 

@@ -2,7 +2,7 @@ use super::state::*;
 use crate::Prop;
 use crate::tree::NodeState;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct StyleNodeAttrs<'a> {
     pub(super) tag: &'a str,
     pub(super) classes: ClassList<'a>,
@@ -13,6 +13,48 @@ pub struct StyleNodeAttrs<'a> {
     pub(super) module_id: Option<&'a str>,
     pub(super) state: NodeState,
     pub(super) state_mask: u32,
+    /// The part being styled when these are a control host's attributes
+    /// matched for one of its parts (`slider::thumb`).
+    pub(super) pseudo_element: Option<&'a str>,
+    /// Where a part's style starts instead of the tag's theme defaults.
+    pub(super) part_initial: Option<&'a crate::style::ComputedStyle>,
+}
+
+/// A control host's matching inputs, owned so its part children can be
+/// restyled while the host node is borrowed mutably.
+#[derive(Debug, Clone)]
+pub(super) struct ControlHostAttrs {
+    tag: String,
+    classes: Vec<String>,
+    id: Option<String>,
+    module_id: Option<String>,
+    state: NodeState,
+}
+
+impl ControlHostAttrs {
+    pub(super) fn of(host: &mut crate::tree::WidgetNode) -> Self {
+        let attrs = StyleNodeAttrs::from_node(host);
+        Self {
+            tag: attrs.tag.to_string(),
+            classes: attrs.classes.iter().map(str::to_owned).collect(),
+            id: attrs.id.map(str::to_owned),
+            module_id: attrs.module_id.map(str::to_owned),
+            state: attrs.state,
+        }
+    }
+
+    pub(super) fn for_part<'a>(
+        &'a self,
+        part: &'a str,
+        initial: &'a crate::style::ComputedStyle,
+    ) -> StyleNodeAttrs<'a> {
+        StyleNodeAttrs {
+            module_id: self.module_id.as_deref(),
+            pseudo_element: Some(part),
+            part_initial: Some(initial),
+            ..StyleNodeAttrs::new(&self.tag, &self.classes, self.id.as_deref(), self.state)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -89,6 +131,8 @@ impl<'a> StyleNodeAttrs<'a> {
             module_id: None,
             state,
             state_mask: active_state_mask(state),
+            pseudo_element: None,
+            part_initial: None,
         }
     }
 
@@ -109,6 +153,8 @@ impl<'a> StyleNodeAttrs<'a> {
             module_id: node.module_id(),
             state: node.state,
             state_mask: active_state_mask(node.state),
+            pseudo_element: None,
+            part_initial: None,
         }
     }
 

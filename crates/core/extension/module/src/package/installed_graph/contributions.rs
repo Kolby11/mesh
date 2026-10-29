@@ -191,6 +191,7 @@ impl ModuleContributionIndex {
                 modes: contribution.modes.clone(),
                 default_mode: contribution.default_mode.clone(),
                 mode_metadata: contribution.mode_metadata.clone(),
+                recommends: contribution.recommends.clone(),
             });
         }
         let mut indexed_icon_pack = false;
@@ -369,6 +370,7 @@ pub struct ContributedTheme {
     pub modes: HashMap<String, String>,
     pub default_mode: Option<String>,
     pub mode_metadata: HashMap<String, ThemeModeMetadata>,
+    pub recommends: mesh_core_theme::ThemeRecommendations,
 }
 
 impl ContributedTheme {

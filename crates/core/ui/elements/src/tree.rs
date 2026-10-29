@@ -367,6 +367,8 @@ pub struct WidgetNodeAuthored {
     source_file: Option<Arc<str>>,
     /// The module that contributed this node into a slot.
     slot_source: Option<Arc<str>>,
+    /// Set on the nodes of a native control's part subtree.
+    control_part: Option<crate::ControlPart>,
 }
 
 /// A disclosure's `open={variable}` binding, written back when the shell
@@ -562,8 +564,9 @@ pub fn paint_order_child_indices(node: &WidgetNode) -> Option<Vec<usize>> {
     Some(order)
 }
 
-/// Children in paint order, bottom first. Iterate it in reverse for hit
-/// testing; see [`paint_order_child_indices`].
+/// Children in paint order, bottom first, for pointer and focus walks:
+/// iterate it in reverse for hit testing; see [`paint_order_child_indices`].
+/// A control's parts are left out, so a press on a thumb lands on its host.
 pub fn children_in_paint_order(node: &WidgetNode) -> PaintOrderChildren<'_> {
     match paint_order_child_indices(node) {
         None => PaintOrderChildren::Authored(node.children.iter()),
@@ -586,18 +589,30 @@ impl<'a> Iterator for PaintOrderChildren<'a> {
     type Item = &'a WidgetNode;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Authored(children) => children.next(),
-            Self::Sorted { children, order } => order.next().map(|index| &children[index]),
+        loop {
+            let child = match self {
+                Self::Authored(children) => children.next(),
+                Self::Sorted { children, order } => order.next().map(|index| &children[index]),
+            }?;
+            if child.control_part().is_none() {
+                return Some(child);
+            }
         }
     }
 }
 
 impl DoubleEndedIterator for PaintOrderChildren<'_> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        match self {
-            Self::Authored(children) => children.next_back(),
-            Self::Sorted { children, order } => order.next_back().map(|index| &children[index]),
+        loop {
+            let child = match self {
+                Self::Authored(children) => children.next_back(),
+                Self::Sorted { children, order } => {
+                    order.next_back().map(|index| &children[index])
+                }
+            }?;
+            if child.control_part().is_none() {
+                return Some(child);
+            }
         }
     }
 }
@@ -657,8 +672,19 @@ impl WidgetNode {
                 open_binding: None,
                 source_file: None,
                 slot_source: None,
+                control_part: None,
             }),
         }
+    }
+
+    /// The control part this node draws, when it belongs to a native
+    /// control's part subtree rather than to authored markup.
+    pub fn control_part(&self) -> Option<crate::ControlPart> {
+        self.authored.control_part
+    }
+
+    pub fn set_control_part(&mut self, part: crate::ControlPart) {
+        self.control_part = Some(part);
     }
 
     /// Identify a component memo boundary independently of its tree position.

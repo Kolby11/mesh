@@ -5,7 +5,7 @@
             <text class="settings-section-copy">{t('appearance.theme.copy')}</text>
             <text class="settings-card-meta">{theme_scope_label}</text>
             <GlassButton label={theme_pin_label} onclick={onThemePin} hidden={theme_pin_hidden} />
-            <row class="theme-grid">
+            <row class="theme-grid settings-group">
                 {#for row in theme_rows}
                     <button class="theme-option" class:theme-option-active={row.active} onclick={onThemeSelect(row.id)}>
                         <box class="theme-preview" style:background={row.palette.surface}>
@@ -19,17 +19,49 @@
                                 <box class="theme-preview-panel" style:background={row.palette.surface_container_high} />
                             </column>
                         </box>
-                        <row class="theme-option-copy">
-                            <column class="settings-card-copy">
-                                <text class="settings-card-title">{row.label}</text>
-                                <text class="settings-card-meta">{row.id}</text>
-                                <text class="settings-card-meta">{row.coverage}</text>
-                            </column>
-                            <text class="theme-check" hidden={not row.active}>✓</text>
-                        </row>
+                        <column class="theme-option-copy">
+                            <text class="theme-kicker">{row.kicker}</text>
+                            <row class="theme-title-row">
+                                <text class="theme-title">{row.label}</text>
+                                <text class="theme-now" hidden={not row.active}>{t('appearance.theme.now')}</text>
+                            </row>
+                            <text class="settings-card-meta">{row.recommends}</text>
+                            <text class="settings-card-meta">{row.coverage}</text>
+                        </column>
                     </button>
                 {/for}
             </row>
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('appearance.glass')}</text>
+            <text class="settings-section-copy">{t('appearance.glass.copy')}</text>
+            <column class="settings-group">
+                <row class="settings-group-row">
+                    <box class="row-tile row-tile-cyan"><icon class="row-icon" name="texture" size="16" /></box>
+                    <text class="settings-group-label">{t('appearance.glass.style')}</text>
+                    <row class="glass-style-options" aria-label={t('appearance.glass.style')}>
+                        <button class="glass-style-option" class:glass-style-option-active={glass_style == "theme"} onclick={onGlassPresetTheme}><text class="glass-style-label" class:glass-style-label-active={glass_style == "theme"}>{t('appearance.glass.style.theme')}</text></button>
+                        <button class="glass-style-option" class:glass-style-option-active={glass_style == "liquid"} onclick={onGlassPresetLiquid}><text class="glass-style-label" class:glass-style-label-active={glass_style == "liquid"}>{t('appearance.glass.style.liquid')}</text></button>
+                        <button class="glass-style-option" class:glass-style-option-active={glass_style == "soft"} onclick={onGlassPresetSoft}><text class="glass-style-label" class:glass-style-label-active={glass_style == "soft"}>{t('appearance.glass.style.soft')}</text></button>
+                        <button class="glass-style-option" class:glass-style-option-active={glass_style == "frosted"} onclick={onGlassPresetFrosted}><text class="glass-style-label" class:glass-style-label-active={glass_style == "frosted"}>{t('appearance.glass.style.frosted')}</text></button>
+                    </row>
+                </row>
+                <box class="settings-group-divider" />
+                <row class="settings-group-row">
+                    <box class="row-tile row-tile-blue"><icon class="row-icon" name="blur" size="16" /></box>
+                    <text class="settings-group-label">{t('appearance.glass.blur')}</text>
+                    <text class="settings-value">{glass_blur_label}</text>
+                    <slider class="glass-strength" min="0" max="100" step="1" value="{glass_blur}" onchange={onGlassBlur} aria-label={t('appearance.glass.blur')} />
+                </row>
+                <box class="settings-group-divider" />
+                <row class="settings-group-row">
+                    <box class="row-tile row-tile-purple"><icon class="row-icon" name="water-drop" size="16" /></box>
+                    <text class="settings-group-label">{t('appearance.glass.liquid')}</text>
+                    <text class="settings-value">{glass_liquid_label}</text>
+                    <slider class="glass-strength" min="0" max="100" step="1" value="{glass_liquid}" onchange={onGlassLiquid} aria-label={t('appearance.glass.liquid')} />
+                </row>
+            </column>
         </column>
 
         <column class="settings-section">
@@ -106,6 +138,8 @@ hidden = false
 local theme = require("mesh.theme")
 local debug_ok, debug_service = pcall(require, "mesh.debug")
 if not debug_ok then debug_service = nil end
+local settings_ok, settings_service = pcall(require, "mesh.settings")
+if not settings_ok then settings_service = nil end
 local t = import("mesh.i18n", "t")
 
 theme_value = "mesh-default"
@@ -121,6 +155,11 @@ font_value = "system-ui"
 icon_more_hidden = true
 font_more_hidden = true
 locale_slovak = false
+glass_style = "theme"
+glass_blur = 0
+glass_liquid = 0
+glass_blur_label = "0%"
+glass_liquid_label = "0%"
 
 local RESOURCE_PAGE_SIZE = 24
 local icon_limit = RESOURCE_PAGE_SIZE
@@ -193,17 +232,24 @@ local function installed_themes()
             if rows[position].palette == nil and palette ~= nil then
                 rows[position].palette = palette
             end
-            if type(candidate) == "table" and candidate.coverage ~= nil then
-                rows[position].coverage = candidate.coverage
+            if type(candidate) == "table" then
+                for _, field in ipairs({ "coverage", "modes", "recommends" }) do
+                    if candidate[field] ~= nil then
+                        rows[position][field] = candidate[field]
+                    end
+                end
             end
             return
         end
 
+        local details = type(candidate) == "table" and candidate or {}
         rows[#rows + 1] = {
             id = id,
             label = label,
             palette = palette,
-            coverage = type(candidate) == "table" and candidate.coverage or nil,
+            coverage = details.coverage,
+            modes = details.modes,
+            recommends = details.recommends,
         }
         positions[id] = #rows
         seen[id] = true
@@ -249,6 +295,40 @@ local function installed_themes()
     return rows, seen
 end
 
+-- The mode names a theme offers, as the small caption above its name.
+local function theme_kicker(option)
+    local names = {}
+    for _, mode in ipairs(type(option.modes) == "table" and option.modes or {}) do
+        local name = type(mode) == "table" and mode.name or mode
+        if name ~= nil then names[#names + 1] = string.upper(tostring(name)) end
+    end
+    return table.concat(names, " · ")
+end
+
+-- What selecting the theme adopts: its first installed font and icon theme,
+-- or its first choice when the installed catalog has not loaded that far.
+local function theme_recommendation(option)
+    local recommends = type(option.recommends) == "table" and option.recommends or {}
+    local resources = theme and theme.system_resources or {}
+    local function first(candidates, installed, field)
+        local present = {}
+        for _, entry in ipairs(installed or {}) do
+            present[tostring(entry[field] or "")] = true
+        end
+        for _, candidate in ipairs(candidates or {}) do
+            if present[candidate] then return candidate end
+        end
+        return (candidates or {})[1]
+    end
+    local font = first(recommends.fonts, font_catalog, "name")
+    local icons = first(recommends.icons, resources.icon_themes, "id")
+    if font == nil and icons == nil then return "" end
+    local parts = {}
+    if font ~= nil then parts[#parts + 1] = font end
+    if icons ~= nil then parts[#parts + 1] = icons end
+    return t('appearance.theme.recommends') .. " " .. table.concat(parts, " · ")
+end
+
 local function sync_theme(theme_id)
     theme_value = tostring(theme_id or "mesh-default")
     local installed, seen = installed_themes()
@@ -268,6 +348,8 @@ local function sync_theme(theme_id)
             label = option.label,
             palette = palette,
             active = active,
+            kicker = theme_kicker(option),
+            recommends = theme_recommendation(option),
             coverage = type(option.coverage) == "table"
                 and (tostring(option.coverage.tuned or 0) .. " " .. t('appearance.coverage.tuned')
                     .. " · " .. tostring(option.coverage.defaults or 0) .. " " .. t('appearance.coverage.defaults')
@@ -336,6 +418,104 @@ local function sync_system_resources()
     font_rows = fonts
 end
 
+-- Glass material. Strength 100% is each tier's strongest glass; the saved
+-- `glass.strength.*` overrides record the choice, and the backdrop overrides
+-- apply it to every module that uses @mesh/glass-material.
+local GLASS_TIERS = {
+    pill = { blur = 16, depth = 6, edge = 5, dispersion = 0.4 },
+    card = { blur = 24, depth = 10, edge = 8, dispersion = 0.6 },
+    dock = { blur = 20, depth = 9, edge = 7, dispersion = 0.6 },
+    panel = { blur = 32, depth = 12, edge = 9, dispersion = 0.6 },
+    flare = { blur = 10, depth = 0, edge = 0, dispersion = 0 },
+    lens = { blur = 0, depth = 8, edge = 8, dispersion = 0 },
+}
+local GLASS_PRESETS = {
+    liquid = { blur = 10, liquid = 100 },
+    soft = { blur = 45, liquid = 45 },
+    frosted = { blur = 100, liquid = 0 },
+}
+
+local function length(value)
+    return string.format("%gpx", math.floor(value * 10 + 0.5) / 10)
+end
+
+local function backdrop_filter(tier, blur, liquid)
+    local parts = {}
+    if tier.blur > 0 then
+        parts[#parts + 1] = "blur(" .. length(tier.blur * blur / 100) .. ")"
+    end
+    parts[#parts + 1] = "refract(" .. length(tier.depth * liquid / 100) .. " "
+        .. length(tier.edge * liquid / 100) .. ")"
+    if tier.dispersion > 0 and liquid > 0 then
+        parts[#parts + 1] = "dispersion(" .. length(tier.dispersion * liquid / 100) .. ")"
+    end
+    return table.concat(parts, " ")
+end
+
+local function stored_tokens()
+    local namespaces = settings_service and settings_service.namespaces or {}
+    local shell = type(namespaces) == "table" and namespaces.shell or {}
+    local themed = type(shell) == "table" and shell.theme or {}
+    return type(themed) == "table" and type(themed.tokens) == "table" and themed.tokens or {}
+end
+
+local function show_glass(style, blur, liquid)
+    glass_style = style
+    glass_blur = blur
+    glass_liquid = liquid
+    glass_blur_label = tostring(math.floor(blur + 0.5)) .. "%"
+    glass_liquid_label = tostring(math.floor(liquid + 0.5)) .. "%"
+end
+
+local function sync_glass()
+    local tokens = stored_tokens()
+    local blur = tonumber(tokens["glass.strength.blur"])
+    local liquid = tonumber(tokens["glass.strength.liquid"])
+    if blur == nil or liquid == nil then
+        show_glass("theme", glass_blur, glass_liquid)
+        return
+    end
+    show_glass(tostring(tokens["glass.strength.style"] or "custom"), blur, liquid)
+end
+
+local function apply_glass(style, blur, liquid)
+    show_glass(style, blur, liquid)
+    local tokens = {
+        ["glass.strength.style"] = style,
+        ["glass.strength.blur"] = blur,
+        ["glass.strength.liquid"] = liquid,
+    }
+    for name, tier in pairs(GLASS_TIERS) do
+        tokens["@mesh/glass-material.glass.backdrop." .. name] = backdrop_filter(tier, blur, liquid)
+    end
+    theme.set_tokens(tokens)
+end
+
+local function slider_number(value)
+    if type(value) == "table" then value = value.value end
+    return math.max(0, math.min(100, tonumber(value) or 0))
+end
+
+function onGlassPresetTheme()
+    show_glass("theme", glass_blur, glass_liquid)
+    local tokens = {
+        ["glass.strength.style"] = mesh.json.null,
+        ["glass.strength.blur"] = mesh.json.null,
+        ["glass.strength.liquid"] = mesh.json.null,
+    }
+    for name in pairs(GLASS_TIERS) do
+        tokens["@mesh/glass-material.glass.backdrop." .. name] = mesh.json.null
+    end
+    theme.set_tokens(tokens)
+end
+
+function onGlassPresetLiquid() apply_glass("liquid", GLASS_PRESETS.liquid.blur, GLASS_PRESETS.liquid.liquid) end
+function onGlassPresetSoft() apply_glass("soft", GLASS_PRESETS.soft.blur, GLASS_PRESETS.soft.liquid) end
+function onGlassPresetFrosted() apply_glass("frosted", GLASS_PRESETS.frosted.blur, GLASS_PRESETS.frosted.liquid) end
+
+function onGlassBlur(value) apply_glass("custom", slider_number(value), glass_liquid) end
+function onGlassLiquid(value) apply_glass("custom", glass_blur, slider_number(value)) end
+
 effect(function()
     local current_theme = "mesh-default"
     if theme then
@@ -344,13 +524,15 @@ effect(function()
             current_theme = theme.state.current or theme.state.theme_id or current_theme
         end
     end
+    -- Resources first: theme cards name the recommended fonts that are installed.
+    sync_system_resources()
     sync_theme(current_theme)
     local pinned = theme and theme.scope == "profile"
     theme_scope_label = pinned and t('appearance.theme.pinned') or t('appearance.theme.shared')
     theme_pin_label = pinned and t('appearance.theme.unpin') or t('appearance.theme.pin')
     theme_pin_hidden = not (pinned or (theme and theme.can_pin))
     sync_locale(mesh.locale.current() or "en")
-    sync_system_resources()
+    sync_glass()
 end)
 
 function onThemeSelect(theme_id)
@@ -424,13 +606,14 @@ end
         width: 100%;
         gap: var(--spacing-md);
         flex-wrap: wrap;
+        padding: var(--spacing-md);
     }
 
     .theme-option {
         flex-direction: column;
         align-items: stretch;
         min-width: 0;
-        flex-basis: 180px;
+        flex-basis: 220px;
         flex-grow: 1;
         gap: var(--spacing-sm);
         padding: var(--spacing-sm);
@@ -464,7 +647,7 @@ end
 
     .theme-preview {
         width: 100%;
-        height: 118px;
+        height: 132px;
         overflow: hidden;
         border-radius: var(--radius-sm);
     }
@@ -516,12 +699,139 @@ end
 
     .theme-option-copy {
         width: 100%;
+        gap: 2px;
+        padding-inline: var(--spacing-xs);
+        padding-bottom: var(--spacing-xs);
+    }
+
+    .theme-kicker {
+        height: auto;
+        color: var(--color-primary);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        line-height: 1.6;
+    }
+
+    .theme-title-row {
+        width: 100%;
         align-items: center;
-        justify-content: space-between;
         gap: var(--spacing-sm);
     }
 
-    .theme-check,
+    .theme-title {
+        height: auto;
+        color: var(--glass-settings-text);
+        font-size: 18px;
+        font-weight: 750;
+    }
+
+    .theme-now {
+        height: auto;
+        padding-inline: 8px;
+        padding-block: 2px;
+        border-radius: var(--radius-full);
+        background: color-mix(in srgb, var(--color-primary) 16%, transparent);
+        color: var(--color-primary);
+        font-size: 11px;
+        font-weight: 700;
+    }
+
+    /* A grouped card of rows, as in the reference system settings. */
+    .settings-group {
+        width: 100%;
+        padding: var(--spacing-sm);
+        border-radius: var(--radius-lg);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--glass-settings-rim);
+        background: var(--glass-settings-inset);
+    }
+
+    .settings-group-row {
+        width: 100%;
+        min-height: 48px;
+        align-items: center;
+        gap: var(--spacing-md);
+        padding-inline: var(--spacing-sm);
+    }
+
+    .settings-group-label {
+        height: auto;
+        flex-grow: 1;
+        color: var(--glass-settings-text);
+        font-size: var(--typography-size-sm);
+        font-weight: 600;
+    }
+
+    .settings-group-divider {
+        width: 100%;
+        height: 1px;
+        background: var(--glass-settings-rim);
+    }
+
+    .row-tile {
+        width: 28px;
+        height: 28px;
+        flex-shrink: 0;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        background: var(--color-primary);
+    }
+
+    .row-tile-cyan { background: var(--color-info); }
+    .row-tile-blue { background: var(--color-primary); }
+    .row-tile-purple { background: var(--color-tertiary-container); }
+
+    .row-icon {
+        color: var(--color-on-primary);
+    }
+
+    .glass-style-options {
+        flex-shrink: 0;
+        gap: 2px;
+        padding: 2px;
+        border-radius: var(--radius-full);
+        background: color-mix(in srgb, var(--glass-settings-text) 8%, transparent);
+    }
+
+    .glass-style-option {
+        height: 28px;
+        padding-inline: 12px;
+        align-items: center;
+        justify-content: center;
+        border-radius: var(--radius-full);
+        background: transparent;
+        transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .glass-style-option:hover {
+        background: color-mix(in srgb, var(--glass-settings-text) 6%, transparent);
+    }
+
+    .glass-style-option-active,
+    .glass-style-option-active:hover {
+        background: var(--glass-settings-inset);
+        box-shadow: 0 1px 3px #0000001f;
+    }
+
+    .glass-style-label {
+        height: auto;
+        color: var(--glass-settings-text-muted);
+        font-size: var(--typography-size-xs);
+        font-weight: 600;
+    }
+
+    .glass-style-label-active {
+        color: var(--color-primary);
+    }
+
+    .glass-strength {
+        width: 200px;
+        flex-shrink: 0;
+    }
+
     .language-check {
         color: var(--glass-indicator);
         font-size: var(--typography-size-xs);

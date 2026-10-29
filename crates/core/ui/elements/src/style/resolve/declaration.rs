@@ -1294,6 +1294,9 @@ pub(super) fn selector_to_diagnostic_string(selector: &Selector) -> String {
         Selector::Class(class) => format!(".{class}"),
         Selector::Id(id) => format!("#{id}"),
         Selector::State(tag, state) => format!("{tag}:{state}"),
+        Selector::PseudoElement(host, part) => {
+            format!("{}::{part}", selector_to_diagnostic_string(host))
+        }
         Selector::Compound(parts) => parts
             .iter()
             .map(selector_to_diagnostic_string)

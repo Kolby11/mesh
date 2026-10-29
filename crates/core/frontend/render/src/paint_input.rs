@@ -128,14 +128,6 @@ fn hash_primitive(node: &WidgetNode) -> u64 {
             node.input_preedit.hash(&mut hasher);
             hash_color(node.computed_style.color, &mut hasher);
         }
-        "slider" => {
-            hash_attributes(
-                node,
-                &[Prop::Min, Prop::Max, Prop::Value, Prop::Orient],
-                &mut hasher,
-            );
-            hash_color(node.computed_style.color, &mut hasher);
-        }
         "checkbox" | "radio" => {
             hash_attributes(node, &[Prop::Checked], &mut hasher);
             hash_color(node.computed_style.color, &mut hasher);

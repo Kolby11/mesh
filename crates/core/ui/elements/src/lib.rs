@@ -2,6 +2,7 @@ pub mod accessibility;
 pub mod attributes;
 pub mod bounds_index;
 pub mod composition;
+pub mod control_parts;
 pub mod element;
 pub mod frame;
 pub mod frame_dirty;
@@ -36,6 +37,7 @@ pub use accessibility::{
 };
 pub use attributes::{AttrKey, AttributeMap};
 pub use composition::{CallbackHandle, ComponentCompositionProps, HandlerTarget};
+pub use control_parts::{ControlPart, control_part_names, control_part_nodes};
 pub use element::{
     BASE_ELEMENT_FIELDS, ELEMENT_CONTRACT_DEFS, ELEMENT_TYPE_DEFS, ElementAttributeDef,
     ElementAttributeType, ElementContractDef, ElementDiagnostic, ElementDiagnosticKind,

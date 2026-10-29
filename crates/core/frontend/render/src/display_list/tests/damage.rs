@@ -522,22 +522,6 @@ fn display_list_uses_cached_icon_opacity_for_conservative_barriers() {
 }
 
 #[test]
-fn display_list_rebuilds_when_slider_value_changes() {
-    let mut root = node(1, "slider", 0.0, 0.0, 100.0, 20.0);
-    root.attributes.insert(Prop::Min, "0".into());
-    root.attributes.insert(Prop::Max, "100".into());
-    root.attributes.insert(Prop::Value, "25".into());
-    let mut list = RetainedDisplayList::default();
-    list.update(&root, 100, 20, false, true);
-
-    root.attributes.insert(Prop::Value, "75".into());
-    let metrics = list.update(&root, 100, 20, false, true);
-
-    assert_eq!(metrics.entries_rebuilt, 1);
-    assert_eq!(metrics.damage_area, 2_000);
-}
-
-#[test]
 fn display_list_rebuilds_when_border_width_changes() {
     let mut root = node(1, "box", 0.0, 0.0, 100.0, 20.0);
     root.computed_style.border_color = Color::WHITE;

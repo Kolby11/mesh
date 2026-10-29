@@ -1273,3 +1273,243 @@ fn theme_only_hover_rules_invalidate_and_restyle_their_nodes() {
         resting
     );
 }
+
+#[test]
+fn slider_parts_restyle_with_their_host_and_never_take_the_press() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <row>
+    <slider class="level" value="40" />
+  </row>
+</template>
+<style>
+.level { width: 200px; height: 40px; padding: 0px; }
+.level::track { height: 6px; margin-left: 0px; margin-right: 0px; }
+slider::thumb { width: 36px; height: 22px; }
+slider:active::thumb { width: 48px; height: 30px; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 80);
+    let mut paint = |component: &mut FrontendSurfaceComponent| {
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+            .unwrap();
+        if component.wants_render() {
+            component
+                .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+                .unwrap();
+        }
+    };
+    paint(&mut component);
+    let thumb = |component: &FrontendSurfaceComponent| {
+        fn find(node: &WidgetNode) -> Option<&WidgetNode> {
+            if node.control_part() == Some(mesh_core_elements::ControlPart::SliderThumb) {
+                return Some(node);
+            }
+            node.children.iter().find_map(find)
+        }
+        find(component.last_tree.as_ref().unwrap()).unwrap().clone()
+    };
+    let resting = thumb(&component);
+    assert_eq!((resting.layout.width, resting.layout.height), (36.0, 22.0));
+    let centre_x = resting.layout.x + resting.layout.width / 2.0;
+    let centre_y = resting.layout.y + resting.layout.height / 2.0;
+
+    // A press on the thumb lands on the slider, which owns input.
+    let tree = component.last_tree.as_ref().unwrap();
+    let hit = mesh_core_interaction::pointer_press_hit(tree, centre_x, centre_y);
+    assert_eq!(hit.target.map(|target| target.key), Some("root/0/0"));
+    // Parts expose no semantics; the slider does.
+    assert!(!mesh_core_elements::NodeEligibility::local(&resting).is_semantically_visible());
+
+    let slider_id = runtime_node_id_for_key("root/0/0");
+    component.pointer_down_id = Some(slider_id);
+    component.invalidate_interaction_restyle();
+    paint(&mut component);
+    let pressed = thumb(&component);
+    assert_eq!((pressed.layout.width, pressed.layout.height), (48.0, 30.0));
+    let pressed_centre = pressed.layout.x + pressed.layout.width / 2.0;
+    assert!((pressed_centre - centre_x).abs() < 0.5, "the thumb grows around the value");
+
+    component.pointer_down_id = None;
+    component.invalidate_interaction_restyle();
+    paint(&mut component);
+    assert_eq!(thumb(&component).layout.width, 36.0);
+}
+
+#[test]
+fn slider_thumb_transitions_animate_the_press() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <row>
+    <slider value="40" />
+  </row>
+</template>
+<style>
+slider { width: 200px; height: 40px; }
+slider::thumb { width: 36px; height: 22px; transition: width 10s linear, height 10s linear; }
+slider:active::thumb { width: 48px; height: 30px; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 80);
+    let mut paint = |component: &mut FrontendSurfaceComponent| {
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+            .unwrap();
+    };
+    paint(&mut component);
+    if component.wants_render() {
+        paint(&mut component);
+    }
+    let thumb = |component: &FrontendSurfaceComponent| {
+        fn find(node: &WidgetNode) -> Option<&WidgetNode> {
+            if node.control_part() == Some(mesh_core_elements::ControlPart::SliderThumb) {
+                return Some(node);
+            }
+            node.children.iter().find_map(find)
+        }
+        find(component.last_tree.as_ref().unwrap()).unwrap().clone()
+    };
+    let thumb_id = thumb(&component).id;
+
+    component.pointer_down_id = Some(runtime_node_id_for_key("root/0/0"));
+    component.invalidate_interaction_restyle();
+    paint(&mut component);
+
+    let width = thumb(&component).layout.width;
+    assert!(
+        (36.0..48.0).contains(&width),
+        "a ten-second transition has barely started, width {width}"
+    );
+    assert!(component.transitions.contains_key(thumb_id));
+    assert!(component.wants_render(), "the running transition keeps frames coming");
+}
+
+#[test]
+fn slider_value_changes_move_the_thumb() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <row>
+    <slider min="0" max="100" step="10" value="40" />
+  </row>
+</template>
+<style>
+slider { width: 200px; height: 40px; padding: 0px; }
+slider::track { margin-left: 0px; margin-right: 0px; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 80);
+    let mut paint = |component: &mut FrontendSurfaceComponent| {
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+            .unwrap();
+        if component.wants_render() {
+            component
+                .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+                .unwrap();
+        }
+    };
+    paint(&mut component);
+    let anchor_x = |component: &FrontendSurfaceComponent| {
+        fn find(node: &WidgetNode) -> Option<&WidgetNode> {
+            if node.control_part() == Some(mesh_core_elements::ControlPart::SliderAnchor) {
+                return Some(node);
+            }
+            node.children.iter().find_map(find)
+        }
+        let tree = component.last_tree.as_ref().unwrap();
+        let slider = &tree.children[0].children[0];
+        let anchor = find(tree).unwrap();
+        anchor.layout.x + anchor.layout.width / 2.0 - slider.layout.x
+    };
+    assert!((anchor_x(&component) - 80.0).abs() < 0.5, "{}", anchor_x(&component));
+
+    component.focused_key = Some("root/0/0".into());
+    component
+        .handle_input(
+            &theme,
+            240,
+            80,
+            ComponentInput::KeyPressed {
+                key: "ArrowRight".into(),
+                modifiers: KeyModifiers::default(),
+            },
+        )
+        .unwrap();
+    paint(&mut component);
+    assert!((anchor_x(&component) - 100.0).abs() < 0.5, "{}", anchor_x(&component));
+}
+
+#[test]
+fn theme_declared_part_transitions_animate_without_component_motion_rules() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("theme.css"),
+        "slider::thumb { width: 36px; height: 22px; transition: width 10s linear; }\n\
+         slider:active::thumb { width: 48px; }\n",
+    )
+    .unwrap();
+    let pack = mesh_core_theme::load_theme_from_source(
+        &mesh_core_theme::ThemeSourceHandle::new(dir.path(), "theme.css").unwrap(),
+        "parts",
+        "Parts",
+    )
+    .unwrap();
+    let theme = mesh_core_theme::Theme::compose_layers(
+        &default_theme(),
+        &pack,
+        "@test/parts:parts",
+        "dark",
+        [],
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <row>
+    <slider value="40" />
+  </row>
+</template>
+<style>
+slider { width: 200px; height: 40px; }
+</style>
+"#,
+    );
+    let mut buffer = PixelBuffer::new(240, 80);
+    let mut paint = |component: &mut FrontendSurfaceComponent| {
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+            .unwrap();
+    };
+    paint(&mut component);
+    if component.wants_render() {
+        paint(&mut component);
+    }
+    component.pointer_down_id = Some(runtime_node_id_for_key("root/0/0"));
+    component.invalidate_interaction_restyle();
+    paint(&mut component);
+
+    fn thumb(node: &WidgetNode) -> Option<&WidgetNode> {
+        if node.control_part() == Some(mesh_core_elements::ControlPart::SliderThumb) {
+            return Some(node);
+        }
+        node.children.iter().find_map(thumb)
+    }
+    let thumb = thumb(component.last_tree.as_ref().unwrap()).unwrap();
+    assert!(
+        thumb.layout.width < 48.0,
+        "the theme's transition animates the press, width {}",
+        thumb.layout.width
+    );
+    assert!(component.transitions.contains_key(thumb.id));
+}

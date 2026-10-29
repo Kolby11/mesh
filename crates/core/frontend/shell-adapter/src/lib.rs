@@ -618,6 +618,10 @@ pub enum CoreRequest {
     SetFontFamily {
         family: String,
     },
+    /// Patch user theme token overrides; a `null` value removes one.
+    SetThemeTokens {
+        tokens: serde_json::Map<String, serde_json::Value>,
+    },
     SetBackdropImage {
         path: String,
     },

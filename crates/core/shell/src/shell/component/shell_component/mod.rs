@@ -61,6 +61,7 @@ impl FrontendSurfaceComponent {
         self.interaction_frame.reset();
         self.cached_restyle_rules = None;
         self.cached_restyle_state_dependencies = StyleStateDependencies::default();
+        self.cached_restyle_rules_animate = false;
         self.cached_style_rule_index = None;
         self.runtime_style_diagnostic_fingerprint = None;
         self.intrinsic_layout_cache = IntrinsicLayoutCache::default();

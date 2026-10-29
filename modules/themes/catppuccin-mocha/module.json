@@ -20,7 +20,17 @@
               "contrast": "normal"
             }
           },
-          "tokenContract": "1.1"
+          "tokenContract": "1.1",
+          "recommends": {
+            "fonts": [
+              "Inter",
+              "Rubik",
+              "Noto Sans"
+            ],
+            "icons": [
+              "Papirus-Dark"
+            ]
+          }
         }
       ]
     }

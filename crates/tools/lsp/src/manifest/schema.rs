@@ -1002,6 +1002,31 @@ fn mesh_contributes(doc: &'static str) -> Node {
                                     ))),
                                 ),
                             ),
+                            field(
+                                "recommends",
+                                false,
+                                obj(
+                                    "Resources adopted when this theme is selected; the first installed entry of each list wins.",
+                                    vec![
+                                        field(
+                                            "fonts",
+                                            false,
+                                            string_array(
+                                                "Preferred UI font families, most preferred first.",
+                                                "Exact fontconfig family name.",
+                                            ),
+                                        ),
+                                        field(
+                                            "icons",
+                                            false,
+                                            string_array(
+                                                "Preferred icon themes, most preferred first.",
+                                                "XDG icon-theme id or icon-pack id.",
+                                            ),
+                                        ),
+                                    ],
+                                ),
+                            ),
                         ],
                     ))),
                 ),

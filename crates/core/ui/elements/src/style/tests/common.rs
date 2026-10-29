@@ -22,6 +22,7 @@ pub(super) fn selector_has_class(selector: &Selector, class: &str) -> bool {
     match selector {
         Selector::Class(name) => name == class,
         Selector::Compound(parts) => parts.iter().any(|part| selector_has_class(part, class)),
+        Selector::PseudoElement(host, _) => selector_has_class(host, class),
         Selector::Tag(_) | Selector::Id(_) | Selector::State(_, _) | Selector::Universal => false,
     }
 }

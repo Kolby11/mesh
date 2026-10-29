@@ -1034,6 +1034,18 @@ from this tree keeps the same stylesheet rules. See the
 Theme-driven component defaults resolve before local stylesheet rules. The
 effective order is documented in [`../spec/04-styling.md`](../spec/04-styling.md).
 
+A native control's look is styled on its parts, with states on the host:
+
+```css
+.volume::track { height: 6px; }
+.volume::fill { background-color: var(--glass-indicator); }
+slider:active::thumb { width: 52px; transition: width 260ms; }
+```
+
+`slider` exposes `::track`, `::fill` and `::thumb`; core keeps the value,
+input and accessibility. See
+[control parts](../spec/04-styling.md#62-control-parts-hostpart).
+
 Keyframes are percentage-only:
 
 ```css

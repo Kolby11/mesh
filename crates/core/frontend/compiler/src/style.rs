@@ -110,6 +110,8 @@ fn selector_key(selector: &Selector) -> SelectorKey<'_> {
             .find(|key| !matches!(key, SelectorKey::Unkeyed))
             .unwrap_or(SelectorKey::Unkeyed),
         Selector::State(_, _) | Selector::Universal => SelectorKey::Unkeyed,
+        // Keyed by its host; the matcher keeps it off ordinary nodes.
+        Selector::PseudoElement(host, _) => selector_key(host),
     }
 }
 

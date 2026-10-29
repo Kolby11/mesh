@@ -1987,6 +1987,7 @@ impl Shell {
             CoreRequest::SetLocale { locale } => self.apply_set_locale(&locale),
             CoreRequest::SetIconTheme { theme_id } => self.apply_set_icon_theme(&theme_id),
             CoreRequest::SetFontFamily { family } => self.apply_set_font_family(&family),
+            CoreRequest::SetThemeTokens { tokens } => self.apply_set_theme_tokens(tokens),
             CoreRequest::SetKeyboardSetting { field, value } => {
                 self.apply_set_keyboard_setting(&field, value)
             }
@@ -3740,6 +3741,7 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::SetThemeMode { .. } => "set_mode",
         CoreRequest::SetIconTheme { .. } => "set_icon_theme",
         CoreRequest::SetFontFamily { .. } => "set_font_family",
+        CoreRequest::SetThemeTokens { .. } => "set_tokens",
         CoreRequest::SetKeyboardSetting { .. } => "set_keyboard_setting",
         CoreRequest::SetBackdropImage { .. } => "set_backdrop_image",
         CoreRequest::SetLocale { .. } => "set_locale",
@@ -3799,6 +3801,12 @@ fn durable_write_key(request: &CoreRequest) -> Option<String> {
         CoreRequest::SetLocale { .. } => "locale".into(),
         CoreRequest::SetIconTheme { .. } => "icon_theme".into(),
         CoreRequest::SetFontFamily { .. } => "font_family".into(),
+        // Patches to different tokens are independent; only a later patch of
+        // exactly the same tokens supersedes an earlier one.
+        CoreRequest::SetThemeTokens { tokens } => format!(
+            "theme_tokens:{}",
+            tokens.keys().cloned().collect::<Vec<_>>().join(",")
+        ),
         CoreRequest::SetKeyboardSetting { field, .. } => format!("keyboard:{field}"),
         CoreRequest::SetBackdropImage { .. } => "backdrop_image".into(),
         CoreRequest::SetProvider { interface, .. } => format!("provider:{interface}"),

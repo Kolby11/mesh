@@ -151,7 +151,9 @@ normal XDG theme.
 The shipped v1 system picker enumerates every visible XDG theme and writes its
 id to `shell.icons.default_pack`; the resolver accepts that id directly without
 requiring a wrapper MESH module. The ordered `packs` shape below remains the
-target for mixing MESH mapping packs with system themes.
+target for mixing MESH mapping packs with system themes. Selecting a theme
+sets `default_pack` to the first available icon theme the theme recommends
+([04 §2.2](04-styling.md#22-recommended-fonts-and-icons)).
 
 ```json
 {

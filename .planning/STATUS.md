@@ -12,7 +12,8 @@ measurements live in [`log/`](log/README.md).
 
 ## Next
 
-- Investigate intermittent fractional retained-layout parity.
+- Investigate intermittent fractional retained-layout parity. The redesigned Settings appearance page now reproduces it deterministically (`settings_scroll_shift_matches_full_paint`).
+- Extend styleable control parts from `slider` to scrollbars, inputs, toggles and progress.
 - Continue trusted live glass source work and the in-surface blur engine.
 
 ## Blocked / known baselines
