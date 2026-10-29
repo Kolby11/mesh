@@ -652,3 +652,31 @@ fn user_parts_apply_in_preview_and_preserve_explicit_text_inheritance() {
         mesh_core_elements::style::Dimension::Px(80.0)
     );
 }
+
+#[test]
+fn bare_text_nodes_keep_their_explicit_selector_styles() {
+    let component = mesh_core_component::parse_component(
+        r#"
+<template><column>Hello</column></template>
+<style>column { color: #111111; font-size: 12px; } text { color: #ff0000; }</style>"#,
+    )
+    .unwrap();
+    let rules = &component.style.as_ref().unwrap().rules;
+    let tree = build_widget_tree_from_component(
+        &component,
+        &test_manifest(),
+        &mesh_core_theme::default_theme(),
+        200.0,
+        80.0,
+        None,
+        "root",
+        None,
+        rules,
+    );
+    let text = find_tag(&tree, "text").unwrap();
+    assert_eq!(
+        text.computed_style.color,
+        mesh_core_elements::Color::from_hex("#ff0000").unwrap()
+    );
+    assert_eq!(text.computed_style.font_size, 12.0);
+}

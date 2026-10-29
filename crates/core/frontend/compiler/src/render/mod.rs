@@ -511,11 +511,8 @@ fn build_widget_node_inner(
                     parent_style,
                 );
             if let Some(parent_style) = parent_style {
-                inherit_text_style(
-                    &mut node.computed_style,
-                    parent_style,
-                    StylePropertyMask::default(),
-                );
+                let explicit = node.computed_style.explicit_properties;
+                inherit_text_style(&mut node.computed_style, parent_style, explicit);
             }
             node
         }
@@ -568,11 +565,8 @@ fn build_widget_node_inner(
                     parent_style,
                 );
             if let Some(parent_style) = parent_style {
-                inherit_text_style(
-                    &mut node.computed_style,
-                    parent_style,
-                    StylePropertyMask::default(),
-                );
+                let explicit = node.computed_style.explicit_properties;
+                inherit_text_style(&mut node.computed_style, parent_style, explicit);
             }
             node
         }
