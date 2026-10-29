@@ -290,7 +290,6 @@ evidence and test workloads are in the linked reports.
 - [ ] Assess collision-safe equality for frontend memo fingerprints; the 64-bit hash alone decides reuse. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Localize glass-bar status/workspace labels; hardcoded English bypasses the module catalogs. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Reconcile advanced Settings optimistic edits with authoritative results; pending props, provider and module states currently override later snapshots indefinitely. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
-- [ ] Align the frontend adapter's service authorization test with deferred contract-aware dispatch; its current assertion contradicts the ABI. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Localize glass-widget weather and idle-media text; hardcoded English bypasses the module catalogs. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] **S10-PERF-001 / S10-PERF-002 / S10-PERF-003:** Cache tree/style preparation and recursive imports by
       content revision, and narrow effect/state observation summaries after

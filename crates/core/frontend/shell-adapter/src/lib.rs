@@ -1237,7 +1237,7 @@ mod effect_adapter_tests {
     }
 
     #[test]
-    fn adapter_rejects_effects_without_their_capability_scope() {
+    fn adapter_defers_service_authorization_to_contract_aware_dispatch() {
         let effect = ScopedFrontendEffect::new(
             EffectScope::new(
                 EffectSource::new("@mesh/test", Some("instance".into())),
@@ -1253,11 +1253,13 @@ mod effect_adapter_tests {
             }),
         );
 
+        // Operation capabilities come from the interface contract, which the
+        // adapter does not hold; it forwards the caller's grants for the
+        // shell to check at dispatch.
         assert!(matches!(
             ShellEffectAdapter::lower(effect),
-            Err(ShellEffectError::Rejected(
-                EffectRejection::MissingCapability { .. }
-            ))
+            Ok(CoreRequest::ServiceCall { source_capabilities, .. })
+                if source_capabilities.granted().is_empty()
         ));
     }
 
