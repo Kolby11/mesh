@@ -7,3 +7,21 @@ license.workspace = true
 
 [dependencies]
 mesh-core-elements = { workspace = true }
+mesh-core-frontend = { workspace = true }
+thiserror = { workspace = true }
+mesh-core-component = { workspace = true }
+mesh-core-module = { workspace = true }
+mesh-core-service = { workspace = true }
+mesh-core-locale = { workspace = true }
+mesh-core-capability = { workspace = true }
+mesh-core-frontend-abi = { workspace = true }
+mesh-core-frontend-shell-adapter = { workspace = true }
+mesh-core-scripting = { workspace = true }
+mesh-core-diagnostics = { workspace = true }
+serde_json = { workspace = true }
+rayon = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+mesh-core-wayland = { workspace = true }
+tempfile = "3"

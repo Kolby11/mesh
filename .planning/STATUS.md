@@ -1,14 +1,15 @@
 # Status
 
-**Updated:** 2026-10-28
+**Updated:** 2026-10-29
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and
 measurements live in [`log/`](log/README.md).
 
 ## Now
 
-- Continue the whole-codebase audit; sections 01–07 and 09 are reviewed, while section 08 needs deeper logic/test coverage. Sections 10–16 and cross-section review remain; resume from the coverage inventory.
+- Continue the whole-codebase audit; sections 01–09 have review reports, including section 08's continuation and stated coverage limits. Sections 10–16 and cross-section review remain; resume from the coverage inventory.
 - Extract the frontend component runtime from shell (SH-08).
+- Implement the Material reference shell (08), including the desktop editor, widget picker, side rail and dock.
 
 ## Next
 

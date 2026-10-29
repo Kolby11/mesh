@@ -22,6 +22,7 @@ shell, and switching profiles replaces the whole shell live.
 | `05-retro-desktop` | Tapedeck | — | bevelled top taskbar with window list, desktop icons, tile dock, tapedeck player |
 | `06-aero-desktop` | Skyglass | — | glass taskbar (orb, pinned/running apps, tray, clock), start panel, desktop icons |
 | `07-dark-dashboard` | Nocturne | — | tabbed full-screen overlay (dashboard, workspaces, wallpapers) |
+| `08-material-desktop` | Material | — | desktop edit mode with widget picker, configurable widget grid, top editing toolbar, side rail and bottom dock |
 | `2001-desktop` | Dockyard | — | right-edge tile dock, workspace clip, root menu, minimized-window tiles |
 | `liquid-glass-settings` | Glass | Shipped (`@mesh/glass`) | — |
 

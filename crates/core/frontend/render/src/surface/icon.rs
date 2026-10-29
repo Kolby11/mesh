@@ -105,7 +105,6 @@ struct CachedImage {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ImageDecodeKey {
-    resource_revision: u64,
     path: Arc<Path>,
     freshness: FileFreshness,
 }
@@ -459,10 +458,6 @@ fn drain_image_decode_jobs() -> bool {
         let Ok(mut queue) = queue.lock() else {
             return false;
         };
-        let current_generation = resource_revision();
-        queue
-            .ready
-            .retain(|key, _| key.resource_revision == current_generation);
         let mut results = Vec::new();
         while let Ok(result) = queue.receiver.try_recv() {
             let waiters = queue.pending.remove(&result.key);
@@ -478,7 +473,6 @@ fn drain_image_decode_jobs() -> bool {
         for (result, waiters) in results {
             if result.cancelled
                 || result.image.is_none()
-                || !resource_generation_is_current(result.key.resource_revision)
                 || resource_fingerprint(&result.key.path) != Some(result.key.freshness)
             {
                 continue;
@@ -505,9 +499,7 @@ fn take_ready_image(key: &ImageDecodeKey) -> Option<Arc<image::RgbaImage>> {
         .ready
         .remove(key)
         .and_then(|(image, _budget)| {
-            (resource_generation_is_current(key.resource_revision)
-                && resource_fingerprint(&key.path) == Some(key.freshness))
-            .then_some(image)
+            (resource_fingerprint(&key.path) == Some(key.freshness)).then_some(image)
         })
 }
 
@@ -876,13 +868,11 @@ fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
 fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
     let freshness = resource_fingerprint(path)?;
     let key = ImageDecodeKey {
-        resource_revision: resource_revision(),
         path: Arc::from(path),
         freshness,
     };
     if let Ok(mut guard) = image_cache().lock()
         && let Some(cached) = guard.get(path)
-        && cached.resource_revision == key.resource_revision
         && cached.freshness == key.freshness
     {
         return Some(Arc::clone(&cached.image));
@@ -892,7 +882,7 @@ fn get_or_load(path: &Path) -> Option<Arc<image::RgbaImage>> {
             guard.insert(
                 Arc::clone(&key.path),
                 CachedImage {
-                    resource_revision: key.resource_revision,
+                    resource_revision: resource_revision(),
                     freshness: key.freshness,
                     image: Arc::clone(&image),
                 },
@@ -1625,17 +1615,37 @@ pub fn draw_icon_from_path_with_options_on_canvas(
     multicolor: bool,
 ) {
     let raster_scale = canvas_raster_scale(canvas);
+    let mut stretched = false;
     let raster_w = (dest_w as f32 * raster_scale).ceil() as i32;
     let raster_h = (dest_h as f32 * raster_scale).ceil() as i32;
     let variant = match resolve_file_variant(path, raster_w, raster_h, tint, multicolor) {
         FileVariant::Ready(variant) => variant,
+        // A magnified raster is still being prepared: stretch the 1:1 raster
+        // already on screen instead of blinking the icon out until it lands.
+        FileVariant::Pending if raster_scale != 1.0 => {
+            match resolve_file_variant(path, dest_w, dest_h, tint, multicolor) {
+                FileVariant::Ready(variant) => {
+                    stretched = true;
+                    variant
+                }
+                FileVariant::Pending | FileVariant::Unavailable => return,
+            }
+        }
         FileVariant::Pending => return,
         FileVariant::Unavailable => {
             draw_missing_icon_fallback_on_canvas(canvas, dest_x, dest_y, dest_w, dest_h, tint);
             return;
         }
     };
-    if raster_scale == 1.0 {
+    if stretched {
+        let dest = Rect::from_xywh(
+            dest_x as f32,
+            dest_y as f32,
+            variant.width as f32,
+            variant.height as f32,
+        );
+        blit_variant_into_rect(canvas, &variant, dest, resampled_sampling());
+    } else if raster_scale == 1.0 {
         blit_variant_on_canvas(canvas, &variant, dest_x, dest_y);
     } else {
         let dest = Rect::from_xywh(
@@ -2338,7 +2348,6 @@ mod tests {
         .save(&path)
         .unwrap();
         let key = ImageDecodeKey {
-            resource_revision: resource_revision(),
             path: Arc::from(path.as_path()),
             freshness: resource_fingerprint(&path).unwrap(),
         };

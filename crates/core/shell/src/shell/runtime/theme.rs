@@ -522,6 +522,7 @@ impl Shell {
         theme_effect: bool,
         locale_effect: bool,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
+        let batch_started = std::time::Instant::now();
         if let Some(authoring) = commit.profile_authoring {
             self.active_profile_authoring = Some(authoring);
         }
@@ -556,6 +557,10 @@ impl Shell {
             requests.extend(self.mark_components_locale_changed()?);
             requests.extend(self.sync_locale_service_state()?);
         }
+        tracing::debug!(
+            "control-plane batch applied in {:?} (theme: {theme_effect}, locale: {locale_effect})",
+            batch_started.elapsed()
+        );
         Ok(requests)
     }
 
@@ -731,6 +736,7 @@ impl Shell {
             );
             return Ok(VecDeque::new());
         };
+        let switch_started = std::time::Instant::now();
         let theme_id = theme_id.to_owned();
         let recommended = graph
             .theme_catalog()
@@ -789,7 +795,10 @@ impl Shell {
         theme.update_active(|active| {
             crate::shell::discovery::apply_font_registry_tokens(active, &self.font_registry);
         });
-        tracing::info!("active theme changed to '{theme_id}'");
+        tracing::info!(
+            "active theme changed to '{theme_id}' (prepared in {:?})",
+            switch_started.elapsed()
+        );
         self.commit_control_plane_settings(
             settings_candidate,
             Some((theme, prepared_theme.watch)),

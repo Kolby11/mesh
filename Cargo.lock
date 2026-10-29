@@ -2296,7 +2296,23 @@ dependencies = [
 name = "mesh-core-frontend-runtime"
 version = "0.1.0"
 dependencies = [
+ "mesh-core-capability",
+ "mesh-core-component",
+ "mesh-core-diagnostics",
  "mesh-core-elements",
+ "mesh-core-frontend",
+ "mesh-core-frontend-abi",
+ "mesh-core-frontend-shell-adapter",
+ "mesh-core-locale",
+ "mesh-core-module",
+ "mesh-core-scripting",
+ "mesh-core-service",
+ "mesh-core-wayland",
+ "rayon",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

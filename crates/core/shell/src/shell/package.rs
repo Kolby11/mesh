@@ -199,7 +199,7 @@ impl Shell {
                         package_rollback.take(),
                         self,
                     );
-                    return Err(error);
+                    return Err(error.into());
                 }
             };
             self.frontend_catalog

@@ -1,10 +1,10 @@
-use super::service::{
+use mesh_core_frontend_runtime::service::{
     ServiceCapabilities, apply_service_update_with_name,
     apply_service_update_with_name_and_fingerprint, script_events_to_requests_at,
     seed_service_context, service_capabilities, typed_effects_to_requests_at,
 };
-use super::surface_layout::{SurfaceLayoutSettings, resolve_frontend_module_settings_with_props};
-use super::types::{
+use mesh_core_surface_config::{SurfaceLayoutSettings, resolve_frontend_module_settings_with_props};
+use mesh_core_frontend_shell_adapter::{
     ChildSurfaceDiagnostic, ChildSurfaceKind, ChildSurfaceRequest, ComponentContext,
     ComponentError, ComponentInput, ComponentProfilingRecord, CoreEvent, CoreRequest,
     FrontendEffectRevision, FrontendFrame, FrontendFrameEffects, FrontendFrameRevisions,
@@ -2356,7 +2356,7 @@ fn declared_service_names(
     let mut collect = |manifest: &mesh_core_module::Manifest| {
         for dependency in &manifest.dependencies.interfaces {
             names.insert(
-                crate::shell::service::service_name_from_interface(&dependency.name).to_string(),
+                mesh_core_frontend_runtime::service::service_name_from_interface(&dependency.name).to_string(),
             );
         }
         for capability in manifest

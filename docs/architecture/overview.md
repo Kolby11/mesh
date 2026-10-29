@@ -226,6 +226,7 @@ process crashes are outside that isolation guarantee.
 | `ScriptContext` | `mesh-core-scripting` | Isolated frontend Luau execution context |
 | `BackendRuntime` | `mesh-core-scripting` | Luau service-provider execution and host APIs |
 | `WidgetNode` | `mesh-core-elements` | Retained UI node with style, layout, and semantics |
+| `FrontendCatalog` | `mesh-core-frontend-runtime` | Compiled frontend modules, contributions, and reload snapshots |
 | `FrontendSurfaceComponent` | `mesh-core-shell` | Component instance attached to a shell surface |
 | `Shell` | `mesh-core-shell` | Development-runtime integration point |
 

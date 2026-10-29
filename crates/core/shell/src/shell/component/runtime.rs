@@ -831,7 +831,7 @@ impl FrontendSurfaceComponent {
                 source,
             })?;
         if script_has_service_read(&script_ctx, "mesh.locale", "locale") {
-            let payload = crate::shell::locale_service_payload(&self.locale, None, None);
+            let payload = mesh_core_frontend_runtime::locale::locale_service_payload(&self.locale, None, None);
             apply_service_update_with_name(
                 script_ctx.state_mut(),
                 true,
@@ -2196,7 +2196,7 @@ impl FrontendSurfaceComponent {
         text: &mesh_core_module::LocalizedText,
     ) -> mesh_core_locale::LocalizedTextResolution {
         let resolution =
-            crate::shell::resolve_manifest_text(&self.locale, module_id, field_path, text);
+            mesh_core_frontend_runtime::locale::resolve_manifest_text(&self.locale, module_id, field_path, text);
         self.record_localized_miss(&resolution, None);
         resolution
     }

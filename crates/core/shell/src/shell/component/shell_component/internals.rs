@@ -486,7 +486,7 @@ impl FrontendSurfaceComponent {
         else {
             return Ok(Vec::new());
         };
-        let service_name = crate::shell::service::service_name_from_interface_cow(service);
+        let service_name = mesh_core_frontend_runtime::service::service_name_from_interface_cow(service);
         let mut needs_rebuild = false;
         let mut runtimes = {
             let mut runtimes = self.runtimes.lock().unwrap();

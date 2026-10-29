@@ -1,5 +1,5 @@
 use super::*;
-use crate::shell::PopoverTriggerReference;
+use mesh_core_frontend_shell_adapter::PopoverTriggerReference;
 use mesh_core_elements::Prop;
 
 #[test]

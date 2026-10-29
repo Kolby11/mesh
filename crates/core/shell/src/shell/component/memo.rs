@@ -36,7 +36,7 @@
 //! distinct runtime/cache identities. A `{#for}` can supply `key={expression}`
 //! to retain that identity across reorders; unkeyed loops remain positional.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -62,145 +62,7 @@ pub(super) struct ComponentMemoEntry {
     node: WidgetNode,
 }
 
-struct RuntimeGenerationEntry {
-    parent: Option<Arc<str>>,
-    children: HashSet<Arc<str>>,
-    generation: u64,
-    subtree_generation: u64,
-    runtime: bool,
-}
-
-/// Parent/child index for runtime mutation generations.
-///
-/// Memo validity only needs to know whether anything in an instance's
-/// subtree changed. Keeping that aggregate in the index avoids scanning every
-/// runtime when a memo entry is stored or probed. Parent placeholders are
-/// retained while a child is registered so registration order does not matter;
-/// only entries marked as real runtimes are returned to memo lookups.
-#[derive(Default)]
-pub(super) struct RuntimeGenerationIndex {
-    entries: HashMap<Arc<str>, RuntimeGenerationEntry>,
-    next_subtree_generation: u64,
-}
-
-impl RuntimeGenerationIndex {
-    fn ensure_entry(&mut self, key: Arc<str>) {
-        if self.entries.contains_key(&key) {
-            return;
-        }
-        let parent = parent_instance_key(&key);
-        if let Some(parent_key) = parent.as_ref() {
-            self.ensure_entry(Arc::clone(parent_key));
-            self.entries
-                .get_mut(parent_key)
-                .expect("parent runtime-generation entry")
-                .children
-                .insert(Arc::clone(&key));
-        }
-        self.entries.insert(
-            key,
-            RuntimeGenerationEntry {
-                parent,
-                children: HashSet::new(),
-                generation: 0,
-                subtree_generation: 0,
-                runtime: false,
-            },
-        );
-    }
-
-    fn bump_path(&mut self, key: &Arc<str>) {
-        self.next_subtree_generation = self.next_subtree_generation.wrapping_add(1);
-        if self.next_subtree_generation == 0 {
-            self.next_subtree_generation = 1;
-        }
-        let stamp = self.next_subtree_generation;
-        let mut current = Some(Arc::clone(key));
-        while let Some(current_key) = current {
-            let Some(entry) = self.entries.get_mut(&current_key) else {
-                break;
-            };
-            entry.subtree_generation = stamp;
-            current = entry.parent.clone();
-        }
-    }
-
-    pub(super) fn register(&mut self, key: &str, generation: u64) {
-        let key: Arc<str> = Arc::from(key);
-        self.ensure_entry(Arc::clone(&key));
-        let changed = {
-            let entry = self
-                .entries
-                .get_mut(&key)
-                .expect("registered runtime-generation entry");
-            let changed = !entry.runtime || entry.generation != generation;
-            entry.runtime = true;
-            entry.generation = generation;
-            changed
-        };
-        if changed {
-            self.bump_path(&key);
-        }
-    }
-
-    pub(super) fn sync(&mut self, key: &str, generation: u64) {
-        let key: Arc<str> = Arc::from(key);
-        self.ensure_entry(Arc::clone(&key));
-        let changed = {
-            let entry = self
-                .entries
-                .get_mut(&key)
-                .expect("synced runtime-generation entry");
-            let changed = !entry.runtime || entry.generation != generation;
-            entry.runtime = true;
-            entry.generation = generation;
-            changed
-        };
-        if changed {
-            self.bump_path(&key);
-        }
-    }
-
-    pub(super) fn subtree_generation(&self, key: &str) -> Option<u64> {
-        self.entries
-            .get(key)
-            .filter(|entry| entry.runtime)
-            .map(|entry| entry.subtree_generation)
-    }
-
-    /// Monotonic aggregate revision for all runtime generations represented in
-    /// this surface. A frontend frame uses this instead of exposing the
-    /// private per-instance generation index to shell consumers.
-    pub(super) fn revision(&self) -> u64 {
-        self.next_subtree_generation
-    }
-
-    fn runtime_count(&self) -> usize {
-        self.entries.values().filter(|entry| entry.runtime).count()
-    }
-
-    pub(super) fn rebuild(&mut self, runtimes: &[(Arc<str>, u64)]) {
-        self.entries.clear();
-        self.next_subtree_generation = 0;
-        for (key, generation) in runtimes {
-            self.register(key, *generation);
-        }
-    }
-
-    pub(super) fn clear(&mut self) {
-        self.entries.clear();
-        self.next_subtree_generation = 0;
-    }
-
-    #[cfg(test)]
-    fn aggregate_for(&self, key: &str) -> Option<u64> {
-        self.entries.get(key).map(|entry| entry.subtree_generation)
-    }
-}
-
-fn parent_instance_key(key: &str) -> Option<Arc<str>> {
-    key.rsplit_once('/').map(|(parent, _)| Arc::from(parent))
-}
+pub(super) use mesh_core_frontend_runtime::RuntimeGenerationIndex;
 
 /// Snapshot of the side-effect mark counters taken before a child build.
 #[derive(Clone, Copy)]
@@ -239,22 +101,8 @@ pub(super) fn component_props_fingerprint(
     hasher.finish()
 }
 
-/// Stable fingerprint for manifest-provided slot props. Slot contributions use
-/// JSON values rather than template attributes, but otherwise have the same
-/// cache contract as ordinary embedded components.
-pub(super) fn slot_props_fingerprint(props: &serde_json::Map<String, serde_json::Value>) -> u64 {
-    // `serde_json::Map` is the ordered map representation in this workspace;
-    // contribution props originate in a manifest and therefore already have a
-    // stable key order. Avoid allocating a sortable scratch vector on every
-    // memo probe.
-    let mut hasher = std::hash::DefaultHasher::new();
-    props.len().hash(&mut hasher);
-    for (key, value) in props {
-        key.hash(&mut hasher);
-        hash_json_value(value, &mut hasher);
-    }
-    hasher.finish()
-}
+use mesh_core_frontend_runtime::hash_json_value;
+pub(super) use mesh_core_frontend_runtime::slot_props_fingerprint;
 
 #[cfg(test)]
 fn descendant_instance_prefix(instance_key: &str) -> String {
@@ -262,45 +110,6 @@ fn descendant_instance_prefix(instance_key: &str) -> String {
     prefix.push_str(instance_key);
     prefix.push('/');
     prefix
-}
-
-fn hash_json_value(value: &serde_json::Value, hasher: &mut impl Hasher) {
-    match value {
-        serde_json::Value::Null => 0u8.hash(hasher),
-        serde_json::Value::Bool(flag) => {
-            1u8.hash(hasher);
-            flag.hash(hasher);
-        }
-        serde_json::Value::Number(number) => {
-            2u8.hash(hasher);
-            if let Some(int) = number.as_i64() {
-                int.hash(hasher);
-            } else if let Some(uint) = number.as_u64() {
-                uint.hash(hasher);
-            } else {
-                number.as_f64().unwrap_or(0.0).to_bits().hash(hasher);
-            }
-        }
-        serde_json::Value::String(text) => {
-            3u8.hash(hasher);
-            text.hash(hasher);
-        }
-        serde_json::Value::Array(items) => {
-            4u8.hash(hasher);
-            items.len().hash(hasher);
-            for item in items {
-                hash_json_value(item, hasher);
-            }
-        }
-        serde_json::Value::Object(entries) => {
-            5u8.hash(hasher);
-            entries.len().hash(hasher);
-            for (key, entry) in entries {
-                key.hash(hasher);
-                hash_json_value(entry, hasher);
-            }
-        }
-    }
 }
 
 impl FrontendSurfaceComponent {
@@ -482,26 +291,6 @@ mod tests {
         assert_eq!(
             descendant_instance_prefix("@mesh/panel/local:Toolbar"),
             "@mesh/panel/local:Toolbar/"
-        );
-    }
-
-    #[test]
-    fn runtime_generation_index_aggregates_descendants_without_scanning() {
-        let mut index = RuntimeGenerationIndex::default();
-        index.register("root", 1);
-        let root_generation = index.aggregate_for("root").unwrap();
-        index.register("root/local:Child", 1);
-        let child_generation = index.aggregate_for("root/local:Child").unwrap();
-        let root_after_child = index.aggregate_for("root").unwrap();
-
-        assert_ne!(root_after_child, root_generation);
-        assert_ne!(child_generation, 0);
-
-        index.sync("root/local:Child", 2);
-        assert_ne!(index.aggregate_for("root").unwrap(), root_after_child);
-        assert_eq!(
-            index.subtree_generation("root/local:Child"),
-            index.aggregate_for("root/local:Child")
         );
     }
 

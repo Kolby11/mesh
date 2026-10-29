@@ -18,17 +18,27 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---
 
+- [ ] Implement the Material reference shell (`08-material-desktop`): editable desktop widget grid, widget picker, editing toolbar, side rail and dock, with a composition/profile and token-based theme. [Design](../.planning/todos/pending/2026-10-27-reference-shells.md).
 - [ ] Make liquid-glass Settings readable over applications with a light, translucent outer panel and calmer inner controls; the shared glass palette is too transparent.
 - [ ] **Styleable control parts:** extend `host::part` beyond `slider` to scrollbars, inputs, checkbox/radio/switch and progress; their looks are still hardcoded in the renderer. [Design](../.planning/todos/pending/2026-10-29-control-parts.md).
 - [ ] Fix retained scroll-shift parity on the redesigned Settings appearance page: `settings_scroll_shift_matches_full_paint` finds two pixels one channel off at a scroll frame (2026-10-29). Either half of the redesign alone passes, so it is a layout-dependent seam, likely the open fractional retained-layout parity issue.
 - [ ] Animate the slider value itself (thumb glide on click-to-jump and keyboard steps); the fill geometry is core-written, so transitions on it do not apply.
 - [ ] Isolate hyprglass/compositor GPU cost during widget resize; native-namespace replay confirms plugin draws and removes parent rebuilds, but plugin stage timers remain disabled and display latency is unmeasured.
-- [ ] Continue the whole-codebase audit: sections 01–07 and 09 are reviewed; section 08 needs deeper logic/test coverage, and sections 10–16 plus cross-section review remain.
-      Resume the three review layers and file coverage in [the audit inventory](../.planning/codebase/audits/2026-10-27-whole-codebase/00-coverage.md); [interim findings](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md) include component testing and profiling opportunities.
+- [ ] Continue the whole-codebase audit: sections 01–09 have review reports; sections 10–16 plus cross-section review and final inventory reconciliation remain.
+      Resume the three review layers and file coverage in [the audit inventory](../.planning/codebase/audits/2026-10-27-whole-codebase/00-coverage.md); [section 08 continuation](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md) records newer evidence and remaining coverage.
 - [ ] Project documented icon axis custom properties into computed icon styles; generic custom-property handling currently bypasses their lowering. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Bound custom-property and prop-reference resolution depth and work; long acyclic chains recurse without a limit. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Include keyboard shortcuts in semantic snapshot diffs; shortcut-only changes currently produce no field change. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Align transition shorthand property selection with longhand; names such as `padding-left` and `row-gap` are currently dropped. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Preserve retained layout when an existing unkeyed node gains a key; structural reconciliation can delete its reused Taffy node and panic. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Apply slider part styles when authored children precede generated parts; the restyle pass currently skips them. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Preserve independent row and column gaps through style resolution and layout; both currently share one value. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Exclude shapes with invalid geometry from hit testing; they currently retain a rectangular hit region with no shape content. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Preserve quoted asset filenames during CSS reference expansion; `var(` or `prop(` in a filename is currently substituted. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Handle non-finite accessibility range attributes locally; accepted values such as `NaN` currently invalidate the frame snapshot. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Propagate supported inherited text properties such as font style and direction; child styles currently fall back to their defaults. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Invalidate cached style rule indexes when rules change in place; pointer and length reuse can retain old declarations. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
+- [ ] Derive popover trigger expansion even when a closed popup is hidden; semantic publication currently leaves conflicting authored state in place. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Convert scroll-to-view distances into the scroll owner's coordinates; transformed containers can overshoot or move in the wrong direction. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/09-interaction-and-motion.md).
 - [ ] Hit-test overlapping scrollbars in paint order; reverse insertion order can select a lower z-index sibling. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/09-interaction-and-motion.md).
 - [ ] Keep reverse and alternate stepped keyframe wake deadlines from missing changes immediately after boundaries. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/09-interaction-and-motion.md).
@@ -275,6 +285,10 @@ evidence and test workloads are in the linked reports.
 
 ### Section 10 — Frontend compiler and host
 
+- [ ] Provide a real evaluator for production preview expressions; the current no-composition path returns null while unit tests use Luau. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Keep template-expression failure diagnostics active until the full render succeeds; a later successful expression currently resolves them prematurely. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Include manifest identity when reusing compiled contribution roots; manifest-only changes can retain an old contribution manifest. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Tie frontend compilation fingerprints to the exact source bytes parsed; edits between parsing and later fingerprint reads can publish stale compiled content as current. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] **S10-PERF-001 / S10-PERF-002 / S10-PERF-003:** Cache tree/style preparation and recursive imports by
       content revision, and narrow effect/state observation summaries after
       measuring rebuild and service-update workloads. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/10-frontend-compiler-and-host.md)

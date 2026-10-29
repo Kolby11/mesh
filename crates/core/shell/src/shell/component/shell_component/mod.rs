@@ -15,7 +15,7 @@ use super::*;
 use crate::shell::component::runtime::{
     ResolvedProps, merge_reloaded_props, resolve_props, script_has_service_read,
 };
-use crate::shell::{ServiceInterfaceEventSubscription, ServiceObservationSummary};
+use mesh_core_frontend_shell_adapter::{ServiceInterfaceEventSubscription, ServiceObservationSummary};
 use mesh_core_elements::style::SurfaceExclusiveZone;
 
 impl FrontendSurfaceComponent {
@@ -84,7 +84,7 @@ impl FrontendSurfaceComponent {
     ) -> bool {
         match event {
             ServiceEvent::Updated { service, .. } => {
-                let service_name = crate::shell::service::service_name_from_interface_cow(service);
+                let service_name = mesh_core_frontend_runtime::service::service_name_from_interface_cow(service);
                 runtime
                     .script_ctx
                     .has_tracked_fields_for_service(&service_name)
@@ -93,7 +93,7 @@ impl FrontendSurfaceComponent {
                         .has_interface_event_subscription_for_service(&service_name)
             }
             ServiceEvent::InterfaceEvent { service, name, .. } => {
-                let service_name = crate::shell::service::service_name_from_interface_cow(service);
+                let service_name = mesh_core_frontend_runtime::service::service_name_from_interface_cow(service);
                 runtime
                     .script_ctx
                     .is_subscribed_to_interface_event(&service_name, name)
@@ -508,7 +508,7 @@ impl ShellComponent for FrontendSurfaceComponent {
                 // renders `{last_service_update.name}` as an empty string.
                 let _ = runtime.script_ctx.seed_context_global(
                     "last_service_update",
-                    crate::shell::service::service_update_metadata(service_name, source_module),
+                    mesh_core_frontend_runtime::service::service_update_metadata(service_name, source_module),
                 );
             }
             let state_changed = runtime.script_ctx.state().is_dirty();
@@ -596,7 +596,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         else {
             return;
         };
-        let service_name = crate::shell::service::service_name_from_interface_cow(service);
+        let service_name = mesh_core_frontend_runtime::service::service_name_from_interface_cow(service);
         if !self.declared_service_names.contains(service_name.as_ref()) {
             return;
         }
@@ -1879,7 +1879,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         // locale key is useful for normal reuse, but clearing them here also
         // covers a catalog snapshot replacement that keeps the same locale.
         self.clear_component_memo();
-        let payload = crate::shell::locale_service_payload(&locale.snapshot(), None, None);
+        let payload = mesh_core_frontend_runtime::locale::locale_service_payload(&locale.snapshot(), None, None);
         let mut generations = Vec::new();
         for (instance_key, runtime) in self.runtimes.lock().unwrap().iter_mut() {
             let module_id = runtime.script_ctx.module_id.clone();

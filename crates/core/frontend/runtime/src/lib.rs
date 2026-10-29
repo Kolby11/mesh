@@ -1,3 +1,18 @@
+pub mod locale;
+
+pub mod service;
+
+pub mod catalog;
+
+mod fingerprint;
+pub use fingerprint::{hash_json_value, slot_props_fingerprint};
+
+mod catalog_imports;
+pub use catalog_imports::{compiled_interface_imports, validate_interface_import_declarations};
+
+mod generation;
+pub use generation::RuntimeGenerationIndex;
+
 mod service_deps;
 pub use service_deps::NodeServiceFieldDependencies;
 
@@ -57,3 +72,15 @@ pub fn runtime_node_id_for_key(key: &str) -> NodeId {
 
 #[cfg(test)]
 mod tests;
+
+/// Errors produced while preparing a frontend catalog.
+#[derive(Debug, thiserror::Error)]
+pub enum FrontendCatalogError {
+    #[error("failed to compile frontend module '{module_id}': {source}")]
+    FrontendCompile {
+        module_id: String,
+        source: mesh_core_frontend::CompileFrontendError,
+    },
+    #[error("{message}")]
+    FrontendComposition { message: String },
+}
