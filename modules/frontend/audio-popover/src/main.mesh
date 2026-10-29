@@ -64,6 +64,14 @@ end
 if audio and audio.VolumeChanged then
     audio.VolumeChanged:on(function(event)
         local percent = clamp_percent(event.level)
+        -- The backend echoing the last value we sent ends a drag that never
+        -- reports a release, such as keyboard slider changes. The pending
+        -- value keeps the displayed position until the backend agrees.
+        if volume_dragging and last_sent_slider_value ~= nil
+            and math.abs(percent - last_sent_slider_value) <= 1 then
+            volume_dragging = false
+            return
+        end
         -- While the user is actively dragging, keep showing the drag
         -- position instead of snapping to a stale backend value.
         if not volume_dragging then
