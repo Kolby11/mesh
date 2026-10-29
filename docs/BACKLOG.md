@@ -302,6 +302,18 @@ evidence and test workloads are in the linked reports.
 - [ ] Reconcile advanced Settings optimistic edits with authoritative results; pending props, provider and module states currently override later snapshots indefinitely. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Correct Settings device OS fallbacks; literal values are currently treated as translation keys and rendered as missing-key markers. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Clear or mark stale Settings audio and device details when providers disappear; previously reported data remains displayed. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Handle numeric slider change values in Quick Settings; its volume and brightness handlers currently expect an event object. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Handle text values in the debug-inspector module filter; its callback currently expects an event object. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Preserve explicit text selector styles on compiler-generated text nodes; inherited parent values currently overwrite them. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Reconcile language-selector optimistic state after rejected, no-op or external locale changes; it can remain selected on an outdated locale. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Build theme-selector options from the installed theme catalog; its fixed list omits other installed themes and can offer absent ones. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Drive the theme widget icon from actual theme mode; its theme-ID heuristic misses dark themes and mode changes. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Reconcile theme-selector optimistic state after failed or no-op selections; the pending theme can remain displayed indefinitely. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Align the frontend adapter's service authorization test with deferred contract-aware dispatch; its current assertion contradicts the ABI. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] End audio-popover slider drag state after keyboard changes; backend volume updates can otherwise remain ignored. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Reconcile profile-menu pending state on failed or externally superseded switches; the pending marker can remain stale. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Make window and media title truncation Unicode-safe; byte slicing can cut through a multi-byte character. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Localize glass-widget weather and idle-media text; hardcoded English bypasses the module catalogs. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] **S10-PERF-001 / S10-PERF-002 / S10-PERF-003:** Cache tree/style preparation and recursive imports by
       content revision, and narrow effect/state observation summaries after
       measuring rebuild and service-update workloads. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/10-frontend-compiler-and-host.md)
@@ -397,8 +409,6 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
       Settings; check `TextCacheMetrics.layout_misses` first.
 - [ ] Text draws one `draw_image_rect` per glyph; batch with `draw_atlas` per run,
       later Skia text blobs. Glyph pages re-upload the whole page on growth.
-- [ ] Icon tint is in every icon raster key, so colour changes re-rasterize;
-      cache A8 masks and tint at draw.
 - [ ] Images exceeding the 32 MiB `SKIA_IMAGE_CACHE` budget (including mipmaps)
       are copied and re-uploaded every paint; wrap the decoded `Arc` without copying.
 - [ ] Service updates run Lua per message, not per frame.

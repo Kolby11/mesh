@@ -1256,20 +1256,29 @@ fn blit_variant_on_canvas(canvas: &Canvas, variant: &RasterVariant, dest_x: i32,
         variant.width as f32,
         variant.height as f32,
     );
-    blit_variant_into_rect(canvas, variant, dest, SamplingOptions::default());
+    blit_variant_into_rect(canvas, variant, dest, SamplingOptions::default(), None);
 }
 
+/// Draws `variant` into `dest`. A `tint` recolours the raster's alpha mask, so
+/// monochrome icons share one raster across colours.
 fn blit_variant_into_rect(
     canvas: &Canvas,
     variant: &RasterVariant,
     dest: Rect,
     sampling: SamplingOptions,
+    tint: Option<Color>,
 ) {
     let Some(image) = cached_skia_image_for_variant(variant) else {
         return;
     };
     let mut paint = Paint::default();
     paint.set_anti_alias(false);
+    if let Some(tint) = tint {
+        paint.set_color_filter(skia_safe::color_filters::blend(
+            skia_safe::Color::from_argb(255, tint.r, tint.g, tint.b),
+            skia_safe::BlendMode::SrcIn,
+        ));
+    }
     let (image, source) = crate::surface::image_pages::resolve(&image);
     crate::prepared_scene::retain_image(&image);
     canvas.draw_image_rect_with_sampling_options(
@@ -1617,6 +1626,14 @@ pub fn draw_icon_from_path_with_options_on_canvas(
     draw_file_icon_on_canvas(canvas, path, dest_x, dest_y, dest_w, dest_h, tint, multicolor);
 }
 
+/// Colour of the shared monochrome icon raster; the real tint is applied at draw.
+const NEUTRAL_RASTER_TINT: Color = Color {
+    r: 0,
+    g: 0,
+    b: 0,
+    a: 255,
+};
+
 fn draw_file_icon_on_canvas(
     canvas: &Canvas,
     path: &Path,
@@ -1627,16 +1644,23 @@ fn draw_file_icon_on_canvas(
     tint: Color,
     multicolor: bool,
 ) -> bool {
+    // A monochrome raster is the tint over the source alpha, so it is cached
+    // once under a neutral colour and recoloured as it is drawn.
+    let (raster_tint, draw_tint) = if multicolor {
+        (tint, None)
+    } else {
+        (NEUTRAL_RASTER_TINT, Some(tint))
+    };
     let raster_scale = canvas_raster_scale(canvas);
     let mut stretched = false;
     let raster_w = (dest_w as f32 * raster_scale).ceil() as i32;
     let raster_h = (dest_h as f32 * raster_scale).ceil() as i32;
-    let variant = match resolve_file_variant(path, raster_w, raster_h, tint, multicolor) {
+    let variant = match resolve_file_variant(path, raster_w, raster_h, raster_tint, multicolor) {
         FileVariant::Ready(variant) => variant,
         // A magnified raster is still being prepared: stretch the 1:1 raster
         // already on screen instead of blinking the icon out until it lands.
         FileVariant::Pending if raster_scale != 1.0 => {
-            match resolve_file_variant(path, dest_w, dest_h, tint, multicolor) {
+            match resolve_file_variant(path, dest_w, dest_h, raster_tint, multicolor) {
                 FileVariant::Ready(variant) => {
                     stretched = true;
                     variant
@@ -1657,9 +1681,15 @@ fn draw_file_icon_on_canvas(
             variant.width as f32,
             variant.height as f32,
         );
-        blit_variant_into_rect(canvas, &variant, dest, resampled_sampling());
+        blit_variant_into_rect(canvas, &variant, dest, resampled_sampling(), draw_tint);
     } else if raster_scale == 1.0 {
-        blit_variant_on_canvas(canvas, &variant, dest_x, dest_y);
+        let dest = Rect::from_xywh(
+            dest_x as f32,
+            dest_y as f32,
+            variant.width as f32,
+            variant.height as f32,
+        );
+        blit_variant_into_rect(canvas, &variant, dest, SamplingOptions::default(), draw_tint);
     } else {
         let dest = Rect::from_xywh(
             dest_x as f32,
@@ -1667,7 +1697,7 @@ fn draw_file_icon_on_canvas(
             variant.width as f32 / raster_scale,
             variant.height as f32 / raster_scale,
         );
-        blit_variant_into_rect(canvas, &variant, dest, resampled_sampling());
+        blit_variant_into_rect(canvas, &variant, dest, resampled_sampling(), draw_tint);
     }
     true
 }
@@ -2711,6 +2741,47 @@ mod tests {
         assert!(pixels.iter().any(|(_, _, color)| {
             color.a == 255 && color.r == tint().r && color.g == tint().g && color.b == tint().b
         }));
+    }
+
+    #[test]
+    fn monochrome_canvas_icons_share_one_raster_across_tints() {
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("symbol.svg");
+        write_test_svg(&path);
+        let red = Color { r: 220, g: 20, b: 40, a: 255 };
+        let blue = Color { r: 10, g: 60, b: 230, a: 255 };
+
+        let mut reference = PixelBuffer::new(24, 24);
+        draw_icon_from_path(&mut reference, &path, 4, 3, 14, 12, red);
+
+        let mut tinted = PixelBuffer::new(24, 24);
+        PixelCanvasSession::new(&mut tinted).with_canvas(|canvas| {
+            draw_icon_from_path_with_options_on_canvas(canvas, &path, 4, 3, 14, 12, red, false);
+        });
+        let entries = RASTER_CACHE.get().unwrap().lock().unwrap().len();
+        let mut recolored = PixelBuffer::new(24, 24);
+        PixelCanvasSession::new(&mut recolored).with_canvas(|canvas| {
+            draw_icon_from_path_with_options_on_canvas(canvas, &path, 4, 3, 14, 12, blue, false);
+        });
+
+        assert_eq!(
+            RASTER_CACHE.get().unwrap().lock().unwrap().len(),
+            entries,
+            "a second tint must reuse the cached raster"
+        );
+        let reds = non_transparent_pixels(&reference);
+        let drawn = non_transparent_pixels(&tinted);
+        assert_eq!(reds.len(), drawn.len());
+        for ((x, y, expected), (_, _, actual)) in reds.iter().zip(&drawn) {
+            assert_eq!((expected.r, expected.g, expected.b, expected.a), (actual.r, actual.g, actual.b, actual.a), "pixel {x},{y}");
+        }
+        assert!(
+            non_transparent_pixels(&recolored)
+                .iter()
+                .any(|(_, _, c)| c.a == 255 && (c.r, c.g, c.b) == (blue.r, blue.g, blue.b))
+        );
     }
 
     #[test]
