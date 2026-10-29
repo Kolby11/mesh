@@ -10093,3 +10093,13 @@ The display list still keeps the nodes (`display_list_keeps_plain_opacity_zero_n
 so the pop stays balanced and an animation out of zero opacity needs no rebuild.
 Covered by `skia_effect_layer_at_zero_opacity_paints_nothing_and_stays_balanced`;
 the 365 render lib tests pass. Not benchmarked.
+
+## 2026-10-29 — Skia deferred cleanup after each GPU scene raster
+
+Area: GPU residency
+
+`GpuSceneRenderer::render` now calls `perform_deferred_cleanup(10 s)` after
+drawing, so scratch textures unused for ten seconds leave VRAM. Cached image
+residency is governed by the existing resource-cache limit and is unchanged.
+It compiles and the render lib tests pass; the GPU tests need a device and were
+not run here, so no live memory figure is recorded.

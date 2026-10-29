@@ -193,6 +193,9 @@ impl GpuSceneRenderer {
     }
 }
 
+/// Skia scratch resources untouched this long are returned to the driver.
+const UNUSED_RESOURCE_TTL: std::time::Duration = std::time::Duration::from_secs(10);
+
 fn clone_planes(planes: &DmabufPlanes) -> Result<DmabufPlanes, GpuSceneError> {
     Ok(DmabufPlanes {
         fourcc: planes.fourcc,
@@ -299,6 +302,9 @@ impl SceneRenderer for GpuSceneRenderer {
         canvas.clip_region(&region, None);
         snapshot.resources().draw(canvas);
         canvas.restore();
+        self.context
+            .skia
+            .perform_deferred_cleanup(UNUSED_RESOURCE_TTL, None);
         let slots = &mut state.slots;
         slots.retain(|slot| slot.leased.load(Ordering::Acquire) != RETIRED);
         for slot in slots.iter_mut() {
