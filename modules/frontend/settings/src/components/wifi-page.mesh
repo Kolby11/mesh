@@ -150,6 +150,7 @@ effect(function()
     interface_name = tostring(network.interface_name or network.device_name or "wifi.wireless_adapter")
 
     network_rows = {}
+    active_network = t("common.not_connected")
     local networks = network.networks
     if enabled and type(networks) == "table" then
         for _, entry in ipairs(networks) do
