@@ -27,10 +27,13 @@ pub fn hash_json_value(value: &serde_json::Value, hasher: &mut impl Hasher) {
         serde_json::Value::Number(number) => {
             2u8.hash(hasher);
             if let Some(int) = number.as_i64() {
+                0u8.hash(hasher);
                 int.hash(hasher);
             } else if let Some(uint) = number.as_u64() {
+                1u8.hash(hasher);
                 uint.hash(hasher);
             } else {
+                2u8.hash(hasher);
                 number.as_f64().unwrap_or(0.0).to_bits().hash(hasher);
             }
         }
@@ -53,5 +56,24 @@ pub fn hash_json_value(value: &serde_json::Value, hasher: &mut impl Hasher) {
                 hash_json_value(entry, hasher);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn digest(value: serde_json::Value) -> u64 {
+        let mut hasher = std::hash::DefaultHasher::new();
+        hash_json_value(&value, &mut hasher);
+        hasher.finish()
+    }
+
+    #[test]
+    fn numeric_subtypes_with_the_same_bits_hash_differently() {
+        let bits = 1.0_f64.to_bits();
+        assert_ne!(digest(json!(bits)), digest(json!(1.0_f64)));
+        assert_ne!(digest(json!(1_i64)), digest(json!(1.0_f64)));
     }
 }
