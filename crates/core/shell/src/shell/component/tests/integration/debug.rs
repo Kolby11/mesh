@@ -723,22 +723,22 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
                         "health": []
                     },
                     {
-                        "module_id": "@mesh/mesh-default-dark",
+                        "module_id": "@mesh/material-dark",
                         "kind": "theme",
                         "enabled": true,
                         "uses": {},
                         "provides": {
-                            "themes": [{ "id": "mesh-default-dark", "label": "MESH Default Dark" }]
+                            "themes": [{ "id": "material-dark", "label": "Material Dark" }]
                         },
                         "diagnostics": []
                     },
                     {
-                        "module_id": "@mesh/mesh-default-light",
+                        "module_id": "@mesh/material-light",
                         "kind": "theme",
                         "enabled": true,
                         "uses": {},
                         "provides": {
-                            "themes": [{ "id": "mesh-default-light", "label": "MESH Default Light" }]
+                            "themes": [{ "id": "material-light", "label": "Material Light" }]
                         },
                         "diagnostics": []
                     },
@@ -998,8 +998,8 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
     let text = rendered_text(&component);
     assert!(text.iter().any(|line| line == "Color theme"));
     assert!(text.iter().any(|line| line == "Language"));
-    assert!(text.iter().any(|line| line == "MESH Default Dark"));
-    assert!(text.iter().any(|line| line == "MESH Default Light"));
+    assert!(text.iter().any(|line| line == "Material Dark"));
+    assert!(text.iter().any(|line| line == "Material Light"));
     assert!(text.iter().any(|line| line == "Gruvbox Dark"));
     assert!(text.iter().any(|line| line == "Papirus Dark"));
     assert!(text.iter().any(|line| line == "Noto Sans"));
@@ -1090,7 +1090,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
     let requests = component
         .call_namespaced_handler(
             "__mesh_embed__::@mesh/settings/local:AppearancePage::onThemeSelect",
-            &[serde_json::json!("mesh-default-light")],
+            &[serde_json::json!("material-light")],
         )
         .unwrap();
     match requests.as_slice() {
@@ -1104,7 +1104,7 @@ fn settings_surface_renders_backend_pages_and_advanced_controls() {
         ] => {
             assert_eq!(interface, "mesh.theme");
             assert_eq!(command, "set_theme");
-            assert_eq!(payload["theme_id"], serde_json::json!("mesh-default-light"));
+            assert_eq!(payload["theme_id"], serde_json::json!("material-light"));
         }
         other => panic!("expected theme change request, got {other:?}"),
     }

@@ -53,7 +53,7 @@ onRunScenario = nil
   .benchmark-title {
     font-size: var(--typography-size-sm);
     font-weight: 700;
-    color: var(--color-on-surface);
+    color: var(--glass-settings-text);
   }
 
   .section-copy,
@@ -61,23 +61,23 @@ onRunScenario = nil
   .benchmark-secondary-metric,
   .benchmark-hint {
     font-size: var(--typography-size-xs);
-    color: var(--color-on-surface-variant);
+    color: var(--glass-settings-text-muted);
   }
 
   .benchmark-status,
   .benchmark-primary-metric {
     font-size: var(--typography-size-xs);
     font-weight: 700;
-    color: var(--color-on-surface);
+    color: var(--glass-settings-text);
   }
 
   .benchmark-row {
     width: 100%;
     padding: var(--spacing-md);
-    background: var(--color-surface-container);
+    background: var(--glass-settings-inset);
     border-width: 1px;
     border-style: solid;
-    border-color: var(--color-outline-variant);
+    border-color: var(--glass-settings-rim);
   }
 
   .benchmark-action {

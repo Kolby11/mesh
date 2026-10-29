@@ -68,7 +68,7 @@ local pending_theme_replaced = nil
 local theme_changed = nil
 
 -- Dark and light are modes of the default theme; quick settings switches them.
-local THEME_DEFAULT = "mesh-default"
+local THEME_DEFAULT = "material"
 local THEME_GRUVBOX = "gruvbox-dark"
 local THEME_NORD = "nord"
 local THEME_MOCHA = "catppuccin-mocha"
@@ -92,7 +92,7 @@ local THEME_OPTIONS = {
 }
 
 local THEME_LABELS = {
-    [THEME_DEFAULT] = "MESH Default",
+    [THEME_DEFAULT] = "Material",
     [THEME_GRUVBOX] = "Gruvbox",
     [THEME_NORD] = "Nord",
     [THEME_MOCHA] = "Catppuccin Mocha",

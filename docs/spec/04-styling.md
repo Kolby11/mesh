@@ -26,7 +26,7 @@ model the renderer uses.
    produce incoherent UI). Modes (dark / light / high-contrast) live *inside*
    a theme and are user-switchable at runtime. This is the deliberate
    opposite of icon/font/language packs, which are ordered multi-active
-   chains. **Shipped:** `@mesh/mesh-default` is one theme with `dark` and
+   chains. **Shipped:** `@mesh/material` is one theme with `dark` and
    `light` modes. Quick settings switches the active theme's mode through
    `mesh.theme.set_mode`, choosing the mode whose `color_scheme` matches. A
    theme without such a mode leaves the control disabled rather than
@@ -140,9 +140,17 @@ around, most preferred first:
 ```json
 "recommends": {
   "fonts": ["SF Pro Display", "Inter", "Google Sans Flex", "Noto Sans"],
-  "icons": ["WhiteSur-dark", "Papirus-Dark"]
+  "icons": ["WhiteSur-dark", "Papirus-Dark"],
+  "composition": "@mesh/glass"
 }
 ```
+
+`composition` names the composition module the theme is designed for. It is
+advisory: selecting a theme never switches profile. `mesh.theme.themes[]
+.recommends.composition` publishes it, and Settings offers to switch to the
+profile of the same short name and shows the glass-strength controls only when
+the active theme recommends `@mesh/glass`. The shipped `material` theme
+recommends `@mesh/desk` and turns every `--glass-backdrop-*` token off.
 
 Selecting the theme writes the first installed font family to
 `shell.fonts.ui_family` and the first available icon theme or icon pack to
@@ -805,7 +813,14 @@ draws gets its own lens edge. The shipped `liquid-glass` theme is written for
 it: its materials are `blur() refract(0px 0px)`, so MESH exports blur regions
 and paints no rim, grain or refraction of its own, fills keep an even alpha
 above the contour threshold and shadows stay below it. Without the plugin the
-same theme falls back to compositor blur. Without a live source, they retain blur and rim lighting
+same theme falls back to compositor blur.
+
+**Shipped:** a theme states whether the plugin should draw behind MESH
+surfaces with `recommends.compositor_glass` (`true` for `liquid-glass`, `false`
+for the solid Material-style themes). `mesh.theme` publishes the active value as
+`compositor_glass`; `@mesh/glass-bar` forwards it to `mesh.wm.set_glass_enabled`,
+which the Hyprland backend applies by toggling hyprglass's layer glass. A theme
+that omits it leaves the compositor as configured. Without a live source, they retain blur and rim lighting
 but omit displacement and dispersion. Promoted popups follow the same route.
 `mesh.theme.set_backdrop_image { path }` (`service.theme.control`) selects an
 absolute image file, writing where the other appearance settings go, and

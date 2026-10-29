@@ -84,6 +84,13 @@
         "shell.surface",
         "theme.read"
       ],
+      "@mesh/glass-power": [
+        "locale.read",
+        "service.session.control",
+        "service.session.read",
+        "shell.surface",
+        "theme.read"
+      ],
       "@mesh/glass-dashboard": [
         "locale.read",
         "service.media.control",
@@ -144,6 +151,7 @@
         "exec.argv:hyprctl:[\"activewindow\",\"-j\"]",
         "exec.argv:hyprctl:[\"dispatch\",\"hl.dsp.focus({ workspace = \\\"*\\\" })\"]",
         "exec.argv:hyprctl:[\"dispatch\",\"workspace\",\"*\"]",
+        "exec.argv:hyprctl:[\"eval\",\"*\"]",
         "exec.argv:hyprctl:[\"instances\",\"-j\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$HYPRLAND_INSTANCE_SIGNATURE\\\"\"]",
         "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\\\"\"]",
@@ -276,6 +284,7 @@
         "service.settings.control",
         "service.settings.read",
         "service.theme.control",
+        "service.wm.control",
         "shell.surface",
         "theme.read"
       ],
@@ -298,6 +307,11 @@
         "locale.read",
         "service.audio.control",
         "service.audio.read"
+      ],
+      "@mesh/systemd-session": [
+        "exec.argv:systemctl:[\"poweroff\"]",
+        "exec.argv:systemctl:[\"reboot\"]",
+        "exec.argv:systemctl:[\"suspend\"]"
       ],
       "@mesh/wallpaper-carousel": [
         "locale.read",

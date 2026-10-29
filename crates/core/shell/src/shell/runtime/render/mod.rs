@@ -492,6 +492,7 @@ impl Shell {
                     margin_bottom: surface.margin_bottom,
                     margin_left: surface.margin_left,
                     blur: surface.blur,
+                    center: surface.center,
                     policy_revision: 0,
                 };
                 let previous_config = self.components[index].parent.last_surface_config.as_ref();

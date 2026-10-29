@@ -14,7 +14,10 @@
         "service.debug.read",
         "service.debug.control",
         "locale.read"
-      ]
+      ],
+      "modules": {
+        "@mesh/glass-material": ">=0.1.0"
+      }
     },
     "entry": "src/main.mesh",
     "surface": {

@@ -1899,6 +1899,7 @@ impl Shell {
                 ("can_pin", "boolean?"),
                 ("system_resources", "object?"),
                 ("backdrop_image", "string?"),
+                ("compositor_glass", "boolean?"),
             ],
             &[
                 ("set_theme", &[("theme_id", "string"), ("scope", "string?")]),

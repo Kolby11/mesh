@@ -1548,6 +1548,7 @@ impl Shell {
                 margin_bottom: surface.margin_bottom,
                 margin_left: surface.margin_left,
                 blur: surface.blur,
+                center: surface.center,
                 policy_revision: 0,
             }
         } else {
@@ -1572,6 +1573,7 @@ impl Shell {
                 margin_bottom: 0,
                 margin_left: 0,
                 blur: surface.blur,
+                center: surface.center,
                 policy_revision: 0,
             }
         };

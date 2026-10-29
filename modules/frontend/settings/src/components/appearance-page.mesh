@@ -5,6 +5,7 @@
             <text class="settings-section-copy">{t('appearance.theme.copy')}</text>
             <text class="settings-card-meta">{theme_scope_label}</text>
             <GlassButton label={theme_pin_label} onclick={onThemePin} hidden={theme_pin_hidden} />
+            <GlassButton label={shell_offer_label} onclick={onShellSwitch} hidden={shell_offer_hidden} />
             <row class="theme-grid settings-group">
                 {#for row in theme_rows}
                     <button class="theme-option" class:theme-option-active={row.active} onclick={onThemeSelect(row.id)}>
@@ -33,7 +34,7 @@
             </row>
         </column>
 
-        <column class="settings-section">
+        <column class="settings-section" hidden={glass_hidden}>
             <text class="settings-section-title">{t('appearance.glass')}</text>
             <text class="settings-section-copy">{t('appearance.glass.copy')}</text>
             <column class="settings-group">
@@ -52,14 +53,14 @@
                     <box class="row-tile row-tile-blue"><icon class="row-icon" name="blur" size="16" /></box>
                     <text class="settings-group-label">{t('appearance.glass.blur')}</text>
                     <text class="settings-value">{glass_blur_label}</text>
-                    <slider class="glass-strength" min="0" max="100" step="1" value="{glass_blur}" onchange={onGlassBlur} aria-label={t('appearance.glass.blur')} />
+                    <slider class="glass-strength" min="0" max="100" step="1" value="{glass_blur}" onchange={onGlassBlur} onrelease={onGlassBlurRelease} aria-label={t('appearance.glass.blur')} />
                 </row>
                 <box class="settings-group-divider" />
                 <row class="settings-group-row">
                     <box class="row-tile row-tile-purple"><icon class="row-icon" name="water-drop" size="16" /></box>
                     <text class="settings-group-label">{t('appearance.glass.liquid')}</text>
                     <text class="settings-value">{glass_liquid_label}</text>
-                    <slider class="glass-strength" min="0" max="100" step="1" value="{glass_liquid}" onchange={onGlassLiquid} aria-label={t('appearance.glass.liquid')} />
+                    <slider class="glass-strength" min="0" max="100" step="1" value="{glass_liquid}" onchange={onGlassLiquid} onrelease={onGlassLiquidRelease} aria-label={t('appearance.glass.liquid')} />
                 </row>
             </column>
         </column>
@@ -140,14 +141,22 @@ local debug_ok, debug_service = pcall(require, "mesh.debug")
 if not debug_ok then debug_service = nil end
 local settings_ok, settings_service = pcall(require, "mesh.settings")
 if not settings_ok then settings_service = nil end
+local packages_ok, packages = pcall(require, "mesh.packages")
+if not packages_ok then packages = nil end
+local wm_ok, wm = pcall(require, "mesh.wm")
+if not wm_ok then wm = nil end
 local t = import("mesh.i18n", "t")
 
-theme_value = "mesh-default"
+theme_value = "material"
 locale_value = "en"
 theme_rows = {}
 theme_scope_label = ""
 theme_pin_label = ""
 theme_pin_hidden = true
+shell_offer_label = ""
+shell_offer_hidden = true
+shell_offer_profile = ""
+glass_hidden = true
 icon_theme_rows = {}
 font_rows = {}
 icon_theme_value = "hicolor"
@@ -329,8 +338,29 @@ local function theme_recommendation(option)
     return t('appearance.theme.recommends') .. " " .. table.concat(parts, " · ")
 end
 
+-- A theme names the composition it is designed for (`recommends.composition`,
+-- e.g. `@mesh/glass`); the profile of the same short name is offered, never
+-- switched to silently. Glass strength only applies to glass compositions.
+local function sync_shell(option)
+    local recommends = option and type(option.recommends) == "table" and option.recommends or {}
+    local composition = tostring(recommends.composition or "")
+    glass_hidden = composition ~= "@mesh/glass"
+    shell_offer_hidden = true
+    shell_offer_profile = ""
+    local name = string.match(composition, "^@mesh/([%w%-_]+)$")
+    if name == nil or packages == nil or packages.active_profile == name then return end
+    for _, id in ipairs(packages.profiles or {}) do
+        if id == name then
+            shell_offer_profile = id
+            shell_offer_label = t('appearance.theme.shell_switch') .. " " .. id
+            shell_offer_hidden = false
+            return
+        end
+    end
+end
+
 local function sync_theme(theme_id)
-    theme_value = tostring(theme_id or "mesh-default")
+    theme_value = tostring(theme_id or "material")
     local installed, seen = installed_themes()
 
     -- Keep the current theme selectable while the module graph is still being
@@ -359,6 +389,9 @@ local function sync_theme(theme_id)
         }
     end
     theme_rows = rows
+    for _, option in ipairs(installed) do
+        if option.id == theme_value then sync_shell(option) end
+    end
 end
 
 local function sync_locale(locale)
@@ -489,6 +522,9 @@ local function apply_glass(style, blur, liquid)
         tokens["@mesh/glass-material.glass.backdrop." .. name] = backdrop_filter(tier, blur, liquid)
     end
     theme.set_tokens(tokens)
+    -- Surfaces above windows are drawn by the compositor's glass plugin, which
+    -- takes its strength from the provider rather than from the style tokens.
+    if wm ~= nil and wm.set_glass_strength ~= nil then wm.set_glass_strength(blur, liquid) end
 end
 
 local function slider_number(value)
@@ -507,17 +543,22 @@ function onGlassPresetTheme()
         tokens["@mesh/glass-material.glass.backdrop." .. name] = mesh.json.null
     end
     theme.set_tokens(tokens)
+    if wm ~= nil and wm.set_glass_strength ~= nil then wm.set_glass_strength(-1, -1) end
 end
 
 function onGlassPresetLiquid() apply_glass("liquid", GLASS_PRESETS.liquid.blur, GLASS_PRESETS.liquid.liquid) end
 function onGlassPresetSoft() apply_glass("soft", GLASS_PRESETS.soft.blur, GLASS_PRESETS.soft.liquid) end
 function onGlassPresetFrosted() apply_glass("frosted", GLASS_PRESETS.frosted.blur, GLASS_PRESETS.frosted.liquid) end
 
-function onGlassBlur(value) apply_glass("custom", slider_number(value), glass_liquid) end
-function onGlassLiquid(value) apply_glass("custom", glass_blur, slider_number(value)) end
+-- Every token write is a full settings transaction plus a theme rebuild, so a
+-- drag shows its value immediately and commits only when the slider is released.
+function onGlassBlur(value) show_glass("custom", slider_number(value), glass_liquid) end
+function onGlassLiquid(value) show_glass("custom", glass_blur, slider_number(value)) end
+function onGlassBlurRelease(value) apply_glass("custom", slider_number(value), glass_liquid) end
+function onGlassLiquidRelease(value) apply_glass("custom", glass_blur, slider_number(value)) end
 
 effect(function()
-    local current_theme = "mesh-default"
+    local current_theme = "material"
     if theme then
         current_theme = theme.current or theme.theme_id or current_theme
         if theme.state then
@@ -540,6 +581,11 @@ function onThemeSelect(theme_id)
     if selected == "" then return end
     sync_theme(selected)
     theme.set_theme(selected)
+end
+
+function onShellSwitch()
+    if shell_offer_profile == "" or packages == nil then return end
+    packages.switch_profile(shell_offer_profile)
 end
 
 function onThemePin()

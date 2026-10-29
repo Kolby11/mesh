@@ -178,8 +178,10 @@ function nextTrack() if media_ready then media.next() end end
 
     /* Wedges are vector shapes: the box paints nothing, the background fills the
     sector and the border strokes it, and pointer hits land on the wedge only. */
-    .wedge { position: absolute; left: 0; top: 0; width: 520px; height: 520px; background-color: var(--color-surface); border: 1px solid var(--color-outline-variant); }
-    .wedge:hover, .wedge:focus-visible { background-color: var(--color-surface-variant); }
+    .wedge { position: absolute; left: 0; top: 0; width: 520px; height: 520px; background-color: var(--color-surface); border: 1px solid var(--color-outline-variant); transform: scale(1); transition: transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate), background-color var(--animation-duration-short) var(--animation-curves-bezier-standard); }
+    /* Every wedge box is centred on the ring, so scaling about the box centre
+    pushes the hovered sector straight outwards without covering its neighbours. */
+    .wedge:hover, .wedge:focus-visible { background-color: var(--color-surface-variant); transform: scale(1.06); }
     .wedge-focused { border-color: var(--color-primary); }
     .wedge-art { position: absolute; width: 44px; height: 44px; }
 

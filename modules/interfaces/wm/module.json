@@ -1,13 +1,13 @@
 {
   "name": "@mesh/wm-interface",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Standard wm service contract, independent of its providers.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "interface",
     "interface": {
       "name": "mesh.wm",
-      "version": "1.1",
+      "version": "1.2",
       "domain": "wm",
       "relationship": "base",
       "contract": {
@@ -33,6 +33,12 @@
           "focus_workspace": {
             "signature": "(id: int) -> Result",
             "stateBinding": { "field": "active_workspace", "fromArg": "id" }
+          },
+          "set_glass_strength": {
+            "signature": "(blur: float, liquid: float) -> Result"
+          },
+          "set_glass_enabled": {
+            "signature": "(enabled: boolean) -> Result"
           }
         },
         "events": {

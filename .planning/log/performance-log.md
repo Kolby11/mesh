@@ -10103,3 +10103,24 @@ drawing, so scratch textures unused for ten seconds leave VRAM. Cached image
 residency is governed by the existing resource-cache limit and is unchanged.
 It compiles and the render lib tests pass; the GPU tests need a device and were
 not run here, so no live memory figure is recorded.
+
+## 2026-10-29 — Constant-time runtime-generation counts
+
+Area: frontend runtime, component memoization
+
+`RuntimeGenerationIndex` now maintains the number of real runtime entries as
+placeholders become registered and as the index is rebuilt or cleared. Memo
+probes no longer scan all index entries merely to check that count. Repeated
+registration and synchronization do not increment it twice.
+
+On an AMD Ryzen 7 7840HS, `rustc -O` standalone code using the actual index
+measured 10,000 count-and-subtree probes, pinned to CPU 2. Three interleaved
+before/after process pairs each produced five samples. For 10, 100 and 1,000
+registered children respectively, before ranges were 287–421, 1,057–1,431
+and 9,156–13,931 µs; after ranges were 207–295, 214–282 and 219–309 µs.
+Each index also had an unregistered root placeholder. There is no named gate;
+these are isolated lookup measurements, not end-to-end frame timings.
+
+Verified: both runtime-generation tests pass through the frontend runtime crate,
+including placeholder, duplicate registration, synchronization, rebuild and
+clear cases. The file also passes standalone generation tests.

@@ -1,7 +1,7 @@
 {
   "name": "@mesh/vitrum",
   "version": "0.1.0",
-  "description": "Vitrum theme, after the niri glass shell: lit-from-within glass tinted by a violet accent with a mint dichroic second hue, rounded parts and Inter type. Vitrum Night (dark) and Vitrum Day (light).",
+  "description": "Vitrum palette on Material surfaces: violet accent with a mint second hue, solid tonal surfaces and elevation shadows, with dark and light modes.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "theme",
@@ -27,6 +27,7 @@
           },
           "tokenContract": "1.1",
           "recommends": {
+            "composition": "@mesh/desk",
             "fonts": [
               "Inter",
               "JetBrains Mono",
@@ -36,7 +37,8 @@
               "Phosphor",
               "Papirus-Dark",
               "WhiteSur-dark"
-            ]
+            ],
+            "compositor_glass": false
           }
         }
       ]

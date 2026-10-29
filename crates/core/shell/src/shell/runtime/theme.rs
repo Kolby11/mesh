@@ -1202,6 +1202,8 @@ impl Shell {
                     .map(|descriptor| serde_json::json!({
                         "fonts": descriptor.recommends.fonts,
                         "icons": descriptor.recommends.icons,
+                        "composition": descriptor.recommends.composition,
+                        "compositor_glass": descriptor.recommends.compositor_glass,
                     })),
             })
         };
@@ -1251,6 +1253,11 @@ impl Shell {
                 &self.resource_snapshot.host_catalog,
             ),
             "backdrop_image": self.settings.render.backdrop.image,
+            "compositor_glass": self
+                .installed_module_graph
+                .as_ref()
+                .and_then(|graph| graph.theme_catalog().get(&snapshot.id))
+                .and_then(|descriptor| descriptor.recommends.compositor_glass),
         })
     }
 

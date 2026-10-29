@@ -1,7 +1,7 @@
 {
   "name": "@mesh/nord",
   "version": "0.1.0",
-  "description": "Nord theme.",
+  "description": "Nord theme palette on Material surfaces.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "theme",
@@ -30,7 +30,8 @@
             "icons": [
               "Nordzy-dark",
               "Papirus-Dark"
-            ]
+            ],
+            "compositor_glass": false
           }
         }
       ]

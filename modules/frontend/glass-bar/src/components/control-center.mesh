@@ -22,7 +22,7 @@
             </row>
             <column class="level">
                 <row class="level-heading"><text class="tile-title">{t("controls.volume")}</text><text class="value">{volume_label}</text></row>
-                <row class="slider-row"><icon name="audio-volume-high" size="20" /><slider class="level-slider" ref="glassVolume" value={volume} min="0" max="100" onchange={onVolume} disabled={not audio_available} aria-label={t("controls.volume")} /></row>
+                <row class="slider-row"><icon name="audio-volume-high" size="20" /><slider class="level-slider" ref="glassVolume" value={volume} min="0" max="100" onchange={onVolume} onrelease={onVolumeRelease} disabled={not audio_available} aria-label={t("controls.volume")} /></row>
             </column>
             <column class="level">
                 <row class="level-heading"><text class="tile-title">{t("controls.brightness")}</text><text class="value">{brightness_label}</text></row>
@@ -43,6 +43,8 @@ volume = 0
 volume_label = "--"
 muted = false
 audio_available = false
+volume_pending = nil
+last_sent_volume = nil
 brightness_level = 0
 brightness_label = "--"
 brightness_available = false
@@ -51,7 +53,13 @@ network_glyph = "network-wireless-offline"
 battery_label = t("controls.power_unavailable")
 effect(function()
     audio_available = audio.available == true
-    volume = math.clamp(math.floor(audio.percent or 0), 0, 100)
+    local backend_volume = math.clamp(math.floor(audio.percent or 0), 0, 100)
+    -- Hold the dragged position until the backend catches up; otherwise each
+    -- echo of an older value snaps the thumb backwards mid-drag.
+    if volume_pending ~= nil and math.abs(backend_volume - volume_pending) <= 2 then
+        volume_pending = nil
+    end
+    volume = volume_pending or backend_volume
     volume_label = audio_available and (tostring(volume) .. "%") or t("controls.unavailable")
     muted = audio.muted == true
     brightness_available = brightness.available == true
@@ -67,8 +75,20 @@ end)
 function onMute() audio.toggle_mute() end
 function onVolume(value)
     volume = math.clamp(tonumber(value) or 0, 0, 100)
+    volume_pending = volume
     volume_label = tostring(math.floor(volume)) .. "%"
-    audio.set_volume("default", volume)
+    if last_sent_volume == nil or math.abs(last_sent_volume - volume) >= 1 then
+        last_sent_volume = volume
+        audio.set_volume("default", volume)
+    end
+end
+function onVolumeRelease(value)
+    volume = math.clamp(tonumber(value) or 0, 0, 100)
+    if last_sent_volume == nil or math.abs(last_sent_volume - volume) >= 1 then
+        audio.set_volume("default", volume)
+    end
+    last_sent_volume = nil
+    volume_pending = nil
 end
 function onBrightness(value)
     brightness_level = math.clamp(tonumber(value) or 0, 0, 100)

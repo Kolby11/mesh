@@ -1,0 +1,57 @@
+{
+  "name": "@mesh/glass-power",
+  "version": "0.1.0",
+  "description": "Hidden power panel on the right screen edge: hovering the middle of the edge slides out sleep, restart and power-off buttons.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "interfaces": {
+        "mesh.session": ">=1.0"
+      },
+      "modules": {
+        "@mesh/glass-material": ">=0.1.0"
+      },
+      "capabilities": [
+        "shell.surface",
+        "theme.read",
+        "locale.read",
+        "service.session.read",
+        "service.session.control"
+      ],
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      }
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "right",
+      "center": true,
+      "layer": "overlay",
+      "keyboard_mode": "none",
+      "visible_on_start": true
+    },
+    "provides": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Power edge"
+        }
+      ]
+    },
+    "accessibility": {
+      "role": "toolbar"
+    },
+    "i18n": {
+      "defaultLocale": "en"
+    },
+    "contributes": {
+      "i18n": [
+        { "id": "en", "locale": "en", "path": "config/i18n/en.json" }
+      ]
+    }
+  }
+}

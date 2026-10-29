@@ -144,7 +144,7 @@ end
         justify-content: center;
         align-items: center;
         border-radius: 17px;
-        border: 1px solid var(--glass-fill-subtle);
+        border: 1px solid transparent;
         /* A colour with any alpha counts as authored; alpha 0 would let the
         theme's opaque `button` fill paint over the glass. */
         background-color: var(--glass-fill-lens);
@@ -155,7 +155,6 @@ end
 
     .tile-focused,
     .tile-focused:hover {
-        border-color: var(--glass-rim-focused);
         background-image: var(--glass-surface-focused);
     }
 
@@ -218,7 +217,7 @@ end
     }
 
     .tile:hover {
-        border-color: var(--glass-rim-hover);
+        background-image: var(--glass-surface-focused);
         transform: translateY(-12px) scale(1.22);
     }
 

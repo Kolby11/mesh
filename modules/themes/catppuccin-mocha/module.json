@@ -1,7 +1,7 @@
 {
   "name": "@mesh/catppuccin-mocha",
   "version": "0.1.0",
-  "description": "Catppuccin Mocha theme.",
+  "description": "Catppuccin Mocha theme palette on Material surfaces.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "theme",
@@ -29,7 +29,8 @@
             ],
             "icons": [
               "Papirus-Dark"
-            ]
+            ],
+            "compositor_glass": false
           }
         }
       ]

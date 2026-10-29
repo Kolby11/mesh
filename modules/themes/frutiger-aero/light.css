@@ -1,31 +1,29 @@
 :root {
+  --color-selection-background: #0077b6;
+  --color-selection-foreground: #ffffff;
   --icon-size-sm: 16px;
   --icon-size-md: 20px;
   --icon-size-lg: 24px;
-  --animation-curves-bezier-emphasized: cubic-bezier(0.2, 0, 0, 1);
-  --animation-curves-bezier-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
-  --animation-curves-bezier-standard: cubic-bezier(0.2, 0, 0, 1);
-  --animation-curves-bezier-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
-  --animation-curves-bezier-standard-decelerate: cubic-bezier(0, 0, 0, 1);
-  --animation-default-border-radius: border-radius var(--animation-duration-short)
-    var(--animation-curves-bezier-emphasized-decelerate);
+  --animation-curves-bezier-emphasized: cubic-bezier(0.2, 0.0, 0, 1.0);
+  --animation-curves-bezier-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1.0);
+  --animation-curves-bezier-standard: cubic-bezier(0.2, 0.0, 0, 1.0);
+  --animation-curves-bezier-standard-accelerate: cubic-bezier(0.3, 0.0, 1, 1.0);
+  --animation-curves-bezier-standard-decelerate: cubic-bezier(0.0, 0.0, 0, 1.0);
+  --animation-default-border-radius: border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
   --animation-default-opacity: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
   --animation-duration-extra-long: 500;
-  --animation-duration-fast: 110;
+  --animation-duration-fast: 90;
   --animation-duration-instant: 0;
-  --animation-duration-long: 420;
-  --animation-duration-medium: 280;
-  --animation-duration-short: 180;
+  --animation-duration-long: 360;
+  --animation-duration-medium: 240;
+  --animation-duration-short: 150;
   --animation-opacity-disabled: 0.38;
-  --animation-scale-hover: 1.04;
-  --animation-scale-press: 0.95;
-  --animation-lift-hover: -3px;
-  --animation-lift-press: -1px;
-  --color-focus-ring: #00a8e8;
-  --effect-backdrop-blur-surface-radius: 24px;
-  --effect-backdrop-blur-popup-radius: 18px;
-  --effect-backdrop-blur-surface-background: rgba(255, 255, 255, 0.45);
-  --effect-backdrop-blur-popup-background: rgba(236, 248, 255, 0.66);
+  --animation-scale-hover: 1.02;
+  --animation-scale-press: 0.98;
+  --effect-backdrop-blur-surface-radius: 20px;
+  --effect-backdrop-blur-popup-radius: 14px;
+  --effect-backdrop-blur-surface-background: #ffffff5c;
+  --effect-backdrop-blur-popup-background: #e2f2fc47;
   --base16-base00: #eaf6fd;
   --base16-base01: #d4ecfa;
   --base16-base02: #a9cde3;
@@ -53,9 +51,9 @@
   --color-border-muted: #cfe6f3;
   --color-disabled: #8aa5b8;
   --color-error: #c62828;
-  --color-error-container: #ffd9d6;
+  --color-error-container: #f4d4d4;
   --color-info: #1565c0;
-  --color-info-container: #d3e6ff;
+  --color-info-container: #d0e0f2;
   --color-inverse-on-surface: #eaf6fd;
   --color-inverse-primary: #7fd0ff;
   --color-inverse-surface: #0b2e4a;
@@ -63,44 +61,42 @@
   --color-on-background: #0b2e4a;
   --color-on-disabled: #e6eef3;
   --color-on-error: #ffffff;
-  --color-on-error-container: #5c0a0a;
+  --color-on-error-container: #3b0c0c;
   --color-on-info: #ffffff;
-  --color-on-info-container: #0a2a55;
+  --color-on-info-container: #061e3a;
   --color-on-link: #ffffff;
   --color-on-primary: #ffffff;
-  --color-on-primary-container: #003352;
-  --color-on-primary-fixed: #ffffff;
-  --color-on-primary-fixed-variant: #ffffff;
+  --color-on-primary-container: #002437;
+  --color-on-primary-fixed: #001e2e;
+  --color-on-primary-fixed-variant: #0077b6;
   --color-on-secondary: #ffffff;
-  --color-on-secondary-container: #0f3d0f;
-  --color-on-secondary-fixed: #ffffff;
-  --color-on-secondary-fixed-variant: #0f3d0f;
+  --color-on-secondary-container: #0d260d;
+  --color-on-secondary-fixed: #0a200a;
+  --color-on-secondary-fixed-variant: #2a7f2a;
   --color-on-success: #ffffff;
-  --color-on-success-container: #0f3d12;
+  --color-on-success-container: #0e260f;
   --color-on-surface: #0b2e4a;
   --color-on-surface-variant: #2f5878;
   --color-on-tertiary: #ffffff;
-  --color-on-tertiary-container: #00363c;
-  --color-on-tertiary-fixed: #ffffff;
-  --color-on-tertiary-fixed-variant: #00363c;
+  --color-on-tertiary-container: #00272b;
+  --color-on-tertiary-fixed: #002124;
+  --color-on-tertiary-fixed-variant: #00838f;
   --color-on-warning: #ffffff;
-  --color-on-warning-container: #4a2c00;
+  --color-on-warning-container: #311d00;
   --color-outline: #5b88a8;
   --color-outline-variant: #a9cde3;
   --color-primary: #0077b6;
-  --color-primary-container: #bfe6fb;
-  --color-primary-fixed: #0077b6;
-  --color-primary-fixed-dim: #005f92;
+  --color-primary-container: #cce4f0;
+  --color-primary-fixed: #cce4f0;
+  --color-primary-fixed-dim: #94c6e0;
   --color-scrim: #000000;
   --color-secondary: #2a7f2a;
-  --color-secondary-container: #c8f0b8;
-  --color-secondary-fixed: #2a7f2a;
-  --color-secondary-fixed-dim: #216b21;
-  --color-selection-background: #9fdcf7;
-  --color-selection-foreground: #0b2e4a;
+  --color-secondary-container: #d4e5d4;
+  --color-secondary-fixed: #d4e5d4;
+  --color-secondary-fixed-dim: #a6c9a6;
   --color-shadow: #0b3a5c;
   --color-success: #2e7d32;
-  --color-success-container: #c8efc4;
+  --color-success-container: #d5e5d6;
   --color-surface: #f4fbff;
   --color-surface-bright: #ffffff;
   --color-surface-container: #e2f2fc;
@@ -112,28 +108,28 @@
   --color-surface-tint: #0077b6;
   --color-surface-variant: #d6ebf7;
   --color-tertiary: #00838f;
-  --color-tertiary-container: #b2f1f4;
-  --color-tertiary-fixed: #00838f;
-  --color-tertiary-fixed-dim: #006b75;
+  --color-tertiary-container: #cce6e9;
+  --color-tertiary-fixed: #cce6e9;
+  --color-tertiary-fixed-dim: #94cbd0;
   --color-warning: #a35f00;
-  --color-warning-container: #ffe6b3;
+  --color-warning-container: #eddfcc;
   --elevation-2xl: 12;
   --elevation-lg: 6;
   --elevation-md: 3;
   --elevation-none: 0;
   --elevation-sm: 1;
   --elevation-xl: 8;
-  --radius-2xl: 30;
+  --radius-2xl: 28;
   --radius-full: 9999;
   --radius-lg: 16;
-  --radius-md: 10;
+  --radius-md: 8;
   --radius-none: 0;
   --radius-sm: 4;
   --radius-xl: 24;
-  --shadow-colored-primary: 0 0 0 1px rgba(0, 168, 232, 0.40);
-  --shadow-umbra-lg: 0 10px 30px rgba(11, 58, 92, 0.22);
-  --shadow-umbra-md: 0 4px 14px rgba(11, 58, 92, 0.18);
-  --shadow-umbra-sm: 0 1px 4px rgba(11, 58, 92, 0.16);
+  --shadow-colored-primary: 0 0 0 1px rgba(0, 119, 182, 0.18);
+  --shadow-umbra-lg: 0 4px 12px rgba(0,0,0,0.22);
+  --shadow-umbra-md: 0 2px 6px rgba(0,0,0,0.18);
+  --shadow-umbra-sm: 0 1px 2px rgba(0,0,0,0.15);
   --shape-corner-extra-large: 28;
   --shape-corner-extra-small: 4;
   --shape-corner-full: 9999;
@@ -261,7 +257,7 @@ input {
   padding: 10;
   gap: 8;
   border-width: 1;
-  border-color: #9cc7e0;
+  border-color: #a9cde3;
   border-radius: 10;
   background: #ffffff;
 }
@@ -335,18 +331,7 @@ node {
   align-items: stretch;
   align-self: auto;
   justify-content: start;
-  transition:
-    background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-    color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-    border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
-    opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard),
-    border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate),
-    border-width var(--animation-duration-medium) var(--animation-curves-bezier-standard),
-    width var(--animation-duration-medium) var(--animation-curves-bezier-standard),
-    height var(--animation-duration-medium) var(--animation-curves-bezier-standard),
-    padding var(--animation-duration-medium) var(--animation-curves-bezier-standard),
-    margin var(--animation-duration-medium) var(--animation-curves-bezier-standard),
-    transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+  transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard), color var(--animation-duration-short) var(--animation-curves-bezier-standard), border-color var(--animation-duration-short) var(--animation-curves-bezier-standard), opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard), border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate), border-width var(--animation-duration-medium) var(--animation-curves-bezier-standard), width var(--animation-duration-medium) var(--animation-curves-bezier-standard), height var(--animation-duration-medium) var(--animation-curves-bezier-standard), padding var(--animation-duration-medium) var(--animation-curves-bezier-standard), margin var(--animation-duration-medium) var(--animation-curves-bezier-standard), transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
 }
 
 tooltip {
@@ -363,7 +348,7 @@ tooltip {
 @keyframes tooltip-enter {
   from {
     opacity: 0;
-    transform: scale(0);
+    transform: scale(0.85);
   }
   to {
     opacity: 1;
@@ -371,58 +356,44 @@ tooltip {
   }
 }
 
-/* Glass material: Aero Day: frosted white glass, deep-sea text, aqua and grass accents. Glossy two-stop fills (the renderer resolves two-colour
-   gradients) with bright white rims standing in for the Aero horizon highlight. */
+/* Material is solid and tonal: the shared glass family keeps its role colours
+   but draws opaque tonal fills and no backdrop blur, refraction or compositor
+   blur region. */
 @module "@mesh/glass-material" {
   :root {
-    --glass-hover: #ffffff66;
-    --glass-rim: #ffffffbf;
-    --glass-rim-hover: #fffffff2;
+    --glass-surface-pill: linear-gradient(#d4ecfa, #d4ecfa);
+    --glass-surface-recording: linear-gradient(#f4d4d4, #f4d4d4);
+    --glass-surface-weather: linear-gradient(#e2f2fc, #e2f2fc);
+    --glass-surface-media: linear-gradient(#d4ecfa, #d4ecfa);
+    --glass-surface-dock: linear-gradient(#d4ecfa, #d4ecfa);
+    --glass-surface-flare: linear-gradient(#c4e3f7, #c4e3f7);
+    --glass-surface-lens: linear-gradient(#c4e3f7, #c4e3f7);
+    --glass-surface-panel: linear-gradient(#e2f2fc, #e2f2fc);
+    --glass-surface-focused: linear-gradient(#cce4f0, #cce4f0);
+    --glass-surface-battery: linear-gradient(#cce4f0, #cce4f0);
+    --glass-surface-battery-low: linear-gradient(#f4d4d4, #f4d4d4);
+    --glass-surface-control: linear-gradient(#d4e5d4, #d4e5d4);
+    --glass-surface-active: linear-gradient(#0077b6, #0077b6);
+    --glass-fill-subtle: #c4e3f7;
+    --glass-fill-occupied: #d4e5d4;
+    --glass-fill-inset: #eef8fe;
+    --glass-fill-artwork: #c4e3f7;
+    --glass-meter-track: #c4e3f7;
+    --glass-settings-surface: linear-gradient(#e2f2fc, #e2f2fc);
+    --glass-settings-inset: #eef8fe;
+    --glass-settings-selected: linear-gradient(#cce4f0, #cce4f0);
+    --glass-control-fill-selected: linear-gradient(#cce4f0, #cce4f0);
+    --glass-control-fill-primary: linear-gradient(#0077b6, #0077b6);
+    --glass-control-fill-danger: linear-gradient(#f4d4d4, #f4d4d4);
     --glass-text: #0b2e4a;
-    --glass-text-muted: #2f5878;
-    --glass-text-heading: #06223a;
-    --glass-text-strong: #021526;
-    --glass-text-caption: #355e7e;
-    --glass-text-cool: #005f92;
-    --glass-text-artwork: #2f5878;
-    --glass-text-control: #0b2e4a;
-    --glass-text-on-accent: #ffffff;
-    --glass-indicator: #00a8e8;
-    --glass-indicator-recording: #e53935;
-    --glass-fill-subtle: #ffffff73;
-    --glass-fill-occupied: #7fd0ffbf;
-    --glass-fill-hover: #3ec1ffd9;
-    --glass-fill-inset: #ffffff59;
-    --glass-rim-accent: #ffffffd9;
-    --glass-rim-inset: #ffffff8c;
-    --glass-rim-control: #ffffffa6;
-    --glass-fill-artwork: #ffffff4d;
-    --glass-fill-lens: #ffffff0d;
-    --glass-rim-focused: #00a8e8bf;
-    --glass-surface-pill: linear-gradient(to bottom, #ffffffe0, #d2efffa6);
-    --glass-surface-recording: linear-gradient(to bottom, #ff8a80e6, #e53935cc);
-    --glass-surface-weather: linear-gradient(to bottom, #ffffffcc, #bfe8ff8c);
-    --glass-surface-media: linear-gradient(to bottom, #ffffffd1, #c8f0ff8c);
-    --glass-surface-active: linear-gradient(to bottom, #7fe0ff, #0090d6);
-    --glass-surface-dock: linear-gradient(to bottom, #ffffffd9, #b8e6ff99);
-    --glass-surface-flare: linear-gradient(to bottom, #ffffffb3, #ffffff40);
-    --glass-surface-lens: linear-gradient(to bottom, #ffffffcc, #ffffff33);
-    --glass-surface-focused: linear-gradient(to bottom, #a6ecffe6, #3ec1ffb3);
-    --glass-surface-battery: linear-gradient(to bottom, #c8f7a8, #5cc94a);
-    --glass-surface-battery-low: linear-gradient(to bottom, #ffb3a8, #e5533f);
-    --glass-surface-control: linear-gradient(to bottom, #e6fbd9e6, #9fe38ab3);
-    --glass-shadow-pill: 0 4px 14px #0b3a5c2e, 0 1px 1px #ffffffcc;
-    --glass-shadow-card: 0 18px 44px #0b3a5c38, 0 1px 2px #ffffffd9;
-    --glass-shadow-dock: 0 -4px 22px #0b3a5c2e;
-    --glass-shadow-lens: 0 4px 12px #0b3a5c26;
-    --glass-shadow-artwork: 0 8px 22px #0b3a5c40;
-    --glass-text-on-error: #ffffff;
-    --glass-surface-panel: linear-gradient(to bottom, #ffffffe6, #dcf2ffcc);
-    --glass-backdrop-pill: blur(12px) refract(5px 4px) dispersion(0.3px) grain(0.06);
-    --glass-backdrop-card: blur(22px) refract(8px 6px) dispersion(0.4px) grain(0.06);
-    --glass-backdrop-dock: blur(18px) refract(8px 6px) dispersion(0.4px) grain(0.06);
-    --glass-backdrop-panel: blur(30px) refract(10px 8px) dispersion(0.4px) grain(0.06);
-    --glass-backdrop-flare: blur(10px) refract(0px 0px);
-    --glass-backdrop-lens: refract(8px 8px);
+    --glass-rim-inset: #a9cde3;
+    --glass-backdrop-pill: none;
+    --glass-backdrop-card: none;
+    --glass-backdrop-dock: none;
+    --glass-backdrop-panel: none;
+    --glass-backdrop-flare: none;
+    --glass-backdrop-lens: none;
+    --glass-shadow-pill: none;
+    --glass-shadow-lens: none;
   }
 }

@@ -1,15 +1,15 @@
 {
-  "name": "@mesh/mesh-default",
+  "name": "@mesh/material",
   "version": "0.1.0",
-  "description": "MESH Default theme with dark and light modes.",
+  "description": "Material theme: solid tonal surfaces, elevation shadows and Material motion, with dark and light modes. No glass effects.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "theme",
     "contributes": {
       "themes": [
         {
-          "id": "mesh-default",
-          "label": "MESH Default",
+          "id": "material",
+          "label": "Material",
           "modes": {
             "dark": "dark.css",
             "light": "light.css"
@@ -27,6 +27,7 @@
           },
           "tokenContract": "1.1",
           "recommends": {
+            "composition": "@mesh/desk",
             "fonts": [
               "Inter",
               "Noto Sans"
@@ -34,7 +35,8 @@
             "icons": [
               "Papirus",
               "Adwaita"
-            ]
+            ],
+            "compositor_glass": false
           }
         }
       ]

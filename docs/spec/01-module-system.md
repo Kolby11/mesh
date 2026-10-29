@@ -177,10 +177,12 @@ of the other fields apply:
 
 | `role` | Protocol | Placement fields |
 | ------ | -------- | ---------------- |
-| `layer` (default) | `zwlr_layer_shell_v1` — shell chrome: panels, launchers, overlays | `anchor`, `layer`, `keyboard_mode` |
+| `layer` (default) | `zwlr_layer_shell_v1` — shell chrome: panels, launchers, overlays | `anchor`, `center`, `layer`, `keyboard_mode` |
 | `window` | `xdg_toplevel` — an ordinary application window that tiles, floats, moves between workspaces, and closes | `title`, `appId`, `resizable`, `decorations` |
 
-`visible_on_start` and `blur` apply to both.
+`visible_on_start` and `blur` apply to both. A `left` or `right` layer surface
+sits in the top corner of its edge; `center: true` centers it vertically on
+that edge instead.
 
 ```json
 "surface": {

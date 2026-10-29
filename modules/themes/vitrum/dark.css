@@ -11,21 +11,18 @@
     var(--animation-curves-bezier-emphasized-decelerate);
   --animation-default-opacity: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
   --animation-duration-extra-long: 500;
-  --animation-duration-fast: 110;
+  --animation-duration-fast: 90;
   --animation-duration-instant: 0;
-  --animation-duration-long: 420;
-  --animation-duration-medium: 280;
-  --animation-duration-short: 180;
+  --animation-duration-long: 360;
+  --animation-duration-medium: 240;
+  --animation-duration-short: 150;
   --animation-opacity-disabled: 0.38;
-  --animation-scale-hover: 1.04;
-  --animation-scale-press: 0.95;
-  --animation-lift-hover: -3px;
-  --animation-lift-press: -1px;
-  --color-focus-ring: #b4a9ff;
-  --effect-backdrop-blur-surface-radius: 24px;
-  --effect-backdrop-blur-popup-radius: 18px;
-  --effect-backdrop-blur-surface-background: rgba(255, 255, 255, 0.06);
-  --effect-backdrop-blur-popup-background: rgba(255, 255, 255, 0.10);
+  --animation-scale-hover: 1.02;
+  --animation-scale-press: 0.98;
+  --effect-backdrop-blur-surface-radius: 20px;
+  --effect-backdrop-blur-popup-radius: 14px;
+  --effect-backdrop-blur-surface-background: #0e0d145c;
+  --effect-backdrop-blur-popup-background: #1b192547;
   --base16-base00: #0e0d14;
   --base16-base01: #1b1925;
   --base16-base02: #2e2a3d;
@@ -53,54 +50,54 @@
   --color-border-muted: #25212f;
   --color-disabled: #7a7590;
   --color-error: #f28b9a;
-  --color-error-container: #d6455d;
+  --color-error-container: #5c3945;
   --color-info: #b4a9ff;
-  --color-info-container: #6d5fe0;
+  --color-info-container: #484365;
   --color-inverse-on-surface: #0e0d14;
   --color-inverse-primary: #5546c9;
   --color-inverse-surface: #ebe9f4;
   --color-link: #b4a9ff;
   --color-on-background: #ebe9f4;
   --color-on-disabled: #2b2738;
-  --color-on-error: #2a0a10;
-  --color-on-error-container: #ffe8ec;
-  --color-on-info: #120c33;
-  --color-on-info-container: #ece9ff;
+  --color-on-error: #2c191c;
+  --color-on-error-container: #fce5e9;
+  --color-on-info: #201e2e;
+  --color-on-info-container: #eeecff;
   --color-on-link: #0e0d14;
-  --color-on-primary: #120c33;
-  --color-on-primary-container: #ffffff;
-  --color-on-primary-fixed: #120c33;
-  --color-on-primary-fixed-variant: #120c33;
-  --color-on-secondary: #0b1f14;
-  --color-on-secondary-container: #ebe9f4;
-  --color-on-secondary-fixed: #0b1f14;
-  --color-on-secondary-fixed-variant: #0b1f14;
-  --color-on-success: #0b1f14;
-  --color-on-success-container: #0b1f14;
+  --color-on-primary: #19162c;
+  --color-on-primary-container: #e5e2fd;
+  --color-on-primary-fixed: #1c1931;
+  --color-on-primary-fixed-variant: #3f386f;
+  --color-on-secondary: #192a21;
+  --color-on-secondary-container: #e6fbf0;
+  --color-on-secondary-fixed: #1c2f25;
+  --color-on-secondary-fixed-variant: #3f6a53;
+  --color-on-success: #1a281f;
+  --color-on-success-container: #e6f8ed;
   --color-on-surface: #ebe9f4;
   --color-on-surface-variant: #b3afc6;
-  --color-on-tertiary: #1f0b1a;
-  --color-on-tertiary-container: #1f0b1a;
-  --color-on-tertiary-fixed: #1f0b1a;
-  --color-on-tertiary-fixed-variant: #1f0b1a;
-  --color-on-warning: #2a1f06;
-  --color-on-warning-container: #2a1f06;
+  --color-on-tertiary: #291a25;
+  --color-on-tertiary-container: #f9e6f5;
+  --color-on-tertiary-fixed: #2e1d2a;
+  --color-on-tertiary-fixed-variant: #67405e;
+  --color-on-warning: #2c2616;
+  --color-on-warning-container: #fcf6e2;
   --color-outline: #a09bb8;
   --color-outline-variant: #3a3550;
   --color-primary: #8b7cf6;
-  --color-primary-container: #6d5fe0;
-  --color-primary-fixed: #8b7cf6;
-  --color-primary-fixed-dim: #6d5fe0;
+  --color-primary-container: #3b3562;
+  --color-primary-fixed: #e8e5fd;
+  --color-primary-fixed-dim: #8b7cf6;
   --color-scrim: #000000;
   --color-secondary: #8decb9;
-  --color-secondary-container: #1ca65c;
-  --color-secondary-fixed: #8decb9;
-  --color-secondary-fixed-dim: #1ca65c;
+  --color-secondary-container: #3b584f;
+  --color-secondary-fixed: #e8fbf1;
+  --color-secondary-fixed-dim: #8decb9;
   --color-selection-background: #8b7cf6;
-  --color-selection-foreground: #120c33;
+  --color-selection-foreground: #19162c;
   --color-shadow: #05030f;
   --color-success: #8ee0ad;
-  --color-success-container: #4fb97f;
+  --color-success-container: #3c554b;
   --color-surface: #15131d;
   --color-surface-bright: #3b3650;
   --color-surface-container: #1b1925;
@@ -111,12 +108,12 @@
   --color-surface-dim: #0e0d14;
   --color-surface-tint: #8b7cf6;
   --color-surface-variant: #242131;
-  --color-tertiary: e48fd0;
-  --color-tertiary-container: #a5528f;
-  --color-tertiary-fixed: e48fd0;
-  --color-tertiary-fixed-dim: #a5528f;
+  --color-tertiary: #e48fd0;
+  --color-tertiary-container: #573b56;
+  --color-tertiary-fixed: #fae9f6;
+  --color-tertiary-fixed-dim: #e48fd0;
   --color-warning: #f2d479;
-  --color-warning-container: #c9a53a;
+  --color-warning-container: #5c513a;
   --elevation-2xl: 12;
   --elevation-lg: 6;
   --elevation-md: 3;
@@ -125,21 +122,21 @@
   --elevation-xl: 8;
   --radius-2xl: 28;
   --radius-full: 9999;
-  --radius-lg: 12;
-  --radius-md: 9;
+  --radius-lg: 16;
+  --radius-md: 8;
   --radius-none: 0;
-  --radius-sm: 6;
-  --radius-xl: 20;
-  --shadow-colored-primary: 0 0 0 1px #8b7cf659;
-  --shadow-umbra-lg: 0 10px 30px rgba(0, 4, 16, 0.55);
-  --shadow-umbra-md: 0 4px 14px rgba(0, 4, 16, 0.45);
-  --shadow-umbra-sm: 0 1px 4px rgba(0, 4, 16, 0.40);
+  --radius-sm: 4;
+  --radius-xl: 24;
+  --shadow-colored-primary: 0 0 0 1px rgba(139, 124, 246, 0.22);
+  --shadow-umbra-lg: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-umbra-md: 0 2px 6px rgba(0, 0, 0, 0.36);
+  --shadow-umbra-sm: 0 1px 2px rgba(0, 0, 0, 0.32);
   --shape-corner-extra-large: 28;
   --shape-corner-extra-small: 4;
   --shape-corner-full: 9999;
-  --shape-corner-large: 20;
+  --shape-corner-large: 16;
   --shape-corner-medium: 12;
-  --shape-corner-small: 9;
+  --shape-corner-small: 8;
   --spacing-2xl: 40;
   --spacing-3xl: 48;
   --spacing-4xl: 64;
@@ -251,8 +248,8 @@ button {
   flex-direction: row;
   padding: 10;
   gap: 8;
-  border-radius: 9;
-  background: #ffffff17;
+  border-radius: 12;
+  background: #242131;
 }
 
 input {
@@ -262,7 +259,7 @@ input {
   gap: 8;
   border-width: 1;
   border-color: #3a3550;
-  border-radius: 9;
+  border-radius: 10;
   background: #0e0d14;
 }
 
@@ -271,52 +268,6 @@ slider {
   height: 36;
   padding: 8;
   gap: 8;
-}
-
-/* Vitrum slider: a thin track with a system-blue fill and a white pill
-   thumb. Pressed, the pill swells with a slight overshoot into a clear lens
-   that refracts the track beneath it, and settles back on release. */
-slider::track {
-  height: 6px;
-  margin-left: 10px;
-  margin-right: 10px;
-  border-radius: 3px;
-  background-color: #78788033;
-}
-
-slider::fill {
-  border-radius: 3px;
-  background-color: var(--color-primary);
-}
-
-slider::thumb {
-  width: 38px;
-  height: 24px;
-  border-radius: 12px;
-  border-width: 1px;
-  border-style: solid;
-  border-color: #ffffffcc;
-  background-color: #fbfcfe;
-  box-shadow: 0 2px 8px #00000038;
-  transition: width 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
-              height 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
-              border-radius 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
-              background-color 200ms var(--animation-curves-bezier-standard),
-              box-shadow 200ms var(--animation-curves-bezier-standard);
-}
-
-slider:active::thumb {
-  width: 52px;
-  height: 32px;
-  border-radius: 16px;
-  border-color: #ffffffee;
-  background-color: #ffffff1a;
-  box-shadow: 0 6px 18px #00000024;
-  backdrop-filter: refract(6px 5px) dispersion(0.4px);
-}
-
-slider:disabled::fill {
-  background-color: color-mix(in srgb, var(--color-on-surface) 30%, transparent);
 }
 
 scroll {
@@ -395,16 +346,7 @@ node {
     transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
 }
 
-/* Glass chrome: translucent enough for the compositor glass to show through
-   (in place, or as a blurred popup) and above the 0.04 contour threshold. */
 tooltip {
-  background: rgba(18, 14, 34, 0.42);
-  color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 10px;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 500;
   animation: tooltip-enter var(--animation-duration-short) ease-out;
   cursor-offset-x: 14;
   cursor-offset-y: 18;
@@ -418,7 +360,7 @@ tooltip {
 @keyframes tooltip-enter {
   from {
     opacity: 0;
-    transform: scale(0);
+    transform: scale(0.85);
   }
   to {
     opacity: 1;
@@ -426,69 +368,44 @@ tooltip {
   }
 }
 
-/* Glass material: Vitrum's lit-from-within glass over the shared
-   @mesh/glass-material token family. Like Liquid Glass the refraction is the
-   compositor's; the tint is the accent (a violet by default) with a mint
-   second hue (--color-secondary: the accent turned -100 degrees, as Vitrum
-   derives its dichroic edge), and controls that are on glow with the accent.
-   Fills keep an even alpha above the 0.04 contour threshold and shadows stay
-   below it. */
+/* Material is solid and tonal: the shared glass family keeps its role colours
+   but draws opaque tonal fills and no backdrop blur, refraction or compositor
+   blur region. */
 @module "@mesh/glass-material" {
   :root {
-    --glass-hover: #ffffff2e;
-    --glass-rim: #ffffff2e;
-    --glass-rim-hover: #d9d3ff99;
-    --glass-text: #f4f2fc;
-    --glass-text-muted: #d5d1e6cc;
-    --glass-text-heading: #ffffff;
-    --glass-text-strong: #ffffff;
-    --glass-text-caption: #cbc6defa;
-    --glass-text-cool: #d9d3ff;
-    --glass-text-artwork: #f2f0fb;
-    --glass-text-control: #ffffff;
-    --glass-text-on-accent: #120c33;
-    --glass-indicator: #ffffff;
-    --glass-indicator-recording: #ff5d73;
-    --glass-fill-subtle: #ffffff38;
-    --glass-fill-occupied: #8b7cf68c;
-    --glass-fill-hover: #8b7cf6c4;
-    --glass-fill-inset: #ffffff26;
-    --glass-rim-accent: #c9c1ff80;
-    --glass-rim-inset: #ffffff33;
-    --glass-rim-control: #ffffff2e;
-    --glass-fill-artwork: #ffffff1f;
-    --glass-fill-lens: #ffffff03;
-    --glass-rim-focused: #b4a9ff99;
-    --glass-surface-pill: linear-gradient(to bottom, #c4bde62e, #0e0a2640);
-    --glass-surface-recording: linear-gradient(to bottom, #ff6b8680, #d6355252);
-    --glass-surface-weather: linear-gradient(to bottom, #c4bde62e, #0e0a2640);
-    --glass-surface-media: linear-gradient(to bottom, #c4bde62e, #0e0a2640);
-    --glass-surface-active: linear-gradient(to bottom, #8b7cf6f2, #6d5fe0d9);
-    --glass-surface-dock: linear-gradient(to bottom, #c4bde62e, #0e0a2640);
-    --glass-surface-flare: linear-gradient(to bottom, #ffffff30, #ffffff10);
-    --glass-surface-lens: linear-gradient(to bottom, #ffffff22, #0000000f);
-    --glass-surface-focused: linear-gradient(to bottom, #c9c1ff40, #8b7cf61f);
-    --glass-surface-battery: linear-gradient(to bottom, #ffffffe6, #e8e4fbb3);
-    --glass-surface-battery-low: linear-gradient(to bottom, #ff8fa0e6, #e2465ecc);
-    --glass-surface-control: linear-gradient(to bottom, #8b7cf673, #8b7cf638);
-    --glass-shadow-pill: 0 4px 14px #07031408;
-    --glass-shadow-card: 0 18px 48px #07031408;
-    --glass-shadow-dock: 0 -6px 24px #07031408;
-    --glass-shadow-lens: 0 4px 12px #07031408;
-    --glass-shadow-artwork: 0 8px 22px #07031466;
-    --glass-text-on-error: #ffffff;
-    --glass-surface-panel: linear-gradient(to bottom, #c4bde62e, #0e0a2640);
-    --glass-settings-surface: linear-gradient(to bottom, #f5f4fbf2, #e9e7f3eb);
-    --glass-settings-text: #1b1826;
-    --glass-settings-text-muted: #6b6783;
-    --glass-settings-inset: #ffffffe0;
-    --glass-settings-rim: #0000000f;
-    --glass-settings-selected: linear-gradient(to bottom, #e3defdf2, #d6d0fbf2);
-    --glass-backdrop-pill: blur(2px) refract(0px 0px);
-    --glass-backdrop-card: blur(2px) refract(0px 0px);
-    --glass-backdrop-dock: blur(2px) refract(0px 0px);
-    --glass-backdrop-panel: blur(4px) refract(0px 0px);
-    --glass-backdrop-flare: blur(2px) refract(0px 0px);
-    --glass-backdrop-lens: refract(0px 0px);
+    --glass-surface-pill: linear-gradient(#242131, #242131);
+    --glass-surface-recording: linear-gradient(#5c3945, #5c3945);
+    --glass-surface-weather: linear-gradient(#1b1925, #1b1925);
+    --glass-surface-media: linear-gradient(#242131, #242131);
+    --glass-surface-dock: linear-gradient(#242131, #242131);
+    --glass-surface-flare: linear-gradient(#2e2a3d, #2e2a3d);
+    --glass-surface-lens: linear-gradient(#2e2a3d, #2e2a3d);
+    --glass-surface-panel: linear-gradient(#1b1925, #1b1925);
+    --glass-surface-focused: linear-gradient(#3b3562, #3b3562);
+    --glass-surface-battery: linear-gradient(#3b3562, #3b3562);
+    --glass-surface-battery-low: linear-gradient(#5c3945, #5c3945);
+    --glass-surface-control: linear-gradient(#3b584f, #3b584f);
+    --glass-surface-active: linear-gradient(#8b7cf6, #8b7cf6);
+    --glass-fill-subtle: #2e2a3d;
+    --glass-fill-occupied: #3b584f;
+    --glass-fill-inset: #12101a;
+    --glass-fill-artwork: #2e2a3d;
+    --glass-meter-track: #2e2a3d;
+    --glass-settings-surface: linear-gradient(#1b1925, #1b1925);
+    --glass-settings-inset: #12101a;
+    --glass-settings-selected: linear-gradient(#3b3562, #3b3562);
+    --glass-control-fill-selected: linear-gradient(#3b3562, #3b3562);
+    --glass-control-fill-primary: linear-gradient(#8b7cf6, #8b7cf6);
+    --glass-control-fill-danger: linear-gradient(#5c3945, #5c3945);
+    --glass-text: #ebe9f4;
+    --glass-rim-inset: #3a3550;
+    --glass-backdrop-pill: none;
+    --glass-backdrop-card: none;
+    --glass-backdrop-dock: none;
+    --glass-backdrop-panel: none;
+    --glass-backdrop-flare: none;
+    --glass-backdrop-lens: none;
+    --glass-shadow-pill: none;
+    --glass-shadow-lens: none;
   }
 }

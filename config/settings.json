@@ -20,7 +20,7 @@
       }
     },
     "theme": {
-      "active": "@mesh/mesh-default:mesh-default"
+      "active": "@mesh/material:material"
     }
   }
 }

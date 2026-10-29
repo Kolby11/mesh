@@ -19,6 +19,7 @@ struct RuntimeGenerationEntry {
 #[derive(Default)]
 pub struct RuntimeGenerationIndex {
     entries: HashMap<Arc<str>, RuntimeGenerationEntry>,
+    runtime_count: usize,
     next_subtree_generation: u64,
 }
 
@@ -72,6 +73,9 @@ impl RuntimeGenerationIndex {
                 .entries
                 .get_mut(&key)
                 .expect("registered runtime-generation entry");
+            if !entry.runtime {
+                self.runtime_count += 1;
+            }
             let changed = !entry.runtime || entry.generation != generation;
             entry.runtime = true;
             entry.generation = generation;
@@ -90,6 +94,9 @@ impl RuntimeGenerationIndex {
                 .entries
                 .get_mut(&key)
                 .expect("synced runtime-generation entry");
+            if !entry.runtime {
+                self.runtime_count += 1;
+            }
             let changed = !entry.runtime || entry.generation != generation;
             entry.runtime = true;
             entry.generation = generation;
@@ -115,11 +122,12 @@ impl RuntimeGenerationIndex {
     }
 
     pub fn runtime_count(&self) -> usize {
-        self.entries.values().filter(|entry| entry.runtime).count()
+        self.runtime_count
     }
 
     pub fn rebuild(&mut self, runtimes: &[(Arc<str>, u64)]) {
         self.entries.clear();
+        self.runtime_count = 0;
         self.next_subtree_generation = 0;
         for (key, generation) in runtimes {
             self.register(key, *generation);
@@ -128,6 +136,7 @@ impl RuntimeGenerationIndex {
 
     pub fn clear(&mut self) {
         self.entries.clear();
+        self.runtime_count = 0;
         self.next_subtree_generation = 0;
     }
 }
@@ -158,5 +167,25 @@ mod tests {
             index.subtree_generation("root/local:Child"),
             index.subtree_generation("root/local:Child")
         );
+    }
+
+    #[test]
+    fn runtime_count_excludes_placeholders_and_tracks_rebuilds() {
+        let mut index = RuntimeGenerationIndex::default();
+        index.register("root/child/grandchild", 1);
+        assert_eq!(index.runtime_count(), 1);
+        index.sync("root/child/grandchild", 2);
+        index.register("root/child/grandchild", 2);
+        assert_eq!(index.runtime_count(), 1);
+        index.sync("root/child", 1);
+        index.register("root", 1);
+        assert_eq!(index.runtime_count(), 3);
+
+        index.rebuild(&[(Arc::from("other/child"), 1), (Arc::from("other/child"), 2)]);
+        assert_eq!(index.runtime_count(), 1);
+        index.clear();
+        assert_eq!(index.runtime_count(), 0);
+        index.register("other", 1);
+        assert_eq!(index.runtime_count(), 1);
     }
 }

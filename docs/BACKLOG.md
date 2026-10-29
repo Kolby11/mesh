@@ -19,6 +19,8 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 ---
 
 - [ ] Implement the Material reference shell (`08-material-desktop`): editable desktop widget grid, widget picker, editing toolbar, side rail and dock, with a composition/profile and token-based theme. [Design](../.planning/todos/pending/2026-10-27-reference-shells.md).
+- [ ] Reapply the saved glass strength to hyprglass at startup and after a compositor reload; `mesh.wm.set_glass_strength` runs only when the Settings controls change, and its layer list mirrors the user's hyprglass config.
+- [ ] Give `@mesh/material` its own composition once `08-material-desktop` lands; the theme recommends `@mesh/desk` until then.
 - [ ] Make liquid-glass Settings readable over applications with a light, translucent outer panel and calmer inner controls; the shared glass palette is too transparent.
 - [ ] **Styleable control parts:** extend `host::part` beyond `slider` to scrollbars, inputs, checkbox/radio/switch and progress; their looks are still hardcoded in the renderer. [Design](../.planning/todos/pending/2026-10-29-control-parts.md).
 - [ ] Fix retained scroll-shift parity on the redesigned Settings appearance page: `settings_scroll_shift_matches_full_paint` finds two pixels one channel off at a scroll frame (2026-10-29). Either half of the redesign alone passes, so it is a layout-dependent seam, likely the open fractional retained-layout parity issue.

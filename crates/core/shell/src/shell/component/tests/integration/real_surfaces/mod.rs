@@ -42,6 +42,8 @@ impl ShellSurface for LayoutRecordingSurface {
 
     fn set_blur(&mut self, _blur: bool) {}
 
+    fn set_center(&mut self, _center: bool) {}
+
     fn set_role(&mut self, _role: mesh_core_wayland::SurfaceRole) {}
 
     fn set_window_options(&mut self, _options: mesh_core_wayland::WindowOptions) {}

@@ -41,7 +41,7 @@ onBenchmark = nil
     flex-wrap: nowrap;
     border-bottom-width: 1px;
     border-bottom-style: solid;
-    border-bottom-color: var(--color-outline-variant);
+    border-bottom-color: var(--glass-settings-rim);
   }
 
   .view-tab {
@@ -58,7 +58,7 @@ onBenchmark = nil
     border-bottom-color: transparent;
     font-size: var(--typography-size-md);
     font-weight: 600;
-    color: var(--color-on-surface-variant);
+    color: var(--glass-settings-text-muted);
   }
 
   .view-tab-active {

@@ -8,6 +8,7 @@
     "uses": {
       "interfaces": {
         "mesh.wm": ">=1.0",
+        "mesh.theme": ">=1.0",
         "mesh.audio": ">=1.0",
         "mesh.power": ">=1.0"
       },

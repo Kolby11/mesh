@@ -32,6 +32,7 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/keybind-help` | surface | `src/main.mesh` | Keyboard shortcuts window opened by `F1`, listing every binding by surface |
 | `@mesh/cheatsheet` | surface | `src/main.mesh` | Dark compositor-shortcut cheatsheet: the window manager's described keybinds in sections and columns of keycaps; reads `mesh.wm-keybinds`; open it with `mesh-shell` IPC `shell:toggle_surface:@mesh/cheatsheet` |
 | `@mesh/radial-launcher` | surface | `src/main.mesh` | Radial overlay: a ring of app wedges, a clock hub and media wedges, built from `<shape>` sectors |
+| `@mesh/glass-power` | surface | `src/main.mesh` | Hidden right-edge power panel: hovering the middle of the edge slides out sleep, restart and power off; restart and power off need a second click |
 | `@mesh/halo-orb` | surface | `src/main.mesh` | Always-visible orb that toggles the radial launcher, with the shell switcher beside it |
 | `@mesh/glass-dock` | surface | `src/main.mesh` | Glass shelf with neighboring-icon magnification and a searchable launcher with grid and list views of installed applications |
 | `@mesh/glass-notifications` | surface | `src/main.mesh` | Glass notification toasts under the bar; shows itself while a notification is popped up |
@@ -96,6 +97,7 @@ and easing, with separate entrance animations for islands, cards and popups.
 | `@mesh/networkmanager-network` | backend | `src/main.luau` | `mesh.network` through `nmcli` |
 | `@mesh/hyprland-apps` | backend | `src/main.luau` | `mesh.apps`: desktop entries joined with Hyprland clients |
 | `@mesh/wf-recorder` | backend | `src/main.luau` | `mesh.recorder` through `wf-recorder` |
+| `@mesh/systemd-session` | backend | `src/main.luau` | `mesh.session` suspend, power off and reboot through `systemctl` |
 | `@mesh/status-notifier-tray` | backend | `src/main.luau` | `mesh.tray`: StatusNotifier watcher/host, item state and controls |
 | `@mesh/freedesktop-notifications` | backend | `src/main.luau` | `mesh.notifications`: owns `org.freedesktop.Notifications` through `mesh.dbus_serve` |
 | `@mesh/proc-system` | backend | `src/main.luau` | `mesh.system` from `/proc`, hwmon and `df` |
@@ -134,6 +136,7 @@ stale artwork requests are cancelled when the track's art URL changes.
 | `@mesh/wallpapers-interface` | interface | `mesh.wallpapers` wallpaper library contract |
 | `@mesh/wm-keybinds-interface` | interface | `mesh.wm-keybinds` compositor keybind contract: sections of described binds |
 | `@mesh/recorder-interface` | interface | `mesh.recorder` screen-recording contract |
+| `@mesh/session-interface` | interface | `mesh.session` suspend, power-off and reboot contract |
 | `@mesh/liquid-glass` | theme | Neutral white glass palette over a deep blue base with system-blue accents; tunes `@mesh/glass-material` |
 | `@mesh/frutiger-aero` | theme | Frutiger Aero palette: frosted-white glass, sky and aqua blues, grass-green accents, Noto Sans; light (default) and dark modes; tunes `@mesh/glass-material` |
 | `@mesh/vitrum` | theme | Vitrum palette, after the niri glass shell: lit-from-within glass tinted by a violet accent with a mint second hue, rounded parts, Inter; dark (default) and light modes; tunes `@mesh/glass-material` |

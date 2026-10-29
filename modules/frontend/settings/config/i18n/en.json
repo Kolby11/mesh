@@ -261,6 +261,7 @@
   "keyboard.corner.bottom_left": "Bottom left",
   "keyboard.corner.bottom_right": "Bottom right",
   "appearance.theme.now": "Now",
+  "appearance.theme.shell_switch": "Switch to shell:",
   "appearance.theme.recommends": "Recommends",
   "appearance.glass": "Glass material",
   "appearance.glass.copy": "How strongly glass surfaces blur and bend what is behind them. Theme keeps the active theme's own glass.",

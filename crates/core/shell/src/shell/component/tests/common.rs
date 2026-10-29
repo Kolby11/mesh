@@ -832,14 +832,14 @@ pub(super) fn themed_primary(id: &str, primary_hex: &str) -> Theme {
     theme
 }
 
-/// A mode of the shipped `mesh-default` theme, loaded from its stylesheet.
+/// A mode of the shipped `material` theme, loaded from its stylesheet.
 pub(super) fn shipped_default_theme_mode(mode: &str) -> Theme {
     let theme_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../..")
-        .join("modules/themes/mesh-default");
+        .join("modules/themes/material");
     let source = mesh_core_theme::ThemeSourceHandle::new(theme_root, format!("{mode}.css"))
         .unwrap_or_else(|err| panic!("failed to describe default theme mode {mode}: {err}"));
-    mesh_core_theme::load_theme_from_source(&source, "mesh-default", "MESH Default")
+    mesh_core_theme::load_theme_from_source(&source, "material", "Material")
         .unwrap_or_else(|err| panic!("failed to load default theme mode {mode}: {err}"))
 }
 

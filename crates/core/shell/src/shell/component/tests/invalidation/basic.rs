@@ -44,6 +44,8 @@ impl ShellSurface for CountingSurface {
         self.layout_calls += 1;
     }
 
+    fn set_center(&mut self, _center: bool) {}
+
     fn set_role(&mut self, _role: mesh_core_wayland::SurfaceRole) {
         self.layout_calls += 1;
     }

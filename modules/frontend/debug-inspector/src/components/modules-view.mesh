@@ -67,7 +67,7 @@ onFilterChange = nil
   .module-title {
     font-size: var(--typography-size-sm);
     font-weight: 700;
-    color: var(--color-on-surface);
+    color: var(--glass-settings-text);
   }
 
   .section-copy,
@@ -75,7 +75,7 @@ onFilterChange = nil
   .module-meta,
   .module-metric {
     font-size: var(--typography-size-xs);
-    color: var(--color-on-surface-variant);
+    color: var(--glass-settings-text-muted);
   }
 
   .empty-card,
@@ -83,10 +83,10 @@ onFilterChange = nil
     width: 100%;
     padding: var(--spacing-md);
     border-radius: var(--radius-md);
-    background: var(--color-surface-container);
+    background: var(--glass-settings-inset);
     border-width: 1px;
     border-style: solid;
-    border-color: var(--color-outline-variant);
+    border-color: var(--glass-settings-rim);
   }
 
   .empty-copy,

@@ -336,6 +336,7 @@ impl Shell {
                     margin_bottom: 0,
                     margin_left: 0,
                     blur: false,
+                    center: false,
                     policy_revision: 0,
                 };
                 let previous_config = self.components[index].children[child_index]

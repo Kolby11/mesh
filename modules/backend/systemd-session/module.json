@@ -1,0 +1,37 @@
+{
+  "name": "@mesh/systemd-session",
+  "version": "0.1.0",
+  "description": "Session power provider over systemctl: suspend, power off and reboot through logind.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:systemctl:[\"suspend\"]",
+        "exec.argv:systemctl:[\"poweroff\"]",
+        "exec.argv:systemctl:[\"reboot\"]"
+      ],
+      "binaries": [
+        {
+          "name": "systemctl",
+          "reason": "Ask logind to suspend, power off or reboot the machine.",
+          "packages": { "arch": "systemd", "debian": "systemd", "fedora": "systemd", "nixos": "systemd" }
+        }
+      ],
+      "modules": {
+        "@mesh/session-interface": "^1.0.0"
+      }
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.session",
+        "version": "1.0",
+        "provider": "systemd",
+        "label": "systemd",
+        "priority": 100
+      }
+    ]
+  }
+}

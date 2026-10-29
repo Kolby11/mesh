@@ -238,7 +238,7 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
         "test must click during the controlled entering frame"
     );
     let dark =
-        first_node_with_attr(tree, "aria-label", "MESH Default").expect("default theme button");
+        first_node_with_attr(tree, "aria-label", "Material").expect("default theme button");
     let click_x = dark.layout.x + dark.layout.width * 0.5;
     let click_y = dark.layout.y + dark.layout.height * 0.5;
 
@@ -276,7 +276,7 @@ fn shipped_theme_selector_buttons_accept_first_entering_frame_clicks() {
                 if interface == "mesh.theme"
                     && command == "set_theme"
                     && payload.get("theme_id")
-                        == Some(&serde_json::json!("mesh-default"))
+                        == Some(&serde_json::json!("material"))
         )),
         "first entering-frame click should reach the theme handler: {requests:?}"
     );

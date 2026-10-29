@@ -1,7 +1,7 @@
 {
   "name": "@mesh/gruvbox-dark",
   "version": "0.1.0",
-  "description": "Gruvbox Dark theme.",
+  "description": "Gruvbox Dark theme palette on Material surfaces.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "theme",
@@ -32,7 +32,8 @@
             "icons": [
               "Gruvbox-Plus-Dark",
               "Papirus-Dark"
-            ]
+            ],
+            "compositor_glass": false
           }
         }
       ]

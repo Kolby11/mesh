@@ -111,7 +111,7 @@ layout_bounds_value = ""
   .section-title {
     font-size: var(--typography-size-sm);
     font-weight: 700;
-    color: var(--color-on-surface);
+    color: var(--glass-settings-text);
   }
 
   .state-card,
@@ -120,10 +120,10 @@ layout_bounds_value = ""
     width: 100%;
     padding: var(--spacing-md);
     border-radius: var(--radius-md);
-    background: var(--color-surface-container);
+    background: var(--glass-settings-inset);
     border-width: 1px;
     border-style: solid;
-    border-color: var(--color-outline-variant);
+    border-color: var(--glass-settings-rim);
   }
 
   .state-copy,
@@ -136,14 +136,14 @@ layout_bounds_value = ""
   .metric-group-title {
     font-size: var(--typography-size-sm);
     font-weight: 700;
-    color: var(--color-on-surface);
+    color: var(--glass-settings-text);
   }
 
   .state-text,
   .summary-text,
   .metric-summary {
     font-size: var(--typography-size-xs);
-    color: var(--color-on-surface-variant);
+    color: var(--glass-settings-text-muted);
   }
 
   .profiling-toggle {
@@ -189,12 +189,12 @@ layout_bounds_value = ""
 
   .metric-label {
     font-size: var(--typography-size-xs);
-    color: var(--color-on-surface-variant);
+    color: var(--glass-settings-text-muted);
   }
 
   .metric-value {
     font-size: var(--typography-size-xs);
     font-weight: 700;
-    color: var(--color-on-surface);
+    color: var(--glass-settings-text);
   }
 </style>

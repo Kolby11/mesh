@@ -349,6 +349,9 @@ pub struct SurfaceConfig {
     /// single compositor rule can blur every opted-in MESH surface (Hyprland:
     /// `layerrule = blur, :blur$`). See [`SurfaceConfig::wayland_namespace`].
     pub blur: bool,
+    /// Anchors a left/right layer surface to both vertical edges so the
+    /// compositor centers its fixed height on that edge.
+    pub center: bool,
     /// Accepted semantic policy generation. The shell assigns this only after
     /// a configure succeeds, so retries do not publish speculative revisions.
     pub policy_revision: u64,
@@ -380,6 +383,7 @@ impl Default for SurfaceConfig {
             margin_bottom: 0,
             margin_left: 0,
             blur: false,
+            center: false,
             policy_revision: 0,
         }
     }

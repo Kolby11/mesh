@@ -1024,6 +1024,22 @@ fn mesh_contributes(doc: &'static str) -> Node {
                                                 "XDG icon-theme id or icon-pack id.",
                                             ),
                                         ),
+                                        field(
+                                            "composition",
+                                            false,
+                                            scalar(
+                                                "Composition module this theme is designed for, such as @mesh/material.",
+                                                "string",
+                                            ),
+                                        ),
+                                        field(
+                                            "compositor_glass",
+                                            false,
+                                            scalar(
+                                                "Whether the compositor glass plugin draws behind MESH surfaces under this theme; false keeps them solid.",
+                                                "boolean",
+                                            ),
+                                        ),
                                     ],
                                 ),
                             ),
@@ -1650,6 +1666,15 @@ fn surface_layout_node() -> Node {
                     "Request compositor background blur. MESH gives the surface a \
                      `:blur` namespace suffix a single compositor rule can target \
                      (Hyprland: `layerrule = blur, :blur$`).",
+                    "boolean",
+                ),
+            ),
+            field(
+                "center",
+                false,
+                scalar(
+                    "Center a `left`/`right` layer surface on its edge instead of \
+                     pinning it to the top corner.",
                     "boolean",
                 ),
             ),

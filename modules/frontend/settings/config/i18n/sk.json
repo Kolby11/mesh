@@ -260,6 +260,7 @@
   "keyboard.corner.bottom_left": "Vľavo dole",
   "keyboard.corner.bottom_right": "Vpravo dole",
   "appearance.theme.now": "Teraz",
+  "appearance.theme.shell_switch": "Prepnúť na shell:",
   "appearance.theme.recommends": "Odporúča",
   "appearance.glass": "Sklenený materiál",
   "appearance.glass.copy": "Ako silno sklenené plochy rozmazávajú a lámu to, čo je za nimi. Téma ponechá vlastné sklo aktívnej témy.",

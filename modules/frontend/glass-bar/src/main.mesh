@@ -38,6 +38,15 @@ local Weather = require("./components/weather.mesh")
 local Status = require("./components/status.mesh")
 local ProfileSwitcher = require("@mesh/profile-switcher")
 local t = import("mesh.i18n", "t")
+local theme = require("mesh.theme")
+local wm = require("mesh.wm")
+
+-- Solid themes declare no compositor glass; the plugin draws behind these
+-- surfaces only when the active theme wants it.
+effect(function()
+    local wanted = theme.compositor_glass
+    if wanted ~= nil and wm.set_glass_enabled ~= nil then wm.set_glass_enabled(wanted) end
+end)
 
 function onSettings()
     mesh.shell.show_surface("@mesh/settings")

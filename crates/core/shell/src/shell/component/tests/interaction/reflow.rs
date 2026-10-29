@@ -977,8 +977,8 @@ fn real_navigation_bar_repaints_when_theme_changes() {
         real_frontend_module_component("@mesh/navigation-bar", audio_network_catalog());
     let dark = default_theme();
     let mut light = default_theme();
-    light.id = "mesh-default-light".into();
-    light.name = "mesh-default-light".into();
+    light.id = "material-light".into();
+    light.name = "material-light".into();
     light.tokens_mut().insert(
         "color.surface-container".into(),
         mesh_core_theme::TokenValue::String("#f0f0f0".into()),
@@ -1043,8 +1043,8 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
             service: "mesh.theme".into(),
             source_module: "@mesh/shell".into(),
             payload: serde_json::json!({
-                "current": "mesh-default",
-                "theme_id": "mesh-default",
+                "current": "material",
+                "theme_id": "material",
                 "mode": "light",
                 "is_dark": false
             }),
@@ -1127,8 +1127,8 @@ fn real_navigation_bar_repaints_existing_transition_state_when_theme_changes_bac
             service: "mesh.theme".into(),
             source_module: "@mesh/shell".into(),
             payload: serde_json::json!({
-                "current": "mesh-default",
-                "theme_id": "mesh-default",
+                "current": "material",
+                "theme_id": "material",
                 "mode": "dark",
                 "is_dark": true
             }),

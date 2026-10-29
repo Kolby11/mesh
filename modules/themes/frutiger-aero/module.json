@@ -1,7 +1,7 @@
 {
   "name": "@mesh/frutiger-aero",
   "version": "0.1.0",
-  "description": "Frutiger Aero theme: glossy frosted-white glass, sky and aqua blues, grass-green accents and a humanist sans. Aero Day (light) and Aero Night (dark).",
+  "description": "Frutiger Aero palette on Material surfaces: sky and aqua blues with grass-green accents, solid tonal surfaces and elevation shadows. Aero Day (light) and Aero Night (dark).",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "theme",
@@ -27,6 +27,7 @@
           },
           "tokenContract": "1.1",
           "recommends": {
+            "composition": "@mesh/desk",
             "fonts": [
               "Frutiger",
               "Segoe UI",
@@ -37,7 +38,8 @@
               "Papirus",
               "OneUI-light",
               "breeze"
-            ]
+            ],
+            "compositor_glass": false
           }
         }
       ]

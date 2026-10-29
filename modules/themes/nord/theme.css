@@ -21,8 +21,8 @@
   --animation-scale-press: 0.98;
   --effect-backdrop-blur-surface-radius: 20px;
   --effect-backdrop-blur-popup-radius: 14px;
-  --effect-backdrop-blur-surface-background: rgba(10, 10, 14, 0.36);
-  --effect-backdrop-blur-popup-background: rgba(24, 26, 34, 0.28);
+  --effect-backdrop-blur-surface-background: #2429335c;
+  --effect-backdrop-blur-popup-background: #3b425247;
   --base16-base00: #2e3440;
   --base16-base01: #434c5e;
   --base16-base02: #4c566a;
@@ -50,54 +50,54 @@
   --color-border-muted: #434c5e;
   --color-disabled: #7b88a1;
   --color-error: #bf616a;
-  --color-error-container: #a54e57;
+  --color-error-container: #5c424d;
   --color-info: #88c0d0;
-  --color-info-container: #5e81ac;
+  --color-info-container: #4b616e;
   --color-inverse-on-surface: #2e3440;
   --color-inverse-primary: #d0b06f;
   --color-inverse-surface: #e5e9f0;
   --color-link: #88c0d0;
   --color-on-background: #e5e9f0;
   --color-on-disabled: #4c566a;
-  --color-on-error: #242933;
-  --color-on-error-container: #e5e9f0;
-  --color-on-info: #242933;
-  --color-on-info-container: #e5e9f0;
+  --color-on-error: #221113;
+  --color-on-error-container: #f1dcde;
+  --color-on-info: #182325;
+  --color-on-info-container: #e5f1f5;
   --color-on-link: #242933;
-  --color-on-primary: #242933;
-  --color-on-primary-container: #242933;
-  --color-on-primary-fixed: #242933;
-  --color-on-primary-fixed-variant: #242933;
-  --color-on-secondary: #242933;
-  --color-on-secondary-container: #e5e9f0;
-  --color-on-secondary-fixed: #242933;
-  --color-on-secondary-fixed-variant: #e5e9f0;
-  --color-on-success: #242933;
-  --color-on-success-container: #242933;
+  --color-on-primary: #2a2519;
+  --color-on-primary-container: #fbf4e5;
+  --color-on-primary-fixed: #2f291c;
+  --color-on-primary-fixed-variant: #6a5b3f;
+  --color-on-secondary: #182325;
+  --color-on-secondary-container: #e5f1f5;
+  --color-on-secondary-fixed: #1b262a;
+  --color-on-secondary-fixed-variant: #3d565e;
+  --color-on-success: #1d2219;
+  --color-on-success-container: #ebf1e6;
   --color-on-surface: #e5e9f0;
   --color-on-surface-variant: #d8dee9;
-  --color-on-tertiary: #242933;
-  --color-on-tertiary-container: #242933;
-  --color-on-tertiary-fixed: #242933;
-  --color-on-tertiary-fixed-variant: #242933;
-  --color-on-warning: #242933;
-  --color-on-warning-container: #242933;
+  --color-on-tertiary: #1d2219;
+  --color-on-tertiary-container: #ebf1e6;
+  --color-on-tertiary-fixed: #21261c;
+  --color-on-tertiary-fixed-variant: #49553f;
+  --color-on-warning: #2a2519;
+  --color-on-warning-container: #fbf4e5;
   --color-outline: #7b88a1;
   --color-outline-variant: #4c566a;
   --color-primary: #ebcb8b;
-  --color-primary-container: #d0b06f;
-  --color-primary-fixed: #ebcb8b;
-  --color-primary-fixed-dim: #d0b06f;
+  --color-primary-container: #6a6458;
+  --color-primary-fixed: #fbf5e8;
+  --color-primary-fixed-dim: #ebcb8b;
   --color-scrim: #000000;
   --color-secondary: #88c0d0;
-  --color-secondary-container: #5e81ac;
-  --color-secondary-fixed: #88c0d0;
-  --color-secondary-fixed-dim: #5e81ac;
+  --color-secondary-container: #4b616e;
+  --color-secondary-fixed: #e7f2f6;
+  --color-secondary-fixed-dim: #88c0d0;
   --color-selection-background: #ebcb8b;
-  --color-selection-foreground: #242933;
+  --color-selection-foreground: #2a2519;
   --color-shadow: #000000;
   --color-success: #a3be8c;
-  --color-success-container: #86a071;
+  --color-success-container: #536058;
   --color-surface: #2e3440;
   --color-surface-bright: #4c566a;
   --color-surface-container: #3b4252;
@@ -109,11 +109,11 @@
   --color-surface-tint: #ebcb8b;
   --color-surface-variant: #434c5e;
   --color-tertiary: #a3be8c;
-  --color-tertiary-container: #86a071;
-  --color-tertiary-fixed: #a3be8c;
-  --color-tertiary-fixed-dim: #86a071;
+  --color-tertiary-container: #536058;
+  --color-tertiary-fixed: #edf2e8;
+  --color-tertiary-fixed-dim: #a3be8c;
   --color-warning: #ebcb8b;
-  --color-warning-container: #d0b06f;
+  --color-warning-container: #6a6458;
   --elevation-2xl: 12;
   --elevation-lg: 6;
   --elevation-md: 3;
@@ -127,7 +127,7 @@
   --radius-none: 0;
   --radius-sm: 4;
   --radius-xl: 24;
-  --shadow-colored-primary: 0 0 0 1px rgba(250, 189, 47, 0.22);
+  --shadow-colored-primary: 0 0 0 1px rgba(235, 203, 139, 0.22);
   --shadow-umbra-lg: 0 4px 12px rgba(0, 0, 0, 0.4);
   --shadow-umbra-md: 0 2px 6px rgba(0, 0, 0, 0.36);
   --shadow-umbra-sm: 0 1px 2px rgba(0, 0, 0, 0.32);
@@ -249,7 +249,7 @@ button {
   padding: 10;
   gap: 8;
   border-radius: 12;
-  background: #3b4252;
+  background: #434c5e;
 }
 
 input {
@@ -360,10 +360,52 @@ tooltip {
 @keyframes tooltip-enter {
   from {
     opacity: 0;
-    transform: scale(0);
+    transform: scale(0.85);
   }
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+/* Material is solid and tonal: the shared glass family keeps its role colours
+   but draws opaque tonal fills and no backdrop blur, refraction or compositor
+   blur region. */
+@module "@mesh/glass-material" {
+  :root {
+    --glass-surface-pill: linear-gradient(#434c5e, #434c5e);
+    --glass-surface-recording: linear-gradient(#5c424d, #5c424d);
+    --glass-surface-weather: linear-gradient(#3b4252, #3b4252);
+    --glass-surface-media: linear-gradient(#434c5e, #434c5e);
+    --glass-surface-dock: linear-gradient(#434c5e, #434c5e);
+    --glass-surface-flare: linear-gradient(#4c566a, #4c566a);
+    --glass-surface-lens: linear-gradient(#4c566a, #4c566a);
+    --glass-surface-panel: linear-gradient(#3b4252, #3b4252);
+    --glass-surface-focused: linear-gradient(#6a6458, #6a6458);
+    --glass-surface-battery: linear-gradient(#6a6458, #6a6458);
+    --glass-surface-battery-low: linear-gradient(#5c424d, #5c424d);
+    --glass-surface-control: linear-gradient(#4b616e, #4b616e);
+    --glass-surface-active: linear-gradient(#ebcb8b, #ebcb8b);
+    --glass-fill-subtle: #4c566a;
+    --glass-fill-occupied: #4b616e;
+    --glass-fill-inset: #2e3440;
+    --glass-fill-artwork: #4c566a;
+    --glass-meter-track: #4c566a;
+    --glass-settings-surface: linear-gradient(#3b4252, #3b4252);
+    --glass-settings-inset: #2e3440;
+    --glass-settings-selected: linear-gradient(#6a6458, #6a6458);
+    --glass-control-fill-selected: linear-gradient(#6a6458, #6a6458);
+    --glass-control-fill-primary: linear-gradient(#ebcb8b, #ebcb8b);
+    --glass-control-fill-danger: linear-gradient(#5c424d, #5c424d);
+    --glass-text: #e5e9f0;
+    --glass-rim-inset: #4c566a;
+    --glass-backdrop-pill: none;
+    --glass-backdrop-card: none;
+    --glass-backdrop-dock: none;
+    --glass-backdrop-panel: none;
+    --glass-backdrop-flare: none;
+    --glass-backdrop-lens: none;
+    --glass-shadow-pill: none;
+    --glass-shadow-lens: none;
   }
 }

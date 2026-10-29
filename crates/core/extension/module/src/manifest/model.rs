@@ -829,6 +829,10 @@ pub struct SurfaceLayoutSection {
     /// (styling spec §10) and needs no flag.
     #[serde(default)]
     pub blur: Option<bool>,
+    /// Center a `left`/`right` layer surface on its edge instead of pinning it
+    /// to the top corner. Ignored for other anchors and for windows.
+    #[serde(default)]
+    pub center: Option<bool>,
     /// Window title (`role: "window"` only). Localizable.
     #[serde(default)]
     pub title: Option<LocalizedText>,

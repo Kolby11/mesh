@@ -1,0 +1,41 @@
+{
+  "name": "@mesh/session-interface",
+  "version": "1.0.0",
+  "description": "Standard contract for ending or pausing the machine session: suspend, power off and reboot.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.session",
+      "version": "1.0",
+      "domain": "session",
+      "relationship": "base",
+      "contract": {
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether the provider can suspend, power off and reboot the machine"
+          }
+        },
+        "methods": {
+          "suspend": "() -> Result",
+          "poweroff": "() -> Result",
+          "reboot": "() -> Result"
+        },
+        "capabilities": {
+          "required": ["service.session.read"],
+          "optional": ["service.session.control"],
+          "methods": {
+            "suspend": ["service.session.control"],
+            "poweroff": ["service.session.control"],
+            "reboot": ["service.session.control"]
+          },
+          "permissions": {
+            "service.session.read": "standard",
+            "service.session.control": "elevated"
+          }
+        }
+      }
+    }
+  }
+}

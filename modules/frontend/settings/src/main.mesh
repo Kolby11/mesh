@@ -7,7 +7,7 @@
 
                 <column class="sidebar-scroll">
                     <tabs class="sidebar-groups" aria-label={t('settings.categories')} aria-orientation="vertical">
-                        <column class="settings-navigation">
+                        <column class="settings-navigation" hidden={not (nav_visible("wifi") or nav_visible("audio") or nav_visible("bluetooth"))}>
                         <tab class="settings-nav-item" selected={active_page == "wifi"} hidden={not nav_visible("wifi")} onactivate={showWifi} title={t('nav.wifi.tooltip')}>
                             <box class="nav-tile nav-tile-blue"><icon class="nav-icon" name="wifi" size="16" /></box>
                             <text class="nav-title">{t('nav.wifi')}</text>
@@ -21,7 +21,7 @@
                             <text class="nav-title">{t('nav.bluetooth')}</text>
                         </tab>
                         </column>
-                        <column class="settings-navigation">
+                        <column class="settings-navigation" hidden={not (nav_visible("appearance") or nav_visible("device") or nav_visible("keyboard") or nav_visible("advanced"))}>
                         <tab class="settings-nav-item" selected={active_page == "appearance"} hidden={not nav_visible("appearance")} onactivate={showAppearance} title={t('nav.appearance.tooltip')}>
                             <box class="nav-tile nav-tile-purple"><icon class="nav-icon" name="applications-graphics" size="16" /></box>
                             <text class="nav-title">{t('nav.appearance')}</text>

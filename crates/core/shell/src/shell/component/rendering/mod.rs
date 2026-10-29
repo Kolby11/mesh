@@ -361,6 +361,7 @@ impl FrontendSurfaceComponent {
             self.surface_layout.margin_left,
         );
         surface.set_blur(self.surface_layout.blur);
+        surface.set_center(self.surface_layout.center);
     }
 
     /// Resolve the toplevel-only settings against this component's locale and

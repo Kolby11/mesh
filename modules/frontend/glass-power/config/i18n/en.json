@@ -1,0 +1,8 @@
+{
+  "power.title": "Power",
+  "power.suspend": "Sleep",
+  "power.reboot": "Restart",
+  "power.poweroff": "Power off",
+  "power.confirm.reboot": "Click again to restart",
+  "power.confirm.poweroff": "Click again to power off"
+}

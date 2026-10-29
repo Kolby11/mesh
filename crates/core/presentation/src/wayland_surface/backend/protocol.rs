@@ -85,6 +85,9 @@ pub(super) fn map_anchor(cfg: &SurfaceConfig) -> Anchor {
         Some(Edge::Right) if cfg.wire_size.height.is_span() => {
             Anchor::TOP | Anchor::BOTTOM | Anchor::RIGHT
         }
+        // Layer-shell centers a fixed extent between two opposing anchors.
+        Some(Edge::Left) if cfg.center => Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT,
+        Some(Edge::Right) if cfg.center => Anchor::TOP | Anchor::BOTTOM | Anchor::RIGHT,
         Some(Edge::Left) => Anchor::TOP | Anchor::LEFT,
         Some(Edge::Right) => Anchor::TOP | Anchor::RIGHT,
         None => Anchor::empty(),

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "revision": 122,
+  "revision": 171,
   "from": {
     "module": "@mesh/glass"
   },
@@ -12,7 +12,7 @@
   "settings": {
     "shell": {
       "fonts": {
-        "ui_family": "Google Sans Flex"
+        "ui_family": "Noto Sans"
       },
       "i18n": {
         "fallback_locale": "en",
@@ -36,17 +36,17 @@
         }
       },
       "theme": {
-        "active": "@mesh/liquid-glass:liquid-glass",
+        "active": "@mesh/vitrum:vitrum",
         "tokens": {
-          "@mesh/glass-material.glass.backdrop.card": "blur(10.7px) refract(10px 8px) dispersion(0.6px)",
-          "@mesh/glass-material.glass.backdrop.dock": "blur(8.9px) refract(9px 7px) dispersion(0.6px)",
-          "@mesh/glass-material.glass.backdrop.flare": "blur(4.5px) refract(0px 0px)",
+          "@mesh/glass-material.glass.backdrop.card": "blur(2.4px) refract(10px 8px) dispersion(0.6px)",
+          "@mesh/glass-material.glass.backdrop.dock": "blur(2px) refract(9px 7px) dispersion(0.6px)",
+          "@mesh/glass-material.glass.backdrop.flare": "blur(1px) refract(0px 0px)",
           "@mesh/glass-material.glass.backdrop.lens": "refract(8px 8px)",
-          "@mesh/glass-material.glass.backdrop.panel": "blur(14.3px) refract(12px 9px) dispersion(0.6px)",
-          "@mesh/glass-material.glass.backdrop.pill": "blur(7.1px) refract(6px 5px) dispersion(0.4px)",
-          "glass.strength.blur": 44.603515625,
+          "@mesh/glass-material.glass.backdrop.panel": "blur(3.2px) refract(12px 9px) dispersion(0.6px)",
+          "@mesh/glass-material.glass.backdrop.pill": "blur(1.6px) refract(6px 5px) dispersion(0.4px)",
+          "glass.strength.blur": 10,
           "glass.strength.liquid": 100,
-          "glass.strength.style": "custom"
+          "glass.strength.style": "liquid"
         }
       }
     }

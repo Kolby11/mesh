@@ -38,6 +38,8 @@ pub struct SurfaceLayoutSettings {
     /// Appends a `:blur` suffix to the compositor namespace so a single
     /// compositor blur rule can target every opted-in surface.
     pub blur: bool,
+    /// Centers a left/right surface on its edge rather than the top corner.
+    pub center: bool,
 }
 
 /// Toplevel-only placement settings (`role: "window"`).
@@ -182,6 +184,7 @@ pub fn generic_surface_layout_fallback() -> SurfaceLayoutSettings {
         margin_bottom: 0,
         margin_left: 0,
         blur: false,
+        center: false,
     }
 }
 
@@ -254,6 +257,9 @@ pub fn surface_layout_from_manifest(manifest: &Manifest) -> SurfaceLayoutSetting
     }
     if let Some(blur) = surface.blur {
         layout.blur = blur;
+    }
+    if let Some(center) = surface.center {
+        layout.center = center;
     }
 
     layout
@@ -364,6 +370,13 @@ pub fn resolve_frontend_module_settings_with_props(
         .and_then(serde_json::Value::as_bool)
     {
         layout.blur = blur;
+    }
+
+    if let Some(center) = surface
+        .and_then(|value| value.get("center"))
+        .and_then(serde_json::Value::as_bool)
+    {
+        layout.center = center;
     }
 
     let props = load_prop_settings(&checked_props);
@@ -477,6 +490,7 @@ pub fn surface_layout_to_json(layout: &SurfaceLayoutSettings) -> serde_json::Val
 
     if role_field_applies_to_layout(layout, SurfaceRoleField::Anchor) {
         block.insert("anchor".into(), surface_edge_name(layout.edge).into());
+        block.insert("center".into(), layout.center.into());
     }
     if role_field_applies_to_layout(layout, SurfaceRoleField::Layer) {
         block.insert("layer".into(), surface_layer_name(layout.layer).into());
@@ -731,6 +745,7 @@ pub const SURFACE_FIELDS: &[FieldSpec] = &[
     ),
     FieldSpec::new("visible_on_start", FieldKind::Bool),
     FieldSpec::new("blur", FieldKind::Bool),
+    FieldSpec::new("center", FieldKind::Bool),
 ];
 
 /// A module namespace's top-level keys. `props` has a component-specific

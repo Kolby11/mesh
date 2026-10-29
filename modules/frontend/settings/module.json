@@ -18,7 +18,8 @@
       "optionalInterfaces": {
         "mesh.network": ">=1.0",
         "mesh.bluetooth": ">=1.0",
-        "mesh.device": ">=1.0"
+        "mesh.device": ">=1.0",
+        "mesh.wm": ">=1.2"
       },
       "resources": {
         "icons": [
@@ -36,6 +37,7 @@
         "service.bluetooth.control",
         "service.device.read",
         "theme.read",
+        "service.wm.control",
         "locale.read",
         "locale.write",
         "service.theme.control",

@@ -620,8 +620,12 @@ impl FrontendSurfaceComponent {
                 .as_secs_f32();
             let duration = animation.duration.as_secs_f32().max(f32::EPSILON);
             let progress = (elapsed / duration).clamp(0.0, 1.0);
-            let eased =
-                mesh_core_animation::apply_easing(mesh_core_animation::Easing::EaseOut, progress);
+            // Cubic ease-out (easeOutCubic): the CSS `ease-out` keyword is too
+            // gentle at the start for 140ms wheel steps and reads as lag.
+            let eased = mesh_core_animation::apply_easing(
+                mesh_core_animation::Easing::CubicBezier(0.215, 0.61, 0.355, 1.0),
+                progress,
+            );
             let x = animation.start.x + (animation.target.x - animation.start.x) * eased;
             let y = animation.start.y + (animation.target.y - animation.start.y) * eased;
             updates.push((*key, ScrollOffsetState { x, y }));

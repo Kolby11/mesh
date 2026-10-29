@@ -1,0 +1,173 @@
+<template>
+    <box class="edge" class:edge-expanded={expanded} onpointerenter={onEnter} onpointerleave={onLeave}>
+        <box class="handle" class:handle-hidden={open} aria-hidden="true" />
+        <column class="panel" class:panel-open={open} aria-label={t("power.title")}>
+            <button class="action" onclick={onSuspend} title={t("power.suspend")} aria-label={t("power.suspend")} disabled={not available}>
+                <icon class="glyph" name="system-suspend" size="24" />
+            </button>
+            <button class="action" class:action-armed={armed == "reboot"} onclick={onReboot} title={armed == "reboot" and t("power.confirm.reboot") or t("power.reboot")} aria-label={armed == "reboot" and t("power.confirm.reboot") or t("power.reboot")} disabled={not available}>
+                <icon class="glyph" name={armed == "reboot" and "object-select" or "system-reboot"} size="24" />
+            </button>
+            <button class="action action-danger" class:action-armed={armed == "poweroff"} onclick={onPoweroff} title={armed == "poweroff" and t("power.confirm.poweroff") or t("power.poweroff")} aria-label={armed == "poweroff" and t("power.confirm.poweroff") or t("power.poweroff")} disabled={not available}>
+                <icon class="glyph" name={armed == "poweroff" and "object-select" or "system-shutdown"} size="24" />
+            </button>
+        </column>
+    </box>
+</template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local session = require("mesh.session")
+
+-- The panel slides out before the surface narrows again, so the compositor
+-- resizes the layer twice per reveal rather than on every animation frame.
+local SLIDE_MS = 220
+local ARM_MS = 3000
+
+open = false
+expanded = false
+armed = ""
+available = false
+
+local leave_generation = 0
+local arm_generation = 0
+
+effect(function()
+    available = session.available == true
+end)
+
+function onEnter()
+    leave_generation += 1
+    expanded = true
+    open = true
+end
+
+function onLeave()
+    open = false
+    armed = ""
+    leave_generation += 1
+    local generation = leave_generation
+    task.spawn(function()
+        task.sleep(SLIDE_MS)
+        if generation == leave_generation then expanded = false end
+    end)
+end
+
+-- Restart and power off take a second click within ARM_MS, so a stray click
+-- at the screen edge cannot end the session.
+local function confirm(action, run)
+    if armed == action then
+        armed = ""
+        run()
+        return
+    end
+    armed = action
+    arm_generation += 1
+    local generation = arm_generation
+    task.spawn(function()
+        task.sleep(ARM_MS)
+        if generation == arm_generation and armed == action then armed = "" end
+    end)
+end
+
+function onSuspend()
+    armed = ""
+    session.suspend()
+end
+function onReboot() confirm("reboot", session.reboot) end
+function onPoweroff() confirm("poweroff", session.poweroff) end
+</script>
+
+<style>
+    /* Collapsed, the surface is a thin strip on the screen edge that catches
+    the pointer; expanded, it is wide enough for the panel to slide into. */
+    .edge {
+        width: 8px;
+        height: 196px;
+        padding: 0;
+        overflow: hidden;
+        exclusive-zone: none;
+        background: transparent;
+    }
+
+    .edge-expanded {
+        width: 88px;
+    }
+
+    .handle {
+        position: absolute;
+        right: 2px;
+        top: 70px;
+        width: 4px;
+        height: 56px;
+        border-radius: 2px;
+        background: var(--glass-rim-hover);
+        opacity: 0.8;
+        transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .handle-hidden {
+        opacity: 0;
+    }
+
+    .panel {
+        position: absolute;
+        right: 10px;
+        top: 6px;
+        padding: 10px;
+        gap: 10px;
+        border-radius: 28px;
+        border: 1px solid var(--glass-rim);
+        background-image: var(--glass-surface-panel);
+        backdrop-filter: var(--glass-backdrop-panel);
+        opacity: 0;
+        transform: translateX(96px);
+        transition: transform 220ms var(--animation-curves-bezier-emphasized-decelerate),
+            opacity 220ms var(--animation-curves-bezier-standard);
+    }
+
+    .panel-open {
+        opacity: 1;
+        transform: translateX(0px);
+    }
+
+    .action {
+        width: 48px;
+        height: 48px;
+        padding: 0;
+        justify-content: center;
+        align-items: center;
+        border-radius: 24px;
+        border: 1px solid var(--glass-control-rim);
+        background-color: var(--glass-fill-lens);
+        background-image: var(--glass-surface-control);
+        color: var(--glass-control-text);
+        transition: transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+    }
+
+    .action:hover {
+        border-color: var(--glass-control-rim-hover);
+        transform: scale(1.08);
+    }
+
+    .action:active {
+        transform: scale(0.94);
+    }
+
+    .action-danger:hover {
+        color: var(--glass-control-text-danger);
+    }
+
+    .action-armed,
+    .action-armed:hover {
+        border-color: var(--glass-control-rim-focus);
+        background-image: var(--glass-control-fill-danger);
+        color: var(--glass-control-text-danger);
+    }
+
+    .glyph {
+        width: 24px;
+        height: 24px;
+        color: inherit;
+    }
+</style>

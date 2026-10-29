@@ -109,6 +109,8 @@ pub trait ShellSurface {
     fn set_margin(&mut self, top: i32, right: i32, bottom: i32, left: i32);
     /// Turned into a `:blur`-suffixed layer-shell namespace by presentation.
     fn set_blur(&mut self, blur: bool);
+    /// Centers a left/right layer surface on its edge.
+    fn set_center(&mut self, center: bool);
     fn show(&mut self);
     fn hide(&mut self);
 }
@@ -227,6 +229,7 @@ pub struct StubSurface {
     pub margin_bottom: i32,
     pub margin_left: i32,
     pub blur: bool,
+    pub center: bool,
     pub role: SurfaceRole,
     pub window: WindowOptions,
 }
@@ -262,6 +265,7 @@ impl Default for StubSurface {
             margin_bottom: 0,
             margin_left: 0,
             blur: false,
+            center: false,
             role: SurfaceRole::Layer,
             window: WindowOptions::default(),
         }
@@ -307,6 +311,10 @@ impl ShellSurface for StubSurface {
 
     fn set_blur(&mut self, blur: bool) {
         self.blur = blur;
+    }
+
+    fn set_center(&mut self, center: bool) {
+        self.center = center;
     }
 
     fn show(&mut self) {

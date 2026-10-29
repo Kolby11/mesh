@@ -1,7 +1,7 @@
 {
   "name": "@mesh/tokyo-night",
   "version": "0.1.0",
-  "description": "Tokyo Night theme.",
+  "description": "Tokyo Night theme palette on Material surfaces.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "theme",
@@ -30,7 +30,8 @@
             "icons": [
               "Tokyonight-Dark",
               "Papirus-Dark"
-            ]
+            ],
+            "compositor_glass": false
           }
         }
       ]

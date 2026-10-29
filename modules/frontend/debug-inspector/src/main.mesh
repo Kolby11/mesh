@@ -1032,11 +1032,14 @@ end)
         exclusive-zone: none;
         width: 520px;
         min-height: 640px;
-        background: var(--color-surface);
-        color: var(--color-on-surface);
+        background: transparent;
+        background-image: var(--glass-settings-surface);
+        backdrop-filter: var(--glass-backdrop-panel);
+        box-shadow: var(--glass-shadow-card);
+        color: var(--glass-settings-text);
         border-width: 1px;
         border-style: solid;
-        border-color: var(--color-outline-variant);
+        border-color: var(--glass-rim);
         border-radius: var(--radius-lg);
     }
 
@@ -1107,8 +1110,8 @@ end)
         justify-content: center;
         align-items: center;
         border-radius: var(--radius-full);
-        background: var(--color-surface-container);
-        color: var(--color-on-surface);
+        background: var(--glass-settings-inset);
+        color: var(--glass-settings-text);
         border-width: 0;
     }
 
@@ -1116,10 +1119,10 @@ end)
         gap: var(--spacing-xs);
         padding: var(--spacing-md);
         border-radius: var(--radius-md);
-        background: var(--color-surface-container-low);
+        background: var(--glass-settings-inset);
         border-width: 1px;
         border-style: solid;
-        border-color: var(--color-outline-variant);
+        border-color: var(--glass-settings-rim);
     }
 
     .profiling-head {
@@ -1132,7 +1135,7 @@ end)
     .profiling-title {
         font-size: var(--typography-size-sm);
         font-weight: 700;
-        color: var(--color-on-surface);
+        color: var(--glass-settings-text);
     }
 
     .profiling-badge {
@@ -1147,7 +1150,7 @@ end)
 
     .profiling-copy {
         font-size: var(--typography-size-xs);
-        color: var(--color-on-surface-variant);
+        color: var(--glass-settings-text-muted);
     }
 
     .inspector-body {
@@ -1163,12 +1166,12 @@ end)
     .section-title {
         font-size: var(--typography-size-sm);
         font-weight: 700;
-        color: var(--color-on-surface);
+        color: var(--glass-settings-text);
     }
 
     .section-copy {
         font-size: var(--typography-size-xs);
-        color: var(--color-on-surface-variant);
+        color: var(--glass-settings-text-muted);
     }
 
     .benchmark-stack {
@@ -1179,10 +1182,10 @@ end)
         width: 100%;
         padding: var(--spacing-md);
         border-radius: var(--radius-md);
-        background: var(--color-surface-container);
+        background: var(--glass-settings-inset);
         border-width: 1px;
         border-style: solid;
-        border-color: var(--color-outline-variant);
+        border-color: var(--glass-settings-rim);
     }
 
     .benchmark-card-copy {
@@ -1192,11 +1195,11 @@ end)
     .benchmark-card-title {
         font-size: var(--typography-size-sm);
         font-weight: 700;
-        color: var(--color-on-surface);
+        color: var(--glass-settings-text);
     }
 
     .benchmark-card-text {
         font-size: var(--typography-size-xs);
-        color: var(--color-on-surface-variant);
+        color: var(--glass-settings-text-muted);
     }
 </style>

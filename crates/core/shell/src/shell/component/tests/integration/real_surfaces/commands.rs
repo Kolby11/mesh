@@ -225,7 +225,7 @@ fn real_quick_settings_theme_chips_switch_the_active_theme_mode() {
     ctx.apply_service_payload(
         "theme",
         &serde_json::json!({
-            "current": "mesh-default", "theme_id": "mesh-default", "mode": "dark", "is_dark": true,
+            "current": "material", "theme_id": "material", "mode": "dark", "is_dark": true,
             "modes": [
                 { "name": "dark", "color_scheme": "dark", "contrast": "normal" },
                 { "name": "light", "color_scheme": "light", "contrast": "normal" }

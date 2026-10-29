@@ -1530,8 +1530,8 @@ mod reuse_tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../modules/themes");
         for mode in ["dark", "light"] {
             sources.push((
-                format!("mesh-default-{mode}"),
-                std::fs::read_to_string(themes.join("mesh-default").join(format!("{mode}.css")))
+                format!("material-{mode}"),
+                std::fs::read_to_string(themes.join("material").join(format!("{mode}.css")))
                     .unwrap(),
             ));
         }

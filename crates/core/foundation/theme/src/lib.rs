@@ -623,17 +623,30 @@ pub struct ThemeModeDescriptor {
 /// names exact host resources (fontconfig families, XDG icon-theme ids or icon
 /// pack ids); selecting the theme adopts the first one installed. Packs that
 /// recommend nothing leave the user's font and icon choices untouched.
+///
+/// `composition` names the composition module the theme is designed for. It is
+/// advisory: selecting the theme never switches profile, and surfaces use it
+/// to offer the switch or to show controls only the composition supports.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ThemeRecommendations {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fonts: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub icons: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub composition: Option<String>,
+    /// Whether the compositor's glass plugin should draw behind MESH layer
+    /// surfaces under this theme. `None` leaves the compositor as configured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compositor_glass: Option<bool>,
 }
 
 impl ThemeRecommendations {
     pub fn is_empty(&self) -> bool {
-        self.fonts.is_empty() && self.icons.is_empty()
+        self.fonts.is_empty()
+            && self.icons.is_empty()
+            && self.composition.is_none()
+            && self.compositor_glass.is_none()
     }
 }
 
@@ -721,6 +734,16 @@ impl ThemePackDescriptor {
                     self.id
                 ));
             }
+        }
+        if recommends
+            .composition
+            .as_deref()
+            .is_some_and(|composition| composition.trim().is_empty())
+        {
+            return Err(format!(
+                "theme {} recommends an empty composition",
+                self.id
+            ));
         }
         self.recommends = recommends;
         Ok(self)
@@ -2689,7 +2712,7 @@ mod tests {
         assert_eq!(button.get("padding").map(String::as_str), Some("10"));
         assert_eq!(
             button.get("background").map(String::as_str),
-            Some("#24283b")
+            Some("#2f334d")
         );
     }
 
