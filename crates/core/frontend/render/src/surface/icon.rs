@@ -1634,16 +1634,8 @@ pub fn draw_icon_from_path_with_options_on_canvas(
     tint: Color,
     multicolor: bool,
 ) {
-    draw_file_icon_on_canvas(
-        canvas, path, dest_x, dest_y, dest_w, dest_h, tint, multicolor, 1.0,
-    );
+    draw_file_icon_on_canvas(canvas, path, dest_x, dest_y, dest_w, dest_h, tint, multicolor);
 }
-
-/// Files named by `src` (app icons in a dock) are rasterized at least this much
-/// larger than drawn. Hover and press animations scale them, and a raster made
-/// only for the larger size would paint late and pop in as a sharper image; one
-/// supersampled raster serves rest, hover and press by resampling.
-const SOURCE_ICON_MIN_RASTER_SCALE: f32 = 2.0;
 
 /// Colour of the shared monochrome icon raster; the real tint is applied at draw.
 const NEUTRAL_RASTER_TINT: Color = Color {
@@ -1662,7 +1654,6 @@ fn draw_file_icon_on_canvas(
     dest_h: i32,
     tint: Color,
     multicolor: bool,
-    min_raster_scale: f32,
 ) -> bool {
     // A monochrome raster is the tint over the source alpha, so it is cached
     // once under a neutral colour and recoloured as it is drawn.
@@ -1671,7 +1662,7 @@ fn draw_file_icon_on_canvas(
     } else {
         (NEUTRAL_RASTER_TINT, Some(tint))
     };
-    let raster_scale = canvas_raster_scale(canvas).max(min_raster_scale);
+    let raster_scale = canvas_raster_scale(canvas);
     let mut stretched = false;
     let raster_w = (dest_w as f32 * raster_scale).ceil() as i32;
     let raster_h = (dest_h as f32 * raster_scale).ceil() as i32;
@@ -2064,16 +2055,8 @@ pub fn draw_icon_from_path_in_session(
     multicolor: bool,
 ) {
     session.with_canvas(|canvas| {
-        draw_file_icon_on_canvas(
-            canvas,
-            path,
-            dest_x,
-            dest_y,
-            dest_w,
-            dest_h,
-            tint,
-            multicolor,
-            SOURCE_ICON_MIN_RASTER_SCALE,
+        draw_icon_from_path_with_options_on_canvas(
+            canvas, path, dest_x, dest_y, dest_w, dest_h, tint, multicolor,
         );
     });
 }
@@ -2148,7 +2131,7 @@ fn draw_icon_resolution_with_axes_in_session(
             session
                 .with_canvas(|canvas| {
                     draw_file_icon_on_canvas(
-                        canvas, &path, dest_x, dest_y, dest_w, dest_h, tint, multicolor, 1.0,
+                        canvas, &path, dest_x, dest_y, dest_w, dest_h, tint, multicolor,
                     )
                 })
                 .unwrap_or(true)
