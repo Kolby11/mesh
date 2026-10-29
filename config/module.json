@@ -186,6 +186,15 @@
         "exec.argv:nmcli:[\"device\",\"wifi\",\"rescan\"]",
         "exec.argv:nmcli:[\"radio\",\"wifi\",\"*\"]"
       ],
+      "@mesh/cheatsheet": [
+        "locale.read",
+        "service.wm-keybinds.read",
+        "shell.surface",
+        "theme.read"
+      ],
+      "@mesh/hyprland-keybinds": [
+        "exec.argv:sh:[\"-c\",\"for f in \\\"$HOME/.config/hypr/hyprland/keybinds.lua\\\" \\\"$HOME/.config/hypr/custom/keybinds.lua\\\"; do [ -f \\\"$f\\\" ] && { cat \\\"$f\\\"; echo; }; done; true\"]"
+      ],
       "@mesh/keybind-help": [
         "locale.read",
         "service.keybinds.control",

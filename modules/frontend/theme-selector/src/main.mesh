@@ -74,6 +74,7 @@ local THEME_NORD = "nord"
 local THEME_MOCHA = "catppuccin-mocha"
 local THEME_TOKYO = "tokyo-night"
 local THEME_LIQUID = "liquid-glass"
+local THEME_VITRUM = "vitrum"
 
 current_theme = THEME_DEFAULT
 
@@ -87,6 +88,7 @@ local THEME_OPTIONS = {
     { id = THEME_MOCHA, core = "bubble-option-core-mocha", icon = "palette" },
     { id = THEME_TOKYO, core = "bubble-option-core-tokyo", icon = "weather-clear-night" },
     { id = THEME_LIQUID, core = "bubble-option-core-liquid", icon = "weather-clear" },
+    { id = THEME_VITRUM, core = "bubble-option-core-vitrum", icon = "weather-clear-night" },
 }
 
 local THEME_LABELS = {
@@ -96,6 +98,7 @@ local THEME_LABELS = {
     [THEME_MOCHA] = "Catppuccin Mocha",
     [THEME_TOKYO] = "Tokyo Night",
     [THEME_LIQUID] = "Liquid Glass",
+    [THEME_VITRUM] = "Vitrum",
 }
 
 -- The bubble stage routes both the wheel's `scroll` and the trackpad's

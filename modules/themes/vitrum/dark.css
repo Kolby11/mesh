@@ -1,0 +1,494 @@
+:root {
+  --icon-size-sm: 16px;
+  --icon-size-md: 20px;
+  --icon-size-lg: 24px;
+  --animation-curves-bezier-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --animation-curves-bezier-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --animation-curves-bezier-standard: cubic-bezier(0.2, 0, 0, 1);
+  --animation-curves-bezier-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
+  --animation-curves-bezier-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+  --animation-default-border-radius: border-radius var(--animation-duration-short)
+    var(--animation-curves-bezier-emphasized-decelerate);
+  --animation-default-opacity: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+  --animation-duration-extra-long: 500;
+  --animation-duration-fast: 110;
+  --animation-duration-instant: 0;
+  --animation-duration-long: 420;
+  --animation-duration-medium: 280;
+  --animation-duration-short: 180;
+  --animation-opacity-disabled: 0.38;
+  --animation-scale-hover: 1.04;
+  --animation-scale-press: 0.95;
+  --animation-lift-hover: -3px;
+  --animation-lift-press: -1px;
+  --color-focus-ring: #b4a9ff;
+  --effect-backdrop-blur-surface-radius: 24px;
+  --effect-backdrop-blur-popup-radius: 18px;
+  --effect-backdrop-blur-surface-background: rgba(255, 255, 255, 0.06);
+  --effect-backdrop-blur-popup-background: rgba(255, 255, 255, 0.10);
+  --base16-base00: #0e0d14;
+  --base16-base01: #1b1925;
+  --base16-base02: #2e2a3d;
+  --base16-base03: #625d78;
+  --base16-base04: #a7a3b8;
+  --base16-base05: #d9d6e6;
+  --base16-base06: #f0eef8;
+  --base16-base07: #ffffff;
+  --base16-base08: #f28b9a;
+  --base16-base09: #f4a572;
+  --base16-base0A: #f2d479;
+  --base16-base0B: #8ee0ad;
+  --base16-base0C: #7fd8e8;
+  --base16-base0D: #8b7cf6;
+  --base16-base0E: #b79cf7;
+  --base16-base0F: #e48fd0;
+  --border-style-default: solid;
+  --border-width-hairline: 1;
+  --border-width-medium: 2;
+  --border-width-none: 0;
+  --border-width-thick: 3;
+  --border-width-thin: 1;
+  --color-background: #0e0d14;
+  --color-border: #3a3550;
+  --color-border-muted: #25212f;
+  --color-disabled: #7a7590;
+  --color-error: #f28b9a;
+  --color-error-container: #d6455d;
+  --color-info: #b4a9ff;
+  --color-info-container: #6d5fe0;
+  --color-inverse-on-surface: #0e0d14;
+  --color-inverse-primary: #5546c9;
+  --color-inverse-surface: #ebe9f4;
+  --color-link: #b4a9ff;
+  --color-on-background: #ebe9f4;
+  --color-on-disabled: #2b2738;
+  --color-on-error: #2a0a10;
+  --color-on-error-container: #ffe8ec;
+  --color-on-info: #120c33;
+  --color-on-info-container: #ece9ff;
+  --color-on-link: #0e0d14;
+  --color-on-primary: #120c33;
+  --color-on-primary-container: #ffffff;
+  --color-on-primary-fixed: #120c33;
+  --color-on-primary-fixed-variant: #120c33;
+  --color-on-secondary: #0b1f14;
+  --color-on-secondary-container: #ebe9f4;
+  --color-on-secondary-fixed: #0b1f14;
+  --color-on-secondary-fixed-variant: #0b1f14;
+  --color-on-success: #0b1f14;
+  --color-on-success-container: #0b1f14;
+  --color-on-surface: #ebe9f4;
+  --color-on-surface-variant: #b3afc6;
+  --color-on-tertiary: #1f0b1a;
+  --color-on-tertiary-container: #1f0b1a;
+  --color-on-tertiary-fixed: #1f0b1a;
+  --color-on-tertiary-fixed-variant: #1f0b1a;
+  --color-on-warning: #2a1f06;
+  --color-on-warning-container: #2a1f06;
+  --color-outline: #a09bb8;
+  --color-outline-variant: #3a3550;
+  --color-primary: #8b7cf6;
+  --color-primary-container: #6d5fe0;
+  --color-primary-fixed: #8b7cf6;
+  --color-primary-fixed-dim: #6d5fe0;
+  --color-scrim: #000000;
+  --color-secondary: #8decb9;
+  --color-secondary-container: #1ca65c;
+  --color-secondary-fixed: #8decb9;
+  --color-secondary-fixed-dim: #1ca65c;
+  --color-selection-background: #8b7cf6;
+  --color-selection-foreground: #120c33;
+  --color-shadow: #05030f;
+  --color-success: #8ee0ad;
+  --color-success-container: #4fb97f;
+  --color-surface: #15131d;
+  --color-surface-bright: #3b3650;
+  --color-surface-container: #1b1925;
+  --color-surface-container-high: #242131;
+  --color-surface-container-highest: #2e2a3d;
+  --color-surface-container-low: #12101a;
+  --color-surface-container-lowest: #0e0d14;
+  --color-surface-dim: #0e0d14;
+  --color-surface-tint: #8b7cf6;
+  --color-surface-variant: #242131;
+  --color-tertiary: e48fd0;
+  --color-tertiary-container: #a5528f;
+  --color-tertiary-fixed: e48fd0;
+  --color-tertiary-fixed-dim: #a5528f;
+  --color-warning: #f2d479;
+  --color-warning-container: #c9a53a;
+  --elevation-2xl: 12;
+  --elevation-lg: 6;
+  --elevation-md: 3;
+  --elevation-none: 0;
+  --elevation-sm: 1;
+  --elevation-xl: 8;
+  --radius-2xl: 28;
+  --radius-full: 9999;
+  --radius-lg: 12;
+  --radius-md: 9;
+  --radius-none: 0;
+  --radius-sm: 6;
+  --radius-xl: 20;
+  --shadow-colored-primary: 0 0 0 1px #8b7cf659;
+  --shadow-umbra-lg: 0 10px 30px rgba(0, 4, 16, 0.55);
+  --shadow-umbra-md: 0 4px 14px rgba(0, 4, 16, 0.45);
+  --shadow-umbra-sm: 0 1px 4px rgba(0, 4, 16, 0.40);
+  --shape-corner-extra-large: 28;
+  --shape-corner-extra-small: 4;
+  --shape-corner-full: 9999;
+  --shape-corner-large: 20;
+  --shape-corner-medium: 12;
+  --shape-corner-small: 9;
+  --spacing-2xl: 40;
+  --spacing-3xl: 48;
+  --spacing-4xl: 64;
+  --spacing-inset-comfortable: 16;
+  --spacing-inset-compact: 12;
+  --spacing-inset-loose: 24;
+  --spacing-lg: 24;
+  --spacing-md: 16;
+  --spacing-sm: 8;
+  --spacing-xl: 32;
+  --spacing-xs: 4;
+  --state-dragged-opacity: 0.16;
+  --state-focus-opacity: 0.12;
+  --state-hover-opacity: 0.08;
+  --state-pressed-opacity: 0.12;
+  --typography-family: Inter;
+  --typography-family-brand: Inter;
+  --typography-family-plain: Inter;
+  --typography-line-height-normal: 1.4;
+  --typography-line-height-relaxed: 1.6;
+  --typography-line-height-tight: 1.15;
+  --typography-scale-body-large-line-height: 24;
+  --typography-scale-body-large-size: 16;
+  --typography-scale-body-large-weight: 400;
+  --typography-scale-body-medium-line-height: 20;
+  --typography-scale-body-medium-size: 14;
+  --typography-scale-body-medium-weight: 400;
+  --typography-scale-body-small-line-height: 16;
+  --typography-scale-body-small-size: 12;
+  --typography-scale-body-small-weight: 400;
+  --typography-scale-display-large-line-height: 64;
+  --typography-scale-display-large-size: 57;
+  --typography-scale-display-large-weight: 400;
+  --typography-scale-display-medium-line-height: 52;
+  --typography-scale-display-medium-size: 45;
+  --typography-scale-display-medium-weight: 400;
+  --typography-scale-display-small-line-height: 44;
+  --typography-scale-display-small-size: 36;
+  --typography-scale-display-small-weight: 400;
+  --typography-scale-headline-large-line-height: 40;
+  --typography-scale-headline-large-size: 32;
+  --typography-scale-headline-large-weight: 400;
+  --typography-scale-headline-medium-line-height: 36;
+  --typography-scale-headline-medium-size: 28;
+  --typography-scale-headline-medium-weight: 400;
+  --typography-scale-headline-small-line-height: 32;
+  --typography-scale-headline-small-size: 24;
+  --typography-scale-headline-small-weight: 400;
+  --typography-scale-label-large-line-height: 20;
+  --typography-scale-label-large-size: 14;
+  --typography-scale-label-large-weight: 500;
+  --typography-scale-label-medium-line-height: 16;
+  --typography-scale-label-medium-size: 12;
+  --typography-scale-label-medium-weight: 500;
+  --typography-scale-label-small-line-height: 16;
+  --typography-scale-label-small-size: 11;
+  --typography-scale-label-small-weight: 500;
+  --typography-scale-title-large-line-height: 28;
+  --typography-scale-title-large-size: 22;
+  --typography-scale-title-large-weight: 500;
+  --typography-scale-title-medium-line-height: 24;
+  --typography-scale-title-medium-size: 16;
+  --typography-scale-title-medium-weight: 500;
+  --typography-scale-title-small-line-height: 20;
+  --typography-scale-title-small-size: 14;
+  --typography-scale-title-small-weight: 500;
+  --typography-size-2xl: 24;
+  --typography-size-3xl: 32;
+  --typography-size-lg: 16;
+  --typography-size-md: 14;
+  --typography-size-sm: 12;
+  --typography-size-xl: 20;
+  --typography-size-xs: 11;
+  --typography-tracking-normal: 0;
+  --typography-tracking-tight: -0.02;
+  --typography-tracking-wide: 0.02;
+  --typography-weight-bold: 700;
+  --typography-weight-light: 300;
+  --typography-weight-medium: 500;
+  --typography-weight-regular: 400;
+  --typography-weight-semibold: 600;
+}
+
+row {
+  flex-direction: row;
+  width: fit;
+  height: fit;
+  padding: 0;
+  gap: 8;
+  background: transparent;
+}
+
+column {
+  flex-direction: column;
+  width: fit;
+  height: fit;
+  padding: 0;
+  gap: 8;
+  background: transparent;
+}
+
+box {
+  width: fit;
+  height: fit;
+  background: transparent;
+}
+
+button {
+  flex-direction: row;
+  padding: 10;
+  gap: 8;
+  border-radius: 9;
+  background: #ffffff17;
+}
+
+input {
+  flex-direction: row;
+  height: 44;
+  padding: 10;
+  gap: 8;
+  border-width: 1;
+  border-color: #3a3550;
+  border-radius: 9;
+  background: #0e0d14;
+}
+
+slider {
+  flex-direction: row;
+  height: 36;
+  padding: 8;
+  gap: 8;
+}
+
+/* Vitrum slider: a thin track with a system-blue fill and a white pill
+   thumb. Pressed, the pill swells with a slight overshoot into a clear lens
+   that refracts the track beneath it, and settles back on release. */
+slider::track {
+  height: 6px;
+  margin-left: 10px;
+  margin-right: 10px;
+  border-radius: 3px;
+  background-color: #78788033;
+}
+
+slider::fill {
+  border-radius: 3px;
+  background-color: var(--color-primary);
+}
+
+slider::thumb {
+  width: 38px;
+  height: 24px;
+  border-radius: 12px;
+  border-width: 1px;
+  border-style: solid;
+  border-color: #ffffffcc;
+  background-color: #fbfcfe;
+  box-shadow: 0 2px 8px #00000038;
+  transition: width 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              height 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              border-radius 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              background-color 200ms var(--animation-curves-bezier-standard),
+              box-shadow 200ms var(--animation-curves-bezier-standard);
+}
+
+slider:active::thumb {
+  width: 52px;
+  height: 32px;
+  border-radius: 16px;
+  border-color: #ffffffee;
+  background-color: #ffffff1a;
+  box-shadow: 0 6px 18px #00000024;
+  backdrop-filter: refract(6px 5px) dispersion(0.4px);
+}
+
+slider:disabled::fill {
+  background-color: color-mix(in srgb, var(--color-on-surface) 30%, transparent);
+}
+
+scroll {
+  flex-direction: column;
+  height: 220;
+  padding: 0;
+  gap: 8;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: transparent;
+}
+
+icon {
+  width: 18;
+  height: 18;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+text {
+  height: 22;
+  font-size: 14;
+  background: transparent;
+}
+
+span {
+  flex-direction: row;
+  align-self: start;
+  padding: 0;
+  gap: 0;
+  background: transparent;
+}
+
+popover {
+  padding: 0;
+  gap: 0;
+  background: transparent;
+}
+
+node {
+  display: flex;
+  width: auto;
+  height: auto;
+  padding: 0;
+  margin: 0;
+  gap: 0;
+  border-width: 0;
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-on-surface);
+  font-family: var(--typography-family);
+  font-size: var(--typography-size-md);
+  font-weight: var(--typography-weight-regular);
+  line-height: var(--typography-line-height-normal);
+  opacity: 1;
+  overflow: visible;
+  flex-direction: row;
+  flex-grow: 0;
+  flex-shrink: 1;
+  align-items: stretch;
+  align-self: auto;
+  justify-content: start;
+  transition:
+    background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+    color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+    border-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
+    opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate),
+    border-width var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    width var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    height var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    padding var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    margin var(--animation-duration-medium) var(--animation-curves-bezier-standard),
+    transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+}
+
+/* Glass chrome: translucent enough for the compositor glass to show through
+   (in place, or as a blurred popup) and above the 0.04 contour threshold. */
+tooltip {
+  background: rgba(18, 14, 34, 0.42);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  animation: tooltip-enter var(--animation-duration-short) ease-out;
+  cursor-offset-x: 14;
+  cursor-offset-y: 18;
+  delay: 300;
+  gap: 6;
+  position: bottom;
+}
+
+/* Tooltip enter animation: expands outward from the box center while fading
+   in. Stops may declare `opacity` and `transform` (scale/translate). */
+@keyframes tooltip-enter {
+  from {
+    opacity: 0;
+    transform: scale(0);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Glass material: Vitrum's lit-from-within glass over the shared
+   @mesh/glass-material token family. Like Liquid Glass the refraction is the
+   compositor's; the tint is the accent (a violet by default) with a mint
+   second hue (--color-secondary: the accent turned -100 degrees, as Vitrum
+   derives its dichroic edge), and controls that are on glow with the accent.
+   Fills keep an even alpha above the 0.04 contour threshold and shadows stay
+   below it. */
+@module "@mesh/glass-material" {
+  :root {
+    --glass-hover: #ffffff2e;
+    --glass-rim: #ffffff2e;
+    --glass-rim-hover: #d9d3ff99;
+    --glass-text: #f4f2fc;
+    --glass-text-muted: #d5d1e6cc;
+    --glass-text-heading: #ffffff;
+    --glass-text-strong: #ffffff;
+    --glass-text-caption: #cbc6defa;
+    --glass-text-cool: #d9d3ff;
+    --glass-text-artwork: #f2f0fb;
+    --glass-text-control: #ffffff;
+    --glass-text-on-accent: #120c33;
+    --glass-indicator: #ffffff;
+    --glass-indicator-recording: #ff5d73;
+    --glass-fill-subtle: #ffffff38;
+    --glass-fill-occupied: #8b7cf68c;
+    --glass-fill-hover: #8b7cf6c4;
+    --glass-fill-inset: #ffffff26;
+    --glass-rim-accent: #c9c1ff80;
+    --glass-rim-inset: #ffffff33;
+    --glass-rim-control: #ffffff2e;
+    --glass-fill-artwork: #ffffff1f;
+    --glass-fill-lens: #ffffff03;
+    --glass-rim-focused: #b4a9ff99;
+    --glass-surface-pill: linear-gradient(to bottom, #c4bde62e, #0e0a2640);
+    --glass-surface-recording: linear-gradient(to bottom, #ff6b8680, #d6355252);
+    --glass-surface-weather: linear-gradient(to bottom, #c4bde62e, #0e0a2640);
+    --glass-surface-media: linear-gradient(to bottom, #c4bde62e, #0e0a2640);
+    --glass-surface-active: linear-gradient(to bottom, #8b7cf6f2, #6d5fe0d9);
+    --glass-surface-dock: linear-gradient(to bottom, #c4bde62e, #0e0a2640);
+    --glass-surface-flare: linear-gradient(to bottom, #ffffff30, #ffffff10);
+    --glass-surface-lens: linear-gradient(to bottom, #ffffff22, #0000000f);
+    --glass-surface-focused: linear-gradient(to bottom, #c9c1ff40, #8b7cf61f);
+    --glass-surface-battery: linear-gradient(to bottom, #ffffffe6, #e8e4fbb3);
+    --glass-surface-battery-low: linear-gradient(to bottom, #ff8fa0e6, #e2465ecc);
+    --glass-surface-control: linear-gradient(to bottom, #8b7cf673, #8b7cf638);
+    --glass-shadow-pill: 0 4px 14px #07031408;
+    --glass-shadow-card: 0 18px 48px #07031408;
+    --glass-shadow-dock: 0 -6px 24px #07031408;
+    --glass-shadow-lens: 0 4px 12px #07031408;
+    --glass-shadow-artwork: 0 8px 22px #07031466;
+    --glass-text-on-error: #ffffff;
+    --glass-surface-panel: linear-gradient(to bottom, #c4bde62e, #0e0a2640);
+    --glass-settings-surface: linear-gradient(to bottom, #f5f4fbf2, #e9e7f3eb);
+    --glass-settings-text: #1b1826;
+    --glass-settings-text-muted: #6b6783;
+    --glass-settings-inset: #ffffffe0;
+    --glass-settings-rim: #0000000f;
+    --glass-settings-selected: linear-gradient(to bottom, #e3defdf2, #d6d0fbf2);
+    --glass-backdrop-pill: blur(2px) refract(0px 0px);
+    --glass-backdrop-card: blur(2px) refract(0px 0px);
+    --glass-backdrop-dock: blur(2px) refract(0px 0px);
+    --glass-backdrop-panel: blur(4px) refract(0px 0px);
+    --glass-backdrop-flare: blur(2px) refract(0px 0px);
+    --glass-backdrop-lens: refract(0px 0px);
+  }
+}

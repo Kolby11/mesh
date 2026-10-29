@@ -441,6 +441,22 @@ end
         border-color: #0a84ff;
     }
 
+    .bubble-option-core-vitrum {
+        background-color: #2a2150;
+        color: #ffffff;
+        border-color: #8b7cf6;
+        animation-name: bubble-option-float-center;
+        animation-delay: 400ms;
+    }
+
+    .bubble-option-core-vitrum-active {
+        border-color: #8decb9;
+    }
+
+    .bubble-option-core-vitrum:hover {
+        border-color: #8decb9;
+    }
+
     .bubble-option-core-language {
         background-color: prop(blur_background);
         color: var(--color-on-surface);

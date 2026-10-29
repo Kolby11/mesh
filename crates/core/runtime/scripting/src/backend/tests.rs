@@ -4609,3 +4609,52 @@ async fn live_mpris_publishes_playerctl_position() {
     ctx.call_stop_async().await.unwrap();
     ctx.shutdown_streams().await;
 }
+
+#[test]
+fn hyprland_keybinds_group_described_binds_by_section_comment() {
+    let script = bundled_backend_script("../../../../modules/backend/hyprland-keybinds/src/main.luau");
+    let mut ctx = BackendScriptContext::new("@mesh/hyprland-keybinds");
+    ctx.load_script(&script).unwrap();
+    ctx.ensure_lua()
+        .unwrap()
+        .load(
+            r#"
+mesh.exec = function(program, args)
+    return { success = true, stderr = "", stdout = [==[
+--##! Shell
+hl.bind("SUPER + SUPER_L", hl.dsp.global("quickshell:searchToggleRelease"), { description = "Shell: Toggle search" })
+hl.bind("SUPER + V", hl.dsp.global("quickshell:overviewClipboardToggle"))
+hl.bind("CTRL + SUPER + T", hl.dsp.global("quickshell:wallpaperSelectorToggle"),
+    { description = "Shell: Change wallpaper" })
+--##! Window
+replace_bind("SUPER + S", hl.dsp.layout("togglesplit"), { description = "Window: Toggle split" })
+hl.bind("SUPER + SHIFT + F", hl.dsp.window.float({ action = "toggle" }), { description = "Float/Tile" })
+-- hl.bind("SUPER + X", hl.dsp.exec_cmd("x"), { description = "Commented out" })
+]==] }
+end
+"#,
+        )
+        .exec()
+        .unwrap();
+
+    let outcome = ctx
+        .run_command_finished("refresh", &serde_json::json!({}))
+        .unwrap();
+    let state = outcome.state.expect("refresh publishes state");
+    assert_eq!(
+        state,
+        serde_json::json!({
+            "available": true,
+            "sections": [
+                { "name": "Shell", "binds": [
+                    { "mods": ["Super"], "key": "SUPER_L", "comment": "Toggle search" },
+                    { "mods": ["Ctrl", "Super"], "key": "T", "comment": "Change wallpaper" },
+                ] },
+                { "name": "Window", "binds": [
+                    { "mods": ["Super"], "key": "S", "comment": "Toggle split" },
+                    { "mods": ["Super", "Shift"], "key": "F", "comment": "Float/Tile" },
+                ] },
+            ],
+        })
+    );
+}

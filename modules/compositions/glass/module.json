@@ -22,7 +22,8 @@
         "@mesh/glass-dashboard": ">=0.1.0",
         "@mesh/radial-launcher": ">=0.1.0",
         "@mesh/wallpaper-parallax": ">=0.1.0",
-        "@mesh/keybind-help": ">=0.1.0"
+        "@mesh/keybind-help": ">=0.1.0",
+        "@mesh/cheatsheet": ">=0.1.0"
       }
     },
     "compose": {
@@ -81,6 +82,11 @@
           "module": "@mesh/keybind-help",
           "entrypoint": "main",
           "active": true
+        },
+        "@mesh/cheatsheet#default": {
+          "module": "@mesh/cheatsheet",
+          "entrypoint": "main",
+          "active": true
         }
       },
       "providers": {
@@ -94,7 +100,8 @@
         "mesh.notifications": "@mesh/freedesktop-notifications",
         "mesh.system": "@mesh/proc-system",
         "mesh.visualizer": "@mesh/cava-visualizer",
-        "mesh.wallpapers": "@mesh/wallpaper-directory"
+        "mesh.wallpapers": "@mesh/wallpaper-directory",
+        "mesh.wm-keybinds": "@mesh/hyprland-keybinds"
       },
       "resources": {
         "theme": "@mesh/liquid-glass",

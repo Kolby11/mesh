@@ -22,7 +22,7 @@ Semantic normalization iterates string and typed attribute views together (`acce
 
 Some background images are resolved and parsed for validation and then again for application (`style/resolve/declaration.rs:463`, `:983`); typed literals may take an earlier path. Measure 1/100/1,000 gradient nodes with 2/8/32 stops and literal or variable inputs, parsing calls, allocations and frame latency, preserving diagnostics, cascade and pixels. This is an unmeasured style hypothesis.
 
-Interaction traversal clones inherited clip stacks (`interaction/src/lib.rs:146`, `interaction_contract.rs:243`). Benchmark pointer and focus walks across 100/1,000/10,000 nodes with 0/1/4/16 nested clips, including transforms and rounded clips, allocations and latency; require targeting and clipping parity. This is an unmeasured cross-section hypothesis related to existing hit-test work; the rejected Skia replay inline-stack experiment is a different path.
+Interaction traversal previously cloned inherited clip vectors at each node. Commit `b2f7ebb4` now shares the vector across non-clipping nodes; adding a clip still copies its ancestors (`interaction_contract.rs:243`). See the October performance log for its workload and measurements. Further clip-nesting work is an unmeasured cross-section hypothesis; the rejected Skia replay inline-stack experiment is a different path.
 
 ## Dead code and redundancy
 

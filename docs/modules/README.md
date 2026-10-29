@@ -30,6 +30,7 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/glass-bar` | surface | `src/main.mesh` | Floating glass islands with clock/calendar, workspaces, media, recording, weather and a live audio/brightness control center |
 | `@mesh/glass-widgets` | surface | `src/main.mesh` | Responsive desktop media and weather cards with colour artwork and a three-point forecast |
 | `@mesh/keybind-help` | surface | `src/main.mesh` | Keyboard shortcuts window opened by `F1`, listing every binding by surface |
+| `@mesh/cheatsheet` | surface | `src/main.mesh` | Dark compositor-shortcut cheatsheet: the window manager's described keybinds in sections and columns of keycaps; reads `mesh.wm-keybinds`; open it with `mesh-shell` IPC `shell:toggle_surface:@mesh/cheatsheet` |
 | `@mesh/radial-launcher` | surface | `src/main.mesh` | Radial overlay: a ring of app wedges, a clock hub and media wedges, built from `<shape>` sectors |
 | `@mesh/halo-orb` | surface | `src/main.mesh` | Always-visible orb that toggles the radial launcher, with the shell switcher beside it |
 | `@mesh/glass-dock` | surface | `src/main.mesh` | Glass shelf with neighboring-icon magnification and a searchable launcher with grid and list views of installed applications |
@@ -100,6 +101,7 @@ and easing, with separate entrance animations for islands, cards and popups.
 | `@mesh/proc-system` | backend | `src/main.luau` | `mesh.system` from `/proc`, hwmon and `df` |
 | `@mesh/cava-visualizer` | backend | `src/main.luau` | `mesh.visualizer` spectrum bars from `cava` |
 | `@mesh/wallpaper-directory` | backend | `src/main.luau` | `mesh.wallpapers` from one directory, with ImageMagick thumbnails and 16:9 panoramas |
+| `@mesh/hyprland-keybinds` | backend | `mesh.wm-keybinds` provider: described `hl.bind` calls from the Hyprland Lua config, grouped by `--##! Section` comments |
 
 MPRIS follows metadata and playback status, resamples position every two seconds
 for external seeks, and downloads artwork separately from playback updates.
@@ -130,9 +132,11 @@ stale artwork requests are cancelled when the track's art URL changes.
 | `@mesh/system-interface` | interface | `mesh.system` processor, memory, disk, temperature and network load |
 | `@mesh/visualizer-interface` | interface | `mesh.visualizer` audio spectrum contract |
 | `@mesh/wallpapers-interface` | interface | `mesh.wallpapers` wallpaper library contract |
+| `@mesh/wm-keybinds-interface` | interface | `mesh.wm-keybinds` compositor keybind contract: sections of described binds |
 | `@mesh/recorder-interface` | interface | `mesh.recorder` screen-recording contract |
 | `@mesh/liquid-glass` | theme | Neutral white glass palette over a deep blue base with system-blue accents; tunes `@mesh/glass-material` |
 | `@mesh/frutiger-aero` | theme | Frutiger Aero palette: frosted-white glass, sky and aqua blues, grass-green accents, Noto Sans; light (default) and dark modes; tunes `@mesh/glass-material` |
+| `@mesh/vitrum` | theme | Vitrum palette, after the niri glass shell: lit-from-within glass tinted by a violet accent with a mint second hue, rounded parts, Inter; dark (default) and light modes; tunes `@mesh/glass-material` |
 | `@mesh/volume-presentation` | library | Luau `require("@mesh/volume-presentation/volume")`: level normalization, scroll steps and the semantic volume icon shared by every audio frontend |
 | `@mesh/glass-material` | library | Shared surface gradients, translucent fills, text, accents, rims, hovers, shadows and `--glass-backdrop-{pill,card,dock,panel,flare,lens}` blur/refraction materials; defaults derive from any theme, with Liquid Glass and Frutiger Aero tuning them |
 | `@mesh/shell-ui-interface` | interface | Named UI extension-point contracts a host surface renders foreign module UI into |

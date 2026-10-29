@@ -505,6 +505,7 @@ fn shipped_glass_material_resolves_and_paints_under_every_theme_mode() {
                     ("frutiger-aero", "light") => (12.0, 5.0, 4.0, 0.3),
                     ("frutiger-aero", "dark") => (12.0, 6.0, 5.0, 0.5),
                     ("liquid-glass", _) => (2.0, 0.0, 0.0, 0.0),
+                    ("vitrum", _) => (2.0, 0.0, 0.0, 0.0),
                     _ => (10.0, 6.0, 5.0, 0.4),
                 };
                 let backdrop = style.backdrop_filter;
@@ -537,6 +538,15 @@ fn shipped_glass_material_resolves_and_paints_under_every_theme_mode() {
                         style.box_shadow.color,
                         Color::from_hex("#00081f08").unwrap()
                     );
+                } else if declaration.id == "vitrum" {
+                    let (from, to, foreground) = match mode.as_str() {
+                        "dark" => ("#c4bde62e", "#0e0a2640", "#f4f2fc"),
+                        "light" => ("#ffffffcc", "#e9e5f98c", "#1b1826"),
+                        _ => panic!("unexpected Vitrum mode: {mode}"),
+                    };
+                    assert_eq!(gradient.from, Color::from_hex(from).unwrap());
+                    assert_eq!(gradient.to, Color::from_hex(to).unwrap());
+                    assert_eq!(style.color, Color::from_hex(foreground).unwrap());
                 } else {
                     let surface = theme
                         .resolve_token_value("--color-surface-container-high")
