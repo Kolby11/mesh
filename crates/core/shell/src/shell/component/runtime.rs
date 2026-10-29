@@ -1079,6 +1079,8 @@ impl FrontendSurfaceComponent {
         {
             failure.take().map(|(_, message)| message)
         } else {
+            drop(failure);
+            self.resolve_template_expression_failure(instance_key);
             None
         }
     }

@@ -524,6 +524,7 @@ impl FrontendSurfaceComponent {
                 .unwrap_or_else(|| self.build_error_widget(failure));
         } else {
             self.template_patch_recovery_pending.set(false);
+            self.resolve_template_expression_failure(self.root_instance_key());
         }
         if let Err(error) = mesh_core_elements::validate_widget_tree(&tree) {
             tracing::error!(

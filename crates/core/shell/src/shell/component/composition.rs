@@ -119,7 +119,6 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             .evaluate_compiled_template_expression(expression, locals)
         {
             Ok((value, service_reads)) => {
-                self.resolve_template_expression_failure(instance_key);
                 Some(mesh_core_frontend::TemplateExpressionResult {
                     value,
                     service_reads,
