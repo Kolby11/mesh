@@ -449,7 +449,11 @@ impl FrontendCatalogHandle {
         if current.version != expected_version {
             return false;
         }
-        *current = state;
+        // The restored content gets a fresh version: reusing the old one would
+        // let a later publication collide with the version a stale rollback
+        // is still waiting on.
+        let version = current.version.wrapping_add(1);
+        *current = FrontendCatalogState { version, ..state };
         true
     }
 
