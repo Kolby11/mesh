@@ -494,6 +494,17 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 .collect()
         };
 
+        // The host's declared maximum applies before any instance is built, so
+        // excess contributions never initialize or mount.
+        let mut selected = selected;
+        if let Some(max) = host
+            .hosted_extension_points
+            .get(extension_point)
+            .and_then(|hosted| hosted.max)
+        {
+            selected.truncate(max as usize);
+        }
+
         let mut nodes = Vec::with_capacity(selected.len());
         for selected in selected {
             let (placement_id, contribution) = match selected {
