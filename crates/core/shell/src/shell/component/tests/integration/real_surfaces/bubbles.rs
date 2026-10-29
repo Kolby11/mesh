@@ -357,7 +357,7 @@ fn shipped_theme_selector_scroll_reveals_themes_outside_the_window() {
 
     assert_eq!(
         seen.len(),
-        6,
+        7,
         "four scroll steps should have brought every installed theme into view: {seen:?}"
     );
 }

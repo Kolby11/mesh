@@ -143,7 +143,7 @@ fn navigation_bar_keyboard_shortcut_and_theme_activation_work_on_real_surface() 
             service_request_parts(request).is_some_and(|(interface, command, payload)| {
                 interface == "mesh.theme"
                     && command == "set_theme"
-                    && payload.get("theme_id") == Some(&serde_json::json!("liquid-glass"))
+                    && payload.get("theme_id") == Some(&serde_json::json!("vitrum"))
             })
         }),
         "Enter on a focused theme option should select it: {selection_requests:?}"
