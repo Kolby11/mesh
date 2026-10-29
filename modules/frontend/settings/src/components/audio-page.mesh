@@ -119,6 +119,8 @@ effect(function()
         controls_disabled = true
         provider_label = "common.no_active_provider"
         control_path = "common.unavailable"
+        output_name = t("audio.default_output")
+        output_description = t("audio.discovery_unavailable")
         sync_volume(0, false)
         return
     end

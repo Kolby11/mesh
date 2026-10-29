@@ -158,6 +158,13 @@ effect(function()
     if device.available == false then
         service_pill = "device.partial"
         service_active = false
+        os_label = t("common.not_reported")
+        kernel_label = t("common.not_reported")
+        architecture_label = t("common.not_reported")
+        processor_label = t("common.not_reported")
+        memory_label = t("common.not_reported")
+        graphics_label = t("common.not_reported")
+        uptime_label = t("common.not_reported")
         device_backend_notice = "device.runtime_live"
         device_backend_joiner = ""
         device_backend_source = ""
