@@ -41,10 +41,10 @@ pub fn apply_easing(easing: Easing, t: f32) -> f32 {
     let t = t.clamp(0.0, 1.0);
     match easing {
         Easing::Linear => t,
-        Easing::Ease => ease_in_out_cubic(t),
-        Easing::EaseIn => ease_in_cubic(t),
-        Easing::EaseOut => ease_out_cubic(t),
-        Easing::EaseInOut => ease_in_out_cubic(t),
+        Easing::Ease => cubic_bezier_eval(t, 0.25, 0.1, 0.25, 1.0),
+        Easing::EaseIn => cubic_bezier_eval(t, 0.42, 0.0, 1.0, 1.0),
+        Easing::EaseOut => cubic_bezier_eval(t, 0.0, 0.0, 0.58, 1.0),
+        Easing::EaseInOut => cubic_bezier_eval(t, 0.42, 0.0, 0.58, 1.0),
         Easing::CubicBezier(x1, y1, x2, y2) => cubic_bezier_eval(t, x1, y1, x2, y2),
         Easing::Steps(count, position) => steps_eval(t, count, position),
     }
@@ -79,22 +79,6 @@ fn steps_eval(t: f32, count: u32, position: StepPosition) -> f32 {
     };
 
     (current / jumps).clamp(0.0, 1.0)
-}
-
-fn ease_in_cubic(t: f32) -> f32 {
-    t * t * t
-}
-
-fn ease_out_cubic(t: f32) -> f32 {
-    1.0 - (1.0 - t).powi(3)
-}
-
-fn ease_in_out_cubic(t: f32) -> f32 {
-    if t < 0.5 {
-        4.0 * t * t * t
-    } else {
-        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
-    }
 }
 
 /// Evaluate a CSS-style cubic Bézier curve at progress `t in [0, 1]`.
@@ -181,6 +165,23 @@ mod tests {
         ] {
             assert!(apply_easing(easing, 0.0).abs() < 1e-4);
             assert!((apply_easing(easing, 1.0) - 1.0).abs() < 1e-4);
+        }
+    }
+
+    #[test]
+    fn keyword_easings_follow_the_css_keyword_curves() {
+        // Reference values of the CSS keyword cubic-beziers at t = 0.5.
+        for (easing, expected) in [
+            (Easing::Ease, 0.8024),
+            (Easing::EaseIn, 0.3153),
+            (Easing::EaseOut, 0.6847),
+            (Easing::EaseInOut, 0.5),
+        ] {
+            assert!(
+                (apply_easing(easing, 0.5) - expected).abs() < 5e-3,
+                "{easing:?}: {}",
+                apply_easing(easing, 0.5)
+            );
         }
     }
 

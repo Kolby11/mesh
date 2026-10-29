@@ -978,9 +978,10 @@ mod tests {
 
         let animation = tooltip_animation_from_theme(&theme).expect("animation lowered");
         let mid = animation.sample(Duration::from_millis(100));
-        assert!((mid.opacity - 0.125).abs() < 1e-3);
-        assert!((mid.scale - 0.5625).abs() < 1e-3);
-        assert!((mid.translate_y - 8.75).abs() < 1e-3);
+        // CSS `ease-in` maps half progress to ~.3153.
+        assert!((mid.opacity - 0.3153).abs() < 5e-3);
+        assert!((mid.scale - 0.6577).abs() < 5e-3);
+        assert!((mid.translate_y - 6.847).abs() < 5e-2);
     }
 
     #[test]

@@ -576,11 +576,11 @@ mod tests {
             )
             .expect("eased segment frame");
 
-        // The second half is sampled at local progress .5. Ease-in maps that
-        // to .125, so the midpoint stop (.5) advances only 1/16 of the full
-        // style range instead of the linear 1/4.
-        assert!((current.opacity - 0.5625).abs() < 0.001);
-        assert!((current.transform.translate_x - 56.25).abs() < 0.001);
+        // The second half is sampled at local progress .5. The CSS `ease-in`
+        // curve maps that to ~.3153, so the midpoint stop (.5) advances ~.158
+        // of the segment's range instead of the linear .25.
+        assert!((current.opacity - 0.6577).abs() < 0.005);
+        assert!((current.transform.translate_x - 65.77).abs() < 0.5);
     }
 
     #[test]

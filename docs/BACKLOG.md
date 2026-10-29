@@ -46,7 +46,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Classify removal of optional positional service arguments as breaking; existing callers can still supply them. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Preserve validated stylesheet image paths through style lowering; resolved relative URLs are rejected as absolute. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Make keyboard focus traversal reach offscreen scroll descendants and reveal the focused control. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
-- [ ] Implement the standard easing keyword curves; current keywords use different polynomials. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Bound command pipe capture and shutdown when descendants outlive the direct child; retained pipes can block worker cleanup. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Retry Wayland flush after transient write backpressure; `WouldBlock` currently propagates as an error. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Preserve distinct, resolvable diagnostic issue identities when codes exceed the size limit; truncation currently breaks lookup and can merge issues. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
