@@ -983,6 +983,8 @@ impl FrontendCatalog {
                                 entry_path
                                     .as_ref()
                                     .is_some_and(|path| compiled.source_path == *path)
+                                    && manifest_fingerprint(&compiled.manifest)
+                                        == manifest_fingerprint(&module.manifest)
                                     && compiled.source_fingerprint.is_some_and(|fingerprint| {
                                         source_fingerprint(&compiled.watched_paths)
                                             == Some(fingerprint)

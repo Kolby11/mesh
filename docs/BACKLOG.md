@@ -287,7 +287,6 @@ evidence and test workloads are in the linked reports.
 
 - [ ] Provide a real evaluator for production preview expressions; the current no-composition path returns null while unit tests use Luau. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Keep template-expression failure diagnostics active until the full render succeeds; a later successful expression currently resolves them prematurely. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
-- [ ] Include manifest identity when reusing compiled contribution roots; manifest-only changes can retain an old contribution manifest. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Tie frontend compilation fingerprints to the exact source bytes parsed; edits between parsing and later fingerprint reads can publish stale compiled content as current. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Resolve component-relative asset URLs per source file; the source-text parse cache can reuse another directory's asset base. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Assess collision-safe equality for frontend memo fingerprints; the 64-bit hash alone decides reuse. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
