@@ -21,24 +21,11 @@ theme_icon = "weather-clear-night"
 theme_tooltip_key = "nav.select_theme"
 
 theme_popover = nil
-local theme_popover_connected = false
 
-local function apply_theme(theme_id)
-    local is_dark = type(theme_id) == "string" and string.find(theme_id, "dark", 1, true) ~= nil
-    theme_icon = is_dark and "weather-clear-night" or "weather-clear"
-end
+local theme = require("mesh.theme")
 
-effect(function(self)
-    -- `bind:this` becomes available after the initial template evaluation.
-    -- State updates then flow through the child event instead of being polled.
-    if theme_popover == nil or theme_popover_connected then
-        return
-    end
-    theme_popover_connected = true
-    apply_theme(theme_popover.current_theme)
-    theme_popover.ThemeChanged:on(function()
-        apply_theme(theme_popover.current_theme)
-    end)
+effect(function()
+    theme_icon = theme.is_dark ~= false and "weather-clear-night" or "weather-clear"
 end)
 </script>
 
