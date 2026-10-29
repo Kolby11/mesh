@@ -96,6 +96,10 @@ struct TextEngine {
     alias_set_id: u64,
     swash_cache: SwashCache,
     layout_cache: ByteLruCache<u64, TextLayoutEntry>,
+    /// Key of the layout `take_layout` last returned from the cache. The
+    /// caller stores the buffer back, so reusing the key avoids reallocating
+    /// its strings on every hit.
+    parked_key: Option<(u64, TextLayoutKey)>,
     resource_revision: u64,
     /// Bumped when the font system changes; [`Self::measurer_revision`] is
     /// derived from it and the active alias set.
@@ -163,7 +167,8 @@ pub struct TextCacheMetrics {
     pub shaping_micros: u64,
 }
 
-struct TextLayoutEntry {
+/// The inputs a cached layout was shaped from, kept to confirm a hash match.
+struct TextLayoutKey {
     resource_revision: u64,
     measurer_revision: u64,
     text: String,
@@ -179,6 +184,10 @@ struct TextLayoutEntry {
     shaping_features: String,
     max_width: Option<u32>,
     align: TextAlign,
+}
+
+struct TextLayoutEntry {
+    key: TextLayoutKey,
     buffer: Buffer,
 }
 
@@ -272,7 +281,7 @@ impl<'a> TextLayoutParams<'a> {
     }
 }
 
-impl TextLayoutEntry {
+impl TextLayoutKey {
     fn matches(&self, params: &TextLayoutParams<'_>) -> bool {
         self.resource_revision == params.resource_revision
             && self.text == params.text
@@ -291,10 +300,32 @@ impl TextLayoutEntry {
             && self.measurer_revision == params.measurer_revision
     }
 
+    fn from_params(params: &TextLayoutParams<'_>) -> Self {
+        Self {
+            resource_revision: params.resource_revision,
+            measurer_revision: params.measurer_revision,
+            text: params.text.to_string(),
+            font_family: params.font_family.to_string(),
+            font_size: params.font_size,
+            font_weight: params.font_weight,
+            font_style: params.font_style,
+            letter_spacing: params.letter_spacing,
+            line_height: params.line_height,
+            text_direction: params.text_direction,
+            white_space: params.white_space,
+            language: params.language.to_owned(),
+            shaping_features: params.shaping_features.to_owned(),
+            max_width: params.max_width,
+            align: params.align,
+        }
+    }
+}
+
+impl TextLayoutEntry {
     fn estimated_bytes(&self) -> Option<usize> {
         estimated_text_layout_bytes(
-            self.text.capacity(),
-            self.font_family.capacity(),
+            self.key.text.capacity(),
+            self.key.font_family.capacity(),
             &self.buffer,
         )
     }
@@ -432,6 +463,7 @@ impl TextRenderer {
                 alias_sets: vec![HashMap::new()],
                 alias_set_id: 0,
                 swash_cache: SwashCache::new(),
+                parked_key: None,
                 layout_cache: ByteLruCache::new(
                     TEXT_LAYOUT_CACHE_CAPACITY,
                     TEXT_LAYOUT_CACHE_MAX_BYTES,
@@ -1337,9 +1369,10 @@ impl TextEngine {
         align: Align,
     ) -> Buffer {
         if let Some(entry) = self.layout_cache.remove(&params.cache_key)
-            && entry.matches(params)
+            && entry.key.matches(params)
         {
             self.metrics.layout_hits = self.metrics.layout_hits.saturating_add(1);
+            self.parked_key = Some((params.cache_key, entry.key));
             return entry.buffer;
         }
 
@@ -1379,22 +1412,12 @@ impl TextEngine {
     }
 
     fn store_layout(&mut self, params: &TextLayoutParams<'_>, cosmic: Buffer) {
+        let key = match self.parked_key.take() {
+            Some((hash, key)) if hash == params.cache_key && key.matches(params) => key,
+            _ => TextLayoutKey::from_params(params),
+        };
         let entry = TextLayoutEntry {
-            resource_revision: params.resource_revision,
-            measurer_revision: params.measurer_revision,
-            text: params.text.to_string(),
-            font_family: params.font_family.to_string(),
-            font_size: params.font_size,
-            font_weight: params.font_weight,
-            font_style: params.font_style,
-            letter_spacing: params.letter_spacing,
-            line_height: params.line_height,
-            text_direction: params.text_direction,
-            white_space: params.white_space,
-            language: params.language.to_owned(),
-            shaping_features: params.shaping_features.to_owned(),
-            max_width: params.max_width,
-            align: params.align,
+            key,
             buffer: cosmic,
         };
         let Some(weight) = entry.estimated_bytes() else {

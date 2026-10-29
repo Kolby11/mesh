@@ -404,9 +404,6 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
       `clip_rrect` and mask-filter shadows on Ganesh behind a parity test.
 - [ ] Skia context: no persistent shader cache, no `perform_deferred_cleanup`,
       one flush plus fence per surface per frame instead of one per frame.
-- [ ] Text: each layout-cache hit removes and reinserts its entry (~15–25 allocs
-      per text node per paint), and the shared 512-entry cache may never hit on
-      Settings; check `TextCacheMetrics.layout_misses` first.
 - [ ] Text draws one `draw_image_rect` per glyph; batch with `draw_atlas` per run,
       later Skia text blobs. Glyph pages re-upload the whole page on growth.
 - [ ] Images exceeding the 32 MiB `SKIA_IMAGE_CACHE` budget (including mipmaps)
