@@ -386,27 +386,28 @@ fn parse_component_file(path: &Path) -> Result<ComponentFile, CompileFrontendErr
             path: path.to_path_buf(),
             source,
         })?;
-    let component = match parsed_component_cache::get(&source) {
+    let mut component = match parsed_component_cache::get(&source) {
         Some(component) => component,
         None => {
-            let mut component =
+            let component =
                 parse_component(&source).map_err(|source| CompileFrontendError::ParseSource {
                     path: path.to_path_buf(),
                     span: source.span(),
                     source,
                 })?;
-            // Relative `url(...)` assets resolve against the component
-            // file's directory, like GTK: a module ships its images next to
-            // the `.mesh` source that names them. Local imports go through
-            // this same function with their own directory.
-            if let Some(style) = component.style.as_mut() {
-                let asset_base = path.parent().unwrap_or(Path::new("/")).to_path_buf();
-                style.absolutize_urls(&asset_base);
-            }
             parsed_component_cache::insert(source, &component);
             component
         }
     };
+    // Relative `url(...)` assets resolve against the component file's
+    // directory, like GTK: a module ships its images next to the `.mesh`
+    // source that names them. The cache holds the source-only parse, so two
+    // files with identical text in different directories each get their own
+    // base.
+    if let Some(style) = component.style.as_mut() {
+        let asset_base = path.parent().unwrap_or(Path::new("/")).to_path_buf();
+        style.absolutize_urls(&asset_base);
+    }
     validate_component_pseudo_states(path, &component)?;
     Ok(component)
 }
@@ -2369,6 +2370,28 @@ mod parse_cache_tests {
         let loaded = mesh_core_module::manifest::load_canonical_manifest(&module_dir)
             .expect("settings manifest should load");
         (loaded.manifest, module_dir)
+    }
+
+    #[test]
+    fn identical_sources_in_different_directories_keep_their_own_asset_base() {
+        let root = tempfile::tempdir().unwrap();
+        let source = "<template><box /></template>\n<style>box { background-image: url(bg.png); }</style>\n";
+        let mut parsed = Vec::new();
+        for name in ["a", "b"] {
+            let dir = root.path().join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            let file = dir.join("main.mesh");
+            std::fs::write(&file, source).unwrap();
+            parsed.push((dir, parse_component_file(&file).unwrap()));
+        }
+        for (dir, component) in parsed {
+            let style = component.style.expect("style block");
+            let rendered = format!("{:?}", style.rules);
+            assert!(
+                rendered.contains(&dir.join("bg.png").display().to_string()),
+                "{rendered}"
+            );
+        }
     }
 
     #[test]
