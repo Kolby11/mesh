@@ -272,7 +272,7 @@ local function update_local_prop(module_id, name, value, has_override, instance_
     for _, row in ipairs(prop_rows) do
         if row.module_id == module_id and row.name == name and row.scope_instance_id == (instance_id or "") then
             row.value = value
-            row.display_value = tostring(value or "") .. tostring(row.unit or "")
+            row.display_value = tostring(value == nil and "" or value) .. tostring(row.unit or "")
             row.reset_hidden = not has_override
         end
     end
@@ -437,7 +437,8 @@ effect(function()
                 or (instance_overrides[selected_instance] or {})
             local override = selected_overrides[name]
             local has_override = override ~= nil
-            local value = has_override and override or inherited_value
+            local value = inherited_value
+            if has_override then value = override end
             local pending = pending_props[pending_key(module_id, selected_instance, name)]
             if pending ~= nil then
                 value = pending.value
@@ -455,7 +456,7 @@ effect(function()
                 value = value,
                 default = definition.default,
                 inherited_value = inherited_value,
-                display_value = tostring(value or "") .. tostring(definition.unit or ""),
+                display_value = tostring(value == nil and "" or value) .. tostring(definition.unit or ""),
                 unit = tostring(definition.unit or ""),
                 options = definition.enum or {},
                 minimum = tonumber(definition.minimum) or 0,
@@ -519,7 +520,8 @@ function onPropScopeNext(module_id, current, instances)
                 or (row.instance_overrides[next_scope] or {})
             local override = selected_overrides[row.name]
             local has_override = override ~= nil
-            local value = has_override and override or inherited
+            local value = inherited
+            if has_override then value = override end
             local pending = pending_props[pending_key(module_id, next_scope, row.name)]
             if pending ~= nil then
                 value = pending.value
@@ -529,7 +531,7 @@ function onPropScopeNext(module_id, current, instances)
             row.scope_label = next_scope == "" and t("advanced.scope_global") or next_scope
             row.inherited_value = inherited
             row.value = value
-            row.display_value = tostring(value or "") .. tostring(row.unit or "")
+            row.display_value = tostring(value == nil and "" or value) .. tostring(row.unit or "")
             row.reset_hidden = not has_override
         end
         updated[#updated + 1] = row
