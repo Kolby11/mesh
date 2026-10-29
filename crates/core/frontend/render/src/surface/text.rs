@@ -726,8 +726,10 @@ impl TextRenderer {
                         base_x,
                         base_y,
                         resource_revision,
+                        batch: None,
                     };
                     cosmic.render(&mut renderer, cosmic_color(color));
+                    renderer.flush();
                 })
             });
         }
@@ -1090,6 +1092,46 @@ struct SkiaGlyphRenderer<'a> {
     base_x: i32,
     base_y: i32,
     resource_revision: u64,
+    batch: Option<GlyphBatch>,
+}
+
+/// Glyphs of one atlas page and paint colour, drawn with a single
+/// `draw_atlas` call. Anything drawn between glyphs flushes it first so
+/// painting order is unchanged.
+struct GlyphBatch {
+    page: skia_safe::Image,
+    rgba: (u8, u8, u8, u8),
+    transforms: Vec<skia_safe::RSXform>,
+    sources: Vec<Rect>,
+}
+
+impl SkiaGlyphRenderer<'_> {
+    fn flush(&mut self) {
+        flush_glyph_batch(self.canvas, &mut self.batch);
+    }
+}
+
+/// Takes the fields it needs rather than `&mut self` so glyph drawing can
+/// flush while atlas and page entries are still borrowed.
+fn flush_glyph_batch(canvas: &Canvas, batch: &mut Option<GlyphBatch>) {
+    let Some(batch) = batch.take() else {
+        return;
+    };
+    let mut paint = Paint::default();
+    paint.set_anti_alias(false);
+    let (r, g, b, a) = batch.rgba;
+    paint.set_argb(a, r, g, b);
+    crate::prepared_scene::retain_image(&batch.page);
+    canvas.draw_atlas(
+        &batch.page,
+        &batch.transforms,
+        &batch.sources,
+        None,
+        skia_safe::BlendMode::Modulate,
+        SamplingOptions::default(),
+        None,
+        &paint,
+    );
 }
 
 impl Renderer for SkiaGlyphRenderer<'_> {
@@ -1098,6 +1140,7 @@ impl Renderer for SkiaGlyphRenderer<'_> {
         if a == 0 || w == 0 || h == 0 {
             return;
         }
+        self.flush();
         let mut paint = Paint::default();
         paint.set_anti_alias(false);
         paint.set_argb(a, r, g, b);
@@ -1149,16 +1192,39 @@ impl Renderer for SkiaGlyphRenderer<'_> {
             .slot
             .and_then(|slot| Some((self.pages.image(slot)?, Rect::from(slot.src))));
 
+        // Color emoji: image carries its own RGB, so only alpha modulates.
+        // Monochrome mask: paint color becomes the glyph color and the
+        // image's A8 alpha modulates it.
+        let rgba = if entry.is_color {
+            (0xff, 0xff, 0xff, a)
+        } else {
+            (r, g, b, a)
+        };
+        if let Some((page, src)) = paged.as_ref() {
+            let compatible = self
+                .batch
+                .as_ref()
+                .is_some_and(|batch| batch.rgba == rgba && batch.page.unique_id() == page.unique_id());
+            if !compatible {
+                flush_glyph_batch(self.canvas, &mut self.batch);
+                self.batch = Some(GlyphBatch {
+                    page: (*page).clone(),
+                    rgba,
+                    transforms: Vec::new(),
+                    sources: Vec::new(),
+                });
+            }
+            let batch = self.batch.as_mut().expect("batch was just ensured");
+            batch
+                .transforms
+                .push(skia_safe::RSXform::new(1.0, 0.0, (dest_x, dest_y)));
+            batch.sources.push(*src);
+            return;
+        }
+        flush_glyph_batch(self.canvas, &mut self.batch);
         let mut paint = Paint::default();
         paint.set_anti_alias(false);
-        if entry.is_color {
-            // Color emoji: image carries its own RGB. Modulate alpha only.
-            paint.set_argb(a, 0xff, 0xff, 0xff);
-        } else {
-            // Monochrome mask: paint color becomes the glyph color; the
-            // image's A8 alpha modulates it.
-            paint.set_argb(a, r, g, b);
-        }
+        paint.set_argb(rgba.3, rgba.0, rgba.1, rgba.2);
         crate::prepared_scene::retain_image(paged.as_ref().map_or(&entry.image, |(page, _)| page));
         match paged {
             Some((page, src)) => self.canvas.draw_image_rect_with_sampling_options(
