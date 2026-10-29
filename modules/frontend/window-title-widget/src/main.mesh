@@ -11,7 +11,10 @@ local function windowTitle()
     local window = wm and wm.active_window
     local title = window and window.title or ""
     if title == "" then return "Desktop" end
-    return #title > 36 and (string.sub(title, 1, 34) .. "…") or title
+    if (utf8.len(title) or #title) > 36 then
+        return string.sub(title, 1, (utf8.offset(title, 35) or 35) - 1) .. "…"
+    end
+    return title
 end
 </script>
 

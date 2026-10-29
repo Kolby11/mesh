@@ -262,3 +262,18 @@ fn bundled_media_views_follow_position_and_reconcile_unacknowledged_seeks() {
         assert_eq!(ctx.state().get(field), Some(json!(expected)), "{path}");
     }
 }
+
+#[test]
+fn frontend_scripts_can_truncate_titles_on_character_boundaries() {
+    let mut ctx = ScriptContext::new("@test/utf8-truncate", CapabilitySet::default()).unwrap();
+    ctx.load_script(
+        r#"
+local text = "ééééé"
+cut = string.sub(text, 1, (utf8.offset(text, 3) or 3) - 1)
+count = utf8.len(text)
+"#,
+    )
+    .unwrap();
+    assert_eq!(ctx.state().get("cut"), Some(json!("éé")));
+    assert_eq!(ctx.state().get("count"), Some(json!(5)));
+}

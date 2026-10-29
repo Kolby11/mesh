@@ -312,7 +312,6 @@ evidence and test workloads are in the linked reports.
 - [ ] Align the frontend adapter's service authorization test with deferred contract-aware dispatch; its current assertion contradicts the ABI. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] End audio-popover slider drag state after keyboard changes; backend volume updates can otherwise remain ignored. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Reconcile profile-menu pending state on failed or externally superseded switches; the pending marker can remain stale. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
-- [ ] Make window and media title truncation Unicode-safe; byte slicing can cut through a multi-byte character. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Localize glass-widget weather and idle-media text; hardcoded English bypasses the module catalogs. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] **S10-PERF-001 / S10-PERF-002 / S10-PERF-003:** Cache tree/style preparation and recursive imports by
       content revision, and narrow effect/state observation summaries after
