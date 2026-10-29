@@ -108,6 +108,11 @@ local function value_or(value, fallback)
     return tostring(value)
 end
 
+local function literal_or(value, fallback)
+    if value == nil or tostring(value) == "" then return fallback end
+    return tostring(value)
+end
+
 local function format_memory(bytes)
     if bytes == nil then return t("common.not_reported") end
     if bytes > 1024 * 1024 * 1024 then
@@ -161,8 +166,8 @@ effect(function()
     end
 
     device_name = value_or(device.hostname or device.device_name, "device.this_device")
-    local os_name = value_or(device.os_name or device.distribution, "Linux")
-    local os_version = value_or(device.os_version or device.distribution_version, "")
+    local os_name = literal_or(device.os_name or device.distribution, "Linux")
+    local os_version = literal_or(device.os_version or device.distribution_version, "")
     os_label = os_version == "" and os_name or (os_name .. " " .. os_version)
     kernel_label = value_or(device.kernel or device.kernel_version, "common.not_reported")
     architecture_label = value_or(device.architecture or device.arch, "common.not_reported")
