@@ -457,6 +457,22 @@ end
         border-color: #8decb9;
     }
 
+    .bubble-option-core-generic {
+        background-color: var(--color-surface-container-high);
+        color: var(--color-on-surface);
+        border-color: var(--color-primary);
+        animation-name: bubble-option-float-center;
+        animation-delay: 500ms;
+    }
+
+    .bubble-option-core-generic-active {
+        border-color: var(--color-tertiary);
+    }
+
+    .bubble-option-core-generic:hover {
+        border-color: var(--color-tertiary);
+    }
+
     .bubble-option-core-language {
         background-color: prop(blur_background);
         color: var(--color-on-surface);

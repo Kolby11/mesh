@@ -145,20 +145,60 @@ local function build_option(option, current)
         icon = option.icon,
         text_class = "bubble-option-text bubble-option-hidden",
         text = "",
-        title = THEME_LABELS[option.id],
+        title = THEME_LABELS[option.id] or option.label or option.id,
         active = option.id == current,
     }
 end
 
+-- The ring offers the installed themes: shipped ones keep their tuned swatch,
+-- and any other installed theme gets a generic bubble. Without a catalog the
+-- shipped list stands in.
+local function theme_options()
+    local installed = theme and theme.themes
+    if type(installed) ~= "table" or #installed == 0 then
+        return THEME_OPTIONS
+    end
+    local present = {}
+    for _, entry in installed do
+        if type(entry) == "table" and type(entry.id) == "string" then
+            present[entry.id] = entry
+        end
+    end
+    local options = {}
+    local known = {}
+    for _, option in THEME_OPTIONS do
+        known[option.id] = true
+        if present[option.id] then
+            options[#options + 1] = option
+        end
+    end
+    for _, entry in installed do
+        if type(entry) == "table" and type(entry.id) == "string" and not known[entry.id] then
+            known[entry.id] = true
+            options[#options + 1] = {
+                id = entry.id,
+                core = "bubble-option-core-generic",
+                icon = "palette",
+                label = tostring(entry.label or entry.id),
+            }
+        end
+    end
+    if #options == 0 then
+        return THEME_OPTIONS
+    end
+    return options
+end
+
 local function normalize_index(index)
-    local count = #THEME_OPTIONS
+    local count = #theme_options()
     return ((index - 1) % count) + 1
 end
 
 local function sync_options(current)
     local next_items = {}
+    local options = theme_options()
     for slot = 1, VISIBLE_SLOTS do
-        local option = THEME_OPTIONS[normalize_index(window_start + slot - 1)]
+        local option = options[normalize_index(window_start + slot - 1)]
         next_items[slot] = build_option(option, current)
     end
     items = next_items
@@ -168,7 +208,7 @@ end
 -- browsed: on first paint and once the popover has closed, so the next open
 -- starts centred rather than wherever the last scroll left it.
 local function centre_window_on(theme_id)
-    for index, option in THEME_OPTIONS do
+    for index, option in theme_options() do
         if option.id == theme_id then
             window_start = normalize_index(index - 1)
             rotation = ""
