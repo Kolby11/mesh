@@ -10082,3 +10082,14 @@ applied to its command is exact there. Nodes with shadows, outlines, filters,
 scroll-content coordinates or a scaled clip stay affine. Not benchmarked;
 correctness is covered by a display-list unit test and the 364 render lib
 tests. Measure with `navigation_hover_profile` before claiming a speedup.
+
+## 2026-10-29 — Fully transparent compositing layers are rejected, not rasterized
+
+Area: rendering, painter
+
+A source-over layer at `opacity <= 0` with no filter now opens an empty-clip
+`save` instead of an offscreen `save_layer`, so Skia culls the whole subtree.
+The display list still keeps the nodes (`display_list_keeps_plain_opacity_zero_nodes_paintable`),
+so the pop stays balanced and an animation out of zero opacity needs no rebuild.
+Covered by `skia_effect_layer_at_zero_opacity_paints_nothing_and_stays_balanced`;
+the 365 render lib tests pass. Not benchmarked.

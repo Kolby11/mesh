@@ -1267,6 +1267,19 @@ impl SkiaPaintBackend {
             return ActivePainterLayer { save_count: None };
         }
 
+        if layer.opacity <= 0.0
+            && layer.blend_mode == PainterBlendMode::SrcOver
+            && matches!(layer.filter, PainterFilter::None)
+        {
+            // Nothing in a fully transparent layer is visible; an empty clip
+            // lets Skia reject the subtree without rasterizing an offscreen.
+            let save_count = canvas.save();
+            canvas.clip_rect(Rect::new_empty(), None, false);
+            return ActivePainterLayer {
+                save_count: Some(save_count),
+            };
+        }
+
         let mut paint = skia_safe::Paint::default();
         paint.set_alpha_f(layer.opacity.clamp(0.0, 1.0));
         paint.set_blend_mode(blend_mode_to_skia(layer.blend_mode));

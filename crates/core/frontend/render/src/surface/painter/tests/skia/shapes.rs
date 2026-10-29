@@ -104,6 +104,41 @@ fn skia_effect_layer_opacity_isolates_child_pixels() {
 }
 
 #[test]
+fn skia_effect_layer_at_zero_opacity_paints_nothing_and_stays_balanced() {
+    let mut buffer = PixelBuffer::new(12, 12);
+    let mut diagnostics = Vec::new();
+    let draw = |x| PainterCommand::DrawRect {
+        rect: ClipRect {
+            x,
+            y: 2,
+            width: 3,
+            height: 3,
+        },
+        paint: PainterPaint::fill(Color::from_hex("#ff0000").unwrap()),
+        clip: full_clip(12, 12),
+    };
+
+    SkiaPaintBackend.execute_commands(
+        &mut buffer,
+        &[
+            PainterCommand::PushLayer(PainterLayer::isolated(
+                full_clip(12, 12),
+                0.0,
+                PainterBlendMode::SrcOver,
+            )),
+            draw(2),
+            PainterCommand::PopLayer,
+            draw(7),
+        ],
+        &mut diagnostics,
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(pixel(&buffer, 3, 3), Color::TRANSPARENT);
+    assert_eq!(pixel(&buffer, 8, 3).r, 255);
+}
+
+#[test]
 fn skia_effect_layer_blur_expands_painted_pixels() {
     let mut buffer = PixelBuffer::new(24, 24);
     let mut diagnostics = Vec::new();

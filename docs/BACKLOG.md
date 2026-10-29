@@ -391,11 +391,8 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
       target while hidden and pool dmabuf slots per size in `GpuPresenter`.
 - [ ] GPU target and dmabuf ring reallocate on every size change; round both up
       to 64 px classes like the SHM path and crop with the viewport.
-- [ ] Opacity: `opacity: 0` subtrees still rasterize into a layer (prune in the
-      painter's layer loop; the display list must keep them, see
-      `display_list_keeps_plain_opacity_zero_nodes_paintable`), and single-
-      primitive leaves open a `save_layer`; prune the first, fold alpha into the
-      paint for the second. Animated opacity/transform layers have no raster cache.
+- [ ] Opacity: single-primitive leaves open a `save_layer`; fold alpha into the
+      paint instead. Animated opacity/transform layers have no raster cache.
 - [ ] The GPU painter keeps CPU-tuned choices (A8 atlas rounded fills, shader
       clips, CPU-rastered shadows/gradients); try analytic `draw_rrect`/
       `clip_rrect` and mask-filter shadows on Ganesh behind a parity test.
