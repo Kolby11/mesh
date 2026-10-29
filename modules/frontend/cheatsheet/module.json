@@ -1,0 +1,55 @@
+{
+  "name": "@mesh/cheatsheet",
+  "version": "0.1.0",
+  "description": "Compositor shortcut cheatsheet: a dark sheet of the window manager's described keybinds, grouped by section into columns of keycaps and labels.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": {
+      "interfaces": {
+        "mesh.wm-keybinds": ">=1.0"
+      },
+      "capabilities": [
+        "shell.surface",
+        "theme.read",
+        "locale.read",
+        "service.wm-keybinds.read"
+      ]
+    },
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "top",
+      "layer": "overlay",
+      "keyboard_mode": "exclusive",
+      "visible_on_start": false
+    },
+    "provides": {
+      "layout": [
+        {
+          "id": "main",
+          "entrypoint": "src/main.mesh",
+          "label": "Shortcut cheatsheet"
+        }
+      ]
+    },
+    "accessibility": {
+      "role": "dialog"
+    },
+    "i18n": {
+      "defaultLocale": "en"
+    },
+    "contributes": {
+      "i18n": [
+        { "id": "en", "locale": "en", "path": "config/i18n/en.json" }
+      ],
+      "keybinds": {
+        "close": {
+          "label": { "t": "keybind.close.label", "fallback": "Close cheatsheet" },
+          "description": { "t": "keybind.close.description", "fallback": "Hide the shortcut cheatsheet" },
+          "category": { "t": "keybind.category", "fallback": "Cheatsheet" },
+          "trigger": { "kind": "shortcut", "key": "Escape" }
+        }
+      }
+    }
+  }
+}

@@ -6,6 +6,7 @@ mod commands;
 mod glass;
 mod hover;
 mod inspector;
+mod cheatsheet;
 mod keybind_help;
 mod layout;
 mod navigation_profile;

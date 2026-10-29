@@ -1,0 +1,147 @@
+<template>
+    <box class="overlay">
+        <button class="scrim" onclick={onClose} keybind="close" onkeybind={onClose} aria-label={t("sheet.title")} tabindex="-1" />
+        <column class="sheet" aria-label={t("sheet.title")}>
+            <row class="tabs">
+                <row class="tab">
+                    <text class="tab-label">{t("sheet.tab")}</text>
+                </row>
+            </row>
+            <row class="columns">
+                {#for column in columns key={column.id}}
+                    <column class="column">
+                        {#for section in column.sections key={section.name}}
+                            <column class="section">
+                                <text class="section-title">{section.name}</text>
+                                {#for bind in section.binds key={bind.id}}
+                                    <row class="bind">
+                                        <row class="keys">
+                                            {#for cap in bind.caps key={cap.id}}
+                                                <text class="plus" hidden={cap.first}>+</text>
+                                                <text class="keycap">{cap.label}</text>
+                                            {/for}
+                                        </row>
+                                        <text class="comment">{bind.comment}</text>
+                                    </row>
+                                {/for}
+                            </column>
+                        {/for}
+                    </column>
+                {/for}
+                <text class="empty" hidden={has_rows}>{t("sheet.empty")}</text>
+            </row>
+        </column>
+    </box>
+</template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local keybinds = require("mesh.wm-keybinds")
+
+local SURFACE = "@mesh/cheatsheet"
+local COLUMN_COUNT = 3
+-- A section's header counts as this many rows when balancing the columns.
+local TITLE_ROWS = 2
+
+columns = {}
+has_rows = false
+
+-- Hyprland's names for the keys that read badly as written.
+local LABELS = {
+    Super = "Super",
+    Slash = "/",
+    Hash = "#",
+    Period = ".",
+    Comma = ",",
+    Return = "Enter",
+    Minus = "−",
+    Equal = "=",
+    BackSpace = "⌫",
+    Delete = "Del",
+    Escape = "Esc",
+    Page_Up = "PgUp",
+    Page_Down = "PgDn",
+    ["mouse:272"] = "LMB",
+    ["mouse:273"] = "RMB",
+    ["mouse:275"] = "Back",
+    mouse_up = "Scroll ↓",
+    mouse_down = "Scroll ↑",
+}
+
+local function label(name)
+    local known = LABELS[name]
+    if known then return known end
+    return #name == 1 and string.upper(name) or name
+end
+
+local function caps(bind, index)
+    local list = {}
+    for _, mod in bind.mods or {} do
+        list[#list + 1] = { id = bind.key .. ":m" .. #list, label = label(mod), first = #list == 0 }
+    end
+    list[#list + 1] = { id = bind.key .. ":k", label = label(bind.key), first = #list == 0 }
+    return list
+end
+
+-- Sections stay whole and in config order; each goes to the shortest column
+-- so far, so the three columns come out about the same height.
+effect(function()
+    local built, heights = {}, {}
+    for index = 1, COLUMN_COUNT do
+        built[index] = { id = "c" .. index, sections = {} }
+        heights[index] = 0
+    end
+    local any = false
+    for _, section in keybinds.sections or {} do
+        local binds = {}
+        for index, bind in section.binds or {} do
+            binds[#binds + 1] = {
+                id = section.name .. ":" .. index,
+                comment = bind.comment,
+                caps = caps(bind, index),
+            }
+        end
+        if #binds > 0 then
+            any = true
+            local target = 1
+            for index = 2, COLUMN_COUNT do
+                if heights[index] < heights[target] then target = index end
+            end
+            local sections = built[target].sections
+            sections[#sections + 1] = { name = section.name, binds = binds }
+            heights[target] += #binds + TITLE_ROWS
+        end
+    end
+    columns = built
+    has_rows = any
+end)
+
+function onClose() mesh.shell.hide_surface(SURFACE) end
+</script>
+
+<style>
+    .overlay { position: relative; width: 100%; height: 100%; justify-content: center; align-items: center; exclusive-zone: ignore; background: transparent; }
+    .scrim { position: absolute; left: 0; top: 0; width: 100%; height: 100%; padding: 0; border-radius: 0; background: var(--color-scrim); opacity: 0.35; transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard); }
+    .scrim.mesh-surface-entering { opacity: 0; }
+    .scrim.mesh-surface-exiting { opacity: 0; transition-duration: var(--animation-duration-fast); }
+
+    .sheet { padding: 20px 22px 26px 22px; gap: 14px; border-radius: 22px; border: 1px solid var(--color-outline-variant); background: color-mix(in srgb, var(--color-background) 94%, transparent); color: var(--color-on-surface); opacity: 1; transform: translateY(0px) scale(1); transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-short) var(--animation-curves-bezier-standard); }
+    .sheet.mesh-surface-entering { opacity: 0; transform: translateY(20px) scale(0.97); }
+    .sheet.mesh-surface-exiting { opacity: 0; transform: translateY(10px) scale(0.98); transition-duration: var(--animation-duration-fast); }
+
+    .tabs { width: 100%; justify-content: center; }
+    .tab { padding: 6px 14px; align-items: center; border-radius: 12px; background: color-mix(in srgb, var(--color-primary) 22%, transparent); }
+    .tab-label { height: 20px; font-size: 13px; font-weight: 600; color: var(--color-on-surface); }
+
+    .columns { gap: 36px; align-items: start; }
+    .column { gap: 20px; align-items: start; }
+    .section { gap: 8px; align-items: start; }
+    .section-title { height: 26px; font-size: 20px; font-weight: 500; color: var(--color-on-surface); }
+
+    .bind { gap: 18px; align-items: center; }
+    .keys { width: 190px; gap: 4px; align-items: center; }
+    .keycap { height: 20px; padding: 1px 6px; font-size: 11px; font-weight: 600; border-radius: 6px; border: 1px solid var(--color-outline-variant); background: var(--color-surface-container-high); color: var(--color-on-surface); }
+    .plus { height: 20px; font-size: 11px; color: var(--color-on-surface-variant); }
+    .comment { height: 18px; font-size: 12px; color: var(--color-on-surface-variant); }
+    .empty { height: 40px; font-size: 13px; color: var(--color-on-surface-variant); }
+</style>

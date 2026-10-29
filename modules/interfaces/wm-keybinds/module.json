@@ -1,0 +1,45 @@
+{
+  "name": "@mesh/wm-keybinds-interface",
+  "version": "1.0.0",
+  "description": "Compositor keybind contract: the window manager's own shortcuts, grouped into the sections its config declares, for cheatsheets.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.wm-keybinds",
+      "version": "1.0",
+      "domain": "wm-keybinds",
+      "relationship": "base",
+      "contract": {
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether a keybind config could be read"
+          },
+          "sections": {
+            "type": "Section[]",
+            "description": "Described keybinds, in config order, grouped by section title"
+          }
+        },
+        "methods": { "refresh": "() -> Result" },
+        "events": {},
+        "types": {
+          "Section": {
+            "name": "string",
+            "binds": "Bind[]"
+          },
+          "Bind": {
+            "mods": "string[]",
+            "key": "string",
+            "comment": "string"
+          }
+        },
+        "capabilities": {
+          "required": ["service.wm-keybinds.read"],
+          "methods": { "refresh": ["service.wm-keybinds.read"] },
+          "permissions": { "service.wm-keybinds.read": "standard" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "sheet.title": "Shortcut cheatsheet",
+  "sheet.tab": "Keybinds",
+  "sheet.empty": "No described keybinds were found in the Hyprland config",
+  "keybind.close.label": "Close cheatsheet",
+  "keybind.close.description": "Hide the shortcut cheatsheet",
+  "keybind.category": "Cheatsheet"
+}

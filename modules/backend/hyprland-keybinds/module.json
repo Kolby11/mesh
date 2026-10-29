@@ -1,0 +1,28 @@
+{
+  "name": "@mesh/hyprland-keybinds",
+  "version": "0.1.0",
+  "description": "Hyprland keybinds read from the Lua config: every hl.bind with a description, grouped by its --##! section comments.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:sh:[\"-c\",\"for f in \\\"$HOME/.config/hypr/hyprland/keybinds.lua\\\" \\\"$HOME/.config/hypr/custom/keybinds.lua\\\"; do [ -f \\\"$f\\\" ] && { cat \\\"$f\\\"; echo; }; done; true\"]"
+      ],
+      "modules": {
+        "@mesh/wm-keybinds-interface": "^1.0.0"
+      }
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.wm-keybinds",
+        "version": "1.0",
+        "provider": "hyprland",
+        "label": "Hyprland keybinds",
+        "priority": 100
+      }
+    ]
+  }
+}
