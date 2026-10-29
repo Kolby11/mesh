@@ -26,9 +26,6 @@ function round_percent(level_value)
     if safe < 0 then
         safe = 0
     end
-    if safe <= 1 then
-        safe = safe * 100
-    end
     if safe > 100 then
         safe = 100
     end

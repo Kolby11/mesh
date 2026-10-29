@@ -82,9 +82,6 @@ effect(function()
         return
     end
     local level = power.level or 0
-    if level <= 1 then
-        level *= 100
-    end
     level = math.clamp(math.floor(level + 0.5), 0, 100)
     battery_text = tostring(level) .. "%"
     battery_low = level <= 15 and not power.charging

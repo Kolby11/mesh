@@ -40,7 +40,6 @@ effect(function()
     battery_available = power.available == true
     if not battery_available then return end
     local level = power.level or 0
-    if level <= 1 then level *= 100 end
     level = math.clamp(math.floor(level + 0.5), 0, 100)
     battery_icon = power.charging and "battery-full-charging"
         or level >= 90 and "battery-full"
