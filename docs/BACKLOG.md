@@ -390,8 +390,8 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
 - [ ] Sparse frames still pay ~10 full passes (batch index rebuild, topology
       check, backdrop regions, layer-scope collection); the subtree reuse map
       drops descendants of reused subtrees (`build.rs:433`) — add a regression.
-- [ ] Hit testing visits the whole tree without bounds culling and clones a clip
-      `Vec` per node on pointer move; hover keys are re-parsed to `NodeId`s.
+- [ ] Hit testing visits the whole tree without bounds culling (needs retained
+      subtree extents, since children may overflow); hover keys are re-parsed to `NodeId`s.
 
 ### Scroll and animation frames
 

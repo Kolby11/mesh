@@ -232,7 +232,9 @@ impl AffineClip {
 
 #[derive(Debug, Clone, Default)]
 pub struct AffineClipStack {
-    clips: Vec<AffineClip>,
+    // Shared so descending through a non-clipping node costs a refcount bump
+    // rather than a copy of every ancestor clip.
+    clips: std::sync::Arc<Vec<AffineClip>>,
 }
 
 impl AffineClipStack {
@@ -241,9 +243,12 @@ impl AffineClipStack {
     }
 
     pub fn push(&self, clip: AffineClip) -> Self {
-        let mut next = self.clone();
-        next.clips.push(clip);
-        next
+        let mut clips = Vec::with_capacity(self.clips.len() + 1);
+        clips.extend_from_slice(&self.clips);
+        clips.push(clip);
+        Self {
+            clips: std::sync::Arc::new(clips),
+        }
     }
 
     /// Return the ordered transformed clips accumulated from the surface root.
@@ -265,7 +270,7 @@ impl AffineClipStack {
 
     pub fn bounds(&self) -> Option<LayoutRect> {
         let mut bounds = None;
-        for clip in &self.clips {
+        for clip in self.clips.iter() {
             bounds = intersect_layout_rect(bounds, clip.bounds());
             if bounds.is_none() {
                 return None;
