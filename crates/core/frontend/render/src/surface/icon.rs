@@ -124,6 +124,10 @@ struct CachedSvgCacheability {
     cacheable: bool,
 }
 
+/// A file raster depends only on the file's fingerprint, carried in the key as
+/// `freshness`, so its key omits the resource revision. Keying by revision made
+/// every icon-pack publish discard every file icon and repaint them all blank
+/// until workers rasterized them again.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct RasterCacheKey {
     resource_revision: u64,
@@ -134,6 +138,13 @@ struct RasterCacheKey {
     tint: u32,
     multicolor: bool,
     freshness: Option<FileFreshness>,
+}
+
+impl RasterCacheKey {
+    fn is_current(&self) -> bool {
+        self.source_kind == RasterSourceKind::File
+            || resource_generation_is_current(self.resource_revision)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -598,7 +609,7 @@ fn drain_icon_raster_jobs() -> bool {
         };
         let current_generation = mesh_core_resources::resource_revision();
         queue.ready.retain(|key, (_, linked_resources, _)| {
-            key.resource_revision == current_generation
+            (key.source_kind == RasterSourceKind::File || key.resource_revision == current_generation)
                 && linked_resources_are_current(linked_resources)
         });
         let mut results = Vec::new();
@@ -612,7 +623,7 @@ fn drain_icon_raster_jobs() -> bool {
     let mut cached_results = Vec::new();
     let mut ready_results = Vec::new();
     for (result, waiters) in results {
-        if result.cancelled || !resource_generation_is_current(result.key.resource_revision) {
+        if result.cancelled || !result.key.is_current() {
             continue;
         }
         profiling::record_icon_image_raster(result.elapsed);
@@ -969,7 +980,7 @@ fn raster_file_key_with_freshness(
     freshness: FileFreshness,
 ) -> RasterCacheKey {
     RasterCacheKey {
-        resource_revision: resource_revision(),
+        resource_revision: 0,
         source_kind: RasterSourceKind::File,
         source_identity: source_identity(path, Some(freshness)),
         width,
@@ -2741,6 +2752,26 @@ mod tests {
         assert!(pixels.iter().any(|(_, _, color)| {
             color.a == 255 && color.r == tint().r && color.g == tint().g && color.b == tint().b
         }));
+    }
+
+    #[test]
+    fn file_rasters_survive_a_resource_revision() {
+        if crate::isolate_resource_state_test(
+            "surface::icon::tests::file_rasters_survive_a_resource_revision",
+        ) {
+            return;
+        }
+        let _guard = icon_test_lock();
+        clear_icon_caches();
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("symbol.svg");
+        write_test_svg(&path);
+        let freshness = file_freshness(&path).unwrap();
+        let before = raster_file_key_with_freshness(&path, 14, 12, tint(), false, freshness);
+        mesh_core_resources::advance_resource_revision();
+        let after = raster_file_key_with_freshness(&path, 14, 12, tint(), false, freshness);
+        assert_eq!(before, after, "a revision must not change a file raster's key");
+        assert!(after.is_current());
     }
 
     #[test]

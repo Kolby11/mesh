@@ -2407,11 +2407,17 @@ impl SkiaPaintBackend {
         );
         let mut skia_paint = skia_paint(paint.color, true);
         skia_paint.set_alpha(paint.color.a);
-        let (skia_image, source) = crate::surface::image_pages::resolve(&skia_image);
+        // A paged image is a sub-rect of a shared atlas, where mipmaps would
+        // blend its neighbours in. A downscaled image needs them, and
+        // switching it between standalone and paged once the page publishes
+        // would change its filtering mid-session, so it is never paged.
+        let (skia_image, source) = if downscaled {
+            (skia_image, None)
+        } else {
+            crate::surface::image_pages::resolve(&skia_image)
+        };
         crate::prepared_scene::retain_image(&skia_image);
-        // A paged image is a sub-rect of a shared atlas; mipmaps there would
-        // blend its neighbours in.
-        let sampling = match (resampled, downscaled && source.is_none()) {
+        let sampling = match (resampled, downscaled) {
             (false, _) => SamplingOptions::default(),
             (true, true) => SamplingOptions::new(
                 skia_safe::FilterMode::Linear,
