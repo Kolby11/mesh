@@ -1,6 +1,6 @@
 <template>
     <row class="status">
-        <row class="status-pill status-chip" title="Input language" aria-label={"Language " .. language}>
+        <row class="status-pill status-chip" title="Interface language" aria-label={"Language " .. language}>
             <icon class="status-glyph" name="input-keyboard" size="13" />
             <text class="status-label">{language}</text>
         </row>
@@ -38,6 +38,10 @@ local network = require("mesh.network")
 local volume = require("@mesh/volume-presentation/volume")
 
 language = string.upper(string.sub(mesh.locale.current() or "en", 1, 2))
+
+effect(function()
+    language = string.upper(string.sub(mesh.locale.current() or "en", 1, 2))
+end)
 network_glyph = "network-wireless-offline"
 network_label = "Offline"
 volume_glyph = "audio-volume-high"
@@ -68,6 +72,7 @@ effect(function()
     if audio.available == false then
         volume_text = "--"
         volume_glyph = "audio-volume-muted"
+        volume_label = "Volume"
         return
     end
     local percent = volume.percent(audio.percent)
@@ -79,6 +84,9 @@ end)
 effect(function()
     if power.available == false then
         battery_text = "--"
+        battery_glyph = "battery-caution"
+        battery_label = "Battery"
+        battery_low = false
         return
     end
     local level = power.level or 0
