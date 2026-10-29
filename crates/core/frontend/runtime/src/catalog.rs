@@ -440,6 +440,29 @@ impl FrontendCatalogHandle {
         previous
     }
 
+    fn publish_if_current(
+        &self,
+        expected_version: u64,
+        catalog: FrontendCatalog,
+        changed_module: Option<&str>,
+    ) -> Option<FrontendCatalogState> {
+        let mut state = self.state.write().unwrap();
+        if state.version != expected_version {
+            return None;
+        }
+        let catalog = Arc::new(catalog);
+        let (changed_modules, affected_modules) =
+            catalog_changes(&state.catalog, &catalog, changed_module);
+        *state = FrontendCatalogState {
+            version: state.version.wrapping_add(1),
+            catalog,
+            changed_modules: Arc::new(changed_modules),
+            affected_modules: Arc::new(affected_modules),
+            validation_graph: state.validation_graph.clone(),
+        };
+        Some(state.clone())
+    }
+
     /// Restore a previously published catalog only while the generation that
     /// was published from it is still current. A reload can fail after the
     /// candidate has been published, so an unconditional restore could erase
@@ -466,16 +489,22 @@ impl FrontendCatalogHandle {
         manifest: &Manifest,
         module_dir: &Path,
     ) -> Result<(FrontendCatalogState, FrontendCatalogState), FrontendCatalogError> {
-        let previous = self.snapshot();
-        let catalog = previous.catalog.reload_module(
-            module_id,
-            manifest,
-            module_dir,
-            previous.validation_graph.as_deref(),
-        )?;
-        self.replace(catalog, Some(module_id));
-        let published = self.snapshot();
-        Ok((previous, published))
+        // Another publication can land while this source is compiling. The
+        // reload is rebased on the newer state rather than overwriting it.
+        loop {
+            let previous = self.snapshot();
+            let catalog = previous.catalog.reload_module(
+                module_id,
+                manifest,
+                module_dir,
+                previous.validation_graph.as_deref(),
+            )?;
+            if let Some(published) =
+                self.publish_if_current(previous.version, catalog, Some(module_id))
+            {
+                return Ok((previous, published));
+            }
+        }
     }
 }
 
@@ -2085,6 +2114,32 @@ local audio = require("mesh.audio@>=2.0")
                 &*rebuilt_entry.compiled,
             ));
         }
+    }
+
+    #[test]
+    fn conditional_publication_and_restore_use_fresh_versions() {
+        let handle = FrontendCatalogHandle::default();
+        let base = handle.snapshot().version;
+        assert!(
+            handle
+                .publish_if_current(base, FrontendCatalog::default(), None)
+                .is_some()
+        );
+        assert!(
+            handle
+                .publish_if_current(base, FrontendCatalog::default(), None)
+                .is_none(),
+            "a publication built from an older version must not overwrite"
+        );
+
+        let published = handle.snapshot();
+        let previous = FrontendCatalogState {
+            version: base,
+            ..published.clone()
+        };
+        assert!(handle.restore_if_current(published.version, previous));
+        assert_ne!(handle.snapshot().version, base);
+        assert!(handle.snapshot().version != published.version);
     }
 
     #[test]
