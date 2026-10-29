@@ -624,7 +624,11 @@ fn drain_icon_raster_jobs() -> bool {
     let mut ready_results = Vec::new();
     for (result, waiters) in results {
         if result.cancelled || !result.key.is_current() {
+            tracing::debug!(target: "mesh_icon_trace", icon = %result.key.source_identity.display(), width = result.key.width, height = result.key.height, cancelled = result.cancelled, "raster result dropped");
             continue;
+        }
+        if result.variant.is_none() {
+            tracing::debug!(target: "mesh_icon_trace", icon = %result.key.source_identity.display(), width = result.key.width, height = result.key.height, "raster job produced no pixels");
         }
         profiling::record_icon_image_raster(result.elapsed);
         if result.cacheable {
@@ -1673,13 +1677,20 @@ fn draw_file_icon_on_canvas(
         FileVariant::Pending if raster_scale != 1.0 => {
             match resolve_file_variant(path, dest_w, dest_h, raster_tint, multicolor) {
                 FileVariant::Ready(variant) => {
+                    tracing::debug!(target: "mesh_icon_trace", icon = %path.display(), raster_scale, "stretched 1x raster while magnified raster pends");
                     stretched = true;
                     variant
                 }
-                FileVariant::Pending | FileVariant::Unavailable => return false,
+                FileVariant::Pending | FileVariant::Unavailable => {
+                    tracing::debug!(target: "mesh_icon_trace", icon = %path.display(), raster_scale, "BLANK: magnified and 1x rasters both unavailable");
+                    return false;
+                }
             }
         }
-        FileVariant::Pending => return false,
+        FileVariant::Pending => {
+            tracing::debug!(target: "mesh_icon_trace", icon = %path.display(), "BLANK: 1x raster pending");
+            return false;
+        }
         FileVariant::Unavailable => {
             draw_missing_icon_fallback_on_canvas(canvas, dest_x, dest_y, dest_w, dest_h, tint);
             return true;
@@ -1825,6 +1836,7 @@ fn resolve_file_variant_async(
     let key = raster_file_key_with_freshness(path, width, height, tint, multicolor, freshness);
 
     if let Some(variant) = take_ready_variant(&key) {
+        tracing::debug!(target: "mesh_icon_trace", icon = %path.display(), width, height, "raster ready from worker");
         return FileVariant::Ready(variant);
     }
 
@@ -1850,6 +1862,7 @@ fn resolve_file_variant_async(
     // The consumer repaints when the worker publishes; painting nothing until
     // then keeps decode and resampling off the frame. Only when no worker can
     // ever wake it is the file rasterized here.
+    tracing::debug!(target: "mesh_icon_trace", icon = %path.display(), width, height, repaint_pending, "raster missing; scheduled or deferred");
     if repaint_pending {
         return FileVariant::Pending;
     }
