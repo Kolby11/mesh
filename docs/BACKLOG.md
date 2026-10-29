@@ -289,6 +289,7 @@ evidence and test workloads are in the linked reports.
 - [ ] Keep template-expression failure diagnostics active until the full render succeeds; a later successful expression currently resolves them prematurely. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Include manifest identity when reusing compiled contribution roots; manifest-only changes can retain an old contribution manifest. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Tie frontend compilation fingerprints to the exact source bytes parsed; edits between parsing and later fingerprint reads can publish stale compiled content as current. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Resolve component-relative asset URLs per source file; the source-text parse cache can reuse another directory's asset base. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] **S10-PERF-001 / S10-PERF-002 / S10-PERF-003:** Cache tree/style preparation and recursive imports by
       content revision, and narrow effect/state observation summaries after
       measuring rebuild and service-update workloads. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/10-frontend-compiler-and-host.md)
@@ -385,8 +386,6 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
       cache A8 masks and tint at draw.
 - [ ] Images exceeding the 32 MiB `SKIA_IMAGE_CACHE` budget (including mipmaps)
       are copied and re-uploaded every paint; wrap the decoded `Arc` without copying.
-- [ ] An icon-pack publish advances the shared resource revision and rebuilds
-      `FontSystem`; split font and icon revisions.
 - [ ] Service updates run Lua per message, not per frame.
 - [ ] Sparse frames still pay ~10 full passes (batch index rebuild, topology
       check, backdrop regions, layer-scope collection); the subtree reuse map

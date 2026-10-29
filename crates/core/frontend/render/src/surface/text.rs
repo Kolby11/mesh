@@ -1310,21 +1310,14 @@ impl TextEngine {
             return;
         }
 
+        // Font faces change only through `set_font_database`, which rebuilds
+        // the font system and glyph caches. A resource revision (an icon-pack
+        // publish, for instance) leaves faces and rasterized glyphs valid, so
+        // only layouts are dropped.
         self.resource_revision = revision;
         self.bump_measurer_base();
-        self.font_system = self
-            .font_database
-            .as_ref()
-            .map(|database| {
-                FontSystem::new_with_locale_and_db(self.locale.clone(), database.clone())
-            })
-            .unwrap_or_else(FontSystem::new);
-        self.font_system_loaded = true;
-        self.swash_cache = SwashCache::new();
+        self.ensure_font_system();
         self.layout_cache.clear();
-        GLYPH_ATLAS.with(|atlas| atlas.borrow_mut().clear());
-        GLYPH_PAGES.with(|pages| pages.borrow_mut().clear());
-        NAMED_FONT_AVAILABILITY.with(|cache| cache.borrow_mut().clear());
         self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
     }
 
