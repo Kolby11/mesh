@@ -567,7 +567,9 @@ local function sync_module_rows()
 end
 
 function onModuleFilterChange(event)
-    module_filter_value = tostring(event.value or "")
+    local value = event
+    if type(event) == "table" then value = event.value end
+    module_filter_value = tostring(value or "")
     sync_module_rows()
 end
 

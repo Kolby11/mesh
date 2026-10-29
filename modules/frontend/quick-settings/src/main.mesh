@@ -127,8 +127,13 @@ effect(function(self)
     sync_lang(is_sk)
 end)
 
+local function change_value(event)
+    if type(event) == "table" then return event.value end
+    return event
+end
+
 function onVolumeChange(event)
-    local val = math.max(0, math.min(100, math.floor(tonumber(event.value) or 0)))
+    local val = math.max(0, math.min(100, math.floor(tonumber(change_value(event)) or 0)))
     sync_volume(val, false)
     if audio and type(audio.set_volume) == "function" then
         audio.set_volume("default", val)
@@ -141,7 +146,7 @@ function onBrightnessChange(event)
     if not brightness then
         return
     end
-    local val = math.max(0, math.min(100, math.floor(tonumber(event.value) or 100)))
+    local val = math.max(0, math.min(100, math.floor(tonumber(change_value(event)) or 100)))
     brightness_level = val
     brightness_label = mesh.locale.format_percent(val)
     brightness.set(val)
