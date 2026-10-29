@@ -25,7 +25,7 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Animate the slider value itself (thumb glide on click-to-jump and keyboard steps); the fill geometry is core-written, so transitions on it do not apply.
 - [ ] Isolate hyprglass/compositor GPU cost during widget resize; native-namespace replay confirms plugin draws and removes parent rebuilds, but plugin stage timers remain disabled and display latency is unmeasured.
 - [ ] Continue the whole-codebase audit: sections 01–09 have review reports; sections 10–16 plus cross-section review and final inventory reconciliation remain.
-      Resume the three review layers and file coverage in [the audit inventory](../.planning/codebase/audits/2026-10-27-whole-codebase/00-coverage.md); [section 08 continuation](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md) records newer evidence and remaining coverage.
+      Resume the three review layers and file coverage in [the continuation inventory](../.planning/codebase/audits/2026-10-29-whole-codebase/00-coverage.md); [section 10](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md) is in progress.
 - [ ] Project documented icon axis custom properties into computed icon styles; generic custom-property handling currently bypasses their lowering. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Bound custom-property and prop-reference resolution depth and work; long acyclic chains recurse without a limit. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Include keyboard shortcuts in semantic snapshot diffs; shortcut-only changes currently produce no field change. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
@@ -290,6 +290,18 @@ evidence and test workloads are in the linked reports.
 - [ ] Include manifest identity when reusing compiled contribution roots; manifest-only changes can retain an old contribution manifest. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Tie frontend compilation fingerprints to the exact source bytes parsed; edits between parsing and later fingerprint reads can publish stale compiled content as current. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Resolve component-relative asset URLs per source file; the source-text parse cache can reuse another directory's asset base. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Distinguish numeric JSON subtypes in frontend memo fingerprints and assess collision-safe equality; distinct integer and float values currently hash identically. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Apply slot maximums before constructing contributions; excess instances can run initialization and mount before their nodes are discarded. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Reset glass-bar status indicators when services disappear and localize status/workspace labels; stale values and hardcoded English persist. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Make the glass-bar language indicator reflect its label and update on changes; it currently labels a one-time UI locale value as input language. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Consume power levels as percentages in glass-bar, orbit and battery widget; values at or below 1% are currently multiplied and displayed as much higher. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Preserve explicit false instance overrides in advanced Settings; a false value can display as its inherited true value. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Reset the Settings Wi-Fi active network when no connection remains; a previous SSID persists after disconnect. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Make frontend catalog reload publication conditional on its base generation; concurrent updates can otherwise overwrite newer state. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Keep frontend catalog generation tokens unique across rollback; restoring an old version permits a stale rollback to replace a later publication. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Reconcile advanced Settings optimistic edits with authoritative results; pending props, provider and module states currently override later snapshots indefinitely. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Correct Settings device OS fallbacks; literal values are currently treated as translation keys and rendered as missing-key markers. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
+- [ ] Clear or mark stale Settings audio and device details when providers disappear; previously reported data remains displayed. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] **S10-PERF-001 / S10-PERF-002 / S10-PERF-003:** Cache tree/style preparation and recursive imports by
       content revision, and narrow effect/state observation summaries after
       measuring rebuild and service-update workloads. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/10-frontend-compiler-and-host.md)
@@ -362,14 +374,17 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
       with a shader clip per node (`display_list/types.rs:566`). Use a rect clip
       for nodes missing the corner squares; longer term, push/pop clip scopes.
 - [ ] Multi-rect damage replays the selection once per rect when it contains a
-      layer scope (`painter/tree.rs:363,596`); paint once under `clip_region`.
+      layer scope (`painter/tree.rs:363,596`); paint once under a canvas `clip_region`,
+      not the rects' union, or translucent pixels between rects composite twice.
 - [ ] A scroll viewport is one opaque replay span, so damage inside it replays
       all content including offscreen rows (`display_list/build.rs:684`).
 - [ ] Popover show rebuilds the retained GPU target and dmabuf ring. Keep the
       target while hidden and pool dmabuf slots per size in `GpuPresenter`.
 - [ ] GPU target and dmabuf ring reallocate on every size change; round both up
       to 64 px classes like the SHM path and crop with the viewport.
-- [ ] Opacity: `opacity: 0` subtrees still rasterize into a layer, and single-
+- [ ] Opacity: `opacity: 0` subtrees still rasterize into a layer (prune in the
+      painter's layer loop; the display list must keep them, see
+      `display_list_keeps_plain_opacity_zero_nodes_paintable`), and single-
       primitive leaves open a `save_layer`; prune the first, fold alpha into the
       paint for the second. Animated opacity/transform layers have no raster cache.
 - [ ] The GPU painter keeps CPU-tuned choices (A8 atlas rounded fills, shader
