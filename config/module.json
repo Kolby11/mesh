@@ -78,6 +78,7 @@
         "service.power.read",
         "service.recorder.control",
         "service.recorder.read",
+        "service.settings.read",
         "service.weather.read",
         "service.wm.control",
         "service.wm.read",
@@ -284,7 +285,6 @@
         "service.settings.control",
         "service.settings.read",
         "service.theme.control",
-        "service.wm.control",
         "shell.surface",
         "theme.read"
       ],

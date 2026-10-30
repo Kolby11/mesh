@@ -877,7 +877,7 @@ fn selector_dependencies_filter_unrelated_interaction_changes() {
 
     assert!(
         component
-            .collect_interaction_changed_node_ids()
+            .collect_interaction_changed_node_ids(None)
             .affected
             .is_empty(),
         "active and checked changes cannot affect hover-only rules"
@@ -889,7 +889,7 @@ fn selector_dependencies_filter_unrelated_interaction_changes() {
     component.focused_key = Some("root/new".into());
     assert!(
         !component
-            .collect_interaction_changed_node_ids()
+            .collect_interaction_changed_node_ids(None)
             .affected
             .is_empty()
     );

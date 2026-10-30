@@ -38,6 +38,9 @@ pub enum StyleContext {
     Variable { prefix: String },
     Prop { prefix: String },
     Selector,
+    /// After `host::` in a selector: a control part name. `host` is the
+    /// selector's element tag, when it names one.
+    Part { host: Option<String> },
 }
 
 #[derive(Debug, Clone)]
@@ -361,11 +364,11 @@ pub fn style_context_at(block_content: &str, offset: usize) -> StyleContext {
     let last_close = before.rfind('}');
 
     let Some(open) = last_open else {
-        return StyleContext::Selector;
+        return selector_context(before);
     };
 
-    if last_close.is_some_and(|close| close > open) {
-        return StyleContext::Selector;
+    if let Some(close) = last_close.filter(|close| *close > open) {
+        return selector_context(&before[close + 1..]);
     }
 
     // Inside a declaration block
@@ -398,6 +401,23 @@ pub fn style_context_at(block_content: &str, offset: usize) -> StyleContext {
         StyleContext::Value { property }
     } else {
         StyleContext::Property
+    }
+}
+
+/// A selector being typed: after `::` it completes a control part.
+fn selector_context(selector: &str) -> StyleContext {
+    let selector = selector.trim_start();
+    let typed_name = selector
+        .trim_end_matches(|ch: char| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_');
+    let Some(host) = typed_name.strip_suffix("::") else {
+        return StyleContext::Selector;
+    };
+    let tag: String = host
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-')
+        .collect();
+    StyleContext::Part {
+        host: (!tag.is_empty()).then_some(tag),
     }
 }
 

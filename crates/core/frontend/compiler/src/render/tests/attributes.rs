@@ -196,7 +196,11 @@ fn phase87_layout_display_source_semantics_survive_lowering() {
                 .is_some_and(|value| value == "progress")
         })
         .expect("progress node");
-    assert_eq!(progress.tag, "text");
+    assert_eq!(progress.tag, "progress");
+    assert_eq!(
+        progress.children.last().and_then(|part| part.control_part()),
+        Some(mesh_core_elements::ControlPart::ProgressTrack)
+    );
     assert_eq!(
         progress.accessibility.role,
         mesh_core_elements::AccessibilityRole::ProgressBar

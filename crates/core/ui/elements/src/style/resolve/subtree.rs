@@ -657,15 +657,16 @@ impl<'a> StyleResolver<'a> {
         mut restyled: Option<&mut std::collections::HashSet<crate::tree::NodeId>>,
         mut layout_changed: Option<&mut bool>,
     ) {
+        // The compiler appends parts after any authored children.
         if !host
             .children
-            .first()
+            .last()
             .is_some_and(|child| child.control_part().is_some())
         {
             return;
         }
         let host_attrs = ControlHostAttrs::of(host);
-        let geometry = crate::control_parts::SliderGeometry::of(host);
+        let geometry = crate::control_parts::ControlGeometry::of(host);
         crate::control_parts::apply_host_layout(&mut host.computed_style, geometry);
         let scope = ControlPartScope {
             host_attrs: &host_attrs,
@@ -692,21 +693,40 @@ impl<'a> StyleResolver<'a> {
         let Some(part) = node.control_part() else {
             return;
         };
-        let initial = crate::control_parts::initial_part_style(part, scope.host_style);
-        let mut style = match part.name() {
-            Some(name) => self.resolve_node_style_with_attrs_indexed_inner(
+        let initial = crate::control_parts::initial_part_style(part, scope.host_style, scope.geometry);
+        let resolve_named = |name: &str, initial: &ComputedStyle| {
+            self.resolve_node_style_with_attrs_indexed_inner(
                 scope.rules,
                 scope.index,
-                &scope.host_attrs.for_part(name, &initial),
+                &scope.host_attrs.for_part(name, initial),
                 scope.context,
                 None,
                 None,
                 Some(&parent.custom_properties),
-            ),
-            None => ComputedStyle {
-                custom_properties: parent.custom_properties.clone(),
-                ..initial
-            },
+            )
+        };
+        let mut style = match part.name() {
+            Some(name) => resolve_named(name, &initial),
+            None => {
+                let mut style = ComputedStyle {
+                    custom_properties: parent.custom_properties.clone(),
+                    ..initial
+                };
+                if matches!(
+                    part,
+                    crate::ControlPart::SwitchLead | crate::ControlPart::SwitchTail
+                ) {
+                    let thumb = crate::control_parts::initial_part_style(
+                        crate::ControlPart::SwitchThumb,
+                        scope.host_style,
+                        scope.geometry,
+                    );
+                    style.transitions = crate::control_parts::glide_transitions(
+                        &resolve_named("thumb", &thumb).transitions,
+                    );
+                }
+                style
+            }
         };
         inherit_retained_text_style(&mut style, parent);
         if scope.geometry.vertical {
@@ -722,6 +742,9 @@ impl<'a> StyleResolver<'a> {
             }
             node.computed_style = style;
         }
+        // The renderer draws an indicator's mark from the host's checked state.
+        node.state
+            .set(crate::tree::NodeState::CHECKED, scope.geometry.checked);
         // Parts have no semantics of their own, so they never hold back the
         // host's finalized accessibility.
         node.finalized_accessibility_valid = true;
@@ -736,7 +759,7 @@ impl<'a> StyleResolver<'a> {
 struct ControlPartScope<'a> {
     host_attrs: &'a ControlHostAttrs,
     host_style: &'a ComputedStyle,
-    geometry: crate::control_parts::SliderGeometry,
+    geometry: crate::control_parts::ControlGeometry,
     rules: &'a [StyleRule],
     index: &'a StyleRuleIndex,
     context: StyleContext,

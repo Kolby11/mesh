@@ -82,6 +82,25 @@ fn declares_motion(property: &str) -> bool {
         || property.starts_with("animation-")
 }
 
+/// The nodes among `ids` that host control parts.
+fn collect_part_hosts(
+    node: &mesh_core_elements::WidgetNode,
+    ids: &HashSet<mesh_core_elements::NodeId>,
+    hosts: &mut HashSet<mesh_core_elements::NodeId>,
+) {
+    if ids.contains(&node.id)
+        && node
+            .children
+            .last()
+            .is_some_and(|child| child.control_part().is_some())
+    {
+        hosts.insert(node.id);
+    }
+    for child in node.children.iter() {
+        collect_part_hosts(child, ids, hosts);
+    }
+}
+
 impl FrontendSurfaceComponent {
     pub(super) fn record_profiling_stage(
         &mut self,
@@ -947,7 +966,7 @@ impl FrontendSurfaceComponent {
         // borrow checker.
         let mut affected_keys =
             if targeted_interaction_restyle && dirty_types.contains(ComponentDirtyFlags::STATE) {
-                self.collect_interaction_changed_node_ids()
+                self.collect_interaction_changed_node_ids(Some(tree))
             } else {
                 InteractionChangedNodeIds::default()
             };
@@ -1353,20 +1372,13 @@ impl FrontendSurfaceComponent {
                 .map(runtime_node_id_for_key)
         });
         self.previous_active_key = self.pointer_down_id;
-        if self.cached_restyle_state_dependencies.contains_any([
-            mesh_core_elements::PseudoState::Checked,
-            mesh_core_elements::PseudoState::Selected,
-        ]) {
-            self.previous_checked_values
-                .clone_from(&self.checked_values);
-        } else {
-            self.previous_checked_values.clear();
-        }
+        // Not gated on a selector dependency: checkable parts follow `checked`
+        // and a slider value is painted content, whether or not any rule
+        // selects on them.
+        self.previous_checked_values
+            .clone_from(&self.checked_values);
         self.previous_expanded_triggers
             .clone_from(&self.expanded_triggers);
-        // Not gated on a selector dependency the way `checked` is: a slider
-        // value is painted content, so it matters whether or not any rule
-        // selects on it.
         self.previous_slider_values.clone_from(&self.slider_values);
         self.interaction_snapshot_valid = true;
         for &id in &annotation_dirty {
@@ -1556,7 +1568,12 @@ impl FrontendSurfaceComponent {
         Some(changed)
     }
 
-    pub(super) fn collect_interaction_changed_node_ids(&self) -> InteractionChangedNodeIds {
+    /// `tree` is the frame's tree; it lets a checked change reach the parts
+    /// of a host no rule selects on.
+    pub(super) fn collect_interaction_changed_node_ids(
+        &self,
+        tree: Option<&mesh_core_elements::WidgetNode>,
+    ) -> InteractionChangedNodeIds {
         let dependencies = self.cached_restyle_state_dependencies;
         let mut changed_ids =
             HashSet::with_capacity(self.previous_hovered_path.len() + self.hovered_path.len() + 6);
@@ -1623,6 +1640,18 @@ impl FrontendSurfaceComponent {
                 &self.checked_values,
                 &mut changed_ids,
             );
+        } else if let Some(tree) = tree {
+            // Checkable controls' parts follow `checked` whether or not a rule
+            // names it: indicators draw their mark and a switch thumb moves.
+            let mut checked_ids = HashSet::new();
+            changed_map_keys(
+                &self.previous_checked_values,
+                &self.checked_values,
+                &mut checked_ids,
+            );
+            if !checked_ids.is_empty() {
+                collect_part_hosts(tree, &checked_ids, &mut changed_ids);
+            }
         }
 
         if dependencies.contains(mesh_core_elements::PseudoState::Expanded) {

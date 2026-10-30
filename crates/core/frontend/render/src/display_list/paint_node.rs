@@ -206,15 +206,9 @@ pub(super) fn build_paint_content_with_previous(
         }),
         "shape" => mesh_core_elements::ShapeGeometry::from_node(node)
             .map_or(DisplayPaintContent::None, DisplayPaintContent::Shape),
-        "checkbox" if node_is_checked(node) => {
-            DisplayPaintContent::Checkmark(DisplayCheckmarkPaint {
-                kind: CheckmarkKind::Check,
-            })
-        }
-        "radio" if node_is_checked(node) => DisplayPaintContent::Checkmark(DisplayCheckmarkPaint {
-            kind: CheckmarkKind::Dot,
+        _ => indicator_mark(node).map_or(DisplayPaintContent::None, |kind| {
+            DisplayPaintContent::Checkmark(DisplayCheckmarkPaint { kind })
         }),
-        _ => DisplayPaintContent::None,
     }
 }
 
@@ -254,12 +248,17 @@ pub(super) fn retained_optional_display_str(
     value.map(|value| retained_display_str(value, previous))
 }
 
-/// A `checkbox`/`radio` is checked when its `checked` attribute is present and
-/// not an explicit false value (`checked`, `checked="true"`, `checked="1"`).
-pub(crate) fn node_is_checked(node: &WidgetNode) -> bool {
-    node.attributes
-        .get(Prop::Checked)
-        .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1" | "checked"))
+/// The mark a checked `checkbox::indicator` or `radio::indicator` draws in its
+/// `color`; the style resolver mirrors the host's checked state onto it.
+pub(crate) fn indicator_mark(node: &WidgetNode) -> Option<CheckmarkKind> {
+    if !node.state.contains(mesh_core_elements::NodeState::CHECKED) {
+        return None;
+    }
+    match node.control_part()? {
+        mesh_core_elements::ControlPart::CheckboxIndicator => Some(CheckmarkKind::Check),
+        mesh_core_elements::ControlPart::RadioIndicator => Some(CheckmarkKind::Dot),
+        _ => None,
+    }
 }
 
 pub(super) fn build_text_selection(node: &WidgetNode) -> Option<DisplayTextSelectionPaint> {

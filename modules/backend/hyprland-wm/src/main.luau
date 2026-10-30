@@ -451,6 +451,73 @@ function on_poll(self)
     refresh_state(self)
 end
 
+-- Glass layers the hyprglass plugin draws for, with the base preset each uses
+-- in the user's Hyprland config (`mesh` for cards, `mesh-pill` for thin pills).
+local GLASS_LAYERS = {
+    ["@mesh/glass-widgets#default"] = { preset = "mesh", edge = 22 },
+    ["@mesh/glass-bar#default"] = { preset = "mesh-pill", edge = 12 },
+    ["@mesh/glass-dock#default"] = { preset = "mesh-pill", edge = 12 },
+    ["@mesh/glass-notifications#default"] = { preset = "mesh", edge = 22 },
+    ["@mesh/glass-dashboard#default"] = { preset = "mesh", edge = 22 },
+    ["@mesh/settings#default"] = { preset = "mesh", edge = 22 },
+    ["@mesh/glass-wallpapers#default"] = { preset = "mesh", edge = 22 },
+}
+
+-- The last glass requests, reapplied after a compositor config reload: a reload
+-- drops the presets and layer rules set through `hyprctl eval`.
+local glass_strength = nil
+local glass_enabled = nil
+
+-- Re-point the glass layers at presets derived from the user's `mesh` and
+-- `mesh-pill` ones. Strength is a compositor setting: hyprglass ignores the
+-- `blur()` and `refract()` values a MESH style requests. The
+-- layers return to the presets in the Hyprland config when `strength` is nil.
+-- Otherwise both values are 0-100.
+local function apply_glass_strength(strength)
+    local lines = { "local hg = hl.plugin and hl.plugin.hyprglass", "if not hg then return end" }
+    for namespace, layer in pairs(GLASS_LAYERS) do
+        local preset = layer.preset
+        if strength then
+            preset = layer.preset .. "-live"
+            lines[#lines + 1] = string.format(
+                "hg.preset(%q, { inherits = %q, blur_strength = %.3f, blur_iterations = %d, refraction_strength = %.3f, edge_thickness_px = %d })",
+                preset, layer.preset,
+                0.15 + 1.85 * strength.blur / 100, 1 + math.floor(strength.blur / 40),
+                0.6 * strength.liquid / 100, math.floor(layer.edge * strength.liquid / 100 + 0.5)
+            )
+        end
+        lines[#lines + 1] = string.format(
+            "hg.layer(%q, { preset = %q, mask_mode = \"contour\", mask_threshold = 0.04 })",
+            namespace, preset
+        )
+    end
+    local result = mesh.exec("hyprctl", { "eval", table.concat(lines, "\n") })
+    if not result.success then
+        log_warn("glass strength update failed: " .. trim(result.stderr))
+    end
+    return { ok = result.success, error = result.stderr }
+end
+
+local function apply_glass_enabled(enabled)
+    local result = mesh.exec("hyprctl", { "eval", string.format(
+        "local hg = hl.plugin and hl.plugin.hyprglass\nif hg then hg.config({ layers = { enabled = %s } }) end",
+        tostring(enabled)
+    ) })
+    if not result.success then
+        log_warn("glass toggle failed: " .. trim(result.stderr))
+    end
+    return { ok = result.success, error = result.stderr }
+end
+
+local function reapply_glass()
+    if glass_enabled ~= nil then
+        apply_glass_enabled(glass_enabled)
+    end
+    if glass_strength then
+        apply_glass_strength(glass_strength)
+    end
+end
+
 -- Hyprland socket2 event lines: `eventname>>params`
 local WORKSPACE_LIST_EVENTS = {
     createworkspace = true,
@@ -536,6 +603,10 @@ function on_stream_line(self, program, line)
 
     local event, payload = line:match("^([%a%d]+)>>(.*)$")
     if not event then
+        return
+    end
+    if event == "configreloaded" then
+        reapply_glass()
         return
     end
 
@@ -659,64 +730,25 @@ function on_command_focus_workspace(self)
     return { ok = result.success, error = result.stderr }
 end
 
--- Glass layers the hyprglass plugin draws for, with the base preset each uses
--- in the user's Hyprland config (`mesh` for cards, `mesh-pill` for thin pills).
-local GLASS_LAYERS = {
-    ["@mesh/glass-widgets#default"] = { preset = "mesh", edge = 22 },
-    ["@mesh/glass-bar#default"] = { preset = "mesh-pill", edge = 12 },
-    ["@mesh/glass-dock#default"] = { preset = "mesh-pill", edge = 12 },
-    ["@mesh/glass-notifications#default"] = { preset = "mesh", edge = 22 },
-    ["@mesh/glass-dashboard#default"] = { preset = "mesh", edge = 22 },
-    ["@mesh/settings#default"] = { preset = "mesh", edge = 22 },
-    ["@mesh/glass-wallpapers#default"] = { preset = "mesh", edge = 22 },
-}
-
--- Re-point the glass layers at presets derived from the user's `mesh` and
--- `mesh-pill` ones. Strength is a compositor setting: hyprglass ignores the
--- `blur()` and `refract()` values a MESH style requests. The
--- layers return to the presets in the Hyprland config when a value is negative.
--- Otherwise both values are 0-100.
+-- A negative value restores the presets in the Hyprland config.
 function on_command_set_glass_strength(self)
     local payload = mesh.service.payload()
     local blur = tonumber(payload.blur)
     local liquid = tonumber(payload.liquid)
-    if blur and blur < 0 then blur = nil end
-    local lines = { "local hg = hl.plugin and hl.plugin.hyprglass", "if not hg then return end" }
-    for namespace, layer in pairs(GLASS_LAYERS) do
-        local preset = layer.preset
-        if blur and liquid then
-            blur = math.max(0, math.min(100, blur))
-            liquid = math.max(0, math.min(100, liquid))
-            preset = layer.preset .. "-live"
-            lines[#lines + 1] = string.format(
-                "hg.preset(%q, { inherits = %q, blur_strength = %.3f, blur_iterations = %d, refraction_strength = %.3f, edge_thickness_px = %d })",
-                preset, layer.preset,
-                0.15 + 1.85 * blur / 100, 1 + math.floor(blur / 40),
-                0.6 * liquid / 100, math.floor(layer.edge * liquid / 100 + 0.5)
-            )
-        end
-        lines[#lines + 1] = string.format(
-            "hg.layer(%q, { preset = %q, mask_mode = \"contour\", mask_threshold = 0.04 })",
-            namespace, preset
-        )
+    if blur and liquid and blur >= 0 and liquid >= 0 then
+        glass_strength = {
+            blur = math.min(100, blur),
+            liquid = math.min(100, liquid),
+        }
+    else
+        glass_strength = false
     end
-    local result = mesh.exec("hyprctl", { "eval", table.concat(lines, "\n") })
-    if not result.success then
-        log_warn("glass strength update failed: " .. trim(result.stderr))
-    end
-    return { ok = result.success, error = result.stderr }
+    return apply_glass_strength(glass_strength or nil)
 end
 
 -- Switch the compositor's glass for every MESH layer on or off. Themes that
 -- are solid colours turn it off so their surfaces are not drawn as glass.
 function on_command_set_glass_enabled(self)
-    local enabled = mesh.service.payload().enabled == true
-    local result = mesh.exec("hyprctl", { "eval", string.format(
-        "local hg = hl.plugin and hl.plugin.hyprglass\nif hg then hg.config({ layers = { enabled = %s } }) end",
-        tostring(enabled)
-    ) })
-    if not result.success then
-        log_warn("glass toggle failed: " .. trim(result.stderr))
-    end
-    return { ok = result.success, error = result.stderr }
+    glass_enabled = mesh.service.payload().enabled == true
+    return apply_glass_enabled(glass_enabled)
 end

@@ -7,13 +7,14 @@
     "kind": "ui",
     "uses": {
       "interfaces": {
-        "mesh.wm": ">=1.0",
+        "mesh.wm": ">=1.2",
         "mesh.theme": ">=1.0",
         "mesh.audio": ">=1.0",
         "mesh.power": ">=1.0"
       },
       "optionalInterfaces": {
         "mesh.media": ">=1.0",
+        "mesh.settings": ">=1.0",
         "mesh.weather": ">=1.0",
         "mesh.network": ">=1.0",
         "mesh.recorder": ">=1.0",
@@ -39,6 +40,7 @@
         "service.network.read",
         "service.recorder.read",
         "service.recorder.control",
+        "service.settings.read",
         "service.brightness.read",
         "service.brightness.control"
       ],

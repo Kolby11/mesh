@@ -133,6 +133,26 @@ impl AnimatableStyle {
         self
     }
 
+    /// Both endpoints with lengths in pixels, except a dimension that is a
+    /// percentage at both ends: it interpolates as a percentage, so layout
+    /// resolves it against its container on every frame.
+    fn interpolation_pair(from: Self, to: Self) -> (Self, Self) {
+        let (mut resolved_from, mut resolved_to) = (from.resolved_lengths(), to.resolved_lengths());
+        macro_rules! keep_percentages {
+            ($($field:ident),*) => {$(
+                if matches!(
+                    (from.$field, to.$field),
+                    (Dimension::Percent(_), Dimension::Percent(_))
+                ) {
+                    resolved_from.$field = from.$field;
+                    resolved_to.$field = to.$field;
+                }
+            )*};
+        }
+        keep_percentages!(width, height, min_width, max_width, min_height, max_height);
+        (resolved_from, resolved_to)
+    }
+
     pub fn apply_to_node(self, node: &mut WidgetNode) {
         let s = &mut node.computed_style;
         s.border_radius = self.border_radius;
@@ -489,9 +509,8 @@ impl ActiveTransition {
         }
         let active = elapsed - self.delay;
         let raw = (active.as_secs_f32() / self.duration.as_secs_f32()).clamp(0.0, 1.0);
-        self.from
-            .resolved_lengths()
-            .lerp(self.to.resolved_lengths(), apply_easing(self.easing, raw))
+        let (from, to) = AnimatableStyle::interpolation_pair(self.from, self.to);
+        from.lerp(to, apply_easing(self.easing, raw))
     }
 
     pub fn finished(&self, now: Instant) -> bool {
@@ -1205,6 +1224,29 @@ mod tests {
                 Dimension::Px((old_width + new_width) / 2.0)
             );
         }
+    }
+
+    #[test]
+    fn percentage_lengths_interpolate_as_percentages() {
+        // The layout still holds the old, collapsed size when the transition
+        // starts; the percentages, not that size, are the endpoints.
+        let mut node = WidgetNode::new("box");
+        node.computed_style.width = Dimension::Percent(0.0);
+        let previous = AnimatableStyle::from_node(&node);
+        node.computed_style.width = Dimension::Percent(100.0);
+        node.computed_style.transitions = vec![TransitionStyle {
+            duration_ms: 100,
+            easing: mesh_core_elements::TransitionEasing::Linear,
+            properties: TransitionProperties::of_property("width"),
+            ..Default::default()
+        }];
+        let mut animator = TransitionAnimator::new();
+        let start = Instant::now();
+        assert!(animator.step_node(node.id, &mut node, previous, start));
+        let displayed = animator
+            .displayed_style(node.id, start + Duration::from_millis(25), previous)
+            .unwrap();
+        assert_eq!(displayed.width, Dimension::Percent(25.0));
     }
 
     #[test]

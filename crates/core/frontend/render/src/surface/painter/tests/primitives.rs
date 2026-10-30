@@ -377,7 +377,7 @@ fn compatibility_and_retained_input_paths_emit_same_classes() {
 #[test]
 fn compatibility_and_retained_control_paths_emit_same_classes() {
     let mut root = node(
-        "checkbox",
+        "box",
         LayoutRect {
             x: 2.0,
             y: 2.0,
@@ -386,7 +386,8 @@ fn compatibility_and_retained_control_paths_emit_same_classes() {
         },
         Color::TRANSPARENT,
     );
-    root.attributes.insert(Prop::Checked, "true".into());
+    root.set_control_part(mesh_core_elements::ControlPart::CheckboxIndicator);
+    root.state.set(mesh_core_elements::NodeState::CHECKED, true);
     root.computed_style.color = Color::from_hex("#4a90e2").unwrap();
 
     let direct_backend = RecordingPaintBackend::default();

@@ -15,6 +15,11 @@ pub enum UiTag {
     Button,
     Input,
     Slider,
+    Progress,
+    Meter,
+    Checkbox,
+    Radio,
+    Switch,
     Scroll,
     Icon,
     Image,
@@ -38,6 +43,11 @@ impl UiTag {
             UiTag::Button => "button",
             UiTag::Input => "input",
             UiTag::Slider => "slider",
+            UiTag::Progress => "progress",
+            UiTag::Meter => "meter",
+            UiTag::Checkbox => "checkbox",
+            UiTag::Radio => "radio",
+            UiTag::Switch => "switch",
             UiTag::Scroll => "scroll",
             UiTag::Icon => "icon",
             UiTag::Image => "image",
@@ -60,6 +70,11 @@ impl UiTag {
             "button" => Self::Button,
             "input" => Self::Input,
             "slider" => Self::Slider,
+            "progress" => Self::Progress,
+            "meter" => Self::Meter,
+            "checkbox" => Self::Checkbox,
+            "radio" => Self::Radio,
+            "switch" => Self::Switch,
             "scroll" => Self::Scroll,
             "icon" => Self::Icon,
             "image" => Self::Image,
@@ -103,8 +118,8 @@ mod tests {
         assert_eq!(lower_source_tag(&SourceTag::Text).as_str(), "text");
         assert_eq!(lower_source_tag(&SourceTag::Icon).as_str(), "icon");
         assert_eq!(lower_source_tag(&SourceTag::Input).as_str(), "input");
-        assert_eq!(lower_source_tag(&SourceTag::Switch).as_str(), "input");
-        assert_eq!(lower_source_tag(&SourceTag::Checkbox).as_str(), "input");
+        assert_eq!(lower_source_tag(&SourceTag::Switch).as_str(), "switch");
+        assert_eq!(lower_source_tag(&SourceTag::Checkbox).as_str(), "checkbox");
         assert_eq!(lower_source_tag(&SourceTag::Image).as_str(), "image");
     }
 

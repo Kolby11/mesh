@@ -128,11 +128,12 @@ fn hash_primitive(node: &WidgetNode) -> u64 {
             node.input_preedit.hash(&mut hasher);
             hash_color(node.computed_style.color, &mut hasher);
         }
-        "checkbox" | "radio" => {
-            hash_attributes(node, &[Prop::Checked], &mut hasher);
-            hash_color(node.computed_style.color, &mut hasher);
+        _ => {
+            if let Some(mark) = crate::display_list::indicator_mark(node) {
+                mark.hash(&mut hasher);
+                hash_color(node.computed_style.color, &mut hasher);
+            }
         }
-        _ => {}
     }
     hasher.finish()
 }

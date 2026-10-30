@@ -190,7 +190,7 @@ input:focus {
 input:focus-visible {
   color: #505050;
 }
-input:checked {
+checkbox:checked {
   background-color: #606060;
 }
 </style>
@@ -311,7 +311,7 @@ fn targeted_restyle_tracks_active_checked_and_focus_visible_changes() {
             .cached_restyle_state_dependencies
             .contains(mesh_core_elements::PseudoState::FocusVisible)
     );
-    let changed = component.collect_interaction_changed_node_ids();
+    let changed = component.collect_interaction_changed_node_ids(component.last_tree.as_ref());
     assert!(
         changed
             .affected
@@ -1512,4 +1512,212 @@ slider { width: 200px; height: 40px; }
         thumb.layout.width
     );
     assert!(component.transitions.contains_key(thumb.id));
+}
+
+#[test]
+fn progress_fill_follows_script_value_writes() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <column>
+    <progress value="{done}" max="8" />
+  </column>
+</template>
+<script lang="luau">
+done = 2
+</script>
+<style>
+progress { width: 200px; height: 10px; padding: 0px; }
+progress::track { height: 6px; }
+progress::fill { background-color: #ff0000; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 40);
+    let mut paint = |component: &mut FrontendSurfaceComponent| {
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+            .unwrap();
+        if component.wants_render() {
+            component
+                .paint_raster(&theme, SurfaceExtent::unpadded(240, 40), &mut buffer, 1.0)
+                .unwrap();
+        }
+    };
+    paint(&mut component);
+    let fill = |component: &FrontendSurfaceComponent| {
+        fn find(node: &WidgetNode) -> Option<&WidgetNode> {
+            if node.control_part() == Some(mesh_core_elements::ControlPart::ProgressFill) {
+                return Some(node);
+            }
+            node.children.iter().find_map(find)
+        }
+        find(component.last_tree.as_ref().unwrap()).unwrap().clone()
+    };
+    let before = fill(&component);
+    assert_eq!((before.layout.width, before.layout.height), (50.0, 6.0));
+    assert_eq!(
+        before.computed_style.background_color,
+        mesh_core_elements::style::Color::from_hex("#ff0000").unwrap()
+    );
+
+    component
+        .run_script_call(None, "test", |script_ctx| {
+            script_ctx
+                .assign_global("done", &serde_json::json!(6))
+                .map(|()| Vec::new())
+        })
+        .unwrap();
+    paint(&mut component);
+    assert_eq!(fill(&component).layout.width, 150.0);
+}
+
+#[test]
+fn clicking_checkables_checks_their_parts() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <column>
+    <checkbox class="agree" />
+    <switch class="wifi" />
+  </column>
+</template>
+<style>
+column { padding: 0px; gap: 10px; align-items: start; }
+switch::track { width: 40px; padding: 2px; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 80);
+    let mut paint = |component: &mut FrontendSurfaceComponent| {
+        for _ in 0..3 {
+            component
+                .paint_raster(&theme, SurfaceExtent::unpadded(120, 80), &mut buffer, 1.0)
+                .unwrap();
+            if !component.wants_render() {
+                break;
+            }
+        }
+    };
+    paint(&mut component);
+    fn part(node: &WidgetNode, wanted: mesh_core_elements::ControlPart) -> Option<&WidgetNode> {
+        if node.control_part() == Some(wanted) {
+            return Some(node);
+        }
+        node.children.iter().find_map(|child| part(child, wanted))
+    }
+    let find = |component: &FrontendSurfaceComponent, wanted| {
+        part(component.last_tree.as_ref().unwrap(), wanted)
+            .unwrap()
+            .clone()
+    };
+    use mesh_core_elements::ControlPart::{CheckboxIndicator, SwitchThumb, SwitchTrack};
+    let thumb_offset = |component: &FrontendSurfaceComponent| {
+        find(component, SwitchThumb).layout.x - find(component, SwitchTrack).layout.x
+    };
+    assert!(!find(&component, CheckboxIndicator).state.contains(NodeState::CHECKED));
+    assert_eq!(thumb_offset(&component), 2.0);
+
+    let click = |component: &mut FrontendSurfaceComponent, node: &WidgetNode| {
+        let (x, y) = (
+            node.layout.x + node.layout.width / 2.0,
+            node.layout.y + node.layout.height / 2.0,
+        );
+        for pressed in [true, false] {
+            component
+                .handle_input(
+                    &theme,
+                    120,
+                    80,
+                    ComponentInput::PointerButton {
+                        x,
+                        y,
+                        button: 0x110,
+                        pressed,
+                    },
+                )
+                .unwrap();
+        }
+    };
+    let indicator = find(&component, CheckboxIndicator);
+    click(&mut component, &indicator);
+    let thumb = find(&component, SwitchThumb);
+    click(&mut component, &thumb);
+    paint(&mut component);
+
+    assert!(find(&component, CheckboxIndicator).state.contains(NodeState::CHECKED));
+    assert_eq!(thumb_offset(&component), 40.0 - 2.0 - 16.0);
+}
+
+#[test]
+fn switch_thumb_glides_with_its_margin_transition() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <column>
+    <switch />
+  </column>
+</template>
+<style>
+column { padding: 0px; align-items: start; }
+switch::track { width: 40px; padding: 2px; }
+switch::thumb { transition: margin 1s linear; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(120, 60);
+    let mut paint = |component: &mut FrontendSurfaceComponent| {
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(120, 60), &mut buffer, 1.0)
+            .unwrap();
+    };
+    paint(&mut component);
+    if component.wants_render() {
+        paint(&mut component);
+    }
+    fn part(node: &WidgetNode, wanted: mesh_core_elements::ControlPart) -> Option<&WidgetNode> {
+        if node.control_part() == Some(wanted) {
+            return Some(node);
+        }
+        node.children.iter().find_map(|child| part(child, wanted))
+    }
+    use mesh_core_elements::ControlPart::{SwitchThumb, SwitchTrack};
+    let tree = || component.last_tree.as_ref().unwrap();
+    let thumb = part(tree(), SwitchThumb).unwrap().clone();
+    let track_x = part(tree(), SwitchTrack).unwrap().layout.x;
+    let (x, y) = (
+        thumb.layout.x + thumb.layout.width / 2.0,
+        thumb.layout.y + thumb.layout.height / 2.0,
+    );
+    for pressed in [true, false] {
+        component
+            .handle_input(
+                &theme,
+                120,
+                60,
+                ComponentInput::PointerButton {
+                    x,
+                    y,
+                    button: 0x110,
+                    pressed,
+                },
+            )
+            .unwrap();
+    }
+    paint(&mut component);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    paint(&mut component);
+    let offset = part(component.last_tree.as_ref().unwrap(), SwitchThumb)
+        .unwrap()
+        .layout
+        .x
+        - track_x;
+    assert!(
+        offset > 2.0 && offset < 22.0,
+        "a one-second glide is under way, offset {offset}"
+    );
+    assert!(component.wants_render(), "the glide keeps frames coming");
 }

@@ -486,7 +486,7 @@ mod parsed_component_cache {
 }
 
 /// Elements that expose control parts, for validating untagged hosts.
-const CONTROL_PART_HOSTS: &[&str] = &["slider"];
+const CONTROL_PART_HOSTS: &[&str] = &["slider", "progress", "meter", "checkbox", "radio", "switch"];
 
 fn validate_component_pseudo_states(
     path: &Path,

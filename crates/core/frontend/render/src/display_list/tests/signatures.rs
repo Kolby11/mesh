@@ -2,32 +2,40 @@ use super::super::paint_node::*;
 use super::super::*;
 use super::common::*;
 use crate::{RenderObjectDirtySummary, RenderObjectFingerprint};
-use mesh_core_elements::Prop;
 use mesh_core_elements::style::{Color, FontStyle};
+use mesh_core_elements::{ControlPart, NodeState, Prop, WidgetNode};
+
+/// An indicator part as the style resolver leaves it for a host.
+fn indicator(id: u64, part: ControlPart, checked: bool) -> WidgetNode {
+    let mut indicator = node(id, "box", 0.0, 0.0, 18.0, 18.0);
+    indicator.set_control_part(part);
+    indicator.state.set(NodeState::CHECKED, checked);
+    indicator
+}
 
 #[test]
-fn checkbox_and_radio_emit_checkmark_content_only_when_checked() {
-    let mut checkbox = node(1, "checkbox", 0.0, 0.0, 18.0, 18.0);
-    checkbox.attributes.insert(Prop::Checked, "true".into());
+fn checkbox_and_radio_indicators_emit_checkmark_content_only_when_checked() {
     assert_eq!(
-        build_paint_content(&checkbox),
+        build_paint_content(&indicator(1, ControlPart::CheckboxIndicator, true)),
         DisplayPaintContent::Checkmark(DisplayCheckmarkPaint {
             kind: CheckmarkKind::Check,
         })
     );
-
-    let mut radio = node(2, "radio", 0.0, 0.0, 18.0, 18.0);
-    radio.attributes.insert(Prop::Checked, "checked".into());
     assert_eq!(
-        build_paint_content(&radio),
+        build_paint_content(&indicator(2, ControlPart::RadioIndicator, true)),
         DisplayPaintContent::Checkmark(DisplayCheckmarkPaint {
             kind: CheckmarkKind::Dot,
         })
     );
 
-    // Unchecked controls paint no mark.
-    let unchecked = node(3, "checkbox", 0.0, 0.0, 18.0, 18.0);
-    assert_eq!(build_paint_content(&unchecked), DisplayPaintContent::None);
+    // Unchecked indicators and the hosts themselves paint no mark.
+    assert_eq!(
+        build_paint_content(&indicator(3, ControlPart::CheckboxIndicator, false)),
+        DisplayPaintContent::None
+    );
+    let mut host = node(4, "checkbox", 0.0, 0.0, 18.0, 18.0);
+    host.attributes.insert(Prop::Checked, "true".into());
+    assert_eq!(build_paint_content(&host), DisplayPaintContent::None);
 
     let mut falsey = node(4, "checkbox", 0.0, 0.0, 18.0, 18.0);
     falsey.attributes.insert(Prop::Checked, "false".into());
@@ -60,9 +68,9 @@ fn primitive_signature_tracks_relevant_paint_payload_attrs() {
         original_text
     );
 
-    let mut checkbox = node(2, "checkbox", 0.0, 0.0, 20.0, 20.0);
+    let mut checkbox = indicator(2, ControlPart::CheckboxIndicator, false);
     let original_checkbox = primitive_signature(&checkbox, DisplayPrimitiveSlot::Generic);
-    checkbox.attributes.insert(Prop::Checked, "true".into());
+    checkbox.state.set(NodeState::CHECKED, true);
     assert_ne!(
         primitive_signature(&checkbox, DisplayPrimitiveSlot::Generic),
         original_checkbox
@@ -71,10 +79,10 @@ fn primitive_signature_tracks_relevant_paint_payload_attrs() {
 
 #[test]
 fn retained_dirty_contract_matches_shared_paint_signature_inputs() {
-    let mut checkbox = node(1, "checkbox", 0.0, 0.0, 20.0, 20.0);
+    let mut checkbox = indicator(1, ControlPart::CheckboxIndicator, false);
     let checkbox_before = RenderObjectFingerprint::for_node(&checkbox, None);
     let checkbox_signature = primitive_signature(&checkbox, DisplayPrimitiveSlot::Generic);
-    checkbox.attributes.insert(Prop::Checked, "true".into());
+    checkbox.state.set(NodeState::CHECKED, true);
     let checkbox_after = RenderObjectFingerprint::for_node(&checkbox, Some(&checkbox_before));
     let mut dirty = RenderObjectDirtySummary::default();
     assert!(dirty.add_fingerprint_diff(&checkbox_before, &checkbox_after));
@@ -150,7 +158,7 @@ fn batch_signature_uses_only_slot_material() {
 
 #[test]
 fn batch_signature_tracks_generic_content_material() {
-    let mut checkbox = node(1, "checkbox", 0.0, 0.0, 20.0, 20.0);
+    let mut checkbox = indicator(1, ControlPart::CheckboxIndicator, true);
     checkbox.computed_style.background_color.a = 0;
     let original = batch_signature(&checkbox, DisplayPrimitiveSlot::Generic);
 

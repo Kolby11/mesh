@@ -13,8 +13,9 @@ measurements live in [`log/`](log/README.md).
 
 ## Next
 
-- Investigate intermittent fractional retained-layout parity. The redesigned Settings appearance page now reproduces it deterministically (`settings_scroll_shift_matches_full_paint`).
-- Extend styleable control parts from `slider` to scrollbars, inputs, toggles and progress.
+- Investigate intermittent fractional retained-layout parity; the Settings scroll-shift failure turned out to be fractional-phase paint coverage, fixed separately.
+- Design style-only control parts for scrollbars and inputs; slider, progress, meter, checkbox, radio and switch have parts.
+- Fix the Settings and style-fixture tests that still expect glass panels under the solid themes.
 - Continue trusted live glass source work and the in-surface blur engine.
 
 ## Blocked / known baselines

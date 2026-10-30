@@ -50,23 +50,29 @@ The rail, lead and anchor are structure and cannot be styled.
 
 ## Order
 
-Shipped 2026-10-29 for `slider`: selector, part nodes, resolver styling,
-geometry, removal of the native painter, shell restyle and transitions, and the
-Liquid Glass thumb (see the October log). A zero-width anchor was tried first;
-a node without area does not paint its subtree.
+Shipped 2026-10-29: `slider` (selector, part nodes, resolver styling,
+geometry, removal of the native painter, shell restyle and transitions, the
+Liquid Glass thumb); then `progress`/`meter` (`::track`, `::fill`),
+`checkbox`/`radio` (`::indicator`, which draws the mark in its `color`) and
+`switch` (`::track`, `::thumb`, gliding with the thumb's `margin`
+transition), each with its own runtime primitive, and LSP completion of part
+names. See the October log. A zero-width anchor was tried first; a node
+without area does not paint its subtree.
 
 Remaining:
 
 1. Scrollbars (`::track`, `::thumb`), keeping the retained scroll patches
    incremental.
-2. Input (`::placeholder`, `::selection`, `::caret`).
-3. Checkbox, radio and switch (`::indicator`), progress and meter (`::fill`).
-4. LSP completion of part names after `::`.
+2. Input (`::placeholder`, `::caret`, `::selection`).
 
 ## Open questions
 
-- Scrollbar geometry is owned by the scroll retained path (overflow metrics,
-  scroll-scope commands). Parts must keep those patches incremental.
+- Neither remaining control fits the child-node model. Scrollbar geometry is
+  owned by the scroll retained path (overflow metrics, scroll-scope commands);
+  the input's placeholder and caret are placed from text measured at paint
+  time, and inputs draw no selection yet. Likely answer: style-only parts
+  resolved with the host (`for_part`, as now) into a few typed host fields the
+  painter reads, as CSS `::placeholder` has no box. Decide before starting.
 - A lens that magnifies the track needs in-surface refraction; today `refract()`
   samples the backdrop image, so the pressed lens blurs and rims but does not
   magnify what is in the same surface.

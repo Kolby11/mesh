@@ -268,11 +268,7 @@ end
                 let node = control(&tree);
                 assert_eq!(
                     node.tag,
-                    if runtime_tag == "checkbox" || runtime_tag == "switch" {
-                        "input"
-                    } else {
-                        runtime_tag
-                    }
+                    runtime_tag
                 );
                 assert_eq!(
                     node.attributes.get_by_name(attr).unwrap(),

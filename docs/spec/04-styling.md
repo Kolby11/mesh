@@ -545,7 +545,8 @@ measured content axis takes precedence.
 
 ## 6.2 Control parts (`host::part`)
 
-**Status: shipped for `slider`; target for other controls.** A native control
+**Status: shipped for `slider`, `progress`, `meter`, `checkbox`, `radio` and
+`switch`; target for scrollbars and inputs.** A native control
 keeps its behaviour in core — value range, pointer and keyboard input, focus
 and accessibility — while everything it draws is CSS on named parts. Themes and
 components restyle a control with ordinary rules, transitions, keyframes and
@@ -582,16 +583,28 @@ slider:active::thumb { width: 52px; height: 32px; background-color: #ffffff1a;
 | Host | Parts |
 | --- | --- |
 | `slider` | `::track` (the bar), `::fill` (the track up to the value), `::thumb` (the handle) |
+| `progress`, `meter` | `::track` (the bar), `::fill` (the track up to the value) |
+| `checkbox`, `radio` | `::indicator` (the box or ring; when checked it draws a check mark or dot in its `color`) |
+| `switch` | `::track` (the bar), `::thumb` (the knob, at the end of the track when checked) |
 
-Part styles are written for a horizontal slider. With `orient="vertical"`,
+A `progress` or `meter` without a `value` is empty. An `indeterminate`
+progress fills 30% of its track from the start; move it with keyframes on
+`progress::fill`. A switch thumb glides between its ends with the thumb's
+`margin` (or `all`) transition, as if a margin moved it:
+`switch::thumb { transition: margin 160ms ease; }`. The checked state is the
+host's (`switch:checked::track`). `progress`, `meter`, `checkbox`, `radio` and
+`switch` are their own element types, so `input` and `text` rules no longer
+match them; select them by their tag.
+
+Part styles are written for a horizontal control. With `orient="vertical"`,
 widths and heights, and the start/end and cross-axis margins and padding, swap
 automatically, and the fill grows from the bottom.
 
 Not to be confused with `::part(name)` in user stylesheets (§4.4), which
 targets parts a module exposes on its own markup.
 
-**Target:** `scrollbar::track`/`::thumb`, `input::placeholder`/`::selection`/
-`::caret`, `checkbox::indicator` (also `radio`, `switch`) and `progress::fill`.
+**Target:** `scrollbar::track`/`::thumb` and `input::placeholder`/
+`::selection`/`::caret`.
 A pressed thumb's `refract()` samples the backdrop image (§11), so it does not
 yet magnify the track drawn in the same surface.
 
@@ -763,10 +776,13 @@ including retained scrolling content. Promoted popup buffer bounds apply these
 clips before measuring descendant effects, so offscreen scroll rows do not
 resize or reposition the popup buffer. Background images and gradients follow
 normalized corner radii. Partial damage repaints reproduce full-paint edge
-coverage; pixels outside the damage rectangle remain untouched.
+coverage, including content at a fractional scroll offset, whose pixels also
+survive whole-pixel scroll shifts; pixels outside the damage rectangle remain
+untouched.
 
 Transitions between pixel, percentage and intrinsic lengths use the layout
-measurements of their source and target styles. Reversing an interrupted
+measurements of their source and target styles; between two percentages they
+interpolate the percentage, which layout resolves on every frame. Reversing an interrupted
 transition shortens its duration by its eased progress, including repeated
 reversals; the authored target is restored when the transition completes.
 Animations are sampled before layout, so a layout-affecting value (width,

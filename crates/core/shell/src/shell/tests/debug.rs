@@ -550,6 +550,7 @@ fn shell_registers_theme_provider_for_frontend_theme_proxy() {
             "can_pin",
             "system_resources",
             "backdrop_image",
+            "compositor_glass",
         ],
         "theme registry fields must be declared so frontend reads are reactive"
     );

@@ -62,13 +62,13 @@ Display primitives:
 | `icon` | Icon theme or source-backed icon. |
 | `image` | Image source with accessible alternate text. `src` is a file path or a service `blob` handle (`mesh-blob:sha256-…`); see [blobs](../modules/backend-events.md#blobs). |
 | `badge` | Compact status text. |
-| `progress` | Progress indicator metadata with `value`, `min`, `max`, and `indeterminate`. |
+| `progress` | Progress bar with `value`, `min`, `max`, and `indeterminate`; styled through `::track` and `::fill` parts. |
 | `shape` | Vector shape. `type` is `sector` (default), `arc`, `polygon` or `polyline`. Sectors and arcs are centred in the box with the shorter half-side as outer radius; `start`/`end` are degrees clockwise from the top and a sector's `inner` is a 0–1 fraction of the outer radius. Polygons and polylines take `points="x,y x,y"` as percentages of the box. `background-color` fills sectors and polygons, `border-color` and `border-width` stroke the outline, and the box paints no background or border of its own. Pointer hits land only on the painted shape, so overlapping boxes stay independently clickable; add `tabindex`, `role` and `onclick` to make one an activatable control. Children lay out in the shape's box. |
 | `tooltip` | Tooltip content or ownership metadata tied into the existing title/tooltip lookup path. |
 | `avatar` | Image/icon-backed avatar metadata. |
 | `shortcut` | Keyboard shortcut label metadata. |
 
-`meter` remains part of the taxonomy for future coverage, but Phase 87 does not create separate runtime behavior for it. Use `progress` for current progress-like display.
+`meter` draws like `progress` and exposes the same parts; it has no separate behavior yet.
 
 Native scroll regions default to vertical scrolling and clipping in core,
 including with an empty theme. Authors declare a bounded viewport and its content;

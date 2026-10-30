@@ -28,7 +28,35 @@ pub fn complete(
         }
         StyleContext::Prop { prefix } => complete_props(&prefix, doc),
         StyleContext::Selector => vec![],
+        StyleContext::Part { host } => complete_parts(host.as_deref()),
     }
+}
+
+/// Control parts the host tag exposes, or every control's parts when the
+/// host names no tag (`.volume::`).
+fn complete_parts(host: Option<&str>) -> Vec<CompletionItem> {
+    const HOSTS: &[&str] = &["slider", "progress", "meter", "checkbox", "radio", "switch"];
+    let hosts = match host {
+        Some(tag) => vec![tag],
+        None => HOSTS.to_vec(),
+    };
+    let mut parts = BTreeSet::new();
+    for host in hosts {
+        for part in mesh_core_elements::control_part_names(host) {
+            parts.insert((*part, host));
+        }
+    }
+    let mut seen = BTreeSet::new();
+    parts
+        .into_iter()
+        .filter(|(part, _)| seen.insert(*part))
+        .map(|(part, host)| CompletionItem {
+            label: part.to_string(),
+            kind: Some(CompletionItemKind::FIELD),
+            detail: Some(format!("{host} control part")),
+            ..Default::default()
+        })
+        .collect()
 }
 
 fn complete_properties() -> Vec<CompletionItem> {
@@ -237,6 +265,22 @@ mod tests {
 
     fn labels(items: &[CompletionItem]) -> Vec<&str> {
         items.iter().map(|item| item.label.as_str()).collect()
+    }
+
+    #[test]
+    fn part_completions_follow_the_host_tag() {
+        let ctx = crate::util::style_context_at("slider:active::th", 17);
+        assert!(matches!(&ctx, StyleContext::Part { host: Some(host) } if host == "slider"));
+        assert_eq!(labels(&complete_parts(Some("slider"))), ["fill", "thumb", "track"]);
+        assert_eq!(labels(&complete_parts(Some("switch"))), ["thumb", "track"]);
+        assert!(complete_parts(Some("button")).is_empty());
+        let ctx = crate::util::style_context_at(".a { width: 1px; }\n.volume::", 28);
+        assert!(matches!(ctx, StyleContext::Part { host: None }));
+        assert!(labels(&complete_parts(None)).contains(&"indicator"));
+        assert!(matches!(
+            crate::util::style_context_at("slider:hover", 12),
+            StyleContext::Selector
+        ));
     }
 
     #[test]

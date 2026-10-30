@@ -40,12 +40,43 @@ local ProfileSwitcher = require("@mesh/profile-switcher")
 local t = import("mesh.i18n", "t")
 local theme = require("mesh.theme")
 local wm = require("mesh.wm")
+local settings_ok, settings_service = pcall(require, "mesh.settings")
+if not settings_ok then settings_service = nil end
 
 -- Solid themes declare no compositor glass; the plugin draws behind these
--- surfaces only when the active theme wants it.
+-- surfaces only when the active theme wants it. Reading `wm.available`
+-- reapplies it when the provider (re)starts.
 effect(function()
     local wanted = theme.compositor_glass
-    if wanted ~= nil and wm.set_glass_enabled ~= nil then wm.set_glass_enabled(wanted) end
+    if wm.available and wanted ~= nil then wm.set_glass_enabled(wanted) end
+end)
+
+-- Surfaces above windows are drawn by the compositor's glass plugin, which
+-- takes its strength from the provider rather than from the style tokens that
+-- Settings saves. A negative strength restores the compositor's own presets.
+local function saved_glass_strength()
+    local namespaces = settings_service and settings_service.namespaces
+    local shell = type(namespaces) == "table" and namespaces.shell
+    local themed = type(shell) == "table" and shell.theme
+    local tokens = type(themed) == "table" and themed.tokens
+    if type(tokens) ~= "table" then return -1, -1 end
+    local blur = tonumber(tokens["glass.strength.blur"])
+    local liquid = tonumber(tokens["glass.strength.liquid"])
+    if blur == nil or liquid == nil then return -1, -1 end
+    return blur, liquid
+end
+
+local applied_glass = nil
+effect(function()
+    local blur, liquid = saved_glass_strength()
+    if not wm.available then
+        applied_glass = nil
+        return
+    end
+    local key = tostring(blur) .. "/" .. tostring(liquid)
+    if key == applied_glass then return end
+    applied_glass = key
+    wm.set_glass_strength(blur, liquid)
 end)
 
 function onSettings()

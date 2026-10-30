@@ -13,6 +13,7 @@ mod blur;
 mod build;
 mod coverage;
 mod paint_node;
+pub(crate) use paint_node::indicator_mark;
 mod scroll;
 mod scroll_shift;
 mod sequence;

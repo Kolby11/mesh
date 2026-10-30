@@ -1042,8 +1042,10 @@ A native control's look is styled on its parts, with states on the host:
 slider:active::thumb { width: 52px; transition: width 260ms; }
 ```
 
-`slider` exposes `::track`, `::fill` and `::thumb`; core keeps the value,
-input and accessibility. See
+`slider` exposes `::track`, `::fill` and `::thumb`; `progress` and `meter`
+expose `::track` and `::fill`; `checkbox` and `radio` expose `::indicator`;
+`switch` exposes `::track` and `::thumb`. Core keeps the value, input and
+accessibility. See
 [control parts](../spec/04-styling.md#62-control-parts-hostpart).
 
 Keyframes are percentage-only:

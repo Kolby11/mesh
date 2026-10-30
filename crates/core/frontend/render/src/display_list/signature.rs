@@ -185,9 +185,6 @@ pub(super) fn hash_paint_content_attributes(
             hash_attribute(node, Prop::Name, hasher);
             hash_attribute(node, Prop::Size, hasher);
         }
-        "checkbox" | "radio" => {
-            hash_attribute(node, Prop::Checked, hasher);
-        }
         "shape" => {
             hash_attribute(node, Prop::Type, hasher);
             hash_attribute(node, Prop::Start, hasher);
@@ -196,7 +193,7 @@ pub(super) fn hash_paint_content_attributes(
             hash_attribute(node, Prop::Points, hasher);
             node.computed_style.border_width.top.to_bits().hash(hasher);
         }
-        _ => {}
+        _ => super::paint_node::indicator_mark(node).hash(hasher),
     }
 }
 
@@ -253,7 +250,9 @@ pub(super) fn hash_batch_material(
 pub(super) fn hash_generic_batch_material(node: &WidgetNode, hasher: &mut DisplaySignatureHasher) {
     match node.tag.as_str() {
         "input" => hash_text_batch_material(node, hasher),
-        "checkbox" | "radio" => hash_color(node.computed_style.color, hasher),
+        _ if super::paint_node::indicator_mark(node).is_some() => {
+            hash_color(node.computed_style.color, hasher)
+        }
         _ => {}
     }
 }

@@ -4658,3 +4658,19 @@ end
         })
     );
 }
+
+#[test]
+fn bundled_hyprland_provider_loads_with_its_glass_commands() {
+    let script = bundled_backend_script("../../../../modules/backend/hyprland-wm/src/main.luau");
+    let mut ctx = BackendScriptContext::new("@mesh/hyprland-wm");
+    ctx.load_script(&script).unwrap();
+    let globals = ctx.ensure_lua().unwrap().globals();
+    for handler in [
+        "start",
+        "on_stream_line",
+        "on_command_set_glass_strength",
+        "on_command_set_glass_enabled",
+    ] {
+        assert!(globals.get::<Function>(handler).is_ok(), "missing {handler}");
+    }
+}
