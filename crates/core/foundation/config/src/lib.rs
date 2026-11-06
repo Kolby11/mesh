@@ -143,7 +143,10 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
             // action id -> { key }, for shell-owned actions such as `help`.
             FieldSpec::new(
                 "shell_shortcuts",
-                FieldKind::Map(&FieldKind::Section(&[FieldSpec::new("key", FieldKind::Str)])),
+                FieldKind::Map(&FieldKind::Section(&[FieldSpec::new(
+                    "key",
+                    FieldKind::Str,
+                )])),
             ),
             // surface id -> action id -> key; auto-assigned keys kept so they
             // stay put when the surface gains actions.
@@ -165,6 +168,8 @@ pub const SHELL_SETTINGS_FIELDS: &[FieldSpec] = &[
         "fonts",
         FieldKind::Section(&[
             FieldSpec::new("ui_family", FieldKind::Str),
+            FieldSpec::new("base_size", FieldKind::UIntRange { min: 10, max: 32 }),
+            FieldSpec::new("shell_scale", FieldKind::UIntRange { min: 70, max: 200 }),
             FieldSpec::new("packs", FieldKind::StrArray),
         ]),
     ),
@@ -238,6 +243,12 @@ pub struct IconSettings {
 /// can still select another family or a semantic font-pack role explicitly.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct FontSettings {
+    /// Base font size in logical pixels; 14 is the default.
+    #[serde(default)]
+    pub base_size: Option<u32>,
+    /// Whole-shell scale in percent; 100 is the default.
+    #[serde(default)]
+    pub shell_scale: Option<u32>,
     #[serde(default)]
     pub ui_family: Option<String>,
     #[serde(default)]

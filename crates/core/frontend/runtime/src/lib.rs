@@ -1,3 +1,8 @@
+#[cfg(all(test, feature = "allocation-profiling"))]
+#[global_allocator]
+static TEST_ALLOCATOR: mesh_core_debug::allocation::CountingAllocator<std::alloc::System> =
+    mesh_core_debug::allocation::CountingAllocator::new(std::alloc::System);
+
 pub mod locale;
 
 pub mod service;
@@ -84,3 +89,6 @@ pub enum FrontendCatalogError {
     #[error("{message}")]
     FrontendComposition { message: String },
 }
+
+pub mod component;
+pub use component::FrontendSurfaceComponent;

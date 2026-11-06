@@ -73,7 +73,8 @@ pub fn control_part_names(tag: &str) -> &'static [&'static str] {
         Some("slider") => &["track", "fill", "thumb"],
         Some("progress" | "meter") => &["track", "fill"],
         Some("checkbox" | "radio") => &["indicator"],
-        Some("switch") => &["track", "thumb"],
+        Some("switch" | "scroll") => &["track", "thumb"],
+        Some("input") => &["placeholder", "caret", "selection"],
         _ => &[],
     }
 }
@@ -189,6 +190,20 @@ pub(crate) fn initial_part_style(
     geometry: ControlGeometry,
 ) -> ComputedStyle {
     let mut style = ComputedStyle::default();
+    if matches!(part, ControlPart::SliderFill | ControlPart::SliderLead) {
+        style.transitions = vec![TransitionStyle {
+            duration_ms: 150,
+            properties: TransitionProperties { width: true, ..TransitionProperties::none() },
+            ..TransitionStyle::default()
+        }];
+    }
+    if part == ControlPart::SliderThumb {
+        style.transitions = vec![TransitionStyle {
+            duration_ms: 150,
+            properties: TransitionProperties { margin: true, ..TransitionProperties::none() },
+            ..TransitionStyle::default()
+        }];
+    }
     let checked = geometry.checked;
     match part {
         ControlPart::SliderTrack => {
@@ -296,6 +311,11 @@ pub(crate) fn transpose_for_vertical(style: &mut ComputedStyle) {
     };
     style.margin = rotate(style.margin);
     style.padding = rotate(style.padding);
+    for transition in &mut style.transitions {
+        std::mem::swap(&mut transition.properties.width, &mut transition.properties.height);
+        std::mem::swap(&mut transition.properties.min_width, &mut transition.properties.min_height);
+        std::mem::swap(&mut transition.properties.max_width, &mut transition.properties.max_height);
+    }
 }
 
 /// The geometry core owns: where the fill ends and where the thumb sits.

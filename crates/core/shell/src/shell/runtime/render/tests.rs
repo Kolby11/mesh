@@ -36,6 +36,8 @@ fn make_cmd(x: f32, y: f32, width: f32, height: f32, blur_radius: f32) -> Displa
             },
             ancestor_clips: Vec::new().into(),
             style: DisplayPaintStyle {
+            ui_scale: 1.0,
+                paint_parts: Default::default(),
                 resource_revision: mesh_core_resources::resource_revision(),
                 background_color: Color {
                     r: 0,

@@ -205,6 +205,8 @@ impl<'a> StyleResolver<'a> {
         selector: Option<&str>,
         inherited_variables: &HashMap<String, StyleValue>,
     ) -> Vec<StyleDiagnostic> {
+        style.rescale_text(1.0);
+        style.rescale_lengths(1.0);
         let mut diagnostics = Vec::new();
         let mut variables = inherited_variables.clone();
 
@@ -218,6 +220,8 @@ impl<'a> StyleResolver<'a> {
             );
         }
 
+        style.rescale_lengths(self.theme.ui_scale());
+        style.rescale_text(self.theme.text_scale());
         diagnostics
     }
 
@@ -893,9 +897,17 @@ fn apply_declaration_with_context(
                 SurfaceExclusiveZone::from_css(resolved).unwrap_or_default()
             });
         }
-        "gap" => style.gap = resolver.resolve_number_with_variables(value, variables),
-        "column-gap" | "row-gap" | "gap-x" => {
-            style.gap = resolver.resolve_number_with_variables(value, variables)
+        "gap" => {
+            let (row, column) = resolver.with_resolved_str(value, variables, parse_gap_shorthand);
+            style.gap = row;
+            style.row_gap = None;
+            style.column_gap = (row != column).then_some(column);
+        }
+        "column-gap" | "gap-x" => {
+            style.column_gap = Some(resolver.resolve_number_with_variables(value, variables))
+        }
+        "row-gap" => {
+            style.row_gap = Some(resolver.resolve_number_with_variables(value, variables))
         }
         "border-radius" => {
             style.border_radius = resolver

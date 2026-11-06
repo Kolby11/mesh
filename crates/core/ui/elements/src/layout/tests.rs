@@ -2509,3 +2509,39 @@ fn missing_projection_history_keeps_full_write_back_fallback() {
     assert_layout_maps_eq(&keyed_layouts(&root), &keyed_layouts(&reference));
     assert!(state.changed_nodes.is_none());
 }
+
+#[test]
+fn structural_layout_preserves_nodes_that_gain_keys() {
+    let mut root = make_node("row", Dimension::Px(100.0), Dimension::Px(20.0));
+    root.children.push(make_node("a", Dimension::Px(40.0), Dimension::Px(20.0)));
+    let mut state = PerSurfaceLayoutState::default();
+    let mut cache = IntrinsicLayoutCache::default();
+    LayoutEngine::compute_incremental(
+        &mut root, &mut state, 100.0, 20.0, false, false, &mut cache, None,
+    );
+    root.set_mesh_key("root");
+    root.children[0].set_mesh_key("child");
+    LayoutEngine::compute_incremental(
+        &mut root, &mut state, 100.0, 20.0, false, true, &mut cache, None,
+    );
+    assert!(state.valid);
+    assert_eq!(root.children[0].layout.width, 40.0);
+    assert!(state.tree.style(state.node_map[&root.id]).is_ok());
+    assert!(state.tree.style(state.node_map[&root.children[0].id]).is_ok());
+}
+
+#[test]
+fn wrapped_layout_keeps_row_and_column_gaps_independent() {
+    let mut root = make_node("row", Dimension::Px(100.0), Dimension::Px(100.0));
+    root.computed_style.direction = FlexDirection::Row;
+    root.computed_style.flex_wrap = crate::style::FlexWrap::Wrap;
+    root.computed_style.align_content = crate::style::AlignContent::Start;
+    root.computed_style.row_gap = Some(7.0);
+    root.computed_style.column_gap = Some(11.0);
+    for _ in 0..3 {
+        root.children.push(make_node("box", Dimension::Px(40.0), Dimension::Px(20.0)));
+    }
+    LayoutEngine::compute(&mut root, 100.0, 100.0);
+    assert_eq!(root.children[1].layout.x, 51.0);
+    assert_eq!(root.children[2].layout.y, 27.0);
+}

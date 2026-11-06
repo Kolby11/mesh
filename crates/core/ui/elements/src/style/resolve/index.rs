@@ -18,6 +18,7 @@ use std::sync::Arc;
 pub struct StyleRuleIndex {
     pub(super) revision: u64,
     class_to_rules: HashMap<String, Vec<usize>>,
+    rules_snapshot: Vec<StyleRule>,
     pub(super) rules_ptr: usize,
     pub(super) rules_len: usize,
     pub(super) tag: HashMap<String, Vec<usize>>,
@@ -85,6 +86,7 @@ impl StyleRuleIndex {
                 NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
             },
             class_to_rules: HashMap::new(),
+            rules_snapshot: rules.to_vec(),
             rules_ptr: rules.as_ptr() as usize,
             rules_len: rules.len(),
             tag: HashMap::new(),
@@ -172,9 +174,10 @@ impl StyleRuleIndex {
     }
 
     /// Returns true when this index was built from the given rules slice
-    /// (same memory + length). Use to decide whether to reuse or rebuild.
+    /// with identical contents. In-place edits invalidate compiled declarations.
     pub fn is_for(&self, rules: &[StyleRule]) -> bool {
         self.rules_ptr == rules.as_ptr() as usize && self.rules_len == rules.len()
+            && self.rules_snapshot == rules
     }
 
     pub fn for_each_candidate_rule<'a>(

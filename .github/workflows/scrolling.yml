@@ -23,9 +23,9 @@ jobs:
       - name: Check native scroll defaults without theme rules
         run: nix develop -c cargo test -p mesh-core-elements --lib native_scroll_defaults
       - name: Check repeated input and reversals with GPU features enabled
-        run: nix develop -c cargo test -p mesh-core-shell --features gpu --lib scroll_contract
+        run: nix develop -c cargo test -p mesh-core-frontend-runtime --features gpu --lib scroll_contract
       - name: Check padded launcher clipping, geometry and momentum
-        run: nix develop -c cargo test -p mesh-core-shell --features gpu --lib liquid_glass_launcher_keeps_results_viewport_with_many_apps
+        run: nix develop -c cargo test -p mesh-core-frontend-runtime --features gpu --lib liquid_glass_launcher_keeps_results_viewport_with_many_apps
       - name: Check asynchronous scene submission and completion recovery
         run: nix develop -c cargo test -p mesh-core-shell --features gpu --lib scene_submission
       - name: Check popup progress while its parent is blocked

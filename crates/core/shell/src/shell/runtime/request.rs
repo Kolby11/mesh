@@ -1988,6 +1988,8 @@ impl Shell {
             CoreRequest::SetThemeMode { mode } => self.apply_set_theme_mode(&mode),
             CoreRequest::SetLocale { locale } => self.apply_set_locale(&locale),
             CoreRequest::SetIconTheme { theme_id } => self.apply_set_icon_theme(&theme_id),
+            CoreRequest::SetFontSize { size } => self.apply_set_font_size(size),
+            CoreRequest::SetShellScale { scale } => self.apply_set_shell_scale(scale),
             CoreRequest::SetFontFamily { family } => self.apply_set_font_family(&family),
             CoreRequest::SetThemeTokens { tokens } => self.apply_set_theme_tokens(tokens),
             CoreRequest::SetKeyboardSetting { field, value } => {
@@ -2063,11 +2065,9 @@ impl Shell {
                     "debug overlay: {}",
                     if self.debug.enabled { "on" } else { "off" }
                 );
-                let surface_id = self.resolve_root_surface_id(DEBUG_INSPECTOR_SURFACE_ID.to_string());
-                self.set_surface_visibility(
-                    surface_id,
-                    self.debug.enabled,
-                )
+                let surface_id =
+                    self.resolve_root_surface_id(DEBUG_INSPECTOR_SURFACE_ID.to_string());
+                self.set_surface_visibility(surface_id, self.debug.enabled)
             }
             CoreRequest::ToggleDebugLayoutBounds => {
                 self.debug.toggle_layout_bounds();
@@ -2087,7 +2087,8 @@ impl Shell {
                 self.invalidate_debug_layout_bounds_targets();
                 if self.debug.element_picker_enabled && !self.debug.enabled {
                     self.debug.enabled = true;
-                    let surface_id = self.resolve_root_surface_id(DEBUG_INSPECTOR_SURFACE_ID.to_string());
+                    let surface_id =
+                        self.resolve_root_surface_id(DEBUG_INSPECTOR_SURFACE_ID.to_string());
                     self.set_surface_visibility(surface_id, true)
                 } else {
                     Ok(VecDeque::new())
@@ -3742,6 +3743,8 @@ fn profiling_trigger_for_request(request: &CoreRequest) -> &'static str {
         CoreRequest::SetTheme { .. } => "set_theme",
         CoreRequest::SetThemeMode { .. } => "set_mode",
         CoreRequest::SetIconTheme { .. } => "set_icon_theme",
+        CoreRequest::SetFontSize { .. } => "set_font_size",
+        CoreRequest::SetShellScale { .. } => "set_shell_scale",
         CoreRequest::SetFontFamily { .. } => "set_font_family",
         CoreRequest::SetThemeTokens { .. } => "set_tokens",
         CoreRequest::SetKeyboardSetting { .. } => "set_keyboard_setting",
@@ -3802,6 +3805,8 @@ fn durable_write_key(request: &CoreRequest) -> Option<String> {
         CoreRequest::SetThemeMode { .. } => "theme_mode".into(),
         CoreRequest::SetLocale { .. } => "locale".into(),
         CoreRequest::SetIconTheme { .. } => "icon_theme".into(),
+        CoreRequest::SetFontSize { .. } => "font_size".into(),
+        CoreRequest::SetShellScale { .. } => "shell_scale".into(),
         CoreRequest::SetFontFamily { .. } => "font_family".into(),
         // Patches to different tokens are independent; only a later patch of
         // exactly the same tokens supersedes an earlier one.

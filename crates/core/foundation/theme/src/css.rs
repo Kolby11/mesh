@@ -26,7 +26,7 @@ use std::path::Path;
 use std::{cell::RefCell, collections::VecDeque, sync::Arc};
 
 /// The selector subset MESH can match against a single element node.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Selector {
     Tag(String),
     Class(String),

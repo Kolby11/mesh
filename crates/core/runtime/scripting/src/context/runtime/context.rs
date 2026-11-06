@@ -290,7 +290,10 @@ impl ScriptContext {
         )
     }
 
-    #[cfg(test)]
+    /// Create a frontend context with instance-scoped storage beneath an explicit host root.
+    ///
+    /// Storage remains isolated by module, component and instance identity; the
+    /// supplied root changes its location without granting additional capabilities.
     pub fn new_with_storage_scope(
         module_id: impl Into<String>,
         component_id: impl Into<String>,

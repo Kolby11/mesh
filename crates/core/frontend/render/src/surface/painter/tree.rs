@@ -1643,7 +1643,7 @@ fn push_fill_shape_command(
     }
 }
 
-fn push_background_paint_command(
+pub(super) fn push_background_paint_command(
     commands: &mut Vec<PainterCommand>,
     paint: &BackgroundPaint,
     rect: ClipRect,
@@ -1709,7 +1709,7 @@ fn push_background_paint_command(
     }
 }
 
-fn push_border_commands(
+pub(super) fn push_border_commands(
     commands: &mut Vec<PainterCommand>,
     bounds: ClipRect,
     border_widths: &Edges,

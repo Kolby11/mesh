@@ -1,5 +1,12 @@
 use super::*;
 
+pub(super) fn parse_gap_shorthand(value: &str) -> (f32, f32) {
+    let mut values = value.split_whitespace();
+    let row = values.next().map(parse_px).unwrap_or(0.0);
+    let column = values.next().map(parse_px).unwrap_or(row);
+    (row, column)
+}
+
 pub(super) fn parse_edges_shorthand(value: &str) -> Edges {
     let mut values = [0.0; 4];
     let mut len = 0;

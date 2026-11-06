@@ -35,7 +35,7 @@ pub fn complete(
 /// Control parts the host tag exposes, or every control's parts when the
 /// host names no tag (`.volume::`).
 fn complete_parts(host: Option<&str>) -> Vec<CompletionItem> {
-    const HOSTS: &[&str] = &["slider", "progress", "meter", "checkbox", "radio", "switch"];
+    const HOSTS: &[&str] = &["slider", "progress", "meter", "checkbox", "radio", "switch", "scroll", "input"];
     let hosts = match host {
         Some(tag) => vec![tag],
         None => HOSTS.to_vec(),

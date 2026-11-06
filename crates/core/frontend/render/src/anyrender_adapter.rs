@@ -208,7 +208,10 @@ mod tests {
     use std::sync::Arc;
 
     fn base_style() -> DisplayPaintStyle {
+            ui_scale: 1.0,
         DisplayPaintStyle {
+            ui_scale: 1.0,
+            paint_parts: Default::default(),
             resource_revision: 0,
             background_color: Color::TRANSPARENT,
             background_paint: BackgroundPaint::None,
@@ -330,6 +333,8 @@ mod tests {
             mask_text: false,
             focused: false,
             preedit: None,
+            cursor: None,
+            selection: None,
         };
         let c = cmd(
             DisplayPaintContent::Input(input),

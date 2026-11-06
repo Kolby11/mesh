@@ -1,0 +1,1683 @@
+use super::*;
+use mesh_core_frontend_shell_adapter::ComponentContext;
+use crate::component::catalog::{
+    FrontendCatalog, ResolvedExtensionPointContribution, contribution_entry_key,
+    extension_point_key,
+};
+use mesh_core_diagnostics::Diagnostics;
+use mesh_core_frontend::CompiledFrontendModule;
+use mesh_core_render::PixelBuffer;
+use mesh_core_theme::default_theme;
+
+const PARENT_ID: &str = "@test/memo-surface";
+
+/// Build a one-surface frontend whose catalog points back at the surface
+/// itself so local PascalCase components resolve during render.
+fn memo_surface(parent_src: &str, locals: &[(&str, &str)]) -> FrontendSurfaceComponent {
+    let compiled = CompiledFrontendModule {
+        manifest: minimal_test_manifest(PARENT_ID),
+        source_path: PathBuf::from("src/main.mesh"),
+        component: parse_component(parent_src).unwrap(),
+        public_props: Default::default(),
+        local_components: locals
+            .iter()
+            .map(|(alias, src)| ((*alias).to_string(), parse_component(src).unwrap()))
+            .collect(),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([(
+            PARENT_ID.into(),
+            FrontendCatalogEntry {
+                module_dir: PathBuf::from("."),
+                compiled: compiled.clone().into(),
+            },
+        )]),
+        diagnostics: Default::default(),
+        extension_point_contributions: HashMap::new(),
+        extension_point_entries: HashMap::new(),
+        node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
+    };
+    let mut component = FrontendSurfaceComponent::new_for_test(
+        compiled,
+        PathBuf::from("."),
+        catalog,
+        InterfaceCatalog::default(),
+        test_settings_store(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: PARENT_ID.into(),
+            surface_id: PARENT_ID.into(),
+            diagnostics: Diagnostics::new(PARENT_ID),
+        })
+        .unwrap();
+    component.visible = true;
+    component
+}
+
+fn node_with_content<'a>(node: &'a WidgetNode, content: &str) -> Option<&'a WidgetNode> {
+    if node
+        .attributes
+        .get(Prop::Content)
+        .is_some_and(|c| c == content)
+    {
+        return Some(node);
+    }
+    node.children
+        .iter()
+        .find_map(|child| node_with_content(child, content))
+}
+
+/// Force a full script-path rebuild and paint. The first build runs before
+/// layout exists, so embedded container sizes settle only from the second
+/// build onward — tests warm the memo with one extra rebuild before measuring.
+fn rebuild(component: &mut FrontendSurfaceComponent, width: u32, height: u32) -> PixelBuffer {
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(width, height);
+    component.invalidate_script_state();
+    component
+        .paint_raster(
+            &theme,
+            SurfaceExtent::unpadded(width, height),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    buffer
+}
+
+fn runtime_value(
+    component: &FrontendSurfaceComponent,
+    instance_key: &str,
+    name: &str,
+) -> Option<serde_json::Value> {
+    component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(instance_key)
+        .and_then(|runtime| runtime.script_ctx.state().get(name))
+}
+
+#[test]
+fn unchanged_local_component_rebuild_reuses_memoized_subtree() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    <box>
+        <Child label="static" />
+    </box>
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+</script>
+"#,
+        &[(
+            "Child",
+            r#"
+<template>
+    <text content="{label}" />
+</template>
+<script lang="luau">
+label = ""
+</script>
+"#,
+        )],
+    );
+
+    let theme = default_theme();
+    let mut initial = PixelBuffer::new(160, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut initial, 1.0)
+        .unwrap();
+    // Warm-up: the second build settles embedded container sizes post-layout.
+    let first = rebuild(&mut component, 160, 60);
+    let hits_before = component.component_memo_hit_count();
+
+    // A script-state invalidation with no actual changes rebuilds the surface
+    // tree; the untouched child must come from the memo, producing identical
+    // pixels.
+    let second = rebuild(&mut component, 160, 60);
+    assert_eq!(component.component_memo_hit_count(), hits_before + 1);
+    assert_eq!(first.data(), second.data());
+    let memoized_child =
+        node_with_content(component.last_tree.as_ref().unwrap(), "static").unwrap();
+    assert_eq!(
+        memoized_child
+            .attributes
+            .get(Prop::Content)
+            .map(String::as_str),
+        Some("static"),
+        "memoized child subtree still renders its content"
+    );
+    assert!(
+        component.component_memo_shares_authored_payload(
+            "@test/memo-surface/local:Child",
+            memoized_child,
+        ),
+        "the live memo hit should share its immutable authored payload with the cache"
+    );
+}
+
+#[test]
+fn static_service_import_does_not_invalidate_unrelated_local_components() {
+    let mut component = test_frontend_component_with_local_components(
+        r#"
+<template><column>{#if audio.muted}<text>muted</text>{:else}<text>live</text>{/if}<Child /></column></template>
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+local Child = require("./components/child.mesh")
+</script>"#,
+        &[("Child", "<template><text>unchanged</text></template>")],
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 80);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    let update = |component: &mut FrontendSurfaceComponent, muted| {
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.audio".into(),
+                source_module: "@mesh/pipewire-audio".into(),
+                payload: serde_json::json!({"percent": 10, "muted": muted}),
+            })
+            .unwrap();
+    };
+    update(&mut component, false);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    rebuild(&mut component, 160, 80);
+    let hits = component.component_memo_hit_count();
+    update(&mut component, true);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    assert!(rendered_text(&component).iter().any(|text| text == "muted"));
+    assert!(
+        component.component_memo_hit_count() > hits,
+        "unchanged child should be reused"
+    );
+}
+
+#[test]
+fn child_static_service_import_does_not_invalidate_its_sibling() {
+    let mut component = test_frontend_component_with_local_components(
+        r#"
+<template><column><Reader /><Sibling /></column></template>
+<script lang="luau">
+local Reader = require("./components/reader.mesh")
+local Sibling = require("./components/sibling.mesh")
+</script>"#,
+        &[
+            (
+                "Reader",
+                r#"<template>{#if audio.muted}<text>muted</text>{:else}<text>live</text>{/if}</template>
+<script lang="luau">local audio = require("mesh.audio@>=1.0")</script>"#,
+            ),
+            ("Sibling", "<template><text>unchanged</text></template>"),
+        ],
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 80);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    let update = |component: &mut FrontendSurfaceComponent, muted| {
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.audio".into(),
+                source_module: "@mesh/pipewire-audio".into(),
+                payload: serde_json::json!({"percent": 10, "muted": muted}),
+            })
+            .unwrap();
+    };
+    update(&mut component, false);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    rebuild(&mut component, 160, 80);
+    let hits = component.component_memo_hit_count();
+    update(&mut component, true);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    assert!(rendered_text(&component).iter().any(|text| text == "muted"));
+    assert!(
+        component.component_memo_hit_count() > hits,
+        "unchanged sibling should be reused"
+    );
+}
+
+#[test]
+fn repeated_local_aliases_have_independent_runtimes_and_memo_entries() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    <row>
+        <Child label="first" />
+        <Child label="second" />
+    </row>
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+</script>
+"#,
+        &[((
+            "Child",
+            r#"
+<template><text content="{label}" /></template>
+<script lang="luau">label = ""</script>
+"#,
+        ))],
+    );
+
+    let theme = default_theme();
+    let mut initial = PixelBuffer::new(240, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
+        .unwrap();
+    rebuild(&mut component, 240, 60);
+
+    assert_eq!(
+        runtime_value(&component, "@test/memo-surface/local:Child#0", "label"),
+        Some(serde_json::json!("first"))
+    );
+    assert_eq!(
+        runtime_value(&component, "@test/memo-surface/local:Child#1", "label"),
+        Some(serde_json::json!("second"))
+    );
+
+    let hits_before = component.component_memo_hit_count();
+    rebuild(&mut component, 240, 60);
+    assert_eq!(component.component_memo_hit_count(), hits_before + 2);
+    let tree = component.last_tree.as_ref().unwrap();
+    assert!(node_with_content(tree, "first").is_some());
+    assert!(node_with_content(tree, "second").is_some());
+}
+
+#[test]
+fn loop_rendered_local_aliases_have_independent_positional_instances() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    {#for item in items}
+        <Child label={item.label} />
+    {/for}
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+items = { { label = "first" }, { label = "second" } }
+</script>
+"#,
+        &[((
+            "Child",
+            r#"
+<template><text content="{label}" /></template>
+<script lang="luau">label = ""</script>
+"#,
+        ))],
+    );
+
+    let theme = default_theme();
+    let mut initial = PixelBuffer::new(240, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
+        .unwrap();
+    rebuild(&mut component, 240, 60);
+
+    assert_eq!(
+        runtime_value(&component, "@test/memo-surface/local:Child@0", "label"),
+        Some(serde_json::json!("first"))
+    );
+    assert_eq!(
+        runtime_value(&component, "@test/memo-surface/local:Child@1", "label"),
+        Some(serde_json::json!("second"))
+    );
+
+    let hits_before = component.component_memo_hit_count();
+    rebuild(&mut component, 240, 60);
+    assert_eq!(component.component_memo_hit_count(), hits_before + 2);
+}
+
+#[test]
+fn keyed_loop_components_keep_memo_identity_after_reorder() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    {#for item in items key={item.id}}
+        <Child label={item.label} />
+    {/for}
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+items = { { id = "first", label = "First" }, { id = "second", label = "Second" } }
+</script>
+"#,
+        &[(
+            "Child",
+            r#"
+<template><text content="{label}" /></template>
+<script lang="luau">label = ""</script>
+"#,
+        )],
+    );
+
+    let theme = default_theme();
+    let mut initial = PixelBuffer::new(240, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
+        .unwrap();
+    rebuild(&mut component, 240, 60);
+    let hits_before = component.component_memo_hit_count();
+
+    component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get_mut(PARENT_ID)
+        .unwrap()
+        .script_ctx
+        .set_member_state(
+            "items",
+            serde_json::json!([
+                { "id": "second", "label": "Second" },
+                { "id": "first", "label": "First" }
+            ]),
+        )
+        .unwrap();
+    rebuild(&mut component, 240, 60);
+
+    assert_eq!(component.component_memo_hit_count(), hits_before + 2);
+    assert_eq!(
+        runtime_value(
+            &component,
+            "@test/memo-surface/local:Child@0@key:\"first\"",
+            "label"
+        ),
+        Some(serde_json::json!("First"))
+    );
+    assert_eq!(
+        runtime_value(
+            &component,
+            "@test/memo-surface/local:Child@0@key:\"second\"",
+            "label"
+        ),
+        Some(serde_json::json!("Second"))
+    );
+}
+
+#[test]
+fn keyed_loop_native_inputs_keep_runtime_value_after_reorder() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    {#for item in items key={item.id}}
+        <row><text content={item.id} /><input value={item.id} /></row>
+    {/for}
+</template>
+<script lang="luau">
+items = { { id = "first" }, { id = "second" } }
+</script>
+"#,
+        &[],
+    );
+    let theme = default_theme();
+    let mut initial = PixelBuffer::new(240, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 60), &mut initial, 1.0)
+        .unwrap();
+
+    let first_input =
+        first_node_with_attr(component.last_tree.as_ref().unwrap(), "value", "first").unwrap();
+    component
+        .input_values
+        .insert(first_input.id, "edited".into());
+    component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get_mut(PARENT_ID)
+        .unwrap()
+        .script_ctx
+        .set_member_state(
+            "items",
+            serde_json::json!([{ "id": "second" }, { "id": "first" }]),
+        )
+        .unwrap();
+
+    rebuild(&mut component, 240, 60);
+    let rebuilt_first =
+        first_node_with_attr(component.last_tree.as_ref().unwrap(), "value", "edited")
+            .expect("keyed first input retains its runtime value");
+    assert!(rebuilt_first.mesh_key().unwrap().contains(":\"first\"%2F0"));
+}
+
+#[test]
+fn sibling_keyed_loops_with_overlapping_keys_get_distinct_node_ids() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    <column>
+        {#for item in left key={item}}
+            <text content={item} />
+        {/for}
+        {#for item in right key={item}}
+            <text content={item} />
+        {/for}
+    </column>
+</template>
+<script lang="luau">
+left = { "a", "b" }
+right = { "a", "b" }
+</script>
+"#,
+        &[],
+    );
+    rebuild(&mut component, 240, 120);
+    component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get_mut(PARENT_ID)
+        .unwrap()
+        .script_ctx
+        .set_member_state("right", serde_json::json!(["b", "a"]))
+        .unwrap();
+    rebuild(&mut component, 240, 120);
+
+    fn loop_ids(node: &WidgetNode, ids: &mut Vec<NodeId>) {
+        if node.loop_identity().is_some() {
+            ids.push(node.id);
+        }
+        for child in &node.children {
+            loop_ids(child, ids);
+        }
+    }
+    let mut ids = Vec::new();
+    loop_ids(component.last_tree.as_ref().unwrap(), &mut ids);
+    assert_eq!(ids.len(), 4);
+    assert_eq!(ids.iter().collect::<HashSet<_>>().len(), 4);
+}
+
+#[test]
+fn control_flow_children_are_layout_transparent() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    <row>
+        <text content="before" />
+        {#if visible}<text content="conditional" />{/if}
+        {#for item in items}<text content={item} />{/for}
+        <text content="after" />
+    </row>
+</template>
+<script lang="luau">
+visible = true
+items = { "first", "second" }
+</script>
+"#,
+        &[],
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 60), &mut buffer, 1.0)
+        .unwrap();
+
+    let row = first_node_with_attr(
+        component.last_tree.as_ref().unwrap(),
+        "data-mesh-element",
+        "row",
+    )
+    .unwrap();
+    assert_eq!(row.children.len(), 5);
+    assert!(row.children.iter().all(|child| child.tag == "text"));
+}
+
+fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
+    const POINT: &str = "test.memo.slot";
+    let mut parent_manifest = minimal_test_manifest(PARENT_ID);
+    parent_manifest.hosted_extension_points.insert(
+        POINT.into(),
+        mesh_core_module::HostedExtensionPoint::default(),
+    );
+    let parent_compiled = CompiledFrontendModule {
+        manifest: parent_manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: parse_component(&format!(
+            "<template><slot extension-point=\"{POINT}\"/></template>"
+        ))
+        .unwrap(),
+        public_props: Default::default(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
+    let widget_id = "@test/memo-slot-widget";
+    let mut widget_manifest = minimal_test_manifest(widget_id);
+    widget_manifest.package.module_type = mesh_core_module::ModuleType::Widget;
+    let contribution_compiled = CompiledFrontendModule {
+        manifest: widget_manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: parse_component("<template><text content=\"{label}\"/></template>").unwrap(),
+        public_props: Default::default(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([(
+            PARENT_ID.into(),
+            FrontendCatalogEntry {
+                module_dir: PathBuf::from("."),
+                compiled: parent_compiled.clone().into(),
+            },
+        )]),
+        diagnostics: Default::default(),
+        extension_point_contributions: HashMap::from([(
+            extension_point_key(PARENT_ID, POINT),
+            (0..contribution_count)
+                .map(|index| {
+                    let props = serde_json::Map::from_iter([(
+                        "label".into(),
+                        serde_json::Value::String(format!("static slot {index}")),
+                    )]);
+                    ResolvedExtensionPointContribution {
+                        source_module_id: widget_id.into(),
+                        contribution_id: format!("status-{index}"),
+                        order: index as i64,
+                        props_fingerprint: crate::component::memo::slot_props_fingerprint(
+                            &props,
+                        ),
+                        props,
+                    }
+                })
+                .collect(),
+        )]),
+        extension_point_entries: (0..contribution_count)
+            .map(|index| {
+                (
+                    contribution_entry_key(widget_id, &format!("status-{index}")),
+                    contribution_compiled.clone().into(),
+                )
+            })
+            .collect(),
+        node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
+    };
+    let mut component = FrontendSurfaceComponent::new_for_test(
+        parent_compiled,
+        PathBuf::from("."),
+        catalog,
+        InterfaceCatalog::default(),
+        test_settings_store(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: PARENT_ID.into(),
+            surface_id: PARENT_ID.into(),
+            diagnostics: Diagnostics::new(PARENT_ID),
+        })
+        .unwrap();
+    component.visible = true;
+    component
+}
+
+#[test]
+fn unchanged_slot_contribution_reuses_memoized_subtree() {
+    let mut component = memo_slot_surface(1);
+
+    let theme = default_theme();
+    let mut initial = PixelBuffer::new(160, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut initial, 1.0)
+        .unwrap();
+    let initial = rebuild(&mut component, 160, 60);
+    let hits_before = component.component_memo_hit_count();
+    let second = rebuild(&mut component, 160, 60);
+
+    assert_eq!(component.component_memo_hit_count(), hits_before + 1);
+    assert_eq!(initial.data(), second.data());
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "static slot 0").is_some());
+}
+
+#[test]
+fn catalog_generation_rebinds_affected_slot_host_and_keeps_root_runtime() {
+    let mut component = memo_slot_surface(1);
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
+
+    let root_runtime_generation = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(PARENT_ID)
+        .unwrap()
+        .script_ctx
+        .state()
+        .mutation_generation();
+    assert!(
+        component
+            .runtimes
+            .lock()
+            .unwrap()
+            .values()
+            .any(|runtime| runtime.script_ctx.module_id == "@test/memo-slot-widget")
+    );
+
+    let mut next_catalog = (*component.frontend_catalog).clone();
+    next_catalog.extension_point_contributions.clear();
+    component
+        .frontend_catalog_handle
+        .replace(next_catalog, None);
+
+    assert_eq!(
+        component
+            .frontend_catalog
+            .extension_point_contributions_for(PARENT_ID, "test.memo.slot")
+            .len(),
+        1,
+        "the surface keeps its coherent old snapshot until notification"
+    );
+    assert!(component.frontend_catalog_changed());
+    assert!(
+        component
+            .frontend_catalog
+            .extension_point_contributions_for(PARENT_ID, "test.memo.slot")
+            .is_empty()
+    );
+
+    let runtimes = component.runtimes.lock().unwrap();
+    assert_eq!(
+        runtimes
+            .get(PARENT_ID)
+            .unwrap()
+            .script_ctx
+            .state()
+            .mutation_generation(),
+        root_runtime_generation,
+        "an unchanged root runtime must keep its Lua state"
+    );
+    assert!(
+        runtimes
+            .values()
+            .all(|runtime| runtime.script_ctx.module_id != "@test/memo-slot-widget"),
+        "the removed slot widget runtime must be invalidated"
+    );
+    drop(runtimes);
+
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "static slot 0").is_none());
+}
+
+#[test]
+fn changed_prop_refreshes_child_without_visiting_unchanged_sibling() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    <box>
+        <Child label="{parent_label}" />
+        <Other />
+    </box>
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+local Other = require("./components/other.mesh")
+parent_label = "one"
+function setLabel()
+    parent_label = "two"
+end
+</script>
+"#,
+        &[
+            (
+                "Child",
+                r#"
+<template>
+    <text content="{label}" />
+</template>
+<script lang="luau">
+label = ""
+</script>
+"#,
+            ),
+            (
+                "Other",
+                r#"
+<template>
+    <text content="sibling" />
+</template>
+"#,
+            ),
+        ],
+    );
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(200, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
+    // Warm-up: settle container sizes and populate the memo.
+    rebuild(&mut component, 200, 60);
+    let hits_before = component.component_memo_hit_count();
+
+    component.call_namespaced_handler("setLabel", &[]).unwrap();
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(200, 60), &mut buffer, 1.0)
+        .unwrap();
+
+    assert_eq!(component.component_memo_hit_count(), hits_before);
+    assert!(!component.take_invalidation_snapshot().unwrap().full_rebuild);
+    assert_eq!(
+        runtime_value(&component, &format!("{PARENT_ID}/local:Child"), "label"),
+        Some(serde_json::json!("two"))
+    );
+    let tree = component.last_tree.as_ref().unwrap();
+    assert!(node_with_content(tree, "two").is_some());
+    assert!(node_with_content(tree, "sibling").is_some());
+}
+
+#[test]
+fn nested_descendant_state_change_invalidates_enclosing_memo() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    <box>
+        <Child />
+    </box>
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+</script>
+"#,
+        &[
+            (
+                "Child",
+                r#"
+<template>
+    <box>
+        <GrandChild />
+    </box>
+</template>
+<script lang="luau">
+local GrandChild = require("./components/grand-child.mesh")
+</script>
+"#,
+            ),
+            (
+                "GrandChild",
+                r#"
+<template>
+    <text content="{value}" />
+</template>
+<script lang="luau">
+value = 0
+function bump()
+    value = value + 1
+end
+</script>
+"#,
+            ),
+        ],
+    );
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
+    assert!(
+        node_with_content(component.last_tree.as_ref().unwrap(), "0").is_some(),
+        "initial grandchild value renders"
+    );
+    // Warm-up: settle container sizes and populate the memo, then prove the
+    // untouched Child subtree is served from cache.
+    rebuild(&mut component, 160, 60);
+    let hits_before = component.component_memo_hit_count();
+    rebuild(&mut component, 160, 60);
+    assert_eq!(component.component_memo_hit_count(), hits_before + 1);
+    let hits_before = component.component_memo_hit_count();
+
+    // Mutating the grandchild's state must invalidate the enclosing Child
+    // memo entry (descendant generation mismatch), not serve a stale subtree.
+    component
+        .call_namespaced_handler(
+            &format!("__mesh_embed__::{PARENT_ID}/local:Child/local:GrandChild::bump"),
+            &[],
+        )
+        .unwrap();
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
+    assert_eq!(component.component_memo_hit_count(), hits_before);
+    assert!(
+        node_with_content(component.last_tree.as_ref().unwrap(), "1").is_some(),
+        "rebuilt grandchild value renders through the enclosing component"
+    );
+}
+
+#[test]
+fn memoized_popover_wrapper_replays_promotion_flag() {
+    let popover_src = r#"
+<template>
+    <popover>
+        <text content="menu" />
+    </popover>
+</template>
+"#;
+    let mut parent_manifest = minimal_test_manifest(PARENT_ID);
+    parent_manifest.dependencies.modules.insert(
+        "@mesh/menu-popover".into(),
+        mesh_core_module::manifest::DependencySpec::Simple(">=0.1.0".into()),
+    );
+    let mut popover_manifest = minimal_test_manifest("@mesh/menu-popover");
+    popover_manifest.package.module_type = mesh_core_module::ModuleType::Component;
+
+    let parent_compiled = CompiledFrontendModule {
+        manifest: parent_manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: parse_component(
+            r#"
+<template>
+    <box>
+        <MenuPopover />
+    </box>
+</template>
+<script lang="luau">
+local MenuPopover = require("@mesh/menu-popover")
+</script>
+"#,
+        )
+        .unwrap(),
+        public_props: Default::default(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::from([(
+            "MenuPopover".into(),
+            "@mesh/menu-popover".into(),
+        )]),
+        watched_paths: Vec::new(),
+    };
+    let popover_compiled = CompiledFrontendModule {
+        manifest: popover_manifest,
+        source_path: PathBuf::from("src/main.mesh"),
+        component: parse_component(popover_src).unwrap(),
+        public_props: Default::default(),
+        local_components: HashMap::new(),
+        module_component_imports: HashMap::new(),
+        watched_paths: Vec::new(),
+    };
+    let catalog = FrontendCatalog {
+        modules: HashMap::from([
+            (
+                PARENT_ID.into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("."),
+                    compiled: parent_compiled.clone().into(),
+                },
+            ),
+            (
+                "@mesh/menu-popover".into(),
+                FrontendCatalogEntry {
+                    module_dir: PathBuf::from("."),
+                    compiled: popover_compiled.into(),
+                },
+            ),
+        ]),
+        diagnostics: Default::default(),
+        extension_point_contributions: HashMap::new(),
+        extension_point_entries: HashMap::new(),
+        node_slot_placements: Default::default(),
+        dependency_forks: Default::default(),
+    };
+    let mut component = FrontendSurfaceComponent::new_for_test(
+        parent_compiled,
+        PathBuf::from("."),
+        catalog,
+        InterfaceCatalog::default(),
+        test_settings_store(),
+    );
+    component
+        .mount(ComponentContext {
+            component_id: PARENT_ID.into(),
+            surface_id: PARENT_ID.into(),
+            diagnostics: Diagnostics::new(PARENT_ID),
+        })
+        .unwrap();
+    component.visible = true;
+
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
+    assert!(component.has_promoted_popover_wrappers.get());
+    // Warm-up: settle container sizes and populate the memo.
+    rebuild(&mut component, 160, 60);
+    let hits_before = component.component_memo_hit_count();
+
+    // On a rebuild that serves the popover wrapper from the memo, the
+    // promotion presence flag (reset at the top of each surface build) must be
+    // replayed so finalize_tree still collapses the wrapper out of flow.
+    component.invalidate_script_state();
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
+    assert_eq!(component.component_memo_hit_count(), hits_before + 1);
+    assert!(
+        component.has_promoted_popover_wrappers.get(),
+        "memo hit must replay the promoted-popover presence flag"
+    );
+    let tree = component.last_tree.as_ref().unwrap();
+    let wrapper = first_node_by_tag(tree, "surface").or(Some(tree)).unwrap();
+    assert!(
+        find_marker(wrapper),
+        "cached wrapper keeps the promoted-popover marker"
+    );
+}
+
+fn find_marker(node: &WidgetNode) -> bool {
+    if node.is_promoted_popover() {
+        return true;
+    }
+    node.children.iter().any(find_marker)
+}
+
+// cargo test -p mesh-core-frontend-runtime --release -- memoized_rebuild_beats_full_child_reeval --ignored --nocapture
+#[test]
+#[ignore = "release-only component render memoization benchmark"]
+fn memoized_rebuild_beats_full_child_reeval() {
+    let child_src = r#"
+<template>
+    <row>
+        <icon name="{icon}" />
+        <text content="{label}" />
+        <text content="{detail}" />
+    </row>
+</template>
+<script lang="luau">
+icon = "info"
+label = ""
+detail = ""
+effect(function(self)
+    detail = string.format("%s!", label)
+end)
+</script>
+"#;
+    // Distinct aliases: repeated same-alias instances share one runtime and
+    // deliberately miss the memo (props ping-pong bumps the shared state), so
+    // model a navigation-bar-style surface of distinct child components.
+    let children: String = (0..12)
+        .map(|index| format!("        <Item{index} label=\"row {index}\" />\n"))
+        .collect();
+    let imports: String = (0..12)
+        .map(|index| format!("local Item{index} = require(\"./components/item-{index}.mesh\")\n"))
+        .collect();
+    let parent_src = format!(
+        r#"
+<template>
+    <box>
+{children}    </box>
+</template>
+<script lang="luau">
+{imports}</script>
+"#
+    );
+    let aliases: Vec<String> = (0..12).map(|index| format!("Item{index}")).collect();
+    let locals: Vec<(&str, &str)> = aliases
+        .iter()
+        .map(|alias| (alias.as_str(), child_src))
+        .collect();
+    let mut component = memo_surface(&parent_src, &locals);
+
+    let iterations = 200;
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(400, 300);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(400, 300), &mut buffer, 1.0)
+        .unwrap();
+    rebuild(&mut component, 400, 300);
+
+    // Miss path: clear the memo before every rebuild so each child re-runs
+    // template evaluation, prop sync, and style resolution.
+    let miss_started = std::time::Instant::now();
+    for _ in 0..iterations {
+        component.clear_component_memo();
+        rebuild(&mut component, 400, 300);
+    }
+    let miss_time = miss_started.elapsed();
+
+    // Hit path: unchanged children served from the memo on every rebuild.
+    rebuild(&mut component, 400, 300);
+    let hits_before = component.component_memo_hit_count();
+    let hit_started = std::time::Instant::now();
+    for _ in 0..iterations {
+        rebuild(&mut component, 400, 300);
+    }
+    let hit_time = hit_started.elapsed();
+    let hits = component.component_memo_hit_count() - hits_before;
+
+    eprintln!(
+        "component memoization: forced-miss rebuilds {miss_time:?}; memoized rebuilds {hit_time:?}; ratio {:.1}x; hits={hits}",
+        miss_time.as_secs_f64() / hit_time.as_secs_f64()
+    );
+    assert_eq!(hits, iterations * 12);
+    assert!(hit_time < miss_time);
+}
+
+#[test]
+fn finalized_component_memo_matches_fresh_styles_semantics_and_pixels() {
+    const SOURCE: &str = r#"
+<template><box class={variant}><Child /></box></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+variant = "plain"
+</script>
+<style>
+box { transition: none; }
+.warm { color: #ff0000; font-size: 22px; }
+.hidden { display: none; }
+</style>
+"#;
+    const CHILD: &str = r#"
+<template><button><text content="Memo child" /></button></template>
+<style>button { transition: none; } text { transition: none; }</style>
+"#;
+    fn assert_projection(a: &WidgetNode, b: &WidgetNode) {
+        assert_eq!(a.computed_style, b.computed_style);
+        assert_eq!(a.accessibility, b.accessibility);
+        assert_eq!(
+            (a.layout.x, a.layout.y, a.layout.width, a.layout.height),
+            (b.layout.x, b.layout.y, b.layout.width, b.layout.height)
+        );
+        assert_eq!(a.children.len(), b.children.len());
+        for (a, b) in a.children.iter().zip(b.children.iter()) {
+            assert_projection(a, b);
+        }
+    }
+    let mut memo = memo_surface(SOURCE, &[("Child", CHILD)]);
+    let mut fresh = memo_surface(SOURCE, &[("Child", CHILD)]);
+    for _ in 0..3 {
+        rebuild(&mut memo, 240, 80);
+        rebuild(&mut fresh, 240, 80);
+    }
+    for (variant, width) in [
+        ("plain", 240),
+        ("warm", 240),
+        ("hidden", 240),
+        ("plain", 240),
+        ("warm", 300),
+        ("plain", 300),
+    ] {
+        for component in [&mut memo, &mut fresh] {
+            component
+                .runtimes
+                .lock()
+                .unwrap()
+                .get_mut(PARENT_ID)
+                .unwrap()
+                .script_ctx
+                .set_member_state("variant", serde_json::json!(variant))
+                .unwrap();
+        }
+        fresh.clear_component_memo();
+        let cached_pixels = rebuild(&mut memo, width, 80);
+        let fresh_pixels = rebuild(&mut fresh, width, 80);
+        assert_eq!(
+            cached_pixels.data(),
+            fresh_pixels.data(),
+            "{variant} at {width}"
+        );
+        assert_projection(
+            memo.last_tree.as_ref().unwrap(),
+            fresh.last_tree.as_ref().unwrap(),
+        );
+    }
+    assert!(memo.component_memo_hit_count() > 0);
+}
+
+#[test]
+fn localized_children_share_resolver_and_replace_it_on_catalog_change() {
+    let source = r#"<template><column><Child /><Child /></column></template><script lang="luau">local Child = require("./components/child.mesh")</script>"#;
+    let mut surface = test_frontend_component_with_local_components(
+        source,
+        &[("Child", "<template><text>{t('message')}</text></template>")],
+        InterfaceCatalog::default(),
+        &["locale.read"],
+    );
+    let locale = |value: &str| {
+        let mut engine = mesh_core_locale::LocaleEngine::new("en");
+        engine.load_module_translations(
+            "@test/reactive-surface",
+            mesh_core_locale::TranslationSet {
+                locale: "en".into(),
+                messages: HashMap::from([("message".into(), value.into())]),
+            },
+        );
+        engine
+    };
+    surface.locale_changed(&locale("first")).unwrap();
+    let mut buffer = PixelBuffer::new(160, 80);
+    let extent = SurfaceExtent::unpadded(160, 80);
+    surface
+        .paint_raster(&default_theme(), extent, &mut buffer, 1.0)
+        .unwrap();
+    assert!(rendered_text(&surface).iter().any(|text| text == "first"));
+    let first = surface.shared_i18n_translator("@test/reactive-surface");
+    assert!(std::sync::Arc::ptr_eq(
+        &first,
+        &surface.shared_i18n_translator("@test/reactive-surface")
+    ));
+    assert!(!std::sync::Arc::ptr_eq(
+        &first,
+        &surface.shared_i18n_translator("@test/other-module")
+    ));
+    surface.locale_changed(&locale("second")).unwrap();
+    let second = surface.shared_i18n_translator("@test/reactive-surface");
+    assert!(!std::sync::Arc::ptr_eq(&first, &second));
+    surface
+        .paint_raster(&default_theme(), extent, &mut buffer, 1.0)
+        .unwrap();
+    assert!(rendered_text(&surface).iter().any(|text| text == "second"));
+}
+
+#[test]
+#[ignore = "release-only localized component mount workload"]
+fn localized_component_mount_workload() {
+    let theme = default_theme();
+    for key_count in [10, 100] {
+        for component_count in [1, 100, 1000] {
+            let children = "<Child />".repeat(component_count);
+            let source = format!(
+                "<template><column>{children}</column></template><script lang=\"luau\">local Child = require(\"./components/child.mesh\")</script>"
+            );
+            let child = "<template><text>{t('key0')}</text></template>";
+            let mut samples = [Vec::new(), Vec::new()];
+            #[cfg(feature = "allocation-profiling")]
+            let mut allocation_samples = [Vec::new(), Vec::new()];
+            for repetition in 0..5 {
+                let order = if repetition % 2 == 0 { [0, 1] } else { [1, 0] };
+                for mode in order {
+                    let mut surface = test_frontend_component_with_local_components(
+                        &source,
+                        &[("Child", child)],
+                        InterfaceCatalog::default(),
+                        &["locale.read"],
+                    );
+                    surface.disable_i18n_translator_cache = mode == 0;
+                    surface.update_test_locale(|locale| {
+                        locale.load_module_translations(
+                            "@test/reactive-surface",
+                            mesh_core_locale::TranslationSet {
+                                locale: "en".into(),
+                                messages: (0..key_count)
+                                    .map(|index| (format!("key{index}"), format!("value{index}")))
+                                    .collect(),
+                            },
+                        );
+                    });
+                    surface.runtimes.lock().unwrap().clear();
+                    surface.init_root_runtime().unwrap();
+                    #[cfg(feature = "allocation-profiling")]
+                    let allocation_before = mesh_core_debug::allocation::snapshot();
+                    let started = std::time::Instant::now();
+                    let tree = surface.build_tree(&theme, 640, 800);
+                    let elapsed = started.elapsed();
+                    #[cfg(feature = "allocation-profiling")]
+                    allocation_samples[mode].push(
+                        mesh_core_debug::allocation::snapshot().saturating_delta(allocation_before),
+                    );
+                    assert_eq!(surface.runtimes.lock().unwrap().len(), component_count + 1);
+                    assert!(rendered_text_from_node(&tree, "value0"));
+                    samples[mode].push(elapsed.as_secs_f64() * 1000.0);
+                }
+            }
+            for (mode, label) in ["uncached", "shared"].iter().enumerate() {
+                samples[mode].sort_by(f64::total_cmp);
+                println!(
+                    "localized mount {label} components={component_count} catalog_keys={key_count}: median={:.3}ms range={:.3}–{:.3}ms",
+                    samples[mode][2], samples[mode][0], samples[mode][4]
+                );
+                #[cfg(feature = "allocation-profiling")]
+                {
+                    allocation_samples[mode].sort_by_key(|sample| sample.allocation_count);
+                    let middle = allocation_samples[mode][2];
+                    println!(
+                        "localized mount allocations {label} components={component_count} catalog_keys={key_count}: count={} bytes={} reallocations={}",
+                        middle.allocation_count, middle.allocated_bytes, middle.reallocation_count
+                    );
+                }
+            }
+            if component_count == 1000 && key_count == 100 {
+                #[cfg(feature = "allocation-profiling")]
+                assert!(
+                    allocation_samples[1][2].allocation_count + 100_000
+                        < allocation_samples[0][2].allocation_count,
+                    "localized_mount_shared_resolver_allocation_gate"
+                );
+            }
+        }
+    }
+}
+
+fn rendered_text_from_node(node: &WidgetNode, value: &str) -> bool {
+    node.attributes
+        .get(Prop::Content)
+        .is_some_and(|content| content == value)
+        || node
+            .children
+            .iter()
+            .any(|child| rendered_text_from_node(child, value))
+}
+
+#[test]
+#[cfg(feature = "allocation-profiling")]
+fn missing_instance_storage_dense_directory_allocation_gate() {
+    use mesh_core_scripting::storage::{StorageManager, StorageScope};
+    let root = tempfile::tempdir().unwrap();
+    let manager = StorageManager::new(root.path());
+    let scopes: Vec<_> = (0..1000)
+        .map(|index| StorageScope::frontend("@test/mount", "child", format!("child-{index}")))
+        .collect();
+    for scope in &scopes {
+        assert!(manager.open(scope.clone()).diagnostics().is_empty());
+    }
+    let before = mesh_core_debug::allocation::snapshot();
+    let started = std::time::Instant::now();
+    for scope in &scopes {
+        let storage = manager.open(scope.clone());
+        assert!(storage.diagnostics().is_empty());
+        assert_eq!(storage.revision(), 0);
+    }
+    let elapsed = started.elapsed();
+    let allocations = mesh_core_debug::allocation::snapshot().saturating_delta(before);
+    println!(
+        "missing storage 1000 instances/1000 sibling locks: {elapsed:?}, {} allocations, {} bytes",
+        allocations.allocation_count, allocations.allocated_bytes
+    );
+    assert!(
+        allocations.allocation_count < 2_500_000,
+        "missing_instance_storage_dense_directory_allocation_gate"
+    );
+}
+
+#[test]
+fn computed_component_props_refresh_child_without_rebuilding_parent() {
+    let mut component = memo_surface(
+        r#"<template><box><Child label={label(value)} count={value} /><text>{value}</text></box></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+value = 1
+function label(value) return "value:" .. tostring(value) end
+function change() value += 1 end
+</script>"#,
+        &[(
+            "Child",
+            r#"<props>{ label = { type = "string", default = "" }, count = { type = "number", default = 0 } }</props>
+<template><column><text>{props.label}</text><text>{props.count}</text><text>{privateValue}</text></column></template>
+<script lang="luau">privateValue = "retained"</script>"#,
+        )],
+    );
+    rebuild(&mut component, 160, 80);
+    let _ = component.take_invalidation_snapshot();
+    component
+        .call_namespaced_handler(&format!("__mesh_embed__::{PARENT_ID}::change"), &[])
+        .unwrap();
+    assert!(
+        !component.dirty_types.intersects(
+            ComponentDirtyFlags::SCRIPT
+                | ComponentDirtyFlags::TEXT
+                | ComponentDirtyFlags::SCRIPT_NARROW
+        ),
+        "child inputs should use retained parent"
+    );
+    component
+        .call_namespaced_handler(&format!("__mesh_embed__::{PARENT_ID}::change"), &[])
+        .unwrap();
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "value:1").is_some());
+    let mut buffer = PixelBuffer::new(160, 80);
+    component
+        .paint_raster(
+            &default_theme(),
+            SurfaceExtent::unpadded(160, 80),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "value:3").is_some());
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "3").is_some());
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "retained").is_some());
+    let count = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(format!("{PARENT_ID}/local:Child").as_str())
+        .unwrap()
+        .host_props["count"]
+        .as_f64();
+    assert_eq!(count, Some(3.0));
+    let snapshot = component.take_invalidation_snapshot().unwrap();
+    assert!(!snapshot.full_rebuild);
+    let patched = buffer.data().to_vec();
+    let full = rebuild(&mut component, 160, 80);
+    assert_eq!(patched, full.data());
+}
+
+#[test]
+fn component_service_props_refresh_nested_structure_and_preserve_child_state() {
+    let mut component = test_frontend_component_with_local_components(
+        r#"<template><column><Child label={tostring(audio.percent)} visible={audio.muted} /></column></template>
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+local Child = require("./components/child.mesh")
+</script>"#,
+        &[
+            (
+                "Child",
+                r#"<template><column>{#if visible}<GrandChild label={label} />{:else}<text>hidden</text>{/if}<text>{privateValue}</text></column></template>
+<script lang="luau">
+local GrandChild = require("./components/grand.mesh")
+label = ""
+visible = false
+privateValue = "original"
+function retain() privateValue = "preserved" end
+</script>"#,
+            ),
+            (
+                "GrandChild",
+                r#"<template><text>{label}</text></template><script lang="luau">label = ""</script>"#,
+            ),
+        ],
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 80);
+    let update = |component: &mut FrontendSurfaceComponent, percent, muted| {
+        component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.audio".into(),
+                source_module: "@mesh/pipewire-audio".into(),
+                payload: serde_json::json!({"percent":percent,"muted":muted}),
+            })
+            .unwrap();
+    };
+    update(&mut component, 10, false);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    let root = component.root_instance_key().to_owned();
+    component
+        .call_namespaced_handler(&format!("__mesh_embed__::{root}/local:Child::retain"), &[])
+        .unwrap();
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    let _ = component.take_invalidation_snapshot();
+    update(&mut component, 40, true);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 80), &mut buffer, 1.0)
+        .unwrap();
+    assert!(!component.take_invalidation_snapshot().unwrap().full_rebuild);
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "40").is_some());
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "preserved").is_some());
+    let patched = buffer.data().to_vec();
+    let full = rebuild(&mut component, 160, 80);
+    assert_eq!(patched, full.data());
+}
+
+#[test]
+fn component_prop_expression_failure_keeps_last_good_tree_until_rebuild() {
+    let mut component = memo_surface(
+        r#"<template><column><Child label={label(value)} /><text>{value}</text></column></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+value = 1
+function label(value) if value > 1 then error("invalid label") end return "valid" end
+function change() value = 2 end
+</script>"#,
+        &[(
+            "Child",
+            r#"<template><text>{label}</text></template><script lang="luau">label = ""</script>"#,
+        )],
+    );
+    rebuild(&mut component, 160, 80);
+    component
+        .call_namespaced_handler(&format!("__mesh_embed__::{PARENT_ID}::change"), &[])
+        .unwrap();
+    assert!(
+        component
+            .dirty_types
+            .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+    );
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "valid").is_some());
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "1").is_some());
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "2").is_none());
+}
+
+#[test]
+fn component_prop_refresh_preserves_override_and_validates_host_values() {
+    let mut component = memo_surface(
+        r#"<template><column><Child count={value} /></column></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+value = 1
+function equivalent() value = 1.0 end
+function invalid() value = "invalid" end
+</script>"#,
+        &[(
+            "Child",
+            r#"<props>{ count = { type = "number", default = 0, min = 0, max = 10 } }</props>
+<template><text>{props.count}</text></template>
+<script lang="luau">function override() props.count = 7 end</script>"#,
+        )],
+    );
+    rebuild(&mut component, 160, 80);
+    component
+        .call_namespaced_handler(
+            &format!("__mesh_embed__::{PARENT_ID}/local:Child::override"),
+            &[],
+        )
+        .unwrap();
+    let mut buffer = PixelBuffer::new(160, 80);
+    component
+        .paint_raster(
+            &default_theme(),
+            SurfaceExtent::unpadded(160, 80),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    for handler in ["equivalent", "invalid"] {
+        component
+            .call_namespaced_handler(&format!("__mesh_embed__::{PARENT_ID}::{handler}"), &[])
+            .unwrap();
+        assert!(!component.dirty_types.intersects(
+            ComponentDirtyFlags::SCRIPT
+                | ComponentDirtyFlags::TEXT
+                | ComponentDirtyFlags::SCRIPT_NARROW
+        ));
+        component
+            .paint_raster(
+                &default_theme(),
+                SurfaceExtent::unpadded(160, 80),
+                &mut buffer,
+                1.0,
+            )
+            .unwrap();
+        assert!(node_with_content(component.last_tree.as_ref().unwrap(), "7").is_some());
+    }
+    let count = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(format!("{PARENT_ID}/local:Child").as_str())
+        .unwrap()
+        .host_props["count"]
+        .as_f64();
+    assert_eq!(count, Some(0.0));
+}
+
+#[test]
+fn unrecorded_component_prop_boundary_keeps_conservative_rebuild() {
+    let mut component = memo_surface(
+        r#"<template><Child /></template><script lang="luau">local Child = require("./components/child.mesh")</script>"#,
+        &[
+            (
+                "Child",
+                r#"<template><GrandChild label={value} /></template>
+<script lang="luau">
+local GrandChild = require("./components/grand.mesh")
+value = "before"
+function change() value = "after" end
+</script>"#,
+            ),
+            (
+                "GrandChild",
+                r#"<template><text>{label}</text></template><script lang="luau">label = ""</script>"#,
+            ),
+        ],
+    );
+    rebuild(&mut component, 160, 80);
+    component.template_binding_index =
+        crate::component::template_patch::TemplateBindingIndex::build(
+            component.last_tree.as_ref().unwrap(),
+            &HashMap::new(),
+        );
+    component
+        .call_namespaced_handler(
+            &format!("__mesh_embed__::{PARENT_ID}/local:Child::change"),
+            &[],
+        )
+        .unwrap();
+    assert!(
+        component
+            .dirty_types
+            .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+    );
+    let mut buffer = PixelBuffer::new(160, 80);
+    component
+        .paint_raster(
+            &default_theme(),
+            SurfaceExtent::unpadded(160, 80),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "after").is_some());
+}
+
+#[test]
+fn child_structure_and_sibling_keyed_list_refresh_in_one_batch() {
+    let mut component = memo_surface(
+        r#"<template><column class="parent"><Child label={value} />{#for item in items key=item.id}<text>{item.label}</text>{/for}</column></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+value = ""
+items = {{ id = "parent", label = "before" }}
+function change() value = "after"; items[1].label = "updated" end
+</script><style>.parent { width: 160px; height: 80px; }</style>"#,
+        &[(
+            "Child",
+            r#"<template><column>{#if label == ""}{#for row in rows key=row.id}<text>{row.label}</text>{/for}{:else}<text>{label}</text>{/if}</column></template>
+<script lang="luau">
+label = ""
+rows = {{ id = "child", label = "child row" }}
+</script>"#,
+        )],
+    );
+    let mut buffer = rebuild(&mut component, 160, 80);
+    component
+        .call_namespaced_handler(&format!("__mesh_embed__::{PARENT_ID}::change"), &[])
+        .unwrap();
+    component
+        .paint_raster(
+            &default_theme(),
+            SurfaceExtent::unpadded(160, 80),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert!(!component.take_invalidation_snapshot().unwrap().full_rebuild);
+    let tree = component.last_tree.as_ref().unwrap();
+    assert!(node_with_content(tree, "after").is_some());
+    assert!(node_with_content(tree, "updated").is_some());
+    assert!(node_with_content(tree, "child row").is_none());
+    for _ in 0..3 {
+        if !component.wants_immediate_rerender() {
+            break;
+        }
+        component
+            .paint_raster(
+                &default_theme(),
+                SurfaceExtent::unpadded(160, 80),
+                &mut buffer,
+                1.0,
+            )
+            .unwrap();
+    }
+    let expected = rebuild(&mut component, 160, 80);
+    assert!(
+        buffer.data() == expected.data(),
+        "retained pixels must match full rebuild"
+    );
+}
+
+#[test]
+fn child_callbacks_batch_parent_prop_writes_without_rebuilding_parent() {
+    let mut component = memo_surface(
+        r#"<template><column class="parent"><Child value={value} onbump={bump} /><text>{value}</text></column></template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+value = 1
+function bump() value += 1 end
+</script><style>.parent { width: 160px; height: 80px; }</style>"#,
+        &[(
+            "Child",
+            r#"<template><text>{value}</text></template>
+<script lang="luau">
+value = 0
+onbump = nil
+function click() onbump() end
+</script>"#,
+        )],
+    );
+    let mut buffer = rebuild(&mut component, 160, 80);
+    let handler = format!("__mesh_embed__::{PARENT_ID}/local:Child::click");
+    for _ in 0..2 {
+        component.call_namespaced_handler(&handler, &[]).unwrap();
+        assert!(
+            !component
+                .dirty_types
+                .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+        );
+    }
+    component
+        .paint_raster(
+            &default_theme(),
+            SurfaceExtent::unpadded(160, 80),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    assert!(!component.take_invalidation_snapshot().unwrap().full_rebuild);
+    assert!(node_with_content(component.last_tree.as_ref().unwrap(), "3").is_some());
+    let expected = rebuild(&mut component, 160, 80);
+    assert!(
+        buffer.data() == expected.data(),
+        "callback patch must match full rebuild"
+    );
+}

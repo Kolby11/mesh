@@ -615,6 +615,10 @@ pub enum CoreRequest {
         field: String,
         value: serde_json::Value,
     },
+    SetFontSize {
+        size: u32,
+    },
+    SetShellScale { scale: u32 },
     SetFontFamily {
         family: String,
     },
@@ -2046,3 +2050,6 @@ pub trait ShellComponent: Send {
         false
     }
 }
+
+mod builtin_contracts;
+pub use builtin_contracts::builtin_interface_catalog;

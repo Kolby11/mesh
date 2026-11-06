@@ -1,0 +1,468 @@
+use super::*;
+use mesh_core_elements::Prop;
+
+pub(super) fn collect_hover_changed_ids(
+    previous: &[NodeId],
+    current: &[NodeId],
+    changed_ids: &mut HashSet<NodeId>,
+) {
+    let shared_prefix_len = previous
+        .iter()
+        .zip(current)
+        .take_while(|(previous, current)| previous == current)
+        .count();
+    changed_ids.extend(
+        previous[shared_prefix_len..]
+            .iter()
+            .chain(&current[shared_prefix_len..])
+            .copied(),
+    );
+}
+
+pub(super) fn runtime_style_diagnostic_inputs_changed(
+    previous: &mut Option<RuntimeStyleDiagnosticFingerprint>,
+    current: RuntimeStyleDiagnosticFingerprint,
+) -> bool {
+    if *previous == Some(current) {
+        return false;
+    }
+    *previous = Some(current);
+    true
+}
+
+pub(super) const DIAGNOSTIC_FNV_OFFSET: u64 = 0xcbf29ce484222325;
+
+pub(super) const DIAGNOSTIC_FNV_PRIME: u64 = 0x100000001b3;
+
+pub(super) fn diagnostic_hash_bytes(hash: &mut u64, bytes: &[u8]) {
+    for byte in bytes {
+        *hash ^= u64::from(*byte);
+        *hash = hash.wrapping_mul(DIAGNOSTIC_FNV_PRIME);
+    }
+    // Separate adjacent fields, including absent and empty strings.
+    *hash ^= 0xff;
+    *hash = hash.wrapping_mul(DIAGNOSTIC_FNV_PRIME);
+}
+
+pub(super) fn runtime_style_diagnostic_props_fingerprint(props: &SurfaceCssProps) -> u64 {
+    use mesh_core_component::style::StyleValue;
+
+    // Hash entries independently and combine commutatively: SurfaceCssProps is
+    // rebuilt as a randomized HashMap each paint, so iteration order is not a
+    // stable input and sorting would allocate on every diagnostic check.
+    let mut combined = (props.len() as u64).wrapping_mul(DIAGNOSTIC_FNV_PRIME);
+    for (name, value) in props {
+        let mut entry = DIAGNOSTIC_FNV_OFFSET;
+        diagnostic_hash_bytes(&mut entry, name.as_bytes());
+        match value {
+            StyleValue::Literal(value) => {
+                diagnostic_hash_bytes(&mut entry, &[0]);
+                diagnostic_hash_bytes(&mut entry, value.as_bytes());
+            }
+            StyleValue::Var(value) => {
+                diagnostic_hash_bytes(&mut entry, &[1]);
+                diagnostic_hash_bytes(&mut entry, value.as_bytes());
+            }
+            StyleValue::Prop(value) => {
+                diagnostic_hash_bytes(&mut entry, &[2]);
+                diagnostic_hash_bytes(&mut entry, value.as_bytes());
+            }
+        }
+        combined ^= entry.rotate_left((entry & 63) as u32);
+    }
+    combined
+}
+
+pub(super) fn apply_runtime_attribute_state(node: &mut WidgetNode) {
+    apply_runtime_node_state(node);
+    for child in &mut node.children {
+        apply_runtime_attribute_state(child);
+    }
+}
+
+pub(super) fn apply_hidden_attribute_layout(node: &mut WidgetNode) {
+    let authored = node.authored_payload();
+    let hidden = authored.attributes.get(Prop::Hidden).is_some_and(|value| {
+        matches!(
+            value.as_str(),
+            "" | "true" | "1" | "hidden" | "disabled" | "checked"
+        )
+    });
+    if hidden && !node.is_promoted_popover() && !node.is_promoted_window() {
+        node.computed_style.display = mesh_core_elements::style::Display::None;
+    }
+}
+
+pub(super) fn apply_runtime_attribute_state_for_ids(
+    node: &mut WidgetNode,
+    affected_ids: &HashSet<NodeId>,
+) -> bool {
+    let node_affected = affected_ids.contains(&node.id);
+    if node_affected {
+        apply_runtime_attribute_state(node);
+        return true;
+    }
+    let mut descendant_affected = false;
+    for child in &mut node.children {
+        descendant_affected |= apply_runtime_attribute_state_for_ids(child, affected_ids);
+    }
+    descendant_affected
+}
+
+fn apply_runtime_node_state(node: &mut WidgetNode) {
+    apply_hidden_attribute_layout(node);
+    collapse_promoted_popover_node(node);
+    collapse_promoted_window_node(node);
+    constrain_error_placeholder_node(node);
+}
+
+/// Reapplies runtime constraints to `restyled` nodes only, located through
+/// `snapshot`'s paths; nodes whose style was not re-resolved keep theirs.
+pub(super) fn apply_runtime_node_state_by_path(
+    tree: &mut WidgetNode,
+    snapshot: &mesh_core_elements::FrameSnapshot,
+    restyled: &HashSet<NodeId>,
+) {
+    for &id in restyled {
+        let Some(path) = snapshot.node_path(id) else {
+            continue;
+        };
+        let mut node = &mut *tree;
+        for &index in path {
+            node = &mut node.children[index];
+        }
+        apply_runtime_node_state(node);
+    }
+}
+
+/// Removes promoted popover wrappers from flow so neither their geometry nor
+/// a parent flex gap displaces the trigger's visible children. The zero-size
+/// wrapper preserves intrinsic popup measurement; child-surface paint and input
+/// translate the subtree by its own layout origin.
+#[cfg(test)]
+pub(super) fn collapse_promoted_popover_wrappers(node: &mut WidgetNode) {
+    collapse_promoted_popover_node(node);
+    for child in &mut node.children {
+        collapse_promoted_popover_wrappers(child);
+    }
+}
+
+fn collapse_promoted_popover_node(node: &mut WidgetNode) {
+    if node.is_promoted_popover() {
+        node.computed_style.position = mesh_core_elements::style::Position::Absolute;
+        node.computed_style.width = mesh_core_elements::Dimension::Px(0.0);
+        node.computed_style.height = mesh_core_elements::Dimension::Px(0.0);
+        node.computed_style.min_width = mesh_core_elements::Dimension::Px(0.0);
+        node.computed_style.min_height = mesh_core_elements::Dimension::Px(0.0);
+        node.computed_style.overflow_x = mesh_core_elements::style::Overflow::Visible;
+        node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Visible;
+        // The zero-size wrapper is not the popup's containing block: the
+        // promoted root owns a surface of its own. Lay the root out along a
+        // row it cannot shrink in, so its width is its max-content width
+        // rather than the min-content fallback a 0px available width forces
+        // (Quick Settings' 300px panel collapsed to its widest row).
+        node.computed_style.direction = mesh_core_elements::style::FlexDirection::Row;
+        // A single-line flex row clamps its line height to this zero-height
+        // wrapper. Wrapping lets the popup measure its intrinsic cross size.
+        node.computed_style.flex_wrap = mesh_core_elements::style::FlexWrap::Wrap;
+        for child in &mut node.children {
+            child.computed_style.flex_shrink = 0.0;
+            child.computed_style.align_self = mesh_core_elements::style::AlignSelf::Start;
+        }
+    }
+}
+
+fn collapse_promoted_window_node(node: &mut WidgetNode) {
+    if node.is_promoted_window() {
+        // Keep the widget's intrinsic dimensions available to the child-window
+        // request. Absolute positioning removes it from the parent's flex/grid
+        // flow without turning an auto-sized widget into a 0x0 window.
+        node.computed_style.position = mesh_core_elements::style::Position::Absolute;
+        node.computed_style.overflow_x = mesh_core_elements::style::Overflow::Visible;
+        node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Visible;
+    }
+}
+
+/// Keeps generated component-error content from taking over its host layout.
+/// These constraints are shell-owned and must be restored after CSS restyling,
+/// just like promoted-popover geometry above.
+#[cfg(test)]
+pub(in crate::component) fn constrain_error_placeholders(node: &mut WidgetNode) {
+    constrain_error_placeholder_node(node);
+    for child in &mut node.children {
+        constrain_error_placeholders(child);
+    }
+}
+
+fn constrain_error_placeholder_node(node: &mut WidgetNode) {
+    if node.is_error_placeholder() {
+        node.computed_style.min_width = mesh_core_elements::Dimension::Px(0.0);
+        node.computed_style.max_width =
+            mesh_core_elements::Dimension::Px(ERROR_PLACEHOLDER_MAX_WIDTH);
+        node.computed_style.flex_shrink = 1.0;
+        node.computed_style.overflow_x = mesh_core_elements::style::Overflow::Hidden;
+        node.computed_style.overflow_y = mesh_core_elements::style::Overflow::Hidden;
+        node.computed_style.white_space = mesh_core_elements::style::WhiteSpace::Nowrap;
+        node.computed_style.text_overflow = mesh_core_elements::style::TextOverflow::Ellipsis;
+    }
+}
+
+#[derive(Default)]
+pub(in crate::component) struct InteractionChangedNodeIds {
+    pub(in crate::component) affected: HashSet<NodeId>,
+}
+
+pub(super) fn direct_interaction_changed_node_ids(
+    changed_ids: HashSet<NodeId>,
+) -> InteractionChangedNodeIds {
+    // `changed_ids` already contains exactly the nodes whose state toggled and
+    // can serve directly as both targeted-restyle IDs and runtime-state roots.
+    // When targets are nested, the ancestor runtime-state application consumes
+    // its whole subtree and returns before the redundant descendant probe.
+    InteractionChangedNodeIds {
+        affected: changed_ids,
+    }
+}
+
+pub(super) fn selector_contains_state(selector: &mesh_core_component::style::Selector) -> bool {
+    use mesh_core_component::style::Selector;
+
+    match selector {
+        Selector::State(_, _) => true,
+        Selector::Compound(parts) => parts.iter().any(selector_contains_state),
+        Selector::PseudoElement(host, _) => selector_contains_state(host),
+        Selector::Tag(_) | Selector::Class(_) | Selector::Id(_) | Selector::Universal => false,
+    }
+}
+
+pub(super) fn collect_selector_state_dependencies(
+    selector: &mesh_core_component::style::Selector,
+    dependencies: &mut StyleStateDependencies,
+) {
+    use mesh_core_component::style::Selector;
+
+    match selector {
+        Selector::State(_, state) => {
+            if let Some(state) = mesh_core_elements::PseudoState::from_name(state) {
+                dependencies.mask |= state.spec().bit;
+            }
+        }
+        Selector::Compound(parts) => {
+            for part in parts {
+                collect_selector_state_dependencies(part, dependencies);
+            }
+        }
+        // `slider:active::thumb` restyles the host's parts on press.
+        Selector::PseudoElement(host, _) => collect_selector_state_dependencies(host, dependencies),
+        Selector::Tag(_) | Selector::Class(_) | Selector::Id(_) | Selector::Universal => {}
+    }
+}
+
+pub(super) fn append_class(node: &mut WidgetNode, class_name: &str) {
+    let class = node.attributes.entry(Prop::Class).or_default();
+    let has_class = class
+        .split_whitespace()
+        .any(|candidate| candidate == class_name);
+    if has_class {
+        return;
+    }
+    if !class.is_empty() {
+        class.push(' ');
+    }
+    class.push_str(class_name);
+}
+
+pub(in crate::component) fn append_lifecycle_class(
+    node: &mut WidgetNode,
+    class: &str,
+    bases: &mut HashMap<NodeId, (Option<String>, String)>,
+) {
+    mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::AnimationLookup);
+    let entry = bases
+        .entry(node.id)
+        .or_insert_with(|| (node.attributes.get(Prop::Class).cloned(), String::new()));
+    append_class(node, class);
+    entry.1 = node
+        .attributes
+        .get(Prop::Class)
+        .cloned()
+        .unwrap_or_default();
+    for child in &mut node.children {
+        append_lifecycle_class(child, class, bases);
+    }
+}
+
+pub(in crate::component) fn restore_lifecycle_classes(
+    tree: &mut WidgetNode,
+    snapshot: Option<&FrameSnapshot>,
+    bases: &mut HashMap<NodeId, (Option<String>, String)>,
+) {
+    for (id, (class, applied)) in bases.drain() {
+        let Some(node) = lifecycle_node_by_id_mut(tree, snapshot, id) else {
+            continue;
+        };
+        // A binding may replace the class between lifecycle invalidation and
+        // paint. Only restore a value this marker pass still owns.
+        if node.attributes.text(Prop::Class) == Some(applied.as_str()) {
+            match class {
+                Some(class) => {
+                    node.attributes.insert(Prop::Class, class);
+                }
+                None => {
+                    node.attributes.remove(Prop::Class);
+                }
+            }
+        }
+        node.state
+            .remove(NodeState::SURFACE_ENTERING | NodeState::SURFACE_EXITING);
+    }
+}
+
+pub(in crate::component) fn lifecycle_node_mut<'a>(
+    tree: &'a mut WidgetNode,
+    snapshot: Option<&FrameSnapshot>,
+    key: &str,
+) -> Option<&'a mut WidgetNode> {
+    lifecycle_node_by_id_mut(tree, snapshot, runtime_node_id_for_key(key))
+}
+
+fn lifecycle_node_by_id_mut<'a>(
+    tree: &'a mut WidgetNode,
+    snapshot: Option<&FrameSnapshot>,
+    id: NodeId,
+) -> Option<&'a mut WidgetNode> {
+    if let Some(path) = snapshot.and_then(|snapshot| snapshot.node_path(id)) {
+        let mut node = &*tree;
+        let valid = path
+            .iter()
+            .try_for_each(|&index| {
+                mesh_core_elements::frame_work::visit(
+                    mesh_core_elements::frame_work::Pass::AnimationLookup,
+                );
+                node = node.children.get(index).ok_or(())?;
+                Ok::<(), ()>(())
+            })
+            .is_ok()
+            && node.id == id;
+        if valid {
+            let mut node = tree;
+            for &index in path {
+                mesh_core_elements::frame_work::visit(
+                    mesh_core_elements::frame_work::Pass::AnimationLookup,
+                );
+                node = &mut node.children[index];
+            }
+            return Some(node);
+        }
+    }
+    tree.find_mut(id)
+}
+
+pub(super) fn find_node_by_key_mut<'a>(
+    node: &'a mut WidgetNode,
+    key: &str,
+) -> Option<&'a mut WidgetNode> {
+    if node.mesh_key().is_some_and(|value| value == key) {
+        return Some(node);
+    }
+    for child in &mut node.children {
+        if let Some(found) = find_node_by_key_mut(child, key) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+pub(super) fn annotate_selected_text_node(
+    node: &mut WidgetNode,
+    selection: &TextSelectionState,
+    selection_background: &str,
+    selection_foreground: &str,
+) -> bool {
+    let matches_selection = node.tag == "text"
+        && node
+            .attributes
+            .get(Prop::Selectable)
+            .is_some_and(|value| matches!(value.as_str(), "" | "true" | "1"));
+    if matches_selection {
+        node.text_selection = Some(std::sync::Arc::new(mesh_core_elements::TextSelection {
+            background: selection_background.into(),
+            foreground: selection_foreground.into(),
+            anchor: (selection.anchor.x, selection.anchor.y),
+            focus: (selection.focus.x, selection.focus.y),
+            text_origin: (
+                node.layout.x + node.computed_style.padding.left,
+                node.layout.y + node.computed_style.padding.top,
+            ),
+        }));
+        return true;
+    }
+
+    false
+}
+
+pub(in crate::component) fn narrow_expand_ancestors(
+    tree: &WidgetNode,
+    affected: &HashSet<NodeId>,
+    full_affected: &mut HashSet<NodeId>,
+) {
+    let mut ancestors = Vec::new();
+    narrow_collect_ancestors(tree, affected, &mut ancestors, full_affected);
+}
+
+#[cfg(test)]
+pub(super) fn count_shared_authored_nodes(current: &WidgetNode, previous: &WidgetNode) -> usize {
+    usize::from(current.shares_authored_payload_with(previous))
+        + current
+            .children
+            .iter()
+            .zip(&previous.children)
+            .map(|(current, previous)| count_shared_authored_nodes(current, previous))
+            .sum::<usize>()
+}
+
+pub(super) fn narrow_collect_ancestors(
+    node: &WidgetNode,
+    affected: &HashSet<NodeId>,
+    ancestors: &mut Vec<NodeId>,
+    full_affected: &mut HashSet<NodeId>,
+) {
+    if affected.contains(&node.id) {
+        full_affected.extend(ancestors.iter().copied());
+    }
+    ancestors.push(node.id);
+    for child in &node.children {
+        narrow_collect_ancestors(child, affected, ancestors, full_affected);
+    }
+    ancestors.pop();
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn lifecycle_classes_restore_without_overwriting_binding_writes() {
+        for initial in [None, Some("authored")] {
+            for replaced in [false, true] {
+                let mut node = WidgetNode::new("box");
+                if let Some(class) = initial {
+                    node.attributes.insert(Prop::Class, class.into());
+                }
+                let snapshot = FrameSnapshot::complete(&node, 1, None).unwrap();
+                let mut bases = HashMap::new();
+                append_lifecycle_class(&mut node, "mesh-surface-entering", &mut bases);
+                append_lifecycle_class(&mut node, "mesh-surface-exiting", &mut bases);
+                if replaced {
+                    node.attributes.insert(Prop::Class, "binding".into());
+                }
+                restore_lifecycle_classes(&mut node, Some(&snapshot), &mut bases);
+                assert_eq!(
+                    node.attributes.text(Prop::Class),
+                    if replaced { Some("binding") } else { initial }
+                );
+                assert!(bases.is_empty());
+            }
+        }
+    }
+}

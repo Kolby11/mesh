@@ -28,6 +28,8 @@ pub(super) struct PreparedThemeState {
 pub(super) fn default_theme_state(settings: &ShellSettings) -> (ThemeEngine, ThemeWatchState) {
     let mut theme = default_theme();
     apply_font_family(&mut theme, settings.fonts.ui_family.as_deref());
+    theme.set_text_scale(settings.fonts.base_size.unwrap_or(14) as f32 / 14.0);
+    theme.set_ui_scale(settings.fonts.shell_scale.unwrap_or(100) as f32 / 100.0);
     let revision = theme.revision();
 
     (
@@ -155,6 +157,8 @@ pub(super) fn prepare_theme_for_graph(
         theme.name = label.clone();
     }
     apply_font_family(&mut theme, settings.fonts.ui_family.as_deref());
+    theme.set_text_scale(settings.fonts.base_size.unwrap_or(14) as f32 / 14.0);
+    theme.set_ui_scale(settings.fonts.shell_scale.unwrap_or(100) as f32 / 100.0);
     let path = mode_descriptor.source.candidate_path();
     let modified_at = std::fs::metadata(&path)
         .ok()

@@ -11,15 +11,35 @@ use std::sync::Weak;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 thread_local! {
-    static PAINT_CONSUMER: RefCell<Option<Weak<AtomicBool>>> = const { RefCell::new(None) };
+    static PAINT_CONSUMER: RefCell<Option<Weak<ResourceConsumerState>>> = const { RefCell::new(None) };
 }
 
 /// Tracks completed resources requested while painting one component's targets.
 /// Dropping the consumer releases its subscriptions without retaining the component.
 #[derive(Default)]
-pub struct ResourcePaintConsumer(Arc<AtomicBool>);
+struct ResourceConsumerState {
+    ready: AtomicBool,
+    pending: Option<AtomicUsize>,
+}
+
+#[derive(Default)]
+pub struct ResourcePaintConsumer(Arc<ResourceConsumerState>);
 
 impl ResourcePaintConsumer {
+    /// Create a consumer that counts outstanding distinct resource requests.
+    pub fn with_pending_tracking() -> Self {
+        Self(Arc::new(ResourceConsumerState {
+            ready: AtomicBool::new(false),
+            pending: Some(AtomicUsize::new(0)),
+        }))
+    }
+
+    /// Outstanding requests, or `None` when tracking was not enabled.
+    /// A zero count does not rule out more requests on the next repaint.
+    pub fn pending_requests(&self) -> Option<usize> {
+        self.0.pending.as_ref().map(|pending| pending.load(Ordering::Acquire))
+    }
+
     /// Attribute resource requests in this scope to this consumer. Nested scopes
     /// restore the previous consumer when their guard is dropped.
     pub fn enter(&self) -> ResourcePaintScope {
@@ -30,18 +50,18 @@ impl ResourcePaintConsumer {
     }
 
     pub fn is_ready(&self) -> bool {
-        self.0.load(Ordering::Acquire)
+        self.0.ready.load(Ordering::Acquire)
     }
 
     /// Consume the repaint request coalesced from this consumer's finished loads.
     pub fn take_ready(&self) -> bool {
-        self.0.swap(false, Ordering::AcqRel)
+        self.0.ready.swap(false, Ordering::AcqRel)
     }
 }
 
 #[must_use = "keep the resource paint scope alive while painting"]
 pub struct ResourcePaintScope(
-    Option<Weak<AtomicBool>>,
+    Option<Weak<ResourceConsumerState>>,
     std::marker::PhantomData<std::rc::Rc<()>>,
 );
 
@@ -52,7 +72,7 @@ impl Drop for ResourcePaintScope {
 }
 
 #[derive(Default)]
-pub(crate) struct ResourceWaiters(Vec<Weak<AtomicBool>>);
+pub(crate) struct ResourceWaiters(Vec<Weak<ResourceConsumerState>>);
 
 impl ResourceWaiters {
     fn subscribe_current(&mut self) {
@@ -60,16 +80,34 @@ impl ResourceWaiters {
             if let Some(consumer) = active.borrow().as_ref() {
                 self.0.retain(|waiter| waiter.strong_count() > 0);
                 if !self.0.iter().any(|waiter| waiter.ptr_eq(consumer)) {
-                    self.0.push(consumer.clone());
+                    if let Some(state) = consumer.upgrade() {
+                        if let Some(pending) = &state.pending {
+                            pending.fetch_add(1, Ordering::AcqRel);
+                        }
+                        self.0.push(consumer.clone());
+                    }
                 }
             }
         });
     }
 
-    pub(crate) fn notify(self) {
+    pub(crate) fn notify(mut self) {
         crate::prepared_scene::resource_completed();
-        for consumer in self.0.into_iter().filter_map(|waiter| waiter.upgrade()) {
-            consumer.store(true, Ordering::Release);
+        for consumer in self.0.drain(..).filter_map(|waiter| waiter.upgrade()) {
+            if let Some(pending) = &consumer.pending {
+                pending.fetch_sub(1, Ordering::AcqRel);
+            }
+            consumer.ready.store(true, Ordering::Release);
+        }
+    }
+}
+
+impl Drop for ResourceWaiters {
+    fn drop(&mut self) {
+        for consumer in self.0.iter().filter_map(|waiter| waiter.upgrade()) {
+            if let Some(pending) = &consumer.pending {
+                pending.fetch_sub(1, Ordering::AcqRel);
+            }
         }
     }
 }
@@ -364,8 +402,15 @@ mod tests {
     #[test]
     #[ignore = "release-only resource completion fanout profile"]
     fn resource_completion_fanout_profile() {
+        let track_pending = std::env::var_os("MESH_PROFILE_RESOURCE_PENDING").is_some();
         let consumers: Vec<_> = (0..32)
-            .map(|_| super::ResourcePaintConsumer::default())
+            .map(|_| {
+                if track_pending {
+                    super::ResourcePaintConsumer::with_pending_tracking()
+                } else {
+                    super::ResourcePaintConsumer::default()
+                }
+            })
             .collect();
         let mut requests = 0;
         let started = std::time::Instant::now();
@@ -432,6 +477,26 @@ mod tests {
         assert!(!first.take_ready());
     }
 
+    #[test]
+    fn pending_resource_tracking_counts_distinct_requests_and_cancellation() {
+        let tracked = super::ResourcePaintConsumer::with_pending_tracking();
+        let untracked = super::ResourcePaintConsumer::default();
+        let mut pending = super::PendingResourceConsumers::default();
+        {
+            let _scope = tracked.enter();
+            pending.insert("first");
+            pending.insert("first");
+            pending.insert("second");
+        }
+        assert_eq!(tracked.pending_requests(), Some(2));
+        assert_eq!(untracked.pending_requests(), None);
+        pending.remove(&"first").notify();
+        assert_eq!(tracked.pending_requests(), Some(1));
+        assert!(tracked.take_ready());
+        drop(pending);
+        assert_eq!(tracked.pending_requests(), Some(0));
+    }
+
     use super::*;
     use std::time::Duration;
 
@@ -475,7 +540,7 @@ mod tests {
     fn rejected_requests_repaint_after_the_next_settled_job() {
         let _guard = crate::resource_state_test_lock();
         let broker = ResourceBroker::new().expect("test worker should start");
-        let consumer = super::ResourcePaintConsumer::default();
+        let consumer = super::ResourcePaintConsumer::with_pending_tracking();
         {
             let _scope = consumer.enter();
             assert!(
@@ -509,6 +574,7 @@ mod tests {
             let _scope = consumer.enter();
             assert!(broker.retry_after_next_completion());
         }
+        assert_eq!(consumer.pending_requests(), Some(1));
         assert!(!consumer.is_ready());
 
         release_sender.send(()).unwrap();
@@ -520,6 +586,7 @@ mod tests {
             );
             std::thread::yield_now();
         }
+        assert_eq!(consumer.pending_requests(), Some(0));
         assert!(consumer.take_ready());
     }
 

@@ -465,3 +465,92 @@ fn corner_shape_shorthand_and_longhands_resolve_per_corner() {
         }
     );
 }
+
+#[test]
+fn row_and_column_gaps_resolve_independently_and_shorthand_resets_them() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    for (css, expected) in [
+        ("gap: 8px 12px", (8.0, None, Some(12.0))),
+        (
+            "--gaps: 8px 12px; gap: var(--gaps)",
+            (8.0, None, Some(12.0)),
+        ),
+        (
+            "gap: 4px; row-gap: 8px; column-gap: 12px",
+            (4.0, Some(8.0), Some(12.0)),
+        ),
+        (
+            "row-gap: 8px; column-gap: 12px; gap: 4px",
+            (4.0, None, None),
+        ),
+        (
+            "--row: 8px; --column: 12px; row-gap: var(--row); column-gap: var(--column)",
+            (0.0, Some(8.0), Some(12.0)),
+        ),
+    ] {
+        let rules = parse_fixture_style(&format!("<style>.proof {{ {css}; }}</style>"));
+        let (style, diagnostics) = resolve_class(&resolver, &rules, "proof");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!((style.gap, style.row_gap, style.column_gap), expected);
+    }
+}
+
+#[test]
+fn shell_scale_scales_absolute_lengths_and_keeps_percentages() {
+    let mut theme = mesh_core_theme::default_theme();
+    theme.set_ui_scale(1.5);
+    let resolver = StyleResolver::new(&theme);
+    let rules = parse_fixture_style(
+        "<style>.proof { width: 40px; height: 50%; font-size: 20px; padding: 8px; gap: 4px; }</style>",
+    );
+    let (style, diagnostics) = resolve_class(&resolver, &rules, "proof");
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(style.width, crate::Dimension::Px(60.0));
+    assert_eq!(style.height, crate::Dimension::Percent(50.0));
+    assert_eq!(style.font_size, 30.0);
+    assert_eq!(style.padding.left, 12.0);
+    assert_eq!(style.gap, 6.0);
+    let mut again = style.clone();
+    again.rescale_lengths(1.5);
+    assert_eq!(again, style);
+    again.rescale_lengths(1.0);
+    assert_eq!(again.width, crate::Dimension::Px(40.0));
+}
+
+#[test]
+fn shell_scale_preserves_inheritance_and_uses_design_units_for_queries() {
+    let mut theme = mesh_core_theme::default_theme();
+    theme.set_ui_scale(1.5);
+    let resolver = StyleResolver::new(&theme);
+    let rules = parse_fixture_style(r#"<style>
+        .parent { font-size: 20px; width: 100px; }
+        @container (max-width: 700px) { .parent { width: 80px; } }
+    </style>"#);
+    let mut root = crate::WidgetNode::new("box");
+    root.attributes.insert(crate::Prop::Class, "parent".into());
+    root.children.push(crate::WidgetNode::new("text"));
+    resolver.restyle_subtree_cached(&mut root, &rules, StyleContext { container_width: 900.0, container_height: 600.0 }, &mut None);
+    assert_eq!(root.computed_style.width, crate::Dimension::Px(120.0));
+    assert_eq!(root.computed_style.font_size, 30.0);
+    assert_eq!(root.children[0].computed_style.font_size, 30.0);
+}
+
+#[test]
+fn text_and_shell_scales_are_independent_and_compose() {
+    let mut theme = mesh_core_theme::default_theme();
+    theme.set_text_scale(1.5);
+    let rules = parse_fixture_style("<style>.parent { width: 100px; font-size: 20px; }</style>");
+    let mut root = crate::WidgetNode::new("box");
+    root.attributes.insert(crate::Prop::Class, "parent".into());
+    root.children.push(crate::WidgetNode::new("text"));
+    StyleResolver::new(&theme).restyle_subtree_cached(&mut root, &rules, StyleContext::default(), &mut None);
+    assert_eq!(root.computed_style.width, crate::Dimension::Px(100.0));
+    assert_eq!(root.computed_style.font_size, 30.0);
+    assert_eq!(root.children[0].computed_style.font_size, 30.0);
+    theme.set_ui_scale(2.0);
+    StyleResolver::new(&theme).restyle_subtree_cached(&mut root, &rules, StyleContext::default(), &mut None);
+    assert_eq!(root.computed_style.width, crate::Dimension::Px(200.0));
+    assert_eq!(root.computed_style.font_size, 60.0);
+    assert_eq!(root.children[0].computed_style.font_size, 60.0);
+}

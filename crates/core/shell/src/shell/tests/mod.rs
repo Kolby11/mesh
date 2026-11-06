@@ -6,6 +6,7 @@ mod common;
 mod debug;
 mod discovery;
 mod graph;
+mod material;
 mod input;
 mod popover;
 mod profiling;

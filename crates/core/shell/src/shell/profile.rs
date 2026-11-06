@@ -2,9 +2,8 @@ use super::backend::{
     BackendLaunchCandidate, BackendRuntimeStatus,
     backend_launch_candidates_from_graph_with_capabilities,
 };
-use super::component::{
-    FrontendCatalog, FrontendCatalogHandle, FrontendCatalogState, FrontendSurfaceComponent,
-};
+use mesh_core_frontend_runtime::catalog::{FrontendCatalog, FrontendCatalogHandle, FrontendCatalogState};
+use mesh_core_frontend_runtime::FrontendSurfaceComponent;
 use super::*;
 use mesh_core_module::package::{
     ComponentPlacement, InstalledModuleGraph, NodeSlotOverride, PackageTransaction, ProfilePaths,

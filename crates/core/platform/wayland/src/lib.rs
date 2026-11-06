@@ -399,3 +399,6 @@ mod tests {
         assert!(result.is_ok());
     }
 }
+
+/// Linux input event code used for primary pointer activation.
+pub const PRIMARY_POINTER_BUTTON: u32 = 0x110;

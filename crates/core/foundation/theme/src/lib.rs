@@ -740,10 +740,7 @@ impl ThemePackDescriptor {
             .as_deref()
             .is_some_and(|composition| composition.trim().is_empty())
         {
-            return Err(format!(
-                "theme {} recommends an empty composition",
-                self.id
-            ));
+            return Err(format!("theme {} recommends an empty composition", self.id));
         }
         self.recommends = recommends;
         Ok(self)
@@ -887,13 +884,57 @@ pub struct Theme {
     /// advances it, so an in-place edit cannot reuse stale lowered values.
     #[serde(skip, default = "next_theme_revision")]
     revision: u64,
+    #[serde(skip, default = "default_ui_scale")]
+    ui_scale: f32,
+    #[serde(skip, default = "default_ui_scale")]
+    text_scale: f32,
     // Only existing reference-bearing tokens are retained. Snapshot clones
     // share resolutions; mutation detaches the cache before exposing data.
     #[serde(skip)]
     resolved_tokens: Arc<RwLock<HashMap<String, Result<TokenValue, ThemeTokenError>>>>,
 }
 
+fn default_ui_scale() -> f32 {
+    1.0
+}
+
 impl Theme {
+    /// Effective text scale independent of shell geometry.
+    pub fn text_scale(&self) -> f32 {
+        self.text_scale
+    }
+
+    /// Set the text scale and invalidate derived styles.
+    pub fn set_text_scale(&mut self, scale: f32) {
+        let scale = if scale.is_finite() {
+            scale.clamp(0.5, 3.0)
+        } else {
+            1.0
+        };
+        if self.text_scale != scale {
+            self.text_scale = scale;
+            self.invalidate_style_snapshot();
+        }
+    }
+
+    /// Effective shell-wide layout scale, independent of compositor output scale.
+    pub fn ui_scale(&self) -> f32 {
+        self.ui_scale
+    }
+
+    /// Set the effective layout scale and invalidate derived styles.
+    pub fn set_ui_scale(&mut self, scale: f32) {
+        let scale = if scale.is_finite() {
+            scale.clamp(0.5, 3.0)
+        } else {
+            1.0
+        };
+        if self.ui_scale != scale {
+            self.ui_scale = scale;
+            self.invalidate_style_snapshot();
+        }
+    }
+
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),
@@ -908,6 +949,8 @@ impl Theme {
             provenance: BTreeMap::new(),
             user_override_diagnostics: Vec::new(),
             revision: next_theme_revision(),
+            ui_scale: 1.0,
+            text_scale: 1.0,
             resolved_tokens: Arc::default(),
         }
     }
@@ -1418,6 +1461,8 @@ impl From<RawTheme> for Theme {
             provenance: BTreeMap::new(),
             user_override_diagnostics: Vec::new(),
             revision: next_theme_revision(),
+            ui_scale: 1.0,
+            text_scale: 1.0,
             resolved_tokens: Arc::default(),
         };
         normalize_legacy_default_shell_animations(
@@ -1879,6 +1924,8 @@ fn parse_theme_css_with_asset_base(
         provenance: BTreeMap::new(),
         user_override_diagnostics: Vec::new(),
         revision: next_theme_revision(),
+        ui_scale: 1.0,
+        text_scale: 1.0,
         resolved_tokens: Arc::default(),
     };
 

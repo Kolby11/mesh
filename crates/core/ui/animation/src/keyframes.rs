@@ -425,6 +425,8 @@ mod tests {
             letter_spacing: 0.0,
             line_height: 1.4,
             gap: 0.0,
+            row_gap: None,
+            column_gap: None,
             inset_top: None,
             inset_right: None,
             inset_bottom: None,

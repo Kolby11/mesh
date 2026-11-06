@@ -366,6 +366,10 @@ impl<'a> StyleResolver<'a> {
         inherited_variables: Option<&CustomProperties>,
     ) -> ComputedStyle {
         crate::frame_work::visit(crate::frame_work::Pass::StyleResolve);
+        let context = StyleContext {
+            container_width: context.container_width / self.theme.ui_scale(),
+            container_height: context.container_height / self.theme.ui_scale(),
+        };
         // `shared` holds the defaults by reference when they came from the
         // no-diagnostics cache; the diagnostics path still builds its own copy
         // because it also carries per-resolution diagnostics.
@@ -506,6 +510,8 @@ impl<'a> StyleResolver<'a> {
         style.custom_properties = variables_scope.finish();
         style.explicit_properties = explicit_properties;
         style.inherited_properties = StylePropertyMask::default();
+        style.rescale_lengths(self.theme.ui_scale());
+        style.rescale_text(self.theme.text_scale());
         style
     }
 

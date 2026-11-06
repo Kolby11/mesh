@@ -48,5 +48,6 @@ smallvec = "1"
 rayon = { workspace = true }
 
 [dev-dependencies]
+mesh-core-frontend-runtime = { workspace = true, features = ["test-support"] }
 libc = { workspace = true }
 tempfile = "3"

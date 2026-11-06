@@ -17,7 +17,9 @@ pub(in crate::shell) use debug::DebugSnapshotCache;
 pub(in crate::shell) use request::{
     EffectScheduler, ScheduledEffect, UserActivation, UserActivationSource,
 };
-pub(in crate::shell) use theme::ControlPlaneSettingsCommit;
+pub(in crate::shell) use theme::{ControlPlaneSettingsCandidate, ControlPlaneSettingsCommit};
+#[cfg(test)]
+pub(in crate::shell) use theme::THEME_PAYLOAD_BUILDS;
 
 pub(in crate::shell) struct PendingControlPlaneCommit {
     pub(in crate::shell) worker: std::thread::JoinHandle<()>,
@@ -27,6 +29,8 @@ pub(in crate::shell) struct PendingControlPlaneCommit {
     pub(in crate::shell) locale_effect: bool,
     /// Core service calls answered when this commit lands.
     pub(in crate::shell) call_ids: Vec<u64>,
+    pub(in crate::shell) preparation_guard:
+        Option<(u64, u64, DurableControlPlaneRevision, Option<String>)>,
 }
 
 pub(in crate::shell) struct PendingProfileWrite {
@@ -860,6 +864,7 @@ impl Shell {
             ShellMessage::FileWatcherStopped { .. } => "file_watcher_stopped",
             ShellMessage::Ipc(_) => "ipc",
             ShellMessage::IpcProfileSwitch { .. } => "ipc_profile_switch",
+            ShellMessage::ThemePreparationFinished { .. } => "theme_preparation_finished",
             ShellMessage::ControlPlaneSettingsCommitFinished { .. } => {
                 "control_plane_settings_commit_finished"
             }
@@ -1130,6 +1135,79 @@ impl Shell {
                 response,
             } => {
                 pending.extend(self.apply_switch_profile_with_ack(&profile_id, Some(response)));
+            }
+            ShellMessage::ThemePreparationFinished { result } => {
+                let Some(preparing) = self.pending_control_plane_commit.take() else {
+                    tracing::warn!("ignored theme preparation completion without a pending request");
+                    return Ok(());
+                };
+                let call_ids = preparing.call_ids;
+                let outcome = if preparing.worker.join().is_err() {
+                    Err("theme preparation worker panicked".to_string())
+                } else if preparing.preparation_guard.as_ref().is_none_or(
+                    |(graph, activation, revision, profile)| {
+                        self.installed_module_graph
+                            .as_ref()
+                            .map(InstalledModuleGraph::revision)
+                            != Some(*graph)
+                            || self.activation_generation != *activation
+                            || self.control_plane_revision != *revision
+                            || self.active_profile_id != *profile
+                    },
+                ) {
+                    Err("theme preparation became stale before commit".to_string())
+                } else {
+                    result.and_then(|(candidate, prepared)| {
+                        let settings = mesh_core_config::resolve_shell_locale_settings(
+                            candidate.store.shell(),
+                        );
+                        let graph = self
+                            .installed_module_graph
+                            .as_ref()
+                            .expect("guard checked graph");
+                        let fingerprint = theme::theme_source_fingerprint_for(&settings, graph)
+                            .map_err(|error| error.to_string())?;
+                        if prepared.watch.fingerprint != Some(fingerprint) {
+                            return Err("theme source changed during preparation".to_string());
+                        }
+                        let mut theme = prepared.engine;
+                        theme.update_active(|active| {
+                            crate::shell::discovery::apply_font_registry_tokens(active, &self.font_registry);
+                        });
+                        self.commit_control_plane_settings(
+                            candidate,
+                            Some((theme, prepared.watch)),
+                            None,
+                            true,
+                            false,
+                        )
+                        .map_err(|error| error.to_string())
+                    })
+                };
+                match outcome {
+                    Ok(effects) => {
+                        pending.extend(effects);
+                        if let Some(commit) = self.pending_control_plane_commit.as_mut() {
+                            commit.call_ids.extend(call_ids);
+                        } else {
+                            for call_id in call_ids {
+                                self.settle_core_service_call(call_id, Ok(()));
+                            }
+                            self.release_parked_durable_writes();
+                        }
+                    }
+                    Err(error) => {
+                        self.diagnostics.record_lifecycle_error(
+                            "@mesh/settings",
+                            "theme_preparation_rejected",
+                            error.clone(),
+                        );
+                        for call_id in call_ids {
+                            self.settle_core_service_call(call_id, Err(error.clone()));
+                        }
+                        self.release_parked_durable_writes();
+                    }
+                }
             }
             ShellMessage::ControlPlaneSettingsCommitFinished { result } => {
                 let Some(pending_commit) = self.pending_control_plane_commit.take() else {

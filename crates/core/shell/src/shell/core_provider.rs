@@ -209,27 +209,27 @@ const KEYBIND_COMMANDS: [CoreServiceCommand; 3] = [
         },
     },
     CoreServiceCommand {
-    name: "remap",
-    translate: |payload| {
-        let surface = required_text(payload, "surface")?;
-        let action = required_text(payload, "action")?;
-        let key = required_text(payload, "key")?;
-        Some(if surface == "shell" {
-            CoreRequest::SetKeyboardSetting {
-                field: "shell_shortcuts".into(),
-                value: serde_json::json!({ action: { "key": key } }),
-            }
-        } else {
-            CoreRequest::SetKeyboardSetting {
-                field: "surface_shortcuts".into(),
-                value: serde_json::json!({ surface: { action: { "key": key } } }),
-            }
-        })
-    },
+        name: "remap",
+        translate: |payload| {
+            let surface = required_text(payload, "surface")?;
+            let action = required_text(payload, "action")?;
+            let key = required_text(payload, "key")?;
+            Some(if surface == "shell" {
+                CoreRequest::SetKeyboardSetting {
+                    field: "shell_shortcuts".into(),
+                    value: serde_json::json!({ action: { "key": key } }),
+                }
+            } else {
+                CoreRequest::SetKeyboardSetting {
+                    field: "surface_shortcuts".into(),
+                    value: serde_json::json!({ surface: { action: { "key": key } } }),
+                }
+            })
+        },
     },
 ];
 
-const THEME_COMMANDS: [CoreServiceCommand; 6] = [
+const THEME_COMMANDS: [CoreServiceCommand; 8] = [
     CoreServiceCommand {
         name: "set_theme",
         translate: |payload| {
@@ -260,6 +260,20 @@ const THEME_COMMANDS: [CoreServiceCommand; 6] = [
                 mode: required_text(payload, "mode")?,
             })
         },
+    },
+    CoreServiceCommand {
+        name: "set_font_size",
+        translate: |payload| {
+            Some(CoreRequest::SetFontSize {
+                size: u32::try_from(payload.get("size")?.as_u64()?).ok()?,
+            })
+        },
+    },
+    CoreServiceCommand {
+        name: "set_shell_scale",
+        translate: |payload| Some(CoreRequest::SetShellScale {
+            scale: u32::try_from(payload.get("scale")?.as_u64()?).ok()?,
+        }),
     },
     CoreServiceCommand {
         name: "set_font_family",
@@ -347,8 +361,20 @@ mod tests {
             request("set_option", serde_json::json!({ "name": "hint_mode", "value": "hold" })),
             Some(CoreRequest::SetKeyboardSetting { field, .. }) if field == "hint_mode"
         ));
-        assert!(request("set_option", serde_json::json!({ "name": "hint_mode", "value": "sometimes" })).is_none());
-        assert!(request("set_option", serde_json::json!({ "name": "shell_shortcuts", "value": "x" })).is_none());
+        assert!(
+            request(
+                "set_option",
+                serde_json::json!({ "name": "hint_mode", "value": "sometimes" })
+            )
+            .is_none()
+        );
+        assert!(
+            request(
+                "set_option",
+                serde_json::json!({ "name": "shell_shortcuts", "value": "x" })
+            )
+            .is_none()
+        );
         assert!(matches!(
             request("reassign", serde_json::json!({})),
             Some(CoreRequest::SetKeyboardSetting { field, value }) if field == "assigned" && value.is_null()

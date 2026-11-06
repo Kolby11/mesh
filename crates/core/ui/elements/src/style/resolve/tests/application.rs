@@ -344,3 +344,33 @@ fn user_part_memo_tracks_hover_exposure_and_replaced_stylesheets() {
         .restyle_subtree_with_index(&mut node, &rules, &index, StyleContext::default(), None);
     assert_eq!(node.computed_style.opacity, 0.8);
 }
+
+#[test]
+fn paint_time_parts_resolve_host_states_without_adding_layout_children() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let component = mesh_core_component::parse_component(r#"
+        <template><box /></template>
+        <style>
+        scroll::track { background: #123456; border-radius: 1px; }
+        scroll:hover::thumb { background: #abcdef; }
+        input::placeholder { color: #112233; }
+        input::caret { color: #445566; width: 3px; }
+        input::selection { background: #778899; }
+        </style>
+    "#).unwrap();
+    let rules = component.style.unwrap().rules;
+    let mut cache = None;
+    let mut scroll = WidgetNode::new("scroll");
+    scroll.state.insert(NodeState::HOVERED);
+    resolver.restyle_subtree_cached(&mut scroll, &rules, StyleContext::default(), &mut cache);
+    assert!(scroll.children.is_empty());
+    assert_eq!(scroll.computed_style.paint_parts["track"].background_color, crate::style::Color::from_hex("#123456").unwrap());
+    assert_eq!(scroll.computed_style.paint_parts["thumb"].background_color, crate::style::Color::from_hex("#abcdef").unwrap());
+    let mut input = WidgetNode::new("input");
+    resolver.restyle_subtree_cached(&mut input, &rules, StyleContext::default(), &mut cache);
+    assert!(input.children.is_empty());
+    assert_eq!(input.computed_style.paint_parts["caret"].width, crate::Dimension::Px(3.0));
+    assert_eq!(input.computed_style.paint_parts["placeholder"].color, crate::style::Color::from_hex("#112233").unwrap());
+    assert_eq!(input.computed_style.paint_parts["selection"].background_color, crate::style::Color::from_hex("#778899").unwrap());
+}

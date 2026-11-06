@@ -270,5 +270,9 @@
   "appearance.glass.style.soft": "Jemné sklo",
   "appearance.glass.style.frosted": "Matné sklo",
   "appearance.glass.blur": "Sila rozmazania",
-  "appearance.glass.liquid": "Sila lomu"
+  "appearance.glass.liquid": "Sila lomu",
+  "appearance.base_size": "Základná veľkosť textu",
+  "appearance.base_size_reset": "Obnoviť veľkosť textu",
+  "appearance.shell_scale": "Veľkosť prostredia",
+  "appearance.shell_scale_reset": "Obnoviť veľkosť prostredia"
 }

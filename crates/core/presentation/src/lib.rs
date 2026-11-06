@@ -29,7 +29,7 @@ pub struct PointerButtonIdentity {
 }
 
 /// Linux input-event code for the primary pointer button (`BTN_LEFT`).
-pub const PRIMARY_POINTER_BUTTON: u32 = 0x110;
+pub use mesh_core_wayland::PRIMARY_POINTER_BUTTON;
 
 /// The surrounding text state published for the currently focused editable
 /// element. Offsets use UTF-8 bytes, matching `zwp_text_input_v3`.

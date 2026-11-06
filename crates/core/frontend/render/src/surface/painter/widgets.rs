@@ -1,7 +1,5 @@
 use super::text::display_text_style;
-use crate::display_list::{
-    DisplayIconPaint, DisplayInputPaint, DisplayPaintNode,
-};
+use crate::display_list::{DisplayIconPaint, DisplayInputPaint, DisplayPaintNode};
 
 use super::*;
 use std::borrow::Cow;
@@ -47,7 +45,10 @@ impl FrontendRenderEngine {
             display_value.as_ref()
         };
         let text_color = if display_value.is_empty() {
-            dim_color(style.color, 0.6)
+            style
+                .paint_parts
+                .get("placeholder")
+                .map_or_else(|| dim_color(style.color, 0.6), |part| part.color)
         } else {
             style.color
         };
@@ -81,6 +82,49 @@ impl FrontendRenderEngine {
             (y + (style.padding.top * scale) as i32 + ((inner_height - glyph_height) / 2).max(0))
                 .max(0) as u32;
 
+        let selected = input
+            .selection
+            .filter(|(start, end)| {
+                *start <= display_text.len()
+                    && *end <= display_text.len()
+                    && display_text.is_char_boundary(*start)
+                    && display_text.is_char_boundary(*end)
+                    && start != end
+            })
+            .map(|(start, end)| (start.min(end), start.max(end)));
+        let mut selection_rect = None;
+        if input.focused
+            && let Some((start, end)) = selected
+        {
+            let prefix = self
+                .text_renderer
+                .measure_text_style(&display_text[..start], text_style, None)
+                .0;
+            let extent = self
+                .text_renderer
+                .measure_text_style(&display_text[start..end], text_style, None)
+                .0;
+            let selection_color = style
+                .paint_parts
+                .get("selection")
+                .map_or(dim_color(style.color, 0.3), |part| part.background_color);
+            let rect = ClipRect {
+                x: tx as i32 + prefix.round() as i32,
+                y: ty as i32,
+                width: extent.ceil() as i32,
+                height: glyph_height,
+            };
+            selection_rect = Some(rect);
+            self.execute_painter_commands_in_session(
+                session,
+                &[PainterCommand::DrawRect {
+                    rect,
+                    paint: PainterPaint::fill(selection_color),
+                    clip,
+                }],
+            );
+        }
+
         session.with_canvas(|canvas| {
             self.text_renderer.render_clipped_on_canvas_with_text_style(
                 text,
@@ -94,6 +138,26 @@ impl FrontendRenderEngine {
                 None,
             );
         });
+
+        if let Some(rect) = selection_rect {
+            let selected_color = style
+                .paint_parts
+                .get("selection")
+                .map_or(style.color, |part| part.color);
+            session.with_canvas(|canvas| {
+                self.text_renderer.render_clipped_on_canvas_with_text_style(
+                    text,
+                    text_style,
+                    style.text_align,
+                    selected_color,
+                    canvas,
+                    tx,
+                    ty,
+                    clip_to_tuple(intersect_clip(clip, rect)),
+                    None,
+                );
+            });
+        }
 
         if input.focused {
             if let Some(preedit) = preedit {
@@ -123,25 +187,68 @@ impl FrontendRenderEngine {
                 );
             }
 
+            let cursor = input
+                .cursor
+                .filter(|cursor| {
+                    *cursor <= input.value.len() && input.value.is_char_boundary(*cursor)
+                })
+                .map(|cursor| {
+                    if input.mask_text {
+                        input.value[..cursor].chars().count()
+                    } else {
+                        cursor
+                    }
+                });
             let caret_width = preedit
                 .map(|preedit| {
                     self.text_renderer
                         .measure_text_style(&display_text[..preedit.cursor_end], text_style, None)
                         .0
                 })
-                .unwrap_or(text_width);
+                .unwrap_or_else(|| {
+                    cursor
+                        .filter(|cursor| {
+                            *cursor <= display_text.len() && display_text.is_char_boundary(*cursor)
+                        })
+                        .map_or(
+                            if display_text.is_empty() {
+                                0.0
+                            } else {
+                                text_width
+                            },
+                            |cursor| {
+                                self.text_renderer
+                                    .measure_text_style(&display_text[..cursor], text_style, None)
+                                    .0
+                            },
+                        )
+                });
             let caret_x = tx + caret_width.round() as u32;
             let caret_rect = ClipRect {
                 x: caret_x as i32,
                 y: ty as i32,
-                width: 2,
+                width: style
+                    .paint_parts
+                    .get("caret")
+                    .and_then(|part| match part.width {
+                        mesh_core_elements::Dimension::Px(width) => {
+                            Some((width * scale).round().max(1.0) as i32)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or(2),
                 height: glyph_height,
             };
             self.execute_painter_commands_in_session(
                 session,
                 &[PainterCommand::DrawRect {
                     rect: caret_rect,
-                    paint: PainterPaint::fill(style.color),
+                    paint: PainterPaint::fill(
+                        style
+                            .paint_parts
+                            .get("caret")
+                            .map_or(style.color, |part| part.color),
+                    ),
                     clip,
                 }],
             );
@@ -259,10 +366,15 @@ fn scrollbar_commands(
     }
 
     let clip = intersect_clip(clip, bounds);
-    let inset = (4.0 * scale).round().max(2.0) as i32;
-    let thickness = (6.0 * scale).round().max(4.0) as i32;
+    let inset = (4.0 * scale * node.style.ui_scale).round().max(2.0) as i32;
+    let thickness = (6.0 * scale * node.style.ui_scale).round().max(4.0) as i32;
     let radius = (thickness as f32 / 2.0).max(2.0);
-    let (track_color, thumb_color) = scrollbar_colors(node.style.color);
+    let (default_track, default_thumb) = scrollbar_colors(node.style.color);
+    let track_style = node.style.paint_parts.get("track");
+    let thumb_style = node.style.paint_parts.get("thumb");
+    let track_color = track_style.map_or(default_track, |part| part.background_color);
+    let thumb_color = thumb_style.map_or(default_thumb, |part| part.background_color);
+
     let mut commands = Vec::with_capacity(4);
 
     if show_vertical {
@@ -281,12 +393,15 @@ fn scrollbar_commands(
             width: thickness,
             height: track_height,
         };
-        commands.push(PainterCommand::DrawRoundedRect {
-            rect: track,
-            radii: Corners::all(radius),
-            paint: PainterPaint::fill(track_color),
+        push_scroll_part_commands(
+            &mut commands,
+            track_style,
+            track,
+            radius,
+            track_color,
+            scale,
             clip,
-        });
+        );
 
         let thumb_height = if node.scrollbars.content_height <= 0.0 {
             track_height
@@ -295,7 +410,7 @@ fn scrollbar_commands(
                 (viewport_height / node.scrollbars.content_height.max(viewport_height))
                     * track_height as f32,
                 track_height,
-                scale,
+                scale * node.style.ui_scale,
             )
         };
         let thumb_range = (track_height - thumb_height).max(0) as f32;
@@ -306,17 +421,20 @@ fn scrollbar_commands(
                 ((node.scrollbars.scroll_y / node.scrollbars.max_y.max(1.0)) * thumb_range).round()
                     as i32
             };
-        commands.push(PainterCommand::DrawRoundedRect {
-            rect: ClipRect {
+        push_scroll_part_commands(
+            &mut commands,
+            thumb_style,
+            ClipRect {
                 x: track.x,
                 y: thumb_y,
                 width: thickness,
                 height: thumb_height.max(thickness),
             },
-            radii: Corners::all(radius),
-            paint: PainterPaint::fill(thumb_color),
+            radius,
+            thumb_color,
+            scale,
             clip,
-        });
+        );
     }
 
     if show_horizontal {
@@ -330,12 +448,15 @@ fn scrollbar_commands(
             width: track_width,
             height: thickness,
         };
-        commands.push(PainterCommand::DrawRoundedRect {
-            rect: track,
-            radii: Corners::all(radius),
-            paint: PainterPaint::fill(track_color),
+        push_scroll_part_commands(
+            &mut commands,
+            track_style,
+            track,
+            radius,
+            track_color,
+            scale,
             clip,
-        });
+        );
 
         let thumb_width = if node.scrollbars.content_width <= 0.0 {
             track_width
@@ -344,7 +465,7 @@ fn scrollbar_commands(
                 (viewport_width / node.scrollbars.content_width.max(viewport_width))
                     * track_width as f32,
                 track_width,
-                scale,
+                scale * node.style.ui_scale,
             )
         };
         let thumb_range = (track_width - thumb_width).max(0) as f32;
@@ -355,19 +476,63 @@ fn scrollbar_commands(
                 ((node.scrollbars.scroll_x / node.scrollbars.max_x.max(1.0)) * thumb_range).round()
                     as i32
             };
-        commands.push(PainterCommand::DrawRoundedRect {
-            rect: ClipRect {
+        push_scroll_part_commands(
+            &mut commands,
+            thumb_style,
+            ClipRect {
                 x: thumb_x,
                 y: track.y,
                 width: thumb_width.max(thickness),
                 height: thickness,
             },
-            radii: Corners::all(radius),
-            paint: PainterPaint::fill(thumb_color),
+            radius,
+            thumb_color,
+            scale,
             clip,
-        });
+        );
     }
     commands
+}
+
+fn push_scroll_part_commands(
+    commands: &mut Vec<PainterCommand>,
+    style: Option<&mesh_core_elements::ComputedStyle>,
+    rect: ClipRect,
+    default_radius: f32,
+    color: Color,
+    scale: f32,
+    clip: ClipRect,
+) {
+    let radii = style.map_or(Corners::all(default_radius), |style| Corners {
+        top_left: style.border_radius.top_left * scale,
+        top_right: style.border_radius.top_right * scale,
+        bottom_left: style.border_radius.bottom_left * scale,
+        bottom_right: style.border_radius.bottom_right * scale,
+    });
+    commands.push(PainterCommand::DrawRoundedRect {
+        rect,
+        radii,
+        paint: PainterPaint::fill(color),
+        clip,
+    });
+    if let Some(style) = style {
+        super::tree::push_background_paint_command(
+            commands,
+            &style.background_paint,
+            rect,
+            radii,
+            clip,
+        );
+        super::tree::push_border_commands(
+            commands,
+            rect,
+            &style.border_width,
+            radii,
+            style.border_color,
+            scale,
+            clip,
+        );
+    }
 }
 
 #[cfg(test)]

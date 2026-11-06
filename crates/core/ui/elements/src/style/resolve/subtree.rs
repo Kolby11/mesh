@@ -657,6 +657,48 @@ impl<'a> StyleResolver<'a> {
         mut restyled: Option<&mut std::collections::HashSet<crate::tree::NodeId>>,
         mut layout_changed: Option<&mut bool>,
     ) {
+        let tag = crate::element_runtime_tag_for_tag(&host.tag);
+        if matches!(tag, Some("scroll" | "input")) {
+            let attrs = ControlHostAttrs::of(host);
+            let mut parts = std::collections::BTreeMap::new();
+            for name in crate::control_part_names(tag.unwrap()) {
+                let mut initial = ComputedStyle::default();
+                initial.color = host.computed_style.color;
+                initial.font_family = host.computed_style.font_family.clone();
+                initial.font_size = host.computed_style.font_size / (host.computed_style.ui_scale * host.computed_style.text_scale);
+                initial.font_weight = host.computed_style.font_weight;
+                initial.line_height = host.computed_style.line_height;
+                match *name {
+                    "track" | "thumb" => {
+                        initial.background_color = initial.color;
+                        initial.background_color.a = (f32::from(initial.color.a)
+                            * if *name == "track" { 0.20 } else { 0.64 })
+                        .round() as u8;
+                        initial.border_radius = crate::style::Corners::all(3.0);
+                    }
+                    "placeholder" => {
+                        initial.color.a = (f32::from(initial.color.a) * 0.6).round() as u8
+                    }
+                    "caret" => initial.width = crate::style::Dimension::Px(2.0),
+                    "selection" => {
+                        initial.background_color = initial.color;
+                        initial.background_color.a = 80;
+                    }
+                    _ => {}
+                }
+                let style = self.resolve_node_style_with_attrs_indexed_inner(
+                    rules,
+                    index,
+                    &attrs.for_part(name, &initial),
+                    context,
+                    None,
+                    None,
+                    Some(&host.computed_style.custom_properties),
+                );
+                parts.insert((*name).to_owned(), style);
+            }
+            host.computed_style.paint_parts = std::sync::Arc::new(parts);
+        }
         // The compiler appends parts after any authored children.
         if !host
             .children
@@ -693,7 +735,8 @@ impl<'a> StyleResolver<'a> {
         let Some(part) = node.control_part() else {
             return;
         };
-        let initial = crate::control_parts::initial_part_style(part, scope.host_style, scope.geometry);
+        let initial =
+            crate::control_parts::initial_part_style(part, scope.host_style, scope.geometry);
         let resolve_named = |name: &str, initial: &ComputedStyle| {
             self.resolve_node_style_with_attrs_indexed_inner(
                 scope.rules,
@@ -714,10 +757,16 @@ impl<'a> StyleResolver<'a> {
                 };
                 if matches!(
                     part,
-                    crate::ControlPart::SwitchLead | crate::ControlPart::SwitchTail
+                    crate::ControlPart::SwitchLead
+                        | crate::ControlPart::SwitchTail
+                        | crate::ControlPart::SliderLead
                 ) {
                     let thumb = crate::control_parts::initial_part_style(
-                        crate::ControlPart::SwitchThumb,
+                        if part == crate::ControlPart::SliderLead {
+                            crate::ControlPart::SliderThumb
+                        } else {
+                            crate::ControlPart::SwitchThumb
+                        },
                         scope.host_style,
                         scope.geometry,
                     );
@@ -732,7 +781,13 @@ impl<'a> StyleResolver<'a> {
         if scope.geometry.vertical {
             crate::control_parts::transpose_for_vertical(&mut style);
         }
+        let ui_scale = style.ui_scale;
+        let text_scale = style.text_scale;
+        style.rescale_text(1.0);
+        style.rescale_lengths(1.0);
         crate::control_parts::apply_part_geometry(part, &mut style, scope.geometry);
+        style.rescale_lengths(ui_scale);
+        style.rescale_text(text_scale);
         if node.computed_style != style {
             if let Some(layout_changed) = layout_changed.as_deref_mut() {
                 *layout_changed |= !node.computed_style.same_layout_inputs(&style);

@@ -238,8 +238,8 @@ pub(super) fn taffy_style_for_node(
             JustifyContent::SpaceAround => taffy_style::JustifyContent::SpaceAround,
         }),
         gap: TaffySize {
-            width: taffy_length(style.gap),
-            height: taffy_length(style.gap),
+            width: taffy_length(style.column_gap.unwrap_or(style.gap)),
+            height: taffy_length(style.row_gap.unwrap_or(style.gap)),
         },
         flex_direction: match style.direction {
             FlexDirection::Row => taffy_style::FlexDirection::Row,

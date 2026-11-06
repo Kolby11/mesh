@@ -7,6 +7,11 @@ const SHELL_SETTINGS_RELOAD_POLL_INTERVAL: std::time::Duration =
 
 const THEME_DETAIL_CACHE_BYTES: u64 = 8 * 1024 * 1024;
 
+#[cfg(test)]
+thread_local! {
+    pub(in crate::shell) static THEME_PAYLOAD_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn prepared_theme_details(
     cached: &mut Option<(
         serde_json::Value,
@@ -112,7 +117,9 @@ fn patch_theme_tokens(
     if !tokens.is_object() {
         *tokens = serde_json::json!({});
     }
-    let tokens = tokens.as_object_mut().expect("token overrides are an object");
+    let tokens = tokens
+        .as_object_mut()
+        .expect("token overrides are an object");
     for (name, value) in patch {
         if value.is_null() {
             tokens.remove(name);
@@ -156,6 +163,7 @@ fn release_profile_theme(profile: &mut mesh_core_module::package::ShellProfile) 
 /// boundary yet. Theme and locale preparation consume this value before any
 /// live shell state changes, so a rejected candidate cannot leave persistence
 /// and runtime state divergent.
+#[derive(Debug)]
 pub(in crate::shell) struct ControlPlaneSettingsCandidate {
     pub(in crate::shell) store: SettingsStore,
     pub(in crate::shell) shared_revision: u64,
@@ -165,6 +173,7 @@ pub(in crate::shell) struct ControlPlaneSettingsCandidate {
     pub(in crate::shell) profile_commit: Option<ProfileSettingsCommit>,
 }
 
+#[derive(Debug)]
 pub(in crate::shell) struct ProfileSettingsCommit {
     paths: mesh_core_module::package::ProfilePaths,
     profile_id: String,
@@ -241,21 +250,18 @@ fn persist_control_plane_settings(
     })
 }
 
-fn theme_source_fingerprint(shell: &Shell) -> Result<u64, mesh_core_theme::ThemeError> {
-    let graph = shell.installed_module_graph.as_ref().ok_or_else(|| {
-        mesh_core_theme::ThemeError::NotFound(shell.settings.theme.active.clone())
-    })?;
+pub(super) fn theme_source_fingerprint_for(
+    settings: &mesh_core_config::ShellSettings,
+    graph: &InstalledModuleGraph,
+) -> Result<u64, mesh_core_theme::ThemeError> {
     let descriptor = graph
         .theme_catalog()
-        .get(&shell.settings.theme.active)
-        .ok_or_else(|| {
-            mesh_core_theme::ThemeError::NotFound(shell.settings.theme.active.clone())
-        })?;
-    let mode = selected_theme_mode(&shell.settings, descriptor)?;
+        .get(&settings.theme.active)
+        .ok_or_else(|| mesh_core_theme::ThemeError::NotFound(settings.theme.active.clone()))?;
+    let mode = selected_theme_mode(settings, descriptor)?;
     let source = descriptor.mode(&mode).ok_or_else(|| {
         mesh_core_theme::ThemeError::Composition(format!(
-            "theme '{}' has no mode '{mode}'",
-            descriptor.id
+            "theme '{}' has no mode '{mode}'", descriptor.id
         ))
     })?;
     source
@@ -265,6 +271,13 @@ fn theme_source_fingerprint(shell: &Shell) -> Result<u64, mesh_core_theme::Theme
             path: source.source.candidate_path(),
             message: error.to_string(),
         })
+}
+
+fn theme_source_fingerprint(shell: &Shell) -> Result<u64, mesh_core_theme::ThemeError> {
+    let graph = shell.installed_module_graph.as_ref().ok_or_else(|| {
+        mesh_core_theme::ThemeError::NotFound(shell.settings.theme.active.clone())
+    })?;
+    theme_source_fingerprint_for(&shell.settings, graph)
 }
 
 fn theme_preview_palette(theme: &mesh_core_theme::Theme) -> serde_json::Value {
@@ -486,6 +499,7 @@ impl Shell {
             theme_effect,
             locale_effect,
             call_ids: Vec::new(),
+            preparation_guard: None,
         });
         Ok(VecDeque::new())
     }
@@ -523,6 +537,17 @@ impl Shell {
         locale_effect: bool,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let batch_started = std::time::Instant::now();
+        #[cfg(test)]
+        let mut profile_started = std::time::Instant::now();
+        #[cfg(test)]
+        macro_rules! profile_commit_phase {
+            ($phase:literal) => {
+                if std::env::var_os("MESH_PROFILE_THEME_COMMIT").is_some() {
+                    eprintln!("theme commit {}: {:.3}ms", $phase, profile_started.elapsed().as_secs_f64() * 1000.0);
+                }
+                profile_started = std::time::Instant::now();
+            };
+        }
         if let Some(authoring) = commit.profile_authoring {
             self.active_profile_authoring = Some(authoring);
         }
@@ -543,15 +568,30 @@ impl Shell {
 
         self.reconcile_icon_shell_default();
         super::apply_backdrop_settings(&self.settings.render.backdrop);
+        #[cfg(test)]
+        profile_commit_phase!("install");
 
         let mut requests = VecDeque::new();
         // This is intentionally the first effect phase: settings-dependent
         // component state is ready before the appearance and locale signals.
         self.apply_settings_to_components()?;
+        #[cfg(test)]
+        profile_commit_phase!("component_settings");
         requests.extend(self.sync_settings_service_state()?);
+        #[cfg(test)]
+        profile_commit_phase!("settings_publish");
         if theme_effect {
             requests.extend(self.mark_components_theme_changed()?);
+            #[cfg(test)]
+            profile_commit_phase!("component_theme");
             requests.extend(self.sync_theme_service_state()?);
+            #[cfg(test)]
+            if std::env::var_os("MESH_PROFILE_THEME_COMMIT").is_some() {
+                eprintln!(
+                    "theme commit theme_publish: {:.3}ms",
+                    profile_started.elapsed().as_secs_f64() * 1000.0
+                );
+            }
         }
         if locale_effect {
             requests.extend(self.mark_components_locale_changed()?);
@@ -736,7 +776,6 @@ impl Shell {
             );
             return Ok(VecDeque::new());
         };
-        let switch_started = std::time::Instant::now();
         let theme_id = theme_id.to_owned();
         let recommended = graph
             .theme_catalog()
@@ -781,31 +820,72 @@ impl Shell {
             }
             Ok(())
         })?;
-        let candidate_settings =
-            mesh_core_config::resolve_shell_locale_settings(settings_candidate.store.shell());
-        let prepared_theme = match prepare_theme_state_for_graph(&candidate_settings, &graph) {
-            Ok(Some(candidate)) => candidate,
-            Ok(None) => return Ok(VecDeque::new()),
-            Err(error) => {
-                tracing::warn!("cannot compose theme '{theme_id}': {error}");
-                return Ok(VecDeque::new());
-            }
+        self.prepare_theme_selection(settings_candidate, graph)
+    }
+
+    fn prepare_theme_selection(
+        &mut self,
+        candidate: ControlPlaneSettingsCandidate,
+        graph: InstalledModuleGraph,
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
+        let settings = mesh_core_config::resolve_shell_locale_settings(candidate.store.shell());
+        let Some(tx) = self.file_watcher_tx.clone() else {
+            let prepared = match prepare_theme_state_for_graph(&settings, &graph) {
+                Ok(Some(prepared)) => prepared,
+                Ok(None) => return Ok(VecDeque::new()),
+                Err(error) => {
+                    tracing::warn!("cannot compose theme: {error}");
+                    return Ok(VecDeque::new());
+                }
+            };
+            let mut theme = prepared.engine;
+            theme.update_active(|active| {
+                crate::shell::discovery::apply_font_registry_tokens(active, &self.font_registry);
+            });
+            return self.commit_control_plane_settings(
+                candidate, Some((theme, prepared.watch)), None, true, false,
+            );
         };
-        let mut theme = prepared_theme.engine;
-        theme.update_active(|active| {
-            crate::shell::discovery::apply_font_registry_tokens(active, &self.font_registry);
-        });
-        tracing::info!(
-            "active theme changed to '{theme_id}' (prepared in {:?})",
-            switch_started.elapsed()
+        if self.pending_control_plane_commit.is_some() || self.pending_profile_write.is_some() {
+            return Err(ShellRunError::Package(
+                "settings mutation already pending".into(),
+            ));
+        }
+        let guard = (
+            graph.revision(),
+            self.activation_generation,
+            self.control_plane_revision,
+            self.active_profile_id.clone(),
         );
-        self.commit_control_plane_settings(
-            settings_candidate,
-            Some((theme, prepared_theme.watch)),
-            None,
-            true,
-            false,
-        )
+        let wake = self.wake_handle.clone();
+        let worker = std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let before = theme_source_fingerprint_for(&settings, &graph)
+                    .map_err(|error| error.to_string())?;
+                let prepared = prepare_theme_state_for_graph(&settings, &graph)
+                    .map_err(|error| error.to_string())
+                    .and_then(|prepared| prepared.ok_or_else(|| "theme catalog is empty".to_string()))?;
+                if prepared.watch.fingerprint != Some(before) {
+                    return Err("theme source changed during preparation".to_string());
+                }
+                Ok((candidate, prepared))
+            }))
+            .unwrap_or_else(|_| Err("theme preparation worker panicked".to_string()));
+            let _ = tx.send(ShellMessage::ThemePreparationFinished { result });
+            if let Some(wake) = wake {
+                wake.wake();
+            }
+        });
+        self.pending_control_plane_commit = Some(PendingControlPlaneCommit {
+            worker,
+            theme: None,
+            locale: None,
+            theme_effect: true,
+            locale_effect: false,
+            call_ids: Vec::new(),
+            preparation_guard: Some(guard),
+        });
+        Ok(VecDeque::new())
     }
 
     pub(in crate::shell) fn apply_set_theme_mode(
@@ -836,28 +916,7 @@ impl Shell {
             }
             Ok(())
         })?;
-        let candidate_settings =
-            mesh_core_config::resolve_shell_locale_settings(settings_candidate.store.shell());
-        let prepared_theme = match prepare_theme_state_for_graph(&candidate_settings, &graph) {
-            Ok(Some(candidate)) => candidate,
-            Ok(None) => return Ok(VecDeque::new()),
-            Err(error) => {
-                tracing::warn!("cannot select theme mode '{mode}': {error}");
-                return Ok(VecDeque::new());
-            }
-        };
-        let mut theme = prepared_theme.engine;
-        theme.update_active(|active| {
-            crate::shell::discovery::apply_font_registry_tokens(active, &self.font_registry);
-        });
-        tracing::info!("active theme mode changed to '{mode}'");
-        self.commit_control_plane_settings(
-            settings_candidate,
-            Some((theme, prepared_theme.watch)),
-            None,
-            true,
-            false,
-        )
+        self.prepare_theme_selection(settings_candidate, graph)
     }
 
     /// Write user theme token overrides (`shell.theme.tokens`, spec 04 §5)
@@ -909,27 +968,7 @@ impl Shell {
             }
             Ok(())
         })?;
-        let candidate_settings =
-            mesh_core_config::resolve_shell_locale_settings(settings_candidate.store.shell());
-        let prepared_theme = match prepare_theme_state_for_graph(&candidate_settings, &graph) {
-            Ok(Some(candidate)) => candidate,
-            Ok(None) => return Ok(VecDeque::new()),
-            Err(error) => {
-                tracing::warn!("cannot apply theme tokens: {error}");
-                return Ok(VecDeque::new());
-            }
-        };
-        let mut theme = prepared_theme.engine;
-        theme.update_active(|active| {
-            crate::shell::discovery::apply_font_registry_tokens(active, &self.font_registry);
-        });
-        self.commit_control_plane_settings(
-            settings_candidate,
-            Some((theme, prepared_theme.watch)),
-            None,
-            true,
-            false,
-        )
+        self.prepare_theme_selection(settings_candidate, graph)
     }
 
     fn icon_resource_available(&self, id: &str) -> bool {
@@ -1003,6 +1042,58 @@ impl Shell {
             Ok(())
         })?;
         self.commit_control_plane_settings(candidate, None, None, true, false)
+    }
+
+    pub(in crate::shell) fn apply_set_font_size(
+        &mut self,
+        size: u32,
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
+        if !(10..=32).contains(&size) {
+            return Ok(VecDeque::new());
+        }
+        let candidate = self.prepare_control_plane_settings(|shared, profile| {
+            let patch = serde_json::json!({ "fonts": { "base_size": size } });
+            if let Some(profile) = profile {
+                let target = profile
+                    .settings
+                    .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+                    .or_insert_with(|| serde_json::json!({}));
+                mesh_core_config::merge_json(target, &patch);
+            } else {
+                shared.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
+            }
+            Ok(())
+        })?;
+        let mut theme = self.theme.clone();
+        theme.update_active(|active| active.set_text_scale(size as f32 / 14.0));
+        let mut watch = self.theme_watch.clone();
+        watch.revision = theme.active_snapshot().revision;
+        self.commit_control_plane_settings(candidate, Some((theme, watch)), None, true, false)
+    }
+
+    pub(in crate::shell) fn apply_set_shell_scale(
+        &mut self,
+        scale: u32,
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
+        if !(70..=200).contains(&scale) {
+            return Ok(VecDeque::new());
+        }
+        let candidate = self.prepare_control_plane_settings(|shared, profile| {
+            let patch = serde_json::json!({ "fonts": { "shell_scale": scale } });
+            if let Some(profile) = profile {
+                let target = profile.settings.entry(mesh_core_config::SHELL_NAMESPACE.to_string())
+                    .or_insert_with(|| serde_json::json!({}));
+                mesh_core_config::merge_json(target, &patch);
+            } else {
+                shared.merge_namespace(mesh_core_config::SHELL_NAMESPACE, &patch);
+            }
+            Ok(())
+        })?;
+        let mut theme = self.theme.clone();
+        theme.update_active(|active| active.set_ui_scale(scale as f32 / 100.0));
+        let mut watch = self.theme_watch.clone();
+        watch.revision = theme.active_snapshot().revision;
+        self.commit_control_plane_settings(candidate, Some((theme, watch)), None, true, false)
     }
 
     pub(in crate::shell) fn apply_set_font_family(
@@ -1149,6 +1240,8 @@ impl Shell {
     }
 
     fn full_theme_service_payload(&self) -> serde_json::Value {
+        #[cfg(test)]
+        THEME_PAYLOAD_BUILDS.with(|count| count.set(count.get() + 1));
         let snapshot = self.theme.active_snapshot();
         let theme_modes = |theme: &mesh_core_theme::Theme| {
             self.installed_module_graph
@@ -1264,11 +1357,26 @@ impl Shell {
     pub(in crate::shell) fn sync_theme_service_state(
         &mut self,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
+        #[cfg(test)]
+        let mut profile_started = std::time::Instant::now();
+        #[cfg(test)]
+        macro_rules! profile_theme_phase {
+            ($phase:literal) => {
+                if std::env::var_os("MESH_PROFILE_THEME_PUBLICATION").is_some() {
+                    eprintln!("theme publication {}: {:.3}ms", $phase, profile_started.elapsed().as_secs_f64() * 1000.0);
+                }
+                profile_started = std::time::Instant::now();
+            };
+        }
         let snapshot = self.theme.active_snapshot().clone();
         let previous_snapshot = self.last_published_theme_snapshot.clone();
         let full_payload = self.full_theme_service_payload();
+        #[cfg(test)]
+        profile_theme_phase!("build_payload");
         let modes = full_payload["modes"].clone();
         let payload = mesh_core_theme::transport::bounded_snapshot(full_payload);
+        #[cfg(test)]
+        profile_theme_phase!("bound_snapshot");
         let durable_revision = self.control_plane_revision.as_string();
         // The renderer owns this snapshot; a provider mirror is delivered
         // through the normal `mesh.theme` state channel below, not an
@@ -1281,11 +1389,22 @@ impl Shell {
                 .provider_id("mesh.theme")
                 .unwrap_or("@mesh/shell"),
         );
-        let mut requests = self.broadcast_service_event(ServiceEvent::Updated {
-            service: "mesh.theme".into(),
-            source_module: source_module.into(),
-            payload,
-        })?;
+        let source_module = source_module.to_owned();
+        #[cfg(test)]
+        let force_normalization = std::env::var_os("MESH_PROFILE_THEME_NORMALIZE").is_some();
+        #[cfg(not(test))]
+        let force_normalization = false;
+        let mut requests = if force_normalization {
+            self.broadcast_service_event(ServiceEvent::Updated {
+                service: "mesh.theme".into(),
+                source_module,
+                payload,
+            })?
+        } else {
+            self.broadcast_authoritative_theme_state(source_module, payload)?
+        };
+        #[cfg(test)]
+        profile_theme_phase!("publish_snapshot");
 
         if let Some(previous_snapshot) = previous_snapshot.as_ref()
             && previous_snapshot != &snapshot
@@ -1317,15 +1436,29 @@ impl Shell {
                 "changed_tokens": changed_tokens,
                 "changed_token_count": changed_token_count,
             });
-            let details = mesh_core_theme::transport::detail_descriptor(&change);
-            let event = mesh_core_theme::transport::bounded_event(change.clone(), &details);
+            let theme_observed = self.has_interface_event_observers("mesh.theme", "ThemeChanged");
+            #[cfg(test)]
+            let theme_observed = theme_observed
+                || std::env::var_os("MESH_PROFILE_FORCE_THEME_EVENT").is_some();
+            let token_observed = self.has_interface_event_observers("mesh.theme", "TokenChanged");
+            let details = (theme_observed || token_observed)
+                .then(|| mesh_core_theme::transport::detail_descriptor(&change));
+            let event = theme_observed.then(|| {
+                mesh_core_theme::transport::bounded_event(
+                    change.clone(),
+                    details.as_ref().expect("observed event has details"),
+                )
+            });
             self.last_theme_change_details = Some(change);
-            requests.extend(self.broadcast_shell_interface_event(
-                "mesh.theme",
-                "ThemeChanged",
-                event,
-            )?);
-            if self.has_interface_event_observers("mesh.theme", "TokenChanged") {
+            if let Some(event) = event {
+                requests.extend(self.broadcast_shell_interface_event(
+                    "mesh.theme",
+                    "ThemeChanged",
+                    event,
+                )?);
+            }
+            if token_observed {
+                let details = details.as_ref().expect("observed event has details");
                 for name in changed_token_names {
                     requests.extend(self.broadcast_shell_interface_event(
                         "mesh.theme",
@@ -1340,13 +1473,20 @@ impl Shell {
                                 "revision": revision.clone(),
                                 "durable_revision": durable_revision.clone(),
                             }),
-                            &details,
+                            details,
                         ),
                     )?);
                 }
             }
         }
         self.last_published_theme_snapshot = Some(snapshot);
+        #[cfg(test)]
+        if std::env::var_os("MESH_PROFILE_THEME_PUBLICATION").is_some() {
+            eprintln!(
+                "theme publication change_event: {:.3}ms",
+                profile_started.elapsed().as_secs_f64() * 1000.0
+            );
+        }
         Ok(requests)
     }
 

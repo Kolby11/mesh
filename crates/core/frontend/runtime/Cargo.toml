@@ -5,7 +5,29 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+test-support = ["dep:tempfile"]
+gpu = ["mesh-core-render/renderer-gpu"]
+allocation-profiling = ["mesh-core-debug/allocation-profiling"]
+
 [dependencies]
+mesh-core-theme = { workspace = true }
+mesh-core-icon = { workspace = true }
+mesh-core-expression = { workspace = true }
+tempfile = { version = "3", optional = true }
+mesh-core-animation = { workspace = true }
+mesh-core-interaction = { workspace = true }
+mesh-core-config = { workspace = true }
+mesh-core-surface-config = { workspace = true }
+mesh-core-surface-policy = { workspace = true }
+mesh-core-render = { workspace = true }
+mesh-core-debug = { workspace = true }
+mesh-core-wayland = { workspace = true }
+mesh-core-resources = { workspace = true }
+bitflags = { workspace = true }
+slotmap = { workspace = true }
+smallvec = "1"
+
 mesh-core-elements = { workspace = true }
 mesh-core-frontend = { workspace = true }
 thiserror = { workspace = true }
@@ -23,5 +45,6 @@ rayon = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+mesh-core-presentation = { workspace = true }
 mesh-core-wayland = { workspace = true }
 tempfile = "3"

@@ -768,3 +768,60 @@ fn display_list_primitive_helper_bypass_audit_documents_command_backed_compatibi
             .any(|(helper, status)| helper.contains("icon") && status.contains("deferred"))
     );
 }
+
+#[test]
+fn scrollbar_part_palette_repaints_retained_pixels_without_geometry_changes() {
+    use mesh_core_elements::style::{ComputedStyle, Corners, Overflow};
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    let mut root = node("scroll", LayoutRect { x: 0.0, y: 0.0, width: 100.0, height: 80.0 }, Color::TRANSPARENT);
+    root.computed_style.overflow_y = Overflow::Scroll;
+    root.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics { max_y: 320.0, content_height: 400.0, content_width: 100.0, ..Default::default() });
+    let track = ComputedStyle { background_color: Color::from_hex("#0000ff").unwrap(), border_radius: Corners::all(0.0), ..Default::default() };
+    let thumb = ComputedStyle { background_color: Color::from_hex("#ff0000").unwrap(), border_radius: Corners::all(0.0), ..Default::default() };
+    root.computed_style.paint_parts = Arc::new(BTreeMap::from([("track".into(), track), ("thumb".into(), thumb)]));
+    let engine = FrontendRenderEngine::new();
+    let mut pixels = PixelBuffer::new(100, 80);
+    engine.render_tree(&root, &mut pixels, 1.0);
+    assert_eq!(pixel(&pixels, 92, 8), Color::from_hex("#ff0000").unwrap());
+    assert_eq!(pixel(&pixels, 92, 60), Color::from_hex("#0000ff").unwrap());
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 100, 80, true, true);
+    Arc::make_mut(&mut root.computed_style.paint_parts).get_mut("thumb").unwrap().background_color = Color::from_hex("#00ff00").unwrap();
+    list.update(&root, 100, 80, false, true);
+    assert!(!list.damage_rects().is_empty(), "a part-only palette change must invalidate retained paint");
+    let selected = list.select_paint_commands(list.damage_rects().first().copied(), DisplayListRepaintPolicy::FullSurface);
+    engine.render_selected_display_list_for_module(&selected, &mut pixels, 1.0, None, None, None);
+    assert_eq!(pixel(&pixels, 92, 8), Color::from_hex("#00ff00").unwrap());
+    assert_eq!(root.layout, LayoutRect { x: 0.0, y: 0.0, width: 100.0, height: 80.0 });
+}
+
+#[test]
+fn input_selection_and_caret_parts_control_paint_and_retained_invalidation() {
+    use mesh_core_elements::style::{ComputedStyle, Dimension};
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    let mut root = node("input", LayoutRect { x: 0.0, y: 0.0, width: 120.0, height: 32.0 }, Color::TRANSPARENT);
+    root.attributes.insert(Prop::Value, "mesh".into());
+    root.state.insert(mesh_core_elements::NodeState::FOCUSED);
+    root.input_cursor = Some(0);
+    root.input_selection = Some((0, 2));
+    root.computed_style.paint_parts = Arc::new(BTreeMap::from([
+        ("caret".into(), ComputedStyle { color: Color::from_hex("#0000ff").unwrap(), width: Dimension::Px(3.0), ..Default::default() }),
+        ("selection".into(), ComputedStyle { color: Color::WHITE, background_color: Color::from_hex("#ff0000").unwrap(), ..Default::default() }),
+    ]));
+    let backend = RecordingPaintBackend::default();
+    let recorded = backend.clone();
+    let engine = FrontendRenderEngine::with_paint_backend(Box::new(backend));
+    let mut pixels = PixelBuffer::new(120, 32);
+    engine.render_tree(&root, &mut pixels, 1.0);
+    let commands = recorded.recorded_commands();
+    assert!(commands.iter().any(|command| matches!(command, PainterCommand::DrawRect { rect, paint, .. } if paint.color == Color::from_hex("#0000ff").unwrap() && rect.width == 3 && rect.x == 0)));
+    assert!(commands.iter().any(|command| matches!(command, PainterCommand::DrawRect { rect, paint, .. } if paint.color == Color::from_hex("#ff0000").unwrap() && rect.width > 3)));
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 120, 32, true, true);
+    root.input_cursor = Some(4);
+    root.input_selection = None;
+    list.update(&root, 120, 32, false, true);
+    assert!(!list.damage_rects().is_empty(), "cursor and selection-only changes invalidate retained input paint");
+}

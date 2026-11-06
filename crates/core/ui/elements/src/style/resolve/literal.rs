@@ -3,6 +3,9 @@ use crate::style::parse::*;
 use crate::style::*;
 use mesh_core_component::style::StyleValue;
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct GapPair(f32, f32);
+
 macro_rules! literal_properties {
     ($raw:ident, $style:ident, $value:ident; $($variant:ident($ty:ident): $($name:literal)|+ => $parse:expr => $apply:expr;)*) => {
         #[derive(Debug, Clone, Copy)]
@@ -54,7 +57,9 @@ literal_properties! { raw, style, value;
     FontWeight(u16): "font-weight" => Some(parse_px(raw) as u16) => style.font_weight = value;
     LetterSpacing(f32): "letter-spacing" => Some(parse_px(raw)) => style.letter_spacing = value;
     LineHeight(f32): "line-height" => Some(parse_px(raw)) => style.line_height = value;
-    Gap(f32): "gap" | "column-gap" | "row-gap" | "gap-x" => Some(parse_px(raw)) => style.gap = value;
+    Gap(GapPair): "gap" => Some({ let (row, column) = parse_gap_shorthand(raw); GapPair(row, column) }) => { style.gap = value.0; style.row_gap = None; style.column_gap = (value.0 != value.1).then_some(value.1) };
+    RowGap(f32): "row-gap" => Some(parse_px(raw)) => style.row_gap = Some(value);
+    ColumnGap(f32): "column-gap" | "gap-x" => Some(parse_px(raw)) => style.column_gap = Some(value);
     Opacity(f32): "opacity" => Some(parse_px(raw)) => style.opacity = value;
     PaddingTop(f32): "padding-top" => Some(parse_px(raw)) => style.padding.top = value;
     PaddingRight(f32): "padding-right" => Some(parse_px(raw)) => style.padding.right = value;

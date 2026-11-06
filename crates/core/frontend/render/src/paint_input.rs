@@ -76,6 +76,14 @@ pub fn paint_variables_fingerprint(style: &ComputedStyle) -> u64 {
 
 fn hash_material(style: &ComputedStyle) -> u64 {
     let mut hasher = PaintInputHasher::default();
+    for (name, part) in style.paint_parts.iter() {
+        name.hash(&mut hasher);
+        hash_material(part).hash(&mut hasher);
+        hash_color(part.color, &mut hasher);
+        if let mesh_core_elements::Dimension::Px(width) = part.width { width.to_bits().hash(&mut hasher); }
+        part.font_size.to_bits().hash(&mut hasher);
+        part.font_family.hash(&mut hasher);
+    }
     hash_color(style.background_color, &mut hasher);
     hash_background_paint(&style.background_paint, &mut hasher);
     hash_color(style.border_color, &mut hasher);
@@ -126,6 +134,8 @@ fn hash_primitive(node: &WidgetNode) -> u64 {
                 .contains(mesh_core_elements::NodeState::FOCUSED)
                 .hash(&mut hasher);
             node.input_preedit.hash(&mut hasher);
+            node.input_cursor.hash(&mut hasher);
+            node.input_selection.hash(&mut hasher);
             hash_color(node.computed_style.color, &mut hasher);
         }
         _ => {

@@ -56,6 +56,8 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
         layout: node_layout_bounds(node, world_transform),
         ancestor_clips: ancestor_clips.as_slice().into(),
         style: DisplayPaintStyle {
+            ui_scale: node.computed_style.ui_scale,
+            paint_parts: node.computed_style.paint_parts.clone(),
             // Opacity is applied once when the whole node subtree is
             // composited. Keeping primitive colors untouched is important for
             // overlapping descendants and for non-solid paint payloads.
@@ -159,6 +161,8 @@ pub(super) fn build_paint_content_with_previous(
             );
             DisplayPaintContent::Input(DisplayInputPaint {
                 preedit: build_input_preedit(node, value.as_ref()),
+                cursor: node.input_cursor,
+                selection: node.input_selection,
                 value,
                 placeholder,
                 mask_text: node
@@ -186,7 +190,12 @@ pub(super) fn build_paint_content_with_previous(
             size: node
                 .attributes
                 .get(Prop::Size)
-                .and_then(|value| value.parse::<u32>().ok()),
+                .and_then(|value| value.parse::<u32>().ok())
+                .map(|size| {
+                    (size as f32 * node.computed_style.ui_scale)
+                        .round()
+                        .max(1.0) as u32
+                }),
             multicolor: node.attributes.get(Prop::Src).is_some_and(|src| {
                 mesh_core_icon::file_icon_is_multicolor(std::path::Path::new(src))
             }),

@@ -49,8 +49,12 @@ nix develop -c cargo test --release --workspace -- --ignored --nocapture
 
 - Place focused unit tests in a local `tests` module or adjacent `tests.rs`.
 - Put larger crate integration scenarios in the crate's `tests/` directory.
-- Reuse helpers under `crates/core/shell/src/shell/component/tests/` for shell
-  component and shipped-surface scenarios.
+- Component and shipped-module tests live under
+  `crates/core/frontend/runtime/src/component/tests/`; their shared fixtures are
+  in `component/testing.rs`. Fixtures use temporary storage roots.
+- Shell orchestration, live presentation and replay tests stay in
+  `crates/core/shell/src/shell/component_integration/` and consume the runtime's
+  optional `test-support` fixture API. They do not access private host fields.
 - For module contracts, test both accepted normalization and diagnostic failure
   paths.
 - For renderer or interaction changes, include behavior assertions rather than
@@ -72,7 +76,7 @@ compositor. Hardware GPU workload coverage remains in the performance workflow.
 Run the generic handler-free input matrix locally:
 
 ```bash
-nix develop -c cargo test -p mesh-core-shell --features gpu --lib scroll_contract
+nix develop -c cargo test -p mesh-core-frontend-runtime --features gpu --lib scroll_contract
 ```
 
 ## Performance regression checks

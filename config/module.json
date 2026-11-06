@@ -344,6 +344,17 @@
       "@mesh/workspaces-widget": [
         "service.wm.control",
         "service.wm.read"
+      ],
+      "@mesh/material-workspace": [
+        "shell.surface",
+        "theme.read",
+        "locale.read",
+        "service.apps.read",
+        "service.apps.launch",
+        "service.system.read",
+        "service.weather.read",
+        "service.media.read",
+        "service.media.control"
       ]
     },
     "schemaVersion": 1

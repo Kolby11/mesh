@@ -1460,6 +1460,8 @@ section noted.
 
 | Date | Experiment | Section | Result |
 | --- | --- | --- | --- |
+| 2026-11-06 | Always-on per-consumer pending resource counters | rendering | Reverted: three alternating debug samples of `resource_completion_fanout_profile` were 16.359–17.672 ms baseline and 17.494–19.227 ms with counters. Trace readiness needs an opt-in or cheaper design. |
+| 2026-11-06 | Retain complete component restyle-rule cache across theme changes | frontend styling | Reverted: selector-state, layout-state and animation summaries in that cache depend on the active theme. See the 2026-11-06 correction below; source rules must be separated from theme-derived summaries first. |
 | 2026-08-01 | Revalidate `SmallVec<[&WidgetNode; 8]>` for scoped retained-update candidates | N | Halved measured allocations on a 13-node sparse frame, but only 1.011–1.075x over three runs and missed the 1.05x gate twice; reverted again |
 | 2026-07-03 | Component-local copied tracked-field summary for the service event gate | C | Only 1.1x (2.544ms → 2.221ms/100k) and refresh had to clone tracked maps; shell-side subscription index is the viable design |
 | 2026-07-03 | Fractional-scale physical-damage rect fix | D | Byte-for-byte correct but no CPU-side win (28.066ms vs 28.367ms one-box); revisit with compositor/upload damage instrumentation |
@@ -10124,3 +10126,83 @@ these are isolated lookup measurements, not end-to-end frame timings.
 Verified: both runtime-generation tests pass through the frontend runtime crate,
 including placeholder, duplicate registration, synchronization, rebuild and
 clear cases. The file also passes standalone generation tests.
+
+## 2026-11-06 — Keep text layouts across icon revisions
+
+Text renderers now assign generations to their font databases independently of icon-resource revisions. Installing a font database still clears shaped layouts and glyph caches and advances the text measurement revision. Icon-only publication no longer flushes those layouts.
+
+**Measured:** workspace release profile, six interleaved samples of 100 warmed labels across ten simulated icon revisions, comparing explicit old-style layout clearing against retention. Clearing took 22.430–24.507 ms per sample; retention took 0.611–0.677 ms. `icon_revision_text_layout_profile` is an isolated synthetic measurement, not a whole-shell or presentation latency result; there is no relative timing gate. The regression checks cache hits after an icon revision and misses after database replacement. Release text tests: 19 passed, two ignored.
+
+## 2026-11-06 — Retain authored style rules across theme changes
+
+Theme invalidation keeps the component-source rule vector and its selector index; source and locale reloads still discard them. Theme-dependent style resolution, tree, layout, display list and pixels continue to rebuild. This removes repeated rule collection/index construction without assuming that a theme change preserves geometry or script output.
+
+**Measured.** Debug profile (release could not be built with the available filesystem space), `theme_switch_frame_cost_profile`: real 920×900 Settings Appearance surface, ten invalidations and paints of the same theme per sample, three sequential process samples per version, not interleaved. First-paint means were 224.130–255.389 ms before and 230.826–237.068 ms after; profiled style-restyle means were 17.262–17.827 ms before and 15.448–16.726 ms after. The total ranges overlap; these samples do not demonstrate an end-to-end latency improvement or measure an actual theme selection, resource readiness or presentation. No timing gate. A regression checks rule-cache retention while changing theme tokens and repainting the new color.
+
+## 2026-11-06 — Correction: retained theme rule summaries reverted
+
+The preceding retained-rule experiment was reverted after further inspection: the same cache also holds selector-state, layout-state and animation summaries derived from the active theme. Keeping it unchanged can make later interaction or animation invalidation stale, even when the initial repaint test passes. The recorded timings describe the rejected prototype, not shipped behavior. A future attempt must separate source-derived rules/indexes from theme-derived summaries and test a switch that changes state selectors and animation declarations.
+
+## 2026-11-06 — Separate source rule indexes from theme summaries
+
+The retained-rule prototype above was replaced with a revision-keyed split: the source rule vector and selector index survive theme changes, while selector-state, layout-state and animation summaries are recomputed from the active theme and rule generation. Source and locale reloads still discard the index. `theme_switch_retains_source_rules_and_refreshes_theme_dependencies` gates rule-generation retention and checks that a theme switch adds and removes hover, layout and transition dependencies; theme token and scrollbar repaint regressions also pass.
+
+**Measured.** Debug profile, `theme_switch_frame_cost_profile`, 920×900 Settings Appearance, ten same-theme invalidations and paints per sample, three alternating process pairs using the same binary and the test-only `MESH_PROFILE_RESET_THEME_RULES` reference. First-paint means: reset 225.056–242.579 ms, retained 222.689–225.954 ms. Profiled style-restyle means: reset 16.196–17.557 ms, retained 15.341–15.993 ms. This is not an actual theme selection or presentation/resource-readiness trace; the total ranges overlap, so no end-to-end speedup is claimed. Debug was used because available filesystem space was insufficient for a full release build; the gate is structural, not a timing threshold.
+
+## 2026-11-06 — Prepare theme selections on a worker
+
+During the live shell loop, theme selection, mode and token requests now compose candidates on a worker before the existing durable-settings transaction. The shell validates graph and activation generations, the current control-plane/profile revision and the selected source fingerprint before starting persistence; stale candidates are rejected. A worker panic is reported as a failed request. Without the shell event channel, synchronous preparation remains available to direct callers. `theme_selection_prepares_before_durable_commit_on_worker` structurally gates the two-stage path; stale activation and changed-source tests check rejection before persistence. The theme suite passed 41 tests, with three profiles ignored.
+
+**Measured.** Debug profile (the available filesystem space did not permit a release build), `theme_worker_preparation_profile`, one Liquid Glass CSS fixture, ten alternating direct-preparation and worker-submission samples in each of three process runs. Warm direct preparation samples were 3.531–5.222 ms (first samples 14.736–15.271 ms); shell-thread worker submission was 0.708–1.072 ms. These are different scopes: submission includes candidate settings work and excludes worker completion, persistence, source validation, rendering and presentation. They establish where work runs, not a complete theme-switch latency or a relative end-to-end speedup. No timing gate.
+
+## 2026-11-06 — Pending-resource counter experiment reverted
+
+A per-consumer count of distinct outstanding resource subscriptions was prototyped to support appearance resource-readiness tracing. Duplicate subscriptions counted once and cancellation decremented the count; the focused broker test passed. Three alternating debug process pairs of `resource_completion_fanout_profile` (32 consumers, eight shared resource completions per batch, 1,000 batches) measured 16.359–17.672 ms without counts and 17.494–19.227 ms with them. The baseline and candidate were separately compiled debug binaries; no release or whole-frame result was measured. The always-on counter was reverted rather than charging every resource request for an unfinished trace. Readiness tracking remains open and should be opt-in or measured with a cheaper representation.
+
+## 2026-11-06 — Opt-in pending-resource accounting
+
+`ResourcePaintConsumer::with_pending_tracking` counts distinct subscribed jobs; completion decrements before publishing the repaint flag, and dropping a pending waiter also decrements. The ordinary constructor does not update counters. This is a building block for resource-readiness tracing, not a complete readiness or presentation signal: a later repaint can request more resources, and a compositor commit is not physical presentation. The broker tests cover deduplication, cancellation and completion ordering.
+
+**Measured.** Debug profile, `resource_completion_fanout_profile`, 32 consumers, eight shared loads per batch and 1,000 batches; three alternating process pairs of separately compiled binaries. Normal untracked consumers took 16.087–17.526 ms before and 17.408–17.718 ms with opt-in support present but disabled. These ranges overlap; no release or whole-frame result is claimed. Tracking-enabled overhead has not been measured. Five broker tests passed, one profile ignored; no timing gate.
+
+## 2026-11-06 — Opt-in resource counter cost
+
+Follow-up to the opt-in pending-resource accounting entry: three alternating debug process pairs of the same `resource_completion_fanout_profile` binary (32 consumers, eight loads per batch, 1,000 batches) measured 17.838–19.078 ms with tracking disabled and 17.739–19.227 ms with tracking enabled. Ranges overlap; this workload does not establish a measurable tracking cost, and it is not a release or end-to-end frame measurement. `MESH_PROFILE_RESOURCE_PENDING=1` selects the tracked variant of this ignored test.
+
+## 2026-11-06 — Theme worker transaction breakdown
+
+Follow-up to the worker-preparation measurement: `theme_worker_preparation_profile` now separately times shell-thread source/revision validation, control-plane commit handling, and total transaction wall time. Debug profile, one Liquid Glass CSS fixture, 30 samples over three process runs: direct preparation 3.587–18.828 ms, worker submission 0.749–1.228 ms, completion validation and persistence-worker launch 0.787–1.549 ms, commit handling 16.054–32.069 ms, and submission through committed settings 43.773–65.802 ms. Direct preparation includes cold samples and is not an end-to-end baseline; transaction timing excludes visible component rendering, resource readiness, compositor commit and physical presentation. No relative gate.
+
+## 2026-11-06 — Avoid repeated serialization in bounded theme transport
+
+Bounded snapshots reuse the already computed full-document byte count for their initial size decision, and inline events return after their first size check. Large payloads still take the same pruning and size checks; threshold, escaped-Unicode and oversized parity tests compare the results with the previous algorithm, including detail revisions.
+
+**Measured.** Workspace release profile, `bounded_theme_projection_profile`, 100 snapshot-plus-event projections per sample, six interleaved reference/candidate samples per process, three process runs. The 16-token fixture ranged 1.143–1.643 ms reference versus 0.788–0.971 ms optimized; the 512-token fixture ranged 24.481–29.732 ms versus 18.669–21.208 ms. Per-process median speedups were 1.433–1.502× and 1.320–1.364× respectively. The 512-token case is gated at 1.05× as `bounded_theme_projection_speedup`. These are isolated transport projections, not whole-shell selection or presentation timings. Release theme tests: 53 passed, four ignored.
+
+## 2026-11-06 — Theme transport change in the commit fixture
+
+The test-only `MESH_PROFILE_THEME_COMMIT=1` instrumentation was used around the one-theme Liquid Glass shell fixture to locate and then recheck the transport change. Debug profile, three sequential process runs per version, ten commits per run, not interleaved: theme-service publication ranged 14.910–26.463 ms before versus 10.014–23.398 ms after. The ranges overlap and the fixture has no visible component surfaces, so this does not establish a whole-switch improvement. The earlier paired release transport benchmark and its gate isolate the structural serialization reduction.
+
+## 2026-11-06 — Reuse the conservative inline bound
+
+The bounded theme snapshot now skips its final serialization when the existing conservative size bound already proves that adding the details descriptor fits. When the bound cannot prove that, the exact final check remains. Parity tests cover escaped Unicode, threshold-adjacent sizes and replacement of an existing details field.
+
+**Measured.** Workspace release profile, `bounded_theme_projection_profile`, 100 snapshot-plus-event projections per sample, six samples in rotating reference/intermediate/candidate order per process, three process runs. For the 16-token inline fixture, the immediately preceding implementation took 0.799–1.275 ms versus 0.601–1.044 ms for the candidate, with per-process median speedups of 1.230–1.558×. For 512 tokens, ranges were 19.712–24.402 ms versus 19.831–24.539 ms and overlap; no large-payload speedup is claimed. The inline case is gated at 1.05× as `inline_theme_projection_speedup`; the existing 512-token original-reference gate remains. This measures transport, not presentation. Release theme tests: 53 passed, four ignored.
+
+## 2026-11-06 — Skip serialization of unobserved theme events
+
+Theme-change publication retains its complete change document for revisioned reads, but constructs bounded event payloads only when the delivery index reports an observer. Unknown component summaries remain conservative, and token-only observers still receive individual events. Tests cover token-only delivery, fallback subscribers, unobserved change details and oversized events.
+
+**Measured.** Debug profile, `theme_worker_preparation_profile`, one Liquid Glass theme with no event subscribers, ten settings transactions per process, six alternating forced/gated process pairs using one binary. Median per-process change-event phase was 7.542–9.451 ms when forcing the previous event work and 2.303–2.996 ms with the subscriber gate. The forced variant is selected with `MESH_PROFILE_FORCE_THEME_EVENT=1`; this is an instrumented fixture, not a release or end-to-end presentation measurement, and no timing gate is claimed. Theme-filtered shell tests: 45 passed, three ignored.
+
+## 2026-11-06 — Publish the already prepared authoritative theme state
+
+Shell-origin theme publication now passes its already bounded authoritative payload through the common provider validation, optimistic-field reconciliation, state recording and delivery path without rebuilding it. External provider updates still normalize against the shell-owned theme. Existing provider-rejection and theme-publication tests pass; `authoritative_theme_publication_preserves_pending_bound_fields` checks pending command overlays.
+
+**Measured.** Debug profile, `theme_worker_preparation_profile`, one Liquid Glass theme and no event subscribers, ten transactions per process, six alternating forced-normalization/reuse process pairs using the same binary and `MESH_PROFILE_THEME_PUBLICATION=1`. Per-process median snapshot-publication times were 4.964–5.675 ms with `MESH_PROFILE_THEME_NORMALIZE=1` and 0.151–0.185 ms with reuse. This isolates one synchronous publication phase; it is not a release or presentation latency measurement. The theme-filtered shell tests passed 45 tests with three ignored, and the pending-field regression passed separately. No timing gate.
+
+## 2026-11-06 — Authoritative theme publication in the transaction fixture
+
+Follow-up to the prepared-theme publication entry: debug profile, the same one-theme `theme_worker_preparation_profile` fixture, ten transactions per process, four alternating forced-normalization/reuse process pairs of one binary without per-phase instrumentation. Process medians were 13.341–14.286 ms versus 8.790–9.256 ms for commit handling, and 40.865–42.004 ms versus 35.887–38.767 ms for submission through settings commit. This fixture has no visible surfaces and excludes paint, resources and compositor presentation; it is not an end-to-end user-perceived switch measurement. No timing gate.
+
+The authoritative-theme publication change above is now structurally gated by `authoritative_theme_publication_builds_payload_once` in `tools/check-performance`. It counts builds in the current test thread and asserts exactly one; the pending-field regression runs independently. Both focused tests passed in debug.

@@ -271,5 +271,9 @@
   "appearance.glass.style.soft": "Soft-light glass",
   "appearance.glass.style.frosted": "Frosted glass",
   "appearance.glass.blur": "Blur strength",
-  "appearance.glass.liquid": "Liquid strength"
+  "appearance.glass.liquid": "Liquid strength",
+  "appearance.base_size": "Base text size",
+  "appearance.base_size_reset": "Reset text size",
+  "appearance.shell_scale": "Shell scale",
+  "appearance.shell_scale_reset": "Reset shell scale"
 }

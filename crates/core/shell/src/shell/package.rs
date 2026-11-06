@@ -1,4 +1,4 @@
-use super::component::FrontendCatalog;
+use mesh_core_frontend_runtime::catalog::FrontendCatalog;
 use super::profile::PackageRuntimeRollback;
 use super::*;
 use mesh_core_module::package::{

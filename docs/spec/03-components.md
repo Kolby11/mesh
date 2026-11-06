@@ -131,6 +131,9 @@ use logical surface coordinates and retain the pressed target through release,
 including outside its bounds. Target removal ends capture. The
 [syntax guide](../frontend/mesh-syntax.md#keyboard-focus-and-traversal) describes
 focused keyboard input for the same controls.
+Slider `onchange` receives value changes during pointer interaction and keyboard
+steps. `onrelease` receives the final pointer value and each keyboard step's
+value, allowing a handler to commit without persisting every drag movement.
 
 **Shipped two-way value bindings:** `bind:value="variable"` on inputs and
 sliders and `bind:checked="variable"` on checkboxes/switches assign user edits

@@ -128,7 +128,9 @@ Text inputs support `value`, `placeholder`, `disabled`, `readonly`, `required`, 
 
 Numeric slider bindings treat an unchanged numeric value as a no-op even when
 its spelling differs, such as `0` and `0.0`. Text-input bindings retain their
-text comparison semantics.
+text comparison semantics. A slider's `onchange` runs as its value changes;
+`onrelease` runs when a pointer drag ends and after each keyboard step, so it
+can commit changes without writing on every pointer movement.
 
 ## Choice Controls And Menus
 

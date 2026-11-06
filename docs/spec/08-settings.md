@@ -319,3 +319,16 @@ Embedded component settings are resolved once per effective settings/source
 snapshot and canonical source file. Rebuilds reuse the validated projection and
 its diagnostics; settings replacement, source reload and catalog adoption clear
 the cache. Profile changes invalidate it even when the durable revision is unchanged.
+
+
+### Shell base text size
+
+`shell.fonts.base_size` is an integer from 10 to 32 logical pixels (default 14)
+and scales typography relative to the authored default. `shell.fonts.shell_scale`
+is an integer percentage from 70 to 200 (default 100) that scales absolute shell
+lengths, including typography. The factors compose; relative dimensions and
+animation timing retain their meanings. Both follow shared/profile settings
+precedence and are changed through `mesh.theme.set_font_size(size)` and
+`mesh.theme.set_shell_scale(scale)`, respectively, with `service.theme.control`.
+Appearance provides separate controls and resets. Output scale remains a
+separate compositor setting.

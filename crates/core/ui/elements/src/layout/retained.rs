@@ -176,7 +176,7 @@ pub(super) fn reconcile_retained_taffy_node(
 ) -> Result<TaffyNodeId, taffy::TaffyError> {
     crate::frame_work::visit(crate::frame_work::Pass::LayoutBuild);
     let style = taffy_style_for_node(node, report);
-    let retained = node.has_mesh_key();
+    let retained = node.has_mesh_key() && state.stable_node_ids.contains(&node.id);
     let taffy_id = if retained {
         if let Some(existing) = state.node_map.get(&node.id).copied() {
             if state.tree.style(existing)? != &style {

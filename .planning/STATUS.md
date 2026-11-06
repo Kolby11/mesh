@@ -1,11 +1,17 @@
 # Status
 
-**Updated:** 2026-10-29
+**Updated:** 2026-11-06
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and
 measurements live in [`log/`](log/README.md).
 
 ## Now
+
+- Reduce theme and font change latency. Text-size dragging commits on release, icon revisions retain text layouts, and theme selection/mode/token composition runs on a worker; retained theme-tree invalidation, other preparation paths, and end-to-end measurements remain open.
+
+- Validate independent text size and shell scale in a running shell, including profile switching, popup geometry and accessibility.
+
+- Implement the requested SH-08, Material reference shell/composition, control parts, theme fixtures, slider glide, glass Settings readability, and style-index/gap fixes. The retained-layout key-adoption regression passes with the element crate tests.
 
 - Continue the whole-codebase audit; sections 01–09 have review reports, including section 08's continuation and stated coverage limits. Sections 10–16 and cross-section review remain; resume from the coverage inventory.
 - Extract the frontend component runtime from shell (SH-08).
@@ -23,6 +29,9 @@ measurements live in [`log/`](log/README.md).
 - D1 compound-table write tracking remains deferred pending supported runtime
   observation; indirect list reads still compare every item.
 - GPU panel recorded-scene parity exceeds its pixel budget on the baseline.
+- The scrollbar part palette regression passes when it supplies damage to the
+  replay selector. The retained-display geometry workload shares the resource
+  test lock with revision-mutating tests; three two-thread renderer runs pass.
 - NVIDIA as compositor main device and other compositor imports remain unchecked
   live.
 

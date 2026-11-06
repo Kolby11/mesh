@@ -1,5 +1,6 @@
 mod parse;
 mod resolve;
+mod scaling;
 mod types;
 
 pub use mesh_core_component::style::{StepPosition, TransitionEasing};

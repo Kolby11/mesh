@@ -201,11 +201,12 @@ fn node_is_scrollable(node: &WidgetNode) -> bool {
     max_x > f32::EPSILON || max_y > f32::EPSILON
 }
 
-fn scrollbar_thumb_extent(raw_extent: f32, track_extent: f32) -> f32 {
+fn scrollbar_thumb_extent(raw_extent: f32, track_extent: f32, ui_scale: f32) -> f32 {
     let track_extent = track_extent.max(1.0);
-    raw_extent
-        .round()
-        .clamp(SCROLLBAR_MIN_THUMB.min(track_extent), track_extent)
+    raw_extent.round().clamp(
+        (SCROLLBAR_MIN_THUMB * ui_scale).min(track_extent),
+        track_extent,
+    )
 }
 
 /// Measure a surface's content size for the compositor.
@@ -421,9 +422,9 @@ fn scrollbar_hit_for_node_with_transform(
 
     let width = node.layout.width.max(1.0);
     let height = node.layout.height.max(1.0);
-    let thickness = SCROLLBAR_THICKNESS;
-    let inset = SCROLLBAR_INSET;
-    let local_slop = SCROLLBAR_HIT_SLOP;
+    let thickness = SCROLLBAR_THICKNESS * node.computed_style.ui_scale;
+    let inset = SCROLLBAR_INSET * node.computed_style.ui_scale;
+    let local_slop = SCROLLBAR_HIT_SLOP * node.computed_style.ui_scale;
 
     if show_vertical {
         let track_extent = (height
@@ -444,6 +445,7 @@ fn scrollbar_hit_for_node_with_transform(
             let thumb_extent = scrollbar_thumb_extent(
                 (height / scroll.content_height.max(height)) * track_extent,
                 track_extent,
+                node.computed_style.ui_scale,
             );
             let thumb_range = (track_extent - thumb_extent).max(0.0);
             let thumb_start = track_start
@@ -487,6 +489,7 @@ fn scrollbar_hit_for_node_with_transform(
             let thumb_extent = scrollbar_thumb_extent(
                 (width / scroll.content_width.max(width)) * track_extent,
                 track_extent,
+                node.computed_style.ui_scale,
             );
             let thumb_range = (track_extent - thumb_extent).max(0.0);
             let thumb_start = track_start

@@ -63,11 +63,16 @@ pub fn prepare_snapshot(full: Value) -> (Value, PreparedDetails) {
 }
 
 fn project_snapshot(mut full: Value, details: Value) -> Value {
+    let mut full_len = details["bytes"]
+        .as_u64()
+        .and_then(|bytes| usize::try_from(bytes).ok())
+        .expect("detail length was produced from this document");
+    let detail_len = encoded(&details).len();
     for keys in [
         &["tokens", "provenance"][..],
         &["themes", "available", "modes", "system_resources"][..],
     ] {
-        if encoded(&full).len() + encoded(&details).len() + 16 <= INLINE_BYTES {
+        if full_len + detail_len + 16 <= INLINE_BYTES {
             break;
         }
         for key in keys {
@@ -75,9 +80,14 @@ fn project_snapshot(mut full: Value, details: Value) -> Value {
                 .expect("theme state is an object")
                 .remove(*key);
         }
+        full_len = encoded(&full).len();
     }
+    let definitely_inline = full_len
+        .saturating_add(detail_len)
+        .saturating_add(16)
+        <= INLINE_BYTES;
     full["details"] = details.clone();
-    if encoded(&full).len() > INLINE_BYTES {
+    if !definitely_inline && encoded(&full).len() > INLINE_BYTES {
         return json!({"details": details});
     }
     full
@@ -120,23 +130,24 @@ fn read_fragment(text: &str, descriptor: &Value, request: &Value) -> Value {
 /// Large event values are read through the last change's detail document,
 /// including removed tokens. Oversized identities also move to that document.
 pub fn bounded_event(mut event: Value, details: &Value) -> Value {
-    if encoded(&event).len() > INLINE_BYTES {
-        for key in [
-            "tokens",
-            "provenance",
-            "changed_tokens",
-            "value",
-            "modes",
-            "mode_policy",
-        ] {
-            event
-                .as_object_mut()
-                .expect("theme event is an object")
-                .remove(key);
-        }
-        event["details"] = details.clone();
-        event["details_required"] = json!(true);
+    if encoded(&event).len() <= INLINE_BYTES {
+        return event;
     }
+    for key in [
+        "tokens",
+        "provenance",
+        "changed_tokens",
+        "value",
+        "modes",
+        "mode_policy",
+    ] {
+        event
+            .as_object_mut()
+            .expect("theme event is an object")
+            .remove(key);
+    }
+    event["details"] = details.clone();
+    event["details_required"] = json!(true);
     if encoded(&event).len() > INLINE_BYTES {
         return json!({"details":details, "details_required":true});
     }
@@ -146,6 +157,138 @@ pub fn bounded_event(mut event: Value, details: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reference_snapshot(mut full: Value) -> Value {
+        let details = detail_descriptor(&full);
+        for keys in [
+            &["tokens", "provenance"][..],
+            &["themes", "available", "modes", "system_resources"][..],
+        ] {
+            if encoded(&full).len() + encoded(&details).len() + 16 <= INLINE_BYTES {
+                break;
+            }
+            for key in keys {
+                full.as_object_mut().unwrap().remove(*key);
+            }
+        }
+        full["details"] = details.clone();
+        if encoded(&full).len() > INLINE_BYTES {
+            return json!({"details": details});
+        }
+        full
+    }
+
+    fn reference_event(mut event: Value, details: &Value) -> Value {
+        if encoded(&event).len() > INLINE_BYTES {
+            for key in ["tokens", "provenance", "changed_tokens", "value", "modes", "mode_policy"] {
+                event.as_object_mut().unwrap().remove(key);
+            }
+            event["details"] = details.clone();
+            event["details_required"] = json!(true);
+        }
+        if encoded(&event).len() > INLINE_BYTES {
+            return json!({"details": details, "details_required": true});
+        }
+        event
+    }
+
+    fn intermediate_snapshot(mut full: Value) -> Value {
+        let details = detail_descriptor(&full);
+        let mut full_len = details["bytes"].as_u64().unwrap() as usize;
+        let detail_len = encoded(&details).len();
+        for keys in [
+            &["tokens", "provenance"][..],
+            &["themes", "available", "modes", "system_resources"][..],
+        ] {
+            if full_len + detail_len + 16 <= INLINE_BYTES {
+                break;
+            }
+            for key in keys {
+                full.as_object_mut().unwrap().remove(*key);
+            }
+            full_len = encoded(&full).len();
+        }
+        full["details"] = details.clone();
+        if encoded(&full).len() > INLINE_BYTES {
+            return json!({"details": details});
+        }
+        full
+    }
+
+    #[test]
+    fn bounded_projection_matches_reference_across_inline_thresholds() {
+        for size in [0, 512, INLINE_BYTES - 300, INLINE_BYTES, INLINE_BYTES * 2] {
+            let full = json!({"theme_id": "theme", "tokens": {"color": "é\\\"".repeat(size)},
+                "provenance": {"color": "user"}, "themes": ["dark", "light"],
+                "system_resources": {"fonts": ["sans"]}});
+            let details = detail_descriptor(&full);
+            assert_eq!(bounded_snapshot(full.clone()), reference_snapshot(full.clone()));
+            assert_eq!(bounded_event(full.clone(), &details), reference_event(full, &details));
+        }
+        for size in (INLINE_BYTES - 256)..=(INLINE_BYTES + 16) {
+            let full = json!({"tokens": {"color": "a".repeat(size)}});
+            let details = detail_descriptor(&full);
+            assert_eq!(bounded_snapshot(full.clone()), reference_snapshot(full.clone()));
+            assert_eq!(bounded_event(full.clone(), &details), reference_event(full, &details));
+        }
+        for value in [json!(null), json!({"old": "x".repeat(INLINE_BYTES)}), json!("short")] {
+            let full = json!({"details": value, "tokens": {"color": "blue"}});
+            assert_eq!(bounded_snapshot(full.clone()), reference_snapshot(full));
+        }
+    }
+
+    #[test]
+    #[ignore = "paired bounded-theme transport benchmark"]
+    fn bounded_theme_projection_profile() {
+        use std::hint::black_box;
+        use std::time::Instant;
+        for count in [16, 512] {
+            let tokens: serde_json::Map<String, Value> = (0..count)
+                .map(|index| (format!("color.token{index}"), json!("é🦀\\\"".repeat(12))))
+                .collect();
+            let full = json!({"theme_id":"measurement", "tokens":tokens, "themes":["dark", "light"]});
+            let details = detail_descriptor(&full);
+            let mut before = Vec::new();
+            let mut intermediate = Vec::new();
+            let mut after = Vec::new();
+            for sample in 0..6 {
+                for offset in 0..3 {
+                    let mode = (sample + offset) % 3;
+                    let started = Instant::now();
+                    for _ in 0..100 {
+                        let snapshot = match mode {
+                            0 => reference_snapshot(black_box(full.clone())),
+                            1 => intermediate_snapshot(black_box(full.clone())),
+                            _ => bounded_snapshot(black_box(full.clone())),
+                        };
+                        let event = if mode == 0 { reference_event(black_box(full.clone()), &details) }
+                            else { bounded_event(black_box(full.clone()), &details) };
+                        black_box((snapshot, event));
+                    }
+                    match mode {
+                        0 => before.push(started.elapsed().as_secs_f64() * 1000.0),
+                        1 => intermediate.push(started.elapsed().as_secs_f64() * 1000.0),
+                        _ => after.push(started.elapsed().as_secs_f64() * 1000.0),
+                    }
+                }
+            }
+            eprintln!("{count} tokens: reference {before:?}ms intermediate {intermediate:?}ms optimized {after:?}ms");
+            if count == 16 {
+                intermediate.sort_by(f64::total_cmp);
+                after.sort_by(f64::total_cmp);
+                let speedup = intermediate[intermediate.len() / 2] / after[after.len() / 2];
+                println!("MESH_PERF metric=inline_theme_projection_speedup value={speedup:.6}");
+                assert!(speedup >= 1.05, "inline snapshot speedup {speedup:.3} is below 1.05");
+            }
+            if count == 512 {
+                before.sort_by(f64::total_cmp);
+                after.sort_by(f64::total_cmp);
+                let speedup = before[before.len() / 2] / after[after.len() / 2];
+                println!("MESH_PERF metric=bounded_theme_projection_speedup value={speedup:.6}");
+                assert!(speedup >= 1.05, "bounded projection speedup {speedup:.3} is below 1.05");
+            }
+        }
+    }
 
     #[test]
     fn oversized_token_and_provenance_round_trip_with_escaped_unicode() {

@@ -21,6 +21,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
 const TEXT_LAYOUT_CACHE_CAPACITY: usize = 512;
 const TEXT_LAYOUT_CACHE_MAX_BYTES: usize = 16 * 1024 * 1024;
@@ -34,6 +35,11 @@ const GLYPH_ATLAS_MAX_BYTES: usize = 8 * 1024 * 1024;
 const MAX_GLYPH_ATLAS_DIMENSION: u32 = 4096;
 const NAMED_FONT_AVAILABILITY_CACHE_CAPACITY: usize = 128;
 const NAMED_FONT_AVAILABILITY_CACHE_MAX_BYTES: usize = 32 * 1024;
+static TEXT_FONT_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+fn next_text_font_generation() -> u64 {
+    TEXT_FONT_GENERATION.fetch_add(1, AtomicOrdering::Relaxed)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct NamedFontAvailabilityKey {
@@ -59,8 +65,8 @@ struct GlyphAtlasKey {
 }
 
 thread_local! {
-    /// Cached Skia images for rasterized glyph masks. The explicit resource
-    /// revision keeps a font-catalog replacement from reusing an image made
+    /// Cached Skia images for rasterized glyph masks. The font generation
+    /// keeps a font-catalog replacement from reusing an image made
     /// by an older FontSystem, even if cosmic-text reuses the same glyph ID.
     /// `Option` lets us cache "this glyph rasterizes to nothing" (e.g.
     /// spaces) so we skip the swash lookup next time.
@@ -100,6 +106,7 @@ struct TextEngine {
     /// caller stores the buffer back, so reusing the key avoids reallocating
     /// its strings on every hit.
     parked_key: Option<(u64, TextLayoutKey)>,
+    /// Generation of this renderer's font database, independent of icon updates.
     resource_revision: u64,
     /// Bumped when the font system changes; [`Self::measurer_revision`] is
     /// derived from it and the active alias set.
@@ -468,7 +475,7 @@ impl TextRenderer {
                     TEXT_LAYOUT_CACHE_CAPACITY,
                     TEXT_LAYOUT_CACHE_MAX_BYTES,
                 ),
-                resource_revision: resource_revision(),
+                resource_revision: next_text_font_generation(),
                 measurer_base: 0,
                 measurer_revision: 0,
                 metrics: TextCacheMetrics {
@@ -482,7 +489,7 @@ impl TextRenderer {
 
     pub fn cache_metrics(&self) -> TextCacheMetrics {
         let mut engine = self.engine.borrow_mut();
-        engine.ensure_resource_revision();
+        engine.ensure_font_system();
         engine.metrics.shaped_entries = engine.layout_cache.len() as u64;
         engine.metrics.layout_cache_bytes = engine.layout_cache.bytes() as u64;
         engine.metrics.layout_cache_max_bytes = engine.layout_cache.max_bytes() as u64;
@@ -491,7 +498,7 @@ impl TextRenderer {
 
     pub fn reset_cache_metrics(&self) {
         let mut engine = self.engine.borrow_mut();
-        engine.ensure_resource_revision();
+        engine.ensure_font_system();
         let shaped_entries = engine.layout_cache.len() as u64;
         let layout_cache_bytes = engine.layout_cache.bytes() as u64;
         let layout_cache_max_bytes = engine.layout_cache.max_bytes() as u64;
@@ -678,7 +685,7 @@ impl TextRenderer {
     ) {
         let context = style.context(text, max_width);
         let mut engine = self.engine.borrow_mut();
-        engine.ensure_resource_revision();
+        engine.ensure_font_system();
         let (_, metrics, width, text_align) = text_config(
             &engine.font_system,
             context.font_family,
@@ -791,7 +798,7 @@ impl TextRenderer {
 
     pub fn measure_text_context(&self, context: &TextMeasureContext<'_>) -> (f32, f32) {
         let mut engine = self.engine.borrow_mut();
-        engine.ensure_resource_revision();
+        engine.ensure_font_system();
         let (_, metrics, width, _) = text_config(
             &engine.font_system,
             context.font_family,
@@ -889,7 +896,7 @@ impl TextRenderer {
         let text_context = style.context(text, None);
 
         let mut engine = self.engine.borrow_mut();
-        engine.ensure_resource_revision();
+        engine.ensure_font_system();
         let (_, metrics, width, align) = text_config(
             &engine.font_system,
             style.font_family,
@@ -1021,7 +1028,7 @@ impl TextRenderer {
     ) -> Option<TextSelectionGeometry> {
         let context = style.context(text, max_width);
         let mut engine = self.engine.borrow_mut();
-        engine.ensure_resource_revision();
+        engine.ensure_font_system();
         let (_, metrics, width, text_align) = text_config(
             &engine.font_system,
             context.font_family,
@@ -1346,6 +1353,7 @@ impl TextEngine {
     fn set_font_database(&mut self, database: fontdb::Database) {
         crate::prepared_scene::resource_completed();
         self.font_database = Some(database.clone());
+        self.resource_revision = next_text_font_generation();
         self.bump_measurer_base();
         self.font_system = FontSystem::new_with_locale_and_db(self.locale.clone(), database);
         self.font_system_loaded = true;
@@ -1401,26 +1409,8 @@ impl TextEngine {
         }
     }
 
-    fn ensure_resource_revision(&mut self) {
-        let revision = resource_revision();
-        if self.resource_revision == revision {
-            self.ensure_font_system();
-            return;
-        }
-
-        // Font faces change only through `set_font_database`, which rebuilds
-        // the font system and glyph caches. A resource revision (an icon-pack
-        // publish, for instance) leaves faces and rasterized glyphs valid, so
-        // only layouts are dropped.
-        self.resource_revision = revision;
-        self.bump_measurer_base();
-        self.ensure_font_system();
-        self.layout_cache.clear();
-        self.metrics.layout_invalidations = self.metrics.layout_invalidations.saturating_add(1);
-    }
-
     fn revisions(&mut self) -> TextMeasureRevisions {
-        self.ensure_resource_revision();
+        self.ensure_font_system();
         TextMeasureRevisions {
             resource_revision: self.resource_revision,
             measurer_revision: self.measurer_revision,
@@ -2147,8 +2137,66 @@ mod tests {
 
         let renderer = TextRenderer::new();
         renderer.set_font_database(fontdb::Database::new());
-        renderer.engine.borrow_mut().ensure_resource_revision();
+        renderer.engine.borrow_mut().ensure_font_system();
         assert_eq!(renderer.engine.borrow().font_system.db().len(), 0);
+    }
+
+    #[test]
+    fn icon_revision_retains_layouts_and_font_database_change_invalidates_them() {
+        use mesh_core_elements::TextMeasurer;
+
+        let _resources = crate::resource_state_test_lock();
+        let renderer = TextRenderer::new();
+        renderer.measure("stable text", "sans-serif", 14.0, None);
+        renderer.reset_cache_metrics();
+        let before = renderer.revisions();
+        mesh_core_resources::advance_resource_revision();
+        renderer.measure("stable text", "sans-serif", 14.0, None);
+        assert_eq!(renderer.revisions(), before);
+        assert_eq!(renderer.cache_metrics().layout_hits, 1);
+        assert_eq!(renderer.cache_metrics().layout_invalidations, 0);
+
+        let database = renderer.engine.borrow().font_system.db().clone();
+        renderer.set_font_database(database);
+        assert_ne!(renderer.revisions(), before);
+        renderer.measure("stable text", "sans-serif", 14.0, None);
+        assert_eq!(renderer.cache_metrics().layout_misses, 1);
+        assert_eq!(renderer.cache_metrics().layout_invalidations, 1);
+    }
+
+    #[test]
+    #[ignore = "text layout reuse measurement"]
+    fn icon_revision_text_layout_profile() {
+        let _resources = crate::resource_state_test_lock();
+        let labels = (0..100)
+            .map(|i| format!("Settings label {i}"))
+            .collect::<Vec<_>>();
+        let renderer = TextRenderer::new();
+        let mut samples = [Vec::new(), Vec::new()];
+        for iteration in 0..6 {
+            for old in [iteration % 2 == 0, iteration % 2 != 0] {
+                for label in &labels {
+                    renderer.measure(label, "sans-serif", 14.0, None);
+                }
+                let start = std::time::Instant::now();
+                for _ in 0..10 {
+                    mesh_core_resources::advance_resource_revision();
+                    if old {
+                        let mut engine = renderer.engine.borrow_mut();
+                        engine.bump_measurer_base();
+                        engine.layout_cache.clear();
+                    }
+                    for label in &labels {
+                        std::hint::black_box(renderer.measure(label, "sans-serif", 14.0, None));
+                    }
+                }
+                samples[usize::from(!old)].push(start.elapsed().as_secs_f64() * 1000.0);
+            }
+        }
+        eprintln!(
+            "100 labels x 10 icon revisions: cleared={:?} retained={:?} ms",
+            samples[0], samples[1]
+        );
     }
 
     #[test]

@@ -23,7 +23,7 @@ if "--no-run" in sys.argv:
         sys.exit(1)
     if os.environ["GATE_CASE"] == "missing-artifact":
         sys.exit(0)
-    print(json.dumps({"reason": "compiler-artifact", "target": {"name": "mesh_core_shell"}, "profile": {"test": True}, "executable": os.path.abspath(sys.argv[0])}))
+    print(json.dumps({"reason": "compiler-artifact", "target": {"name": sys.argv[sys.argv.index("-p") + 1].replace("-", "_")}, "profile": {"test": True}, "executable": os.path.abspath(sys.argv[0])}))
     sys.exit(0)
 names = {
     "d9_navigation_updates": [("hover_p90_ms", 1), ("service_update_p90_ms", 1)],

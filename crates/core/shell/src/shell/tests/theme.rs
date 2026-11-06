@@ -786,8 +786,14 @@ fn set_theme_adopts_the_first_installed_recommended_font_and_icon_theme() {
         .apply_set_theme("@mesh/test-theme:glassy", None)
         .unwrap();
 
-    assert_eq!(shell.settings.fonts.ui_family.as_deref(), Some("Installed Sans"));
-    assert_eq!(shell.settings.icons.default_pack.as_deref(), Some("Installed Icons"));
+    assert_eq!(
+        shell.settings.fonts.ui_family.as_deref(),
+        Some("Installed Sans")
+    );
+    assert_eq!(
+        shell.settings.icons.default_pack.as_deref(),
+        Some("Installed Icons")
+    );
     assert_eq!(
         shell
             .theme
@@ -807,7 +813,10 @@ fn set_theme_adopts_the_first_installed_recommended_font_and_icon_theme() {
 
     // A later explicit pick is the user's to keep until the next theme switch.
     shell.apply_set_font_family("Other Sans").unwrap();
-    assert_eq!(shell.settings.fonts.ui_family.as_deref(), Some("Other Sans"));
+    assert_eq!(
+        shell.settings.fonts.ui_family.as_deref(),
+        Some("Other Sans")
+    );
 }
 
 #[test]
@@ -835,7 +844,10 @@ fn set_theme_without_installed_recommendations_keeps_the_user_choices() {
         .apply_set_theme("@mesh/test-theme:glassy", None)
         .unwrap();
 
-    assert_eq!(shell.settings.fonts.ui_family.as_deref(), Some("Chosen Sans"));
+    assert_eq!(
+        shell.settings.fonts.ui_family.as_deref(),
+        Some("Chosen Sans")
+    );
     assert_eq!(shell.settings.icons.default_pack, icons_before);
 }
 
@@ -1577,7 +1589,11 @@ fn keyboard_settings_merge_and_a_null_patch_removes_the_saved_assignments() {
     let _env_lock = settings_env_lock();
     let dir = tempfile::tempdir().unwrap();
     let settings_path = dir.path().join("settings.json");
-    fs::write(&settings_path, r#"{"shell":{"keyboard":{"hint_mode":"hold"}}}"#).unwrap();
+    fs::write(
+        &settings_path,
+        r#"{"shell":{"keyboard":{"hint_mode":"hold"}}}"#,
+    )
+    .unwrap();
     let _settings_path = EnvGuard::set("MESH_SETTINGS_PATH", &settings_path);
     let _graph_path = isolated_module_graph(dir.path());
     let mut shell = Shell::new();
@@ -1589,8 +1605,15 @@ fn keyboard_settings_merge_and_a_null_patch_removes_the_saved_assignments() {
         )
         .unwrap();
     let persisted = mesh_core_config::SettingsStore::load_from(&settings_path).unwrap();
-    assert_eq!(persisted.shell().keyboard.assigned["@mesh/dock"]["radial"], "q");
-    assert_eq!(persisted.shell().keyboard.hint_mode, "hold", "sibling fields survive");
+    assert_eq!(
+        persisted.shell().keyboard.assigned["@mesh/dock"]["radial"],
+        "q"
+    );
+    assert_eq!(
+        persisted.shell().keyboard.hint_mode,
+        "hold",
+        "sibling fields survive"
+    );
 
     shell
         .apply_set_keyboard_setting("assigned", serde_json::Value::Null)
@@ -1613,11 +1636,7 @@ fn set_theme_cost_profile() {
     .unwrap();
     fs::write(dir.path().join("theme.css"), css).unwrap();
     let mut shell = Shell::new();
-    shell.installed_module_graph = Some(graph_with_theme_source(
-        dir.path(),
-        "glass",
-        "theme.css",
-    ));
+    shell.installed_module_graph = Some(graph_with_theme_source(dir.path(), "glass", "theme.css"));
     const SWITCHES: u32 = 10;
     let started = std::time::Instant::now();
     for _ in 0..SWITCHES {
@@ -1629,4 +1648,348 @@ fn set_theme_cost_profile() {
         "apply_set_theme: {:.3}ms mean of {SWITCHES}",
         started.elapsed().as_secs_f64() * 1000.0 / SWITCHES as f64
     );
+}
+
+#[test]
+fn font_size_updates_theme_and_persists_with_validated_bounds() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    let mut shell = Shell::new();
+    shell.apply_set_font_size(21).unwrap();
+    assert_eq!(shell.settings.fonts.base_size, Some(21));
+    assert_eq!(shell.theme.active().text_scale(), 1.5);
+    assert_eq!(shell.theme.active().ui_scale(), 1.0);
+    shell.apply_set_font_size(40).unwrap();
+    assert_eq!(shell.settings.fonts.base_size, Some(21));
+    shell.apply_set_shell_scale(150).unwrap();
+    assert_eq!(shell.settings.fonts.shell_scale, Some(150));
+    assert_eq!(shell.theme.active().ui_scale(), 1.5);
+    assert_eq!(shell.theme.active().text_scale(), 1.5);
+    shell.apply_set_shell_scale(201).unwrap();
+    assert_eq!(shell.settings.fonts.shell_scale, Some(150));
+    shell.apply_set_font_size(14).unwrap();
+    assert_eq!(shell.theme.active().text_scale(), 1.0);
+    assert_eq!(shell.theme.active().ui_scale(), 1.5);
+}
+
+#[test]
+fn theme_candidate_can_be_prepared_on_a_worker() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("theme.css"), ":root { --color-surface: #123456; }").unwrap();
+    let graph = graph_with_theme_source(dir.path(), "worker", "theme.css");
+    let mut settings = mesh_core_config::ShellSettings::default();
+    settings.theme.active = "@mesh/test-theme:worker".into();
+    let expected = crate::shell::prepare_theme_state_for_graph(&settings, &graph)
+        .unwrap()
+        .unwrap();
+    let actual = std::thread::spawn(move || {
+        crate::shell::prepare_theme_state_for_graph(&settings, &graph)
+            .unwrap()
+            .unwrap()
+    })
+    .join()
+    .unwrap();
+    assert_eq!(actual.engine.active().id, expected.engine.active().id);
+    assert_eq!(actual.engine.active_snapshot().tokens, expected.engine.active_snapshot().tokens);
+    assert_eq!(actual.watch.path, expected.watch.path);
+    assert_eq!(actual.watch.fingerprint, expected.watch.fingerprint);
+}
+
+#[test]
+fn theme_selection_prepares_before_durable_commit_on_worker() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    fs::write(dir.path().join("theme.css"), ":root { --color-surface: #123456; }").unwrap();
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(dir.path(), "async", "theme.css"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    shell.file_watcher_tx = Some(tx);
+    shell.apply_set_theme("@mesh/test-theme:async", None).unwrap();
+    assert!(shell.pending_control_plane_commit.is_some());
+    assert_ne!(shell.settings.theme.active, "@mesh/test-theme:async");
+    let mut pending = VecDeque::new();
+    let message = rx.blocking_recv().expect("preparation completion");
+    assert!(matches!(message, crate::shell::ShellMessage::ThemePreparationFinished { .. }));
+    shell.handle_shell_message(&mut pending, message).unwrap();
+    assert_ne!(shell.settings.theme.active, "@mesh/test-theme:async");
+    let message = rx.blocking_recv().expect("durable completion");
+    shell.handle_shell_message(&mut pending, message).unwrap();
+    assert_eq!(shell.settings.theme.active, "@mesh/test-theme:async");
+    assert!(shell.pending_control_plane_commit.is_none());
+}
+
+#[test]
+fn theme_selection_rejects_stale_preparation_before_persistence() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    fs::write(dir.path().join("theme.css"), ":root { --color-surface: #123456; }").unwrap();
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(dir.path(), "async", "theme.css"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    shell.file_watcher_tx = Some(tx);
+    shell.apply_set_theme("@mesh/test-theme:async", None).unwrap();
+    let message = rx.blocking_recv().expect("preparation completion");
+    shell.activation_generation += 1;
+    shell.handle_shell_message(&mut VecDeque::new(), message).unwrap();
+    assert!(shell.pending_control_plane_commit.is_none());
+    assert_ne!(shell.settings.theme.active, "@mesh/test-theme:async");
+    let persisted = mesh_core_config::SettingsStore::load_from(&dir.path().join("settings.json")).unwrap();
+    assert_ne!(persisted.shell().theme.active, "@mesh/test-theme:async");
+}
+
+#[test]
+fn theme_selection_rejects_changed_source_before_persistence() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    let source = dir.path().join("theme.css");
+    fs::write(&source, ":root { --color-surface: #123456; }").unwrap();
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(dir.path(), "async", "theme.css"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    shell.file_watcher_tx = Some(tx);
+    shell.apply_set_theme("@mesh/test-theme:async", None).unwrap();
+    let message = rx.blocking_recv().expect("preparation completion");
+    fs::write(source, ":root { --color-surface: #654321; }").unwrap();
+    shell.handle_shell_message(&mut VecDeque::new(), message).unwrap();
+    assert!(shell.pending_control_plane_commit.is_none());
+    assert_ne!(shell.settings.theme.active, "@mesh/test-theme:async");
+    let persisted = mesh_core_config::SettingsStore::load_from(&dir.path().join("settings.json")).unwrap();
+    assert_ne!(persisted.shell().theme.active, "@mesh/test-theme:async");
+}
+
+#[test]
+#[ignore = "theme worker submission and preparation timing"]
+fn theme_worker_preparation_profile() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    let css = fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../modules/themes/liquid-glass/theme.css")).unwrap();
+    fs::write(dir.path().join("theme.css"), css).unwrap();
+    let mut shell = Shell::new();
+    let graph = graph_with_theme_source(dir.path(), "glass", "theme.css");
+    shell.installed_module_graph = Some(graph.clone());
+    let mut settings = shell.settings.clone();
+    settings.theme.active = "@mesh/test-theme:glass".into();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    shell.file_watcher_tx = Some(tx);
+    let mut preparation = Vec::new();
+    let mut submission = Vec::new();
+    let mut validation = Vec::new();
+    let mut commit = Vec::new();
+    let mut total = Vec::new();
+    for _ in 0..10 {
+        let start = std::time::Instant::now();
+        std::hint::black_box(crate::shell::prepare_theme_state_for_graph(&settings, &graph).unwrap());
+        preparation.push(start.elapsed().as_secs_f64() * 1000.0);
+        let transaction_started = std::time::Instant::now();
+        let start = transaction_started;
+        shell.apply_set_theme("@mesh/test-theme:glass", None).unwrap();
+        submission.push(start.elapsed().as_secs_f64() * 1000.0);
+        let message = rx.blocking_recv().unwrap();
+        let started = std::time::Instant::now();
+        shell.handle_shell_message(&mut VecDeque::new(), message).unwrap();
+        validation.push(started.elapsed().as_secs_f64() * 1000.0);
+        let message = rx.blocking_recv().unwrap();
+        let started = std::time::Instant::now();
+        shell.handle_shell_message(&mut VecDeque::new(), message).unwrap();
+        commit.push(started.elapsed().as_secs_f64() * 1000.0);
+        total.push(transaction_started.elapsed().as_secs_f64() * 1000.0);
+    }
+    eprintln!("theme preparation ms: {preparation:?}; worker submission ms: {submission:?}; validation ms: {validation:?}; commit ms: {commit:?}; transaction ms: {total:?}");
+}
+
+#[test]
+fn theme_mode_and_token_requests_use_worker_transaction() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    fs::write(dir.path().join("theme.css"), ":root { --color-surface: #123456; }").unwrap();
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(dir.path(), "async", "theme.css"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    shell.file_watcher_tx = Some(tx);
+    shell.apply_set_theme("@mesh/test-theme:async", None).unwrap();
+    for _ in 0..2 {
+        shell.handle_shell_message(&mut VecDeque::new(), rx.blocking_recv().unwrap()).unwrap();
+    }
+    shell.apply_set_theme_mode("default").unwrap();
+    let prepared = rx.blocking_recv().unwrap();
+    assert!(matches!(prepared, crate::shell::ShellMessage::ThemePreparationFinished { .. }));
+    shell.handle_shell_message(&mut VecDeque::new(), prepared).unwrap();
+    shell.handle_shell_message(&mut VecDeque::new(), rx.blocking_recv().unwrap()).unwrap();
+    assert_eq!(shell.settings.theme.mode.as_deref(), Some("default"));
+    let tokens = serde_json::json!({"color.surface": "#abcdef"}).as_object().unwrap().clone();
+    shell.apply_set_theme_tokens(tokens).unwrap();
+    let prepared = rx.blocking_recv().unwrap();
+    assert!(matches!(prepared, crate::shell::ShellMessage::ThemePreparationFinished { .. }));
+    shell.handle_shell_message(&mut VecDeque::new(), prepared).unwrap();
+    shell.handle_shell_message(&mut VecDeque::new(), rx.blocking_recv().unwrap()).unwrap();
+    assert_eq!(shell.theme.active().token("color.surface").map(ToString::to_string), Some("#abcdef".into()));
+}
+
+#[test]
+fn theme_selection_rejects_changed_control_plane_before_persistence() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    fs::write(dir.path().join("theme.css"), ":root { --color-surface: #123456; }").unwrap();
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(dir.path(), "async", "theme.css"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    shell.file_watcher_tx = Some(tx);
+    shell.apply_set_theme("@mesh/test-theme:async", None).unwrap();
+    let message = rx.blocking_recv().expect("preparation completion");
+    shell.control_plane_revision.shared += 1;
+    shell.handle_shell_message(&mut VecDeque::new(), message).unwrap();
+    assert!(shell.pending_control_plane_commit.is_none());
+    assert_ne!(shell.settings.theme.active, "@mesh/test-theme:async");
+    let persisted = mesh_core_config::SettingsStore::load_from(&dir.path().join("settings.json")).unwrap();
+    assert_ne!(persisted.shell().theme.active, "@mesh/test-theme:async");
+}
+
+#[test]
+fn theme_selection_rejects_changed_graph_and_profile_before_persistence() {
+    for change_profile in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let _settings = isolated_settings_file(dir.path());
+        fs::write(dir.path().join("theme.css"), ":root { --color-surface: #123456; }").unwrap();
+        let mut shell = Shell::new();
+        shell.installed_module_graph = Some(graph_with_theme_source(dir.path(), "async", "theme.css"));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        shell.file_watcher_tx = Some(tx);
+        shell.apply_set_theme("@mesh/test-theme:async", None).unwrap();
+        let message = rx.blocking_recv().expect("preparation completion");
+        if change_profile {
+            shell.active_profile_id = Some("other".into());
+        } else {
+            shell.installed_module_graph = Some(graph_with_theme_source(dir.path(), "other", "theme.css"));
+        }
+        shell.handle_shell_message(&mut VecDeque::new(), message).unwrap();
+        assert!(shell.pending_control_plane_commit.is_none());
+        assert_ne!(shell.settings.theme.active, "@mesh/test-theme:async");
+        let persisted = mesh_core_config::SettingsStore::load_from(&dir.path().join("settings.json")).unwrap();
+        assert_ne!(persisted.shell().theme.active, "@mesh/test-theme:async");
+    }
+}
+
+#[test]
+fn theme_worker_acknowledges_service_call_only_after_durable_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    fs::write(dir.path().join("theme.css"), ":root { --color-surface: #123456; }").unwrap();
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(dir.path(), "async", "theme.css"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    shell.file_watcher_tx = Some(tx);
+    let mut requests = VecDeque::from([CoreRequest::ServiceCall {
+        interface: "mesh.theme".into(),
+        command: "set_theme".into(),
+        payload: serde_json::json!({"theme_id": "@mesh/test-theme:async"}),
+        call_id: 456,
+        source_instance_id: "@test/caller".into(),
+        source_module_id: "@test/caller".into(),
+        source_capabilities: mesh_core_capability::CapabilitySet::from_ids(["service.theme.control"]),
+    }]);
+    shell.drain_requests(&mut requests).unwrap();
+    assert!(shell.pending_service_call_routes.contains_key(&456));
+    shell.handle_shell_message(&mut VecDeque::new(), rx.blocking_recv().unwrap()).unwrap();
+    assert!(shell.pending_service_call_routes.contains_key(&456));
+    shell.handle_shell_message(&mut VecDeque::new(), rx.blocking_recv().unwrap()).unwrap();
+    assert!(!shell.pending_service_call_routes.contains_key(&456));
+    assert_eq!(shell.settings.theme.active, "@mesh/test-theme:async");
+}
+
+#[test]
+fn stale_theme_worker_settles_service_call_without_committing() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    fs::write(dir.path().join("theme.css"), ":root { --color-surface: #123456; }").unwrap();
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(graph_with_theme_source(dir.path(), "async", "theme.css"));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    shell.file_watcher_tx = Some(tx);
+    let mut requests = VecDeque::from([CoreRequest::ServiceCall {
+        interface: "mesh.theme".into(), command: "set_theme".into(),
+        payload: serde_json::json!({"theme_id": "@mesh/test-theme:async"}), call_id: 457,
+        source_instance_id: "@test/caller".into(), source_module_id: "@test/caller".into(),
+        source_capabilities: mesh_core_capability::CapabilitySet::from_ids(["service.theme.control"]),
+    }]);
+    shell.drain_requests(&mut requests).unwrap();
+    assert!(shell.pending_service_call_routes.contains_key(&457));
+    let message = rx.blocking_recv().unwrap();
+    shell.activation_generation += 1;
+    shell.handle_shell_message(&mut VecDeque::new(), message).unwrap();
+    assert!(!shell.pending_service_call_routes.contains_key(&457));
+    assert!(shell.pending_control_plane_commit.is_none());
+    let persisted = mesh_core_config::SettingsStore::load_from(&dir.path().join("settings.json")).unwrap();
+    assert_ne!(persisted.shell().theme.active, "@mesh/test-theme:async");
+}
+
+#[test]
+fn unobserved_theme_change_details_remain_readable() {
+    let mut shell = Shell::new();
+    shell.sync_theme_service_state().unwrap();
+    assert!(!shell.has_interface_event_observers("mesh.theme", "ThemeChanged"));
+    assert!(!shell.has_interface_event_observers("mesh.theme", "TokenChanged"));
+    shell.theme.update_active(|theme| {
+        theme.set_token("color.primary", mesh_core_theme::TokenValue::String("#123456".into()),
+            mesh_core_theme::ThemeProvenance::UserOverride);
+    });
+    shell.sync_theme_service_state().unwrap();
+    let change = shell.last_theme_change_details.as_ref().unwrap();
+    let descriptor = mesh_core_theme::transport::detail_descriptor(change);
+    let page = shell.read_theme_details(&serde_json::json!({"revision": descriptor["revision"]}));
+    assert_eq!(page["ok"], true);
+    let text = page["data"].as_str().unwrap();
+    assert!(text.contains("color.primary"));
+}
+
+#[test]
+fn token_only_theme_observer_receives_revisioned_event() {
+    let summary = Arc::new(Mutex::new(Some(ServiceObservationSummary {
+        update_services: Vec::new(),
+        cached_update_services: Vec::new(),
+        interface_events: vec![ServiceInterfaceEventSubscription {
+            service: "theme".into(), event: "TokenChanged".into(),
+        }],
+    })));
+    let state = Arc::new(Mutex::new(IndexedRecordingState::default()));
+    let mut shell = Shell::new();
+    shell.register_component(Box::new(IndexedRecordingComponent::new(
+        "@test/theme-token-observer", summary, Arc::clone(&state),
+    )));
+    shell.sync_theme_service_state().unwrap();
+    shell.theme.update_active(|theme| {
+        theme.set_token("color.primary", mesh_core_theme::TokenValue::String("#123456".into()),
+            mesh_core_theme::ThemeProvenance::UserOverride);
+    });
+    shell.sync_theme_service_state().unwrap();
+    let state = state.lock().unwrap();
+    assert!(state.handled.iter().any(|event| matches!(event,
+        ServiceEvent::InterfaceEvent { name, payload, .. }
+        if name == "TokenChanged" && payload["name"] == "color.primary" && payload["value"] == "#123456"
+    )));
+    assert!(!state.handled.iter().any(|event| matches!(event,
+        ServiceEvent::InterfaceEvent { name, .. } if name == "ThemeChanged"
+    )));
+}
+
+#[test]
+fn authoritative_theme_publication_preserves_pending_bound_fields() {
+    let mut shell = Shell::new();
+    shell.sync_theme_service_state().unwrap();
+    shell.apply_bound_service_state(
+        "mesh.theme", "mode", serde_json::json!("pending-mode"),
+        Some(mesh_core_backend::CallId::from_raw(975)),
+    );
+    shell.sync_theme_service_state().unwrap();
+    assert_eq!(shell.latest_service_state["mesh.theme"].state["mode"], "pending-mode");
+    assert!(shell.pending_bound_service_state.contains_key(&("mesh.theme".into(), "mode".into())));
+}
+
+#[test]
+fn authoritative_theme_publication_builds_payload_once() {
+    let mut shell = Shell::new();
+    crate::shell::runtime::THEME_PAYLOAD_BUILDS.with(|count| count.set(0));
+    shell.sync_theme_service_state().unwrap();
+    let builds = crate::shell::runtime::THEME_PAYLOAD_BUILDS.with(|count| count.get());
+    assert_eq!(builds, 1, "one committed theme publication builds one snapshot");
 }

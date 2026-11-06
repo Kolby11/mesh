@@ -533,6 +533,9 @@ pub(super) enum ShellMessage {
         profile_id: String,
         response: IpcProfileSwitchResponseSender,
     },
+    ThemePreparationFinished {
+        result: Result<(super::runtime::ControlPlaneSettingsCandidate, super::surface_layout::PreparedThemeState), String>,
+    },
     ControlPlaneSettingsCommitFinished {
         result: Result<super::runtime::ControlPlaneSettingsCommit, String>,
     },

@@ -84,7 +84,9 @@ pub(super) fn record_localized_miss(
 pub(super) use mesh_core_frontend_runtime::locale::{locale_service_payload, resolve_manifest_text};
 
 mod backend;
-mod component;
+use mesh_core_frontend_runtime::component;
+#[cfg(test)]
+mod component_integration;
 mod core_provider;
 mod discovery;
 mod file_watch;
@@ -690,7 +692,7 @@ pub struct Shell {
     composition_mode: ShellCompositionMode,
     active_profile_id: Option<String>,
     modules: HashMap<String, ModuleInstance>,
-    frontend_catalog: component::FrontendCatalogHandle,
+    frontend_catalog: mesh_core_frontend_runtime::catalog::FrontendCatalogHandle,
     module_dirs: Vec<PathBuf>,
     core: ShellCoreState,
     /// Last rendered snapshot sent through the authoritative theme interface.

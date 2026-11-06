@@ -34,6 +34,12 @@ component/runtime tree
 presentation layer ──► Wayland surfaces (dmabuf or SHM buffers)
 ```
 
+The component host lives in `mesh-core-frontend-runtime`, with component-only
+fixtures and shipped-module tests alongside it. Shell owns orchestration, live
+presentation and service authorities; its integration tests exercise those
+boundaries through the host contracts. The optional `test-support` feature
+provides isolated component fixtures without exposing component state fields.
+
 The CLI creates `mesh_core_shell::Shell`. The shell discovers modules, loads
 the installed graph, registers interface contracts and providers, compiles
 frontend roots, executes service/component Luau, renders surfaces, and handles
@@ -181,6 +187,10 @@ Graph changes observed during activation are coalesced and reconciled from the
 latest filesystem state after the pending candidate commits or aborts. Profile
 pointer and authored content changes also trigger reconciliation when the module
 graph is unchanged; retired watcher events remain hints to reread current state.
+Theme selection, mode and token changes compose candidates on a worker during
+the live shell loop. Before persistence, the shell validates the graph,
+activation, settings and profile revisions and the selected source fingerprint.
+Durable writes remain serialized through the control-plane transaction.
 
 During the profile migration, absence of `config/active-profile` preserves the
 legacy root-graph decisions. When it exists, `config/profiles/<id>.json` owns
@@ -227,7 +237,7 @@ process crashes are outside that isolation guarantee.
 | `BackendRuntime` | `mesh-core-scripting` | Luau service-provider execution and host APIs |
 | `WidgetNode` | `mesh-core-elements` | Retained UI node with style, layout, and semantics |
 | `FrontendCatalog` | `mesh-core-frontend-runtime` | Compiled frontend modules, contributions, and reload snapshots |
-| `FrontendSurfaceComponent` | `mesh-core-shell` | Component instance attached to a shell surface |
+| `FrontendSurfaceComponent` | `mesh-core-frontend-runtime` | Component host implementing the shell adapter lifecycle |
 | `Shell` | `mesh-core-shell` | Development-runtime integration point |
 
 ## Service architecture

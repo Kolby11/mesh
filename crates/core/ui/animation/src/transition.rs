@@ -45,6 +45,8 @@ pub struct AnimatableStyle {
     pub letter_spacing: f32,
     pub line_height: f32,
     pub gap: f32,
+    pub row_gap: Option<f32>,
+    pub column_gap: Option<f32>,
     pub inset_top: Option<f32>,
     pub inset_right: Option<f32>,
     pub inset_bottom: Option<f32>,
@@ -91,6 +93,8 @@ impl AnimatableStyle {
             letter_spacing: s.letter_spacing,
             line_height: s.line_height,
             gap: s.gap,
+            row_gap: s.row_gap,
+            column_gap: s.column_gap,
             inset_top: s.inset_top,
             inset_right: s.inset_right,
             inset_bottom: s.inset_bottom,
@@ -177,6 +181,8 @@ impl AnimatableStyle {
         s.letter_spacing = self.letter_spacing;
         s.line_height = self.line_height;
         s.gap = self.gap;
+        s.row_gap = self.row_gap;
+        s.column_gap = self.column_gap;
         s.inset_top = self.inset_top;
         s.inset_right = self.inset_right;
         s.inset_bottom = self.inset_bottom;
@@ -279,6 +285,8 @@ impl AnimatableStyle {
                 desired.line_height,
             ),
             gap: pick(props.animates_gap(), previous.gap, desired.gap),
+            row_gap: pick(props.animates_gap(), previous.row_gap, desired.row_gap),
+            column_gap: pick(props.animates_gap(), previous.column_gap, desired.column_gap),
             inset_top: pick(
                 props.animates_inset_top(),
                 previous.inset_top,
@@ -344,7 +352,7 @@ impl AnimatableStyle {
             || (props.animates_font_size() && self.font_size != other.font_size)
             || (props.animates_letter_spacing() && self.letter_spacing != other.letter_spacing)
             || (props.animates_line_height() && self.line_height != other.line_height)
-            || (props.animates_gap() && self.gap != other.gap)
+            || (props.animates_gap() && (self.gap != other.gap || self.row_gap != other.row_gap || self.column_gap != other.column_gap))
             || (props.animates_inset_top() && self.inset_top != other.inset_top)
             || (props.animates_inset_right() && self.inset_right != other.inset_right)
             || (props.animates_inset_bottom() && self.inset_bottom != other.inset_bottom)
@@ -449,6 +457,8 @@ impl Interpolate for AnimatableStyle {
             letter_spacing: self.letter_spacing.lerp(other.letter_spacing, progress),
             line_height: self.line_height.lerp(other.line_height, progress),
             gap: self.gap.lerp(other.gap, progress),
+            row_gap: Some(self.row_gap.unwrap_or(self.gap).lerp(other.row_gap.unwrap_or(other.gap), progress)),
+            column_gap: Some(self.column_gap.unwrap_or(self.gap).lerp(other.column_gap.unwrap_or(other.gap), progress)),
             inset_top: lerp_option_f32(self.inset_top, other.inset_top, progress),
             inset_right: lerp_option_f32(self.inset_right, other.inset_right, progress),
             inset_bottom: lerp_option_f32(self.inset_bottom, other.inset_bottom, progress),
@@ -1695,6 +1705,8 @@ mod tests {
             letter_spacing: 0.0,
             line_height: 1.0,
             gap: 0.0,
+            row_gap: None,
+            column_gap: None,
             inset_top: Some(0.0),
             inset_right: None,
             inset_bottom: None,

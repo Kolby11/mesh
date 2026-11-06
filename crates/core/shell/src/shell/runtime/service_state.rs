@@ -20,7 +20,30 @@ impl Shell {
         &mut self,
         event: ServiceEvent,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
-        let event = self.normalize_service_event(event);
+        self.broadcast_service_event_inner(event, false)
+    }
+
+    pub(super) fn broadcast_authoritative_theme_state(
+        &mut self,
+        source_module: String,
+        payload: serde_json::Value,
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
+        self.broadcast_service_event_inner(
+            ServiceEvent::Updated {
+                service: "mesh.theme".into(),
+                source_module,
+                payload,
+            },
+            true,
+        )
+    }
+
+    fn broadcast_service_event_inner(
+        &mut self,
+        event: ServiceEvent,
+        authoritative_theme: bool,
+    ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
+        let event = self.normalize_service_event_inner(event, authoritative_theme);
         let profiling_started = self
             .profiling_enabled()
             .then_some(std::time::Instant::now());
@@ -51,6 +74,14 @@ impl Shell {
         &mut self,
         event: ServiceEvent,
     ) -> ServiceEvent {
+        self.normalize_service_event_inner(event, false)
+    }
+
+    fn normalize_service_event_inner(
+        &mut self,
+        event: ServiceEvent,
+        authoritative_theme: bool,
+    ) -> ServiceEvent {
         let ServiceEvent::Updated {
             service,
             source_module,
@@ -74,12 +105,14 @@ impl Shell {
                 payload,
             };
         }
-        if interface == "mesh.theme" {
+        if interface == "mesh.theme" && !authoritative_theme {
             // Theme state is a rendered control-plane fact. A provider may
             // implement commands or mirror the state, but it cannot replace
             // the snapshot that the shell actually committed and painted.
             payload = self.authoritative_theme_service_payload();
-        } else if let Some(contract) = self.interfaces.resolve(&interface, None).compiled_contract {
+        } else if interface != "mesh.theme"
+            && let Some(contract) = self.interfaces.resolve(&interface, None).compiled_contract
+        {
             contract.repair_state(&mut payload);
         }
         // A command-bound field remains shell-authoritative until the provider

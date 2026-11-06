@@ -902,6 +902,7 @@ fn text_command_patches_skip_siblings_and_preserve_effect_coverage() {
 /// coverage without rebuilding siblings, and match a full build exactly.
 #[test]
 fn geometry_command_patches_skip_siblings_and_match_full_build() {
+    let _resources = crate::resource_state_test_lock();
     let mut by_count = Vec::new();
     for count in [16, 1024] {
         for effect in [

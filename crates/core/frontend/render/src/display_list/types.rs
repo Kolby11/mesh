@@ -663,6 +663,9 @@ impl DisplayPaintNode {
 
 #[derive(Debug, Clone)]
 pub struct DisplayPaintStyle {
+    pub ui_scale: f32,
+    pub paint_parts:
+        Arc<std::collections::BTreeMap<String, mesh_core_elements::style::ComputedStyle>>,
     pub resource_revision: u64,
     pub background_color: Color,
     pub background_paint: BackgroundPaint,
@@ -765,6 +768,8 @@ pub struct DisplayInputPaint {
     pub mask_text: bool,
     pub focused: bool,
     pub preedit: Option<DisplayInputPreedit>,
+    pub cursor: Option<usize>,
+    pub selection: Option<(usize, usize)>,
 }
 
 impl PartialEq for DisplayInputPaint {
@@ -774,6 +779,8 @@ impl PartialEq for DisplayInputPaint {
             && self.mask_text == other.mask_text
             && self.focused == other.focused
             && self.preedit == other.preedit
+            && self.cursor == other.cursor
+            && self.selection == other.selection
     }
 }
 

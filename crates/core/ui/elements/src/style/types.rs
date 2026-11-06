@@ -859,6 +859,11 @@ impl std::fmt::Debug for CustomProperties {
 /// Fully resolved style for a widget node.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputedStyle {
+    /// Scale already applied to absolute computed lengths.
+    pub ui_scale: f32,
+    pub text_scale: f32,
+    /// Styles for paint-time parts whose geometry belongs to scrolling or text.
+    pub paint_parts: Arc<std::collections::BTreeMap<String, ComputedStyle>>,
     /// CSS custom properties after this node's cascade. Keeping them on the
     /// immutable style snapshot lets both initial tree construction and
     /// targeted restyles pass inherited variables without a separate side
@@ -920,6 +925,8 @@ pub struct ComputedStyle {
     pub align_items: AlignItems,
     pub align_content: AlignContent,
     pub gap: f32,
+    pub row_gap: Option<f32>,
+    pub column_gap: Option<f32>,
     /// `width / height` the box keeps when only one axis is determined, so a
     /// square control can take its size from the container instead of pinning
     /// both axes. `None` is CSS `aspect-ratio: auto`.
@@ -999,6 +1006,9 @@ impl ComputedStyle {
 impl Default for ComputedStyle {
     fn default() -> Self {
         Self {
+            paint_parts: Arc::default(),
+            ui_scale: 1.0,
+            text_scale: 1.0,
             custom_properties: CustomProperties::default(),
             explicit_properties: StylePropertyMask::default(),
             inherited_properties: StylePropertyMask::default(),
@@ -1049,6 +1059,8 @@ impl Default for ComputedStyle {
             align_items: AlignItems::Stretch,
             align_content: AlignContent::Stretch,
             gap: 0.0,
+            row_gap: None,
+            column_gap: None,
             aspect_ratio: None,
             flex_grow: 0.0,
             flex_shrink: 1.0,
@@ -1179,7 +1191,10 @@ impl CornerShapes {
     /// The `corner-shape` shorthand: one to four keywords expanding like
     /// `border-radius`.
     pub fn from_css(value: &str) -> Self {
-        let shapes: Vec<_> = value.split_whitespace().map(CornerShape::from_css).collect();
+        let shapes: Vec<_> = value
+            .split_whitespace()
+            .map(CornerShape::from_css)
+            .collect();
         let [top_left, top_right, bottom_right, bottom_left] = match shapes.as_slice() {
             [all] => [*all; 4],
             [a, b] => [*a, *b, *a, *b],
@@ -1207,7 +1222,11 @@ impl CornerShapes {
     /// this shape under a clip that removes the scoops.
     pub fn round_radii(self, radii: Corners) -> Corners {
         let keep = |shape: CornerShape, radius: f32| {
-            if shape == CornerShape::Scoop { 0.0 } else { radius }
+            if shape == CornerShape::Scoop {
+                0.0
+            } else {
+                radius
+            }
         };
         Corners {
             top_left: keep(self.top_left, radii.top_left),

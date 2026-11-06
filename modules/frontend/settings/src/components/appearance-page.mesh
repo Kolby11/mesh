@@ -85,6 +85,12 @@
         <column class="settings-section">
             <text class="settings-section-title">{t('appearance.fonts')}</text>
             <text class="settings-section-copy">{t('appearance.fonts.copy')}</text>
+            <row class="settings-info-row"><text>{t('appearance.base_size')}</text><text>{tostring(base_size) .. " px"}</text></row>
+            <slider min="10" max="32" step="1" value={base_size} onchange={onBaseSize} onrelease={onBaseSizeCommit} aria-label={t('appearance.base_size')} />
+            <GlassButton label={t('appearance.base_size_reset')} onclick={onBaseSizeReset} />
+            <row class="settings-info-row"><text>{t('appearance.shell_scale')}</text><text>{tostring(shell_scale) .. "%"}</text></row>
+            <slider min="70" max="200" step="5" value={shell_scale} onchange={onShellScale} onrelease={onShellScaleCommit} aria-label={t('appearance.shell_scale')} />
+            <GlassButton label={t('appearance.shell_scale_reset')} onclick={onShellScaleReset} />
             <scroll class="settings-list resource-list">
                 {#for row in font_rows key={row.name}}
                     <button class="resource-option language-option" class:language-option-active={row.name == font_value} style:font-family={row.family} onclick={onFontSelect(row.name)}>
@@ -159,6 +165,8 @@ icon_theme_rows = {}
 font_rows = {}
 icon_theme_value = "hicolor"
 font_value = "system-ui"
+base_size = 14
+shell_scale = 100
 icon_more_hidden = true
 font_more_hidden = true
 locale_slovak = false
@@ -561,6 +569,10 @@ effect(function()
     end
     -- Resources first: theme cards name the recommended fonts that are installed.
     sync_system_resources()
+    local namespaces = settings_service and settings_service.namespaces or {}
+    local shell = namespaces.shell or {}
+    base_size = tonumber((shell.fonts or {}).base_size) or 14
+    shell_scale = tonumber((shell.fonts or {}).shell_scale) or 100
     sync_theme(current_theme)
     local pinned = theme and theme.scope == "profile"
     theme_scope_label = pinned and t('appearance.theme.pinned') or t('appearance.theme.shared')
@@ -592,6 +604,17 @@ function onIconThemeSelect(theme_id)
     icon_theme_value = selected
     theme.set_icon_theme(selected)
 end
+
+function onBaseSize(value) base_size = math.clamp(math.floor((slider_number(value) or 14) + 0.5), 10, 32) end
+function onBaseSizeCommit(value) onBaseSize(value) theme.set_font_size(base_size) end
+function onBaseSizeReset() base_size = 14 theme.set_font_size(14) end
+
+function onShellScale(value)
+    if type(value) == "table" then value = value.value end
+    shell_scale = math.clamp(math.floor((tonumber(value) or 100) + 0.5), 70, 200)
+end
+function onShellScaleCommit(value) onShellScale(value) theme.set_shell_scale(shell_scale) end
+function onShellScaleReset() shell_scale = 100 theme.set_shell_scale(100) end
 
 function onFontSelect(family)
     local selected = tostring(family or "")

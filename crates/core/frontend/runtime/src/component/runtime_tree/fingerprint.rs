@@ -1,0 +1,496 @@
+use super::*;
+
+pub(super) struct RuntimeTreeHasher(u64);
+
+impl Default for RuntimeTreeHasher {
+    fn default() -> Self {
+        Self(FNV_OFFSET)
+    }
+}
+
+impl Hasher for RuntimeTreeHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.0 ^= u64::from(*byte);
+            self.0 = self.0.wrapping_mul(FNV_PRIME);
+        }
+    }
+
+    fn write_u8(&mut self, value: u8) {
+        self.write_mix(u64::from(value));
+    }
+
+    fn write_u16(&mut self, value: u16) {
+        self.write_mix(u64::from(value));
+    }
+
+    fn write_u32(&mut self, value: u32) {
+        self.write_mix(u64::from(value));
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.write_mix(value);
+    }
+
+    fn write_u128(&mut self, value: u128) {
+        self.write_mix(value as u64);
+        self.write_mix((value >> 64) as u64);
+    }
+
+    fn write_usize(&mut self, value: usize) {
+        self.write_mix(value as u64);
+    }
+
+    fn write_i8(&mut self, value: i8) {
+        self.write_mix(value as u8 as u64);
+    }
+
+    fn write_i16(&mut self, value: i16) {
+        self.write_mix(value as u16 as u64);
+    }
+
+    fn write_i32(&mut self, value: i32) {
+        self.write_mix(value as u32 as u64);
+    }
+
+    fn write_i64(&mut self, value: i64) {
+        self.write_mix(value as u64);
+    }
+
+    fn write_i128(&mut self, value: i128) {
+        self.write_u128(value as u128);
+    }
+
+    fn write_isize(&mut self, value: isize) {
+        self.write_mix(value as usize as u64);
+    }
+}
+
+impl RuntimeTreeHasher {
+    #[inline]
+    pub(super) fn write_mix(&mut self, value: u64) {
+        self.0 ^= value;
+        self.0 = self.0.wrapping_mul(FNV_PRIME);
+        self.0 ^= self.0 >> 32;
+    }
+}
+
+pub(super) fn retained_snapshot(node: &WidgetNode) -> RetainedNodeSnapshot {
+    retained_snapshot_with_render(node, RenderObjectFingerprint::for_node(node, None), None)
+}
+
+/// Builds a retained snapshot, optionally reusing fingerprints that the scoped
+/// update contract proves cannot have changed.
+///
+/// Clean nodes can still move when layout propagates from a dirty subtree (the
+/// common scroll-frame case). Passing their previous snapshot avoids hashing
+/// computed style and attributes, rebuilding child ids, or re-reading state;
+/// only the layout fingerprint is refreshed. Authoritative dirty roots always
+/// pass `None` and receive the complete fingerprint diff.
+pub(super) fn retained_snapshot_with_render(
+    node: &WidgetNode,
+    render: RenderObjectFingerprint,
+    geometry_only_previous: Option<&RetainedNodeSnapshot>,
+) -> RetainedNodeSnapshot {
+    if let Some(previous) = geometry_only_previous {
+        return RetainedNodeSnapshot {
+            layout: layout_fingerprint(node),
+            style_hash: previous.style_hash,
+            attributes_hash: previous.attributes_hash,
+            child_ids: previous.child_ids.clone(),
+            state: previous.state,
+            render,
+            last_seen_epoch: 0,
+        };
+    }
+
+    RetainedNodeSnapshot {
+        layout: layout_fingerprint(node),
+        style_hash: style_fingerprint(&node.computed_style),
+        attributes_hash: attributes_fingerprint(node),
+        child_ids: node.children.iter().map(|child| child.id).collect(),
+        state: node.state,
+        render,
+        last_seen_epoch: 0,
+    }
+}
+
+pub(super) fn layout_fingerprint(node: &WidgetNode) -> LayoutFingerprint {
+    let layout = node.layout;
+    let scroll = node.resolved_scroll_metrics();
+    (
+        layout.x.to_bits(),
+        layout.y.to_bits(),
+        layout.width.to_bits(),
+        layout.height.to_bits(),
+        scroll.x.to_bits(),
+        scroll.y.to_bits(),
+        scroll.max_x.to_bits(),
+        scroll.max_y.to_bits(),
+        scroll.content_width.to_bits(),
+        scroll.content_height.to_bits(),
+    )
+}
+
+pub(super) fn style_fingerprint(style: &ComputedStyle) -> u64 {
+    let mut hasher = RuntimeTreeHasher::default();
+    hash_style_fields(style, &mut hasher);
+    hasher.finish()
+}
+
+pub(super) fn hash_style_fields(style: &ComputedStyle, hasher: &mut impl Hasher) {
+    style.ui_scale.to_bits().hash(hasher);
+    style.text_scale.to_bits().hash(hasher);
+    for (name, part) in style.paint_parts.iter() {
+        name.hash(hasher);
+        hash_style_fields(part, hasher);
+    }
+    mesh_core_render::paint_variables_fingerprint(style).hash(hasher);
+    hash_dimension(style.width, hasher);
+    hash_dimension(style.height, hasher);
+    hash_dimension(style.min_width, hasher);
+    hash_dimension(style.max_width, hasher);
+    hash_dimension(style.min_height, hasher);
+    hash_dimension(style.max_height, hasher);
+    hash_edges(style.padding, hasher);
+    hash_edges(style.margin, hasher);
+    style.surface_exclusive_zone.hash(hasher);
+    hash_edges(style.border_width, hasher);
+    hash_color(style.background_color, hasher);
+    match &style.background_paint {
+        BackgroundPaint::None => 0_u8.hash(hasher),
+        BackgroundPaint::Image(source) => {
+            1_u8.hash(hasher);
+            source.path.hash(hasher);
+        }
+        BackgroundPaint::MultiStopLinearGradient(colors) => {
+            3_u8.hash(hasher);
+            colors.len().hash(hasher);
+            for color in colors {
+                color.r.hash(hasher);
+                color.g.hash(hasher);
+                color.b.hash(hasher);
+                color.a.hash(hasher);
+            }
+        }
+        BackgroundPaint::LinearGradient(gradient) => {
+            2_u8.hash(hasher);
+            hash_color(gradient.from, hasher);
+            hash_color(gradient.to, hasher);
+        }
+        BackgroundPaint::Gradient(gradient) => {
+            4_u8.hash(hasher);
+            match gradient.geometry {
+                GradientGeometry::Linear { angle_degrees } => {
+                    0_u8.hash(hasher);
+                    angle_degrees.to_bits().hash(hasher);
+                }
+                GradientGeometry::Radial {
+                    shape,
+                    extent,
+                    center,
+                } => {
+                    1_u8.hash(hasher);
+                    std::mem::discriminant(&shape).hash(hasher);
+                    std::mem::discriminant(&extent).hash(hasher);
+                    center.0.to_bits().hash(hasher);
+                    center.1.to_bits().hash(hasher);
+                }
+            }
+            gradient.stops.len().hash(hasher);
+            for stop in &gradient.stops {
+                hash_color(stop.color, hasher);
+                stop.position.to_bits().hash(hasher);
+            }
+        }
+    }
+    hash_color(style.border_color, hasher);
+    hash_corners(style.border_radius, hasher);
+    style.corner_shape.hash(hasher);
+    style.opacity.to_bits().hash(hasher);
+    hash_transform(style.transform, hasher);
+    for origin in [style.transform_origin.x, style.transform_origin.y] {
+        match origin {
+            mesh_core_elements::style::TransformOriginValue::Percent(value) => {
+                0_u8.hash(hasher);
+                value.to_bits().hash(hasher);
+            }
+            mesh_core_elements::style::TransformOriginValue::Px(value) => {
+                1_u8.hash(hasher);
+                value.to_bits().hash(hasher);
+            }
+        }
+    }
+    style.transitions.hash(hasher);
+    style.animations.hash(hasher);
+    style.overflow_x.hash(hasher);
+    style.overflow_y.hash(hasher);
+    style.font_family.hash(hasher);
+    style.font_size.to_bits().hash(hasher);
+    style.font_weight.hash(hasher);
+    hash_color(style.color, hasher);
+    style.text_align.hash(hasher);
+    style.line_height.to_bits().hash(hasher);
+    style.font_style.hash(hasher);
+    style.letter_spacing.to_bits().hash(hasher);
+    style.text_overflow.hash(hasher);
+    style.white_space.hash(hasher);
+    style.text_direction.hash(hasher);
+    style.display.hash(hasher);
+    std::mem::discriminant(&style.visibility).hash(hasher);
+    style.direction.hash(hasher);
+    style.justify_content.hash(hasher);
+    style.align_items.hash(hasher);
+    style.align_content.hash(hasher);
+    style.gap.to_bits().hash(hasher);
+    style.row_gap.map(f32::to_bits).hash(hasher);
+    style.column_gap.map(f32::to_bits).hash(hasher);
+    style.flex_grow.to_bits().hash(hasher);
+    style.flex_shrink.to_bits().hash(hasher);
+    hash_dimension(style.flex_basis, hasher);
+    style.flex_wrap.hash(hasher);
+    style.align_self.hash(hasher);
+    style.position.hash(hasher);
+    style.mix_blend_mode.hash(hasher);
+    style.z_index.hash(hasher);
+    style.box_shadow.offset_x.to_bits().hash(hasher);
+    style.box_shadow.offset_y.to_bits().hash(hasher);
+    style.box_shadow.blur_radius.to_bits().hash(hasher);
+    style.box_shadow.spread_radius.to_bits().hash(hasher);
+    hash_color(style.box_shadow.color, hasher);
+    style.box_shadow.inset.hash(hasher);
+    style.additional_box_shadows.len().hash(hasher);
+    for shadow in &style.additional_box_shadows {
+        shadow.offset_x.to_bits().hash(hasher);
+        shadow.offset_y.to_bits().hash(hasher);
+        shadow.blur_radius.to_bits().hash(hasher);
+        shadow.spread_radius.to_bits().hash(hasher);
+        hash_color(shadow.color, hasher);
+        shadow.inset.hash(hasher);
+    }
+    style.outline.width.to_bits().hash(hasher);
+    style.outline.offset.to_bits().hash(hasher);
+    hash_color(style.outline.color, hasher);
+    style.filter.blur_radius.to_bits().hash(hasher);
+    style.backdrop_filter.blur_radius.to_bits().hash(hasher);
+    style.backdrop_filter.refract.hash(hasher);
+    style.backdrop_filter.refract_depth.to_bits().hash(hasher);
+    style.backdrop_filter.refract_edge.to_bits().hash(hasher);
+    style.backdrop_filter.dispersion.to_bits().hash(hasher);
+    style.backdrop_filter.grain.to_bits().hash(hasher);
+    hash_option_f32(style.inset_top, hasher);
+    hash_option_f32(style.inset_right, hasher);
+    hash_option_f32(style.inset_bottom, hasher);
+    hash_option_f32(style.inset_left, hasher);
+    hash_option_f32(style.icon_fill, hasher);
+    hash_option_f32(style.icon_weight, hasher);
+    hash_option_f32(style.icon_grade, hasher);
+    hash_option_f32(style.icon_optical_size, hasher);
+}
+
+pub(super) fn attributes_fingerprint(node: &WidgetNode) -> u64 {
+    let mut hasher = RuntimeTreeHasher::default();
+    node.tag.hash(&mut hasher);
+    node.module_id().hash(&mut hasher);
+    for (key, value) in &node.attributes {
+        if key == "content" && !node.children.is_empty() {
+            continue;
+        }
+        key.hash(&mut hasher);
+        value.hash(&mut hasher);
+    }
+    node.bind_this().hash(&mut hasher);
+    node.open_binding()
+        .map(|binding| (&binding.variable, &binding.owner))
+        .hash(&mut hasher);
+    node.source_file().hash(&mut hasher);
+    node.slot_source().hash(&mut hasher);
+    node.is_error_placeholder().hash(&mut hasher);
+    node.input_preedit.hash(&mut hasher);
+    node.input_cursor.hash(&mut hasher);
+    node.input_selection.hash(&mut hasher);
+    node.text_selection.hash(&mut hasher);
+    (node.state & (NodeState::SURFACE_ENTERING | NodeState::SURFACE_EXITING)).hash(&mut hasher);
+    for (event, handler) in &node.event_handlers {
+        event.hash(&mut hasher);
+        handler.hash(&mut hasher);
+    }
+    for (event, call) in &node.event_handler_calls {
+        event.hash(&mut hasher);
+        call.handler.hash(&mut hasher);
+        for arg in &call.args {
+            hash_json_value(arg, &mut hasher);
+        }
+    }
+    hash_accessibility_role(&node.accessibility.role, &mut hasher);
+    node.accessibility.label.hash(&mut hasher);
+    node.accessibility.description.hash(&mut hasher);
+    node.accessibility.focusable.hash(&mut hasher);
+    // Accessibility snapshots derive focus from the live interaction state;
+    // the accessibility field is only a shell compatibility projection.
+    node.state.contains(NodeState::FOCUSED).hash(&mut hasher);
+    node.accessibility.hidden.hash(&mut hasher);
+    node.accessibility.visible.hash(&mut hasher);
+    node.accessibility.keyboard_shortcut.hash(&mut hasher);
+    node.accessibility.state.disabled.hash(&mut hasher);
+    node.accessibility.state.checked.hash(&mut hasher);
+    node.accessibility.state.expanded.hash(&mut hasher);
+    node.accessibility.state.selected.hash(&mut hasher);
+    node.accessibility.state.pressed.hash(&mut hasher);
+    node.accessibility.state.busy.hash(&mut hasher);
+    node.accessibility.state.invalid.hash(&mut hasher);
+    node.accessibility.state.required.hash(&mut hasher);
+    node.accessibility.state.value.hash(&mut hasher);
+    node.accessibility
+        .state
+        .value_min
+        .map(f32::to_bits)
+        .hash(&mut hasher);
+    node.accessibility
+        .state
+        .value_max
+        .map(f32::to_bits)
+        .hash(&mut hasher);
+    hasher.finish()
+}
+
+pub(super) fn hash_accessibility_role(role: &AccessibilityRole, hasher: &mut impl Hasher) {
+    match role {
+        AccessibilityRole::Button => 0_u8.hash(hasher),
+        AccessibilityRole::Slider => 1_u8.hash(hasher),
+        AccessibilityRole::Label => 2_u8.hash(hasher),
+        AccessibilityRole::TextInput => 3_u8.hash(hasher),
+        AccessibilityRole::Checkbox => 4_u8.hash(hasher),
+        AccessibilityRole::Switch => 5_u8.hash(hasher),
+        AccessibilityRole::Region => 6_u8.hash(hasher),
+        AccessibilityRole::List => 7_u8.hash(hasher),
+        AccessibilityRole::ListItem => 8_u8.hash(hasher),
+        AccessibilityRole::Image => 9_u8.hash(hasher),
+        AccessibilityRole::Toolbar => 10_u8.hash(hasher),
+        AccessibilityRole::Menu => 11_u8.hash(hasher),
+        AccessibilityRole::MenuItem => 12_u8.hash(hasher),
+        AccessibilityRole::Dialog => 13_u8.hash(hasher),
+        AccessibilityRole::Alert => 14_u8.hash(hasher),
+        AccessibilityRole::Status => 15_u8.hash(hasher),
+        AccessibilityRole::ProgressBar => 16_u8.hash(hasher),
+        AccessibilityRole::Tab => 17_u8.hash(hasher),
+        AccessibilityRole::TabPanel => 18_u8.hash(hasher),
+        AccessibilityRole::Separator => 19_u8.hash(hasher),
+        AccessibilityRole::Custom(value) => {
+            20_u8.hash(hasher);
+            value.hash(hasher);
+        }
+    }
+}
+
+pub(super) fn hash_json_value(value: &serde_json::Value, hasher: &mut impl Hasher) {
+    match value {
+        serde_json::Value::Null => 0u8.hash(hasher),
+        serde_json::Value::Bool(value) => {
+            1u8.hash(hasher);
+            value.hash(hasher);
+        }
+        serde_json::Value::Number(value) => {
+            2u8.hash(hasher);
+            if let Some(value) = value.as_i64() {
+                0u8.hash(hasher);
+                value.hash(hasher);
+            } else if let Some(value) = value.as_u64() {
+                1u8.hash(hasher);
+                value.hash(hasher);
+            } else if let Some(value) = value.as_f64() {
+                2u8.hash(hasher);
+                value.to_bits().hash(hasher);
+            } else {
+                3u8.hash(hasher);
+                value.to_string().hash(hasher);
+            }
+        }
+        serde_json::Value::String(value) => {
+            3u8.hash(hasher);
+            value.hash(hasher);
+        }
+        serde_json::Value::Array(values) => {
+            4u8.hash(hasher);
+            values.len().hash(hasher);
+            for value in values {
+                hash_json_value(value, hasher);
+            }
+        }
+        serde_json::Value::Object(values) => {
+            5u8.hash(hasher);
+            values.len().hash(hasher);
+            for (key, value) in values {
+                key.hash(hasher);
+                hash_json_value(value, hasher);
+            }
+        }
+    }
+}
+
+/// Converts NodeState to the canonical pseudo-state dependency mask used
+/// by style indexing and retained-tree invalidation.
+pub(super) fn state_bitmask(state: NodeState) -> u32 {
+    mesh_core_elements::pseudo_state_mask(state)
+}
+
+pub(super) fn hash_dimension(value: Dimension, hasher: &mut impl Hasher) {
+    match value {
+        Dimension::Auto => 0u8.hash(hasher),
+        Dimension::Px(px) => {
+            1u8.hash(hasher);
+            px.to_bits().hash(hasher);
+        }
+        Dimension::Percent(percent) => {
+            2u8.hash(hasher);
+            percent.to_bits().hash(hasher);
+        }
+        Dimension::Content => 3u8.hash(hasher),
+        Dimension::Fit => 4u8.hash(hasher),
+    }
+}
+
+pub(super) fn hash_edges(value: Edges, hasher: &mut impl Hasher) {
+    value.top.to_bits().hash(hasher);
+    value.right.to_bits().hash(hasher);
+    value.bottom.to_bits().hash(hasher);
+    value.left.to_bits().hash(hasher);
+}
+
+pub(super) fn hash_corners(value: Corners, hasher: &mut impl Hasher) {
+    value.top_left.to_bits().hash(hasher);
+    value.top_right.to_bits().hash(hasher);
+    value.bottom_right.to_bits().hash(hasher);
+    value.bottom_left.to_bits().hash(hasher);
+}
+
+pub(super) fn hash_color(value: Color, hasher: &mut impl Hasher) {
+    value.r.hash(hasher);
+    value.g.hash(hasher);
+    value.b.hash(hasher);
+    value.a.hash(hasher);
+}
+
+pub(super) fn hash_transform(value: Transform2D, hasher: &mut impl Hasher) {
+    value.translate_x.to_bits().hash(hasher);
+    value.translate_y.to_bits().hash(hasher);
+    value.scale_x.to_bits().hash(hasher);
+    value.scale_y.to_bits().hash(hasher);
+    value.rotation.to_bits().hash(hasher);
+    value.skew_x.to_bits().hash(hasher);
+    value.skew_y.to_bits().hash(hasher);
+}
+
+pub(super) fn hash_option_f32(value: Option<f32>, hasher: &mut impl Hasher) {
+    match value {
+        Some(value) => {
+            true.hash(hasher);
+            value.to_bits().hash(hasher);
+        }
+        None => false.hash(hasher),
+    }
+}

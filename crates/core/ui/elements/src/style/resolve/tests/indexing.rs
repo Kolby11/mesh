@@ -435,3 +435,23 @@ fn compound_state_dependencies_do_not_widen_candidate_buckets() {
         }
     }
 }
+
+#[test]
+fn rule_index_rebuilds_after_in_place_declaration_and_selector_edits() {
+    let mut rules = vec![StyleRule {
+        selector: Selector::Class("proof".into()),
+        declarations: vec![Declaration {
+            property: "color".into(), value: StyleValue::Literal("red".into()),
+        }],
+        container_query: None,
+    }];
+    let mut cache = None;
+    let initial = super::super::index::ensure_index(&rules, &mut cache).revision;
+    rules[0].declarations[0].value = StyleValue::Literal("blue".into());
+    let changed = super::super::index::ensure_index(&rules, &mut cache).revision;
+    assert_ne!(initial, changed);
+    rules[0].selector = Selector::Class("other".into());
+    let selected = super::super::index::ensure_index(&rules, &mut cache).revision;
+    assert_ne!(changed, selected);
+    assert_eq!(selected, super::super::index::ensure_index(&rules, &mut cache).revision);
+}

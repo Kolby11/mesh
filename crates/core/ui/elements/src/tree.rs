@@ -509,6 +509,8 @@ pub struct WidgetNode {
     pub scroll_metrics: Option<WidgetScrollMetrics>,
     /// Set by the shell on the focused input while an IME composes.
     pub input_preedit: Option<InputPreedit>,
+    pub input_cursor: Option<usize>,
+    pub input_selection: Option<(usize, usize)>,
     /// Set by the shell on the selectable text holding the selection anchor.
     pub text_selection: Option<Arc<TextSelection>>,
     /// Stable runtime identity for this node, kept out of the string attribute map.
@@ -646,6 +648,8 @@ impl WidgetNode {
             state: NodeState::default(),
             scroll_metrics: None,
             input_preedit: None,
+            input_cursor: None,
+            input_selection: None,
             text_selection: None,
             mesh_key: None,
             loop_identity: None,
@@ -1022,6 +1026,8 @@ mod tests {
             state: node.state,
             scroll_metrics: node.scroll_metrics,
             input_preedit: node.input_preedit,
+            input_cursor: node.input_cursor,
+            input_selection: node.input_selection,
             text_selection: node.text_selection.clone(),
             mesh_key: node.mesh_key.clone(),
             loop_identity: node.loop_identity.clone(),

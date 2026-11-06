@@ -373,7 +373,7 @@ work. Disable optional stage profiling when comparing timing results.
 ## CPU glass timing fixture
 
 ```bash
-nix develop -c cargo test -p mesh-core-shell --release --lib glass_dock_cpu_raster_timing_profile -- --ignored --nocapture --test-threads=1
+nix develop -c cargo test -p mesh-core-frontend-runtime --release --lib glass_dock_cpu_raster_timing_profile -- --ignored --nocapture --test-threads=1
 ```
 
 This compositor-free timing fixture paints the shipped glass dock at 2880×114,
@@ -498,6 +498,34 @@ region; each batch drops its contexts and collects the shared VM. It measures
 host setup alone, not complete component mounting, and has no latency gate.
 
 ## Formatter and theme detail workloads
+
+`theme_worker_preparation_profile` compares direct theme preparation with
+worker submission, then records shell-thread validation, commit handling and
+the complete settings transaction. It uses a single Liquid Glass theme fixture;
+it does not include visible surfaces, resource readiness or display feedback.
+Set `MESH_PROFILE_THEME_COMMIT=1` for its test-only per-phase commit timing;
+those additional clock reads make it unsuitable for comparison with uninstrumented
+samples.
+Set `MESH_PROFILE_THEME_PUBLICATION=1` to break the theme-publication phase
+down further.
+In this fixture, `MESH_PROFILE_FORCE_THEME_EVENT=1` forces work for an
+unobserved theme event and `MESH_PROFILE_THEME_NORMALIZE=1` rebuilds the
+authoritative snapshot during publication; use alternating runs to compare
+those test-only references with the ordinary path.
+
+```bash
+nix develop -c cargo test -p mesh-core-shell --release --lib theme_worker_preparation_profile -- --ignored --nocapture --test-threads=1
+```
+
+`resource_completion_fanout_profile` uses normal resource consumers by
+default. Set `MESH_PROFILE_RESOURCE_PENDING=1` to measure opt-in pending-request
+accounting. A zero pending count is not itself a fully ready frame: another
+paint can request more resources.
+
+`bounded_theme_projection_profile` compares the current snapshot and event
+projection with the previous serializer on small and large synthetic theme
+documents. Its large case carries a relative speed gate; it does not measure
+shell commit or presentation latency.
 
 ```bash
 nix develop -c cargo test -p mesh-core-locale --release --lib cached_date_time_formatter_workload -- --ignored --nocapture --test-threads=1

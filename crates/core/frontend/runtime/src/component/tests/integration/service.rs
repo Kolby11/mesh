@@ -1,0 +1,813 @@
+use super::*;
+use crate::service::script_events_to_requests;
+
+#[test]
+fn frontend_component_observes_only_subscribed_interface_events() {
+    let component = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box />
+</template>
+<script lang="luau">
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio.events.VolumeChanged:subscribe(function(_event) end)
+end
+</script>
+"#,
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+
+    assert!(ShellComponent::observes_service_event(
+        &component,
+        &ServiceEvent::InterfaceEvent {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            name: "VolumeChanged".into(),
+            payload: serde_json::json!({ "device_id": "default", "level": 42 }),
+        },
+    ));
+    assert!(!ShellComponent::observes_service_event(
+        &component,
+        &ServiceEvent::InterfaceEvent {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            name: "OtherEvent".into(),
+            payload: serde_json::json!({}),
+        },
+    ));
+    assert!(!ShellComponent::observes_service_event(
+        &component,
+        &ServiceEvent::InterfaceEvent {
+            service: "mesh.network".into(),
+            source_module: "@mesh/networkmanager-network".into(),
+            name: "VolumeChanged".into(),
+            payload: serde_json::json!({}),
+        },
+    ));
+}
+
+#[test]
+fn frontend_component_keeps_service_updates_for_subscribed_event_services_only() {
+    let subscribed = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box />
+</template>
+<script lang="luau">
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio.events.VolumeChanged:subscribe(function(_event) end)
+end
+</script>
+"#,
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+    let idle = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box />
+</template>
+<script lang="luau">
+function init() end
+</script>
+"#,
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+
+    let audio_update = ServiceEvent::Updated {
+        service: "mesh.audio".into(),
+        source_module: "@mesh/pipewire-audio".into(),
+        payload: serde_json::json!({ "percent": 42, "muted": false }),
+    };
+
+    assert!(ShellComponent::observes_service_event(
+        &subscribed,
+        &audio_update,
+    ));
+    assert!(!ShellComponent::observes_service_event(
+        &idle,
+        &audio_update
+    ));
+}
+
+#[test]
+fn event_only_subscription_receives_events_without_service_state() {
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box />
+</template>
+<script lang="luau">
+seen_level = 0
+seen_percent = -1
+
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio.events.VolumeChanged:subscribe(function(event)
+        seen_level = event.level
+        seen_percent = audio.percent or -1
+    end)
+end
+</script>
+"#,
+        event_only_audio_network_catalog(),
+        &["service.audio.events"],
+    );
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({ "percent": 73 }),
+        })
+        .unwrap();
+
+    {
+        let runtimes = component.runtimes.lock().unwrap();
+        let runtime = runtimes.values().next().expect("mounted root runtime");
+        assert_eq!(runtime.script_ctx.service_context_generation(), 0);
+    }
+
+    component
+        .handle_service_event(&ServiceEvent::InterfaceEvent {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            name: "VolumeChanged".into(),
+            payload: serde_json::json!({ "device_id": "default", "level": 42 }),
+        })
+        .unwrap();
+
+    {
+        let runtimes = component.runtimes.lock().unwrap();
+        let runtime = runtimes.values().next().expect("mounted root runtime");
+        assert_eq!(
+            runtime.script_ctx.state().get("seen_level"),
+            Some(serde_json::json!(42))
+        );
+        assert_eq!(
+            runtime.script_ctx.state().get("seen_percent"),
+            Some(serde_json::json!(-1))
+        );
+    }
+}
+
+#[test]
+fn control_only_component_does_not_receive_service_state() {
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box />
+</template>
+<script lang="luau">
+audio_percent = -1
+
+function init()
+    local audio = require("mesh.audio@>=1.0")
+    audio_percent = audio.percent or -1
+end
+</script>
+"#,
+        audio_network_catalog(),
+        &["service.audio.control"],
+    );
+
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({ "percent": 64 }),
+        })
+        .unwrap();
+
+    let runtimes = component.runtimes.lock().unwrap();
+    let runtime = runtimes.values().next().expect("mounted root runtime");
+    assert_eq!(runtime.script_ctx.service_context_generation(), 0);
+    assert_eq!(
+        runtime.script_ctx.state().get("audio_percent"),
+        Some(serde_json::json!(-1))
+    );
+}
+
+#[test]
+fn frontend_proxy_update_reaches_panel_or_quick_settings_render_state() {
+    let mut ctx = make_audio_ctx();
+    ctx.load_script(
+        r#"
+-- Panel-style: read audio.percent and audio.muted directly on rerender.
+volumeIcon = "audio-volume-muted"
+volumeLevel = 0
+
+effect(function()
+    local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
+    if not audio_ok or not audio then return end
+    local pct = audio.percent or 0
+    local muted = audio.muted or false
+    volumeLevel = pct
+    if muted or pct == 0 then
+        volumeIcon = "audio-volume-muted"
+    elseif pct < 34 then
+        volumeIcon = "audio-volume-low"
+    elseif pct < 67 then
+        volumeIcon = "audio-volume-medium"
+    else
+        volumeIcon = "audio-volume-high"
+    end
+end)
+"#,
+    )
+    .unwrap();
+
+    // Simulate a ServiceEvent::Updated payload arriving (as apply_service_payload does).
+    ctx.apply_service_payload(
+        "audio",
+        &serde_json::json!({ "percent": 75, "muted": false }),
+    );
+
+    // The runtime calls the script's render handler on each rerender.
+    assert!(ctx.run_reactive_effects().is_empty());
+
+    // Verify that the template-visible reactive globals reflect the emitted payload,
+    // proving rerender-visible service state without any callback registration.
+    assert_eq!(
+        ctx.state.get("volumeIcon"),
+        Some(serde_json::json!("audio-volume-high")),
+        "volumeIcon should be high for 75% unmuted"
+    );
+    assert_eq!(
+        ctx.state.get("volumeLevel"),
+        Some(serde_json::json!(75)),
+        "volumeLevel should equal the emitted percent"
+    );
+    // Confirm the proxy read was tracked (needed for shell invalidation).
+    let tracked = ctx.tracked_fields_for_service("audio");
+    assert!(
+        tracked.contains("percent"),
+        "audio.percent should be in tracked fields"
+    );
+    assert!(
+        tracked.contains("muted"),
+        "audio.muted should be in tracked fields"
+    );
+}
+
+// ---------- integration test 2: proxy command becomes ServiceCall ----
+
+/// Proves that a bundled control handler (e.g. quick-settings onToggleWiFi)
+/// calling a named proxy command method publishes a `CoreRequest::ServiceCall`
+/// through the `script_events_to_requests` routing layer.
+#[test]
+fn frontend_proxy_command_from_bundled_handler_becomes_service_command_request() {
+    let mut ctx = make_network_ctx();
+    ctx.load_script(
+        r#"
+-- Quick-settings style: read wifi_enabled from proxy, then send the command.
+wifi_enabled = false
+
+function onToggleWiFi()
+    local network_ok, network = pcall(require, "mesh.network@>=1.0")
+    if network_ok and network then
+        local enabled = network.wifi_enabled or false
+        network.set_wifi_enabled(not enabled)
+    end
+end
+"#,
+    )
+    .unwrap();
+
+    // Seed proxy state so wifi_enabled read returns false.
+    ctx.apply_service_payload("network", &serde_json::json!({ "wifi_enabled": false }));
+
+    ctx.call_handler("onToggleWiFi", &[]).unwrap();
+    let events = ctx.drain_published_events();
+
+    // Route published events through the same path the shell uses.
+    let requests = script_events_to_requests(events);
+
+    assert!(
+        !requests.is_empty(),
+        "onToggleWiFi should publish at least one request"
+    );
+    match &requests[0] {
+        CoreRequest::ServiceCall {
+            interface,
+            command,
+            payload,
+            ..
+        } => {
+            assert_eq!(
+                interface, "mesh.network",
+                "interface should be mesh.network"
+            );
+            assert_eq!(
+                command, "set_wifi_enabled",
+                "command should be set_wifi_enabled"
+            );
+            assert_eq!(
+                payload.get("enabled").and_then(|v| v.as_bool()),
+                Some(true),
+                "enabled should be true (toggled from false)"
+            );
+        }
+        other => panic!("expected ServiceCall for network.set_wifi_enabled, got {other:?}"),
+    }
+}
+
+// ---------- integration test 3: missing service keeps fallback copy -----
+
+/// Proves that when `pcall(require, "mesh.audio@>=1.0")` fails (e.g. the
+/// interface contract is not registered in the catalog), the script still
+/// produces user-visible explanatory text rather than a blank or nil surface.
+#[test]
+fn frontend_missing_service_keeps_visible_fallback_copy() {
+    // Intentionally use an empty catalog so the require will fail.
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
+    let mut ctx = ScriptContext::new("@mesh/panel", caps).unwrap();
+    // No interface registered → pcall(require, ...) will catch the error.
+
+    ctx.load_script(
+        r#"
+-- Panel-style degraded path: pcall catches the missing interface.
+volumeLevel = "0"
+volumeIcon = "audio-volume-muted"
+batteryText = "N/A"
+
+effect(function()
+    local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
+    if not audio_ok or not audio then
+        volumeLevel = "0"
+        volumeIcon = "audio-volume-muted"
+        -- Explicit user-visible copy — not blank.
+        batteryText = "N/A"
+        return
+    end
+    volumeLevel = tostring(audio.percent or 0)
+end)
+"#,
+    )
+    .unwrap();
+
+    // No service payload applied — provider is absent.
+    assert!(ctx.run_reactive_effects().is_empty());
+
+    // Template-visible globals must be non-empty explanatory copy.
+    assert_eq!(
+        ctx.state.get("batteryText"),
+        Some(serde_json::json!("N/A")),
+        "batteryText should be 'N/A' when service is unavailable"
+    );
+    assert_eq!(
+        ctx.state.get("volumeLevel"),
+        Some(serde_json::json!("0")),
+        "volumeLevel should be '0' when service is unavailable"
+    );
+    assert_eq!(
+        ctx.state.get("volumeIcon"),
+        Some(serde_json::json!("audio-volume-muted")),
+        "volumeIcon should fall back to muted when service is unavailable"
+    );
+}
+
+#[test]
+fn quick_settings_audio_render_state_uses_seeded_payload() {
+    let mut ctx = make_audio_ctx();
+    ctx.load_script(
+        r#"
+ local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
+if not audio_ok then audio = nil end
+
+audio_label = "0%"
+audio_backend = "Unavailable"
+audio_tooltip = "Volume unavailable"
+icon_name = "audio-volume-muted"
+
+effect(function()
+    if not audio_ok or not audio or audio.available == false then
+        audio_label = "Audio unavailable"
+        audio_backend = "Unavailable"
+        audio_tooltip = "Audio unavailable"
+        icon_name = "audio-volume-muted"
+        return
+    end
+
+    local percent = math.floor((tonumber(audio.percent) or 0) + 0.5)
+    local muted = audio.muted or false
+    audio_label = string.format("%d%%", percent)
+    audio_backend = audio.source_module or "Unavailable"
+    if muted then
+        audio_tooltip = string.format("Volume muted at %d%%", percent)
+    else
+        audio_tooltip = string.format("Volume %d%%", percent)
+    end
+
+    if muted or percent == 0 then
+        icon_name = "audio-volume-muted"
+    elseif percent < 34 then
+        icon_name = "audio-volume-low"
+    elseif percent < 67 then
+        icon_name = "audio-volume-medium"
+    else
+        icon_name = "audio-volume-high"
+    end
+end)
+"#,
+    )
+    .unwrap();
+
+    ctx.apply_service_payload(
+        "audio",
+        &serde_json::json!({
+            "available": true,
+            "percent": 42,
+            "muted": false,
+            "source_module": "@mesh/pipewire-audio"
+        }),
+    );
+
+    assert!(ctx.run_reactive_effects().is_empty());
+
+    assert_eq!(ctx.state.get("audio_label"), Some(serde_json::json!("42%")));
+    assert_eq!(
+        ctx.state.get("audio_backend"),
+        Some(serde_json::json!("@mesh/pipewire-audio"))
+    );
+    assert_eq!(
+        ctx.state.get("audio_tooltip"),
+        Some(serde_json::json!("Volume 42%"))
+    );
+    assert_eq!(
+        ctx.state.get("icon_name"),
+        Some(serde_json::json!("audio-volume-medium"))
+    );
+}
+
+#[test]
+fn quick_settings_audio_slider_publishes_set_volume_service_command() {
+    let mut ctx = make_audio_ctx();
+    ctx.load_script(
+        r#"
+ local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
+if not audio_ok then audio = nil end
+
+audio_percent = 0
+audio_status = ""
+
+local function clamp_percent(value)
+    local numeric = tonumber(value) or 0
+    if numeric < 0 then return 0 end
+    if numeric > 100 then return 100 end
+    return math.floor(numeric + 0.5)
+end
+
+function onVolumeChange(value)
+    local percent = clamp_percent(value)
+    audio_percent = percent
+    if audio_ok and audio and audio.available ~= false then
+        audio.set_volume("default", percent)
+    else
+        audio_status = "Audio controls unavailable"
+    end
+end
+"#,
+    )
+    .unwrap();
+    ctx.apply_service_payload("audio", &serde_json::json!({ "available": true }));
+
+    ctx.call_handler("onVolumeChange", &[serde_json::json!(42)])
+        .unwrap();
+    let requests = script_events_to_requests(ctx.drain_published_events());
+
+    match requests.as_slice() {
+        [
+            CoreRequest::ServiceCall {
+                interface,
+                command,
+                payload,
+                ..
+            },
+        ] => {
+            assert_eq!(interface, "mesh.audio");
+            assert_eq!(command, "set_volume");
+            assert_eq!(
+                payload,
+                &serde_json::json!({ "device_id": "default", "percent": 42 })
+            );
+        }
+        other => panic!("expected one mesh.audio set_volume command, got {other:?}"),
+    }
+}
+
+#[test]
+fn quick_settings_network_toggle_publishes_set_wifi_enabled_service_command() {
+    let mut ctx = make_network_ctx();
+    ctx.load_script(
+        r#"
+ local network_ok, network = pcall(require, "mesh.network@>=1.0")
+if not network_ok then network = nil end
+
+network_status = ""
+
+function onToggleWiFi()
+    if not network_ok or not network or network.available == false then
+        network_status = "Network unavailable"
+        return
+    end
+    if network.controls_available == false or network.permission_denied == true then
+        network_status = "Network controls unavailable"
+        return
+    end
+    network.set_wifi_enabled(not (network.wifi_enabled or false))
+end
+"#,
+    )
+    .unwrap();
+    ctx.apply_service_payload(
+        "network",
+        &serde_json::json!({ "available": true, "wifi_enabled": false }),
+    );
+
+    ctx.call_handler("onToggleWiFi", &[]).unwrap();
+    let requests = script_events_to_requests(ctx.drain_published_events());
+
+    match requests.as_slice() {
+        [
+            CoreRequest::ServiceCall {
+                interface,
+                command,
+                payload,
+                ..
+            },
+        ] => {
+            assert_eq!(interface, "mesh.network");
+            assert_eq!(command, "set_wifi_enabled");
+            assert_eq!(payload, &serde_json::json!({ "enabled": true }));
+        }
+        other => panic!("expected one mesh.network set_wifi_enabled command, got {other:?}"),
+    }
+}
+
+#[test]
+fn quick_settings_missing_services_keep_visible_fallback_copy() {
+    let caps = CapabilitySet::from_ids(["service.audio.read", "service.network.read"]);
+    let mut ctx = ScriptContext::new("@mesh/quick-settings", caps).unwrap();
+
+    ctx.load_script(
+        r#"
+local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
+if not audio_ok then audio = nil end
+local network_ok, network = pcall(require, "mesh.network@>=1.0")
+if not network_ok then network = nil end
+
+audio_status = ""
+network_status = ""
+
+effect(function()
+    if not audio_ok or not audio or audio.available == false then
+        audio_status = "Audio unavailable"
+    end
+    if not network_ok or not network or network.available == false then
+        network_status = "Network unavailable"
+    end
+end)
+"#,
+    )
+    .unwrap();
+
+    assert!(ctx.run_reactive_effects().is_empty());
+
+    assert_eq!(
+        ctx.state.get("audio_status"),
+        Some(serde_json::json!("Audio unavailable"))
+    );
+    assert_eq!(
+        ctx.state.get("network_status"),
+        Some(serde_json::json!("Network unavailable"))
+    );
+}
+
+#[test]
+fn lazily_created_child_runtime_reads_service_state_cached_before_its_first_build() {
+    let mut component = test_frontend_component_with_local_components(
+        r#"
+<template>
+  <box>
+    <Child />
+  </box>
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+</script>
+"#,
+        &[(
+            "Child",
+            r#"
+<template>
+  <text content="{label}" />
+</template>
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+label = "none"
+
+effect(function()
+    label = tostring(audio.percent or "none")
+end)
+</script>
+"#,
+        )],
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+
+    let update = ServiceEvent::Updated {
+        service: "mesh.audio".into(),
+        source_module: "@mesh/pipewire-audio".into(),
+        payload: serde_json::json!({ "available": true, "percent": 42 }),
+    };
+
+    // The surface has not painted, so no runtime reads an audio field yet and
+    // the shell routes the update past it — the payload must still be cached.
+    assert!(!ShellComponent::observes_service_event(&component, &update));
+    ShellComponent::cache_service_payload(&mut component, &update);
+
+    let theme = mesh_core_theme::default_theme();
+    let mut buffer = PixelBuffer::new(160, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
+
+    assert!(
+        rendered_text(&component).iter().any(|text| text == "42"),
+        "child created after the update should render cached service state, got {:?}",
+        rendered_text(&component)
+    );
+}
+
+#[test]
+fn root_runtime_reads_service_state_cached_before_its_first_build() {
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <text content="{label}" />
+</template>
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+label = "none"
+
+effect(function()
+    label = tostring(audio.percent or "none")
+end)
+</script>
+"#,
+        audio_network_catalog(),
+        &["service.audio.read"],
+    );
+
+    let update = ServiceEvent::Updated {
+        service: "mesh.audio".into(),
+        source_module: "@mesh/pipewire-audio".into(),
+        payload: serde_json::json!({ "available": true, "percent": 42 }),
+    };
+
+    // The root runtime exists from mount but has read nothing yet, so the
+    // shell only caches the update for it.
+    assert!(!ShellComponent::observes_service_event(&component, &update));
+    ShellComponent::cache_service_payload(&mut component, &update);
+
+    let theme = mesh_core_theme::default_theme();
+    let mut buffer = PixelBuffer::new(160, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(160, 60), &mut buffer, 1.0)
+        .unwrap();
+
+    assert!(
+        rendered_text(&component).iter().any(|text| text == "42"),
+        "root runtime should render service state cached before its first paint, got {:?}",
+        rendered_text(&component)
+    );
+}
+
+/// A hidden surface does not paint, which is where deferred effects run, so
+/// the shell settles them offscreen: an effect is how a hidden notification
+/// popup decides to show itself.
+#[test]
+fn hidden_component_settles_effects_and_host_requests_offscreen() {
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<template>
+  <box />
+</template>
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+seen_percent = -1
+effect(function()
+    seen_percent = audio.percent or -1
+    if seen_percent > 50 then
+        mesh.shell.show_surface("@test/hidden")
+    end
+end)
+</script>
+"#,
+        audio_network_catalog(),
+        &["service.audio.read", "shell.surface"],
+    );
+
+    let mut requests = component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({ "percent": 64 }),
+        })
+        .unwrap();
+    requests.extend(component.settle_effects_offscreen().unwrap());
+
+    {
+        let runtimes = component.runtimes.lock().unwrap();
+        let runtime = runtimes.values().next().expect("mounted root runtime");
+        assert_eq!(
+            runtime.script_ctx.state().get("seen_percent"),
+            Some(serde_json::json!(64))
+        );
+    }
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ShowSurface { surface_id } if surface_id == "@test/hidden"
+        )),
+        "{requests:?}"
+    );
+}
+
+
+#[test]
+fn paint_effect_requests_include_service_calls_and_are_taken_once() {
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<script lang="luau">
+local audio = require("mesh.audio@>=1.0")
+seen_percent = -1
+effect(function()
+    seen_percent = audio.percent or -1
+    if seen_percent > 50 then
+        mesh.shell.show_surface("@test/target")
+        audio.set_volume("default", 33)
+    end
+end)
+function noop() end
+</script>
+<template><column><text>{audio.percent}</text><text>{seen_percent}</text></column></template>
+<style>* { transition: none; }</style>
+"#,
+        audio_network_catalog(),
+        &[
+            "service.audio.read",
+            "service.audio.control",
+            "shell.surface",
+        ],
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(160, 60);
+    let mut pixels = PixelBuffer::new(160, 60);
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    assert!(component.take_paint_requests().is_empty());
+    let requests = component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.audio".into(),
+            source_module: "@mesh/pipewire-audio".into(),
+            payload: serde_json::json!({"available": true, "percent": 64, "muted": false}),
+        })
+        .unwrap();
+    assert!(
+        requests.is_empty(),
+        "effect must settle during paint: {requests:?}"
+    );
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    let requests = component.take_paint_requests();
+    assert_eq!(requests.len(), 2, "{requests:?}");
+    assert!(requests.iter().any(|request| matches!(request,
+        CoreRequest::ShowSurface { surface_id } if surface_id == "@test/target")));
+    assert!(requests.iter().any(|request| matches!(request,
+        CoreRequest::ServiceCall { command, .. } if command == "set_volume")));
+    assert_eq!(
+        component
+            .frontend_frame()
+            .unwrap()
+            .effects()
+            .host_requests()
+            .len(),
+        2
+    );
+    assert!(component.take_paint_requests().is_empty());
+    assert!(
+        component
+            .call_namespaced_handler("noop", &[])
+            .unwrap()
+            .is_empty()
+    );
+}

@@ -18,6 +18,8 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---
 
+- [ ] Validate independent text size and shell scale in a running shell, including controls, profile switching, popup geometry and accessibility. [Design](../.planning/todos/pending/2026-11-06-shell-scaling.md).
+- [ ] Measure end-to-end theme, font-family and size changes across visible surfaces and resource readiness, including compositor presentation feedback; preserve valid retained work and final-value correctness.
 - [ ] Implement the Material reference shell (`08-material-desktop`): editable desktop widget grid, widget picker, editing toolbar, side rail and dock, with a composition/profile and token-based theme. [Design](../.planning/todos/pending/2026-10-27-reference-shells.md).
 - [ ] Give `@mesh/material` its own composition once `08-material-desktop` lands; the theme recommends `@mesh/desk` until then.
 - [ ] Update the Settings and style-fixture tests that still expect glass panels under the solid themes (`clicking_a_theme_card_repaints_settings_in_the_new_theme_in_one_frame`, `settings_glass_surfaces_follow_the_active_theme_palette`, two `style::tests::fixtures` colours); the themes moved to Material surfaces on 2026-10-29 and the expected looks are undecided.
@@ -31,7 +33,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Bound custom-property and prop-reference resolution depth and work; long acyclic chains recurse without a limit. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Include keyboard shortcuts in semantic snapshot diffs; shortcut-only changes currently produce no field change. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Align transition shorthand property selection with longhand; names such as `padding-left` and `row-gap` are currently dropped. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/08-ui-element-core.md).
-- [ ] Preserve retained layout when an existing unkeyed node gains a key; structural reconciliation can delete its reused Taffy node and panic. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Preserve independent row and column gaps through style resolution and layout; both currently share one value. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Exclude shapes with invalid geometry from hit testing; they currently retain a rectangular hit region with no shape content. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Preserve quoted asset filenames during CSS reference expansion; `var(` or `prop(` in a filename is currently substituted. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).

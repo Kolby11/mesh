@@ -1,0 +1,51 @@
+{
+  "name": "@mesh/material-desktop",
+  "version": "0.1.0",
+  "description": "Material reference desktop composition.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "composition",
+    "uses": {
+      "modules": {
+        "@mesh/material-workspace": ">=0.1.0",
+        "@mesh/material": ">=0.1.0",
+        "@mesh/settings": ">=0.1.0"
+      }
+    },
+    "compose": {
+      "roots": {
+        "@mesh/material-workspace#default": {
+          "module": "@mesh/material-workspace",
+          "entrypoint": "main",
+          "active": true
+        },
+        "@mesh/settings#default": {
+          "module": "@mesh/settings",
+          "entrypoint": "main",
+          "active": true
+        }
+      },
+      "providers": {
+        "mesh.audio": "@mesh/pipewire-audio",
+        "mesh.brightness": "@mesh/backlight-brightness",
+        "mesh.media": "@mesh/mpris-media",
+        "mesh.weather": "@mesh/open-meteo-weather",
+        "mesh.network": "@mesh/networkmanager-network",
+        "mesh.apps": "@mesh/hyprland-apps",
+        "mesh.recorder": "@mesh/wf-recorder",
+        "mesh.notifications": "@mesh/freedesktop-notifications",
+        "mesh.system": "@mesh/proc-system",
+        "mesh.visualizer": "@mesh/cava-visualizer",
+        "mesh.wallpapers": "@mesh/wallpaper-directory",
+        "mesh.wm-keybinds": "@mesh/hyprland-keybinds",
+        "mesh.session": "@mesh/systemd-session"
+      },
+      "resources": {
+        "theme": "@mesh/material",
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      }
+    }
+  }
+}

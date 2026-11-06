@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "revision": 171,
+  "revision": 185,
   "from": {
     "module": "@mesh/glass"
   },
@@ -12,7 +12,8 @@
   "settings": {
     "shell": {
       "fonts": {
-        "ui_family": "Noto Sans"
+        "base_size": 16,
+        "ui_family": "Rubik"
       },
       "i18n": {
         "fallback_locale": "en",
@@ -32,11 +33,11 @@
       },
       "render": {
         "backdrop": {
-          "image": "/home/kolby/Pictures/Wallpapers/silk-folds.jpeg"
+          "image": "/home/kolby/Pictures/Wallpapers/mount-fuji.jpg"
         }
       },
       "theme": {
-        "active": "@mesh/vitrum:vitrum",
+        "active": "@mesh/nord:nord",
         "tokens": {
           "@mesh/glass-material.glass.backdrop.card": "blur(2.4px) refract(10px 8px) dispersion(0.6px)",
           "@mesh/glass-material.glass.backdrop.dock": "blur(2px) refract(9px 7px) dispersion(0.6px)",

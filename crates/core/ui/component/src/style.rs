@@ -10,7 +10,7 @@ pub struct StyleBlock {
 }
 
 /// A single style rule: selector + declarations.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StyleRule {
     pub selector: Selector,
     pub declarations: Vec<Declaration>,
@@ -111,7 +111,7 @@ pub enum StateSelector {
 }
 
 /// A single CSS-like property declaration.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
     pub property: String,
     pub value: StyleValue,

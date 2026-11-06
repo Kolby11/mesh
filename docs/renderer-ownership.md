@@ -11,7 +11,7 @@ research and migration gates are retained in
 | Component parser | `crates/core/ui/component/` | Parses `.mesh` template, script, and style blocks |
 | Frontend compiler | `crates/core/frontend/compiler/` | Resolves imports and builds runtime widget trees |
 | Element/style/layout model | `crates/core/ui/elements/` | Owns `WidgetNode`, computed style, retained Taffy layout, and semantic state |
-| Runtime identity | `crates/core/shell/src/shell/component/runtime_tree.rs` | Preserves node identity and dirty categories across updates |
+| Runtime identity | `crates/core/frontend/runtime/src/component/runtime_tree/` | Preserves node identity and dirty categories across updates |
 | Render objects and display list | `crates/core/frontend/render/src/render_object.rs` and `display_list.rs` | Synchronizes retained paint data, ordering, selection, and damage |
 | Painter contract | `crates/core/frontend/render/src/surface/painter.rs` | Lowers backend-neutral commands and records diagnostics/profiling |
 | Skia backend | `crates/core/frontend/render/src/surface/painter/backend.rs` | Executes low-level raster, path, image, gradient, layer, and effect operations |

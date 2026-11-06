@@ -1,0 +1,216 @@
+<template>
+    <column class="desktop" aria-label={t("desktop")}>
+        <row class="toolbar" role="toolbar" aria-label={t("desktop")}>
+            <icon name="view-grid" size="22" /><text class="toolbar-title">{t("desktop")}</text>
+            <button onclick={onEdit} aria-pressed={editing}>{editing and t("done") or t("edit")}</button>
+            <button hidden={not editing} onclick={onPicker} aria-expanded={picker}>{t("widgets")}</button>
+            <button hidden={not editing} onclick={onReset}>{t("reset")}</button>
+            <box class="spacer" /><ProfileSwitcher />
+        </row>
+        <row class="workspace">
+            <column class="rail" role="toolbar" aria-label={t("desktop")}>
+                <button onclick={onSettings} title={t("settings")} aria-label={t("settings")}><icon name="settings" size="22" /></button>
+                <button onclick={onEdit} title={t("edit")} aria-label={t("edit")}><icon name="document-edit" size="22" /></button>
+                <button onclick={onPicker} title={t("widgets")} aria-label={t("widgets")}><icon name="list-add" size="22" /></button>
+            </column>
+            <scroll class="canvas" aria-label={t("desktop")}>
+                <row class="widget-grid" class:editing={editing}>
+                    {#for widget in widgets key={widget.id}}
+                        <column class="widget" ref={widget.id} style:width={tostring(widget.width) .. "px"}>
+                            <row class="widget-heading">
+                                <button class="drag-handle" hidden={not editing} onpointerdown={onDragStart(widget.id)} onpointerup={onDragEnd} onkeydown={onMoveKey(widget.id)} aria-label={t("move")}><icon name="view-grid" size="16" /></button>
+                                <text>{t(widget.kind)}</text><box class="spacer" />
+                                <button hidden={not editing} onclick={onRemove(widget.id)} aria-label={t("remove")}><icon name="window-close" size="16" /></button>
+                            </row>
+                            <column class="clock-content" hidden={widget.kind ~= "clock"}><text class="clock-time">{clock_time}</text><text>{clock_date}</text></column>
+                            <column class="widget-content" hidden={widget.kind ~= "system"}><text class="metric">{system.available and tostring(math.floor(system.cpu or 0)) .. "%" or "—"}</text><text>{t("cpu")}</text><progress value={system.cpu or 0} max="100" aria-label={t("cpu")} /><text>{t("memory") .. ": " .. memory_label}</text></column>
+                            <column class="widget-content" hidden={widget.kind ~= "weather"}><icon name={weather_icon} size="48" /><text class="metric">{weather.available and tostring(math.floor(weather.temperature or 0)) .. "°" .. (weather.unit or "") or "—"}</text><text>{weather.available and weather.location or t("unavailable")}</text></column>
+                            <column class="widget-content" hidden={widget.kind ~= "media"}><text class="media-title">{media.available and media.title ~= "" and media.title or t("unavailable")}</text><text>{media.artist or ""}</text><row><button onclick={onPrevious} aria-label={t("previous")}><icon name="media-skip-backward" size="20" /></button><button onclick={onPlay} aria-label={t("play")}><icon name="media-playback-start" size="20" /></button><button onclick={onNext} aria-label={t("next")}><icon name="media-skip-forward" size="20" /></button></row></column>
+                            <row class="edit-actions" hidden={not editing}>
+                                <button onclick={onMove(widget.id, -1)} aria-label={t("earlier")}><icon name="go-previous" size="16" /></button>
+                                <button onclick={onMove(widget.id, 1)} aria-label={t("later")}><icon name="go-next" size="16" /></button>
+                                <button onclick={onResize(widget.id, -40)} aria-label={t("narrower")}><text>−</text></button>
+                                <button onclick={onResize(widget.id, 40)} aria-label={t("wider")}><text>+</text></button>
+                            </row>
+                        </column>
+                    {/for}
+                    <button class="empty" hidden={not empty} onclick={onPicker}>{t("empty")}</button>
+                </row>
+            </scroll>
+            <column class="picker" ref="widgetPicker" hidden={not picker} aria-label={t("widgets")}>
+                <row><text class="picker-title">{t("widgets")}</text><box class="spacer" /><button onclick={onPicker} aria-label={t("close")}><icon name="window-close" size="18" /></button></row>
+                <text class="hint">{t("hint")}</text>
+                <input value={query} oninput={onSearch} placeholder={t("search")} aria-label={t("search")} />
+                {#for choice in choices key={choice.kind}}
+                    <button class="picker-choice" hidden={not matches(choice.kind)} onclick={onAdd(choice.kind)} aria-label={t("add") .. ": " .. t(choice.kind)}><icon name={choice.icon} size="24" /><text>{t(choice.kind)}</text><box class="spacer" /><icon name="list-add" size="18" /></button>
+                {/for}
+            </column>
+        </row>
+        <row class="dock-wrap"><row class="dock" role="toolbar" aria-label={t("apps")}>
+            <button onclick={onSettings} aria-label={t("settings")}><icon name="settings" size="26" /></button>
+            {#for app in dock_apps key={app.id}}
+                <button class="app" class:running={app.running} onclick={onActivate(app.id)} title={app.name} aria-label={app.name}><image class="app-image" src={app.icon} alt="" hidden={not app.has_file} /><icon name={app.has_file and "application-x-executable" or app.icon ~= "" and app.icon or "application-x-executable"} size="28" hidden={app.has_file} /></button>
+            {/for}
+        </row></row>
+    </column>
+</template>
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local ProfileSwitcher = require("@mesh/profile-switcher")
+system = require("mesh.system")
+weather = require("mesh.weather")
+media = require("mesh.media")
+local apps = require("mesh.apps")
+local saved
+local drag
+editing = false
+picker = false
+query = ""
+widgets = {}
+empty = true
+effect(function() empty = #widgets == 0 end)
+choices = {{kind="clock",icon="clock"},{kind="system",icon="utilities-system-monitor"},{kind="weather",icon="weather-clear"},{kind="media",icon="media-playback-start"}}
+local function defaults() return {{id="clock-1",kind="clock",width=280},{id="system-2",kind="system",width=240},{id="weather-3",kind="weather",width=240},{id="media-4",kind="media",width=280}} end
+local function persist() if saved then saved.widgets = widgets end end
+local function index_of(id) for i, widget in widgets do if widget.id == id then return i end end end
+function init(self)
+    saved = self.storage
+    local restored = saved.widgets
+    local result, seen = {}, {}
+    if type(restored) == "table" then
+        for _, widget in restored do
+            if #result >= 32 then break end
+            if type(widget) == "table" and type(widget.id) == "string" and not seen[widget.id] and (widget.kind == "clock" or widget.kind == "system" or widget.kind == "weather" or widget.kind == "media") then
+                local width = tonumber(widget.width) or 240
+                if width ~= width then width = 240 end
+                result[#result+1] = {id=widget.id,kind=widget.kind,width=math.clamp(width,200,560)}
+                seen[widget.id] = true
+            end
+        end
+    end
+    widgets = type(restored) == "table" and result or defaults()
+end
+function onEdit() editing = not editing if not editing then picker = false drag = nil end end
+function onPicker() picker = not picker if picker then editing = true end end
+function onSearch(value) query = tostring(value or "") end
+function matches(kind) return string.find(string.lower(t(kind)), string.lower(query), 1, true) ~= nil end
+local function valid_kind(kind)
+    return kind == "clock" or kind == "system" or kind == "weather" or kind == "media"
+end
+function onAdd(kind)
+    if not valid_kind(kind) or #widgets >= 32 then return end
+    local serial = 1
+    while index_of(kind .. "-" .. tostring(serial)) do serial += 1 end
+    local list = table.clone(widgets)
+    list[#list+1] = {id=kind .. "-" .. tostring(serial),kind=kind,width=240}
+    widgets = list
+    persist()
+end
+function onRemove(id)
+    local i = index_of(id) if not i then return end
+    local list = table.clone(widgets) table.remove(list,i) widgets = list persist()
+end
+function onMove(id, delta)
+    local i = index_of(id) if not i then return end
+    local j = math.clamp(i+delta,1,#widgets)
+    local list = table.clone(widgets) list[i],list[j] = list[j],list[i] widgets = list persist()
+end
+function onResize(id, delta)
+    local i = index_of(id) if not i then return end
+    local list = table.clone(widgets) list[i] = table.clone(list[i]) list[i].width = math.clamp(list[i].width+delta,200,560) widgets = list persist()
+end
+function onMoveKey(id,event)
+    if event.key == "ArrowLeft" or event.key == "ArrowUp" then onMove(id,-1)
+    elseif event.key == "ArrowRight" or event.key == "ArrowDown" then onMove(id,1) end
+end
+function onDragStart(id,event) if editing then drag = {id=id,x=event.pointer.x,y=event.pointer.y} end end
+function onDragEnd(event)
+    if not drag then return end
+    local moved = drag
+    drag = nil
+    local x, y = event.pointer.x, event.pointer.y
+    if math.abs(x - moved.x) + math.abs(y - moved.y) <= 16 then return end
+    local picker_bounds = refs.widgetPicker
+    if picker and x >= picker_bounds.left and x <= picker_bounds.right and y >= picker_bounds.top and y <= picker_bounds.bottom then
+        onRemove(moved.id)
+        return
+    end
+    local from = index_of(moved.id)
+    if not from then return end
+    local target, distance = from, math.huge
+    for i, widget in widgets do
+        local bounds = refs[widget.id]
+        if bounds and bounds.width > 0 and bounds.height > 0 then
+            local dx, dy = x - (bounds.left + bounds.right) / 2, y - (bounds.top + bounds.bottom) / 2
+            local candidate = dx * dx + dy * dy
+            if candidate < distance then target, distance = i, candidate end
+        end
+    end
+    if from ~= target then
+        local list = table.clone(widgets)
+        local widget = table.remove(list, from)
+        table.insert(list, target, widget)
+        widgets = list
+        persist()
+    end
+end
+function onReset() widgets = defaults() persist() end
+function onSettings() mesh.shell.toggle_surface("@mesh/settings") end
+function onActivate(id) if apps.available then apps.activate(id) end end
+function onPlay() if media.available then media.play_pause() end end
+function onPrevious() if media.available then media.previous() end end
+function onNext() if media.available then media.next() end end
+weather_icon = "weather-clear"
+effect(function()
+    local icons = {clear="weather-clear",["partly-cloudy"]="weather-few-clouds",cloudy="weather-overcast",fog="weather-fog",drizzle="weather-showers-scattered",rain="weather-showers",snow="weather-snow",storm="weather-storm"}
+    weather_icon = icons[weather.condition] or "weather-clear"
+end)
+clock_time = ""
+clock_date = ""
+clock_now = os.time()
+effect(function() clock_time = mesh.locale.format_time(clock_now) clock_date = mesh.locale.format_date(clock_now,"full") end)
+task.spawn(function() while true do task.sleep((60-os.time()%60)*1000) clock_now=os.time() end end)
+memory_label = "—"
+effect(function() memory_label = system.available and tostring(math.floor((system.memory_used or 0)/1073741824*10)/10) .. " / " .. tostring(math.floor((system.memory_total or 0)/1073741824*10)/10) .. " GiB" or t("unavailable") end)
+dock_apps = {}
+effect(function()
+    local list = {}
+    if apps.available then
+        for _, app in apps.apps do
+            if #list >= 12 then break end
+            list[#list+1] = {id=app.id,name=app.name,icon=app.icon or "",running=app.running,has_file=string.sub(app.icon or "",1,1)=="/"}
+        end
+    end
+    dock_apps = list
+end)
+</script>
+<style>
+.desktop { width: 100%; height: 100%; padding: 20px; gap: 18px; background: var(--color-surface); color: var(--color-on-surface); exclusive-zone: none; }
+.toolbar { width: 100%; height: 60px; padding: 8px 18px; gap: 12px; align-items: center; border-radius: var(--radius-full); background: var(--color-surface-container-high); }
+.toolbar-title, .picker-title { font-size: 20px; font-weight: 600; }
+.spacer { flex-grow: 1; }
+.workspace { width: 100%; flex-grow: 1; min-height: 0; gap: 18px; }
+.rail { width: 60px; height: fit-content; padding: 8px; gap: 12px; border-radius: var(--radius-full); background: var(--color-surface-container-high); }
+.canvas { flex-grow: 1; flex-basis: 0; min-width: 0; height: 100%; padding: 24px; border-radius: 32px; background: var(--color-surface-container-low); }
+.widget-grid { width: 100%; height: fit-content; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.widget { min-width: 200px; max-width: 100%; height: 280px; padding: 18px; gap: 16px; border-radius: 28px; background: var(--color-secondary-container); color: var(--color-on-secondary-container); }
+.widget-heading { width: 100%; align-items: center; gap: 8px; }
+.widget-content, .clock-content { width: 100%; flex-grow: 1; justify-content: center; gap: 10px; }
+.clock-time { font-size: 48px; font-weight: 600; }
+.metric { font-size: 44px; font-weight: 600; }
+.media-title { font-size: 24px; white-space: normal; }
+.edit-actions { width: 100%; justify-content: space-between; gap: 4px; }
+.picker { width: 300px; height: 100%; padding: 20px; gap: 18px; border-radius: 28px; background: var(--color-surface-container-high); overflow-y: auto; }
+.picker-choice { width: 100%; padding: 16px; gap: 12px; background: var(--color-secondary-container); color: var(--color-on-secondary-container); border-radius: 18px; }
+.hint { white-space: normal; color: var(--color-on-surface-variant); }
+.dock-wrap { width: 100%; justify-content: center; }
+.dock { height: 64px; max-width: 100%; padding: 8px 18px; gap: 12px; align-items: center; border-radius: var(--radius-full); background: var(--color-surface-container-high); overflow-x: auto; }
+.app-image { width: 28px; height: 28px; }
+.app { width: 44px; height: 44px; padding: 8px; border-radius: 16px; }
+.running { background: var(--color-primary-container); color: var(--color-on-primary-container); }
+button { padding: 8px 12px; border-radius: var(--radius-full); background: var(--color-surface-container); color: var(--color-on-surface); }
+button:hover { background: var(--color-primary-container); color: var(--color-on-primary-container); }
+button:focus-visible { outline: 2px solid var(--color-primary); }
+@container (max-width: 1000px) { .picker { width: 240px; } .canvas { padding: 12px; } .desktop { padding: 12px; gap: 12px; } }
+@container (max-width: 700px) { .workspace { flex-direction: column; } .rail { width: 100%; height: 44px; flex-direction: row; } .picker { width: 100%; height: 240px; } .toolbar-title { display: none; } .toolbar { gap: 4px; padding: 8px; } }
+</style>

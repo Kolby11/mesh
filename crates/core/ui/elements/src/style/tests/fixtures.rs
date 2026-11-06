@@ -155,9 +155,9 @@ fn shipped_navigation_style_expected_diagnostics_do_not_block_tokens() {
     assert_eq!(
         nav_style.background_color,
         Color {
-            r: 10,
-            g: 10,
-            b: 14,
+            r: 22,
+            g: 22,
+            b: 30,
             a: 92,
         }
     );
@@ -201,9 +201,9 @@ fn shipped_audio_style_fixture_resolves_painter_relevant_values() {
     assert_eq!(
         style.background_color,
         Color {
-            r: 24,
-            g: 26,
-            b: 34,
+            r: 36,
+            g: 40,
+            b: 59,
             a: 71,
         }
     );

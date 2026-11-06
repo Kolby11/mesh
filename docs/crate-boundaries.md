@@ -16,9 +16,11 @@ This workspace keeps browser-like concerns split by crate:
   composition and bounded theme detail transport.
 - `mesh-core-component` parses `.mesh` single-file components into source ASTs.
 - `mesh-core-frontend` compiles `.mesh` source and builds `WidgetNode` trees.
-- `mesh-core-frontend-runtime` owns frontend runtime node identity and the
-  node-to-service-field index, runtime generation index, frontend catalog,
-  service dispatch and shared locale projections; component host extraction is in progress.
+- `mesh-core-frontend-runtime` owns the component host: script/component lifecycle,
+  composition, input and focus, retained layout/frame preparation, child-surface
+  requests and component rendering. It also owns runtime node/service identities,
+  the frontend catalog, service dispatch and shared locale projections. It consumes
+  lower-level surface configuration and host contracts without depending on shell.
 - `mesh-core-animation` owns easing, interpolation, transitions, and keyframes.
 - `mesh-core-interaction` queries `WidgetNode` trees for hit testing, focus, tooltip, and scroll behavior.
 - `mesh-core-render` paints `WidgetNode` trees into `PixelBuffer`s.
@@ -31,9 +33,9 @@ This workspace keeps browser-like concerns split by crate:
   owning declarations.
 - `mesh-core-frontend-abi` owns renderer-neutral frontend effects, caller
   identity, and capability-scoped host contracts.
-- `mesh-core-frontend-shell-adapter` owns the component host lifecycle and
-  shell-side adapters that lower the neutral ABI into renderer and surface
-  operations.
+- `mesh-core-frontend-shell-adapter` owns the host lifecycle contracts, built-in
+  service contract declarations and adapters that lower the neutral ABI into
+  renderer and surface operations. Shell owns their authoritative service implementations.
 - `mesh-core-shell` glues these crates to modules, services, theme, locale, diagnostics, and the event loop.
 
 Normal dependency direction should remain:
@@ -42,9 +44,9 @@ Normal dependency direction should remain:
 surface-policy -> no runtime boundary crates
 render -> elements + icon
 frontend -> component + elements + module + theme
-frontend-runtime -> capability + component + diagnostics + elements + frontend + frontend-abi + frontend-shell-adapter + locale + module + scripting + service
+frontend-runtime -> animation + capability + component + config + debug + diagnostics + elements + expression + frontend + frontend-abi + frontend-shell-adapter + icon + interaction + locale + module + render + resources + scripting + service + surface-config + surface-policy + theme + wayland
 frontend-abi -> capability
-frontend-shell-adapter -> frontend-abi + capability + config + debug + diagnostics + elements + locale + render + scripting + theme + wayland
+frontend-shell-adapter -> frontend-abi + capability + config + debug + diagnostics + elements + locale + render + scripting + service + theme + wayland
 animation -> elements
 interaction -> elements + module
 surface-config -> component + module + wayland + config + surface-policy
@@ -65,7 +67,7 @@ The runtime path is intentionally split from the paint path:
 .mesh source
   -> mesh-core-component
   -> mesh-core-frontend
-  -> mesh-core-shell component runtime
+  -> mesh-core-frontend-runtime component host
   -> mesh-core-render
   -> mesh-core-presentation
 ```
