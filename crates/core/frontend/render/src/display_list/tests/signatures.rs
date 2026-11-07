@@ -122,6 +122,36 @@ fn retained_dirty_contract_matches_shared_paint_signature_inputs() {
 }
 
 #[test]
+fn shape_geometry_changes_dirty_retained_paint_and_display_signatures() {
+    for (kind, prop, before, after) in [
+        ("sector", Prop::Start, "0", "30"),
+        ("sector", Prop::End, "90", "180"),
+        ("sector", Prop::Inner, "0.2", "0.7"),
+        ("arc", Prop::End, "90", "180"),
+        ("polygon", Prop::Points, "0,0 100,0 50,100", "0,0 100,0 0,100"),
+        ("polyline", Prop::Points, "0,0 100,0", "0,0 0,100"),
+        ("sector", Prop::Type, "sector", "arc"),
+    ] {
+        let mut shape = node(1, "shape", 0.0, 0.0, 100.0, 100.0);
+        shape.attributes.insert(Prop::Type, kind.into());
+        shape.attributes.insert(prop, before.into());
+        let old = RenderObjectFingerprint::for_node(&shape, None);
+        let signature = primitive_signature(&shape, DisplayPrimitiveSlot::Generic);
+        let mut list = RetainedDisplayList::default();
+        list.update(&shape, 100, 100, false, true);
+
+        shape.attributes.insert(prop, after.into());
+        let new = RenderObjectFingerprint::for_node(&shape, Some(&old));
+        let mut dirty = RenderObjectDirtySummary::default();
+        assert!(dirty.add_fingerprint_diff(&old, &new), "{kind} {prop:?}");
+        assert_eq!(dirty.primitive, 1, "{kind} {prop:?}");
+        assert_ne!(primitive_signature(&shape, DisplayPrimitiveSlot::Generic), signature);
+        list.update(&shape, 100, 100, false, false);
+        assert!(!list.damage_rects().is_empty(), "{kind} {prop:?}");
+    }
+}
+
+#[test]
 fn resource_revision_invalidates_retained_font_paint_signatures() {
     if crate::isolate_resource_state_test(
         "display_list::tests::signatures::resource_revision_invalidates_retained_font_paint_signatures",

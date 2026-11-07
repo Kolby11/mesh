@@ -806,6 +806,50 @@ end
 }
 
 #[test]
+fn text_input_v3_commit_and_delete_invalidate_handlerless_input() {
+    for source in [
+        r#"<template><box><input /></box></template>"#,
+        r#"<template><box><input on:change="onChange" /></box></template>
+<script lang="luau">function onChange(value) end</script>"#,
+    ] {
+        let mut component = test_frontend_component(source);
+        let theme = default_theme();
+        let extent = SurfaceExtent::unpadded(240, 160);
+        let mut buffer = PixelBuffer::new(240, 160);
+        component.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+        component.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+        component.focused_key = Some("root/0/0".into());
+        component.dirty = false;
+        assert!(!component.wants_render());
+        let edit = |commit, before_bytes| ComponentInput::TextInputEdit {
+            preedit_present: false,
+            preedit: None,
+            preedit_cursor_begin: 0,
+            preedit_cursor_end: 0,
+            commit,
+            before_bytes,
+            after_bytes: 0,
+        };
+        component.handle_input(&theme, 240, 160, edit(Some("é🙂".into()), 0)).unwrap();
+        assert!(component.wants_render(), "commit must invalidate text");
+        component.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+        let input = node_by_mesh_key(component.last_tree.as_ref().unwrap(), "root/0/0");
+        assert_eq!(input.attributes.get(Prop::Value).map(String::as_str), Some("é🙂"));
+
+        component.dirty = false;
+        component.handle_input(&theme, 240, 160, edit(None, "🙂".len())).unwrap();
+        assert!(component.wants_render(), "deletion must invalidate text");
+        component.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+        let input = node_by_mesh_key(component.last_tree.as_ref().unwrap(), "root/0/0");
+        assert_eq!(input.attributes.get(Prop::Value).map(String::as_str), Some("é"));
+
+        component.dirty = false;
+        component.handle_input(&theme, 240, 160, edit(None, 0)).unwrap();
+        assert!(!component.wants_render(), "unchanged transaction should stay clean");
+    }
+}
+
+#[test]
 fn text_input_v3_transaction_applies_delete_and_commit_once() {
     let mut component = test_frontend_component(
         r#"

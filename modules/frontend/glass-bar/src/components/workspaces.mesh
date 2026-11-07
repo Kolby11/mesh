@@ -17,6 +17,7 @@
 
 <script lang="luau">
 local wm = require("mesh.wm")
+local t = import("mesh.i18n", "t")
 
 -- A fixed strip of slots, like the reference rice: empty workspaces still
 -- show as dim dots so the active pill visibly travels between positions.
@@ -52,7 +53,7 @@ effect(function()
     for id = 1, math.min(highest, 10) do
         list[#list + 1] = {
             id = id,
-            label = "Workspace " .. tostring(id),
+            label = t("workspace.label", { id = tostring(id) }),
             active = current_active == id,
             occupied = occupied[id] == true,
         }

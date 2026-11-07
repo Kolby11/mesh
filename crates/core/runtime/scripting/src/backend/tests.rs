@@ -4024,6 +4024,90 @@ end
 }
 
 #[test]
+fn network_provider_prefers_active_access_point_for_duplicate_ssids() {
+    let mut ctx = BackendScriptContext::new("@test/network-duplicate-ssid");
+    ctx.load_script(&bundled_backend_script(
+        "../../../../modules/backend/networkmanager-network/src/main.luau",
+    )).unwrap();
+    ctx.ensure_lua().unwrap().load(r#"
+mesh.dbus_subscribe = function(...) return { program = "dbus:network" } end
+local reverse = false
+function set_reverse(value) reverse = value end
+mesh.dbus_call = function(_, req)
+    local data
+    if req.path == "/org/freedesktop/NetworkManager" then
+        data = { WirelessEnabled = true, Connectivity = 4, Devices = { "/wifi" } }
+    elseif req.path == "/wifi" and req.args[1]:find("Wireless") then
+        data = { ActiveAccessPoint = "/active", AccessPoints = reverse and { "/active", "/other" } or { "/other", "/active" } }
+    elseif req.path == "/wifi" then
+        data = { DeviceType = 2, State = 100, Interface = "wlan0" }
+    else
+        data = { Ssid = { 84, 101, 115, 116 }, Strength = req.path == "/active" and 30 or 90,
+            Flags = req.path == "/active" and 1 or 0, WpaFlags = 0, RsnFlags = 0 }
+    end
+    local entries = {}
+    for k, v in pairs(data) do entries[k] = { value = v } end
+    return { success = true, body = { { value = entries } } }
+end
+"#).exec().unwrap();
+    ctx.call_init().unwrap();
+    for reverse in [false, true] {
+        ctx.ensure_lua().unwrap().globals().get::<mlua::Function>("set_reverse").unwrap().call::<()>(reverse).unwrap();
+        ctx.run_poll().unwrap();
+        let valid: bool = ctx.ensure_lua().unwrap().load(
+            "return #state.networks == 1 and state.networks[1].connected and state.networks[1].secured and state.networks[1].signal == 30 and state.signal == 30 and state.ssid == 'Test'"
+        ).eval().unwrap();
+        assert!(valid);
+    }
+}
+
+#[test]
+fn upower_battery_property_signals_refresh_once_per_batch() {
+    let mut ctx = BackendScriptContext::new("@test/power-signals");
+    ctx.load_script(&bundled_backend_script(
+        "../../../../modules/backend/upower-power/src/main.luau",
+    )).unwrap();
+    ctx.ensure_lua().unwrap().load(r#"
+reads = 0
+level = 30
+mesh.dbus_subscribe = function(...) return { program = "dbus:power" } end
+mesh.dbus_call = function(_, req)
+    if req.member == "Introspect" then
+        return { success = true, body = { { value = '<node name="battery_BAT0"/>' } } }
+    end
+    reads += 1
+    return { success = true, body = { { value = { Percentage = { value = level } } } } }
+end
+"#).exec().unwrap();
+    ctx.call_init().unwrap();
+    ctx.ensure_lua().unwrap().load("level = 70").exec().unwrap();
+    let signal = |name: &str, invalidated: bool| serde_json::json!({
+        "path": "/org/freedesktop/UPower/devices/battery_BAT0", "member": "PropertiesChanged",
+        "body": [
+            { "value": "org.freedesktop.UPower.Device" },
+            { "value": if invalidated { serde_json::json!({}) } else { serde_json::json!({(name): 70}) } },
+            { "value": if invalidated { serde_json::json!([name]) } else { serde_json::json!([]) } }
+        ]
+    }).to_string();
+    ctx.run_stream_batch("dbus:power", &[signal("Unrelated", false)]).unwrap();
+    assert_eq!(ctx.ensure_lua().unwrap().globals().get::<i64>("reads").unwrap(), 1);
+    ctx.run_stream_batch("dbus:power", &[signal("Percentage", false), signal("State", true)]).unwrap();
+    let result: (i64, i64) = ctx.ensure_lua().unwrap().load("return reads, state.level").eval().unwrap();
+    assert_eq!(result, (2, 70));
+    ctx.run_stream_batch("dbus:power", &[signal("Energy", true)]).unwrap();
+    assert_eq!(ctx.ensure_lua().unwrap().globals().get::<i64>("reads").unwrap(), 3);
+    ctx.run_stream_batch("dbus:power", &[
+        serde_json::json!({ "member": "PropertiesChanged", "path": "/org/freedesktop/UPower/devices/line_power_AC" }).to_string(),
+        serde_json::json!({ "member": "DeviceRemoved" }).to_string(),
+    ]).unwrap();
+    assert_eq!(ctx.ensure_lua().unwrap().globals().get::<i64>("reads").unwrap(), 4);
+    ctx.run_stream_batch("dbus:power", &[
+        serde_json::json!({ "member": "DeviceRemoved" }).to_string(),
+    ]).unwrap();
+    assert_eq!(ctx.ensure_lua().unwrap().globals().get::<i64>("reads").unwrap(), 5);
+}
+
+#[test]
 fn native_network_events_ignore_unexposed_properties_and_keep_state_changes() {
     let mut ctx = BackendScriptContext::new("@test/network-signals");
     ctx.load_script(&bundled_backend_script(

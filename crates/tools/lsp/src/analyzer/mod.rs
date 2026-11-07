@@ -32,7 +32,8 @@ fn try_upgrade_to_proxy_ctx(
     let before = &block_content[..offset.min(block_content.len())];
     // Find the last dot-separated token: everything from the last whitespace/delimiter to cursor
     let token_start = before
-        .rfind(|c: char| {
+        .char_indices()
+        .rfind(|&(_, c)| {
             c.is_whitespace()
                 || matches!(
                     c,
@@ -52,7 +53,7 @@ fn try_upgrade_to_proxy_ctx(
                         | '/'
                 )
         })
-        .map(|i| i + 1)
+        .map(|(i, c)| i + c.len_utf8())
         .unwrap_or(0);
     let token = &before[token_start..];
     // Check if token looks like `<var>.<prefix>` or `<var>:<prefix>`.
@@ -121,6 +122,17 @@ mod tests {
     use tower_lsp::lsp_types::{CompletionItemKind, Url};
 
     use super::*;
+
+    #[test]
+    fn completion_after_unicode_whitespace_does_not_split_a_character() {
+        for suffix in ["\n</script>", ""] {
+            let source = format!("<template><input ref=\"field\" /></template>\n<script lang=\"luau\">\nlocal node = refs.field\n\u{2003}node.$0{suffix}");
+            let (source, position) = fixture_with_cursor(&source);
+            let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+            assert!(doc.element_ref_aliases.iter().any(|alias| alias.alias == "node"));
+            let _ = complete(&doc, position, &ModuleRegistry::empty());
+        }
+    }
 
     #[test]
     fn script_completion_on_element_ref_alias_offers_element_members_not_scoped_functions() {

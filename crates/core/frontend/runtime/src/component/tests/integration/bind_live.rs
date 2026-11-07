@@ -20,6 +20,7 @@ fn bind_live_surface(parent_src: &str, child_src: &str) -> FrontendSurfaceCompon
         local_components: HashMap::from([("Child".into(), parse_component(child_src).unwrap())]),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let catalog = FrontendCatalog {
         modules: HashMap::from([(

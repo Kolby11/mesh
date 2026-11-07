@@ -170,11 +170,61 @@ pub(super) fn build_graph_health(
 /// or the current process PATH.
 pub fn binary_available(name: &str) -> bool {
     if name.contains(std::path::MAIN_SEPARATOR) {
-        return Path::new(name).is_file();
+        return executable_file(Path::new(name));
     }
     std::env::var_os("PATH")
-        .map(|path_var| std::env::split_paths(&path_var).any(|dir| dir.join(name).is_file()))
+        .map(|path_var| binary_available_in_path(name, &path_var))
         .unwrap_or(false)
+}
+
+fn binary_available_in_path(name: &str, path: &std::ffi::OsStr) -> bool {
+    std::env::split_paths(path).any(|dir| executable_file(&dir.join(name)))
+}
+
+fn executable_file(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|metadata| {
+        if !metadata.is_file() {
+            return false;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            metadata.permissions().mode() & 0o111 != 0
+        }
+        #[cfg(not(unix))]
+        {
+            true
+        }
+    })
+}
+
+#[cfg(all(test, unix))]
+mod executable_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn path_search_skips_non_executable_candidates() {
+        let root = std::env::temp_dir().join(format!("mesh-exec-path-{}", std::process::id()));
+        let first = root.join("first");
+        let second = root.join("second");
+        std::fs::create_dir_all(&first).unwrap();
+        std::fs::create_dir_all(&second).unwrap();
+        for (directory, mode) in [(&first, 0o644), (&second, 0o755)] {
+            let file = directory.join("mesh-test-tool");
+            std::fs::write(&file, "test").unwrap();
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(mode)).unwrap();
+        }
+        let path = std::env::join_paths([&first, &second]).unwrap();
+        assert!(binary_available_in_path("mesh-test-tool", &path));
+        std::fs::set_permissions(
+            second.join("mesh-test-tool"),
+            std::fs::Permissions::from_mode(0o644),
+        )
+        .unwrap();
+        assert!(!binary_available_in_path("mesh-test-tool", &path));
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 pub(super) fn binary_package_hint(binary: &manifest::BinaryDependency) -> String {

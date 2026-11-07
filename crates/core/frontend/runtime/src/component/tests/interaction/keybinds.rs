@@ -1077,6 +1077,120 @@ fn keybind_diagnostic_rejects_unsafe_user_override() {
 }
 
 #[test]
+fn keybind_overrides_cannot_take_configured_native_control_keys() {
+    let mut component = test_frontend_component(
+        r#"<template><box /></template><script lang="luau"></script>"#,
+    );
+    component.compiled.manifest.keybinds.actions.insert(
+        "mute".into(),
+        mesh_core_module::KeybindAction {
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: vec!["ctrl".into()],
+            },
+            localized_triggers: HashMap::new(),
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+    let mut settings = mesh_core_config::KeyboardSettings {
+        button_activation_keys: vec!["F1".into()],
+        toggle_activation_keys: vec!["F2".into()],
+        slider_decrement_keys: vec!["F3".into()],
+        slider_increment_keys: vec!["ArrowRight".into()],
+        surface_shortcuts: HashMap::from([(
+            "@test/reactive-surface".into(),
+            HashMap::from([(
+                "mute".into(),
+                mesh_core_config::SurfaceShortcutOverride::default(),
+            )]),
+        )]),
+        ..mesh_core_config::KeyboardSettings::default()
+    };
+    for key in ["F1", "f2", "F3", "ArrowRight"] {
+        settings
+            .surface_shortcuts
+            .get_mut("@test/reactive-surface")
+            .unwrap()
+            .get_mut("mute")
+            .unwrap()
+            .key = Some(key.into());
+        let resolved = component.resolved_surface_shortcuts(&settings);
+        assert_eq!(resolved[0].key, "m", "{key}");
+        assert_eq!(resolved[0].source, KeybindResolutionSource::ModuleDefault);
+    }
+    assert_keybind_diagnostic(
+        &component,
+        "mute",
+        "user override uses a configured native control key",
+    );
+    settings.slider_increment_keys.clear();
+    let resolved = component.resolved_surface_shortcuts(&settings);
+    assert_eq!(resolved[0].key, "ArrowRight");
+    assert_eq!(resolved[0].source, KeybindResolutionSource::UserOverride);
+}
+
+#[test]
+fn slider_steps_when_an_override_conflicts_with_its_key() {
+    let mut component = test_frontend_component(
+        r#"<template><box /></template><script lang="luau">
+slider_seen = -1
+shortcut_count = 0
+function onSliderChange(value) slider_seen = value end
+function onShortcut() shortcut_count = shortcut_count + 1 end
+</script>"#,
+    );
+    component.compiled.manifest.keybinds.actions.insert(
+        "action".into(),
+        mesh_core_module::KeybindAction {
+            trigger: mesh_core_module::KeybindTrigger {
+                kind: mesh_core_module::KeybindTriggerKind::Shortcut,
+                key: Some("m".into()),
+                modifiers: Vec::new(),
+            },
+            ..mesh_core_module::KeybindAction::default()
+        },
+    );
+    let settings = test_settings_store_with(
+        "shell",
+        serde_json::json!({ "keyboard": { "surface_shortcuts": {
+            "@test/reactive-surface": { "action": { "key": "ArrowRight" } }
+        } } }),
+    );
+    component.apply_settings(&settings).unwrap();
+    assert_eq!(
+        component.current_keyboard_settings().surface_shortcuts["@test/reactive-surface"]
+            ["action"].key.as_deref(),
+        Some("ArrowRight")
+    );
+    component.last_tree = Some(root_with(vec![
+        event_node_with_attrs(
+            "slider", "root/0", 0.0, 0.0, 120.0, 24.0,
+            &[("min", "0"), ("max", "1"), ("step", "0.1"), ("value", "0.5")],
+            &[("change", "onSliderChange")],
+        ),
+        event_node_with_attrs(
+            "button", "root/1", 0.0, 30.0, 40.0, 24.0,
+            &[("keybind", "action")], &[("keybind", "onShortcut")],
+        ),
+    ]));
+    component.focused_key = Some("root/0".into());
+    component
+        .handle_input(&default_theme(), 240, 160, ComponentInput::KeyPressed {
+            key: "ArrowRight".into(),
+            modifiers: KeyModifiers::default(),
+        })
+        .unwrap();
+    assert!((runtime_number(&component, "slider_seen") - 0.6).abs() < 0.001);
+    assert_eq!(runtime_number(&component, "shortcut_count"), 0.0);
+    assert_keybind_diagnostic(
+        &component,
+        "action",
+        "user override uses a configured native control key",
+    );
+}
+
+#[test]
 fn keybind_diagnostic_reports_missing_runtime_subscriber() {
     let mut component = test_frontend_component(
         r#"

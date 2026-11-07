@@ -196,6 +196,10 @@ the live shell loop. Before persistence, the shell validates the graph,
 activation, settings and profile revisions and the selected source fingerprint.
 Durable writes remain serialized through the control-plane transaction.
 
+The private shell control socket serves at most 64 clients concurrently and
+reaps completed client tasks during service. Additional connections wait in
+the socket backlog until a slot is available; idle clients have no timeout.
+
 During the profile migration, absence of `config/active-profile` preserves the
 legacy root-graph decisions. When it exists, `config/profiles/<id>.json` owns
 the desired composition: explicit roots/background services/providers/resources

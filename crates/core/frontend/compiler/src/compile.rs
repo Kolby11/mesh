@@ -237,7 +237,8 @@ pub fn compile_frontend_entrypoint(
     }
 
     let source_path = resolve_module_entrypoint_path(module_dir, entrypoint)?;
-    let component = parse_component_file(&source_path)?;
+    let mut source_bytes = HashMap::new();
+    let component = parse_component_file_recorded(&source_path, &mut source_bytes)?;
     let mut local_components: HashMap<String, ComponentFile> = HashMap::new();
     let mut module_component_imports = HashMap::new();
     let mut seen_local_paths = HashSet::new();
@@ -252,6 +253,7 @@ pub fn compile_frontend_entrypoint(
         &mut module_component_imports,
         &mut seen_local_paths,
         &mut parsed_components,
+        &mut source_bytes,
         &mut import_bindings,
         &mut ancestry,
     )?;
@@ -284,6 +286,7 @@ pub fn compile_frontend_entrypoint(
         local_components,
         module_component_imports,
         watched_paths,
+        source_bytes,
     })
 }
 
@@ -380,12 +383,21 @@ fn validate_customizable_slots(
     Ok(())
 }
 
+#[cfg(test)]
 fn parse_component_file(path: &Path) -> Result<ComponentFile, CompileFrontendError> {
+    parse_component_file_recorded(path, &mut HashMap::new())
+}
+
+fn parse_component_file_recorded(
+    path: &Path,
+    source_bytes: &mut HashMap<PathBuf, Vec<u8>>,
+) -> Result<ComponentFile, CompileFrontendError> {
     let source =
         std::fs::read_to_string(path).map_err(|source| CompileFrontendError::ReadSource {
             path: path.to_path_buf(),
             source,
         })?;
+    source_bytes.insert(path.to_path_buf(), source.as_bytes().to_vec());
     let mut component = match parsed_component_cache::get(&source) {
         Some(component) => component,
         None => {
@@ -486,7 +498,9 @@ mod parsed_component_cache {
 }
 
 /// Elements that expose control parts, for validating untagged hosts.
-const CONTROL_PART_HOSTS: &[&str] = &["slider", "progress", "meter", "checkbox", "radio", "switch", "scroll", "input"];
+const CONTROL_PART_HOSTS: &[&str] = &[
+    "slider", "progress", "meter", "checkbox", "radio", "switch", "scroll", "input",
+];
 
 fn validate_component_pseudo_states(
     path: &Path,
@@ -593,6 +607,7 @@ fn collect_imports(
     module_component_imports: &mut HashMap<String, String>,
     seen_local_paths: &mut HashSet<PathBuf>,
     parsed_components: &mut HashMap<PathBuf, ComponentFile>,
+    source_bytes: &mut HashMap<PathBuf, Vec<u8>>,
     import_bindings: &mut HashMap<(PathBuf, String), ImportBindingTarget>,
     ancestry: &mut Vec<PathBuf>,
 ) -> Result<(), CompileFrontendError> {
@@ -609,7 +624,7 @@ fn collect_imports(
                 let parsed = if let Some(parsed) = parsed_components.get(&target_path) {
                     parsed.clone()
                 } else {
-                    let parsed = parse_component_file(&target_path)?;
+                    let parsed = parse_component_file_recorded(&target_path, source_bytes)?;
                     parsed_components.insert(target_path.clone(), parsed.clone());
                     parsed
                 };
@@ -641,6 +656,7 @@ fn collect_imports(
                         module_component_imports,
                         seen_local_paths,
                         parsed_components,
+                        source_bytes,
                         import_bindings,
                         ancestry,
                     )?;
@@ -1497,13 +1513,15 @@ slider:active::thumb { width: 48px; }
         );
         validate_component_pseudo_states(Path::new("/tmp/parts.mesh"), &valid).unwrap();
 
-        for (css, part) in [("slider::knob", "slider::knob"), ("button::thumb", "button::thumb")] {
-            let source = format!("<template><box /></template>\n<style>{css} {{ width: 1px; }}</style>");
-            let error = validate_component_pseudo_states(
-                Path::new("/tmp/parts.mesh"),
-                &component(&source),
-            )
-            .unwrap_err();
+        for (css, part) in [
+            ("slider::knob", "slider::knob"),
+            ("button::thumb", "button::thumb"),
+        ] {
+            let source =
+                format!("<template><box /></template>\n<style>{css} {{ width: 1px; }}</style>");
+            let error =
+                validate_component_pseudo_states(Path::new("/tmp/parts.mesh"), &component(&source))
+                    .unwrap_err();
             assert!(
                 matches!(
                     error,
@@ -2154,6 +2172,7 @@ local Child = require("./child.mesh")
                 &mut module_component_imports,
                 &mut seen_local_paths,
                 &mut parsed_components,
+                &mut HashMap::new(),
                 &mut import_bindings,
                 &mut ancestry,
             )
@@ -2252,6 +2271,7 @@ local BranchB = require("./branch-b.mesh")
             &mut module_component_imports,
             &mut seen_local_paths,
             &mut parsed_components,
+            &mut HashMap::new(),
             &mut import_bindings,
             &mut ancestry,
         )
@@ -2319,6 +2339,7 @@ local BranchB = require("./branch-b.mesh")
             &mut module_component_imports,
             &mut seen_local_paths,
             &mut parsed_components,
+            &mut HashMap::new(),
             &mut import_bindings,
             &mut ancestry,
         )
@@ -2375,7 +2396,8 @@ mod parse_cache_tests {
     #[test]
     fn identical_sources_in_different_directories_keep_their_own_asset_base() {
         let root = tempfile::tempdir().unwrap();
-        let source = "<template><box /></template>\n<style>box { background-image: url(bg.png); }</style>\n";
+        let source =
+            "<template><box /></template>\n<style>box { background-image: url(bg.png); }</style>\n";
         let mut parsed = Vec::new();
         for name in ["a", "b"] {
             let dir = root.path().join(name);

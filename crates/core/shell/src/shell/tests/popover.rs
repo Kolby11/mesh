@@ -501,6 +501,51 @@ fn dismissed_legacy_promoted_popover_hides_surface_state() {
 }
 
 #[test]
+fn missing_focus_transfer_destination_preserves_source() {
+    let mut shell = Shell::new();
+    let state = Arc::new(Mutex::new(FocusRecordingState::default()));
+    shell.register_component(Box::new(FocusRecordingComponent::new(
+        "@mesh/audio-popover",
+        state.clone(),
+    )));
+    shell.keyboard_focus_surface = Some("@mesh/audio-popover".into());
+    shell.surfaces.get_mut("@mesh/audio-popover").unwrap().keyboard_mode =
+        mesh_core_wayland::KeyboardMode::Exclusive;
+    shell.transfer_owned_keyboard_modes.insert(
+        "@mesh/audio-popover".into(),
+        mesh_core_wayland::KeyboardMode::OnDemand,
+    );
+
+    let emitted = shell
+        .apply_request(CoreRequest::TransferTabFocus {
+            from_surface: "@mesh/audio-popover".into(),
+            to_surface: "@mesh/removed-target".into(),
+            target: TabFocusTarget::First,
+            return_target: None,
+            target_closes_on_leave: false,
+            close_source: Some("@mesh/audio-popover".into()),
+        })
+        .unwrap();
+
+    assert!(emitted.is_empty());
+    assert_eq!(
+        shell.keyboard_focus_surface.as_deref(),
+        Some("@mesh/audio-popover")
+    );
+    assert_eq!(
+        shell.surfaces["@mesh/audio-popover"].keyboard_mode,
+        mesh_core_wayland::KeyboardMode::Exclusive
+    );
+    assert_eq!(
+        shell.transfer_owned_keyboard_modes["@mesh/audio-popover"],
+        mesh_core_wayland::KeyboardMode::OnDemand
+    );
+    let state = state.lock().unwrap();
+    assert_eq!(state.releases, 0);
+    assert!(state.keyboard_mode_overrides.is_empty());
+}
+
+#[test]
 fn leaving_popover_keeps_return_surface_as_keyboard_owner() {
     let mut shell = Shell::new();
     let trigger_state = Arc::new(Mutex::new(FocusRecordingState::default()));

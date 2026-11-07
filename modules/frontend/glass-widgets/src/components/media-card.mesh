@@ -8,7 +8,7 @@
 <template>
     <row style:width={props.card_width ~= "auto" and props.card_width or nil} style:height={props.card_height ~= "auto" and props.card_height or nil} class="media-card" class:media-card-idle={not has_track}>
         <box class="media-art-frame" class:track-next-a={swipe == "next-a"} class:track-next-b={swipe == "next-b"} class:track-previous-a={swipe == "previous-a"} class:track-previous-b={swipe == "previous-b"}>
-            <image class="media-art" src={art} alt="Album artwork" hidden={art == ""} />
+            <image class="media-art" src={art} alt={t("media.artwork")} hidden={art == ""} />
             <icon class="media-art-glyph" name="audio-x-generic" size="44" hidden={art ~= ""} />
         </box>
         <column class="media-body" class:track-next-a={swipe == "next-a"} class:track-next-b={swipe == "next-b"} class:track-previous-a={swipe == "previous-a"} class:track-previous-b={swipe == "previous-b"}>
@@ -25,18 +25,18 @@
                     onchange={onSeek}
                     onrelease={onSeekRelease}
                     disabled={not has_track}
-                    aria-label="Seek"
+                    aria-label={t("media.seek")}
                 />
                 <text class="media-time">{length_text}</text>
             </row>
             <row class="media-controls">
-                <button class="media-ctl" ref="previousTrack" onclick={onPrevious} disabled={not has_track} aria-label="Previous track">
+                <button class="media-ctl" ref="previousTrack" onclick={onPrevious} disabled={not has_track} aria-label={t("media.previous")}>
                     <icon class="media-ctl-glyph" name="media-skip-backward" size="16" />
                 </button>
-                <button class="media-ctl media-ctl-main" onclick={onToggle} disabled={not has_track} aria-label={playing and "Pause" or "Play"}>
+                <button class="media-ctl media-ctl-main" onclick={onToggle} disabled={not has_track} aria-label={t(playing and "media.pause" or "media.play")}>
                     <icon class="media-ctl-glyph media-ctl-glyph-main" name={playing and "media-playback-pause" or "media-playback-start"} size="16" />
                 </button>
-                <button class="media-ctl" ref="nextTrack" onclick={onNext} disabled={not has_track} aria-label="Next track">
+                <button class="media-ctl" ref="nextTrack" onclick={onNext} disabled={not has_track} aria-label={t("media.next")}>
                     <icon class="media-ctl-glyph" name="media-skip-forward" size="16" />
                 </button>
             </row>
@@ -47,10 +47,11 @@
 <script lang="luau">
 
 local media = require("mesh.media")
+local t = import("mesh.i18n", "t")
 
 has_track = false
 playing = false
-title = "Nothing playing"
+title = t("media.idle")
 artist = ""
 album = ""
 art = ""
@@ -114,7 +115,7 @@ effect(function()
     end
     has_track = media.available == true and (media.title or "") ~= ""
     playing = has_track and media.state.state == "playing"
-    title = has_track and media.title or "Nothing playing"
+    title = has_track and media.title or t("media.idle")
     artist = has_track and (media.artist or "") or ""
     album = media.album or ""
     art = has_track and (media.art_path or "") or ""

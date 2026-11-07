@@ -118,6 +118,16 @@ impl BackdropSource {
     /// by `blur` device pixels, built once per key. A blurred copy may be
     /// smaller than the output; callers scale it up to `width` x `height`.
     fn prepared(&self, width: i32, height: i32, blur: f32) -> Option<skia_safe::Image> {
+        self.prepared_with_budget(width, height, blur, PREPARED_CACHE_BYTES)
+    }
+
+    fn prepared_with_budget(
+        &self,
+        width: i32,
+        height: i32,
+        blur: f32,
+        budget: usize,
+    ) -> Option<skia_safe::Image> {
         let key = PreparedKey {
             width,
             height,
@@ -170,9 +180,13 @@ impl BackdropSource {
         );
         let image = surface.image_snapshot();
         let bytes = |image: &skia_safe::Image| image.width() as usize * image.height() as usize * 4;
+        let image_bytes = bytes(&image);
+        if image_bytes > budget {
+            return Some(image);
+        }
         let mut total =
-            cache.iter().map(|(_, cached)| bytes(cached)).sum::<usize>() + bytes(&image);
-        while total > PREPARED_CACHE_BYTES && !cache.is_empty() {
+            cache.iter().map(|(_, cached)| bytes(cached)).sum::<usize>() + image_bytes;
+        while total > budget && !cache.is_empty() {
             total -= bytes(&cache.remove(0).1);
         }
         cache.push((key, image.clone()));

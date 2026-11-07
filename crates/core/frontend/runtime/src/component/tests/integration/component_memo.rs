@@ -25,6 +25,7 @@ fn memo_surface(parent_src: &str, locals: &[(&str, &str)]) -> FrontendSurfaceCom
             .collect(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let catalog = FrontendCatalog {
         modules: HashMap::from([(
@@ -561,6 +562,7 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let widget_id = "@test/memo-slot-widget";
     let mut widget_manifest = minimal_test_manifest(widget_id);
@@ -573,6 +575,7 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let catalog = FrontendCatalog {
         modules: HashMap::from([(
@@ -910,6 +913,7 @@ local MenuPopover = require("@mesh/menu-popover")
             "@mesh/menu-popover".into(),
         )]),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let popover_compiled = CompiledFrontendModule {
         manifest: popover_manifest,
@@ -919,6 +923,7 @@ local MenuPopover = require("@mesh/menu-popover")
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let catalog = FrontendCatalog {
         modules: HashMap::from([

@@ -121,6 +121,36 @@ fn graph_diagnostics_accept_a_well_formed_window_surface() {
 }
 
 #[test]
+fn center_on_window_is_a_layer_field_unless_promotable() {
+    for promotable in [false, true] {
+        let root = root_with_modules(&[("@mesh/window", ModuleKind::Ui)], &[], None);
+        let mut frontend = loaded_module(
+            "@mesh/window",
+            ModuleKind::Ui,
+            MeshDependencies::default(),
+            vec![],
+            MeshContributes::default(),
+        );
+        frontend.manifest.mesh.entrypoints.main = Some("src/main.mesh".into());
+        declare_frontend_surface_contract(&mut frontend);
+        frontend.manifest.mesh.surface_layout = Some(crate::manifest::SurfaceLayoutSection {
+            role: Some("window".into()),
+            center: Some(false),
+            promotable: Some(promotable),
+            ..Default::default()
+        });
+        let graph = InstalledModuleGraph::from_parts(root, vec![frontend]).unwrap();
+        assert_eq!(
+            graph.diagnostics().iter().any(|diagnostic| {
+                diagnostic.status == "surface_role_field_mismatch"
+                    && diagnostic.message.contains("center")
+            }),
+            !promotable
+        );
+    }
+}
+
+#[test]
 fn graph_diagnostics_accept_both_roles_fields_on_a_promotable_surface() {
     // A promotable surface is realized as chrome *and* as a window at different
     // points in its life, so declaring both sets is the only way to describe it.

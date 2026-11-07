@@ -880,6 +880,7 @@ impl SurfaceLayoutSection {
             SurfaceRoleField::Resizable => self.resizable.is_some(),
             SurfaceRoleField::Decorations => self.decorations.is_some(),
             SurfaceRoleField::Anchor => self.anchor.is_some(),
+            SurfaceRoleField::Center => self.center.is_some(),
             SurfaceRoleField::Layer => self.layer.is_some(),
             SurfaceRoleField::KeyboardMode => self.keyboard_mode.is_some(),
             SurfaceRoleField::Blur => self.blur.is_some(),

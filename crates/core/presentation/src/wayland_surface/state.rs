@@ -1368,6 +1368,8 @@ fn is_keyboard_event(event: &DevWindowEvent) -> bool {
             | DevWindowEvent::Char { .. }
             | DevWindowEvent::TextInput { .. }
             | DevWindowEvent::TextDelete { .. }
+            | DevWindowEvent::TextInputEdit { .. }
+            | DevWindowEvent::KeyboardEnter { .. }
     )
 }
 
@@ -1645,6 +1647,79 @@ mod input_teardown_tests {
 #[cfg(test)]
 mod input_capability_tests {
     use super::*;
+
+    #[test]
+    fn seat_keyboard_cancellation_discards_all_keyboard_events_only_for_that_seat() {
+        let seat_id = ObjectId::null();
+        let surface_id: Arc<str> = Arc::from("panel");
+        let mut pending = PendingTextInput {
+            commit: Some(Arc::from("候")),
+            ..PendingTextInput::default()
+        };
+        let keyboard_events = vec![
+            DevWindowEvent::KeyboardEnter {
+                surface_id: surface_id.clone(),
+            },
+            DevWindowEvent::Key {
+                surface_id: surface_id.clone(),
+                event: DevWindowKeyEvent::Pressed("a".to_string(), KeyMods::default()),
+            },
+            DevWindowEvent::Char {
+                surface_id: surface_id.clone(),
+                ch: 'a',
+            },
+            DevWindowEvent::TextInput {
+                surface_id: surface_id.clone(),
+                text: Arc::from("a"),
+            },
+            DevWindowEvent::TextDelete {
+                surface_id: surface_id.clone(),
+                before_bytes: 1,
+                after_bytes: 0,
+            },
+            pending.take_edit(surface_id.clone()).unwrap(),
+        ];
+        let mut events = Vec::new();
+        for event in keyboard_events {
+            events.push(QueuedInputEvent {
+                seat_id: Some(seat_id.clone()),
+                event: event.clone(),
+            });
+            events.push(QueuedInputEvent {
+                seat_id: None,
+                event,
+            });
+        }
+        let mut focus = Some(surface_id.clone());
+        let mut mods = Modifiers {
+            ctrl: true,
+            ..Modifiers::default()
+        };
+        let mut repeat = Some(KeyboardRepeatState {
+            surface_id,
+            key: "a".to_string(),
+            mods: KeyMods::default(),
+            text: Some(Arc::from("a")),
+            next_at: Instant::now(),
+            interval: Duration::from_millis(30),
+        });
+
+        cancel_keyboard_input_state_for_seat(
+            Some(&seat_id),
+            &mut focus,
+            &mut mods,
+            &mut repeat,
+            &mut events,
+        );
+
+        assert!(focus.is_none());
+        assert!(!mods.ctrl);
+        assert!(repeat.is_none());
+        assert_eq!(events.len(), 6);
+        assert!(events.iter().all(|event| event.seat_id.is_none()));
+        assert!(events.iter().all(|event| is_keyboard_event(&event.event)));
+        assert!(pending.is_empty());
+    }
 
     #[test]
     fn seat_scoped_surface_cancellation_preserves_another_seat_queue() {

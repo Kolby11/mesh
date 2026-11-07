@@ -9,6 +9,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::{JoinHandle, JoinSet};
 
 const MAX_IPC_COMMAND_BYTES: usize = 4096;
+const MAX_IPC_CLIENTS: usize = 64;
 const IPC_SHUTDOWN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[derive(Debug)]
@@ -80,41 +81,53 @@ pub(super) fn spawn_ipc_server(
     std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))?;
     tracing::info!("listening for ipc commands on {}", socket_path.display());
 
-    let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
-    let join = runtime.spawn(async move {
-        let mut clients = JoinSet::new();
-        loop {
-            tokio::select! {
-                _ = &mut shutdown_rx => {
-                    clients.abort_all();
-                    while clients.join_next().await.is_some() {}
-                    break;
-                }
-                accepted = listener.accept() => {
-                    let (stream, _) = match accepted {
-                        Ok(stream) => stream,
-                        Err(err) => {
-                            tracing::warn!("ipc accept failed: {err}");
-                            continue;
-                        }
-                    };
-
-                    let tx = tx.clone();
-                    let wake = wake.clone();
-                    clients.spawn(async move {
-                        if let Err(err) = handle_ipc_client(stream, tx, wake).await {
-                            tracing::warn!("ipc client failed: {err}");
-                        }
-                    });
-                }
-            }
-        }
-    });
+    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let join = runtime.spawn(serve_ipc(listener, tx, wake, shutdown_rx, MAX_IPC_CLIENTS));
 
     Ok(IpcServerHandle {
         shutdown: Some(shutdown_tx),
         join: Some(join),
     })
+}
+
+async fn serve_ipc(
+    listener: UnixListener,
+    tx: mpsc::UnboundedSender<ShellMessage>,
+    wake: WakeHandle,
+    mut shutdown_rx: oneshot::Receiver<()>,
+    max_clients: usize,
+) {
+    let mut clients = JoinSet::new();
+    loop {
+        tokio::select! {
+            _ = &mut shutdown_rx => {
+                clients.abort_all();
+                while clients.join_next().await.is_some() {}
+                break;
+            }
+            Some(result) = clients.join_next(), if !clients.is_empty() => {
+                if let Err(error) = result {
+                    tracing::warn!("ipc client task failed: {error}");
+                }
+            }
+            accepted = listener.accept(), if clients.len() < max_clients => {
+                let (stream, _) = match accepted {
+                    Ok(stream) => stream,
+                    Err(err) => {
+                        tracing::warn!("ipc accept failed: {err}");
+                        continue;
+                    }
+                };
+                let tx = tx.clone();
+                let wake = wake.clone();
+                clients.spawn(async move {
+                    if let Err(err) = handle_ipc_client(stream, tx, wake).await {
+                        tracing::warn!("ipc client failed: {err}");
+                    }
+                });
+            }
+        }
+    }
 }
 
 fn prepare_ipc_parent(parent: &std::path::Path) -> Result<(), std::io::Error> {
@@ -470,6 +483,69 @@ mod tests {
             task.await.unwrap().unwrap();
 
             assert_eq!(response, "error command-too-long\n");
+        });
+    }
+
+    #[test]
+    fn ipc_server_bounds_idle_clients_and_reaps_completed_clients() {
+        let runtime = Runtime::new().unwrap();
+        runtime.block_on(async {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("mesh.sock");
+            let listener = UnixListener::bind(&path).unwrap();
+            let (tx, _rx) = mpsc::unbounded_channel();
+            let (shutdown_tx, shutdown_rx) = oneshot::channel();
+            let server = tokio::spawn(serve_ipc(
+                listener, tx, test_wake_handle(), shutdown_rx, 2,
+            ));
+
+            async fn request(client: &mut BufReader<tokio::net::UnixStream>) -> String {
+                client.get_mut().write_all(b"unknown\n").await.unwrap();
+                let mut response = String::new();
+                client.read_line(&mut response).await.unwrap();
+                response
+            }
+
+            let mut first = BufReader::new(tokio::net::UnixStream::connect(&path).await.unwrap());
+            let mut second = BufReader::new(tokio::net::UnixStream::connect(&path).await.unwrap());
+            assert_eq!(request(&mut first).await, "error unknown-command unknown\n");
+            assert_eq!(request(&mut second).await, "error unknown-command unknown\n");
+            let mut waiting = BufReader::new(tokio::net::UnixStream::connect(&path).await.unwrap());
+            waiting.get_mut().write_all(b"unknown\n").await.unwrap();
+            let mut response = String::new();
+            assert!(
+                tokio::time::timeout(
+                    std::time::Duration::from_millis(100),
+                    waiting.read_line(&mut response),
+                )
+                .await
+                .is_err()
+            );
+            drop(first);
+            tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                waiting.read_line(&mut response),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            assert_eq!(response, "error unknown-command unknown\n");
+            drop(waiting);
+            for _ in 0..8 {
+                let mut client =
+                    BufReader::new(tokio::net::UnixStream::connect(&path).await.unwrap());
+                assert_eq!(
+                    tokio::time::timeout(std::time::Duration::from_secs(2), request(&mut client))
+                        .await
+                        .unwrap(),
+                    "error unknown-command unknown\n"
+                );
+            }
+            shutdown_tx.send(()).unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(2), server)
+                .await
+                .unwrap()
+                .unwrap();
         });
     }
 

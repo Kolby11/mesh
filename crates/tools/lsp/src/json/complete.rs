@@ -119,8 +119,9 @@ fn complete_contract_text(
 ) -> Vec<CompletionItem> {
     let fragment_start = ctx
         .partial
-        .rfind(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
-        .map_or(0, |index| index + 1);
+        .char_indices()
+        .rfind(|&(_, ch)| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .map_or(0, |(index, ch)| index + ch.len_utf8());
     let (before, fragment) = ctx.partial.split_at(fragment_start);
     if syntax == ContractSyntax::Signature {
         let before = before.trim_end();

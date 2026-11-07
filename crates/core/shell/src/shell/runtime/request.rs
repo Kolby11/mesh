@@ -2715,6 +2715,10 @@ impl Shell {
         tracing::debug!(
             "apply_transfer_tab_focus from={from_surface} to={to_surface} return_target={return_target:?} target_closes_on_leave={target_closes_on_leave} close_source={close_source:?}"
         );
+        let Some(target_index) = self.component_index_for_surface(to_surface) else {
+            tracing::warn!(to_surface, "TransferTabFocus target component not found; ignoring");
+            return Ok(VecDeque::new());
+        };
         if let Some(index) = self.component_index_for_surface(from_surface) {
             {
                 let runtime = &mut self.components[index];
@@ -2741,8 +2745,8 @@ impl Shell {
                     .map(|surface| surface.keyboard_mode)
             });
 
-        let target_found = if let Some(index) = self.component_index_for_surface(to_surface) {
-            let runtime = &mut self.components[index];
+        {
+            let runtime = &mut self.components[target_index];
             runtime.component.receive_focus_transfer(
                 &target,
                 return_target,
@@ -2777,25 +2781,6 @@ impl Shell {
                     surface.keyboard_mode = mesh_core_wayland::KeyboardMode::OnDemand;
                 }
             }
-            true
-        } else {
-            tracing::warn!(
-                to_surface,
-                "TransferTabFocus target component not found; ignoring"
-            );
-            if let Some(restore_mode) = target_restore_keyboard_mode {
-                if let Some(surface) = self.surfaces.get_mut(to_surface) {
-                    surface.keyboard_mode = restore_mode;
-                }
-            } else {
-                self.transfer_owned_keyboard_modes.remove(to_surface);
-            }
-            false
-        };
-
-        tracing::debug!("apply_transfer_tab_focus target_found={target_found} to={to_surface}");
-        if !target_found {
-            return Ok(VecDeque::new());
         }
 
         self.keyboard_focus_surface = Some(to_surface.to_string());

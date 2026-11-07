@@ -1221,6 +1221,7 @@ pub(super) fn component_with_embedded_popover(
             "@mesh/test-popover".into(),
         )]),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let popover = CompiledFrontendModule {
         manifest: popover_manifest,
@@ -1230,6 +1231,7 @@ pub(super) fn component_with_embedded_popover(
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let catalog = FrontendCatalog {
         modules: HashMap::from([

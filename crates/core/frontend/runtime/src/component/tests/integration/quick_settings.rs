@@ -250,6 +250,7 @@ end
             "@mesh/audio-popover".into(),
         )]),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let popover_compiled = CompiledFrontendModule {
         manifest: popover_manifest,
@@ -259,6 +260,7 @@ end
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let catalog = FrontendCatalog {
         modules: HashMap::from([

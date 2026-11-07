@@ -229,6 +229,11 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
 
+        if params.options.insert_spaces && params.options.tab_size > 16 {
+            return Err(tower_lsp::jsonrpc::Error::invalid_params(
+                "tabSize must not exceed 16 when inserting spaces",
+            ));
+        }
         let indent_unit = if params.options.insert_spaces {
             " ".repeat(params.options.tab_size.max(1) as usize)
         } else {
@@ -404,6 +409,50 @@ fn full_document_range(source: &str) -> Range {
 mod tests {
     use super::*;
     use tower_lsp::LspService;
+
+    #[tokio::test]
+    async fn formatting_bounds_space_indentation() {
+        let (service, _) = LspService::new(Backend::new);
+        let backend = service.inner();
+        let uri = Url::parse("file:///workspace/main.mesh").unwrap();
+        backend.documents.write().await.insert(
+            uri.clone(),
+            Document::new(
+                uri.clone(),
+                "<template>\n<div>\n<span />\n</div>\n</template>\n".into(),
+            ),
+        );
+        for width in [0, 1, 4, 16] {
+            let params = DocumentFormattingParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                options: FormattingOptions {
+                    tab_size: width,
+                    insert_spaces: true,
+                    ..Default::default()
+                },
+                work_done_progress_params: Default::default(),
+            };
+            let edits = backend.formatting(params).await.unwrap().unwrap();
+            assert!(
+                edits[0]
+                    .new_text
+                    .contains(&format!("\n{}<div>", " ".repeat(width.max(1) as usize)))
+            );
+        }
+        let params = DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri },
+            options: FormattingOptions {
+                tab_size: u32::MAX,
+                insert_spaces: true,
+                ..Default::default()
+            },
+            work_done_progress_params: Default::default(),
+        };
+        assert_eq!(
+            backend.formatting(params).await.unwrap_err().code,
+            tower_lsp::jsonrpc::ErrorCode::InvalidParams
+        );
+    }
 
     #[test]
     fn full_document_range_uses_utf16_end_position() {

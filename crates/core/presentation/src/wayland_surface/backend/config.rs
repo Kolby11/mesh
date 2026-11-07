@@ -453,6 +453,7 @@ impl SurfaceConfig {
                 Edge::Left => SurfacePolicyEdge::Left,
                 Edge::Right => SurfacePolicyEdge::Right,
             }),
+            center: self.center,
             layer: match self.layer {
                 MeshLayer::Background => SurfacePolicyLayer::Background,
                 MeshLayer::Bottom => SurfacePolicyLayer::Bottom,

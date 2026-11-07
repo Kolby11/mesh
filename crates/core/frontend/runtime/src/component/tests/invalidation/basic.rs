@@ -944,6 +944,7 @@ surface { width: 200px; height: 80px; }
                     local_components: HashMap::new(),
                     module_component_imports: HashMap::new(),
                     watched_paths: Vec::new(),
+                    source_bytes: Default::default(),
                 }
                 .into(),
             },
@@ -998,6 +999,7 @@ surface { width: 200px; height: 80px; }
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let host_id = component.id().to_owned();
     Arc::make_mut(&mut component.frontend_catalog)
@@ -1978,6 +1980,7 @@ fn contribution_only_import_dependency_invalidates_its_host() {
             local_components: HashMap::new(),
             module_component_imports,
             watched_paths: Vec::new(),
+            source_bytes: Default::default(),
         }
         .into()
     }
@@ -2072,6 +2075,7 @@ fn profile_fork_mapping_changes_component_lookup_and_invalidates_consumers() {
             local_components: Default::default(),
             module_component_imports: imports,
             watched_paths: Vec::new(),
+            source_bytes: Default::default(),
         }
         .into(),
     };

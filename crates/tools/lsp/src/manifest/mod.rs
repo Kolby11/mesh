@@ -353,6 +353,14 @@ mod tests {
     }
 
     #[test]
+    fn contract_completion_handles_unicode_fragment_boundaries() {
+        let labels = contract_completion(r#""state": { "items": "é|" }"#);
+        assert!(labels.contains(&"string".to_string()));
+        let labels = contract_completion(r#""state": { "items": "😀in|" }"#);
+        assert_eq!(labels, ["int"]);
+    }
+
+    #[test]
     fn method_signatures_suggest_types_after_colons_and_arrows() {
         assert_eq!(
             contract_completion(r#""methods": { "go": "|" }"#),

@@ -25,6 +25,7 @@ pub enum SurfaceRoleField {
     Resizable,
     Decorations,
     Anchor,
+    Center,
     Layer,
     KeyboardMode,
     Blur,
@@ -56,6 +57,7 @@ const APP_ID_SETTINGS_KEYS: &[&str] = &["app_id"];
 const RESIZABLE_SETTINGS_KEYS: &[&str] = &["resizable"];
 const DECORATIONS_SETTINGS_KEYS: &[&str] = &["decorations"];
 const ANCHOR_SETTINGS_KEYS: &[&str] = &["anchor"];
+const CENTER_SETTINGS_KEYS: &[&str] = &["center"];
 const LAYER_SETTINGS_KEYS: &[&str] = &["layer"];
 const KEYBOARD_MODE_SETTINGS_KEYS: &[&str] = &["keyboard_mode"];
 const BLUR_SETTINGS_KEYS: &[&str] = &["blur"];
@@ -93,6 +95,12 @@ pub const SURFACE_ROLE_FIELD_METADATA: &[SurfaceRoleFieldMetadata] = &[
         scope: SurfaceFieldScope::Layer,
         manifest_key: "anchor",
         settings_keys: ANCHOR_SETTINGS_KEYS,
+    },
+    SurfaceRoleFieldMetadata {
+        field: SurfaceRoleField::Center,
+        scope: SurfaceFieldScope::Layer,
+        manifest_key: "center",
+        settings_keys: CENTER_SETTINGS_KEYS,
     },
     SurfaceRoleFieldMetadata {
         field: SurfaceRoleField::Layer,
@@ -190,6 +198,7 @@ pub struct SurfacePolicySnapshot {
     pub window_resizable: bool,
     pub window_decorations: SurfacePolicyDecorations,
     pub edge: Option<SurfacePolicyEdge>,
+    pub center: bool,
     pub layer: SurfacePolicyLayer,
     pub size_policy: SurfacePolicySizePolicy,
     pub content_size: Option<(u32, u32)>,
@@ -216,6 +225,7 @@ impl Default for SurfacePolicySnapshot {
             window_resizable: true,
             window_decorations: SurfacePolicyDecorations::Client,
             edge: Some(SurfacePolicyEdge::Top),
+            center: false,
             layer: SurfacePolicyLayer::Top,
             size_policy: SurfacePolicySizePolicy::Fixed,
             content_size: None,
@@ -309,6 +319,7 @@ pub struct SurfacePolicyPatch {
     pub window_resizable: Option<bool>,
     pub window_decorations: Option<SurfacePolicyDecorations>,
     pub edge: Option<SurfacePolicyEdge>,
+    pub center: Option<bool>,
     pub layer: Option<SurfacePolicyLayer>,
     pub size_policy: Option<SurfacePolicySizePolicy>,
     pub content_size: Option<(u32, u32)>,
@@ -343,6 +354,7 @@ impl SurfacePolicyPatch {
             window_decorations: (base.window_decorations != target.window_decorations)
                 .then_some(target.window_decorations),
             edge: (base.edge != target.edge).then_some(target.edge).flatten(),
+            center: (base.center != target.center).then_some(target.center),
             layer: (base.layer != target.layer).then_some(target.layer),
             size_policy: (base.size_policy != target.size_policy).then_some(target.size_policy),
             content_size: (base.content_size != target.content_size)
@@ -417,6 +429,10 @@ impl SurfacePolicyPatch {
         }
         if let Some(value) = self.edge {
             snapshot.edge = Some(value);
+            provenance.placement = SurfacePolicyValueSource::Settings;
+        }
+        if let Some(value) = self.center {
+            snapshot.center = value;
             provenance.placement = SurfacePolicyValueSource::Settings;
         }
         if let Some(value) = self.layer {
@@ -733,6 +749,9 @@ impl SurfacePolicySnapshot {
 
     fn layer_geometry_changed(&self, next: &Self) -> bool {
         self.edge != next.edge
+            || (self.center != next.center
+                && matches!(self.edge, Some(SurfacePolicyEdge::Left | SurfacePolicyEdge::Right))
+                && !self.height_spans_output)
             || self.layer != next.layer
             || self.layer_wire_size() != next.layer_wire_size()
             || self.width_spans_output != next.width_spans_output
@@ -898,7 +917,7 @@ mod tests {
 
     #[test]
     fn role_field_metadata_covers_every_role_specific_field() {
-        assert_eq!(SURFACE_ROLE_FIELD_METADATA.len(), 8);
+        assert_eq!(SURFACE_ROLE_FIELD_METADATA.len(), 9);
         for metadata in SURFACE_ROLE_FIELD_METADATA {
             assert!(!metadata.manifest_key.is_empty());
             assert!(!metadata.settings_keys.is_empty());

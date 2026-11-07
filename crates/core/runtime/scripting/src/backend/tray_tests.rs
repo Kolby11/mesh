@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 struct Item {
     icon: Arc<Mutex<String>>,
+    title: Arc<Mutex<String>>,
     activations: Arc<AtomicUsize>,
 }
 
@@ -18,8 +19,8 @@ impl Item {
         "mesh-tray-test"
     }
     #[zbus(property)]
-    fn title(&self) -> &str {
-        "Test application"
+    fn title(&self) -> String {
+        self.title.lock().unwrap().clone()
     }
     #[zbus(property)]
     fn status(&self) -> &str {
@@ -178,6 +179,7 @@ async fn tray_provider_registers_updates_activates_and_reuses_an_existing_watche
         return;
     }
     let icon = Arc::new(Mutex::new("test-logo".to_string()));
+    let title = Arc::new(Mutex::new("Test application".to_string()));
     let activations = Arc::new(AtomicUsize::new(0));
     let peer = zbus::connection::Builder::session()
         .unwrap()
@@ -185,6 +187,7 @@ async fn tray_provider_registers_updates_activates_and_reuses_an_existing_watche
             "/StatusNotifierItem",
             Item {
                 icon: Arc::clone(&icon),
+                title: Arc::clone(&title),
                 activations: Arc::clone(&activations),
             },
         )
@@ -228,6 +231,34 @@ async fn tray_provider_registers_updates_activates_and_reuses_an_existing_watche
     registration.await.unwrap().unwrap();
     harness.until(|h| h.item().is_some()).await;
     assert_eq!(harness.item().unwrap()["icon_name"], "test-logo");
+    for suffix in ["é", "€", "😀"] {
+        *title.lock().unwrap() = format!("{}{suffix}", "a".repeat(127));
+        peer.emit_signal(
+            None::<&str>,
+            "/StatusNotifierItem",
+            "org.kde.StatusNotifierItem",
+            "NewTitle",
+            &(),
+        )
+        .await
+        .unwrap();
+        harness
+            .until(|h| h.item().is_some_and(|item| item["title"] == "a".repeat(127)))
+            .await;
+        *title.lock().unwrap() = "Test application".to_owned();
+        peer.emit_signal(
+            None::<&str>,
+            "/StatusNotifierItem",
+            "org.kde.StatusNotifierItem",
+            "NewTitle",
+            &(),
+        )
+        .await
+        .unwrap();
+        harness
+            .until(|h| h.item().is_some_and(|item| item["title"] == "Test application"))
+            .await;
+    }
     let reply = peer
         .call_method(
             Some("org.kde.StatusNotifierWatcher"),

@@ -1110,7 +1110,7 @@ impl FrontendSurfaceComponent {
                         } else {
                             self.input_preedits.remove(&input_node.id);
                         }
-                        if preedit_changed {
+                        if preedit_changed || current != previous {
                             self.invalidate_text_state();
                         }
                         if current != previous {

@@ -4,12 +4,20 @@ use std::fs;
 use std::path::PathBuf;
 
 #[test]
-fn binary_available_accepts_explicit_existing_paths() {
+fn binary_available_checks_explicit_executable_paths() {
     let dir = temp_dir("explicit-binary-path");
     let executable = dir.join("tool");
     fs::write(&executable, "test").unwrap();
 
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!binary_available(executable.to_str().unwrap()));
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    }
     assert!(binary_available(executable.to_str().unwrap()));
+    assert!(!binary_available(dir.to_str().unwrap()));
     assert!(!binary_available(dir.join("missing").to_str().unwrap()));
 
     fs::remove_dir_all(dir).unwrap();

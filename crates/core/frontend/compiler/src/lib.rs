@@ -362,6 +362,8 @@ pub struct CompiledFrontendModule {
     /// Every `.mesh` file that contributed, entrypoint and imports alike. The
     /// hot-reload watcher mtimes each, so editing any one triggers a recompile.
     pub watched_paths: Vec<PathBuf>,
+    /// Source bytes consumed by the compiler, keyed by their resolved path.
+    pub source_bytes: std::collections::HashMap<PathBuf, Vec<u8>>,
 }
 
 impl CompiledFrontendModule {
@@ -437,14 +439,11 @@ fn compiled_revision(compiled: &CompiledFrontendModule) -> u64 {
     serde_json::to_vec(&compiled.manifest)
         .expect("normalized module manifests serialize")
         .hash(&mut hasher);
-    let mut paths = compiled.watched_paths.clone();
+    let mut paths: Vec<_> = compiled.source_bytes.keys().collect();
     paths.sort();
     for path in paths {
         path.hash(&mut hasher);
-        match std::fs::read(&path) {
-            Ok(source) => source.hash(&mut hasher),
-            Err(error) => error.kind().hash(&mut hasher),
-        }
+        compiled.source_bytes[path].hash(&mut hasher);
     }
     hasher.finish()
 }
@@ -1234,6 +1233,7 @@ mod tests {
             local_components: Default::default(),
             module_component_imports: Default::default(),
             watched_paths: Vec::new(),
+            source_bytes: Default::default(),
         };
         let tree = compiled.build_preview_tree_with_state(&theme, 400, 300, Some(&store));
         let texts = collect_text_content(&tree);
@@ -1312,6 +1312,7 @@ mod tests {
             local_components: Default::default(),
             module_component_imports: Default::default(),
             watched_paths: Vec::new(),
+            source_bytes: Default::default(),
         };
         let tree = compiled.build_preview_tree_with_state(&theme, 400, 300, Some(&store));
         fn find_tag<'a>(node: &'a WidgetNode, tag: &str) -> Option<&'a WidgetNode> {
@@ -1779,6 +1780,7 @@ mod tests {
             local_components: Default::default(),
             module_component_imports: Default::default(),
             watched_paths: Vec::new(),
+            source_bytes: Default::default(),
         }
     }
 

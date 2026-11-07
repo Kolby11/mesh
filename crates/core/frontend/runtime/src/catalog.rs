@@ -251,6 +251,9 @@ fn compile_catalog_entry_from_parts(
                 "frontend contribution entry",
             ) {
                 if !compiled.watched_paths.contains(&path) {
+                    if let Ok(bytes) = std::fs::read(&path) {
+                        compiled.source_bytes.insert(path.clone(), bytes);
+                    }
                     compiled.watched_paths.push(path);
                 }
             }
@@ -316,7 +319,19 @@ pub struct SharedCompiledFrontendModule {
 
 impl From<CompiledFrontendModule> for SharedCompiledFrontendModule {
     fn from(compiled: CompiledFrontendModule) -> Self {
-        let source_fingerprint = source_fingerprint(&compiled.watched_paths);
+        let source_fingerprint = (|| {
+            if compiled.watched_paths.len() != compiled.source_bytes.len() {
+                return None;
+            }
+            let mut paths = compiled.watched_paths.clone();
+            paths.sort();
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            for path in paths {
+                path.hash(&mut hasher);
+                compiled.source_bytes.get(&path)?.hash(&mut hasher);
+            }
+            Some(hasher.finish())
+        })();
         Self {
             compiled: CompiledFrontendRevision::from_module(compiled),
             source_fingerprint,
@@ -1791,6 +1806,26 @@ mod performance_tests {
             validate_contribution_props("@mesh/navigation-bar:settings", &invalid, &compiled)
                 .expect_err("invalid contribution prop accepted");
         assert!(error.contains("expects boolean"), "{error}");
+    }
+
+    #[test]
+    fn compilation_fingerprint_tracks_parsed_source_even_if_file_changes_before_publication() {
+        let module_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../../modules/frontend/settings");
+        let manifest = mesh_core_module::manifest::load_canonical_manifest(&module_dir)
+            .unwrap()
+            .manifest;
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("main.mesh");
+        let child = temp.path().join("child.mesh");
+        std::fs::write(&source, r#"<template><Child /></template><script lang="luau">local Child = require("./child.mesh")</script>"#).unwrap();
+        std::fs::write(&child, "<template><text>old</text></template>").unwrap();
+        let compiled = compile_frontend_entrypoint(&manifest, temp.path(), "main.mesh").unwrap();
+        let original_revision = CompiledFrontendRevision::from_module(compiled.clone()).revision();
+        std::fs::write(&child, "<template><text>new</text></template>").unwrap();
+        let published: SharedCompiledFrontendModule = compiled.into();
+        assert_eq!(published.compiled.revision(), original_revision);
+        assert_ne!(published.source_fingerprint, source_fingerprint(&published.watched_paths));
     }
 
     #[cfg(unix)]

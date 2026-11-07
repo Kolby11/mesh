@@ -1658,16 +1658,22 @@ fn cmd_lock(args: &[String]) {
                 return;
             }
             let mut edited = 0;
-            for (module_id, is_edited) in results {
-                if is_edited {
-                    edited += 1;
-                    println!("edited   {module_id}");
-                } else {
-                    println!("verified {module_id}");
+            let mut failed = 0;
+            for (module_id, outcome) in results {
+                match outcome {
+                    update::VerificationOutcome::Edited => {
+                        edited += 1;
+                        println!("edited   {module_id}");
+                    }
+                    update::VerificationOutcome::Verified => println!("verified {module_id}"),
+                    update::VerificationOutcome::Error(error) => {
+                        failed += 1;
+                        println!("failed   {module_id}: {error}");
+                    }
                 }
             }
             println!("{edited} module(s) differ from their locked digest");
-            if provenance.iter().any(|(_, error)| error.is_some()) {
+            if failed > 0 || provenance.iter().any(|(_, error)| error.is_some()) {
                 std::process::exit(1);
             }
         }

@@ -394,6 +394,26 @@ fn unblurred_and_light_blur_copies_keep_output_resolution() {
 }
 
 #[test]
+fn oversized_prepared_image_is_returned_without_cache_admission_or_eviction() {
+    let source = source();
+    let budget = 16 * 16 * 4;
+    let cached = source.prepared_with_budget(16, 16, 0.0, budget).unwrap();
+    let oversized = source.prepared_with_budget(17, 16, 0.0, budget).unwrap();
+    assert_eq!((oversized.width(), oversized.height()), (17, 16));
+    let cache = source.prepared.lock().unwrap();
+    assert_eq!(cache.len(), 1);
+    assert_eq!(cache[0].1.unique_id(), cached.unique_id());
+    drop(cache);
+    let second = source.prepared_with_budget(17, 16, 0.0, budget).unwrap();
+    assert_ne!(oversized.unique_id(), second.unique_id());
+    assert_eq!(source.prepared.lock().unwrap().len(), 1);
+    let replacement = source.prepared_with_budget(8, 16, 0.0, budget).unwrap();
+    let cache = source.prepared.lock().unwrap();
+    assert_eq!(cache.len(), 1);
+    assert_eq!(cache[0].1.unique_id(), replacement.unique_id());
+}
+
+#[test]
 fn prepared_cache_keeps_every_glass_theme_radius() {
     let source = source();
     let radii = [0.0, 5.0, 8.0, 12.0, 14.0, 16.0, 20.0, 22.0, 24.0];

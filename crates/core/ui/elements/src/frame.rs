@@ -324,6 +324,7 @@ pub enum SemanticField {
     Role,
     Name,
     Description,
+    KeyboardShortcut,
     Focusability,
     Focus,
     State,
@@ -333,11 +334,12 @@ pub enum SemanticField {
 }
 
 impl SemanticField {
-    const ALL: [Self; 10] = [
+    const ALL: [Self; 11] = [
         Self::Tree,
         Self::Role,
         Self::Name,
         Self::Description,
+        Self::KeyboardShortcut,
         Self::Focusability,
         Self::Focus,
         Self::State,
@@ -1336,6 +1338,9 @@ fn semantic_fields(
     if before.info.description != after.info.description {
         fields.push(SemanticField::Description);
     }
+    if before.info.keyboard_shortcut != after.info.keyboard_shortcut {
+        fields.push(SemanticField::KeyboardShortcut);
+    }
     if before.info.focusable != after.info.focusable {
         fields.push(SemanticField::Focusability);
     }
@@ -1606,6 +1611,42 @@ mod tests {
             .find(|change| change.identity.mesh_key() == Some("root/item-0"))
             .expect("label change is reported");
         assert_eq!(change.fields.as_ref(), &[SemanticField::Name]);
+    }
+
+    #[test]
+    fn shortcut_changes_are_reported_by_full_and_dirty_snapshots() {
+        let mut root = WidgetNode::new("box");
+        root.id = 1;
+        root.set_mesh_key("root");
+        let mut button = WidgetNode::new("button");
+        button.id = 2;
+        button.set_mesh_key("root/button");
+        button.accessibility.role = AccessibilityRole::Button;
+        root.children.push(button);
+
+        let mut before = FrameSnapshot::complete(&root, 1, None).unwrap();
+        for (revision, shortcut) in [(2, Some("Ctrl+A")), (3, Some("Ctrl+B")), (4, None)] {
+            root.children[0].accessibility.keyboard_shortcut = shortcut.map(str::to_owned);
+            let full = FrameSnapshot::complete(&root, revision, Some(&before)).unwrap();
+            let dirty = FrameSnapshot::capture_dirty(
+                &root,
+                revision,
+                FramePhaseStamps::complete(revision),
+                &before,
+                &HashSet::from([2]),
+            )
+            .unwrap();
+            assert_eq!(dirty.semantic_diff().changes(), full.semantic_diff().changes());
+            let changes = full.semantic_diff().changes();
+            assert_eq!(changes.len(), 1);
+            assert_eq!(changes[0].kind, SemanticChangeKind::Updated);
+            assert_eq!(changes[0].fields.as_ref(), &[SemanticField::KeyboardShortcut]);
+            before = full;
+        }
+        let unchanged = FrameSnapshot::complete(&root, 5, Some(&before)).unwrap();
+        assert!(unchanged.semantic_diff().changes().is_empty());
+        assert!(FrameSnapshot::complete(&root, 6, None).unwrap().semantic_diff().added()
+            .all(|change| change.fields.contains(&SemanticField::KeyboardShortcut)));
     }
 
     #[test]

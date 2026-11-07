@@ -42,5 +42,17 @@
   "calendar.weekday.6": "So",
   "calendar.weekday.7": "Ne",
   "bar.dashboard": "Prehľad",
-  "bar.wallpapers": "Tapety"
+  "bar.wallpapers": "Tapety",
+  "status.language_title": "Jazyk rozhrania",
+  "status.language": "Jazyk {language}",
+  "status.offline": "Bez pripojenia",
+  "status.wired": "Káblové pripojenie",
+  "status.wifi": "Wi-Fi",
+  "status.volume": "Hlasitosť",
+  "status.volume_value": "Hlasitosť {value}",
+  "status.muted": "Stlmené",
+  "status.battery": "Batéria",
+  "status.battery_value": "Batéria {value}",
+  "status.battery_charging": "Batéria {value} · nabíja sa",
+  "workspace.label": "Pracovná plocha {id}"
 }

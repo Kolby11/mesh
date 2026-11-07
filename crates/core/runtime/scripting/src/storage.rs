@@ -903,7 +903,18 @@ pub fn create_lua_storage_table_with_write_guard_and_charge(
                 write_guard()?;
                 with_storage_key_from_lua(&key, &diagnostic_sink, |key| {
                     if matches!(value, LuaValue::Nil) {
-                        newindex_storage.lock().unwrap().remove(key);
+                        let mut storage = newindex_storage.lock().unwrap();
+                        let previous = storage.remove(key);
+                        let attempted_bytes = serde_json::to_vec(&storage.snapshot())
+                            .map_err(mlua::Error::external)?
+                            .len();
+                        if let Err(error) = charge(attempted_bytes) {
+                            if let Some(previous) = previous {
+                                let _ = storage.try_set(key, previous);
+                            }
+                            return Err(error);
+                        }
+                        drop(storage);
                         write_sink(key);
                         return Ok(());
                     }
@@ -1380,5 +1391,28 @@ mod tests {
             reads.lock().unwrap().is_empty(),
             "looking up the table-owned snapshot method should not be tracked as a storage key read"
         );
+    }
+
+    #[test]
+    fn lua_deletion_releases_storage_charge() {
+        let lua = Lua::new();
+        let manager = StorageManager::new(temp_root("lua-delete-charge"));
+        let scoped = manager.open(StorageScope::backend("module", "provider", "one"));
+        let charged = Arc::new(Mutex::new(0));
+        let observed = Arc::clone(&charged);
+        let storage = create_lua_storage_table_with_write_guard_and_charge(
+            &lua, Arc::new(Mutex::new(scoped)), Arc::new(|_| {}), Arc::new(|_| {}),
+            Arc::new(|_| {}), Arc::new(|| Ok(())), Arc::new(move |bytes| {
+                *observed.lock().unwrap() = bytes;
+                Ok(())
+            }),
+        ).unwrap();
+        lua.globals().set("storage", storage).unwrap();
+        lua.load("storage.value = string.rep('x', 100)").exec().unwrap();
+        assert!(*charged.lock().unwrap() > 100);
+        lua.load("storage.value = nil").exec().unwrap();
+        assert_eq!(*charged.lock().unwrap(), 2);
+        lua.load("storage.absent = nil").exec().unwrap();
+        assert_eq!(*charged.lock().unwrap(), 2);
     }
 }

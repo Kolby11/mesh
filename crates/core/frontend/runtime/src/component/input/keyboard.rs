@@ -556,6 +556,7 @@ impl FrontendSurfaceComponent {
                 &declaration,
                 override_key,
                 &active_locale,
+                keyboard_settings,
             ));
         }
         self.assign_auto_shortcuts(&mut resolved, &auto_actions, keyboard_settings);
@@ -923,11 +924,12 @@ impl FrontendSurfaceComponent {
         declaration: &SurfaceShortcutDeclaration,
         override_key: Option<String>,
         active_locale: &str,
+        keyboard_settings: &mesh_core_config::KeyboardSettings,
     ) -> Option<ResolvedSurfaceShortcut> {
         if let Some(key) = override_key {
             let kind = declaration.generic_trigger.kind;
             let modifiers = declaration.generic_trigger.modifiers.clone();
-            if let Some(reason) = unsafe_override_reason(&key, &modifiers) {
+            if let Some(reason) = unsafe_override_reason(&key, &modifiers, keyboard_settings) {
                 self.record_keybind_diagnostic(&declaration.keybind_id, reason);
                 return resolve_surface_shortcut_declaration_without_override(
                     declaration,
@@ -1261,7 +1263,11 @@ fn format_binding(key: &str, modifiers: &[String]) -> String {
     parts.join("+")
 }
 
-fn unsafe_override_reason(key: &str, modifiers: &[String]) -> Option<&'static str> {
+fn unsafe_override_reason(
+    key: &str,
+    modifiers: &[String],
+    settings: &mesh_core_config::KeyboardSettings,
+) -> Option<&'static str> {
     let key = normalize_key_name(key.trim());
     let modifiers = normalized_modifiers(modifiers);
     let has_ctrl = modifiers.iter().any(|modifier| modifier == "ctrl");
@@ -1274,6 +1280,18 @@ fn unsafe_override_reason(key: &str, modifiers: &[String]) -> Option<&'static st
     }
     if has_ctrl && key == "c" {
         return Some("user override uses reserved selection-copy shortcut");
+    }
+    if [
+        &settings.button_activation_keys,
+        &settings.toggle_activation_keys,
+        &settings.slider_decrement_keys,
+        &settings.slider_increment_keys,
+    ]
+    .into_iter()
+    .flatten()
+    .any(|binding| normalize_key_name(binding) == key)
+    {
+        return Some("user override uses a configured native control key");
     }
 
     None

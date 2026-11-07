@@ -149,6 +149,24 @@ end
 
 local POLL_MS = 10000
 local monitor = nil
+local battery_properties = {
+    IsPresent = true, Percentage = true, State = true, TimeToEmpty = true,
+    TimeToFull = true, EnergyRate = true, Energy = true, EnergyFull = true,
+    Capacity = true,
+}
+
+local function battery_changed(signal)
+    if signal.member ~= "PropertiesChanged" or signal.path ~= battery_path then return false end
+    local fields = signal.body or {}
+    if not fields[1] or fields[1].value ~= DEVICE_INTERFACE then return false end
+    for name in pairs(fields[2] and fields[2].value or {}) do
+        if battery_properties[name] then return true end
+    end
+    for _, name in ipairs(fields[3] and fields[3].value or {}) do
+        if battery_properties[name] then return true end
+    end
+    return false
+end
 
 function start(self)
     mesh.service.set_poll_interval(POLL_MS)
@@ -167,6 +185,7 @@ function on_stream_batch(self, program, lines)
         local signal = mesh.json.decode(line)
         if signal.member == "DeviceAdded" or signal.member == "DeviceRemoved"
             or (signal.path or ""):find("line_power", 1, true)
+            or battery_changed(signal)
         then
             refresh_state(self)
             return

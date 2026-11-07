@@ -1,6 +1,6 @@
 <template>
     <row class="status">
-        <row class="status-pill status-chip" title="Interface language" aria-label={"Language " .. language}>
+        <row class="status-pill status-chip" title={t("status.language_title")} aria-label={t("status.language", { language = language })}>
             <icon class="status-glyph" name="input-keyboard" size="13" />
             <text class="status-label">{language}</text>
         </row>
@@ -44,28 +44,28 @@ effect(function()
     language = string.upper(string.sub(mesh.locale.current() or "en", 1, 2))
 end)
 network_glyph = "network-wireless-offline"
-network_label = "Offline"
+network_label = t("status.offline")
 volume_glyph = "audio-volume-high"
 volume_text = "--"
-volume_label = "Volume"
+volume_label = t("status.volume")
 battery_glyph = "battery-full"
 battery_text = "--"
-battery_label = "Battery"
+battery_label = t("status.battery")
 battery_low = false
 
 effect(function()
     if network.available ~= true or network.kind == "none" then
         network_glyph = "network-wireless-offline"
-        network_label = "Offline"
+        network_label = t("status.offline")
     elseif network.kind == "ethernet" then
         network_glyph = "network-wired"
-        network_label = "Wired"
+        network_label = t("status.wired")
     else
         local signal = network.signal or 0
         network_glyph = signal >= 66 and "network-wireless-signal-excellent"
             or signal >= 33 and "network-wireless-signal-ok"
             or "network-wireless-signal-weak"
-        network_label = (network.ssid or "Wi-Fi") .. " · " .. tostring(signal) .. "%"
+        network_label = ((network.ssid or "") ~= "" and network.ssid or t("status.wifi")) .. " · " .. tostring(signal) .. "%"
     end
 end)
 
@@ -73,20 +73,20 @@ effect(function()
     if audio.available == false then
         volume_text = "--"
         volume_glyph = "audio-volume-muted"
-        volume_label = "Volume"
+        volume_label = t("status.volume")
         return
     end
     local percent = volume.percent(audio.percent)
     volume_text = tostring(percent) .. "%"
     volume_glyph = volume.icon(percent, audio.muted)
-    volume_label = audio.muted and "Muted" or ("Volume " .. volume_text)
+    volume_label = audio.muted and t("status.muted") or t("status.volume_value", { value = volume_text })
 end)
 
 effect(function()
     if power.available == false then
         battery_text = "--"
         battery_glyph = "battery-caution"
-        battery_label = "Battery"
+        battery_label = t("status.battery")
         battery_low = false
         return
     end
@@ -99,7 +99,7 @@ effect(function()
         or level >= 50 and "battery-good"
         or level >= 20 and "battery-low"
         or "battery-caution"
-    battery_label = "Battery " .. battery_text .. (power.charging and " · charging" or "")
+    battery_label = t(power.charging and "status.battery_charging" or "status.battery_value", { value = battery_text })
 end)
 
 function onToggleMute()

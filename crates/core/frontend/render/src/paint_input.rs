@@ -124,6 +124,11 @@ fn hash_primitive(node: &WidgetNode) -> u64 {
     let mut hasher = PaintInputHasher::default();
     node.tag.hash(&mut hasher);
     match node.tag.as_str() {
+        "shape" => hash_attributes(
+            node,
+            &[Prop::Type, Prop::Start, Prop::End, Prop::Inner, Prop::Points],
+            &mut hasher,
+        ),
         "input" => {
             hash_attributes(
                 node,

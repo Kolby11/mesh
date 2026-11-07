@@ -42,5 +42,17 @@
   "calendar.weekday.6": "Sa",
   "calendar.weekday.7": "Su",
   "bar.dashboard": "Dashboard",
-  "bar.wallpapers": "Wallpapers"
+  "bar.wallpapers": "Wallpapers",
+  "status.language_title": "Interface language",
+  "status.language": "Language {language}",
+  "status.offline": "Offline",
+  "status.wired": "Wired",
+  "status.wifi": "Wi-Fi",
+  "status.volume": "Volume",
+  "status.volume_value": "Volume {value}",
+  "status.muted": "Muted",
+  "status.battery": "Battery",
+  "status.battery_value": "Battery {value}",
+  "status.battery_charging": "Battery {value} · charging",
+  "workspace.label": "Workspace {id}"
 }

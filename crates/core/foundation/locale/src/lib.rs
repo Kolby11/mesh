@@ -606,7 +606,7 @@ impl LocaleSnapshot {
     }
 
     fn translate_in_core(&self, key: &str) -> Option<&CatalogEntry> {
-        for locale in self.selection.chain() {
+        for locale in self.core_lookup_order() {
             if let Some(messages) = self.catalogs.core.get(locale) {
                 if let Some(value) = messages.get(key) {
                     return Some(value);
@@ -614,6 +614,13 @@ impl LocaleSnapshot {
             }
         }
         None
+    }
+
+    fn core_lookup_order(&self) -> impl DoubleEndedIterator<Item = &str> {
+        let chain = self.selection.chain();
+        let last_resort = (!chain.iter().any(|locale| locale == LAST_RESORT_LOCALE))
+            .then_some(LAST_RESORT_LOCALE);
+        chain.iter().map(String::as_str).chain(last_resort)
     }
 
     /// The one precedence order for a module's catalogs, highest first: each
@@ -680,17 +687,7 @@ impl LocaleSnapshot {
     }
 
     fn resolve_in_core<'a>(&'a self, key: &str, args: &HashMap<String, String>) -> Option<&'a str> {
-        let last_resort = (!self
-            .selection
-            .chain()
-            .iter()
-            .any(|locale| locale == LAST_RESORT_LOCALE))
-        .then_some(LAST_RESORT_LOCALE);
-        self.selection
-            .chain()
-            .iter()
-            .map(String::as_str)
-            .chain(last_resort)
+        self.core_lookup_order()
             .find_map(|locale| {
                 self.catalogs
                     .core
@@ -768,7 +765,7 @@ impl LocaleSnapshot {
 
     fn effective_core_translations(&self) -> HashMap<String, String> {
         let mut messages = HashMap::new();
-        for locale in self.selection.chain().iter().rev() {
+        for locale in self.core_lookup_order().rev() {
             if let Some(catalog) = self.catalogs.core.get(locale) {
                 messages.extend(catalog.iter().filter_map(|(key, entry)| {
                     entry
@@ -997,6 +994,9 @@ fn message_placeholders(message: &str) -> Result<BTreeSet<String>, String> {
     let mut placeholders = BTreeSet::new();
     let mut remaining = message;
     while let Some(open) = remaining.find('{') {
+        if remaining[..open].contains('}') {
+            return Err("message contains an unmatched '}'".into());
+        }
         if let Some(close) = remaining[open + 1..].find('}') {
             let close = open + 1 + close;
             let name = &remaining[open + 1..close];
@@ -2261,6 +2261,13 @@ fn interpolate(template: &str, args: &HashMap<String, String>) -> Option<String>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rejects_unmatched_closing_braces_before_placeholders() {
+        for message in ["} {name}", "{first} } {second}", "{name}}"] {
+            assert!(super::validate_message(message).is_err(), "{message}");
+        }
+        assert!(super::validate_message("Hello {name}, {place}!").is_ok());
+    }
     use super::*;
 
     // cargo test -p mesh-core-locale --release --lib -- cached_icu_formatter_profile --ignored --nocapture
@@ -2554,6 +2561,32 @@ mod tests {
         });
 
         assert_eq!(engine.core_translator().translate("ok"), Some("OK"));
+    }
+
+    #[test]
+    fn core_lookup_and_bulk_share_english_last_resort() {
+        let mut engine = LocaleEngine::with_fallback_locale("sk", "fr");
+        for (locale, messages) in [
+            ("en", [("only", "Hello {name}"), ("shared", "English")]),
+            ("fr", [("other", "Autre"), ("shared", "Français")]),
+        ] {
+            engine.load_core_translations(TranslationSet {
+                locale: locale.to_string(),
+                messages: messages
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect(),
+            });
+        }
+        let translator = engine.core_translator();
+        assert_eq!(translator.translate("only"), Some("Hello {name}"));
+        assert_eq!(
+            translator.translate_with("only", &HashMap::from([("name".into(), "Ada".into())])),
+            Some("Hello Ada".into())
+        );
+        assert_eq!(translator.translations()["only"], "Hello {name}");
+        assert_eq!(translator.translations()["shared"], "Français");
+        assert_eq!(translator.translate("shared"), Some("Français"));
     }
 
     #[test]

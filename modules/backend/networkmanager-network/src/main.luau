@@ -54,7 +54,7 @@ local function ssid_text(bytes)
 end
 
 local function access_points(wireless, next_state, connected_path)
-    local seen, networks = {}, {}
+    local seen, networks, paths = {}, {}, {}
     for _, path in ipairs(wireless.AccessPoints or {}) do
         local point = properties(path, ACCESS_POINT)
         local ssid = point and ssid_text(point.Ssid) or ""
@@ -65,20 +65,32 @@ local function access_points(wireless, next_state, connected_path)
                 next_state.signal = signal
                 next_state.ssid = ssid
             end
-            if ssid ~= "" and not seen[ssid] then
-                seen[ssid] = true
-                networks[#networks + 1] = {
-                    id = ssid, ssid = ssid, signal = signal,
-                    secured = (point.Flags or 0) % 2 == 1 or (point.WpaFlags or 0) ~= 0
-                        or (point.RsnFlags or 0) ~= 0,
-                    connected = connected,
-                }
+            if ssid ~= "" then
+                local index = seen[ssid]
+                local previous = index and networks[index]
+                if not previous then
+                    index = #networks + 1
+                    seen[ssid] = index
+                end
+                if not previous or (connected and not previous.connected)
+                    or (connected == previous.connected and (signal > previous.signal
+                        or (signal == previous.signal and path < paths[index])))
+                then
+                    paths[index] = path
+                    networks[index] = {
+                        id = ssid, ssid = ssid, signal = signal,
+                        secured = (point.Flags or 0) % 2 == 1 or (point.WpaFlags or 0) ~= 0
+                            or (point.RsnFlags or 0) ~= 0,
+                        connected = connected,
+                    }
+                end
             end
         end
     end
     table.sort(networks, function(a, b)
         if a.connected ~= b.connected then return a.connected end
-        return a.signal > b.signal
+        if a.signal ~= b.signal then return a.signal > b.signal end
+        return a.ssid < b.ssid
     end)
     next_state.networks = networks
 end

@@ -453,6 +453,49 @@ end
 }
 
 #[test]
+fn equal_service_payload_advances_source_guard_without_notification() {
+    let caps = CapabilitySet::from_ids(["service.audio.read"]);
+    let mut ctx = ScriptContext::new("@test/audio-equal-source", caps).unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+observed = 0
+function read_audio()
+    local audio = require("mesh.audio@>=1.0")
+    observed = audio.percent
+end
+"#,
+    )
+    .unwrap();
+    let first = serde_json::json!({ "percent": 20 });
+    let changed = serde_json::json!({ "percent": 99 });
+    let first_fp = ScriptContext::service_payload_fingerprint(&first);
+    let changed_fp = ScriptContext::service_payload_fingerprint(&changed);
+
+    assert!(ctx.apply_service_payload_with_generation("audio", &first, first_fp, None, 0));
+    assert!(!ctx.apply_service_payload_with_generation("audio", &first, first_fp, Some("A"), 7));
+    assert!(!ctx.apply_service_payload_with_generation("audio", &first, first_fp, Some("B"), 8));
+    assert_eq!(ctx.service_context_generation(), 1);
+    assert_eq!(ctx.service_payload_generation("audio"), Some(1));
+    assert!(!ctx.apply_service_payload_with_generation(
+        "audio", &changed, changed_fp, Some("A"), 7
+    ));
+    assert!(!ctx.apply_service_payload_with_generation(
+        "audio", &changed, changed_fp, Some("A"), 8
+    ));
+    assert!(!ctx.apply_service_payload_with_generation("audio", &changed, changed_fp, None, 0));
+    ctx.call_handler("read_audio", &[]).unwrap();
+    assert_eq!(ctx.state.get("observed"), Some(serde_json::json!(20)));
+
+    assert!(ctx.apply_service_payload_with_generation(
+        "audio", &changed, changed_fp, Some("B"), 8
+    ));
+    assert_eq!(ctx.service_context_generation(), 2);
+    ctx.call_handler("read_audio", &[]).unwrap();
+    assert_eq!(ctx.state.get("observed"), Some(serde_json::json!(99)));
+}
+
+#[test]
 fn interface_proxy_reads_state_fields_without_callbacks() {
     let caps = CapabilitySet::from_ids(["service.audio.read"]);
     let mut ctx = ScriptContext::new("@test/audio-widget", caps).unwrap();

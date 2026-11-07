@@ -56,9 +56,12 @@ impl ServiceContextState {
             }
         }
 
-        if self.payloads.get(service).is_some_and(|current| {
-            current.fingerprint == fingerprint && current.value.as_ref() == payload
-        }) {
+        if let Some(current) = self.payloads.get_mut(service)
+            && current.fingerprint == fingerprint
+            && current.value.as_ref() == payload
+        {
+            current.source_module = source_module.map(str::to_owned);
+            current.source_generation = source_generation;
             return false;
         }
 

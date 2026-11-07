@@ -81,7 +81,12 @@ local function remove(id)
 end
 
 local function text(value, limit)
-    return type(value) == "string" and value:sub(1, limit or 128):gsub("[%c]", " ") or ""
+    if type(value) ~= "string" then return "" end
+    limit = limit or 128
+    if #value > limit then
+        value = value:sub(1, utf8.offset(value, 0, limit + 1) - 1)
+    end
+    return value:gsub("[%c]", " ")
 end
 
 -- The pixmap closest to 32px becomes a blob; the shell scales it.

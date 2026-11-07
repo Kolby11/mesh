@@ -1,6 +1,6 @@
 use super::*;
-use mesh_core_frontend_shell_adapter::ComponentContext;
 use crate::component::catalog::FrontendCatalog;
+use mesh_core_frontend_shell_adapter::ComponentContext;
 mod cpu_timing;
 use mesh_core_diagnostics::Diagnostics;
 use mesh_core_frontend::compile_frontend_module;
@@ -611,11 +611,9 @@ fn liquid_glass_launcher_keeps_results_viewport_with_many_apps() {
         "momentum should keep moving the popup"
     );
     let mut pixels = PixelBuffer::new(popup_size.0, popup_size.1);
-    assert!(
-        component
-            .paint_child_surface_raster(&request.node_key, &mut pixels, 1.0, content_offset, false)
-            .unwrap()
-    );
+    assert!(component
+        .paint_child_surface_raster(&request.node_key, &mut pixels, 1.0, content_offset, false)
+        .unwrap());
 }
 
 #[test]
@@ -898,7 +896,8 @@ fn wallpaper_parallax_shows_five_slanted_cards_with_panning_pictures() {
         .find(|slot| first_node_by_class(slot, "card-selected").is_some())
         .unwrap();
     let selected = first_node_by_class(slot, "card-selected").unwrap();
-    let centre = slot.layout.x + slot.computed_style.transform.translate_x + slot.layout.width / 2.0;
+    let centre =
+        slot.layout.x + slot.computed_style.transform.translate_x + slot.layout.width / 2.0;
     assert!(
         (centre - (stage.layout.x + stage.layout.width / 2.0)).abs() < 1.0,
         "selected card is centred: {centre} in {:?}",
@@ -1476,16 +1475,14 @@ fn desktop_widgets_export_real_blur_and_do_not_draw_scrollbars() {
     for (width, height) in [(1920, 1000), (640, 1000)] {
         paint(&mut component, width, height);
         assert!(!component.display_list_blur_regions().is_empty());
-        assert!(
-            !component
-                .display_list_paint_commands()
-                .iter()
-                .any(|command| matches!(
-                    command.kind,
-                    mesh_core_render::display_list::DisplayPaintCommandKind::ApplyBackdropRefraction
-                        | mesh_core_render::display_list::DisplayPaintCommandKind::Scrollbars
-                ))
-        );
+        assert!(!component
+            .display_list_paint_commands()
+            .iter()
+            .any(|command| matches!(
+                command.kind,
+                mesh_core_render::display_list::DisplayPaintCommandKind::ApplyBackdropRefraction
+                    | mesh_core_render::display_list::DisplayPaintCommandKind::Scrollbars
+            )));
     }
 }
 
@@ -1678,8 +1675,13 @@ fn desktop_widgets_resize_during_playback_without_forced_rebuilds() {
             assert_eq!(
                 (card.layout.width, card.layout.height),
                 (
-                    component.runtime_state(component.root_instance_key()).unwrap()
-                        .get_ref("media_width").unwrap().as_f64().unwrap() as f32,
+                    component
+                        .runtime_state(component.root_instance_key())
+                        .unwrap()
+                        .get_ref("media_width")
+                        .unwrap()
+                        .as_f64()
+                        .unwrap() as f32,
                     186.0 + delta
                 ),
                 "delta={delta}; root={:?}; child={:?}; style={:?}",
@@ -1919,11 +1921,9 @@ fn desktop_seek_then_track_switch_resets_slider_and_elapsed_time() {
                 "acknowledged={acknowledge}, new position={position}, slider={actual}, text={:?}",
                 rendered_text(&component)
             );
-            assert!(
-                rendered_text(&component)
-                    .iter()
-                    .any(|text| text == &format!("00:{position:02}"))
-            );
+            assert!(rendered_text(&component)
+                .iter()
+                .any(|text| text == &format!("00:{position:02}")));
         }
     }
 }
@@ -2677,7 +2677,9 @@ fn glass_bar_active_workspace_pill_scales_up_from_circle() {
         }),
     );
     assert!(component.wants_render());
-    component.paint_raster(&theme, extent, &mut pixels, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
     let tree = component.last_tree.as_ref().unwrap();
     let pill = workspace_pill(tree).unwrap();
     let class2 = pill.children[1].attributes.get(Prop::Class).unwrap();
@@ -2709,7 +2711,9 @@ fn glass_bar_active_workspace_pill_scales_up_from_circle() {
         }),
     );
     assert!(component.wants_render());
-    component.paint_raster(&theme, extent, &mut pixels, 1.0).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
     let tree = component.last_tree.as_ref().unwrap();
     let pill = workspace_pill(tree).unwrap();
     let class1 = pill.children[0].attributes.get(Prop::Class).unwrap();
@@ -2961,6 +2965,134 @@ fn glass_exit_settles_before_the_root_opacity_duration() {
         component.set_surface_exiting(false);
         assert!(!component.exit_settled());
     }
+}
+
+#[test]
+fn glass_labels_follow_locale_changes() {
+    let catalog = GlassCatalog::new();
+    let mut locale = mesh_core_locale::LocaleEngine::from_snapshot(catalog.locale.snapshot());
+    for module in ["glass-bar", "glass-widgets"] {
+        let path = root()
+            .join("modules/frontend")
+            .join(module)
+            .join("config/i18n/sk.json");
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        locale.load_module_catalog(
+            &format!("@mesh/{module}"),
+            mesh_core_locale::compile_catalog("sk", &json),
+        );
+    }
+    let mut bar = catalog.mount("glass-bar");
+    let mut widgets = catalog.mount("glass-widgets");
+    bar.handle_service_event(&ServiceEvent::Updated {
+        service: "mesh.audio".into(),
+        source_module: "@test/glass-services".into(),
+        payload: serde_json::json!({"available": false}),
+    })
+    .unwrap();
+    paint(&mut bar, 1440, 80);
+    paint(&mut widgets, 1000, 600);
+    let bar_tree = bar.last_tree.as_ref().unwrap();
+    assert_eq!(
+        first_node_by_class(bar_tree, "status-chip-btn")
+            .unwrap()
+            .attributes
+            .get(Prop::AriaLabel)
+            .map(String::as_str),
+        Some("Volume")
+    );
+    let widgets_tree = widgets.last_tree.as_ref().unwrap();
+    assert_eq!(
+        first_node_by_class(widgets_tree, "media-title")
+            .unwrap()
+            .attributes
+            .get(Prop::Content)
+            .map(String::as_str),
+        Some("Nothing playing")
+    );
+    locale.set_locale("sk");
+    bar.locale_changed(&locale).unwrap();
+    widgets.locale_changed(&locale).unwrap();
+    paint(&mut bar, 1440, 80);
+    paint(&mut widgets, 1000, 600);
+    let bar_tree = bar.last_tree.as_ref().unwrap();
+    assert_eq!(
+        first_node_by_class(bar_tree, "status-chip-btn")
+            .unwrap()
+            .attributes
+            .get(Prop::AriaLabel)
+            .map(String::as_str),
+        Some("Hlasitosť")
+    );
+    assert_eq!(
+        first_node_by_class(bar_tree, "ws")
+            .unwrap()
+            .attributes
+            .get(Prop::AriaLabel)
+            .map(String::as_str),
+        Some("Pracovná plocha 1")
+    );
+    let widgets_tree = widgets.last_tree.as_ref().unwrap();
+    assert_eq!(
+        first_node_by_class(widgets_tree, "media-title")
+            .unwrap()
+            .attributes
+            .get(Prop::Content)
+            .map(String::as_str),
+        Some("Nič sa neprehráva")
+    );
+    assert_eq!(
+        first_node_by_class(widgets_tree, "weather-condition")
+            .unwrap()
+            .attributes
+            .get(Prop::Content)
+            .map(String::as_str),
+        Some("Čaká sa na predpoveď")
+    );
+    widgets.handle_service_event(&ServiceEvent::Updated {
+        service: "mesh.weather".into(),
+        source_module: "@test/glass-services".into(),
+        payload: serde_json::json!({"available": true, "location": "", "condition": "rain", "temperature": 8, "feels_like": 6, "is_day": true, "hourly": []}),
+    }).unwrap();
+    paint(&mut widgets, 1000, 600);
+    let tree = widgets.last_tree.as_ref().unwrap();
+    assert_eq!(
+        first_node_by_class(tree, "weather-condition")
+            .unwrap()
+            .attributes
+            .get(Prop::Content)
+            .map(String::as_str),
+        Some("Dážď")
+    );
+    assert_eq!(
+        first_node_by_class(tree, "weather-feels")
+            .unwrap()
+            .attributes
+            .get(Prop::Content)
+            .map(String::as_str),
+        Some("Pocitovo 6°")
+    );
+    locale.set_locale("en");
+    widgets.locale_changed(&locale).unwrap();
+    paint(&mut widgets, 1000, 600);
+    let tree = widgets.last_tree.as_ref().unwrap();
+    assert_eq!(
+        first_node_by_class(tree, "weather-condition")
+            .unwrap()
+            .attributes
+            .get(Prop::Content)
+            .map(String::as_str),
+        Some("Rain")
+    );
+    assert_eq!(
+        first_node_by_class(tree, "weather-feels")
+            .unwrap()
+            .attributes
+            .get(Prop::Content)
+            .map(String::as_str),
+        Some("Feels 6°")
+    );
 }
 
 #[test]
@@ -3258,11 +3390,17 @@ fn glass_bar_volume_chip_steps_volume_with_arrow_keys() {
 #[test]
 fn glass_bar_volume_chip_steps_volume_with_wheel_and_touchpad() {
     let mut component = host("glass-bar");
-    update(&mut component, "mesh.audio", serde_json::json!({"available":true,"percent":50,"muted":false}));
+    update(
+        &mut component,
+        "mesh.audio",
+        serde_json::json!({"available":true,"percent":50,"muted":false}),
+    );
     paint(&mut component, 1920, 100);
     for touchpad in [false, true] {
         for (dy, command) in [(1.0, "volume_up"), (-1.0, "volume_down")] {
-            let chip = first_node_by_class(component.last_tree.as_ref().unwrap(), "status-chip-btn").unwrap();
+            let chip =
+                first_node_by_class(component.last_tree.as_ref().unwrap(), "status-chip-btn")
+                    .unwrap();
             let x = chip.layout.x + chip.layout.width / 2.0;
             let y = chip.layout.y + chip.layout.height / 2.0;
             let input = if touchpad {
@@ -3272,8 +3410,12 @@ fn glass_bar_volume_chip_steps_volume_with_wheel_and_touchpad() {
             };
             let requests = component.handle_input(&theme(), 1920, 100, input).unwrap();
             let calls: Vec<_> = requests.iter().filter_map(service_request_parts).collect();
-            assert!(calls.iter().any(|(service, method, _)| *service == "mesh.audio" && *method == command),
-                "touchpad={touchpad}, dy={dy}: {calls:?}");
+            assert!(
+                calls
+                    .iter()
+                    .any(|(service, method, _)| *service == "mesh.audio" && *method == command),
+                "touchpad={touchpad}, dy={dy}: {calls:?}"
+            );
             paint(&mut component, 1920, 100);
         }
     }
@@ -3285,11 +3427,22 @@ fn glass_control_center_keeps_low_battery_values_in_percent_units() {
     paint(&mut component, 1920, 100);
     press(&mut component, "glassControls", 1920, 100);
     for (level, displayed) in [(0.0, 0), (0.5, 1), (1.0, 1), (2.0, 2), (100.0, 100)] {
-        update(&mut component, "mesh.power", serde_json::json!({"available":true,"level":level,"charging":false}));
+        update(
+            &mut component,
+            "mesh.power",
+            serde_json::json!({"available":true,"level":level,"charging":false}),
+        );
         paint(&mut component, 1920, 100);
         let footer = first_node_by_class(component.last_tree.as_ref().unwrap(), "footer").unwrap();
-        let label = first_node_by_class(footer, "caption").unwrap().attributes.get(Prop::Content).unwrap();
-        assert!(label.starts_with(&format!("{displayed}%")), "level={level}: {label}");
+        let label = first_node_by_class(footer, "caption")
+            .unwrap()
+            .attributes
+            .get(Prop::Content)
+            .unwrap();
+        assert!(
+            label.starts_with(&format!("{displayed}%")),
+            "level={level}: {label}"
+        );
     }
 }
 

@@ -736,6 +736,7 @@ pub fn test_frontend_component_with_local_components(
             .collect(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     // The catalog points back at this surface so local PascalCase components
     // resolve during render.
@@ -784,6 +785,7 @@ pub fn test_frontend_component_with_manifest(
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let catalog = FrontendCatalog {
         modules: HashMap::new(),
@@ -860,6 +862,7 @@ pub fn test_frontend_component_with_required_icons(
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let catalog = FrontendCatalog {
         modules: HashMap::new(),
@@ -906,6 +909,7 @@ pub fn test_frontend_component_with_catalog(
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let catalog = FrontendCatalog {
         modules: HashMap::new(),
@@ -1001,6 +1005,7 @@ pub fn real_frontend_module_component(
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let audio_popover_compiled = CompiledFrontendModule {
         manifest: audio_popover_manifest,
@@ -1014,6 +1019,7 @@ pub fn real_frontend_module_component(
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let language_popover_compiled = CompiledFrontendModule {
         manifest: language_popover_manifest,
@@ -1034,6 +1040,7 @@ pub fn real_frontend_module_component(
         )]),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let theme_selector_compiled = CompiledFrontendModule {
         manifest: theme_selector_manifest,
@@ -1054,6 +1061,7 @@ pub fn real_frontend_module_component(
         )]),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let quick_settings_compiled = CompiledFrontendModule {
         manifest: quick_settings_manifest,
@@ -1067,6 +1075,7 @@ pub fn real_frontend_module_component(
         local_components: HashMap::new(),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let debug_inspector_compiled = CompiledFrontendModule {
         manifest: debug_inspector_manifest,
@@ -1137,6 +1146,7 @@ pub fn real_frontend_module_component(
         ]),
         module_component_imports: HashMap::new(),
         watched_paths: Vec::new(),
+        source_bytes: Default::default(),
     };
     let settings_compiled = compile_frontend_module(&settings_manifest, &settings_dir)
         .expect("settings module and its local pages should compile");

@@ -244,8 +244,9 @@ fn canonicalize_template_attrs(line: &str) -> String {
             }
         }
 
-        out.push(bytes[i] as char);
-        i += 1;
+        let ch = line[i..].chars().next().unwrap();
+        out.push(ch);
+        i += ch.len_utf8();
     }
 
     out
@@ -640,6 +641,17 @@ mod tests {
 </template>
 ";
         assert_eq!(fmt(src), expected);
+    }
+
+    #[test]
+    fn formatting_preserves_utf8_and_is_idempotent() {
+        let src = "<template>\n<button title=\"Café 😀\" aria-label=\"{t('žluťoučký')}\" class=\"é {active}\">\n<text>Zažlť 😀</text>\n</button>\n</template>\n";
+        let formatted = fmt(src);
+        assert!(formatted.contains("title=\"Café 😀\""));
+        assert!(formatted.contains("aria-label={t('žluťoučký')}"));
+        assert!(formatted.contains("class=\"é {active}\""));
+        assert!(formatted.contains("<text>Zažlť 😀</text>"));
+        assert_eq!(fmt(&formatted), formatted);
     }
 
     #[test]

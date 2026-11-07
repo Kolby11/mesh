@@ -97,6 +97,7 @@ impl SurfaceLayoutSettings {
                 Edge::Left => SurfacePolicyEdge::Left,
                 Edge::Right => SurfacePolicyEdge::Right,
             }),
+            center: self.center,
             layer: match self.layer {
                 Layer::Background => SurfacePolicyLayer::Background,
                 Layer::Bottom => SurfacePolicyLayer::Bottom,
@@ -490,6 +491,8 @@ pub fn surface_layout_to_json(layout: &SurfaceLayoutSettings) -> serde_json::Val
 
     if role_field_applies_to_layout(layout, SurfaceRoleField::Anchor) {
         block.insert("anchor".into(), surface_edge_name(layout.edge).into());
+    }
+    if role_field_applies_to_layout(layout, SurfaceRoleField::Center) {
         block.insert("center".into(), layout.center.into());
     }
     if role_field_applies_to_layout(layout, SurfaceRoleField::Layer) {
@@ -1102,6 +1105,7 @@ mod tests {
             serde_json::json!({
                 "surface": {
                     "blur": true,
+                    "center": true,
                 }
             }),
             &manifest,
@@ -1109,6 +1113,9 @@ mod tests {
 
         assert_eq!(settings.declared_policy.snapshot.blur, false);
         assert_eq!(settings.effective_policy.snapshot.blur, true);
+        assert!(!settings.declared_policy.snapshot.center);
+        assert!(settings.effective_policy.snapshot.center);
+        assert_eq!(settings.effective_policy.overrides.center, Some(true));
         assert_eq!(settings.effective_policy.snapshot.margins, [0; 4]);
         assert_eq!(settings.policy, settings.effective_policy.snapshot);
         assert!(settings.effective_policy.diagnostics.is_empty());

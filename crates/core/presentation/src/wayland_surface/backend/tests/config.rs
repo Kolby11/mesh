@@ -200,6 +200,37 @@ fn layer_geometry_change_requires_fresh_configure() {
 }
 
 #[test]
+fn centered_fixed_rail_reconfigures_without_recreating_the_role() {
+    for edge in [Edge::Left, Edge::Right] {
+        let mut previous = base_cfg();
+        previous.edge = Some(edge);
+        let mut next = previous.clone();
+        next.center = true;
+        let diff = previous.semantic_diff(previous.keyboard_mode, &next, next.keyboard_mode);
+        assert_eq!(diff.change, SurfacePolicyChange::LayerConfigure);
+        assert!(diff.requires_fresh_configure());
+        assert!(!diff.requires_recreation());
+        assert_ne!(protocol::map_anchor(&previous), protocol::map_anchor(&next));
+    }
+    let mut previous = base_cfg();
+    previous.edge = Some(Edge::Top);
+    let mut next = previous.clone();
+    next.center = true;
+    assert_eq!(
+        previous.semantic_diff(previous.keyboard_mode, &next, next.keyboard_mode).change,
+        SurfacePolicyChange::Noop
+    );
+    let mut previous = base_cfg();
+    set_requested_size(&mut previous, (280, 0), SurfacePadding::default());
+    let mut next = previous.clone();
+    next.center = true;
+    assert_eq!(
+        previous.semantic_diff(previous.keyboard_mode, &next, next.keyboard_mode).change,
+        SurfacePolicyChange::Noop
+    );
+}
+
+#[test]
 fn unchanged_config_has_no_semantic_diff() {
     let previous = base_cfg();
     let next = previous.clone();

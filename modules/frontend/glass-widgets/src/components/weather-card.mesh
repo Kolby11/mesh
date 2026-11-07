@@ -38,6 +38,7 @@
 <script lang="luau">
 
 local weather = require("mesh.weather")
+local t = import("mesh.i18n", "t")
 
 local GLYPHS = {
     clear = "weather-clear",
@@ -50,15 +51,11 @@ local GLYPHS = {
     storm = "weather-storm",
 }
 
-local LABELS = {
-    clear = "Clear", ["partly-cloudy"] = "Partly cloudy", cloudy = "Cloudy", fog = "Fog",
-    drizzle = "Drizzle", rain = "Rain", snow = "Snow", storm = "Thunderstorm",
-}
 
 available = false
 glyph = GLYPHS.cloudy
-location = "Weather"
-condition = "Loading…"
+location = t("weather.title")
+condition = t("weather.loading")
 temperature = "--"
 feels = ""
 forecast = {}
@@ -71,8 +68,8 @@ end
 effect(function()
     available = weather.available == true
     if not available then
-        location = "Weather"
-        condition = "Waiting for forecast"
+        location = t("weather.title")
+        condition = t("weather.waiting")
         temperature = "--"
         feels = ""
         forecast = {}
@@ -80,10 +77,10 @@ effect(function()
     end
     local state = weather.condition or "cloudy"
     glyph = (state == "clear" and weather.is_day == false) and "weather-clear-night" or GLYPHS[state] or GLYPHS.cloudy
-    location = (weather.location or "") ~= "" and weather.location or "Here"
-    condition = LABELS[state] or state
+    location = (weather.location or "") ~= "" and weather.location or t("weather.here")
+    condition = GLYPHS[state] and t("weather." .. state) or state
     temperature = tostring(math.floor((weather.temperature or 0) + 0.5))
-    feels = "Feels " .. tostring(math.floor((weather.feels_like or 0) + 0.5)) .. "°"
+    feels = t("weather.feels", { temperature = tostring(math.floor((weather.feels_like or 0) + 0.5)) })
     local points = {}
     for index, point in weather.hourly or {} do
         if index > 3 then break end

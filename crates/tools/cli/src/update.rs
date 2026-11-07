@@ -1064,20 +1064,29 @@ pub fn rollback(
     Ok(restored)
 }
 
-/// Recompute every digest and report which modules the user has edited.
-pub fn verify(modules_dir: &Path, lock: &MeshLock) -> Vec<(String, bool)> {
+#[derive(Debug, PartialEq, Eq)]
+pub enum VerificationOutcome {
+    Verified,
+    Edited,
+    Error(String),
+}
+
+/// Recompute every digest, retaining failures for individual modules.
+pub fn verify(modules_dir: &Path, lock: &MeshLock) -> Vec<(String, VerificationOutcome)> {
     lock.modules
         .iter()
-        .filter_map(|(module_id, entry)| {
-            let Ok(installed_at) = module_install_path(modules_dir, module_id) else {
-                return Some((module_id.clone(), true));
-            };
-            if !installed_at.exists() {
-                return Some((module_id.clone(), true));
-            }
-            has_local_edits(&installed_at, entry)
-                .ok()
-                .map(|edited| (module_id.clone(), edited))
+        .map(|(module_id, entry)| {
+            let outcome = module_install_path(modules_dir, module_id)
+                .and_then(|installed_at| has_local_edits(&installed_at, entry))
+                .map(|edited| {
+                    if edited {
+                        VerificationOutcome::Edited
+                    } else {
+                        VerificationOutcome::Verified
+                    }
+                })
+                .unwrap_or_else(|error| VerificationOutcome::Error(error.to_string()));
+            (module_id.clone(), outcome)
         })
         .collect()
 }
@@ -1113,6 +1122,71 @@ mod tests {
         LockedModule, MeshLock, ModuleSource, PackageOperation, PackageOwner,
     };
     use std::collections::BTreeSet;
+
+    #[test]
+    fn lock_verification_reports_every_digest_failure() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-verify-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let mut lock = MeshLock::new();
+        for name in ["valid", "edited", "missing", "invalid", "unreadable"] {
+            let path = root.join("me").join(name);
+            fs::create_dir_all(&path).unwrap();
+            fs::write(path.join("main.luau"), "return {}\n").unwrap();
+            lock.modules.insert(
+                format!("@me/{name}"),
+                LockedModule {
+                    version: "1.0.0".into(),
+                    source: ModuleSource::Path { path: "local".into() },
+                    revision: None,
+                    digest: module_tree_digest(&path).unwrap(),
+                    trust: Default::default(),
+                    signature: None,
+                    dependencies: BTreeMap::new(),
+                    requested_by: BTreeSet::new(),
+                },
+            );
+        }
+        fs::write(root.join("me/edited/main.luau"), "changed").unwrap();
+        fs::remove_dir_all(root.join("me/missing")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("main.luau", root.join("me/invalid/link")).unwrap();
+        #[cfg(not(unix))]
+        fs::remove_dir_all(root.join("me/invalid")).unwrap();
+        #[cfg(unix)]
+        let unreadable_denied = {
+            use std::os::unix::fs::PermissionsExt;
+            let file = root.join("me/unreadable/main.luau");
+            fs::set_permissions(&file, fs::Permissions::from_mode(0)).unwrap();
+            fs::read(&file).is_err()
+        };
+        let results: BTreeMap<_, _> = verify(&root, &lock).into_iter().collect();
+        assert_eq!(results.len(), 5);
+        assert_eq!(results["@me/valid"], VerificationOutcome::Verified);
+        assert_eq!(results["@me/edited"], VerificationOutcome::Edited);
+        assert!(matches!(
+            results["@me/missing"],
+            VerificationOutcome::Error(_)
+        ));
+        assert!(matches!(
+            results["@me/invalid"],
+            VerificationOutcome::Error(_)
+        ));
+        #[cfg(unix)]
+        if unreadable_denied {
+            assert!(matches!(results["@me/unreadable"], VerificationOutcome::Error(_)));
+        }
+        lock.modules.retain(|id, _| id == "@me/missing" || id == "@me/invalid");
+        assert!(verify(&root, &lock)
+            .iter()
+            .all(|(_, result)| matches!(result, VerificationOutcome::Error(_))));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     fn manifest(
         name: &str,
