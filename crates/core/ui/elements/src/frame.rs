@@ -1350,7 +1350,10 @@ fn semantic_fields(
     if before.info.hidden != after.info.hidden || before.info.visible != after.info.visible {
         fields.push(SemanticField::Visibility);
     }
-    if !accessibility_state_equal(&before.info.state, &after.info.state) {
+    if !accessibility_state_equal(&before.info.state, &after.info.state)
+        || before.info.set_size != after.info.set_size
+        || before.info.position_in_set != after.info.position_in_set
+    {
         fields.push(SemanticField::State);
     }
     if !layout_equal(before.bounds, after.bounds) {

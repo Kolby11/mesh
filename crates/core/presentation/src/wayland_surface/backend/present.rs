@@ -196,6 +196,7 @@ impl WaylandSurfaceBackend {
         };
         if let Err(error) = entry.attach_buffer(
             &qh,
+            state.presentation.as_ref(),
             surface_id,
             slot,
             logical_w,

@@ -217,10 +217,30 @@ impl ActiveKeyframeAnimation {
         let duration = self.duration.as_secs_f64();
         let iteration = (active.as_secs_f64() / duration).floor();
         let raw_now = active.as_secs_f64() / duration - iteration;
+        let reverse = match self.direction {
+            AnimationDirection::Normal => false,
+            AnimationDirection::Reverse => true,
+            AnimationDirection::Alternate => (iteration as u32) % 2 == 1,
+            AnimationDirection::AlternateReverse => (iteration as u32) % 2 == 0,
+        };
+        // Reverse steps change just after a boundary rather than at it. The
+        // sample uses f32 progress, so keep ticking across its rounding window.
+        if reverse
+            && boundaries
+                .iter()
+                .any(|boundary| (raw_now - boundary).abs() <= 4.0 * f64::from(f32::EPSILON))
+        {
+            return NextChange::EveryFrame;
+        }
         let next_raw = boundaries
             .into_iter()
             .filter(|&raw| raw > raw_now + 1e-9)
             .fold(1.0f64, f64::min);
+        let next_raw = if reverse {
+            (next_raw - 2.0 * f64::from(f32::EPSILON)).max(raw_now)
+        } else {
+            next_raw
+        };
         let next = self.started_at + self.delay + self.duration.mul_f64(iteration + next_raw);
         match self.total_active_duration() {
             Some(total) => NextChange::At(next.min(self.started_at + self.delay + total)),
@@ -838,5 +858,53 @@ mod tests {
             animation.next_change(&rule, start + ms(400)),
             NextChange::Never
         );
+    }
+
+    #[test]
+    fn reverse_step_boundaries_keep_waking_until_the_value_changes() {
+        let ms = Duration::from_millis;
+        let mut animation = animation();
+        let start = animation.started_at;
+        animation.iteration_count = AnimationIterationCount::Infinite;
+        let rule = registry().get("pulse").unwrap().clone();
+
+        for position in [
+            mesh_core_elements::StepPosition::JumpStart,
+            mesh_core_elements::StepPosition::JumpEnd,
+            mesh_core_elements::StepPosition::JumpNone,
+            mesh_core_elements::StepPosition::JumpBoth,
+        ] {
+            animation.easing = Easing::Steps(2, position);
+            for direction in [
+                AnimationDirection::Reverse,
+                AnimationDirection::Alternate,
+                AnimationDirection::AlternateReverse,
+            ] {
+                animation.direction = direction;
+                let mut at = start;
+                while at < start + ms(3000) {
+                    let held = animation
+                        .current_with_rule(&rule, style(0.0, 0.0), at)
+                        .unwrap()
+                        .opacity;
+                    let next = match animation.next_change(&rule, at) {
+                        NextChange::EveryFrame => at + ms(1),
+                        NextChange::At(next) => next,
+                        NextChange::Never => panic!("infinite animation stopped"),
+                    };
+                    assert!(next > at);
+                    let mut probe = at + ms(1);
+                    while probe < next {
+                        assert_eq!(
+                            animation.current_with_rule(&rule, style(0.0, 0.0), probe).unwrap().opacity,
+                            held,
+                            "{direction:?} at {at:?}, next {next:?}, probe {probe:?}"
+                        );
+                        probe += ms(1);
+                    }
+                    at = next;
+                }
+            }
+        }
     }
 }

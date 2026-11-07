@@ -336,6 +336,8 @@ pub(super) fn attributes_fingerprint(node: &WidgetNode) -> u64 {
     node.accessibility.hidden.hash(&mut hasher);
     node.accessibility.visible.hash(&mut hasher);
     node.accessibility.keyboard_shortcut.hash(&mut hasher);
+    node.accessibility.set_size.hash(&mut hasher);
+    node.accessibility.position_in_set.hash(&mut hasher);
     node.accessibility.state.disabled.hash(&mut hasher);
     node.accessibility.state.checked.hash(&mut hasher);
     node.accessibility.state.expanded.hash(&mut hasher);

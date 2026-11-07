@@ -967,6 +967,15 @@ pub struct ComputedStyle {
 }
 
 impl ComputedStyle {
+    /// Space this container's layout puts between consecutive children along
+    /// its flex direction.
+    pub fn main_axis_gap(&self) -> f32 {
+        match self.direction {
+            FlexDirection::Column => self.row_gap.unwrap_or(self.gap),
+            FlexDirection::Row => self.column_gap.unwrap_or(self.gap),
+        }
+    }
+
     /// Whether `other` feeds layout the same inputs as `self`. Fields that
     /// only change painting, animation setup or inheritance bookkeeping are
     /// ignored; any other field counts, so a newly added field is layout

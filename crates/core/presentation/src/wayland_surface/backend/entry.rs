@@ -1,4 +1,4 @@
-use super::state::FrameCallbackData;
+use super::state::{FrameCallbackData, PresentationFeedbackData};
 use super::*;
 use mesh_core_render::DamageRect;
 use smallvec::{SmallVec, smallvec};
@@ -851,6 +851,7 @@ impl SurfaceEntry {
     pub(super) fn attach_buffer(
         &mut self,
         qh: &QueueHandle<State>,
+        presentation: Option<&WpPresentation>,
         surface_id: &str,
         slot: BufferSlot,
         logical_width: u32,
@@ -924,6 +925,16 @@ impl SurfaceEntry {
             .generations
             .begin_frame(surface_id, buffer_generation)?;
         wl_surface.frame(qh, callback);
+        if let Some(presentation) = presentation {
+            presentation.feedback(
+                wl_surface,
+                qh,
+                PresentationFeedbackData {
+                    surface_id: Arc::from(surface_id),
+                    committed_at: Instant::now(),
+                },
+            );
+        }
         wl_surface.commit();
         self.generations.commit_buffer(buffer_generation);
         self.frame_pending_since = Some(Instant::now());

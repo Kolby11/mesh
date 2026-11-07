@@ -60,6 +60,12 @@ raster-worker queueing and the wait for the shared raster batch are excluded.
 Child surfaces start their own timers at subtree painting; parent preparation
 and child-request reconciliation are not charged to them. GPU worker execution
 and compositor display latency are asynchronous and excluded from this total.
+`display_latency` is the time from `wl_surface.commit` to the compositor's
+`wp_presentation_feedback` verdict, so it includes the GPU and compositor time
+`total_surface_render` excludes. Samples tagged `discarded` were never shown.
+It is absent when the compositor lacks `wp_presentation`, and it is measured on
+the shell's monotonic clock at event arrival rather than from the compositor's
+presentation timestamp.
 The `paint` samples tagged `deferred_raster` report individual CPU replays;
 `present_commit` reports the presentation call.
 

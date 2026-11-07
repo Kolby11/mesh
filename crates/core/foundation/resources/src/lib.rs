@@ -815,15 +815,23 @@ fn host_resource_roots() -> HostResourceRoots {
         ]
     });
 
+    resource_roots(home, data_home, data_dirs)
+}
+
+fn resource_roots(
+    home: Option<PathBuf>,
+    data_home: Option<PathBuf>,
+    system_data_dirs: Vec<PathBuf>,
+) -> HostResourceRoots {
     let mut ordered_data_dirs = Vec::new();
-    if let Some(data_home) = data_home {
-        ordered_data_dirs.push(data_home);
+    if let Some(data_home) = &data_home {
+        ordered_data_dirs.push(data_home.clone());
     }
-    ordered_data_dirs.extend(data_dirs);
+    ordered_data_dirs.extend(system_data_dirs);
     let data_dirs = existing_unique_paths(ordered_data_dirs);
 
     let mut icon_candidates = Vec::new();
-    if let Some(data_home) = data_dirs.first() {
+    if let Some(data_home) = &data_home {
         icon_candidates.push(data_home.join("icons"));
     }
     if let Some(home) = &home {
@@ -832,7 +840,7 @@ fn host_resource_roots() -> HostResourceRoots {
     icon_candidates.extend(data_dirs.iter().map(|dir| dir.join("icons")));
 
     let mut font_candidates = Vec::new();
-    if let Some(data_home) = data_dirs.first() {
+    if let Some(data_home) = &data_home {
         font_candidates.push(data_home.join("fonts"));
     }
     if let Some(home) = &home {
@@ -949,6 +957,34 @@ fn read_icon_theme(path: &Path) -> Option<SystemIconTheme> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_data_home_keeps_legacy_user_dirs_ahead_of_system_dirs() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("home");
+        let system = temp.path().join("system");
+        for dir in [
+            home.join(".icons"),
+            home.join(".fonts"),
+            system.join("icons"),
+            system.join("fonts"),
+        ] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let roots = resource_roots(
+            Some(home.clone()),
+            Some(home.join(".local/share")),
+            vec![system.clone()],
+        );
+        assert_eq!(
+            roots.icon_dirs,
+            vec![home.join(".icons"), system.join("icons")]
+        );
+        assert_eq!(
+            roots.font_dirs,
+            vec![home.join(".fonts"), system.join("fonts")]
+        );
+    }
 
     #[test]
     fn empty_xdg_directory_values_are_absent() {

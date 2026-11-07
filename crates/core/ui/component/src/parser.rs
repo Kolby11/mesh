@@ -2655,6 +2655,76 @@ local Thing = require("@mesh/thing")
         assert_eq!(for_node.key.as_deref(), Some("item.id"));
     }
 
+    fn parse_for(header: &str) -> Result<crate::ForNode, ParseError> {
+        let source = format!("<template>{{#for {header}}}<text>{{item}}</text>{{/for}}</template>");
+        let file = parse_component(&source)?;
+        let TemplateNode::For(for_node) = file.template.unwrap().root.remove(0) else {
+            panic!("expected ForNode");
+        };
+        Ok(for_node)
+    }
+
+    #[test]
+    fn for_window_options_parse_in_any_order_with_the_key() {
+        for header in [
+            "item in items key={item.id} window=48 overscan=5",
+            "item in items window=\"48\" overscan=5 key={item.id}",
+            "item in items overscan=5 window=48 key={item.id}",
+        ] {
+            let node = parse_for(header).expect(header);
+            assert_eq!(node.iterable, "items", "{header}");
+            assert_eq!(node.key.as_deref(), Some("item.id"), "{header}");
+            assert_eq!(
+                node.window,
+                Some(crate::VirtualWindow {
+                    item_extent: 48.0,
+                    overscan: 5
+                }),
+                "{header}"
+            );
+        }
+        let node = parse_for("item in items window=32.5").unwrap();
+        assert_eq!(node.iterable, "items");
+        assert_eq!(node.key, None);
+        assert_eq!(node.window.unwrap().item_extent, 32.5);
+        assert_eq!(node.window.unwrap().overscan, 3);
+    }
+
+    #[test]
+    fn for_without_window_options_is_unwindowed_even_when_an_identifier_is_named_window() {
+        assert_eq!(parse_for("item in items").unwrap().window, None);
+        let node = parse_for("item in window key={item.id}").unwrap();
+        assert_eq!(node.iterable, "window");
+        assert_eq!(node.window, None);
+    }
+
+    #[test]
+    fn windowed_for_requires_exactly_one_root_element() {
+        for body in ["", "<text>a</text><text>b</text>"] {
+            let source = format!(
+                "<template><box>{{#for item in items window=20}}{body}{{/for}}</box></template>"
+            );
+            let error = parse_component(&source).expect_err("accepted");
+            assert!(error.to_string().contains("exactly one root"), "{error}");
+        }
+        let source = "<template><box>{#for item in items window=20}\n  <text>a</text>\n{/for}</box></template>";
+        parse_component(source).expect("surrounding whitespace is not a root");
+    }
+
+    #[test]
+    fn invalid_for_window_options_are_rejected() {
+        for header in [
+            "item in items window=0",
+            "item in items window=abc",
+            "item in items window=-4",
+            "item in items overscan=2",
+            "item in items window=48 overscan=-1",
+            "item in items window=48 overscan=1.5",
+        ] {
+            assert!(parse_for(header).is_err(), "{header} was accepted");
+        }
+    }
+
     #[test]
     fn parse_if_else() {
         let source = r#"

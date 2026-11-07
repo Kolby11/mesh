@@ -110,11 +110,13 @@ props! {
     AriaLabel = "aria-label": Text, A11Y;
     AriaLabelledby = "aria-labelledby": Text, A11Y;
     AriaOwns = "aria-owns": Text, A11Y;
+    AriaPosinset = "aria-posinset": Number, A11Y;
     AriaPressed = "aria-pressed": Token, STYLE | A11Y;
     AriaReadonly = "aria-readonly": Bool, STYLE | A11Y;
     AriaRequired = "aria-required": Bool, STYLE | A11Y;
     AriaRole = "aria-role": Text, A11Y;
     AriaSelected = "aria-selected": Bool, STYLE | A11Y;
+    AriaSetsize = "aria-setsize": Number, A11Y;
     AriaValuemax = "aria-valuemax": Number, A11Y;
     AriaValuemin = "aria-valuemin": Number, A11Y;
     AriaValuenow = "aria-valuenow": Number, STYLE | A11Y;
@@ -131,6 +133,7 @@ props! {
     DataBenchmark = "data-benchmark": Text, STYLE;
     DataIndex = "data-index": Text, STYLE;
     DataMeshElement = "data-mesh-element": Text, STYLE | A11Y | STRUCTURE;
+    DataMeshVirtualList = "data-mesh-virtual-list": Text, STRUCTURE;
     DataTooltipDisabled = "data-tooltip-disabled": Bool, STRUCTURE;
     Constrain = "constrain": Token, STRUCTURE;
     Default = "default": Bool, STYLE | A11Y;

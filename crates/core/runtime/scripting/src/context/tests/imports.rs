@@ -1048,6 +1048,13 @@ escaped = pcall(require, "@alice/kit/../volume")
 }
 
 fn thermal_catalog(features: &[&str]) -> mesh_core_service::InterfaceCatalog {
+    thermal_catalog_with_provider(features, true)
+}
+
+fn thermal_catalog_with_provider(
+    features: &[&str],
+    provider: bool,
+) -> mesh_core_service::InterfaceCatalog {
     let mut catalog = mesh_core_service::InterfaceCatalog::default();
     catalog.register_contract(
         mesh_core_service::parse_interface_contract(
@@ -1056,7 +1063,8 @@ fn thermal_catalog(features: &[&str]) -> mesh_core_service::InterfaceCatalog {
             &serde_json::json!({
                 "state": {
                     "available": { "type": "boolean" },
-                    "fans": { "type": "int?" }
+                    "fans": { "type": "int?", "default": 4 },
+                    "temperature": { "type": "int?", "default": 20 }
                 },
                 "methods": { "calibrate": "()", "set_fan": "()" },
                 "features": { "fan-control": { "members": ["fans", "set_fan"] } },
@@ -1071,15 +1079,17 @@ fn thermal_catalog(features: &[&str]) -> mesh_core_service::InterfaceCatalog {
         )
         .unwrap(),
     );
-    catalog.register_provider(mesh_core_service::InterfaceProvider {
-        interface: "mesh.thermal".into(),
-        version: Some("1.0".into()),
-        base_module: None,
-        provider_module: "@alice/thermal".into(),
-        backend_name: "thermal".into(),
-        priority: 100,
-    });
-    catalog.register_provider_features("mesh.thermal", "@alice/thermal", features.iter().copied());
+    if provider {
+        catalog.register_provider(mesh_core_service::InterfaceProvider {
+            interface: "mesh.thermal".into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: "@alice/thermal".into(),
+            backend_name: "thermal".into(),
+            priority: 100,
+        });
+        catalog.register_provider_features("mesh.thermal", "@alice/thermal", features.iter().copied());
+    }
     catalog
 }
 
@@ -1097,8 +1107,12 @@ local result = thermal.set_fan()
 fan_call_ok = result.ok ~= false
 fan_call_error = result.error
 fans_seen = nil
+nested_fans_seen = nil
+initial_direct = thermal.fans
+initial_nested = thermal.state.fans
 function read_fans()
     fans_seen = thermal.fans
+    nested_fans_seen = thermal.state.fans
 end
 "#,
     )
@@ -1125,6 +1139,9 @@ fn unsupported_contract_features_are_absent_from_the_proxy() {
         ))
     );
     assert_eq!(ctx.state.get("fans_seen"), None);
+    assert_eq!(ctx.state.get("nested_fans_seen"), None);
+    assert_eq!(ctx.state.get("initial_direct"), None);
+    assert_eq!(ctx.state.get("initial_nested"), None);
     assert!(
         ctx.drain_published_events().is_empty(),
         "a gated call is never dispatched"
@@ -1138,9 +1155,33 @@ fn advertised_contract_features_dispatch_normally() {
     assert_eq!(ctx.state.get("unknown"), Some(Value::Bool(false)));
     assert_eq!(ctx.state.get("fan_call_ok"), Some(Value::Bool(true)));
     assert_eq!(ctx.state.get("fans_seen"), Some(Value::from(2)));
+    assert_eq!(ctx.state.get("nested_fans_seen"), Some(Value::from(2)));
+    assert_eq!(ctx.state.get("initial_direct"), Some(Value::from(4)));
+    assert_eq!(ctx.state.get("initial_nested"), Some(Value::from(4)));
     assert!(
         ctx.drain_published_events()
             .iter()
             .any(|event| event.channel == "mesh.thermal.set_fan")
     );
+}
+
+#[test]
+fn missing_provider_hides_feature_defaults_in_both_state_paths() {
+    let caps = CapabilitySet::from_ids(["service.thermal.read"]);
+    let mut ctx = ScriptContext::new("@alice/panel", caps).unwrap();
+    ctx.set_interface_catalog(thermal_catalog_with_provider(&[], false));
+    ctx.load_script(
+        r#"
+local thermal = require("mesh.thermal")
+direct_hidden = thermal.fans == nil
+nested_hidden = thermal.state.fans == nil
+direct_default = thermal.temperature
+nested_default = thermal.state.temperature
+"#,
+    )
+    .unwrap();
+    assert_eq!(ctx.state.get("direct_hidden"), Some(Value::Bool(true)));
+    assert_eq!(ctx.state.get("nested_hidden"), Some(Value::Bool(true)));
+    assert_eq!(ctx.state.get("direct_default"), Some(Value::from(20)));
+    assert_eq!(ctx.state.get("nested_default"), Some(Value::from(20)));
 }

@@ -48,6 +48,12 @@ fn accesskit_node(node: &AccessibilityTreeNode) -> (AccessKitNodeId, Node) {
     if let Some(value) = node.info.state.value.clone() {
         accesskit_node.set_value(value);
     }
+    if let Some(size) = node.info.set_size {
+        accesskit_node.set_size_of_set(size as usize);
+    }
+    if let Some(position) = node.info.position_in_set {
+        accesskit_node.set_position_in_set(position as usize);
+    }
     if node.info.focusable {
         accesskit_node.add_action(Action::Focus);
     }

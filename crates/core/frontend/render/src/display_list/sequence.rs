@@ -59,6 +59,33 @@ impl<T> PaintSequence<T> {
             leaf: [].iter(),
         }
     }
+
+    /// An iterator over the items from `index` on, found with one descent
+    /// instead of a lookup per item.
+    pub fn iter_from(&self, index: usize) -> PaintSequenceIter<'_, T> {
+        let mut iter = PaintSequenceIter {
+            stack: Vec::new(),
+            leaf: [].iter(),
+        };
+        let mut sequence = self;
+        let mut index = index;
+        while index < sequence.len {
+            let part = sequence.ends.partition_point(|end| *end <= index);
+            let offset = if part == 0 { 0 } else { sequence.ends[part - 1] };
+            iter.stack.push(sequence.parts[part + 1..].iter());
+            match &sequence.parts[part] {
+                PaintPart::Leaf(items) => {
+                    iter.leaf = items[index - offset..].iter();
+                    break;
+                }
+                PaintPart::Branch(child) => {
+                    sequence = child;
+                    index -= offset;
+                }
+            }
+        }
+        iter
+    }
     pub(super) fn assemble(local: Vec<T>, children: Vec<(usize, Arc<Self>)>) -> Self {
         let mut local = local.into_iter();
         let mut consumed = 0;
@@ -155,6 +182,31 @@ impl<T: Clone> PaintSequence<T> {
         self.flat.get_or_init(|| self.iter().cloned().collect())
     }
 }
+/// Sequential reads by index. Consecutive indices advance an iterator; a jump
+/// seeks once, so a replay span costs one descent rather than one per item.
+pub struct PaintSequenceCursor<'a, T> {
+    sequence: &'a PaintSequence<T>,
+    iter: PaintSequenceIter<'a, T>,
+    next: usize,
+}
+impl<'a, T> PaintSequenceCursor<'a, T> {
+    pub fn new(sequence: &'a PaintSequence<T>) -> Self {
+        Self {
+            sequence,
+            iter: sequence.iter_from(0),
+            next: 0,
+        }
+    }
+
+    pub fn get(&mut self, index: usize) -> Option<&'a T> {
+        if index != self.next {
+            self.iter = self.sequence.iter_from(index);
+        }
+        self.next = index.saturating_add(1);
+        self.iter.next()
+    }
+}
+
 pub struct PaintSequenceIter<'a, T> {
     stack: Vec<std::slice::Iter<'a, PaintPart<T>>>,
     leaf: std::slice::Iter<'a, T>,
@@ -194,6 +246,25 @@ impl<T> std::ops::Index<usize> for PaintSequence<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn iter_from_and_cursor_match_indexed_access() {
+        let children = (0..300)
+            .map(|index| (0, Arc::new(PaintSequence::from(vec![index * 2, index * 2 + 1]))))
+            .collect();
+        let sequence = PaintSequence::assemble(vec![9_000, 9_001], children);
+        for start in [0, 1, 2, 7, 150, sequence.len() - 1] {
+            let from: Vec<_> = sequence.iter_from(start).copied().collect();
+            let expected: Vec<_> = (start..sequence.len()).map(|index| sequence[index]).collect();
+            assert_eq!(from, expected, "start {start}");
+        }
+        assert!(sequence.iter_from(sequence.len()).next().is_none());
+        let mut cursor = PaintSequenceCursor::new(&sequence);
+        for index in [0, 1, 2, 100, 101, 102, 5, 6, sequence.len() - 1] {
+            assert_eq!(cursor.get(index), sequence.get(index), "index {index}");
+        }
+        assert_eq!(cursor.get(sequence.len()), None);
+    }
 
     #[test]
     fn replacements_share_clean_branches_and_preserve_old_snapshots() {

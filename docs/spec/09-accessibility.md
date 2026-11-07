@@ -23,6 +23,7 @@ Each `WidgetNode` contributes a semantic node with:
 | **value** | Control value metadata (slider value/min/max, input text, progress) |
 | **state** | checked / selected / expanded / disabled / focused / pressed |
 | **focus metadata** | focusable, tab position, keyboard shortcut metadata from resolved keybinds |
+| **set size / position** | `aria-setsize` / `aria-posinset` (positive integers); a windowed `{#for}` list sets both on every built item so the unbuilt items still count |
 | **relationships** | parent/child order, tooltip ownership, popover trigger ↔ surface |
 
 Core elements come with correct default semantics — a `button` is focusable
@@ -49,6 +50,10 @@ Rules:
   for visible tooltip text when both are needed.
 - `aria-hidden="true"` removes decorative nodes (icon glyphs duplicating a
   label) from the semantic tree.
+- A windowed `{#for}` list (`docs/frontend/mesh-syntax.md`) builds only
+  the items near its viewport, so each built item carries `aria-setsize` (the
+  full item count) and `aria-posinset` (its one-based ordinal), and the
+  list's spacer boxes are `aria-hidden`.
 - State attributes (`aria-pressed`, `checked`, `selected`, `expanded`) bind
   reactively like any attribute.
 - A `<popover>` trigger (its `anchor-ref` target) is `expanded` exactly while
@@ -65,7 +70,7 @@ Rules:
 **Status: shipped for the covered element families.**
 
 The compiler/render pipeline maps semantic nodes to AccessKit: roles, names,
-values, states, and keyboard shortcut metadata flow into the platform
+values, states, set size and position, and keyboard shortcut metadata flow into the platform
 accessibility tree per surface, including promoted child surfaces (popovers)
 — focus and semantics cross the surface boundary with the component tree,
 so a popover reads as part of its logical parent.

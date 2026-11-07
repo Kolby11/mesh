@@ -6,7 +6,7 @@ Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and measurem
 
 ## Now
 
-- Five parallel correctness waves are implemented with focused regressions passing, most recently source-generation guards, native shortcut protection, lock digest errors, and executable dependency checks. Changes await review.
+- A correctness wave is in flight: optional service-feature visibility, optional surface-policy clearing, stepped animation deadlines, and XDG resource precedence.
 
 ## Next
 

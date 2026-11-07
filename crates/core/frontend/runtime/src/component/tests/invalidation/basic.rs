@@ -2609,9 +2609,13 @@ function mutate() items[3].color = "#00ff00" end
         let theme = default_theme();
         let extent = SurfaceExtent::unpadded(320, 100);
         let mut pixels = PixelBuffer::new(320, 100);
-        component
-            .paint_raster(&theme, extent, &mut pixels, 1.0)
-            .unwrap();
+        // A list this long outside any scroller is built windowed on the first
+        // frame and in full once layout shows there is nothing to window against.
+        for _ in 0..3 {
+            component
+                .paint_raster(&theme, extent, &mut pixels, 1.0)
+                .unwrap();
+        }
         component.set_profiling_enabled(true);
         let _ = component.take_profiling_records();
         component.call_namespaced_handler("mutate", &[]).unwrap();

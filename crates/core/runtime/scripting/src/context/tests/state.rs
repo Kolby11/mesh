@@ -509,3 +509,30 @@ fn script_state_clone_shares_variable_values() {
     );
     assert_eq!(cloned.get("elements"), state.get("elements"));
 }
+
+#[test]
+fn virtual_window_round_trips_per_list_and_reports_changes() {
+    use mesh_core_elements::VirtualRange;
+    let range = |first, last, extent| VirtualRange {
+        first,
+        last,
+        extent,
+    };
+    let mut state = ScriptState::new();
+    assert_eq!(state.virtual_window("main#10"), None);
+    assert!(state.supports_virtual_windows());
+
+    assert!(state.set_virtual_window("main#10", range(4, 20, 40.0)));
+    let generation = state.mutation_generation();
+    assert!(!state.set_virtual_window("main#10", range(4, 20, 40.0)));
+    assert_eq!(state.mutation_generation(), generation);
+    assert!(!state.is_dirty());
+
+    assert!(state.set_virtual_window("main#99", VirtualRange::FULL));
+    assert!(state.set_virtual_window("main#10", range(5, 21, 40.0)));
+    assert!(state.set_virtual_window("main#10", range(5, 21, 52.5)));
+    assert_eq!(state.virtual_window("main#10"), Some(range(5, 21, 52.5)));
+    assert_eq!(state.virtual_window("main#99"), Some(VirtualRange::FULL));
+    assert!(state.virtual_window("main#99").unwrap().is_full());
+    assert_ne!(state.mutation_generation(), generation);
+}

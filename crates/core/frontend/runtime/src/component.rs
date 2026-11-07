@@ -36,6 +36,7 @@ mod runtime_tree;
 mod shell_component;
 mod template_patch;
 mod tooltip;
+mod virtual_list;
 
 pub(crate) use catalog::{
     FrontendCatalog, FrontendCatalogHandle, SharedCompiledFrontendModule,
@@ -1261,6 +1262,8 @@ pub struct FrontendSurfaceComponent {
     /// snapshots costs meaningful interaction-frame time and is wasted on
     /// scripts that never read them. Recomputed on source reload.
     element_metric_usage: ElementMetricUsage,
+    /// Whether the last retained tree contained a windowed `{#for}` list.
+    virtual_lists_seen: bool,
     /// Cache of resolved surface shortcuts keyed by the already-cached
     /// `KeyboardSettings` plus active locale. Resolution clones manifest
     /// declarations, checks overrides, and localizes triggers, so avoid doing
@@ -1630,6 +1633,7 @@ impl FrontendSurfaceComponent {
             style_rules_generation: 0,
             runtime_style_diagnostic_fingerprint: None,
             element_metric_usage,
+            virtual_lists_seen: false,
             resolved_surface_shortcuts_cache: RefCell::new(None),
             pending_assigned_write: RefCell::new(None),
             key_hints: Default::default(),

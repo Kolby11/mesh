@@ -726,6 +726,46 @@ impl Dispatch<HyprlandFocusGrabManagerV1, GlobalData, State> for State {
     }
 }
 
+impl Dispatch<WpPresentation, GlobalData, State> for State {
+    fn event(
+        _: &mut State,
+        _: &WpPresentation,
+        _: wp_presentation::Event,
+        _: &GlobalData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+    }
+}
+
+impl Dispatch<WpPresentationFeedback, super::state::PresentationFeedbackData, State> for State {
+    fn event(
+        state: &mut State,
+        _: &WpPresentationFeedback,
+        event: wp_presentation_feedback::Event,
+        data: &super::state::PresentationFeedbackData,
+        _: &Connection,
+        _: &QueueHandle<State>,
+    ) {
+        let (refresh_nanos, discarded) = match event {
+            wp_presentation_feedback::Event::Presented { refresh, .. } => (refresh, false),
+            wp_presentation_feedback::Event::Discarded => (0, true),
+            _ => return,
+        };
+        if state.presentation_samples.len() >= super::state::MAX_PRESENTATION_SAMPLES {
+            state.presentation_samples.pop_front();
+        }
+        state
+            .presentation_samples
+            .push_back(super::state::PresentationSample {
+                surface_id: data.surface_id.clone(),
+                commit_to_event: data.committed_at.elapsed(),
+                refresh_nanos,
+                discarded,
+            });
+    }
+}
+
 impl Dispatch<WpViewporter, GlobalData, State> for State {
     fn event(
         _: &mut State,

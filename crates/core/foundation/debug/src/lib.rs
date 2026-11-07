@@ -484,6 +484,10 @@ pub enum ProfilingStage {
     IconImageRaster,
     Paint,
     PresentCommit,
+    /// Commit to compositor verdict (`wp_presentation` feedback), so it
+    /// covers the asynchronous GPU and compositor time `TotalSurfaceRender`
+    /// excludes. Discarded updates carry the trigger `discarded`.
+    DisplayLatency,
     RedrawCount,
     #[default]
     TotalSurfaceRender,
@@ -505,6 +509,7 @@ impl ProfilingStage {
             Self::IconImageRaster => "icon_image_raster",
             Self::Paint => "paint",
             Self::PresentCommit => "present_commit",
+            Self::DisplayLatency => "display_latency",
             Self::RedrawCount => "redraw_count",
             Self::TotalSurfaceRender => "total_surface_render",
         }

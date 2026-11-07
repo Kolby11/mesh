@@ -8,6 +8,13 @@
 use super::ParseError;
 use crate::SourceSpan;
 
+/// Literal `window=` / `overscan=` options of a `{#for}` header.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct VirtualWindowOption {
+    pub(super) item_extent: f32,
+    pub(super) overscan: usize,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct BraceToken {
     pub(super) span: SourceSpan,
@@ -28,6 +35,7 @@ pub(super) enum BraceKind {
         item: String,
         iterable: SourceSpan,
         key: Option<SourceSpan>,
+        window: Option<VirtualWindowOption>,
     },
     ElseIf {
         condition: SourceSpan,
@@ -177,30 +185,83 @@ fn parse_for_header(
     }
 
     let after_in = trimmed_span(source, in_start + 2, header.end);
-    let key_marker = find_top_level_key(source, after_in);
-    let (iterable, key) = if let Some(key_start) = key_marker {
-        let iterable = trimmed_span(source, after_in.start, key_start);
-        let key_value_start = skip_ascii_whitespace(source, key_start + 3);
-        if source.as_bytes().get(key_value_start) != Some(&b'=') {
-            return Err(error_at(source, key_start, "expected `=` after `key`"));
+    let mut markers = Vec::new();
+    for name in ["key", "window", "overscan"] {
+        if let Some(start) = find_top_level_option(source, after_in, name) {
+            markers.push((start, name));
         }
-        let key_value = trimmed_span(source, key_value_start + 1, after_in.end);
-        let key = if source.as_bytes().get(key_value.start) == Some(&b'{') {
-            if source.as_bytes().get(key_value.end.saturating_sub(1)) != Some(&b'}') {
-                return Err(error_at(
-                    source,
-                    key_value.start,
-                    "unclosed `key={...}` expression",
-                ));
+    }
+    markers.sort_unstable();
+    let iterable = trimmed_span(
+        source,
+        after_in.start,
+        markers.first().map_or(after_in.end, |(start, _)| *start),
+    );
+    let mut key = None;
+    let mut window_extent = None;
+    let mut overscan = None;
+    for (index, (marker_start, name)) in markers.iter().enumerate() {
+        let value_end = markers
+            .get(index + 1)
+            .map_or(after_in.end, |(next, _)| *next);
+        let value_start = skip_ascii_whitespace(source, marker_start + name.len());
+        if source.as_bytes().get(value_start) != Some(&b'=') {
+            return Err(error_at(
+                source,
+                *marker_start,
+                &format!("expected `=` after `{name}`"),
+            ));
+        }
+        let value = trimmed_span(source, value_start + 1, value_end);
+        match *name {
+            "key" => {
+                key = Some(if source.as_bytes().get(value.start) == Some(&b'{') {
+                    if source.as_bytes().get(value.end.saturating_sub(1)) != Some(&b'}') {
+                        return Err(error_at(
+                            source,
+                            value.start,
+                            "unclosed `key={...}` expression",
+                        ));
+                    }
+                    trimmed_span(source, value.start + 1, value.end - 1)
+                } else {
+                    value
+                });
             }
-            trimmed_span(source, key_value.start + 1, key_value.end - 1)
-        } else {
-            key_value
-        };
-        (iterable, Some(key))
-    } else {
-        (after_in, None)
-    };
+            "window" => {
+                let text = unquote_literal(&source[value.start..value.end]);
+                let extent = text.parse::<f32>().ok().filter(|v| v.is_finite() && *v > 0.0);
+                window_extent = Some(extent.ok_or_else(|| {
+                    error_at(
+                        source,
+                        value.start,
+                        "`window` must be a positive item height or width in px",
+                    )
+                })?);
+            }
+            _ => {
+                let text = unquote_literal(&source[value.start..value.end]);
+                overscan = Some(text.parse::<usize>().map_err(|_| {
+                    error_at(
+                        source,
+                        value.start,
+                        "`overscan` must be a non-negative whole number of items",
+                    )
+                })?);
+            }
+        }
+    }
+    if overscan.is_some() && window_extent.is_none() {
+        return Err(error_at(
+            source,
+            body_start,
+            "`overscan` requires `window` on the same `#for`",
+        ));
+    }
+    let window = window_extent.map(|item_extent| VirtualWindowOption {
+        item_extent,
+        overscan: overscan.unwrap_or(crate::DEFAULT_VIRTUAL_OVERSCAN),
+    });
 
     if iterable.start == iterable.end {
         return Err(error_at(
@@ -225,7 +286,15 @@ fn parse_for_header(
         item: source[item.start..item.end].to_string(),
         iterable,
         key,
+        window,
     })
+}
+
+fn unquote_literal(text: &str) -> &str {
+    let text = text.trim();
+    text.strip_prefix('"')
+        .and_then(|inner| inner.strip_suffix('"'))
+        .unwrap_or(text)
 }
 
 fn validate_control_flow(source: &str, tokens: &mut [BraceToken]) -> Result<(), ParseError> {
@@ -510,7 +579,7 @@ fn find_top_level_word(source: &str, span: SourceSpan, word: &str) -> Option<usi
     None
 }
 
-fn find_top_level_key(source: &str, span: SourceSpan) -> Option<usize> {
+fn find_top_level_option(source: &str, span: SourceSpan, name: &str) -> Option<usize> {
     let mut cursor = span.start;
     let mut parentheses = 0usize;
     let mut brackets = 0usize;
@@ -533,12 +602,13 @@ fn find_top_level_key(source: &str, span: SourceSpan) -> Option<usize> {
         if parentheses == 0
             && brackets == 0
             && braces == 0
-            && source[cursor..].starts_with("key")
+            && source[cursor..].starts_with(name)
             && (cursor == span.start || source.as_bytes()[cursor - 1].is_ascii_whitespace())
-            && source[cursor + 3..]
+            && source[cursor + name.len()..]
                 .chars()
                 .next()
                 .is_some_and(|next| next.is_ascii_whitespace() || next == '=')
+            && (name == "key" || is_single_assignment(source, cursor + name.len()))
         {
             return Some(cursor);
         }
@@ -565,6 +635,13 @@ fn trimmed_span(source: &str, start: usize, end: usize) -> SourceSpan {
         end -= ch.len_utf8();
     }
     SourceSpan::new(start, end)
+}
+
+/// Whether the next non-space character at `cursor` is `=` but not `==`, so an
+/// iterable that merely names a variable `window` is not read as an option.
+fn is_single_assignment(source: &str, cursor: usize) -> bool {
+    let cursor = skip_ascii_whitespace(source, cursor);
+    source.as_bytes().get(cursor) == Some(&b'=') && source.as_bytes().get(cursor + 1) != Some(&b'=')
 }
 
 fn skip_ascii_whitespace(source: &str, mut cursor: usize) -> usize {

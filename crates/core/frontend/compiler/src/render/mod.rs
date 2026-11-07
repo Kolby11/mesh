@@ -4,13 +4,13 @@ use crate::style::{
 };
 use crate::tags::lower_source_tag;
 use crate::{FrontendCompositionResolver, LayeredStore};
-use mesh_core_elements::{KeyedTemplateItem, KeyedTemplateList, Prop};
+use mesh_core_elements::{KeyedTemplateItem, KeyedTemplateList, Prop, VirtualRange};
 use std::sync::Arc;
 
 use mesh_core_component::template::{
-    Attribute, AttributeValue, ElementNode, ForNode, TemplateNode,
+    Attribute, AttributeValue, ElementNode, ForNode, TemplateNode, VirtualWindow,
 };
-use mesh_core_elements::style::StylePropertyMask;
+use mesh_core_elements::style::{FlexDirection, StylePropertyMask};
 use mesh_core_elements::{
     ComputedStyle, NodeId, StyleContext, StyleResolver, VariableStore, WidgetNode,
     authored_element_state, normalize_accessibility_before_finalization as normalize_accessibility,
@@ -762,11 +762,46 @@ where
     // `WidgetNode` is a large struct, so growing this vector re-copies every
     // node built so far. The exact child count is known before the first push.
     let items: Vec<_> = items.into_iter().collect();
-    let mut children = Vec::with_capacity(items.len().saturating_mul(for_node.children.len()));
+    let total = items.len();
+    let windowing = virtual_windowing(for_node, store, instance_key, total);
+    let (first, last) = windowing.map_or((0, total), |windowing| windowing.range);
+    let mut children =
+        Vec::with_capacity((last - first).saturating_mul(for_node.children.len()));
     let mut seen_keyed_identities = HashSet::new();
     let mut keys = Vec::with_capacity(items.len());
     let mut unique = HashSet::new();
-    let patchable = !store.in_loop() && crate::patchable_keyed_loop(for_node);
+    // Keyed patches assume a fixed item shape; a window moves with the scroll.
+    let patchable =
+        !store.in_loop() && windowing.is_none() && crate::patchable_keyed_loop(for_node);
+    let list_id = windowing.map(|_| virtual_list_id(for_node, instance_key));
+    let spacer_axis = parent_style.map_or(FlexDirection::Column, |style| style.direction);
+    let main_axis_gap = parent_style.map_or(0.0, ComputedStyle::main_axis_gap);
+    let spacer = |skipped: usize, leading: bool| {
+        let windowing = windowing.expect("spacers exist only for windowed loops");
+        // Layout adds one `gap` between the spacer and its neighbouring item
+        // that the skipped items would not have had after their last one.
+        let skipped_extent =
+            (skipped as f32 * (windowing.extent + main_axis_gap) - main_axis_gap).max(0.0);
+        virtual_spacer(
+            skipped_extent,
+            spacer_axis,
+            &format!(
+                "{} {first} {last} {total} {} {} {}",
+                list_id.as_deref().unwrap_or_default(),
+                windowing.extent,
+                windowing.overscan,
+                u8::from(windowing.auto),
+            ),
+            format!("{}:spacer:{leading}", list_id.as_deref().unwrap_or_default()),
+            manifest,
+            build_style,
+            parent_style,
+            child_context,
+        )
+    };
+    if first > 0 {
+        children.push(spacer(first, true));
+    }
     let mut valid_keys = true;
     if patchable {
         for item in &items {
@@ -807,7 +842,12 @@ where
                 }),
         })
     });
-    for (item_ordinal, item_val) in items.into_iter().enumerate() {
+    for (item_ordinal, item_val) in items
+        .into_iter()
+        .enumerate()
+        .skip(first)
+        .take(last - first)
+    {
         let loop_identity = for_node
             .key
             .as_ref()
@@ -829,6 +869,9 @@ where
                     None => key,
                 }
             })
+            // A window moves, so an unkeyed item is identified by its ordinal
+            // rather than by its position among the built siblings.
+            .or_else(|| windowing.map(|_| format!("@{item_ordinal}")))
             .or_else(|| store.loop_identity().map(str::to_owned));
         let item_store = LayeredStore {
             base: store,
@@ -852,6 +895,14 @@ where
                 composition,
             );
             for (fragment_index, child) in built.iter_mut().enumerate() {
+                if windowing.is_some() {
+                    // The set is larger than what is built; tell assistive
+                    // technology where this item sits in all of it.
+                    child
+                        .attributes
+                        .insert(Prop::AriaPosinset, (item_ordinal + 1).to_string());
+                    child.attributes.insert(Prop::AriaSetsize, total.to_string());
+                }
                 if let Some(identity) = item_store.loop_identity() {
                     // Sibling loops under one parent may yield equal keys; the
                     // block's source offset keeps their node identities apart.
@@ -869,7 +920,144 @@ where
             children.extend(built);
         }
     }
+    if last < total {
+        children.push(spacer(total - last, false));
+    }
     children
+}
+
+/// Items built before any host measurement exists, so the first frame has
+/// content to lay out and measure.
+const INITIAL_VIRTUAL_ITEMS: usize = 24;
+
+/// The most items built before measurement, however large the surface.
+const MAX_INITIAL_VIRTUAL_ITEMS: usize = 240;
+
+/// Smallest item assumed when sizing the first build to the surface, in px.
+const MIN_ASSUMED_ITEM_EXTENT: f32 = 16.0;
+
+/// Items to build before any measurement: enough to cover the surface if every
+/// item were the smallest assumed size, and never fewer than the default.
+fn initial_virtual_items(viewport_hint: Option<f32>) -> usize {
+    let covering = viewport_hint
+        .filter(|hint| hint.is_finite() && *hint > 0.0)
+        .map_or(0, |hint| (hint / MIN_ASSUMED_ITEM_EXTENT).ceil() as usize);
+    covering.clamp(INITIAL_VIRTUAL_ITEMS, MAX_INITIAL_VIRTUAL_ITEMS)
+}
+
+/// Unannotated `{#for}` lists at least this long are windowed automatically
+/// when a host drives windows and their items prove to be uniform.
+const AUTO_WINDOW_MIN_ITEMS: usize = 100;
+
+/// How one `{#for}` block is windowed for this build.
+#[derive(Clone, Copy)]
+struct Windowing {
+    /// Built items `[first, last)`, clamped to the list.
+    range: (usize, usize),
+    /// Item size along the scroll axis, gap excluded; zero until measured.
+    extent: f32,
+    overscan: usize,
+    /// Inferred from measurement rather than declared with `window=`.
+    auto: bool,
+}
+
+fn virtual_list_id(for_node: &ForNode, instance_key: &str) -> String {
+    format!("{instance_key}#{}", for_node.span.start)
+}
+
+/// Whether the body is one element or component, so every item is one node.
+fn for_body_is_single_root(for_node: &ForNode) -> bool {
+    matches!(
+        for_node.children.as_slice(),
+        [TemplateNode::Element(_) | TemplateNode::Component(_)]
+    )
+}
+
+/// The windowing for a loop over `total` items, or `None` to build every item.
+/// A nested loop has no scroll viewport of its own, so only top-level loops are
+/// windowed, and a list the host has marked [`VirtualRange::FULL`] is built whole.
+fn virtual_windowing(
+    for_node: &ForNode,
+    store: &dyn VariableStore,
+    instance_key: &str,
+    total: usize,
+) -> Option<Windowing> {
+    if store.in_loop() {
+        return None;
+    }
+    let declared = for_node.window;
+    if declared.is_none()
+        && !(store.supports_virtual_windows()
+            && total >= AUTO_WINDOW_MIN_ITEMS
+            && for_body_is_single_root(for_node))
+    {
+        return None;
+    }
+    let chosen = store.virtual_window(&virtual_list_id(for_node, instance_key));
+    if chosen.is_some_and(VirtualRange::is_full) {
+        return None;
+    }
+    let overscan = declared.map_or(mesh_core_component::DEFAULT_VIRTUAL_OVERSCAN, |window| {
+        window.overscan
+    });
+    let extent = declared.map_or_else(
+        || chosen.map_or(0.0, |chosen| chosen.extent),
+        |window| window.item_extent,
+    );
+    let initial = initial_virtual_items(store.virtual_viewport_hint()) + overscan;
+    let (first, last) = chosen.map_or((0, initial), |chosen| (chosen.first, chosen.last));
+    let last = last.min(total);
+    Some(Windowing {
+        range: (first.min(last), last),
+        extent,
+        overscan,
+        auto: declared.is_none(),
+    })
+}
+
+/// Empty box standing in for `extent` px of skipped items along the parent's
+/// main axis. `meta` is the list identity, range and window the host reads
+/// back from the laid-out tree.
+fn virtual_spacer(
+    extent: f32,
+    axis: FlexDirection,
+    meta: &str,
+    identity: String,
+    manifest: &Manifest,
+    build_style: &BuildStyleContext<'_, '_>,
+    parent_style: Option<&ComputedStyle>,
+    container_context: StyleContext,
+) -> WidgetNode {
+    let size = match axis {
+        FlexDirection::Column => "height",
+        FlexDirection::Row => "width",
+    };
+    let inline_style = format!("{size}: {extent}px; flex-shrink: 0");
+    let mut node = WidgetNode::new("box");
+    attach_module_id(&mut node, &manifest.package.id);
+    node.attributes
+        .insert(Prop::DataMeshElement, "box".into());
+    node.attributes
+        .insert(Prop::DataMeshVirtualList, meta.to_owned());
+    node.attributes.insert(Prop::AriaHidden, "true".into());
+    node.set_loop_identity(identity);
+    node.attributes.insert(Prop::Style, inline_style.clone());
+    node.computed_style = build_style
+        .resolver
+        .resolve_node_style_for_module_indexed_with_inline_style_and_parent_style(
+            build_style.rules,
+            build_style.index.as_ref(),
+            "box",
+            &[],
+            None,
+            Some(&inline_style),
+            None,
+            container_context,
+            authored_element_state(&node.attributes),
+            Some(&manifest.package.id),
+            parent_style,
+        );
+    node
 }
 
 /// Record which script variable an element's `open={variable}` reads, so the

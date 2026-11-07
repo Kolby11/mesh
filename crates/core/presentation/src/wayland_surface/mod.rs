@@ -13,6 +13,7 @@ pub use backend::{
     ContentExtent, LayerSurfaceSizePolicy, LayerWireExtent, LayerWireSize, SurfaceConfig,
     SurfaceExtent, SurfaceExtentError, SurfacePadding, UnmeasuredSize, WaylandSurfaceBackend,
 };
+pub use state::PresentationSample;
 pub use popup::{PopupAnchor, PopupConfig, PopupConstraint, PopupGravity, PopupPlacement};
 
 use crate::dev_window::{DevWindowEvent, DevWindowKeyEvent, KeyMods};
@@ -90,6 +91,10 @@ use wayland_protocols::wp::pointer_gestures::zv1::client::{
 use wayland_protocols::wp::text_input::zv3::client::{
     zwp_text_input_manager_v3, zwp_text_input_manager_v3::ZwpTextInputManagerV3, zwp_text_input_v3,
     zwp_text_input_v3::ZwpTextInputV3,
+};
+use wayland_protocols::wp::presentation_time::client::{
+    wp_presentation::{self, WpPresentation},
+    wp_presentation_feedback::{self, WpPresentationFeedback},
 };
 use wayland_protocols::wp::viewporter::client::{
     wp_viewport::WpViewport, wp_viewporter, wp_viewporter::WpViewporter,

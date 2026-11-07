@@ -376,7 +376,8 @@ fn scene_frame_in_flight_survives_hide_resize_and_destroy() {
             .present_with_damage(surface_id, "inflight", visible, canvas, &[damage])
             .unwrap()
     };
-    // Hide while in flight: the frame is dropped, the surface is not gated.
+    // Hide while in flight: the frame is dropped and the layer role is
+    // destroyed, so showing it again recreates the surface.
     record_heavy(&mut canvas, width, height, 0);
     assert_eq!(present(&mut engine, &mut canvas, true), PresentStatus::Submitted);
     assert!(engine.surface_waiting_for_buffer_release(surface_id));
@@ -385,6 +386,13 @@ fn scene_frame_in_flight_survives_hide_resize_and_destroy() {
     std::thread::sleep(Duration::from_millis(50));
     assert!(engine.take_scene_completions().is_empty());
     engine.finish_frame().unwrap();
+    assert_eq!(
+        present(&mut engine, &mut canvas, true),
+        PresentStatus::SurfaceMissing
+    );
+    engine
+        .configure(surface_id, top_layer_config("@mesh/live-matrix-inflight"))
+        .unwrap();
     // Visible again presents normally.
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {

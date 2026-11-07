@@ -368,6 +368,61 @@ removed, so each row keeps its identity and state.
 {/if}
 ```
 
+#### Long lists are windowed
+
+A `{#for}` over many items inside a scrolling container builds only the items
+near the viewport, so first paint and scroll cost stay flat however long the
+list is. Two empty spacer boxes stand in for the items that are not built, so
+the scroll extent and scrollbar match the full list.
+
+Lists of 100 or more items are windowed automatically when every item is a
+single root element: the shell builds the first items, measures them, and if
+they are all the same size along the scroll axis (gap included) it windows the
+list. Nothing needs to be written:
+
+```xml
+<scroll class="results">
+  {#for hit in hits key={hit.id}}
+    <result-row>{hit.title}</result-row>
+  {/for}
+</scroll>
+```
+
+A list is built in full instead, as it always was, when:
+
+- it is under 100 items, or its body is not exactly one root element;
+- it is not inside a container that scrolls on the list's axis;
+- its items are not all the same size, or an item's size later changes;
+- it is nested inside another `{#for}`.
+
+The first frame of a long list shows only the first items (enough to cover the
+surface at 16 px per item, at most 240); the rest follows on the next frame,
+once layout can be measured. A windowed list is not keyed-patched; when its
+window moves, the owning component rebuilds on the next frame.
+
+Each item keeps the same identity wherever the window is: keyed items by
+their key, unkeyed items by their ordinal. Input, slider, checked and scroll
+state held by the component therefore returns when a row comes back into the
+window. Hover and focus are released when a row is unbuilt, except that a
+focused row stays built while it is within 256 items of the window. State kept
+inside a row's own script variables is not preserved; keep it in the owning
+component's variables. Built items carry `aria-setsize` and `aria-posinset`, and
+the spacers are hidden from assistive technology. Nodes after the list in the
+same parent are addressed by position, so their identity can shift when the
+number of built items changes; keep a windowed list as its parent's only child
+when siblings hold state.
+
+To window a shorter list, or to skip the measuring frame, declare the item size:
+
+```xml
+{#for hit in hits key={hit.id} window=48 overscan=4}
+```
+
+`window` is each item's size in px along the parent's main axis (height in a
+column, width in a row), excluding the parent's `gap`. `overscan` (default 3) is
+how many items to keep built beyond each edge. The body must be exactly one root
+element of that size, margins included.
+
 ### Two-way binding
 
 Use `bind:attr="variable"` to sync an element's attribute back to script

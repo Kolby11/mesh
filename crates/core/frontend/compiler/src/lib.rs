@@ -1338,6 +1338,273 @@ mod tests {
         assert_eq!(collect_text_content(parent), vec!["Alice".to_string()]);
     }
 
+    struct WindowedStore {
+        items: MapStore,
+        window: Option<(usize, usize)>,
+        automatic: bool,
+    }
+
+    impl mesh_core_elements::VariableStore for WindowedStore {
+        fn get(&self, name: &str) -> Option<serde_json::Value> {
+            self.items.get(name)
+        }
+
+        fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
+            self.items.get_ref(name)
+        }
+
+        fn keys(&self) -> Vec<String> {
+            self.items.keys()
+        }
+
+        fn virtual_window(&self, _list_id: &str) -> Option<mesh_core_elements::VirtualRange> {
+            self.window.map(|(first, last)| mesh_core_elements::VirtualRange {
+                first,
+                last,
+                extent: if last == usize::MAX { 0.0 } else { 40.0 },
+            })
+        }
+
+        fn supports_virtual_windows(&self) -> bool {
+            self.automatic
+        }
+    }
+
+    /// Builds `<box style="flex-direction: ...">{#for ...}<text/>{/for}</box>`
+    /// over `count` items and returns the box's children.
+    fn windowed_children(
+        header: &str,
+        direction: &str,
+        count: usize,
+        window: Option<(usize, usize)>,
+    ) -> Vec<WidgetNode> {
+        windowed_children_with(header, direction, count, window, false)
+    }
+
+    fn windowed_children_with(
+        header: &str,
+        direction: &str,
+        count: usize,
+        window: Option<(usize, usize)>,
+        automatic: bool,
+    ) -> Vec<WidgetNode> {
+        let source = format!(
+            r#"<template><box style="flex-direction: {direction}">{{#for item in items {header}}}<text>{{item}}</text>{{/for}}</box></template>"#
+        );
+        let component = mesh_core_component::parse_component(&source).unwrap();
+        let manifest = mesh_core_module::Manifest {
+            package: mesh_core_module::ModuleSection {
+                id: "test".into(),
+                version: "0.1.0".into(),
+                module_type: mesh_core_module::ModuleType::Widget,
+                api_version: "0.1.0".into(),
+                name: None,
+                license: None,
+                description: None,
+                authors: vec![],
+                repository: None,
+            },
+            compatibility: Default::default(),
+            dependencies: Default::default(),
+            capabilities: Default::default(),
+            entrypoints: Default::default(),
+            accessibility: None,
+            keybinds: Default::default(),
+            i18n: None,
+            theme: None,
+            service: None,
+            provides: vec![],
+            interface: None,
+            interfaces: Vec::new(),
+            extensions: vec![],
+            exports: Default::default(),
+            hosted_extension_points: Default::default(),
+            extension_point_contributions: Default::default(),
+            surface_layout: None,
+            assets: None,
+            icons: None,
+            icon_pack: None,
+            icon_requirements: Default::default(),
+            translations: Default::default(),
+        };
+        let items: Vec<_> = (0..count).map(|index| serde_json::json!(index)).collect();
+        let store = WindowedStore {
+            items: MapStore(
+                [("items".to_string(), serde_json::Value::Array(items))]
+                    .into_iter()
+                    .collect(),
+            ),
+            window,
+            automatic,
+        };
+        let compiled = CompiledFrontendModule {
+            manifest,
+            source_path: std::path::PathBuf::from("test.mesh"),
+            component,
+            public_props: Default::default(),
+            local_components: Default::default(),
+            module_component_imports: Default::default(),
+            watched_paths: Vec::new(),
+            source_bytes: Default::default(),
+        };
+        let theme = mesh_core_theme::default_theme();
+        let tree = compiled.build_preview_tree_with_state(&theme, 400, 300, Some(&store));
+        fn find_box(node: &WidgetNode) -> Option<&WidgetNode> {
+            if node.tag == "box" {
+                return Some(node);
+            }
+            node.children.iter().find_map(find_box)
+        }
+        find_box(&tree).expect("authored box").children.to_vec()
+    }
+
+    fn spacer_style(node: &WidgetNode) -> Option<&str> {
+        node.attributes
+            .get(mesh_core_elements::Prop::DataMeshVirtualList)
+            .map(|_| node.attributes.get(mesh_core_elements::Prop::Style).unwrap().as_str())
+    }
+
+    #[test]
+    fn windowed_for_builds_only_the_chosen_range_with_exact_spacers() {
+        let children = windowed_children("window=40 overscan=2", "column", 100, Some((10, 15)));
+        assert_eq!(children.len(), 7);
+        assert_eq!(spacer_style(&children[0]), Some("height: 400px; flex-shrink: 0"));
+        assert!(children[1..6].iter().all(|child| child.tag == "text"));
+        assert_eq!(spacer_style(&children[6]), Some("height: 3400px; flex-shrink: 0"));
+        let leading = children[0]
+            .attributes
+            .get(mesh_core_elements::Prop::DataMeshVirtualList)
+            .unwrap();
+        assert!(leading.ends_with(" 10 15 100 40 2 0"), "{leading}");
+        assert_eq!(
+            children[0].computed_style.height,
+            mesh_core_elements::style::Dimension::Px(400.0)
+        );
+        assert_eq!(children[0].computed_style.flex_shrink, 0.0);
+    }
+
+    #[test]
+    fn windowed_for_without_a_chosen_range_builds_the_initial_window() {
+        let children = windowed_children("window=40 overscan=2", "column", 100, None);
+        // 24 initial items plus overscan, then one trailing spacer.
+        assert_eq!(children.len(), 26 + 1);
+        assert_eq!(spacer_style(&children[26]), Some("height: 2960px; flex-shrink: 0"));
+        assert!(spacer_style(&children[0]).is_none());
+    }
+
+    #[test]
+    fn windowed_for_sizes_spacers_along_the_row_axis() {
+        let children = windowed_children("window=64", "row", 50, Some((20, 30)));
+        assert_eq!(spacer_style(&children[0]), Some("width: 1280px; flex-shrink: 0"));
+        assert_eq!(
+            children[0].computed_style.width,
+            mesh_core_elements::style::Dimension::Px(1280.0)
+        );
+    }
+
+    #[test]
+    fn windowed_for_clamps_the_chosen_range_and_adds_no_spacer_when_whole() {
+        let children = windowed_children("window=40", "column", 6, Some((0, 500)));
+        assert_eq!(children.len(), 6);
+        assert!(children.iter().all(|child| child.tag == "text"));
+        let children = windowed_children("window=40", "column", 6, Some((400, 500)));
+        assert_eq!(children.len(), 1);
+        assert_eq!(spacer_style(&children[0]), Some("height: 240px; flex-shrink: 0"));
+    }
+
+    #[test]
+    fn large_unannotated_for_is_windowed_when_the_host_drives_windows() {
+        let children = windowed_children_with("", "column", 500, None, true);
+        // 24 initial items plus the default overscan, then a trailing spacer
+        // that is empty until the host has measured an item.
+        assert_eq!(children.len(), 27 + 1);
+        assert_eq!(spacer_style(&children[27]), Some("height: 0px; flex-shrink: 0"));
+        assert!(
+            children[27]
+                .attributes
+                .get(mesh_core_elements::Prop::DataMeshVirtualList)
+                .unwrap()
+                .ends_with(" 0 27 500 0 3 1")
+        );
+    }
+
+    #[test]
+    fn measured_automatic_window_sizes_spacers_from_the_measured_extent() {
+        let children = windowed_children_with("", "column", 500, Some((10, 20)), true);
+        assert_eq!(children.len(), 10 + 2);
+        assert_eq!(spacer_style(&children[0]), Some("height: 400px; flex-shrink: 0"));
+        assert_eq!(spacer_style(&children[11]), Some("height: 19200px; flex-shrink: 0"));
+    }
+
+    #[test]
+    fn unannotated_for_is_not_windowed_without_a_driving_host_or_below_the_minimum() {
+        assert_eq!(windowed_children_with("", "column", 500, None, false).len(), 500);
+        assert_eq!(windowed_children_with("", "column", 99, None, true).len(), 99);
+    }
+
+    #[test]
+    fn a_full_range_builds_every_item_without_spacers() {
+        let full = Some((0, usize::MAX));
+        let children = windowed_children_with("", "column", 500, full, true);
+        assert_eq!(children.len(), 500);
+        assert!(children.iter().all(|child| child.tag == "text"));
+        let declared = windowed_children_with("window=40", "column", 500, full, true);
+        assert_eq!(declared.len(), 500);
+    }
+
+    #[test]
+    fn spacers_account_for_the_parent_gap() {
+        // 40px items 10px apart: ten skipped items span 10 * 50 - 10 (the gap
+        // layout already adds beside the spacer).
+        let children =
+            windowed_children("window=40", "column; gap: 10px", 100, Some((10, 15)));
+        assert_eq!(spacer_style(&children[0]), Some("height: 490px; flex-shrink: 0"));
+        assert_eq!(spacer_style(&children[6]), Some("height: 4240px; flex-shrink: 0"));
+    }
+
+    #[test]
+    fn windowed_items_keep_their_identity_and_report_their_place_in_the_set() {
+        use mesh_core_elements::Prop;
+        let item = |children: &[WidgetNode], ordinal: &str| -> WidgetNode {
+            children
+                .iter()
+                .find(|child| {
+                    child.attributes.get(Prop::Content).map(String::as_str) == Some(ordinal)
+                })
+                .unwrap_or_else(|| panic!("item {ordinal} not built"))
+                .clone()
+        };
+        let early = windowed_children("window=40", "column", 100, Some((10, 15)));
+        let late = windowed_children("window=40", "column", 100, Some((12, 18)));
+        let (a, b) = (item(&early, "12"), item(&late, "12"));
+        assert!(a.loop_identity().is_some());
+        assert_eq!(a.loop_identity(), b.loop_identity());
+        assert_ne!(
+            a.loop_identity(),
+            item(&early, "13").loop_identity(),
+            "neighbouring items are distinct"
+        );
+        assert_eq!(a.attributes.get(Prop::AriaPosinset).map(String::as_str), Some("13"));
+        assert_eq!(a.attributes.get(Prop::AriaSetsize).map(String::as_str), Some("100"));
+
+        let spacers: Vec<_> = early
+            .iter()
+            .filter(|child| child.attributes.get(Prop::DataMeshVirtualList).is_some())
+            .collect();
+        assert_eq!(spacers.len(), 2);
+        assert!(spacers.iter().all(|spacer| {
+            spacer.attributes.get(Prop::AriaHidden).map(String::as_str) == Some("true")
+                && spacer.loop_identity().is_some()
+        }));
+        assert_ne!(spacers[0].loop_identity(), spacers[1].loop_identity());
+    }
+
+    #[test]
+    fn unwindowed_for_ignores_a_host_window() {
+        let children = windowed_children("", "column", 30, Some((5, 8)));
+        assert_eq!(children.len(), 30);
+    }
+
     #[test]
     fn for_node_borrows_iterable_without_owned_root_clone() {
         use std::cell::Cell;

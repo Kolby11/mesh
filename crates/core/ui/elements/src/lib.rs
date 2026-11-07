@@ -95,6 +95,32 @@ pub use tree::{
 ///
 /// Implemented by the scripting layer to provide script-side state
 /// without `mesh-core-elements` depending on `mesh-core-scripting`.
+/// Items of a windowed `{#for}` list a host has asked to build.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VirtualRange {
+    /// First built item.
+    pub first: usize,
+    /// One past the last built item, overscan included. [`Self::FULL`] builds
+    /// every item.
+    pub last: usize,
+    /// Main-axis size of one item in px, gap excluded; zero when not yet
+    /// measured.
+    pub extent: f32,
+}
+
+impl VirtualRange {
+    /// Marks a list that must be built in full.
+    pub const FULL: Self = Self {
+        first: 0,
+        last: usize::MAX,
+        extent: 0.0,
+    };
+
+    pub fn is_full(self) -> bool {
+        self.first == 0 && self.last == usize::MAX
+    }
+}
+
 pub trait VariableStore {
     fn get(&self, name: &str) -> Option<serde_json::Value>;
     fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
@@ -117,6 +143,22 @@ pub trait VariableStore {
     /// Retained collection identity for a fixed-shape keyed native loop.
     fn keyed_template_item(&self) -> Option<KeyedTemplateItem> {
         None
+    }
+    /// The range a host has chosen for the windowed `{#for}` list with this
+    /// identity. `None` builds the initial window.
+    fn virtual_window(&self, list_id: &str) -> Option<VirtualRange> {
+        let _ = list_id;
+        None
+    }
+    /// Largest surface extent in px the host is painting, so a list's initial
+    /// window can cover the viewport before any row has been measured.
+    fn virtual_viewport_hint(&self) -> Option<f32> {
+        None
+    }
+    /// Whether a host drives windowed lists in this store. Large unannotated
+    /// `{#for}` lists are only windowed automatically when it does.
+    fn supports_virtual_windows(&self) -> bool {
+        false
     }
     /// Whether expressions also read a captured loop item.
     fn in_loop(&self) -> bool {

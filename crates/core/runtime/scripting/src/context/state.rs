@@ -1,4 +1,4 @@
-use mesh_core_elements::VariableStore;
+use mesh_core_elements::{VariableStore, VirtualRange};
 use mesh_core_locale::{LocalizedTextResolution, ModuleTranslator};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -128,11 +128,15 @@ pub struct ScriptState {
     /// and proxy registrations that deliberately leave `snapshot_generation`
     /// alone, so callers can cache full-state clones safely.
     mutation_generation: u64,
+    /// Largest extent of the surface being painted, in px. Only sizes a windowed
+    /// list's first build, so it is not state and never invalidates a template.
+    virtual_viewport_hint: Option<f32>,
 }
 
 impl ScriptState {
     pub fn new() -> Self {
         Self {
+            virtual_viewport_hint: None,
             variables: HashMap::new(),
             dirty: false,
             proxies: HashMap::new(),
@@ -499,7 +503,67 @@ impl Default for ScriptState {
     }
 }
 
+/// Host-maintained state variable holding each windowed `{#for}` list's built
+/// item range, keyed by list identity.
+const VIRTUAL_WINDOWS_VARIABLE: &str = "__virtual_windows";
+
+impl ScriptState {
+    /// Records the surface extent the first build of a windowed list should
+    /// cover. This is not tracked state: it neither marks the state dirty nor
+    /// advances any generation.
+    pub fn set_virtual_viewport_hint(&mut self, extent: f32) {
+        self.virtual_viewport_hint = Some(extent);
+    }
+
+    /// Records the range a windowed list should build. Returns whether it
+    /// differs from the range already recorded; a change advances the mutation
+    /// generation but does not mark the state dirty.
+    pub fn set_virtual_window(&mut self, list_id: &str, range: VirtualRange) -> bool {
+        if VariableStore::virtual_window(self, list_id) == Some(range) {
+            return false;
+        }
+        let mut windows = match self.variables.get(VIRTUAL_WINDOWS_VARIABLE).map(Arc::as_ref) {
+            Some(Value::Object(windows)) => windows.clone(),
+            _ => serde_json::Map::new(),
+        };
+        windows.insert(
+            list_id.to_owned(),
+            serde_json::json!([range.first as u64, range.last as u64, range.extent]),
+        );
+        let value = Value::Object(windows);
+        let fingerprint = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            value.to_string().hash(&mut hasher);
+            hasher.finish()
+        };
+        self.set_host_value_with_fingerprint(VIRTUAL_WINDOWS_VARIABLE, value, fingerprint);
+        true
+    }
+}
+
 impl VariableStore for ScriptState {
+    fn virtual_window(&self, list_id: &str) -> Option<VirtualRange> {
+        let range = self
+            .variables
+            .get(VIRTUAL_WINDOWS_VARIABLE)?
+            .get(list_id)?
+            .as_array()?;
+        Some(VirtualRange {
+            first: usize::try_from(range.first()?.as_u64()?).ok()?,
+            last: usize::try_from(range.get(1)?.as_u64()?).ok()?,
+            extent: range.get(2)?.as_f64()? as f32,
+        })
+    }
+
+    fn virtual_viewport_hint(&self) -> Option<f32> {
+        self.virtual_viewport_hint
+    }
+
+    fn supports_virtual_windows(&self) -> bool {
+        true
+    }
+
     fn get(&self, name: &str) -> Option<Value> {
         if let Some(proxy) = self.proxies.get(name) {
             return Some((proxy.getter)());
@@ -543,6 +607,7 @@ impl Clone for ScriptState {
             snapshot_generation: self.snapshot_generation,
             cached_snapshot: Mutex::new(None),
             mutation_generation: self.mutation_generation,
+            virtual_viewport_hint: self.virtual_viewport_hint,
         }
     }
 }
@@ -600,6 +665,18 @@ impl VariableStore for LocaleBoundState<'_, '_> {
 
     fn keys(&self) -> Vec<String> {
         self.state.keys()
+    }
+
+    fn virtual_window(&self, list_id: &str) -> Option<VirtualRange> {
+        self.state.virtual_window(list_id)
+    }
+
+    fn virtual_viewport_hint(&self) -> Option<f32> {
+        self.state.virtual_viewport_hint()
+    }
+
+    fn supports_virtual_windows(&self) -> bool {
+        self.state.supports_virtual_windows()
     }
 
     fn translate(&self, key: &str) -> Option<String> {

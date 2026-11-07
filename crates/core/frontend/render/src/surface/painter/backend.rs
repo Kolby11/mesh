@@ -52,7 +52,9 @@ impl BlurQuality {
 }
 
 const SKIA_IMAGE_CACHE_CAPACITY: usize = 128;
-const SKIA_IMAGE_CACHE_MAX_BYTES: usize = 32 * 1024 * 1024;
+// Sized so a 4K wallpaper with its mipmap chain (~44 MB) is admitted; an entry
+// over the budget is rejected and its pixels copied again on every paint.
+const SKIA_IMAGE_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
 const GRADIENT_SHADER_CACHE_CAPACITY: usize = 64;
 const GRADIENT_SHADER_CACHE_MAX_BYTES: usize = 64 * 1024;
 const GRADIENT_SHADER_ENTRY_BYTES: usize = 1024;
@@ -269,6 +271,11 @@ fn build_gradient_shader(
 // that allocation from being reused at the same address, so a key never names
 // a different image, without pinning the decoded pixels: the entry's only
 // pixel memory is the Skia copy.
+#[cfg(test)]
+pub(crate) fn skia_image_cache_len() -> usize {
+    SKIA_IMAGE_CACHE.with(|cache| cache.borrow().len())
+}
+
 struct CachedSkiaImage {
     _source: std::sync::Weak<image::RgbaImage>,
     image: skia_safe::Image,

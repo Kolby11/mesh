@@ -26,6 +26,11 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Measure end-to-end theme, font-family and size changes across visible surfaces and resource readiness, including compositor presentation feedback; preserve valid retained work and final-value correctness.
 - [ ] Implement the Material reference shell (`08-material-desktop`): editable desktop widget grid, widget picker, editing toolbar, side rail and dock, with a composition/profile and token-based theme. [Design](../.planning/todos/pending/2026-10-27-reference-shells.md).
 - [ ] Give `@mesh/material` its own composition once `08-material-desktop` lands; the theme recommends `@mesh/desk` until then.
+- [ ] `bundled_media_views_follow_position_and_reconcile_unacknowledged_seeks` fails on a clean `HEAD` with
+      `CapabilityDenied("mesh.i18n")`: the test's capability set lacks what the bundled media views now import.
+- [ ] `material_profile_switch_retires_its_roots_and_restores_them` fails on a clean `HEAD`: the real
+      audio/brightness/media/network/power/wm providers are changed candidates and the test has no
+      backend runtime. Add a test-only backend stub so profile-switch tests need not start real providers.
 - [ ] Update the Settings and style-fixture tests that still expect glass panels under the solid themes (`clicking_a_theme_card_repaints_settings_in_the_new_theme_in_one_frame`, `settings_glass_surfaces_follow_the_active_theme_palette`, two `style::tests::fixtures` colours); the themes moved to Material surfaces on 2026-10-29 and the expected looks are undecided.
 - [ ] Make liquid-glass Settings readable over applications with a light, translucent outer panel and calmer inner controls; the shared glass palette is too transparent.
 - [ ] **Styleable control parts:** add scrollbar (`::track`, `::thumb`) and input (`::placeholder`, `::caret`, `::selection`) parts; the renderer still hardcodes their looks, and neither fits the child-node model. [Design](../.planning/todos/pending/2026-10-29-control-parts.md).
@@ -48,7 +53,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Index semantic-token coordinates instead of rescanning each document prefix; coordinate work currently grows quadratically with token-dense source. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/16-developer-and-authoring-tools.md).
 - [ ] Use parsed block spans and declared component props in authoring queries; raw tag searches and public-script-member lookup currently misidentify blocks and input completions. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/16-developer-and-authoring-tools.md).
 - [ ] Apply socket connection deadlines and cancellation during establishment; blocking Unix connect currently precedes configured read/write timeouts. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/11-luau-runtime-and-sandbox.md).
-- [ ] Apply optional-feature visibility consistently to nested service state; `.state` currently bypasses the direct-member feature gate. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/11-luau-runtime-and-sandbox.md).
 - [ ] Admit subprocess streams and publish Started before worker execution; immediate output or exit can currently precede registration and overwrite terminal status. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/11-luau-runtime-and-sandbox.md).
 - [ ] Preserve supervised failure/quarantine history through backend readiness and continue bounded recovery after replacement initialization fails; completion currently resets history and pending failures stop retries. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/15-shell-core-and-orchestration.md).
 - [ ] Bound backend ingress through the final shell consumer; bridges currently drain bounded producer queues into an unbounded inbox before coalescing. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/15-shell-core-and-orchestration.md).
@@ -70,7 +74,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Derive popover trigger expansion even when a closed popup is hidden; semantic publication currently leaves conflicting authored state in place. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Convert scroll-to-view distances into the scroll owner's coordinates; transformed containers can overshoot or move in the wrong direction. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/09-interaction-and-motion.md).
 - [ ] Hit-test overlapping scrollbars in paint order; reverse insertion order can select a lower z-index sibling. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/09-interaction-and-motion.md).
-- [ ] Keep reverse and alternate stepped keyframe wake deadlines from missing changes immediately after boundaries. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/09-interaction-and-motion.md).
 - [ ] Make fork creation format-independent and transactional; valid minified manifests fail after leaving partial copies. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Classify removal of optional positional service arguments as breaking; existing callers can still supply them. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Preserve validated stylesheet image paths through style lowering; resolved relative URLs are rejected as absolute. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
@@ -102,7 +105,7 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Measure per-module signature verification cost during graph loading; signed modules currently launch serial verifier processes. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Build an author-facing component test harness after SH-08, with deterministic services, time and input plus semantic, request and render assertions; current reusable fixtures are shell-private Rust tests. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Add repeatable component profiling scenarios and run metadata; report failed CPU decoding as unavailable and index activity windows instead of rescanning every sample. [Earlier audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md), [tooling evidence](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/16-developer-and-authoring-tools.md).
-- [ ] Correlate input and service changes through surface preparation, GPU completion, commit and available presentation feedback; existing per-stage samples do not show end-to-end latency. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
+- [ ] Correlate input and service changes with `display_latency` (commit to presentation feedback is recorded); still missing is the link from the originating input or service event to that commit, and the compositor presentation timestamp. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Support deactivating inherited profile roots through CLI commands and distinguish resetting an override from removing a root. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Recompute active dependency reachability after blocking roots; the resolver can retain dependencies reached only from a failed root. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Use exclusive no-follow temporary files for store pointer writes; predictable PID-based temporary paths can follow existing symlinks. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
@@ -121,7 +124,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Align icon coverage advice with live alias, dash fallback and owner-scoped resolution; advice can report gaps for icons that resolve. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Reject duplicate glyph names in JSON icon maps; parsing currently collapses duplicates before validation. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Resolve icon overrides through MESH pack-qualified mappings; current override lookup treats targets as file or XDG assets. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
-- [ ] Preserve user resource precedence when XDG data home is absent; filtering currently lets a system directory occupy its ordering slot. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Include override-only font roles in renderer alias projection; registry resolution and rendered `font-family` can disagree. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Ignore template braces and directives inside XML comments while retaining accurate spans and editor recovery. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Use scoped expression references in standalone component validation; local function parameters can be reported as unknown globals. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
@@ -369,9 +371,14 @@ The items below are local fixes. The large wins are the
 [change-proportional frame pipeline](#change-proportional-frame-pipeline--next-implementation-priority)
 at the top of this file; prefer it over further single-pass scoping.
 
-- [ ] Add opt-in recycling/virtualized lists for vertical and horizontal scrolling (`axis`), initially with fixed item sizes.
-      Instantiate visible items plus overscan and reuse keyed rows, preserving full scroll extent, item state, focus and accessibility; lists currently instantiate every item.
-      Benchmark launcher and Settings resource lists; defer variable-size items and two-axis grids.
+- [ ] Measure the shipped launcher, font, icon-theme and inspector lists under automatic windowing; wrapping
+      grids and uneven rows build in full by design, and the real data sets are not reproduced in tests.
+- [ ] Lists that must stay fully built (uneven rows, no scroller) switch from a windowed first frame to a full
+      build on the second, a ~300 ms frame at 2,000 rows, and then pay ~9 ms per scroll frame: both pointer hit
+      tests visit every row (~45% of the frame) and a scroll viewport replays every row's commands (~30%).
+      Prune both with retained subtree extents, or window uneven rows against estimated sizes.
+- [ ] A windowed list holds its first frame back for one settle frame (wrong scrollbar, partial rows) because
+      layout is needed to measure; consider settling in the same paint before presentation.
 
 ### Render sweep findings
 
@@ -396,8 +403,9 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
 - [ ] Skia context: no persistent shader cache; one flush plus fence per
       surface per frame instead of one per frame.
 - [ ] Glyph pages re-upload the whole page when they grow; upload only the new cells.
-- [ ] Images exceeding the 32 MiB `SKIA_IMAGE_CACHE` budget (including mipmaps)
-      are copied and re-uploaded every paint; wrap the decoded `Arc` without copying.
+- [ ] Images exceeding the 64 MiB `SKIA_IMAGE_CACHE` budget (including mipmaps; anything
+      much above 4K) are still copied and re-uploaded every paint. A zero-copy wrap needs a
+      Skia `Data` release proc (`skia_bindings`); `Data::new_bytes` cannot tie the `Arc` to the image.
 - [ ] Service updates run Lua per message, not per frame.
 - [ ] Sparse frames still pay ~10 full passes (batch index rebuild, topology
       check, backdrop regions, layer-scope collection); the subtree reuse map

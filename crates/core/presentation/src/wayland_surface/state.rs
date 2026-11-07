@@ -116,6 +116,29 @@ pub(super) struct FrameCallbackData {
     pub(super) buffer_generation: u64,
 }
 
+/// Upper bound on undrained presentation samples; the oldest is dropped first.
+pub(super) const MAX_PRESENTATION_SAMPLES: usize = 256;
+
+/// User data of one `wp_presentation_feedback`, created when the commit that
+/// it describes is issued.
+#[derive(Debug, Clone)]
+pub(super) struct PresentationFeedbackData {
+    pub(super) surface_id: Arc<str>,
+    pub(super) committed_at: Instant,
+}
+
+/// Outcome of one committed buffer as reported by the compositor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresentationSample {
+    pub surface_id: Arc<str>,
+    /// Time from `wl_surface.commit` to the compositor's verdict event.
+    pub commit_to_event: std::time::Duration,
+    /// Output refresh interval in nanoseconds; zero when unknown or discarded.
+    pub refresh_nanos: u32,
+    /// The content update was never shown.
+    pub discarded: bool,
+}
+
 pub(super) struct SeatInputState {
     pub(super) seat: wl_seat::WlSeat,
     pub(super) pointer: Option<ThemedPointer>,
@@ -202,6 +225,8 @@ pub(super) struct State {
     pub(super) activation_state: Option<ActivationState>,
     pub(super) focus_grab_manager: Option<HyprlandFocusGrabManagerV1>,
     pub(super) viewporter: Option<WpViewporter>,
+    pub(super) presentation: Option<WpPresentation>,
+    pub(super) presentation_samples: std::collections::VecDeque<PresentationSample>,
     pub(super) fractional_scale_manager: Option<WpFractionalScaleManagerV1>,
     pub(super) blur_protocols: BlurProtocols,
     pub(super) seat_state: SeatState,

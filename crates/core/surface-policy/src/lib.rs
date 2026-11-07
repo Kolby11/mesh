@@ -308,22 +308,24 @@ impl DeclaredSurfaceContract {
 /// Sparse normalized settings/runtime values layered over a declared
 /// contract. `None` means that the declared value remains effective; a
 /// missing value is therefore different from a meaningful zero or `false`.
+/// Optional snapshot fields use an outer option for presence and an inner
+/// option for the value: `Some(None)` explicitly clears the declared value.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SurfacePolicyPatch {
     pub role: Option<SurfaceRoleKind>,
     pub visible: Option<bool>,
     pub namespace: Option<String>,
     pub blur: Option<bool>,
-    pub window_title: Option<String>,
-    pub window_app_id: Option<String>,
+    pub window_title: Option<Option<String>>,
+    pub window_app_id: Option<Option<String>>,
     pub window_resizable: Option<bool>,
     pub window_decorations: Option<SurfacePolicyDecorations>,
-    pub edge: Option<SurfacePolicyEdge>,
+    pub edge: Option<Option<SurfacePolicyEdge>>,
     pub center: Option<bool>,
     pub layer: Option<SurfacePolicyLayer>,
     pub size_policy: Option<SurfacePolicySizePolicy>,
-    pub content_size: Option<(u32, u32)>,
-    pub surface_size: Option<(u32, u32)>,
+    pub content_size: Option<Option<(u32, u32)>>,
+    pub surface_size: Option<Option<(u32, u32)>>,
     pub width_spans_output: Option<bool>,
     pub height_spans_output: Option<bool>,
     pub exclusive_zone: Option<i32>,
@@ -344,25 +346,19 @@ impl SurfacePolicyPatch {
             namespace: (base.namespace != target.namespace).then(|| target.namespace.clone()),
             blur: (base.blur != target.blur).then_some(target.blur),
             window_title: (base.window_title != target.window_title)
-                .then(|| target.window_title.clone())
-                .flatten(),
+                .then(|| target.window_title.clone()),
             window_app_id: (base.window_app_id != target.window_app_id)
-                .then(|| target.window_app_id.clone())
-                .flatten(),
+                .then(|| target.window_app_id.clone()),
             window_resizable: (base.window_resizable != target.window_resizable)
                 .then_some(target.window_resizable),
             window_decorations: (base.window_decorations != target.window_decorations)
                 .then_some(target.window_decorations),
-            edge: (base.edge != target.edge).then_some(target.edge).flatten(),
+            edge: (base.edge != target.edge).then_some(target.edge),
             center: (base.center != target.center).then_some(target.center),
             layer: (base.layer != target.layer).then_some(target.layer),
             size_policy: (base.size_policy != target.size_policy).then_some(target.size_policy),
-            content_size: (base.content_size != target.content_size)
-                .then_some(target.content_size)
-                .flatten(),
-            surface_size: (base.surface_size != target.surface_size)
-                .then_some(target.surface_size)
-                .flatten(),
+            content_size: (base.content_size != target.content_size).then_some(target.content_size),
+            surface_size: (base.surface_size != target.surface_size).then_some(target.surface_size),
             width_spans_output: (base.width_spans_output != target.width_spans_output)
                 .then_some(target.width_spans_output),
             height_spans_output: (base.height_spans_output != target.height_spans_output)
@@ -412,11 +408,11 @@ impl SurfacePolicyPatch {
             provenance.placement = SurfacePolicyValueSource::Settings;
         }
         if let Some(value) = &self.window_title {
-            snapshot.window_title = Some(value.clone());
+            snapshot.window_title = value.clone();
             provenance.window = SurfacePolicyValueSource::Settings;
         }
         if let Some(value) = &self.window_app_id {
-            snapshot.window_app_id = Some(value.clone());
+            snapshot.window_app_id = value.clone();
             provenance.window = SurfacePolicyValueSource::Settings;
         }
         if let Some(value) = self.window_resizable {
@@ -428,7 +424,7 @@ impl SurfacePolicyPatch {
             provenance.window = SurfacePolicyValueSource::Settings;
         }
         if let Some(value) = self.edge {
-            snapshot.edge = Some(value);
+            snapshot.edge = value;
             provenance.placement = SurfacePolicyValueSource::Settings;
         }
         if let Some(value) = self.center {
@@ -444,11 +440,11 @@ impl SurfacePolicyPatch {
             provenance.placement = SurfacePolicyValueSource::Settings;
         }
         if let Some(value) = self.content_size {
-            snapshot.content_size = Some(value);
+            snapshot.content_size = value;
             provenance.placement = SurfacePolicyValueSource::Derived;
         }
         if let Some(value) = self.surface_size {
-            snapshot.surface_size = Some(value);
+            snapshot.surface_size = value;
             provenance.placement = SurfacePolicyValueSource::Derived;
         }
         if let Some(value) = self.width_spans_output {
@@ -750,7 +746,10 @@ impl SurfacePolicySnapshot {
     fn layer_geometry_changed(&self, next: &Self) -> bool {
         self.edge != next.edge
             || (self.center != next.center
-                && matches!(self.edge, Some(SurfacePolicyEdge::Left | SurfacePolicyEdge::Right))
+                && matches!(
+                    self.edge,
+                    Some(SurfacePolicyEdge::Left | SurfacePolicyEdge::Right)
+                )
                 && !self.height_spans_output)
             || self.layer != next.layer
             || self.layer_wire_size() != next.layer_wire_size()
@@ -1082,6 +1081,65 @@ mod tests {
             plan.presentation,
             SurfacePresentationTransition::RecreateObject
         );
+    }
+
+    #[test]
+    fn optional_fields_round_trip_through_patches_and_reset() {
+        let populated = SurfacePolicySnapshot {
+            window_title: Some("Title".into()),
+            window_app_id: Some("app".into()),
+            edge: Some(SurfacePolicyEdge::Left),
+            content_size: Some((10, 20)),
+            surface_size: Some((30, 40)),
+            ..SurfacePolicySnapshot::default()
+        };
+        let empty = SurfacePolicySnapshot {
+            window_title: None,
+            window_app_id: None,
+            edge: None,
+            content_size: None,
+            surface_size: None,
+            ..populated.clone()
+        };
+        let state = |mask: u8| SurfacePolicySnapshot {
+            window_title: (mask & 1 != 0)
+                .then(|| populated.window_title.clone())
+                .flatten(),
+            window_app_id: (mask & 2 != 0)
+                .then(|| populated.window_app_id.clone())
+                .flatten(),
+            edge: (mask & 4 != 0).then_some(populated.edge).flatten(),
+            content_size: (mask & 8 != 0).then_some(populated.content_size).flatten(),
+            surface_size: (mask & 16 != 0).then_some(populated.surface_size).flatten(),
+            ..empty.clone()
+        };
+        for base_mask in 0..32 {
+            for target_mask in 0..32 {
+                let base = state(base_mask);
+                let target = state(target_mask);
+                let mut declared = DeclaredSurfaceContract::from_snapshot(base.clone());
+                declared.snapshot = base.clone();
+                let mut compiler = SurfacePolicyCompiler::new();
+                let patch = SurfacePolicyPatch::between(&base, &target);
+                let result = compiler.compile(&declared, &patch);
+                let mut expected = target.clone();
+                expected.revision = result.snapshot.revision;
+                assert_eq!(result.snapshot, expected);
+                assert_eq!(result.snapshot.revision, 1);
+                let repeated = compiler.compile(&declared, &patch);
+                assert_eq!(repeated.snapshot.revision, 1);
+                let reset = compiler.compile(&declared, &SurfacePolicyPatch::default());
+                let mut expected_base = base.clone();
+                expected_base.revision = reset.snapshot.revision;
+                assert_eq!(reset.snapshot, expected_base);
+                let expected_revision = if base.diff(&target).change == SurfacePolicyChange::Noop {
+                    1
+                } else {
+                    2
+                };
+                assert_eq!(reset.snapshot.revision, expected_revision);
+            }
+        }
     }
 
     #[test]

@@ -175,6 +175,7 @@ fn create_service_proxy(
         Arc::clone(&service_context_state),
         Arc::clone(&tracked_service_fields),
         Arc::clone(&absent_state),
+        features.clone(),
     )?;
     let events_proxy = create_events_proxy(
         lua,
@@ -659,12 +660,16 @@ fn create_service_state_proxy(
     service_context_state: Arc<Mutex<ServiceContextState>>,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     absent_state: Arc<serde_json::Map<String, Value>>,
+    features: FeatureGate,
 ) -> mlua::Result<Table> {
     let state = lua.create_table()?;
     let meta = lua.create_table()?;
     meta.set(
         "__index",
         lua.create_function(move |lua, (_table, key): (Table, String)| {
+            if features.unsupported(&key).is_some() {
+                return Ok(LuaValue::Nil);
+            }
             record_tracked_field_once(&tracked_service_fields, &service_name, &key);
             service_payload_field(
                 lua,

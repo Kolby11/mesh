@@ -93,6 +93,7 @@ impl Shell {
         }
         self.drain_surface_lifecycle_events()?;
         self.reconcile_scene_completions();
+        self.record_presentation_latency();
         self.drain_window_close_requests()?;
         self.sync_text_input_state()?;
 
@@ -1133,6 +1134,21 @@ impl Shell {
     /// One that never reached the compositor (superseded, resized away,
     /// buffers busy, GPU failure) leaves the surface showing stale pixels, so
     /// repaint the whole surface.
+    fn record_presentation_latency(&mut self) {
+        for sample in self.presentation_engine.take_presentation_samples() {
+            let module_id = self
+                .component_target_for_surface(&sample.surface_id)
+                .map(|(index, _)| self.components[index].surface_id.as_str().to_owned());
+            self.record_surface_profiling_stage(
+                &sample.surface_id,
+                module_id.as_deref(),
+                mesh_core_debug::ProfilingStage::DisplayLatency,
+                sample.commit_to_event,
+                Some(if sample.discarded { "discarded" } else { "presented" }),
+            );
+        }
+    }
+
     fn reconcile_scene_completions(&mut self) {
         for completion in self.presentation_engine.take_scene_completions() {
             #[cfg(test)]

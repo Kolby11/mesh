@@ -184,6 +184,15 @@ impl VariableStore for BoundTemplateStore<'_> {
     fn template_locals(&self) -> serde_json::Map<String, serde_json::Value> {
         self.locals.cloned().unwrap_or_default()
     }
+    fn virtual_window(&self, list_id: &str) -> Option<mesh_core_elements::VirtualRange> {
+        self.base.virtual_window(list_id)
+    }
+    fn virtual_viewport_hint(&self) -> Option<f32> {
+        self.base.virtual_viewport_hint()
+    }
+    fn supports_virtual_windows(&self) -> bool {
+        self.base.supports_virtual_windows()
+    }
     fn translate(&self, key: &str) -> Option<String> {
         self.base.translate(key)
     }
@@ -254,6 +263,15 @@ impl VariableStore for TrackingVariableStore<'_> {
     }
     fn keyed_template_item(&self) -> Option<mesh_core_elements::KeyedTemplateItem> {
         self.inner.keyed_template_item()
+    }
+    fn virtual_window(&self, list_id: &str) -> Option<mesh_core_elements::VirtualRange> {
+        self.inner.virtual_window(list_id)
+    }
+    fn virtual_viewport_hint(&self) -> Option<f32> {
+        self.inner.virtual_viewport_hint()
+    }
+    fn supports_virtual_windows(&self) -> bool {
+        self.inner.supports_virtual_windows()
     }
     fn in_loop(&self) -> bool {
         self.inner.in_loop()

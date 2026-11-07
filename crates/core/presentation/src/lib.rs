@@ -12,7 +12,7 @@ pub use dev_window::{DevWindowEvent as WindowEvent, DevWindowKeyEvent as WindowK
 pub use wayland_surface::{
     ContentExtent, LayerSurfaceSizePolicy, LayerWireExtent, LayerWireSize, PopupAnchor,
     PopupConfig, PopupConstraint, PopupGravity, PopupPlacement, SurfaceConfig, SurfaceExtent,
-    SurfaceExtentError, SurfacePadding, UnmeasuredSize,
+    PresentationSample, SurfaceExtentError, SurfacePadding, UnmeasuredSize,
 };
 
 /// The Wayland seat and button-press serial that authorize an `xdg_popup` grab.
@@ -1352,6 +1352,15 @@ impl PresentationEngine {
         }
         let _ = allow_gpu;
         PixelBuffer::try_new(width, height).map(SurfaceCanvas::from)
+    }
+
+    /// Compositor verdicts on committed buffers since the last call; empty
+    /// without `wp_presentation`.
+    pub fn take_presentation_samples(&mut self) -> Vec<PresentationSample> {
+        match &mut self.backend {
+            Backend::WaylandSurface(bridge) => bridge.take_presentation_samples(),
+            _ => Vec::new(),
+        }
     }
 
     /// Commit frames the scene worker has published and report the outcome of

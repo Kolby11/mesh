@@ -89,6 +89,11 @@ pub struct AccessibilityInfo {
     pub visible: bool,
     pub state: AccessibilityState,
     pub keyboard_shortcut: Option<String>,
+    /// Number of items in the set this node belongs to, when the set is larger
+    /// than the nodes built for it (a windowed list).
+    pub set_size: Option<u32>,
+    /// One-based position of this node in its set.
+    pub position_in_set: Option<u32>,
 }
 
 impl Default for AccessibilityInfo {
@@ -103,6 +108,8 @@ impl Default for AccessibilityInfo {
             visible: true,
             state: AccessibilityState::default(),
             keyboard_shortcut: None,
+            set_size: None,
+            position_in_set: None,
         }
     }
 }
@@ -468,7 +475,9 @@ struct NormalizationAttributes<'a> {
     aria_description: Option<&'a String>,
     aria_keyshortcuts: Option<&'a String>,
     aria_label: Option<&'a String>,
+    aria_posinset: Option<&'a String>,
     aria_role: Option<&'a String>,
+    aria_setsize: Option<&'a String>,
     aria_valuemax: Option<&'a String>,
     aria_valuemin: Option<&'a String>,
     aria_valuenow: Option<&'a String>,
@@ -511,7 +520,9 @@ impl<'a> NormalizationAttributes<'a> {
                 "aria-description" => slots.aria_description = Some(text),
                 "aria-keyshortcuts" => slots.aria_keyshortcuts = Some(text),
                 "aria-label" => slots.aria_label = Some(text),
+                "aria-posinset" => slots.aria_posinset = Some(text),
                 "aria-role" => slots.aria_role = Some(text),
+                "aria-setsize" => slots.aria_setsize = Some(text),
                 "aria-valuemax" => slots.aria_valuemax = Some(text),
                 "aria-valuemin" => slots.aria_valuemin = Some(text),
                 "aria-valuenow" => slots.aria_valuenow = Some(text),
@@ -639,6 +650,13 @@ fn normalized_info(
             .cloned()
             .or(preserved_description)
     };
+    let set_number = |value: Option<&String>| {
+        value
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .filter(|value| *value > 0)
+    };
+    info.set_size = set_number(attributes.aria_setsize).filter(|_| !hidden);
+    info.position_in_set = set_number(attributes.aria_posinset).filter(|_| !hidden);
     info.keyboard_shortcut = attributes
         .aria_keyshortcuts
         .or(attributes.key)
@@ -983,6 +1001,37 @@ mod tests {
                 .iter()
                 .all(|node| node.info.label.as_deref() != Some("Do not announce"))
         );
+    }
+
+    #[test]
+    fn set_size_and_position_are_published_and_dropped_when_invalid_or_hidden() {
+        let mut root = WidgetNode::new("box");
+        let mut item = WidgetNode::new("box");
+        attr(&mut item, "aria-setsize", "2000");
+        attr(&mut item, "aria-posinset", "13");
+        let mut invalid = WidgetNode::new("box");
+        attr(&mut invalid, "aria-setsize", "many");
+        attr(&mut invalid, "aria-posinset", "0");
+        let mut hidden = WidgetNode::new("box");
+        attr(&mut hidden, "aria-setsize", "5");
+        attr(&mut hidden, "aria-posinset", "1");
+        attr(&mut hidden, "aria-hidden", "true");
+        root.children.extend([item, invalid, hidden]);
+
+        normalize_accessibility(&mut root);
+
+        assert_eq!(root.children[0].accessibility.set_size, Some(2000));
+        assert_eq!(root.children[0].accessibility.position_in_set, Some(13));
+        assert_eq!(root.children[1].accessibility.set_size, None);
+        assert_eq!(root.children[1].accessibility.position_in_set, None);
+        assert_eq!(root.children[2].accessibility.set_size, None);
+        let snapshot = AccessibilityTree::publish(&root);
+        let published = snapshot
+            .nodes
+            .iter()
+            .find(|node| node.info.set_size == Some(2000))
+            .expect("published with its set");
+        assert_eq!(published.info.position_in_set, Some(13));
     }
 
     #[test]

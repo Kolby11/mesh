@@ -34,6 +34,7 @@ impl WaylandSurfaceBackend {
         let activation_state = ActivationState::bind(&globals, &qh).ok();
         let focus_grab_manager = globals.bind(&qh, 1..=1, GlobalData).ok();
         let viewporter: Option<WpViewporter> = globals.bind(&qh, 1..=1, GlobalData).ok();
+        let presentation: Option<WpPresentation> = globals.bind(&qh, 1..=1, GlobalData).ok();
         let fractional_scale_manager: Option<WpFractionalScaleManagerV1> =
             globals.bind(&qh, 1..=1, GlobalData).ok();
         // The ext manager's `blur` capability arrives as an event; until it
@@ -66,6 +67,8 @@ impl WaylandSurfaceBackend {
             activation_state,
             focus_grab_manager,
             viewporter,
+            presentation,
+            presentation_samples: std::collections::VecDeque::new(),
             fractional_scale_manager,
             blur_protocols,
             pointer_gestures,
@@ -379,6 +382,12 @@ impl WaylandSurfaceBackend {
     /// Drain the ids of windows the user asked to close (title-bar button,
     /// compositor keybind). The shell decides what closing means — hiding the
     /// surface, running a teardown handler — so this only reports the request.
+    /// Drains the compositor's presentation verdicts since the last call.
+    /// Empty when `wp_presentation` is unavailable.
+    pub fn take_presentation_samples(&mut self) -> Vec<crate::PresentationSample> {
+        self.state.presentation_samples.drain(..).collect()
+    }
+
     pub fn take_close_requests(&mut self) -> Vec<String> {
         std::mem::take(&mut self.state.close_requests)
     }

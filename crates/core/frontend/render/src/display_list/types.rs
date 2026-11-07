@@ -1,4 +1,4 @@
-use super::sequence::{PaintSequence, PaintSequenceIter};
+use super::sequence::{PaintSequence, PaintSequenceCursor, PaintSequenceIter};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -946,13 +946,13 @@ pub(super) enum SelectedDisplayListSelection {
 }
 
 pub struct SelectedDisplayListPaintIter<'a> {
-    pub(super) commands: &'a PaintSequence<DisplayPaintCommand>,
+    pub(super) commands: PaintSequenceCursor<'a, DisplayPaintCommand>,
     pub(super) state: SelectedDisplayListPaintIterState<'a>,
 }
 
 pub struct SelectedDisplayListPaintKindIter<'a> {
-    pub(super) commands: &'a PaintSequence<DisplayPaintCommand>,
-    pub(super) kinds: &'a PaintSequence<DisplayPaintCommandKind>,
+    pub(super) commands: PaintSequenceCursor<'a, DisplayPaintCommand>,
+    pub(super) kinds: PaintSequenceCursor<'a, DisplayPaintCommandKind>,
     pub(super) state: SelectedDisplayListPaintKindIterState<'a>,
 }
 
@@ -1049,7 +1049,7 @@ impl<'a> SelectedDisplayListPaint<'a> {
 
     pub fn iter(&self) -> SelectedDisplayListPaintIter<'_> {
         SelectedDisplayListPaintIter {
-            commands: self.commands,
+            commands: PaintSequenceCursor::new(self.commands),
             state: match &self.selection {
                 SelectedDisplayListSelection::All => {
                     SelectedDisplayListPaintIterState::All(self.commands.iter())
@@ -1068,8 +1068,8 @@ impl<'a> SelectedDisplayListPaint<'a> {
 
     pub fn iter_with_kinds(&self) -> SelectedDisplayListPaintKindIter<'_> {
         SelectedDisplayListPaintKindIter {
-            commands: self.commands,
-            kinds: self.kinds,
+            commands: PaintSequenceCursor::new(self.commands),
+            kinds: PaintSequenceCursor::new(self.kinds),
             state: match &self.selection {
                 SelectedDisplayListSelection::All => {
                     SelectedDisplayListPaintKindIterState::All(self.commands.iter())

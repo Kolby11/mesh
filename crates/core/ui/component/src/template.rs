@@ -435,7 +435,21 @@ pub struct ForNode {
     pub key: Option<String>,
     /// The optional key expression body in the opening directive.
     pub key_span: Option<crate::SourceSpan>,
+    /// Opt-in windowing: only the items near the scroll viewport are built.
+    pub window: Option<VirtualWindow>,
     pub children: Vec<TemplateNode>,
+}
+
+/// Items built beyond each edge of the visible range when `overscan` is omitted.
+pub const DEFAULT_VIRTUAL_OVERSCAN: usize = 3;
+
+/// Fixed-extent windowing of a `{#for}` list along its scroll axis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VirtualWindow {
+    /// Main-axis size of every item, in CSS px.
+    pub item_extent: f32,
+    /// Items built beyond each edge of the visible range.
+    pub overscan: usize,
 }
 
 /// A slot for projected content.

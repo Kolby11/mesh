@@ -1162,6 +1162,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         };
         let paint_width = extent.padded_width().max(content_width).max(1);
         let paint_height = extent.padded_height().max(content_height).max(1);
+        self.publish_virtual_viewport_hint(paint_width.max(paint_height) as f32);
         // The paint buffer's physical size tracks `paint_width`/`paint_height`
         // (content plus the tooltip overlay reserve, times scale), not the
         // content-only dimensions `observe_surface_size` watches above. A
@@ -1590,6 +1591,15 @@ impl ShellComponent for FrontendSurfaceComponent {
         let element_metrics_changed = retained_dirty_affects_element_metrics(retained_dirty);
         if self.element_metric_usage.any() && element_metrics_changed {
             self.publish_element_metrics(&tree, self.element_metric_usage);
+        }
+
+        if (self.virtual_lists_seen || requires_tree_rebuild)
+            && (requires_tree_rebuild
+                || !dirty_types
+                    .difference(ComponentDirtyFlags::PAINT)
+                    .is_empty())
+        {
+            self.update_virtual_windows(&tree);
         }
 
         let effective_damage_area = effective_damage.damage_area(display_list_metrics.surface_area);

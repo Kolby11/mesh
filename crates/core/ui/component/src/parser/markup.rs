@@ -87,6 +87,7 @@ fn preprocess_template(source: &str, braces: &BraceLex) -> Result<String, ParseE
                 item,
                 iterable,
                 key,
+                window,
             } => {
                 if markup.in_tag {
                     return Err(ParseError::InvalidTemplate {
@@ -98,11 +99,20 @@ fn preprocess_template(source: &str, braces: &BraceLex) -> Result<String, ParseE
                 let key = key
                     .map(|key| format!(" key=\"{}\"", xml_attr_escape(&source[key.start..key.end])))
                     .unwrap_or_default();
+                let window = window
+                    .map(|window| {
+                        format!(
+                            " window=\"{}\" overscan=\"{}\"",
+                            window.item_extent, window.overscan
+                        )
+                    })
+                    .unwrap_or_default();
                 output.push_str(&format!(
-                    "<mesh-for data-mesh-id=\"{id}\" data-mesh-end=\"{close_end}\" item=\"{}\" iterable=\"{}\"{}>",
+                    "<mesh-for data-mesh-id=\"{id}\" data-mesh-end=\"{close_end}\" item=\"{}\" iterable=\"{}\"{}{}>",
                     xml_attr_escape(item),
                     xml_attr_escape(&source[iterable.start..iterable.end]),
                     key,
+                    window,
                 ));
                 flow.push(Flow::For);
             }
@@ -923,6 +933,30 @@ fn build_template_node(
             });
         };
         let close_end = synthetic_end(&attributes, "data-mesh-end")?;
+        let window = find_static_attr(&attributes, "window")
+            .and_then(|extent| extent.parse::<f32>().ok())
+            .map(|item_extent| VirtualWindow {
+                item_extent,
+                overscan: find_static_attr(&attributes, "overscan")
+                    .and_then(|overscan| overscan.parse::<usize>().ok())
+                    .unwrap_or(crate::DEFAULT_VIRTUAL_OVERSCAN),
+            });
+        if window.is_some() {
+            let roots = children
+                .iter()
+                .filter(|child| {
+                    !matches!(child, TemplateNode::Text(text) if text.content.trim().is_empty())
+                })
+                .count();
+            if roots != 1 {
+                return Err(ParseError::InvalidTemplate {
+                    message: "a windowed `#for` must contain exactly one root element, \
+                              because every item must span the same `window` extent"
+                        .into(),
+                    span: node_span,
+                });
+            }
+        }
         return Ok(TemplateNode::For(ForNode {
             item_name,
             iterable: iterable_text,
@@ -930,6 +964,7 @@ fn build_template_node(
             iterable_span: add_base(*iterable, source_base),
             key: find_static_attr(&attributes, "key"),
             key_span: key.map(|key| add_base(key, source_base)),
+            window,
             children,
         }));
     }
