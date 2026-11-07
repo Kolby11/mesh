@@ -65,25 +65,25 @@
                 <scroll ref="settings_scroll" class="settings-scroll">
                     <column class="settings-page-stack">
                         <column class="settings-page-slot" hidden={active_page ~= "wifi"}>
-                            <WifiPage />
+                            {#if active_page == "wifi"}<WifiPage />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "audio"}>
-                            <AudioPage />
+                            {#if active_page == "audio"}<AudioPage />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "bluetooth"}>
-                            <BluetoothPage />
+                            {#if active_page == "bluetooth"}<BluetoothPage />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "appearance"}>
-                            <AppearancePage />
+                            {#if active_page == "appearance"}<AppearancePage />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "device"}>
-                            <DeviceInfoPage />
+                            {#if active_page == "device"}<DeviceInfoPage />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "keyboard"}>
-                            <KeyboardPage />
+                            {#if active_page == "keyboard"}<KeyboardPage />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "advanced"}>
-                            <AdvancedPage />
+                            {#if active_page == "advanced"}<AdvancedPage />{/if}
                         </column>
                     </column>
                 </scroll>
@@ -103,7 +103,10 @@ local WifiPage = require("./components/wifi-page.mesh")
 local t = import("mesh.i18n", "t")
 
 -- The active page drives the nav highlight, the visible page slot and the
--- header copy straight from the template.
+-- header copy straight from the template. Only the active page is built, but
+-- every page keeps its own slot column: pages that were bare siblings under an
+-- {#if} would share child positions, and so node identities, and the engine
+-- would animate the previous page's geometry into the next page.
 active_page = "wifi"
 
 search_query = ""

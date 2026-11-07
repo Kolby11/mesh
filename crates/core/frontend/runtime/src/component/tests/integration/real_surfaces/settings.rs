@@ -22,8 +22,10 @@ fn settings_audio_static_import_keeps_unrelated_page_generations_stable() {
         .insert("AudioPage".into(), parse_component(&direct).unwrap());
     let extent = SurfaceExtent::unpadded(920, 900);
     let mut buffer = PixelBuffer::new(920, 900);
+    // Only the showing page is built, so the Audio page has to be the one showing
+    // for its runtime to exist and observe the service.
     settings
-        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
         .unwrap();
     settings
         .paint_raster(&theme, extent, &mut buffer, 1.0)
@@ -75,8 +77,8 @@ fn settings_audio_static_import_keeps_unrelated_page_generations_stable() {
             .collect::<std::collections::HashMap<_, _>>()
     };
     assert!(
-        before.keys().any(|key| key.contains("AppearancePage")),
-        "{before:?}"
+        !before.keys().any(|key| key.contains("AppearancePage")),
+        "pages that are not showing are not built: {before:?}"
     );
     update(&mut settings, 20);
     let runtimes = settings.runtimes.lock().unwrap();
@@ -475,6 +477,15 @@ fn settings_navigation_classes_and_language_options_derive_from_template_state()
         .unwrap();
     assert!(active_handler(&settings).contains("showAudio"));
 
+    // The language options live on the Appearance page, which is only built
+    // while it is showing.
+    settings
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
+        .unwrap();
+    settings
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
+    assert!(active_handler(&settings).contains("showAppearance"));
     let tree = settings.last_tree.as_ref().expect("settings tree");
     assert_eq!(
         count_class_token(tree, "glass-button-active"),
@@ -938,4 +949,131 @@ fn appearance_base_size_control_emits_a_validated_theme_request() {
         CoreRequest::ServiceCall { interface, command, payload, .. }
         if interface == "mesh.theme" && command == "set_shell_scale" && payload["scale"] == 150
     )), "{requests:?}");
+}
+
+fn subtree_size(node: &WidgetNode) -> usize {
+    1 + node.children.iter().map(subtree_size).sum::<usize>()
+}
+
+/// Node counts under each page slot of the real Settings surface, hidden or not.
+fn page_slot_sizes(node: &WidgetNode, out: &mut Vec<(bool, usize)>) {
+    let is_slot = node
+        .attributes
+        .get(Prop::Class)
+        .is_some_and(|classes| classes.split_whitespace().any(|class| class == "settings-page-slot"));
+    if is_slot {
+        let hidden = node.attributes.get(Prop::Hidden).is_some_and(|value| value == "true");
+        out.push((hidden, subtree_size(node)));
+        return;
+    }
+    for child in &node.children {
+        page_slot_sizes(child, out);
+    }
+}
+
+/// Run with
+/// `cargo test -p mesh-core-frontend-runtime --lib settings_hidden_pages_profile -- --ignored --nocapture`
+/// (add `--profile profiling` for release-equivalent timings).
+#[test]
+#[ignore = "measurement, not a gate"]
+fn settings_hidden_pages_profile() {
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(920, 900);
+    let started = std::time::Instant::now();
+    let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let construct_ms = started.elapsed().as_secs_f64() * 1e3;
+    let mut buffer = PixelBuffer::new(920, 900);
+    let started = std::time::Instant::now();
+    settings.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+    let first_paint_ms = started.elapsed().as_secs_f64() * 1e3;
+
+    let tree = settings.last_tree.as_ref().unwrap();
+    let mut slots = Vec::new();
+    page_slot_sizes(tree, &mut slots);
+    let total = subtree_size(tree);
+    let hidden_nodes: usize = slots.iter().filter(|(hidden, _)| *hidden).map(|(_, size)| size).sum();
+    let visible_nodes: usize = slots.iter().filter(|(hidden, _)| !*hidden).map(|(_, size)| size).sum();
+    let runtimes = settings.runtimes.lock().unwrap().len();
+    println!(
+        "settings: construct {construct_ms:.1} ms, first paint {first_paint_ms:.1} ms, \
+         {total} nodes ({visible_nodes} in the shown page, {hidden_nodes} in {} hidden pages), \
+         {runtimes} component runtimes, slots {slots:?}",
+        slots.iter().filter(|(hidden, _)| *hidden).count()
+    );
+
+    let mut switches = Vec::new();
+    for page in ["Audio", "Bluetooth", "Appearance", "Device", "Keyboard", "Advanced", "Wifi"] {
+        settings
+            .call_namespaced_handler(&format!("__mesh_embed__::@mesh/settings::show{page}"), &[])
+            .unwrap();
+        let started = std::time::Instant::now();
+        settings.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+        let first = started.elapsed().as_secs_f64() * 1e3;
+        let mut settle_ms = 0.0;
+        while settings.wants_render() {
+            let started = std::time::Instant::now();
+            settings.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+            settle_ms += started.elapsed().as_secs_f64() * 1e3;
+            if settle_ms > 2_000.0 {
+                break;
+            }
+        }
+        switches.push(format!("{page} {first:.1}+{settle_ms:.1}"));
+    }
+    println!("settings: first switch to each page (paint ms + settle ms): {}", switches.join(", "));
+
+    let mut repaint = Vec::new();
+    for _ in 0..30 {
+        settings.invalidate_script_state();
+        let started = std::time::Instant::now();
+        settings.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+        repaint.push(started.elapsed().as_secs_f64() * 1e3);
+    }
+    repaint.sort_by(f64::total_cmp);
+    println!(
+        "settings: full-rebuild repaint ms min {:.2} median {:.2} max {:.2}",
+        repaint[0],
+        repaint[repaint.len() / 2],
+        repaint[repaint.len() - 1]
+    );
+}
+
+/// A pill-shaped control (`border-radius: 9999px`) is displayed clamped to its
+/// box. A node rebuilt before layout used to read the unclamped radius as a new
+/// target, so every full rebuild kept the surface asking for frames while a
+/// 150 ms radius transition ran between two identical-looking shapes.
+#[test]
+fn full_rebuilds_and_page_switches_leave_the_settings_surface_idle() {
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(920, 900);
+    let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+    settings.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+    let mut settle = |settings: &mut FrontendSurfaceComponent| {
+        let mut frames = 0;
+        while settings.wants_render() && frames < 60 {
+            settings.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+            frames += 1;
+        }
+        frames
+    };
+    assert!(settle(&mut settings) <= 1);
+
+    settings.invalidate_script_state();
+    settings.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert!(
+        !settings.wants_render(),
+        "a full rebuild must not start transitions between equal-looking styles"
+    );
+
+    for page in ["Audio", "Appearance", "Bluetooth", "Wifi"] {
+        settings
+            .call_namespaced_handler(&format!("__mesh_embed__::@mesh/settings::show{page}"), &[])
+            .unwrap();
+        settings.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+        assert!(
+            !settings.wants_render(),
+            "switching to {page} must leave nothing animating"
+        );
+    }
 }

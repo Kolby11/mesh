@@ -781,6 +781,20 @@ impl TransitionAnimator {
         // the rest keep any in-place update (a surface root's size) made since.
         let mut resolved = AnimatableStyle::from_node(node);
         resolved.containing_block = containing_block;
+        // A node rebuilt this frame is sampled before layout, so its box is
+        // still empty. Reading that as the target would animate the previous
+        // frame's box into nothing, and leave the radius unclamped (9999px
+        // against a displayed 18px). Until layout runs, the box is the one
+        // already on screen.
+        if node.layout.width <= 0.0 && node.layout.height <= 0.0 {
+            resolved.used_width = previous_displayed.used_width;
+            resolved.used_height = previous_displayed.used_height;
+            resolved.border_radius = visual_border_radius(
+                node.computed_style.border_radius,
+                previous_displayed.used_width,
+                previous_displayed.used_height,
+            );
+        }
         let desired = match (self.authored.get(&key), self.active.get(&key)) {
             (Some(authored), Some(running)) if node.computed_style.animated_sample => {
                 let animated = running
@@ -1138,6 +1152,90 @@ mod tests {
         let still_active = animator.step_node(key, &mut node, displayed, done);
         assert!(!still_active);
         assert!((node.computed_style.opacity - 1.0).abs() < 1e-4);
+    }
+
+    fn animating(properties: mesh_core_elements::TransitionProperties) -> TransitionStyle {
+        TransitionStyle {
+            duration_ms: 150,
+            properties,
+            ..TransitionStyle::default()
+        }
+    }
+
+    #[test]
+    fn a_rebuilt_node_before_layout_keeps_the_clamped_radius_on_screen() {
+        // A pill (`border-radius: 9999px`) in a 36px box is displayed at 18px.
+        // The same node rebuilt and sampled before layout has no box to clamp
+        // against and must not read 9999px as a new target.
+        let mut node = WidgetNode::new("input");
+        node.computed_style.border_radius = Corners::all(9999.0);
+        node.computed_style.transitions = vec![animating(mesh_core_elements::TransitionProperties {
+            border_radius: true,
+            ..mesh_core_elements::TransitionProperties::none()
+        })];
+        let laid_out = mesh_core_elements::LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 100.0,
+            height: 36.0,
+        };
+        let previous = AnimatableStyle::from_style_and_layout(&node.computed_style, laid_out);
+        assert_eq!(previous.border_radius, Corners::all(18.0));
+
+        let mut animator = TransitionAnimator::new();
+        let key = node.id;
+        assert!(!animator.step_node(key, &mut node, previous, Instant::now()));
+        assert!(!animator.contains_key(key));
+        assert_eq!(node.computed_style.border_radius, Corners::all(18.0));
+    }
+
+    #[test]
+    fn a_rebuilt_node_before_layout_does_not_shrink_to_nothing() {
+        let mut node = WidgetNode::new("text");
+        node.computed_style.transitions = vec![animating(mesh_core_elements::TransitionProperties {
+            width: true,
+            height: true,
+            ..mesh_core_elements::TransitionProperties::none()
+        })];
+        let laid_out = mesh_core_elements::LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 435.0,
+            height: 45.0,
+        };
+        let previous = AnimatableStyle::from_style_and_layout(&node.computed_style, laid_out);
+
+        let mut animator = TransitionAnimator::new();
+        let key = node.id;
+        assert!(
+            !animator.step_node(key, &mut node, previous, Instant::now()),
+            "a node with no layout yet must not animate toward a zero size"
+        );
+        assert!(!animator.contains_key(key));
+    }
+
+    #[test]
+    fn a_laid_out_node_still_animates_a_real_size_change() {
+        let mut node = WidgetNode::new("box");
+        node.computed_style.transitions = vec![animating(mesh_core_elements::TransitionProperties {
+            width: true,
+            ..mesh_core_elements::TransitionProperties::none()
+        })];
+        let layout = |width| mesh_core_elements::LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width,
+            height: 36.0,
+        };
+        node.computed_style.width = mesh_core_elements::style::Dimension::Px(200.0);
+        node.layout = layout(200.0);
+        let mut earlier = node.computed_style.clone();
+        earlier.width = mesh_core_elements::style::Dimension::Px(100.0);
+        let previous = AnimatableStyle::from_style_and_layout(&earlier, layout(100.0));
+        let mut animator = TransitionAnimator::new();
+        let key = node.id;
+        assert!(animator.step_node(key, &mut node, previous, Instant::now()));
+        assert!(animator.contains_key(key));
     }
 
     #[test]

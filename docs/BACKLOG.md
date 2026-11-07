@@ -371,6 +371,13 @@ The items below are local fixes. The large wins are the
 [change-proportional frame pipeline](#change-proportional-frame-pipeline--next-implementation-priority)
 at the top of this file; prefer it over further single-pass scoping.
 
+- [ ] Sibling `{#if}` branches that each produce a node sit at the same child position and so share node identity
+      (id, key, transitions, hover, focus, caches). In Settings, swapping lazily built pages made the engine animate
+      the old page's laid-out size into the new, not-yet-laid-out nodes: a 435 → 0 width transition read its own
+      collapsed layout back as the target, so text stayed zero-wide and the surface asked for frames forever.
+      Settings is fixed by giving each page its own slot column. A minimal pair of swapped branches does not
+      reproduce it, so find the smallest trigger (embedded components laid out a frame after mount) and decide
+      whether `{#if}` branches should carry their own identity, as `{#for}` blocks do.
 - [ ] Measure the shipped launcher, font, icon-theme and inspector lists under automatic windowing; wrapping
       grids and uneven rows build in full by design, and the real data sets are not reproduced in tests.
 - [ ] Lists that must stay fully built (uneven rows, no scroller) switch from a windowed first frame to a full

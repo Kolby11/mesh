@@ -228,11 +228,13 @@ fn unread_audio_updates_schedule_no_frame() {
     );
 }
 
-/// The hidden Audio page derives its labels in an effect. A volume change
-/// writes those bound globals, which must patch the bindings in place instead
-/// of rebuilding the visible Appearance page, and match a full rebuild.
+/// A page that is not showing is not built, so a volume change does no work
+/// for the visible Appearance page, and the Audio page opens on the current
+/// value. Once visible, the Audio page derives its labels in an effect: a
+/// volume change writes those bound globals, which must patch the bindings in
+/// place instead of rebuilding the page, and match a full rebuild.
 #[test]
-fn hidden_audio_page_volume_patches_without_rebuild() {
+fn audio_volume_is_not_built_while_hidden_and_patches_without_rebuild_when_shown() {
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(920, 900);
     let mut settings = appearance_surface(&theme, &mut buffer);
@@ -241,6 +243,30 @@ fn hidden_audio_page_volume_patches_without_rebuild() {
     let _ = settings.take_invalidation_snapshot();
 
     publish_audio_percent(&mut settings, 40);
+    if settings.wants_render() {
+        settings
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .unwrap();
+        let snapshot = settings.take_invalidation_snapshot();
+        assert!(
+            snapshot.is_none_or(|snapshot| !snapshot.full_rebuild),
+            "a service update for a page that is not showing must not rebuild the visible page"
+        );
+    }
+    let mut texts = Vec::new();
+    all_texts(settings.last_tree.as_ref().unwrap(), &mut texts);
+    assert!(!texts.iter().any(|text| text == "40%"), "{texts:?}");
+
+    settings
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAudio", &[])
+        .unwrap();
+    settle(&mut settings, &theme, &mut buffer);
+    let mut opened = Vec::new();
+    all_texts(settings.last_tree.as_ref().unwrap(), &mut opened);
+    assert!(opened.iter().any(|text| text == "40%"), "{opened:?}");
+    let _ = settings.take_invalidation_snapshot();
+
+    publish_audio_percent(&mut settings, 55);
     assert!(
         settings.wants_render(),
         "a bound volume write must schedule a frame"
@@ -260,7 +286,7 @@ fn hidden_audio_page_volume_patches_without_rebuild() {
         all_texts(settings.last_tree.as_ref().unwrap(), &mut texts);
         texts
     };
-    assert!(patched.iter().any(|text| text == "40%"), "{patched:?}");
+    assert!(patched.iter().any(|text| text == "55%"), "{patched:?}");
 
     settle(&mut settings, &theme, &mut buffer);
     settings.invalidate_script_state();
