@@ -17,9 +17,9 @@ pub(in crate::shell) use debug::DebugSnapshotCache;
 pub(in crate::shell) use request::{
     EffectScheduler, ScheduledEffect, UserActivation, UserActivationSource,
 };
-pub(in crate::shell) use theme::{ControlPlaneSettingsCandidate, ControlPlaneSettingsCommit};
 #[cfg(test)]
 pub(in crate::shell) use theme::THEME_PAYLOAD_BUILDS;
+pub(in crate::shell) use theme::{ControlPlaneSettingsCandidate, ControlPlaneSettingsCommit};
 
 pub(in crate::shell) struct PendingControlPlaneCommit {
     pub(in crate::shell) worker: std::thread::JoinHandle<()>,
@@ -1063,10 +1063,21 @@ impl Shell {
                     restart_generation,
                 );
             }
-            ShellMessage::FilesystemChanged { generation } => {
+            ShellMessage::FilesystemChanged { generation, paths } => {
                 if generation <= self.file_watch_set.generation {
                     self.schedule_reload_checks_now();
-                    if generation < self.file_watch_set.generation {
+                    if generation == self.file_watch_set.generation
+                        && let Some(paths) = paths.as_deref()
+                        && self.filesystem_change_is_settings_only(paths)
+                    {
+                        if self.pending_control_plane_commit.is_some()
+                            || self.pending_profile_write.is_some()
+                        {
+                            self.pending_profile_file_reconciliation = true;
+                        } else if !self.configured_profile_matches_authoring() {
+                            pending.extend(self.reconcile_installed_graph());
+                        }
+                    } else if generation < self.file_watch_set.generation {
                         self.pending_graph_reconciliation = true;
                         pending.extend(self.retry_pending_graph_reconciliation());
                     } else {
@@ -1138,7 +1149,9 @@ impl Shell {
             }
             ShellMessage::ThemePreparationFinished { result } => {
                 let Some(preparing) = self.pending_control_plane_commit.take() else {
-                    tracing::warn!("ignored theme preparation completion without a pending request");
+                    tracing::warn!(
+                        "ignored theme preparation completion without a pending request"
+                    );
                     return Ok(());
                 };
                 let call_ids = preparing.call_ids;
@@ -1172,7 +1185,10 @@ impl Shell {
                         }
                         let mut theme = prepared.engine;
                         theme.update_active(|active| {
-                            crate::shell::discovery::apply_font_registry_tokens(active, &self.font_registry);
+                            crate::shell::discovery::apply_font_registry_tokens(
+                                active,
+                                &self.font_registry,
+                            );
                         });
                         self.commit_control_plane_settings(
                             candidate,
@@ -1286,6 +1302,24 @@ impl Shell {
             );
         }
         Ok(())
+    }
+
+    fn filesystem_change_is_settings_only(&self, paths: &[PathBuf]) -> bool {
+        let profile_path = mesh_core_module::package::ProfilePaths::from_root_graph(
+            &self.installed_module_graph_path(),
+        )
+        .ok()
+        .and_then(|paths| {
+            self.active_profile_id
+                .as_ref()
+                .and_then(|id| paths.profile_path(id).ok())
+        });
+        !paths.is_empty()
+            && paths.iter().all(|path| {
+                std::iter::once(&self.settings_watch.path)
+                    .chain(profile_path.iter())
+                    .any(|settings_path| settings_write_path_matches(path, settings_path))
+            })
     }
 
     fn file_watch_paths(&self) -> Vec<PathBuf> {
@@ -1526,19 +1560,63 @@ fn wait_for_eventfd(timeout: Duration, eventfd_fd: std::os::unix::io::BorrowedFd
     }
 }
 
+fn settings_write_path_matches(path: &std::path::Path, settings: &std::path::Path) -> bool {
+    if path == settings {
+        return true;
+    }
+    if path.parent() != settings.parent() {
+        return false;
+    }
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    if name == ".mesh-control-plane.lock" {
+        return true;
+    }
+    let Some(target) = settings.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    name.strip_prefix(&format!(".{target}.tmp-"))
+        .and_then(|suffix| suffix.split_once('-'))
+        .is_some_and(|(pid, sequence)| {
+            !pid.is_empty()
+                && !sequence.is_empty()
+                && pid.bytes().all(|byte| byte.is_ascii_digit())
+                && sequence.bytes().all(|byte| byte.is_ascii_digit())
+        })
+}
+
 #[derive(Default)]
 struct CoalescedShellMessages {
     messages: Vec<ShellMessage>,
     backend_update_index: HashMap<String, HashMap<String, usize>>,
-    filesystem_change_generations: std::collections::HashSet<u64>,
+    filesystem_change_generations: HashMap<u64, usize>,
 }
 
 impl CoalescedShellMessages {
     fn push(&mut self, message: ShellMessage) {
-        if let ShellMessage::FilesystemChanged { generation } = &message {
-            if !self.filesystem_change_generations.insert(*generation) {
+        if let ShellMessage::FilesystemChanged { generation, paths } = &message {
+            if let Some(index) = self.filesystem_change_generations.get(generation).copied() {
+                if let ShellMessage::FilesystemChanged {
+                    paths: existing, ..
+                } = &mut self.messages[index]
+                {
+                    match (existing.as_mut(), paths) {
+                        (Some(existing_paths), Some(paths)) => {
+                            existing_paths.extend(paths.iter().cloned());
+                            existing_paths.sort();
+                            existing_paths.dedup();
+                            if existing_paths.len() > 1024 {
+                                *existing = None;
+                            }
+                        }
+                        _ => *existing = None,
+                    }
+                }
                 return;
             }
+            self.filesystem_change_generations
+                .insert(*generation, self.messages.len());
         }
 
         if let ShellMessage::BackendServiceUpdate {
@@ -1583,6 +1661,35 @@ impl CoalescedShellMessages {
 mod tests {
     use super::*;
 
+    #[test]
+    fn filesystem_coalescing_preserves_paths_and_unknown_events() {
+        let mut coalesced = CoalescedShellMessages::default();
+        for path in ["settings.json", "module.json", "settings.json"] {
+            coalesced.push(ShellMessage::FilesystemChanged {
+                generation: 1,
+                paths: Some(vec![PathBuf::from(path)]),
+            });
+        }
+        let ShellMessage::FilesystemChanged { paths, .. } = &coalesced.messages[0] else {
+            panic!("expected filesystem notification");
+        };
+        assert_eq!(paths.as_ref().unwrap(), &vec![PathBuf::from("module.json"), PathBuf::from("settings.json")]);
+        coalesced.push(ShellMessage::FilesystemChanged { generation: 1, paths: None });
+        coalesced.push(ShellMessage::FilesystemChanged { generation: 1, paths: Some(vec![PathBuf::from("settings.json")]) });
+        assert!(matches!(&coalesced.messages[0], ShellMessage::FilesystemChanged { paths: None, .. }));
+    }
+
+    #[test]
+    fn settings_notifications_cover_only_the_target_and_its_write_files() {
+        let settings = std::path::Path::new("/config/profiles/glass.json");
+        for name in ["glass.json", ".glass.json.tmp-123-4", ".mesh-control-plane.lock"] {
+            assert!(settings_write_path_matches(&settings.with_file_name(name), settings));
+        }
+        for path in ["/config/profiles/other.json", "/config/profiles/.glass.json.tmp-no-pid", "/other/glass.json", "/config/profiles/module.json"] {
+            assert!(!settings_write_path_matches(std::path::Path::new(path), settings));
+        }
+    }
+
     fn backend_update(interface: &str, provider_id: &str, value: i64) -> ShellMessage {
         ShellMessage::BackendServiceUpdate {
             interface: interface.to_string(),
@@ -1620,14 +1727,23 @@ mod tests {
     #[test]
     fn coalesced_shell_messages_keep_single_filesystem_change() {
         let mut coalesced = CoalescedShellMessages::default();
-        coalesced.push(ShellMessage::FilesystemChanged { generation: 1 });
-        coalesced.push(ShellMessage::FilesystemChanged { generation: 1 });
+        coalesced.push(ShellMessage::FilesystemChanged {
+            generation: 1,
+            paths: None,
+        });
+        coalesced.push(ShellMessage::FilesystemChanged {
+            generation: 1,
+            paths: None,
+        });
 
         let messages = coalesced.into_vec();
         assert_eq!(messages.len(), 1);
         assert!(matches!(
             messages[0],
-            ShellMessage::FilesystemChanged { generation: 1 }
+            ShellMessage::FilesystemChanged {
+                generation: 1,
+                paths: None
+            }
         ));
     }
 

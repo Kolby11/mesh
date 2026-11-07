@@ -46,7 +46,7 @@ pub(crate) struct SceneNodeCache {
     order: VecDeque<NodeId>,
     bytes: usize,
     images: HashMap<u32, (usize, usize)>,
-    resources: (u64, u64),
+    resources: Option<(u64, u64, crate::surface::ResourceCompletionSnapshot)>,
     pub metrics: ScenePreparationMetrics,
     #[cfg(test)]
     pub disabled: bool,
@@ -59,13 +59,17 @@ impl SceneNodeCache {
     }
 
     fn sync_resources(&mut self, revision: u64) {
-        let resources = (revision, super::resource_completion_epoch());
-        if self.resources != resources {
+        let resources = (
+            revision,
+            super::resource_completion_epoch(),
+            crate::surface::completion_snapshot(),
+        );
+        if self.resources.as_ref() != Some(&resources) {
             self.entries.clear();
             self.order.clear();
             self.images.clear();
             self.bytes = 0;
-            self.resources = resources;
+            self.resources = Some(resources);
         }
     }
 
@@ -98,13 +102,16 @@ impl SceneNodeCache {
         node: &Arc<DisplayPaintNode>,
         key: NodePaintKey,
         recording: Rc<NodePicture>,
-        completion_epoch: u64,
+        completion_epoch: (u64, crate::surface::ResourceCompletionSnapshot),
     ) {
         self.metrics.recorded_nodes += 1;
         self.metrics.recorded_operations += recording.picture.approximate_op_count();
         // A placeholder or stand-in prepared before an asynchronous completion
         // must never hide the final asset behind an unchanged node identity.
-        if super::resources_pending() || completion_epoch != super::resource_completion_epoch() {
+        if super::resources_pending()
+            || completion_epoch.0 != super::resource_completion_epoch()
+            || completion_epoch.1 != crate::surface::completion_snapshot()
+        {
             return;
         }
         #[cfg(test)]
@@ -206,7 +213,10 @@ mod tests {
         });
         let mut cache = SceneNodeCache::default();
         cache.begin(mesh_core_resources::resource_revision());
-        let epoch = super::super::resource_completion_epoch();
+        let epoch = (
+            super::super::resource_completion_epoch(),
+            crate::surface::completion_snapshot(),
+        );
         let key = || NodePaintKey {
             scale: 1f32.to_bits(),
             clip: (0, 0, 8, 8),
@@ -215,7 +225,7 @@ mod tests {
         for id in 1..=MAX_NODES + 8 {
             let mut node = (*payload).clone();
             node.id = id as u64;
-            cache.insert(&Arc::new(node), key(), recording.clone(), epoch);
+            cache.insert(&Arc::new(node), key(), recording.clone(), epoch.clone());
         }
         assert_eq!(cache.entries.len(), MAX_NODES);
         assert_eq!(cache.order.len(), MAX_NODES);

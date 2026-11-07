@@ -149,6 +149,8 @@ if ! "$workloads_only"; then
   cargo test -p mesh-core-frontend-runtime --release --lib template_function_call_patches
   cargo test -p mesh-core-frontend-runtime --release --lib shared_binding_and_structural_expression
   cargo test -p mesh-core-shell --release --lib authoritative_theme_publication_builds_payload_once
+  cargo test -p mesh-core-shell --release --lib settings_file_notifications_skip_authoring_graph_loads
+  cargo test -p mesh-core-shell --release --lib profile_file_notification_waits_for_settings_commit_without_graph_load
   run_benchmark mesh-core-shell narrow_handler_damage_beats_forced_full_repaint
   run_benchmark mesh-core-shell watcher_idle_wait_profile
   run_benchmark mesh-core-scripting native_subscription_idle_profile

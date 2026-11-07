@@ -1,6 +1,6 @@
 use super::WakeHandle;
 use super::types::ShellMessage;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -227,7 +227,7 @@ fn watch_thread(
         if stop.load(Ordering::Acquire) {
             return;
         }
-        let Some((reader, readiness)) = reader.as_mut() else {
+        let Some((reader, readiness, directories)) = reader.as_mut() else {
             if let Err(error) = wait_for_watch_event(&control, None) {
                 tracing::warn!("file watcher control wait failed: {error}");
                 notify_watcher_stopped(&tx, &wake, current_generation);
@@ -237,10 +237,17 @@ fn watch_thread(
         };
 
         match reader.next() {
-            Ok(_) => {
+            Ok(event) => {
+                use std::os::unix::ffi::OsStrExt;
+                let paths = directories.get(&event.wd()).and_then(|directory| {
+                    event.file_name().map(|name| {
+                        vec![directory.join(std::ffi::OsStr::from_bytes(name.to_bytes()))]
+                    })
+                });
                 if tx
                     .send(ShellMessage::FilesystemChanged {
                         generation: current_generation,
+                        paths,
                     })
                     .is_err()
                 {
@@ -299,6 +306,7 @@ fn open_reader<'a>(
         Option<(
             rustix::fs::inotify::Reader<'a, rustix::fd::OwnedFd>,
             rustix::fd::OwnedFd,
+            HashMap<i32, PathBuf>,
         )>,
         usize,
     ),
@@ -309,9 +317,13 @@ fn open_reader<'a>(
     let inotify = inotify::init(CreateFlags::CLOEXEC | CreateFlags::NONBLOCK)
         .map_err(|error| format!("inotify init failed: {error}"))?;
     let mut watched = 0usize;
+    let mut directories = HashMap::new();
     for dir in watch_dirs(&watch_set.paths) {
         match inotify::add_watch(&inotify, &dir, flags) {
-            Ok(_) => watched += 1,
+            Ok(descriptor) => {
+                directories.insert(descriptor, dir);
+                watched += 1;
+            }
             Err(error) => tracing::warn!("failed to watch {}: {error}", dir.display()),
         }
     }
@@ -329,7 +341,7 @@ fn open_reader<'a>(
         .try_clone()
         .map_err(|error| format!("inotify readiness fd: {error}"))?;
     Ok((
-        Some((inotify::Reader::new(inotify, buf), readiness)),
+        Some((inotify::Reader::new(inotify, buf), readiness, directories)),
         watched,
     ))
 }
@@ -445,7 +457,8 @@ mod tests {
         std::fs::write(second.path().join("settings.json"), "{}").unwrap();
         assert!(matches!(
             receive(&mut rx),
-            ShellMessage::FilesystemChanged { generation: 2 }
+            ShellMessage::FilesystemChanged { generation: 2, paths: Some(paths) }
+                if paths == vec![second.path().join("settings.json")]
         ));
         watcher.stop_and_join();
     }

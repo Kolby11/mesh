@@ -3255,6 +3255,44 @@ fn glass_bar_volume_chip_steps_volume_with_arrow_keys() {
     }
 }
 
+#[test]
+fn glass_bar_volume_chip_steps_volume_with_wheel_and_touchpad() {
+    let mut component = host("glass-bar");
+    update(&mut component, "mesh.audio", serde_json::json!({"available":true,"percent":50,"muted":false}));
+    paint(&mut component, 1920, 100);
+    for touchpad in [false, true] {
+        for (dy, command) in [(1.0, "volume_up"), (-1.0, "volume_down")] {
+            let chip = first_node_by_class(component.last_tree.as_ref().unwrap(), "status-chip-btn").unwrap();
+            let x = chip.layout.x + chip.layout.width / 2.0;
+            let y = chip.layout.y + chip.layout.height / 2.0;
+            let input = if touchpad {
+                ComponentInput::TwoFingerScroll { x, y, dx: 0.0, dy }
+            } else {
+                ComponentInput::Scroll { x, y, dx: 0.0, dy }
+            };
+            let requests = component.handle_input(&theme(), 1920, 100, input).unwrap();
+            let calls: Vec<_> = requests.iter().filter_map(service_request_parts).collect();
+            assert!(calls.iter().any(|(service, method, _)| *service == "mesh.audio" && *method == command),
+                "touchpad={touchpad}, dy={dy}: {calls:?}");
+            paint(&mut component, 1920, 100);
+        }
+    }
+}
+
+#[test]
+fn glass_control_center_keeps_low_battery_values_in_percent_units() {
+    let mut component = host("glass-bar");
+    paint(&mut component, 1920, 100);
+    press(&mut component, "glassControls", 1920, 100);
+    for (level, displayed) in [(0.0, 0), (0.5, 1), (1.0, 1), (2.0, 2), (100.0, 100)] {
+        update(&mut component, "mesh.power", serde_json::json!({"available":true,"level":level,"charging":false}));
+        paint(&mut component, 1920, 100);
+        let footer = first_node_by_class(component.last_tree.as_ref().unwrap(), "footer").unwrap();
+        let label = first_node_by_class(footer, "caption").unwrap().attributes.get(Prop::Content).unwrap();
+        assert!(label.starts_with(&format!("{displayed}%")), "level={level}: {label}");
+    }
+}
+
 /// A focused launcher cell scales up and draws the platform focus outline;
 /// both must stay inside the results viewport, which clips its content, so
 /// the grid keeps five cells per row with an inset for them.

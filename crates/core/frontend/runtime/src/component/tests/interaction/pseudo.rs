@@ -1446,13 +1446,10 @@ slider::track { margin-left: 0px; margin-right: 0px; }
         )
         .unwrap();
     paint(&mut component);
-    eprintln!("slider first: {:?}, transitions {:?}", component.slider_values, component.transitions);
     let initial = anchor_x(&component);
     assert!((80.0..100.0).contains(&initial), "glide starts from the old value: {initial}");
     std::thread::sleep(Duration::from_millis(180));
     paint(&mut component);
-    fn dump(node: &WidgetNode) { if node.control_part().is_some() { eprintln!("part {:?} width {:?} layout {:?}", node.control_part(), node.computed_style.width, node.layout); } for child in &node.children { dump(child); } }
-    dump(component.last_tree.as_ref().unwrap());
     assert!((anchor_x(&component) - 100.0).abs() < 0.5, "{}", anchor_x(&component));
 }
 
@@ -1747,13 +1744,18 @@ fn slider_pointer_drag_snaps_value_parts_and_reduced_motion_skips_glide() {
                 slider::track { margin: 0px; }
             </style>
         "#);
-        component.motion_policy = mesh_core_animation::MotionPolicy::new(reduced);
+        let mut settings = component.settings.as_ref().clone();
+        settings.merge_namespace("shell", &serde_json::json!({"motion":{"reduced":reduced}}));
+        component.apply_settings(&Arc::new(settings)).unwrap();
         let theme = default_theme();
         let mut pixels = PixelBuffer::new(240, 80);
         let mut paint = |component: &mut FrontendSurfaceComponent| {
             component.paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut pixels, 1.0).unwrap();
         };
         paint(&mut component);
+        if component.wants_render() {
+            paint(&mut component);
+        }
         let slider = first_node_by_tag(component.last_tree.as_ref().unwrap(), "slider").unwrap();
         let key = slider.mesh_key().unwrap().to_owned();
         let origin = (slider.layout.x, slider.layout.y);
@@ -1763,7 +1765,8 @@ fn slider_pointer_drag_snaps_value_parts_and_reduced_motion_skips_glide() {
         paint(&mut component);
         let tree = component.last_tree.as_ref().unwrap();
         let anchor = part(tree, mesh_core_elements::ControlPart::SliderAnchor);
-        assert!((anchor.layout.x + anchor.layout.width / 2.0 - origin.0 - 160.0).abs() < 1.0);
+        assert!((anchor.layout.x + anchor.layout.width / 2.0 - origin.0 - 160.0).abs() < 1.0,
+            "reduced={reduced}, anchor={}, value={:?}", anchor.layout.x + anchor.layout.width / 2.0 - origin.0, component.slider_values);
         assert!(!component.transitions.contains_key(part(tree, mesh_core_elements::ControlPart::SliderLead).id));
         assert!(!component.transitions.contains_key(part(tree, mesh_core_elements::ControlPart::SliderFill).id));
         component.active_slider_id = None;

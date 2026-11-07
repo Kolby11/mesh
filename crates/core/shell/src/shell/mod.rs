@@ -81,7 +81,9 @@ pub(super) fn record_localized_miss(
     )
 }
 
-pub(super) use mesh_core_frontend_runtime::locale::{locale_service_payload, resolve_manifest_text};
+pub(super) use mesh_core_frontend_runtime::locale::{
+    locale_service_payload, resolve_manifest_text,
+};
 
 mod backend;
 use mesh_core_frontend_runtime::component;
@@ -755,6 +757,7 @@ pub struct Shell {
     pending_resource_preparation: Option<profile::PendingResourcePreparation>,
     pending_profile_switch: Option<profile::PendingProfileSwitch>,
     pending_graph_reconciliation: bool,
+    pending_profile_file_reconciliation: bool,
     active_profile_authoring: Option<(String, serde_json::Value)>,
     pending_control_plane_commit: Option<runtime::PendingControlPlaneCommit>,
     pending_profile_write: Option<runtime::PendingProfileWrite>,
@@ -1097,9 +1100,10 @@ pub enum ShellRunError {
 impl From<mesh_core_frontend_runtime::FrontendCatalogError> for ShellRunError {
     fn from(error: mesh_core_frontend_runtime::FrontendCatalogError) -> Self {
         match error {
-            mesh_core_frontend_runtime::FrontendCatalogError::FrontendCompile { module_id, source } => {
-                Self::FrontendCompile { module_id, source }
-            }
+            mesh_core_frontend_runtime::FrontendCatalogError::FrontendCompile {
+                module_id,
+                source,
+            } => Self::FrontendCompile { module_id, source },
             mesh_core_frontend_runtime::FrontendCatalogError::FrontendComposition { message } => {
                 Self::FrontendComposition { message }
             }

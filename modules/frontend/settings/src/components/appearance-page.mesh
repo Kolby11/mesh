@@ -322,21 +322,16 @@ end
 
 -- What selecting the theme adopts: its first installed font and icon theme,
 -- or its first choice when the installed catalog has not loaded that far.
-local function theme_recommendation(option)
+local function theme_recommendation(option, fonts_present, icons_present)
     local recommends = type(option.recommends) == "table" and option.recommends or {}
-    local resources = theme and theme.system_resources or {}
-    local function first(candidates, installed, field)
-        local present = {}
-        for _, entry in ipairs(installed or {}) do
-            present[tostring(entry[field] or "")] = true
-        end
+    local function first(candidates, present)
         for _, candidate in ipairs(candidates or {}) do
             if present[candidate] then return candidate end
         end
         return (candidates or {})[1]
     end
-    local font = first(recommends.fonts, font_catalog, "name")
-    local icons = first(recommends.icons, resources.icon_themes, "id")
+    local font = first(recommends.fonts, fonts_present)
+    local icons = first(recommends.icons, icons_present)
     if font == nil and icons == nil then return "" end
     local parts = {}
     if font ~= nil then parts[#parts + 1] = font end
@@ -375,6 +370,10 @@ local function sync_theme(theme_id)
         installed[#installed + 1] = { id = theme_value, label = theme_value }
     end
 
+    local fonts_present, icons_present = {}, {}
+    for _, entry in ipairs(font_catalog) do fonts_present[tostring(entry.name or "")] = true end
+    local resources = theme and theme.system_resources or {}
+    for _, entry in ipairs(resources.icon_themes or {}) do icons_present[tostring(entry.id or "")] = true end
     local rows = {}
     for index, option in ipairs(installed) do
         local active = option.id == theme_value
@@ -385,7 +384,7 @@ local function sync_theme(theme_id)
             palette = palette,
             active = active,
             kicker = theme_kicker(option),
-            recommends = theme_recommendation(option),
+            recommends = theme_recommendation(option, fonts_present, icons_present),
             coverage = type(option.coverage) == "table"
                 and (tostring(option.coverage.tuned or 0) .. " " .. t('appearance.coverage.tuned')
                     .. " · " .. tostring(option.coverage.defaults or 0) .. " " .. t('appearance.coverage.defaults')

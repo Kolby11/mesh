@@ -511,9 +511,11 @@ pub(super) enum ShellMessage {
         restart_generation: u64,
     },
     FilesystemChanged {
-        /// Watch-set generation that observed the event. The shell ignores
-        /// events from a retired activation/catalog watch set.
+        /// Watch-set generation that observed the event. Retired generations
+        /// remain conservative hints to reread the current filesystem state.
         generation: u64,
+        /// `None` requires broad reconciliation (overflow or unknown origin).
+        paths: Option<Vec<PathBuf>>,
     },
     /// The managed inotify worker reconciled its directory bindings. `active`
     /// is false when the desired inputs have no existing directories; the

@@ -11,6 +11,7 @@
             class="status-pill status-chip status-chip-btn"
             onclick={onToggleMute}
             onscroll={onVolumeScroll}
+            ontwofingerscroll={onVolumeScroll}
             onkeydown={onVolumeKey}
             title={volume_label}
             aria-label={volume_label}
@@ -117,10 +118,11 @@ function onVolumeKey(event)
 end
 
 function onVolumeScroll(event)
-    local delta = event and (event.delta_y or event.dy or 0) or 0
-    if delta < 0 then
+    local delta = event and event.delta or {}
+    local dy = tonumber(delta.y) or 0
+    if dy > 0 then
         audio.volume_up()
-    elseif delta > 0 then
+    elseif dy < 0 then
         audio.volume_down()
     end
 end

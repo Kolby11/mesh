@@ -2,9 +2,11 @@ use super::backend::{
     BackendLaunchCandidate, BackendRuntimeStatus,
     backend_launch_candidates_from_graph_with_capabilities,
 };
-use mesh_core_frontend_runtime::catalog::{FrontendCatalog, FrontendCatalogHandle, FrontendCatalogState};
-use mesh_core_frontend_runtime::FrontendSurfaceComponent;
 use super::*;
+use mesh_core_frontend_runtime::FrontendSurfaceComponent;
+use mesh_core_frontend_runtime::catalog::{
+    FrontendCatalog, FrontendCatalogHandle, FrontendCatalogState,
+};
 use mesh_core_module::package::{
     ComponentPlacement, InstalledModuleGraph, NodeSlotOverride, PackageTransaction, ProfilePaths,
     ProfileRootInstance, ShellProfile, load_authoring_snapshot_for_profile,
@@ -809,7 +811,11 @@ impl Shell {
     }
 
     fn reconcile_installed_graph_inner(&mut self, force: bool) -> VecDeque<SourcedRequest> {
-        if self.profile_transition_pending() || !self.pending_backend_runtimes.is_empty() {
+        if self.profile_transition_pending()
+            || !self.pending_backend_runtimes.is_empty()
+            || self.pending_control_plane_commit.is_some()
+            || self.pending_profile_write.is_some()
+        {
             self.pending_graph_reconciliation = true;
             return VecDeque::new();
         }
@@ -833,16 +839,7 @@ impl Shell {
                 return VecDeque::new();
             }
         };
-        let profile_unchanged =
-            match super::discovery::load_configured_profile(&self.installed_module_graph_path()) {
-                Ok(Some((id, profile))) => {
-                    serde_json::to_value(profile).ok().is_some_and(|value| {
-                        self.active_profile_authoring.as_ref() == Some(&(id, value))
-                    })
-                }
-                Ok(None) => self.active_profile_authoring.is_none(),
-                Err(_) => false,
-            };
+        let profile_unchanged = self.configured_profile_matches_authoring();
         if !force
             && profile_unchanged
             && self
@@ -858,6 +855,15 @@ impl Shell {
     pub(in crate::shell) fn retry_pending_graph_reconciliation(
         &mut self,
     ) -> VecDeque<SourcedRequest> {
+        if self.pending_control_plane_commit.is_some() || self.pending_profile_write.is_some() {
+            return VecDeque::new();
+        }
+        if self.pending_profile_file_reconciliation && !self.profile_transition_pending() {
+            self.pending_profile_file_reconciliation = false;
+            if !self.configured_profile_matches_authoring() {
+                self.pending_graph_reconciliation = true;
+            }
+        }
         if self.pending_graph_reconciliation
             && !self.profile_transition_pending()
             && self.pending_backend_runtimes.is_empty()
@@ -865,6 +871,16 @@ impl Shell {
             self.reconcile_installed_graph_inner(true)
         } else {
             VecDeque::new()
+        }
+    }
+
+    pub(in crate::shell) fn configured_profile_matches_authoring(&self) -> bool {
+        match super::discovery::load_configured_profile(&self.installed_module_graph_path()) {
+            Ok(Some((id, profile))) => serde_json::to_value(profile)
+                .ok()
+                .is_some_and(|value| self.active_profile_authoring.as_ref() == Some(&(id, value))),
+            Ok(None) => self.active_profile_authoring.is_none(),
+            Err(_) => false,
         }
     }
 

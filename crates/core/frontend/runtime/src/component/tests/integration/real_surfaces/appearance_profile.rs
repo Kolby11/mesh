@@ -89,6 +89,56 @@ fn seed_large_resource_catalog(settings: &mut FrontendSurfaceComponent, count: u
     settings.invalidate_script_state();
 }
 
+#[test]
+#[ignore = "release-only appearance projection profile"]
+fn appearance_theme_projection_profile() {
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(920, 900);
+    let mut settings = appearance_surface(&theme, &mut buffer);
+    let icons: Vec<_> = (0..240)
+        .map(|i| serde_json::json!({"id": format!("icon-{i}")}))
+        .collect();
+    let fonts: Vec<_> = (0..240)
+        .map(|i| serde_json::json!({"name": format!("font-{i}")}))
+        .collect();
+    let themes: Vec<_> = (0..100)
+        .map(|i| {
+            serde_json::json!({
+                "id": format!("theme-{i}"), "label": format!("Theme {i}"),
+                "recommends": {"fonts": ["missing", "font-239"], "icons": ["missing", "icon-239"]}
+            })
+        })
+        .collect();
+    let started = Instant::now();
+    for i in 0..20 {
+        settings
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.theme".into(),
+                source_module: "@mesh/core-settings".into(),
+                payload: serde_json::json!({"current": format!("theme-{}", i % 2), "themes": themes,
+                "system_resources": {"icon_themes": icons, "font_families": fonts}}),
+            })
+            .unwrap();
+        settings.flush_reactive_effects();
+    }
+    eprintln!(
+        "appearance projection: {:.3}ms/update (20 updates, 100 themes, 240 icons and fonts)",
+        started.elapsed().as_secs_f64() * 50.0
+    );
+    settings
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
+    fn contains_recommendation(node: &WidgetNode) -> bool {
+        node.attributes
+            .get(Prop::Content)
+            .is_some_and(|text| text.contains("font-239") && text.contains("icon-239"))
+            || node.children.iter().any(contains_recommendation)
+    }
+    assert!(contains_recommendation(
+        settings.last_tree.as_ref().unwrap()
+    ));
+}
+
 fn audio_payload(volume: u32) -> serde_json::Value {
     serde_json::json!({
         "volume": volume,
@@ -459,7 +509,11 @@ fn theme_switch_frame_cost_profile() {
             .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
             .unwrap();
     }
-    dump_stages("theme switch first paint", settings.take_profiling_records(), SWITCHES);
+    dump_stages(
+        "theme switch first paint",
+        settings.take_profiling_records(),
+        SWITCHES,
+    );
 }
 
 /// One presented frame as `Shell::render_components_inner` drives it for a

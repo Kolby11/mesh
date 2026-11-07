@@ -1,7 +1,7 @@
-use mesh_core_frontend_runtime::catalog::{FrontendCatalog, FrontendCatalogHandle};
-use mesh_core_frontend_runtime::FrontendSurfaceComponent;
 use super::types::watched_source_mtime;
 use super::*;
+use mesh_core_frontend_runtime::FrontendSurfaceComponent;
+use mesh_core_frontend_runtime::catalog::{FrontendCatalog, FrontendCatalogHandle};
 use mesh_core_module::ModuleHealthRecord;
 #[cfg(test)]
 use rayon::prelude::*;
@@ -48,6 +48,8 @@ fn load_installed_module_graph_candidate(
     root_module_graph_path: &Path,
     committed: Option<&InstalledModuleGraph>,
 ) -> Result<InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
+    #[cfg(test)]
+    AUTHORING_GRAPH_LOADS.with(|count| count.set(count.get() + 1));
     match committed {
         Some(committed) => mesh_core_module::package::load_authoring_snapshot_retaining(
             root_module_graph_path,
@@ -56,6 +58,11 @@ fn load_installed_module_graph_candidate(
         ),
         None => mesh_core_module::package::load_authoring_snapshot(root_module_graph_path),
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    pub(in crate::shell) static AUTHORING_GRAPH_LOADS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 pub(in crate::shell) fn graph_i18n_catalog_sources(
@@ -1338,7 +1345,6 @@ fn log_locale_catalog_diagnostics(diagnostics: &[mesh_core_locale::CatalogSource
 
 pub(in crate::shell) use mesh_core_module::package::effective_profile_settings;
 
-
 #[cfg(test)]
 #[derive(Debug)]
 pub(super) struct DiscoveredModuleManifest {
@@ -1797,7 +1803,8 @@ impl Shell {
         };
 
         let core_service_providers = CoreServiceRegistry::builtin();
-        let mut builtin_interface_catalog = mesh_core_frontend_shell_adapter::builtin_interface_catalog();
+        let mut builtin_interface_catalog =
+            mesh_core_frontend_shell_adapter::builtin_interface_catalog();
         for provider in core_service_providers.providers() {
             builtin_interface_catalog.register_provider(provider.interface_provider());
         }
@@ -1888,10 +1895,13 @@ impl Shell {
             pending_resource_preparation: None,
             pending_profile_switch: None,
             pending_graph_reconciliation: false,
+            pending_profile_file_reconciliation: false,
             active_profile_authoring: load_configured_profile(&graph_path)
                 .ok()
                 .flatten()
-                .and_then(|(id, profile)| serde_json::to_value(profile).ok().map(|value| (id, value))),
+                .and_then(|(id, profile)| {
+                    serde_json::to_value(profile).ok().map(|value| (id, value))
+                }),
             pending_control_plane_commit: None,
             pending_profile_write: None,
             parked_durable_writes: Vec::new(),

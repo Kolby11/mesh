@@ -9,6 +9,9 @@ pub(crate) mod image_pages;
 mod painter;
 mod profiling;
 mod resource_broker;
+#[cfg(test)]
+pub(crate) use resource_broker::PendingResourceConsumers;
+pub(crate) use resource_broker::{ResourceCompletionSnapshot, completion_snapshot};
 mod text;
 
 use std::cell::{Cell, RefCell};
@@ -24,8 +27,9 @@ pub use canvas::{RasterCanvas, RasterReplay, SurfaceCanvas};
 pub use debug_overlay::{DebugOverlay, DebugOverlayRestore, DebugPerfHudSnapshot};
 pub use glyph::GlyphAxes;
 pub use painter::{
-    BlurQuality, FrontendRenderEngine, KeyHint, KeyHintCorner, MAX_BLUR_PASSES, PainterBackendSnapshot,
-    PainterCapabilitySnapshot, PainterDiagnosticSnapshot, TooltipPaintStyle,
+    BlurQuality, FrontendRenderEngine, KeyHint, KeyHintCorner, MAX_BLUR_PASSES,
+    PainterBackendSnapshot, PainterCapabilitySnapshot, PainterDiagnosticSnapshot,
+    TooltipPaintStyle,
 };
 pub use profiling::RasterMetrics;
 pub use resource_broker::{

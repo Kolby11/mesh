@@ -966,9 +966,7 @@ surface { width: 200px; height: 80px; }
 
 #[test]
 fn hover_gate_sees_state_rules_from_extension_point_contributions() {
-    use crate::component::catalog::{
-        ResolvedExtensionPointContribution, extension_point_key,
-    };
+    use crate::component::catalog::{ResolvedExtensionPointContribution, extension_point_key};
     use mesh_core_component::parse_component;
     use mesh_core_frontend::CompiledFrontendModule;
     use std::collections::HashMap;
@@ -1208,6 +1206,167 @@ fn source_reload_drops_stale_retained_tree_before_next_paint() {
             .map(String::as_str),
         Some("after")
     );
+}
+
+fn shared_source_reload_fixture() -> (
+    tempfile::TempDir,
+    crate::catalog::FrontendCatalogHandle,
+    [FrontendSurfaceComponent; 2],
+) {
+    use crate::catalog::{FrontendCatalog, FrontendCatalogEntry, SharedCompiledFrontendModule};
+
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src")).unwrap();
+    std::fs::write(
+        temp.path().join("src/main.mesh"),
+        shared_reload_source("before"),
+    )
+    .unwrap();
+    let manifest = minimal_test_manifest("@test/shared-source-reload");
+    let compiled: SharedCompiledFrontendModule =
+        mesh_core_frontend::compile_frontend_module(&manifest, temp.path())
+            .unwrap()
+            .into();
+    let handle = crate::catalog::FrontendCatalogHandle::from(FrontendCatalog {
+        modules: HashMap::from([(
+            manifest.package.id.clone(),
+            FrontendCatalogEntry {
+                module_dir: temp.path().to_path_buf(),
+                compiled: compiled.clone(),
+            },
+        )]),
+        ..Default::default()
+    });
+    let components = ["first", "second"].map(|instance| {
+        let mut component = FrontendSurfaceComponent::new_for_test(
+            compiled.clone(),
+            temp.path().to_path_buf(),
+            handle.clone(),
+            mesh_core_service::InterfaceCatalog::default(),
+            test_settings_store(),
+        )
+        .with_instance_id(instance);
+        component
+            .mount(ComponentContext {
+                component_id: manifest.package.id.clone(),
+                surface_id: instance.into(),
+                diagnostics: Diagnostics::new(instance),
+            })
+            .unwrap();
+        component.visible = true;
+        component
+    });
+    (temp, handle, components)
+}
+
+fn shared_reload_source(label: &str) -> String {
+    format!(
+        r#"<template><text>{{label}}</text></template>
+<script lang="luau">
+label = "{label}"
+function init(self)
+    self.storage.starts = (self.storage.starts or 0) + 1
+    starts = self.storage.starts
+end
+function changeLabel() label = "handled {label}" end
+</script>"#
+    )
+}
+
+fn assert_shared_reload_label(component: &FrontendSurfaceComponent, expected: &str) {
+    assert_eq!(
+        first_node_by_tag(component.last_tree.as_ref().unwrap(), "text")
+            .unwrap()
+            .attributes
+            .get(Prop::Content)
+            .map(String::as_str),
+        Some(expected)
+    );
+}
+
+#[test]
+fn source_reload_updates_sibling_root_instances_without_reinitializing_the_initiator() {
+    let (temp, _, mut components) = shared_source_reload_fixture();
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 80);
+    for component in &mut components {
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+            .unwrap();
+    }
+    std::fs::write(
+        temp.path().join("src/main.mesh"),
+        shared_reload_source("after"),
+    )
+    .unwrap();
+    assert!(components[0].reload_source().unwrap());
+    assert!(!components[0].frontend_catalog_changed());
+    assert!(components[1].frontend_catalog_changed());
+
+    for component in &mut components {
+        let state = component
+            .runtime_state(component.root_instance_key())
+            .unwrap();
+        assert_eq!(state.get("starts"), Some(serde_json::json!(2)));
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+            .unwrap();
+        assert_shared_reload_label(component, "after");
+        component
+            .call_namespaced_handler("changeLabel", &[])
+            .unwrap();
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+            .unwrap();
+        assert_shared_reload_label(component, "handled after");
+    }
+}
+
+#[test]
+fn failed_catalog_root_replacement_preserves_the_previous_runtime_and_tree() {
+    let (temp, handle, [_, mut component]) = shared_source_reload_fixture();
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(240, 80);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
+    let version = component.frontend_catalog_version;
+    let generation = component
+        .runtimes
+        .lock()
+        .unwrap()
+        .get(component.root_instance_key())
+        .unwrap()
+        .script_ctx
+        .generation;
+    std::fs::write(temp.path().join("src/main.mesh"),
+        "<template><text>broken</text></template><script lang=\"luau\">function init(self) error('replacement failed') end</script>")
+        .unwrap();
+    handle
+        .reload_module(component.id(), &component.compiled.manifest, temp.path())
+        .unwrap();
+
+    assert!(!component.frontend_catalog_changed());
+    assert_eq!(component.frontend_catalog_version, version);
+    assert_eq!(
+        component
+            .runtimes
+            .lock()
+            .unwrap()
+            .get(component.root_instance_key())
+            .unwrap()
+            .script_ctx
+            .generation,
+        generation
+    );
+    assert_shared_reload_label(&component, "before");
+    component
+        .call_namespaced_handler("changeLabel", &[])
+        .unwrap();
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(240, 80), &mut buffer, 1.0)
+        .unwrap();
+    assert_shared_reload_label(&component, "handled before");
 }
 
 #[test]
@@ -1894,9 +2053,7 @@ fn contribution_only_import_dependency_invalidates_its_host() {
 
 #[test]
 fn profile_fork_mapping_changes_component_lookup_and_invalidates_consumers() {
-    use crate::component::catalog::{
-        FrontendCatalog, FrontendCatalogEntry, FrontendCatalogHandle,
-    };
+    use crate::component::catalog::{FrontendCatalog, FrontendCatalogEntry, FrontendCatalogHandle};
     use mesh_core_component::parse_component;
     use mesh_core_frontend::CompiledFrontendModule;
 

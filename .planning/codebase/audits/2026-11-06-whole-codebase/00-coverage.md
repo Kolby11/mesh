@@ -1,0 +1,969 @@
+# Coverage inventory — 2026-11-06 continuation
+
+Resumes the [2026-10-29 continuation](../2026-10-29-whole-codebase/00-coverage.md), whose section 10 was in progress. Sections 01–09 have historical review evidence; this inventory does not claim they have been reread at the current revision. Section 10 is under three independent review layers. Sections 11–16 have interim reports; unread files, independent review layers and final cross-section review remain.
+
+Inventory generated with `rg --files --hidden`, excluding build output, Git, planning reports, documentation, agent state and binary assets. Includes Rust/tests/benches, Cargo manifests, component and Luau sources, module/interface manifests, shipped configuration, CSS, tooling and textual build inputs. Root build/tooling inputs are assigned to section 16; shared file contracts belong to section 01 and the shared expression crate belongs to section 07. Frontend module manifests and locale catalogs retain canonical ownership in sections 02 and 05 and are cross-section inputs to section 10. Offline `cargo metadata --no-deps` reports 31 workspace packages; every package manifest appears below.
+
+| Section | Assigned files | Current review |
+| --- | ---: | --- |
+| 01 — core-foundation-contracts | 15 | Historical evidence; current reread pending |
+| 02 — module-system-and-installation | 129 | Historical evidence; current reread pending |
+| 03 — service-contracts | 29 | Historical evidence; current reread pending |
+| 04 — themes | 19 | Historical evidence; current reread pending |
+| 05 — localization-i18n | 48 | Historical evidence; current reread pending |
+| 06 — host-resources-and-icon-packs | 13 | Historical evidence; current reread pending |
+| 07 — component-language | 18 | Historical evidence; current reread pending |
+| 08 — ui-element-core | 59 | Historical evidence; current reread pending |
+| 09 — interaction-and-motion | 19 | Historical evidence; current reread pending |
+| 10 — frontend-compiler-and-host | 206 | 24 full / 46 partial / 136 unread |
+| 11 — luau-runtime-and-sandbox | 93 | 83 full / 10 partial / 0 wholly unread |
+| 12 — rendering-and-paint | 78 | 35 full / 8 partial / 35 unread |
+| 13 — surface-policy-and-configuration | 4 | 4/4 files read; independent layers remain |
+| 14 — wayland-platform-and-presentation | 28 | 28/28 files read; independent layers remain |
+| 15 — shell-core-and-orchestration | 76 | 22 full / 10 partial / 44 unread |
+| 16 — developer-and-authoring-tools | 59 | 59/59 files read; independent layers remain |
+
+Total assigned: 893 after adding the omitted VS Code TypeScript entrypoint on November 7. The original inventory missed that source extension; no exhaustive zero-omission claim is made. Assignment and full-file reads do not establish completion of all three audit layers. Embedded test ranges remain partial.
+
+## Assigned files
+
+### 01 — core-foundation-contracts
+
+- `crates/core/foundation/capability/Cargo.toml` — pending current review.
+- `crates/core/foundation/capability/src/lib.rs` — pending current review.
+- `crates/core/foundation/config/Cargo.toml` — pending current review.
+- `crates/core/foundation/config/src/control_plane.rs` — pending current review.
+- `crates/core/foundation/config/src/keybinds.rs` — pending current review.
+- `crates/core/foundation/config/src/lib.rs` — pending current review.
+- `crates/core/foundation/config/src/settings.rs` — pending current review.
+- `crates/core/foundation/config/src/validate.rs` — pending current review.
+- `crates/core/foundation/debug/Cargo.toml` — pending current review.
+- `crates/core/foundation/debug/src/allocation.rs` — pending current review.
+- `crates/core/foundation/debug/src/lib.rs` — pending current review.
+- `crates/core/foundation/diagnostics/Cargo.toml` — pending current review.
+- `crates/core/foundation/diagnostics/src/lib.rs` — pending current review.
+- `crates/core/foundation/files/Cargo.toml` — pending current review.
+- `crates/core/foundation/files/src/lib.rs` — pending current review.
+
+### 02 — module-system-and-installation
+
+- `crates/core/extension/module/Cargo.toml` — pending current review.
+- `crates/core/extension/module/src/lib.rs` — pending current review.
+- `crates/core/extension/module/src/lifecycle.rs` — pending current review.
+- `crates/core/extension/module/src/manifest.rs` — pending current review.
+- `crates/core/extension/module/src/manifest/graph.rs` — pending current review.
+- `crates/core/extension/module/src/manifest/load.rs` — pending current review.
+- `crates/core/extension/module/src/manifest/model.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/extension/module/src/manifest/tests.rs` — pending current review.
+- `crates/core/extension/module/src/package.rs` — pending current review.
+- `crates/core/extension/module/src/package/authoring.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/extension/module/src/package/composition.rs` — pending current review.
+- `crates/core/extension/module/src/package/content_store.rs` — pending current review.
+- `crates/core/extension/module/src/package/error.rs` — pending current review.
+- `crates/core/extension/module/src/package/fork.rs` — pending current review.
+- `crates/core/extension/module/src/package/install_review.rs` — pending current review.
+- `crates/core/extension/module/src/package/installed_graph/contributions.rs` — pending current review.
+- `crates/core/extension/module/src/package/installed_graph/diagnostics.rs` — pending current review.
+- `crates/core/extension/module/src/package/installed_graph/graph.rs` — pending current review.
+- `crates/core/extension/module/src/package/installed_graph/health.rs` — pending current review.
+- `crates/core/extension/module/src/package/installed_graph/load.rs` — pending current review.
+- `crates/core/extension/module/src/package/installed_graph/mod.rs` — pending current review.
+- `crates/core/extension/module/src/package/installed_graph/scan.rs` — pending current review.
+- `crates/core/extension/module/src/package/installed_graph/token_diagnostics.rs` — pending current review.
+- `crates/core/extension/module/src/package/lock.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/extension/module/src/package/luau_scan.rs` — pending current review.
+- `crates/core/extension/module/src/package/management.rs` — pending current review.
+- `crates/core/extension/module/src/package/module_manifest.rs` — pending current review.
+- `crates/core/extension/module/src/package/paths.rs` — pending current review.
+- `crates/core/extension/module/src/package/preferences.rs` — pending current review.
+- `crates/core/extension/module/src/package/profile.rs` — pending current review.
+- `crates/core/extension/module/src/package/resolution.rs` — pending current review.
+- `crates/core/extension/module/src/package/root.rs` — pending current review.
+- `crates/core/extension/module/src/package/schema.rs` — pending current review.
+- `crates/core/extension/module/src/package/tests/common.rs` — pending current review.
+- `crates/core/extension/module/src/package/tests/contributions.rs` — pending current review.
+- `crates/core/extension/module/src/package/tests/diagnostics.rs` — pending current review.
+- `crates/core/extension/module/src/package/tests/extension_points.rs` — pending current review.
+- `crates/core/extension/module/src/package/tests/graph.rs` — pending current review.
+- `crates/core/extension/module/src/package/tests/interfaces.rs` — pending current review.
+- `crates/core/extension/module/src/package/tests/loading.rs` — pending current review.
+- `crates/core/extension/module/src/package/tests/luau_scan.rs` — pending current review.
+- `crates/core/extension/module/src/package/tests/manifest.rs` — pending current review.
+- `crates/core/extension/module/src/package/tests/mod.rs` — pending current review.
+- `crates/core/extension/module/src/package/tests/shipped.rs` — pending current review.
+- `crates/core/extension/module/src/package/tests/surfaces.rs` — pending current review.
+- `crates/core/extension/module/src/package/tests/token_contracts.rs` — pending current review.
+- `crates/core/extension/module/src/package/transaction.rs` — pending current review.
+- `crates/core/extension/module/src/package/trust.rs` — pending current review.
+- `crates/core/extension/module/src/package/util.rs` — pending current review.
+- `modules/backend/backlight-brightness/module.json` — pending current review.
+- `modules/backend/cava-visualizer/module.json` — pending current review.
+- `modules/backend/device-info/module.json` — pending current review.
+- `modules/backend/freedesktop-notifications/module.json` — pending current review.
+- `modules/backend/hyprland-apps/module.json` — pending current review.
+- `modules/backend/hyprland-keybinds/module.json` — pending current review.
+- `modules/backend/hyprland-wm/module.json` — pending current review.
+- `modules/backend/mpris-media/module.json` — pending current review.
+- `modules/backend/networkmanager-network/module.json` — pending current review.
+- `modules/backend/open-meteo-weather/module.json` — pending current review.
+- `modules/backend/pipewire-audio/module.json` — pending current review.
+- `modules/backend/proc-system/module.json` — pending current review.
+- `modules/backend/pulseaudio-audio/module.json` — pending current review.
+- `modules/backend/status-notifier-tray/module.json` — pending current review.
+- `modules/backend/systemd-session/module.json` — pending current review.
+- `modules/backend/upower-power/module.json` — pending current review.
+- `modules/backend/wallpaper-directory/module.json` — pending current review.
+- `modules/backend/wf-recorder/module.json` — pending current review.
+- `modules/compositions/desk/module.json` — pending current review.
+- `modules/compositions/glass/module.json` — pending current review.
+- `modules/compositions/halo/module.json` — pending current review.
+- `modules/compositions/material-desktop/module.json` — pending current review.
+- `modules/compositions/orbit/module.json` — pending current review.
+- `modules/frontend/audio-popover/module.json` — pending current review.
+- `modules/frontend/battery-widget/module.json` — pending current review.
+- `modules/frontend/blur-test/module.json` — pending current review.
+- `modules/frontend/brightness-widget/module.json` — pending current review.
+- `modules/frontend/cheatsheet/module.json` — pending current review.
+- `modules/frontend/clock-widget/module.json` — pending current review.
+- `modules/frontend/composition-editor/module.json` — pending current review.
+- `modules/frontend/debug-inspector/module.json` — pending current review.
+- `modules/frontend/glass-bar/module.json` — pending current review.
+- `modules/frontend/glass-controls/module.json` — pending current review.
+- `modules/frontend/glass-dashboard/module.json` — pending current review.
+- `modules/frontend/glass-dock/module.json` — pending current review.
+- `modules/frontend/glass-notifications/module.json` — pending current review.
+- `modules/frontend/glass-power/module.json` — pending current review.
+- `modules/frontend/glass-wallpaper/module.json` — pending current review.
+- `modules/frontend/glass-wallpapers/module.json` — pending current review.
+- `modules/frontend/glass-widgets/module.json` — pending current review.
+- `modules/frontend/halo-orb/module.json` — pending current review.
+- `modules/frontend/keybind-help/module.json` — pending current review.
+- `modules/frontend/language-popover/module.json` — pending current review.
+- `modules/frontend/language-widget/module.json` — pending current review.
+- `modules/frontend/material-workspace/module.json` — pending current review.
+- `modules/frontend/navigation-bar/module.json` — pending current review.
+- `modules/frontend/opacity-test/module.json` — pending current review.
+- `modules/frontend/orbit-bar/module.json` — pending current review.
+- `modules/frontend/orbit-widgets/module.json` — pending current review.
+- `modules/frontend/profile-menu/module.json` — pending current review.
+- `modules/frontend/profile-switcher/module.json` — pending current review.
+- `modules/frontend/quick-settings/module.json` — pending current review.
+- `modules/frontend/radial-launcher/module.json` — pending current review.
+- `modules/frontend/settings-widget/module.json` — pending current review.
+- `modules/frontend/settings/module.json` — pending current review.
+- `modules/frontend/shared/module.json` — pending current review.
+- `modules/frontend/text-selection-proof/module.json` — pending current review.
+- `modules/frontend/theme-selector/module.json` — pending current review.
+- `modules/frontend/theme-widget/module.json` — pending current review.
+- `modules/frontend/touch-gesture-proof/module.json` — pending current review.
+- `modules/frontend/volume-widget/module.json` — pending current review.
+- `modules/frontend/wallpaper-carousel/module.json` — pending current review.
+- `modules/frontend/wallpaper-parallax/module.json` — pending current review.
+- `modules/frontend/window-title-widget/module.json` — pending current review.
+- `modules/frontend/workspaces-widget/module.json` — pending current review.
+- `modules/icon-packs/default/module.json` — pending current review.
+- `modules/icon-packs/material-symbols/codepoints.json` — pending current review.
+- `modules/icon-packs/material-symbols/fetch-codepoints.sh` — pending current review.
+- `modules/icon-packs/material-symbols/module.json` — pending current review.
+- `modules/libraries/glass-material/module.json` — pending current review.
+- `modules/libraries/volume-presentation/lib/volume.luau` — pending current review.
+- `modules/libraries/volume-presentation/module.json` — pending current review.
+- `modules/themes/catppuccin-mocha/module.json` — pending current review.
+- `modules/themes/frutiger-aero/module.json` — pending current review.
+- `modules/themes/gruvbox-dark/module.json` — pending current review.
+- `modules/themes/liquid-glass/module.json` — pending current review.
+- `modules/themes/material/module.json` — pending current review.
+- `modules/themes/nord/module.json` — pending current review.
+- `modules/themes/tokyo-night/module.json` — pending current review.
+- `modules/themes/vitrum/module.json` — pending current review.
+
+### 03 — service-contracts
+
+- `crates/core/extension/service/Cargo.toml` — pending current review.
+- `crates/core/extension/service/src/compatibility.rs` — pending current review.
+- `crates/core/extension/service/src/contract.rs` — pending current review.
+- `crates/core/extension/service/src/descriptor.rs` — pending current review.
+- `crates/core/extension/service/src/generator.rs` — pending current review.
+- `crates/core/extension/service/src/generator/rust.rs` — pending current review.
+- `crates/core/extension/service/src/interface.rs` — pending current review.
+- `crates/core/extension/service/src/lib.rs` — pending current review.
+- `crates/core/extension/service/tests/fixtures/audio.contract.json` — pending current review.
+- `crates/core/extension/service/tests/generated/audio.rs` — pending current review.
+- `crates/core/extension/service/tests/rust_bindings.rs` — pending current review.
+- `modules/interfaces/apps/module.json` — pending current review.
+- `modules/interfaces/audio/module.json` — pending current review.
+- `modules/interfaces/brightness/module.json` — pending current review.
+- `modules/interfaces/device/module.json` — pending current review.
+- `modules/interfaces/media/module.json` — pending current review.
+- `modules/interfaces/network/module.json` — pending current review.
+- `modules/interfaces/notifications/module.json` — pending current review.
+- `modules/interfaces/power/module.json` — pending current review.
+- `modules/interfaces/recorder/module.json` — pending current review.
+- `modules/interfaces/session/module.json` — pending current review.
+- `modules/interfaces/shell-ui/module.json` — pending current review.
+- `modules/interfaces/system/module.json` — pending current review.
+- `modules/interfaces/tray/module.json` — pending current review.
+- `modules/interfaces/visualizer/module.json` — pending current review.
+- `modules/interfaces/wallpapers/module.json` — pending current review.
+- `modules/interfaces/weather/module.json` — pending current review.
+- `modules/interfaces/wm-keybinds/module.json` — pending current review.
+- `modules/interfaces/wm/module.json` — pending current review.
+
+### 04 — themes
+
+- `crates/core/foundation/theme/Cargo.toml` — pending current review.
+- `crates/core/foundation/theme/src/contract.rs` — pending current review.
+- `crates/core/foundation/theme/src/css.rs` — pending current review.
+- `crates/core/foundation/theme/src/lib.rs` — pending current review.
+- `crates/core/foundation/theme/src/parts.rs` — pending current review.
+- `crates/core/foundation/theme/src/platform-defaults.css` — pending current review.
+- `crates/core/foundation/theme/src/semantic-tokens-v1.json` — pending current review.
+- `crates/core/foundation/theme/src/transport.rs` — pending current review.
+- `modules/themes/catppuccin-mocha/theme.css` — pending current review.
+- `modules/themes/frutiger-aero/dark.css` — pending current review.
+- `modules/themes/frutiger-aero/light.css` — pending current review.
+- `modules/themes/gruvbox-dark/theme.css` — pending current review.
+- `modules/themes/liquid-glass/theme.css` — pending current review.
+- `modules/themes/material/dark.css` — pending current review.
+- `modules/themes/material/light.css` — pending current review.
+- `modules/themes/nord/theme.css` — pending current review.
+- `modules/themes/tokyo-night/theme.css` — pending current review.
+- `modules/themes/vitrum/dark.css` — pending current review.
+- `modules/themes/vitrum/light.css` — pending current review.
+
+### 05 — localization-i18n
+
+- `crates/core/foundation/locale/Cargo.toml` — pending current review.
+- `crates/core/foundation/locale/src/lib.rs` — pending current review.
+- `crates/core/foundation/locale/src/performance_tests.rs` — pending current review.
+- `modules/frontend/audio-popover/config/i18n/en.json` — pending current review.
+- `modules/frontend/audio-popover/config/i18n/sk.json` — pending current review.
+- `modules/frontend/battery-widget/config/i18n/en.json` — pending current review.
+- `modules/frontend/battery-widget/config/i18n/sk.json` — pending current review.
+- `modules/frontend/brightness-widget/config/i18n/en.json` — pending current review.
+- `modules/frontend/brightness-widget/config/i18n/sk.json` — pending current review.
+- `modules/frontend/cheatsheet/config/i18n/en.json` — pending current review.
+- `modules/frontend/clock-widget/config/i18n/en.json` — pending current review.
+- `modules/frontend/clock-widget/config/i18n/sk.json` — pending current review.
+- `modules/frontend/glass-bar/config/i18n/en.json` — pending current review.
+- `modules/frontend/glass-bar/config/i18n/sk.json` — pending current review.
+- `modules/frontend/glass-dashboard/config/i18n/en.json` — pending current review.
+- `modules/frontend/glass-dashboard/config/i18n/sk.json` — pending current review.
+- `modules/frontend/glass-dock/config/i18n/en.json` — pending current review.
+- `modules/frontend/glass-dock/config/i18n/sk.json` — pending current review.
+- `modules/frontend/glass-notifications/config/i18n/en.json` — pending current review.
+- `modules/frontend/glass-notifications/config/i18n/sk.json` — pending current review.
+- `modules/frontend/glass-power/config/i18n/en.json` — pending current review.
+- `modules/frontend/glass-wallpapers/config/i18n/en.json` — pending current review.
+- `modules/frontend/glass-wallpapers/config/i18n/sk.json` — pending current review.
+- `modules/frontend/glass-widgets/config/i18n/en.json` — pending current review.
+- `modules/frontend/glass-widgets/config/i18n/sk.json` — pending current review.
+- `modules/frontend/keybind-help/config/i18n/en.json` — pending current review.
+- `modules/frontend/language-popover/config/i18n/en.json` — pending current review.
+- `modules/frontend/language-popover/config/i18n/sk.json` — pending current review.
+- `modules/frontend/language-widget/config/i18n/en.json` — pending current review.
+- `modules/frontend/language-widget/config/i18n/sk.json` — pending current review.
+- `modules/frontend/material-workspace/config/i18n/en.json` — pending current review.
+- `modules/frontend/quick-settings/config/i18n/en.json` — pending current review.
+- `modules/frontend/quick-settings/config/i18n/sk.json` — pending current review.
+- `modules/frontend/radial-launcher/config/i18n/en.json` — pending current review.
+- `modules/frontend/settings-widget/config/i18n/en.json` — pending current review.
+- `modules/frontend/settings-widget/config/i18n/sk.json` — pending current review.
+- `modules/frontend/settings/config/i18n/en.json` — pending current review.
+- `modules/frontend/settings/config/i18n/sk.json` — pending current review.
+- `modules/frontend/theme-selector/config/i18n/en.json` — pending current review.
+- `modules/frontend/theme-selector/config/i18n/sk.json` — pending current review.
+- `modules/frontend/theme-widget/config/i18n/en.json` — pending current review.
+- `modules/frontend/theme-widget/config/i18n/sk.json` — pending current review.
+- `modules/frontend/volume-widget/config/i18n/en.json` — pending current review.
+- `modules/frontend/volume-widget/config/i18n/sk.json` — pending current review.
+- `modules/frontend/wallpaper-carousel/config/i18n/en.json` — pending current review.
+- `modules/frontend/wallpaper-carousel/config/i18n/sk.json` — pending current review.
+- `modules/frontend/wallpaper-parallax/config/i18n/en.json` — pending current review.
+- `modules/frontend/wallpaper-parallax/config/i18n/sk.json` — pending current review.
+
+### 06 — host-resources-and-icon-packs
+
+- `crates/core/foundation/resources/Cargo.toml` — pending current review.
+- `crates/core/foundation/resources/src/blob.rs` — pending current review.
+- `crates/core/foundation/resources/src/coverage.rs` — pending current review.
+- `crates/core/foundation/resources/src/font.rs` — pending current review.
+- `crates/core/foundation/resources/src/frozen_font.rs` — pending current review.
+- `crates/core/foundation/resources/src/frozen_font/tests.rs` — pending current review.
+- `crates/core/foundation/resources/src/lib.rs` — pending current review.
+- `crates/core/ui/icon/Cargo.toml` — pending current review.
+- `crates/core/ui/icon/src/bindings.rs` — pending current review.
+- `crates/core/ui/icon/src/fallback.rs` — pending current review.
+- `crates/core/ui/icon/src/lib.rs` — pending current review.
+- `crates/core/ui/icon/src/registry.rs` — pending current review.
+- `crates/core/ui/icon/src/xdg.rs` — pending current review.
+
+### 07 — component-language
+
+- `crates/core/ui/expression/Cargo.toml` — pending current review.
+- `crates/core/ui/expression/src/lib.rs` — pending current review.
+- `crates/core/ui/component/Cargo.toml` — pending current review.
+- `crates/core/ui/component/src/color_literals.rs` — pending current review.
+- `crates/core/ui/component/src/lib.rs` — pending current review.
+- `crates/core/ui/component/src/parser.rs` — pending current review.
+- `crates/core/ui/component/src/parser/brace.rs` — pending current review.
+- `crates/core/ui/component/src/parser/handler.rs` — pending current review.
+- `crates/core/ui/component/src/parser/luau_literal.rs` — pending current review.
+- `crates/core/ui/component/src/parser/markup.rs` — pending current review.
+- `crates/core/ui/component/src/parser/props.rs` — pending current review.
+- `crates/core/ui/component/src/parser/script.rs` — pending current review.
+- `crates/core/ui/component/src/parser/semantic.rs` — pending current review.
+- `crates/core/ui/component/src/parser/styles.rs` — pending current review.
+- `crates/core/ui/component/src/parts.rs` — pending current review.
+- `crates/core/ui/component/src/style.rs` — pending current review.
+- `crates/core/ui/component/src/template.rs` — pending current review.
+- `crates/core/ui/component/src/token_usage.rs` — pending current review.
+
+### 08 — ui-element-core
+
+- `crates/core/ui/elements/Cargo.toml` — pending current review.
+- `crates/core/ui/elements/src/accessibility.rs` — pending current review.
+- `crates/core/ui/elements/src/attributes.rs` — pending current review.
+- `crates/core/ui/elements/src/bounds_index.rs` — pending current review.
+- `crates/core/ui/elements/src/composition.rs` — pending current review.
+- `crates/core/ui/elements/src/control_parts.rs` — pending current review.
+- `crates/core/ui/elements/src/element/contracts.rs` — pending current review.
+- `crates/core/ui/elements/src/element/mod.rs` — pending current review.
+- `crates/core/ui/elements/src/element/snapshot.rs` — pending current review.
+- `crates/core/ui/elements/src/element/tests.rs` — pending current review.
+- `crates/core/ui/elements/src/element/validate.rs` — pending current review.
+- `crates/core/ui/elements/src/frame.rs` — pending current review.
+- `crates/core/ui/elements/src/frame_dirty.rs` — pending current review.
+- `crates/core/ui/elements/src/frame_work.rs` — pending current review.
+- `crates/core/ui/elements/src/interaction_contract.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/ui/elements/src/layout/lowering.rs` — pending current review.
+- `crates/core/ui/elements/src/layout/mod.rs` — pending current review.
+- `crates/core/ui/elements/src/layout/producer.rs` — pending current review.
+- `crates/core/ui/elements/src/layout/retained.rs` — pending current review.
+- `crates/core/ui/elements/src/layout/sparse.rs` — pending current review.
+- `crates/core/ui/elements/src/layout/tests.rs` — pending current review.
+- `crates/core/ui/elements/src/lib.rs` — pending current review.
+- `crates/core/ui/elements/src/lru.rs` — pending current review.
+- `crates/core/ui/elements/src/popover.rs` — pending current review.
+- `crates/core/ui/elements/src/prop.rs` — pending current review.
+- `crates/core/ui/elements/src/pseudo_state.rs` — pending current review.
+- `crates/core/ui/elements/src/shape.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/ui/elements/src/style/mod.rs` — pending current review.
+- `crates/core/ui/elements/src/style/parse.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/attrs.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/cache.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/declaration.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/index.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/literal.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/matching.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/mod.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/node.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/state.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/subtree.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/tests/application.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/tests/caching.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/tests/common.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/tests/indexing.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/tests/mod.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/tests/theme_defaults.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/tests/typed_operations.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/tests/value_resolution.rs` — pending current review.
+- `crates/core/ui/elements/src/style/resolve/value.rs` — pending current review.
+- `crates/core/ui/elements/src/style/scaling.rs` — pending current review.
+- `crates/core/ui/elements/src/style/tests/animation.rs` — pending current review.
+- `crates/core/ui/elements/src/style/tests/common.rs` — pending current review.
+- `crates/core/ui/elements/src/style/tests/diagnostics.rs` — pending current review.
+- `crates/core/ui/elements/src/style/tests/fixtures.rs` — pending current review.
+- `crates/core/ui/elements/src/style/tests/mod.rs` — pending current review.
+- `crates/core/ui/elements/src/style/tests/properties.rs` — pending current review.
+- `crates/core/ui/elements/src/style/tests/resolution.rs` — pending current review.
+- `crates/core/ui/elements/src/style/tests/shorthands.rs` — pending current review.
+- `crates/core/ui/elements/src/style/types.rs` — pending current review.
+- `crates/core/ui/elements/src/tree.rs` — pending current review.
+
+### 09 — interaction-and-motion
+
+- `crates/core/ui/animation/Cargo.toml` — pending current review.
+- `crates/core/ui/animation/src/box_shadow.rs` — pending current review.
+- `crates/core/ui/animation/src/easing.rs` — pending current review.
+- `crates/core/ui/animation/src/instance.rs` — pending current review.
+- `crates/core/ui/animation/src/interpolate.rs` — pending current review.
+- `crates/core/ui/animation/src/keyframes.rs` — pending current review.
+- `crates/core/ui/animation/src/lib.rs` — pending current review.
+- `crates/core/ui/animation/src/policy.rs` — pending current review.
+- `crates/core/ui/animation/src/transform.rs` — pending current review.
+- `crates/core/ui/animation/src/transition.rs` — pending current review.
+- `crates/core/ui/interaction/Cargo.toml` — pending current review.
+- `crates/core/ui/interaction/src/focus.rs` — pending current review.
+- `crates/core/ui/interaction/src/frame.rs` — pending current review.
+- `crates/core/ui/interaction/src/hit_test.rs` — pending current review.
+- `crates/core/ui/interaction/src/lib.rs` — pending current review.
+- `crates/core/ui/interaction/src/scope.rs` — pending current review.
+- `crates/core/ui/interaction/src/scroll.rs` — pending current review.
+- `crates/core/ui/interaction/src/scroll/overflow_cache.rs` — pending current review.
+- `crates/core/ui/interaction/src/transaction.rs` — pending current review.
+
+### 10 — frontend-compiler-and-host
+
+- `crates/core/frontend/abi/Cargo.toml` — full redundancy read; independent layers pending.
+- `crates/core/frontend/abi/src/lib.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/compiler/Cargo.toml` — full redundancy read; independent layers pending.
+- `crates/core/frontend/compiler/src/accessibility.rs` — full redundancy read; independent layers pending.
+- `crates/core/frontend/compiler/src/bindings.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/compiler/src/compile.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/compiler/src/lib.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/compiler/src/render/elements.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/compiler/src/render/expr_eval.rs` — full redundancy read; independent layers pending.
+- `crates/core/frontend/compiler/src/render/mod.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/compiler/src/render/style_context.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/compiler/src/render/tests/accessibility.rs` — pending current review.
+- `crates/core/frontend/compiler/src/render/tests/attributes.rs` — pending current review.
+- `crates/core/frontend/compiler/src/render/tests/common.rs` — pending current review.
+- `crates/core/frontend/compiler/src/render/tests/mod.rs` — pending current review.
+- `crates/core/frontend/compiler/src/render/tests/styles.rs` — pending current review.
+- `crates/core/frontend/compiler/src/render/tests/tracking.rs` — pending current review.
+- `crates/core/frontend/compiler/src/style.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/compiler/src/tags.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/compiler/tests/orbit.rs` — pending current review.
+- `crates/core/frontend/compiler/tests/radial_launcher.rs` — pending current review.
+- `crates/core/frontend/runtime/Cargo.toml` — full redundancy read; independent layers pending.
+- `crates/core/frontend/runtime/src/catalog.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/catalog_imports.rs` — full redundancy read; independent layers pending.
+- `crates/core/frontend/runtime/src/component.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/animation.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/catalog.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/composition.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/diagnostics.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/runtime/src/component/disclosure.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/runtime/src/component/input/focus.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/runtime/src/component/input/keyboard.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/runtime/src/component/input/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/runtime/src/component/input/widgets.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/runtime/src/component/interaction_state.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/memo.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/primitives.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/runtime/src/component/rendering/annotate.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/rendering/interaction_changed_key_tests.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/rendering/mod.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/rendering/tests.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/runtime.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/runtime_tree/annotate.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/runtime_tree/fingerprint.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/runtime_tree/mod.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/runtime_tree/tests/annotate.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/runtime_tree/tests/benchmarks.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/runtime_tree/tests/fingerprint.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/runtime_tree/tests/mod.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/runtime_tree/tests/tree.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/runtime_tree/tree.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/shell_component/child_surface.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/shell_component/child_surface/cache.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/shell_component/damage.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/shell_component/internals.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/shell_component/mod.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/shell_component/tests.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/template_patch.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/testing.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/testing/glass.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/common.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/bind_live.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/component_memo.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/debug.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/element_refs.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/props.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/quick_settings.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/appearance_profile.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/audio.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/brightness.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/bubbles.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/cheatsheet.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/commands.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/glass.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/glass/cpu_timing.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/hover.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/inspector.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/keybind_help.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/layout.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/material.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/mod.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/navigation_profile.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/radial_launcher.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/raster.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/settings.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/transitions.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/real_surfaces/unavailable_interface.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/scroll_contract.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/integration/service.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/interaction.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/interaction/activation.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/interaction/animation.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/interaction/diagnostics.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/interaction/disclosure.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/interaction/gestures.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/interaction/key_scopes.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/interaction/keybinds.rs` — partial source read; lines 1010–1090 and 1310–1410 inspected, remaining tests pending.
+- `crates/core/frontend/runtime/src/component/tests/interaction/navigation.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/interaction/policy.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/tests/interaction/primitives.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/interaction/pseudo.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/tests/interaction/reflow.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/invalidation.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/invalidation/basic.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/tests/invalidation/narrow_script.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/invalidation/profiling.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/tests/invalidation/service_fanout.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/component/tests/invalidation/sparse_geometry.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/mod.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/restyle.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/restyle/cleanup.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/restyle/metrics.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/restyle/preservation.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tests/restyle/selection.rs` — pending current review.
+- `crates/core/frontend/runtime/src/component/tooltip.rs` — pending current review.
+- `crates/core/frontend/runtime/src/fingerprint.rs` — full redundancy read; independent layers pending.
+- `crates/core/frontend/runtime/src/generation.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/runtime/src/lib.rs` — full redundancy read; independent layers pending.
+- `crates/core/frontend/runtime/src/locale.rs` — full redundancy read; independent layers pending.
+- `crates/core/frontend/runtime/src/service.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/runtime/src/service_deps.rs` — full redundancy read; independent layers pending.
+- `crates/core/frontend/runtime/src/service_deps_tests.rs` — full redundancy read; independent layers pending.
+- `crates/core/frontend/runtime/src/tests.rs` — pending current review.
+- `crates/core/frontend/shell-adapter/Cargo.toml` — full redundancy read; independent layers pending.
+- `crates/core/frontend/shell-adapter/src/builtin_contracts.rs` — partial source review; remaining bodies/tests pending.
+- `crates/core/frontend/shell-adapter/src/lib.rs` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/audio-popover/src/main.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/battery-widget/src/main.mesh` — pending current review.
+- `modules/frontend/blur-test/src/main.mesh` — pending current review.
+- `modules/frontend/brightness-widget/src/main.mesh` — pending current review.
+- `modules/frontend/cheatsheet/src/main.mesh` — pending current review.
+- `modules/frontend/clock-widget/src/main.mesh` — pending current review.
+- `modules/frontend/composition-editor/src/main.mesh` — pending current review.
+- `modules/frontend/debug-inspector/src/components/backend-services-view.mesh` — pending current review.
+- `modules/frontend/debug-inspector/src/components/benchmark-view.mesh` — pending current review.
+- `modules/frontend/debug-inspector/src/components/elements-view.mesh` — pending current review.
+- `modules/frontend/debug-inspector/src/components/modules-view.mesh` — pending current review.
+- `modules/frontend/debug-inspector/src/components/overview-view.mesh` — pending current review.
+- `modules/frontend/debug-inspector/src/components/surfaces-view.mesh` — pending current review.
+- `modules/frontend/debug-inspector/src/components/view-tabs.mesh` — pending current review.
+- `modules/frontend/debug-inspector/src/main.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/glass-bar/src/components/calendar.mesh` — pending current review.
+- `modules/frontend/glass-bar/src/components/clock.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/glass-bar/src/components/control-center.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/glass-bar/src/components/now-playing.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/glass-bar/src/components/recorder.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/glass-bar/src/components/status.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/glass-bar/src/components/weather.mesh` — pending current review.
+- `modules/frontend/glass-bar/src/components/workspaces.mesh` — pending current review.
+- `modules/frontend/glass-bar/src/main.mesh` — pending current review.
+- `modules/frontend/glass-controls/components/glass-button.mesh` — pending current review.
+- `modules/frontend/glass-dashboard/src/components/inbox.mesh` — pending current review.
+- `modules/frontend/glass-dashboard/src/components/player.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/glass-dashboard/src/components/stats.mesh` — pending current review.
+- `modules/frontend/glass-dashboard/src/main.mesh` — pending current review.
+- `modules/frontend/glass-dock/src/components/launcher.mesh` — pending current review.
+- `modules/frontend/glass-dock/src/main.mesh` — pending current review.
+- `modules/frontend/glass-notifications/src/main.mesh` — pending current review.
+- `modules/frontend/glass-power/src/main.mesh` — pending current review.
+- `modules/frontend/glass-wallpaper/src/main.mesh` — pending current review.
+- `modules/frontend/glass-wallpapers/src/main.mesh` — pending current review.
+- `modules/frontend/glass-widgets/src/components/media-card.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/glass-widgets/src/components/size-controls.mesh` — pending current review.
+- `modules/frontend/glass-widgets/src/components/spectrum.mesh` — pending current review.
+- `modules/frontend/glass-widgets/src/components/weather-card.mesh` — pending current review.
+- `modules/frontend/glass-widgets/src/main.mesh` — pending current review.
+- `modules/frontend/halo-orb/src/main.mesh` — pending current review.
+- `modules/frontend/keybind-help/src/main.mesh` — pending current review.
+- `modules/frontend/language-popover/src/main.mesh` — pending current review.
+- `modules/frontend/language-widget/src/main.mesh` — pending current review.
+- `modules/frontend/material-workspace/src/main.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/navigation-bar/src/main.mesh` — pending current review.
+- `modules/frontend/navigation-bar/src/settings.mesh` — pending current review.
+- `modules/frontend/opacity-test/src/main.mesh` — pending current review.
+- `modules/frontend/orbit-bar/src/components/island.mesh` — pending current review.
+- `modules/frontend/orbit-bar/src/components/status-strip.mesh` — pending current review.
+- `modules/frontend/orbit-bar/src/components/workspace-strip.mesh` — pending current review.
+- `modules/frontend/orbit-bar/src/main.mesh` — pending current review.
+- `modules/frontend/orbit-widgets/src/components/activity-card.mesh` — pending current review.
+- `modules/frontend/orbit-widgets/src/components/market-card.mesh` — pending current review.
+- `modules/frontend/orbit-widgets/src/components/usage-card.mesh` — pending current review.
+- `modules/frontend/orbit-widgets/src/main.mesh` — pending current review.
+- `modules/frontend/profile-menu/src/main.mesh` — pending current review.
+- `modules/frontend/profile-switcher/src/main.mesh` — pending current review.
+- `modules/frontend/quick-settings/src/main.mesh` — pending current review.
+- `modules/frontend/radial-launcher/src/main.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/settings-widget/src/main.mesh` — pending current review.
+- `modules/frontend/settings/src/components/advanced-page.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/settings/src/components/appearance-page.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/settings/src/components/audio-page.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/settings/src/components/bluetooth-page.mesh` — pending current review.
+- `modules/frontend/settings/src/components/device-info-page.mesh` — pending current review.
+- `modules/frontend/settings/src/components/keyboard-page.mesh` — pending current review.
+- `modules/frontend/settings/src/components/wifi-page.mesh` — pending current review.
+- `modules/frontend/settings/src/main.mesh` — partial source review; remaining bodies/tests pending.
+- `modules/frontend/shared/components/bubble-options.mesh` — pending current review.
+- `modules/frontend/text-selection-proof/src/main.mesh` — pending current review.
+- `modules/frontend/theme-selector/src/main.mesh` — pending current review.
+- `modules/frontend/theme-widget/src/main.mesh` — pending current review.
+- `modules/frontend/touch-gesture-proof/src/main.mesh` — pending current review.
+- `modules/frontend/volume-widget/src/main.mesh` — pending current review.
+- `modules/frontend/wallpaper-carousel/src/main.mesh` — pending current review.
+- `modules/frontend/wallpaper-parallax/src/main.mesh` — pending current review.
+- `modules/frontend/window-title-widget/src/main.mesh` — pending current review.
+- `modules/frontend/workspaces-widget/src/main.mesh` — pending current review.
+
+### 11 — luau-runtime-and-sandbox
+
+- `crates/core/runtime/backend/Cargo.toml` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/backend/src/lib.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/runtime/sandbox/Cargo.toml` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/sandbox/src/lib.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/Cargo.toml` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/command.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/dbus_call.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/runtime/scripting/src/backend/dbus_serve.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/errors.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/event.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/exec.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/runtime/scripting/src/backend/exec_stream.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/host_events.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/host_sources.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/http.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/launch_app.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/logging.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/pipewire_source.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/runtime.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/runtime/scripting/src/backend/state.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/task_io.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/tests.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/runtime/scripting/src/backend/tray_tests.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/wayland_source.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/backend/wayland_workspace.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/element_ref.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/errors.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/lookup.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/proxy.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/benchmarks.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/callbacks.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/context.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/runtime/scripting/src/context/runtime/effects.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/helpers.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/host_api.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/libraries.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/lifecycle.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/prop_layers.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/shell_api.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/state.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/sync.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/tasks.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/template.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/runtime/vm.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/state.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/tests/callbacks.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/tests/common.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/tests/effects.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/tests/events.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/tests/imports.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/runtime/scripting/src/context/tests/interface_proxy.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/runtime/scripting/src/context/tests/lifecycle.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/tests/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/tests/refs.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/tests/shared_vm.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/tests/state.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/tests/storage.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/tests/sync.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/tests/tasks.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/context/tests/template.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/host_api.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/json.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/lib.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/operation.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/policy.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/runtime/scripting/src/pool.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/session.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/src/storage.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/runtime/scripting/src/util.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/tests/fixtures/networkmanager-network/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/tests/fixtures/reference-media/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `crates/core/runtime/scripting/tests/fixtures/shell-theme/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/backlight-brightness/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/cava-visualizer/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/device-info/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/freedesktop-notifications/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/hyprland-apps/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/hyprland-keybinds/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/hyprland-wm/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/mpris-media/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/networkmanager-network/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/open-meteo-weather/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/pipewire-audio/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/proc-system/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/pulseaudio-audio/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/status-notifier-tray/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/systemd-session/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/upower-power/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/wallpaper-directory/src/main.luau` — full source read; independent review layers not necessarily complete.
+- `modules/backend/wf-recorder/src/main.luau` — full source read; independent review layers not necessarily complete.
+
+### 12 — rendering-and-paint
+
+- `crates/core/frontend/render/Cargo.toml` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/accesskit_adapter.rs` — pending current review.
+- `crates/core/frontend/render/src/anyrender_adapter.rs` — pending current review.
+- `crates/core/frontend/render/src/device_damage.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/batch_index.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/blur.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/build.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/coverage.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/paint_node.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/scroll.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/scroll_shift.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/sequence.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/signature.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/spans.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/sparse.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/subtree.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/display_list/tests/common.rs` — pending current review.
+- `crates/core/frontend/render/src/display_list/tests/damage.rs` — pending current review.
+- `crates/core/frontend/render/src/display_list/tests/entries.rs` — pending current review.
+- `crates/core/frontend/render/src/display_list/tests/mod.rs` — pending current review.
+- `crates/core/frontend/render/src/display_list/tests/payloads.rs` — pending current review.
+- `crates/core/frontend/render/src/display_list/tests/signatures.rs` — pending current review.
+- `crates/core/frontend/render/src/display_list/tests/subtrees.rs` — pending current review.
+- `crates/core/frontend/render/src/display_list/types.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/fractional_scale.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/gpu.rs` — pending current review.
+- `crates/core/frontend/render/src/gpu/scene.rs` — pending current review.
+- `crates/core/frontend/render/src/gpu/tests.rs` — pending current review.
+- `crates/core/frontend/render/src/gpu/upload_probe.rs` — pending current review.
+- `crates/core/frontend/render/src/lib.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/library_adapters.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/paint_context.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/paint_input.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/parley_adapter.rs` — pending current review.
+- `crates/core/frontend/render/src/prepared_scene.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/prepared_scene/node_cache.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/prepared_scene/retained_tests.rs` — pending current review.
+- `crates/core/frontend/render/src/proof.rs` — pending current review.
+- `crates/core/frontend/render/src/render_object.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/frontend/render/src/scene_thread.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/scene_thread/tests.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/backdrop.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/surface/backdrop/tests.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/buffer.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/surface/canvas.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/surface/debug_overlay.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/glyph.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/frontend/render/src/surface/glyph_pages.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/surface/icon.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/frontend/render/src/surface/image_pages.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/surface/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/surface/painter.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/surface/painter/backend.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/frontend/render/src/surface/painter/geometry.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/surface/painter/rounded.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/surface/painter/tests/backends.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tests/common.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tests/diagnostics.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tests/mod.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tests/primitives.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tests/regions.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tests/skia/filters.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tests/skia/helpers.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tests/skia/mod.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tests/skia/rounded_damage.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tests/skia/scroll.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tests/skia/selection.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tests/skia/shapes.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tests/skia/vector_shape.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/text.rs` — pending current review.
+- `crates/core/frontend/render/src/surface/painter/tree.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/frontend/render/src/surface/painter/widgets.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/surface/profiling.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/frontend/render/src/surface/resource_broker.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/frontend/render/src/surface/text.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/frontend/render/tests/paint_perf_scenarios.rs` — pending current review.
+- `crates/core/frontend/render/tests/production_icon.rs` — partial source read; remaining bodies/tests pending.
+
+### 13 — surface-policy-and-configuration
+
+- `crates/core/surface-config/Cargo.toml` — full source read; independent review layers not necessarily complete.
+- `crates/core/surface-config/src/lib.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/surface-policy/Cargo.toml` — full source read; independent review layers not necessarily complete.
+- `crates/core/surface-policy/src/lib.rs` — full source read; independent review layers not necessarily complete.
+
+### 14 — wayland-platform-and-presentation
+
+- `crates/core/platform/wayland/Cargo.toml` — full source read; independent review layers not necessarily complete.
+- `crates/core/platform/wayland/src/lib.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/Cargo.toml` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/dev_window.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/lib.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/blur.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/config.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/damage.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/entry.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/events.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/gpu.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/present.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/protocol.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/shm.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/surfaces.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/tests/benchmarks.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/tests/config.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/tests/damage.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/tests/entry.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/tests/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/tests/scale.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/backend/tests/shm.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/handlers.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/popup.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/src/wayland_surface/state.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/presentation/tests/live_compositor_matrix.rs` — full source read; independent review layers not necessarily complete.
+
+### 15 — shell-core-and-orchestration
+
+- `config/module.json` — pending current review.
+- `config/modules/@mesh/networkmanager/package.json` — pending current review.
+- `config/modules/@mesh/panel/package.json` — pending current review.
+- `config/modules/@mesh/pipewire-audio/package.json` — pending current review.
+- `config/modules/@mesh/pulseaudio-audio/package.json` — pending current review.
+- `config/modules/@mesh/quick-settings/package.json` — pending current review.
+- `config/modules/@mesh/shell-theme/package.json` — pending current review.
+- `config/modules/@mesh/upower/package.json` — pending current review.
+- `config/profiles/desk.json` — pending current review.
+- `config/profiles/glass.json` — pending current review.
+- `config/profiles/halo.json` — pending current review.
+- `config/profiles/material.json` — pending current review.
+- `config/profiles/orbit.json` — pending current review.
+- `config/settings.json` — pending current review.
+- `crates/core/shell/Cargo.toml` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/lib.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/backend/candidates.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/backend/lifecycle.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/backend/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/backend/spawn.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/backend/supervision.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/component_integration/appearance.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/component_integration/glass.rs` — pending current review.
+- `crates/core/shell/src/shell/component_integration/live_replay.rs` — pending current review.
+- `crates/core/shell/src/shell/component_integration/live_replay/popup_validation.rs` — pending current review.
+- `crates/core/shell/src/shell/component_integration/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/component_integration/service.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/core_provider.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/discovery.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/shell/src/shell/file_watch.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/shell/src/shell/ipc.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/mod.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/shell/src/shell/module_config.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/package.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/profile.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/shell/src/shell/replay_hooks.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/runtime/debug.rs` — pending current review.
+- `crates/core/shell/src/shell/runtime/mod.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/shell/src/shell/runtime/profiling.rs` — pending current review.
+- `crates/core/shell/src/shell/runtime/reload.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/runtime/render/backdrop.rs` — pending current review.
+- `crates/core/shell/src/shell/runtime/render/child.rs` — pending current review.
+- `crates/core/shell/src/shell/runtime/render/mod.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/shell/src/shell/runtime/render/performance_tests.rs` — pending current review.
+- `crates/core/shell/src/shell/runtime/render/popup.rs` — pending current review.
+- `crates/core/shell/src/shell/runtime/render/tests.rs` — pending current review.
+- `crates/core/shell/src/shell/runtime/request.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/shell/src/shell/runtime/service_state.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/runtime/theme.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/shell/src/shell/runtime/wayland.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/service.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/signals.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/sounds.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/surface_layout.rs` — full source read; independent review layers not necessarily complete.
+- `crates/core/shell/src/shell/tests/backend_lifecycle.rs` — partial source read; remaining bodies/tests pending.
+- `crates/core/shell/src/shell/tests/benchmarks.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/child_surface.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/commands.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/common.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/debug.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/discovery.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/graph.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/input.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/material.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/mod.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/popover.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/profiling.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/request_drain.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/scheduler.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/service_contract.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/service_delivery.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/service_state.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/surface_layout.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/theme.rs` — pending current review.
+- `crates/core/shell/src/shell/tests/window_role.rs` — pending current review.
+- `crates/core/shell/src/shell/types.rs` — partial source read; remaining bodies/tests pending.
+
+### 16 — developer-and-authoring-tools
+
+- `.github/workflows/performance.yml` — full source read; independent review layers not necessarily complete.
+- `.github/workflows/scrolling.yml` — full source read; independent review layers not necessarily complete.
+- `.vscode/settings.json` — full source read; independent review layers not necessarily complete.
+- `Cargo.toml` — full source read; independent review layers not necessarily complete.
+- `crates/tools/cli/Cargo.toml` — full source read; independent review layers not necessarily complete.
+- `crates/tools/cli/build.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/cli/src/main.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/cli/src/update.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/Cargo.toml` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/analyzer/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/analyzer/script.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/analyzer/style.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/analyzer/template.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/backend.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/definition.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/diagnostics.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/document.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/format.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/hover.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/json/complete.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/json/cursor.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/json/diagnostics.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/json/hover.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/json/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/json/schema.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/knowledge/css.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/knowledge/mesh_api.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/knowledge/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/knowledge/tags.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/lib.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/main.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/manifest/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/manifest/schema.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/module_registry.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/semantic_tokens.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/settings/mod.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/settings/parts.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/settings/schema.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/src/util.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/tests/real_manifests.rs` — full source read; independent review layers not necessarily complete.
+- `crates/tools/lsp/tests/real_settings.rs` — full source read; independent review layers not necessarily complete.
+- `editors/vscode/language-configuration.json` — full source read; independent review layers not necessarily complete.
+- `editors/vscode/package-lock.json` — full source read; independent review layers not necessarily complete.
+- `editors/vscode/package.json` — full source read; independent review layers not necessarily complete.
+- `editors/vscode/syntaxes/mesh.tmLanguage.json` — full source read; independent review layers not necessarily complete.
+- `editors/vscode/src/extension.ts` — full source read; independent review layers not necessarily complete.
+- `editors/vscode/tsconfig.json` — full source read; independent review layers not necessarily complete.
+- `flake.nix` — full source read; independent review layers not necessarily complete.
+- `opencode.json` — full source read; independent review layers not necessarily complete.
+- `scripts/claude-backlog-runner.schema.json` — full source read; independent review layers not necessarily complete.
+- `scripts/claude-backlog-runner.sh` — full source read; independent review layers not necessarily complete.
+- `scripts/codex-backlog-runner.schema.json` — full source read; independent review layers not necessarily complete.
+- `scripts/codex-backlog-runner.sh` — full source read; independent review layers not necessarily complete.
+- `tools/check-gpu-performance` — full source read; independent review layers not necessarily complete.
+- `tools/check-performance` — full source read; independent review layers not necessarily complete.
+- `tools/profile-report` — full source read; independent review layers not necessarily complete.
+- `tools/profile-shell` — full source read; independent review layers not necessarily complete.
+- `tools/test-performance-gates.py` — full source read; independent review layers not necessarily complete.
+- `tools/test-profile-report.py` — full source read; independent review layers not necessarily complete.

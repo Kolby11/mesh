@@ -1243,6 +1243,11 @@ impl FrontendSurfaceComponent {
                 nodes.extend(&patched_nodes);
                 nodes.extend(&annotation_dirty);
                 nodes.extend(self.animation_sample_nodes());
+                // Completed or snapped transitions have already left the
+                // registry, but their final samples still change layout.
+                if let Some(sampled) = &self.animation_pass_dirty_roots {
+                    nodes.extend(sampled);
+                }
                 nodes.insert(tree.id);
                 nodes
             });

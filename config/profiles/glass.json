@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "revision": 185,
+  "revision": 231,
   "from": {
     "module": "@mesh/glass"
   },
@@ -12,8 +12,9 @@
   "settings": {
     "shell": {
       "fonts": {
-        "base_size": 16,
-        "ui_family": "Rubik"
+        "base_size": 14,
+        "shell_scale": 100,
+        "ui_family": "Noto Sans"
       },
       "i18n": {
         "fallback_locale": "en",
@@ -21,7 +22,7 @@
         "policy": "manual"
       },
       "icons": {
-        "default_pack": "Papirus-Dark"
+        "default_pack": "Papirus"
       },
       "keyboard": {
         "assigned": {
@@ -37,17 +38,17 @@
         }
       },
       "theme": {
-        "active": "@mesh/nord:nord",
+        "active": "@mesh/material:material",
         "tokens": {
-          "@mesh/glass-material.glass.backdrop.card": "blur(2.4px) refract(10px 8px) dispersion(0.6px)",
-          "@mesh/glass-material.glass.backdrop.dock": "blur(2px) refract(9px 7px) dispersion(0.6px)",
-          "@mesh/glass-material.glass.backdrop.flare": "blur(1px) refract(0px 0px)",
-          "@mesh/glass-material.glass.backdrop.lens": "refract(8px 8px)",
-          "@mesh/glass-material.glass.backdrop.panel": "blur(3.2px) refract(12px 9px) dispersion(0.6px)",
-          "@mesh/glass-material.glass.backdrop.pill": "blur(1.6px) refract(6px 5px) dispersion(0.4px)",
-          "glass.strength.blur": 10,
-          "glass.strength.liquid": 100,
-          "glass.strength.style": "liquid"
+          "@mesh/glass-material.glass.backdrop.card": "blur(10.8px) refract(4.5px 3.6px) dispersion(0.3px)",
+          "@mesh/glass-material.glass.backdrop.dock": "blur(9px) refract(4.1px 3.2px) dispersion(0.3px)",
+          "@mesh/glass-material.glass.backdrop.flare": "blur(4.5px) refract(0px 0px)",
+          "@mesh/glass-material.glass.backdrop.lens": "refract(3.6px 3.6px)",
+          "@mesh/glass-material.glass.backdrop.panel": "blur(14.4px) refract(5.4px 4.1px) dispersion(0.3px)",
+          "@mesh/glass-material.glass.backdrop.pill": "blur(7.2px) refract(2.7px 2.3px) dispersion(0.2px)",
+          "glass.strength.blur": 45,
+          "glass.strength.liquid": 45,
+          "glass.strength.style": "soft"
         }
       }
     }

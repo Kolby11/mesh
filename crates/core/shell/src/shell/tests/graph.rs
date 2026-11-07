@@ -1088,7 +1088,7 @@ fn retired_watcher_event_reconciles_current_profile() {
     shell
         .handle_shell_message(
             &mut requests,
-            super::types::ShellMessage::FilesystemChanged { generation: 1 },
+            super::types::ShellMessage::FilesystemChanged { generation: 1, paths: None },
         )
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);

@@ -17,14 +17,14 @@
 
 #![cfg(feature = "renderer-anyrender")]
 
-use anyrender::PaintScene;
 use anyrender::recording::Scene;
-use peniko::Fill;
+use anyrender::PaintScene;
 use peniko::kurbo::{Affine, Rect, RoundedRect, RoundedRectRadii, Stroke};
+use peniko::Fill;
 
-use crate::DisplayPaintCommand;
 use crate::display_list::{DisplayPaintCommandKind, DisplayPaintContent};
 use crate::proof::FocusedProofDiagnostic;
+use crate::DisplayPaintCommand;
 
 fn to_peniko_color(c: mesh_core_elements::style::Color) -> peniko::Color {
     color::Rgba8 {
@@ -208,7 +208,6 @@ mod tests {
     use std::sync::Arc;
 
     fn base_style() -> DisplayPaintStyle {
-            ui_scale: 1.0,
         DisplayPaintStyle {
             ui_scale: 1.0,
             paint_parts: Default::default(),
@@ -340,6 +339,7 @@ mod tests {
             DisplayPaintContent::Input(input),
             DisplayPaintCommandKind::Node,
         );
+        let mut diagnostics = Vec::new();
         assert_eq!(encode_command_to_scene(&c, &mut diagnostics), 0);
         assert!(diagnostics.is_empty());
     }

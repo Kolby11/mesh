@@ -196,6 +196,81 @@ fn scene_cache_invalidates_external_paint_inputs() {
 }
 
 #[test]
+fn resource_completion_invalidates_only_its_consumer_scene() {
+    let _guard = crate::resource_state_test_lock();
+    let engine = FrontendRenderEngine::new();
+    let mut list = RetainedDisplayList::default();
+    list.update(&tree(16), 256, 256, true, true);
+    let first = crate::ResourcePaintConsumer::default();
+    let second = crate::ResourcePaintConsumer::default();
+    let mut a = SceneCanvas::new(512, 512).unwrap();
+    let mut b = SceneCanvas::new(512, 512).unwrap();
+    {
+        let _scope = first.enter();
+        record(&engine, &list, &mut a, 1.0, None);
+    }
+    {
+        let _scope = second.enter();
+        record(&engine, &list, &mut b, 1.0, None);
+    }
+    let mut pending = crate::surface::PendingResourceConsumers::default();
+    {
+        let _scope = second.enter();
+        pending.insert(1);
+    }
+    pending.remove(&1).notify();
+    let picture = {
+        let _scope = first.enter();
+        record(&engine, &list, &mut a, 1.0, None)
+    };
+    assert_eq!(a.preparation_metrics().reused_nodes, 17);
+    assert_full_parity(&engine, &list, &picture, 1.0);
+    {
+        let _scope = second.enter();
+        record(&engine, &list, &mut b, 1.0, None);
+    }
+    assert_eq!(b.preparation_metrics().recorded_nodes, 17);
+}
+
+#[test]
+#[ignore = "release-only scoped resource completion profile"]
+fn scoped_resource_completion_profile() {
+    let _guard = crate::resource_state_test_lock();
+    let engine = FrontendRenderEngine::new();
+    let mut list = RetainedDisplayList::default();
+    list.update(&tree(1024), 256, 256, true, true);
+    let stable = crate::ResourcePaintConsumer::default();
+    let loading = crate::ResourcePaintConsumer::default();
+    let mut scene = SceneCanvas::new(512, 512).unwrap();
+    let _scope = stable.enter();
+    record(&engine, &list, &mut scene, 1.0, None);
+    for scoped in [false, true] {
+        let mut recorded = 0;
+        let started = std::time::Instant::now();
+        for _ in 0..20 {
+            if scoped {
+                let mut pending = crate::surface::PendingResourceConsumers::default();
+                {
+                    let _loading = loading.enter();
+                    pending.insert(1);
+                }
+                pending.remove(&1).notify();
+            } else {
+                resource_completed();
+            }
+            record(&engine, &list, &mut scene, 1.0, None);
+            recorded += scene.preparation_metrics().recorded_nodes;
+        }
+        eprintln!(
+            "{}: {:?}, recorded {recorded} nodes",
+            if scoped { "scoped" } else { "global" },
+            started.elapsed()
+        );
+        assert_eq!(recorded, if scoped { 0 } else { 20 * 1025 });
+    }
+}
+
+#[test]
 fn scene_cache_preserves_effects_scroll_and_tooltip_inputs() {
     use mesh_core_elements::style::{BlendMode, Overflow};
     let _guard = crate::resource_state_test_lock();

@@ -1,5 +1,46 @@
 # MESH Performance Log
 
+## 2026-11-07 — Scope scene invalidation to resource consumers
+
+`working tree` · area: recorded GPU scenes
+
+Resource job completion now invalidates the requesting consumers' scene caches;
+font and atlas changes remain global, and unscoped painting retains a global
+fallback. New recordings still wait for all outstanding resource jobs.
+
+Release, CPU scene recording, 1,025 box nodes on a 512×512 surface, 20 simulated
+completions for a different consumer: three paired runs of the same binary
+measured 21.923–26.750 ms with forced global invalidation versus 3.482–4.102 ms
+with consumer-scoped completion. Global invalidation recorded 20,500 nodes;
+scoped completion recorded zero. The comparison simulates the prior invalidation
+policy and does not measure actual asset loading or GPU presentation. The
+structural assertion is `scoped_resource_completion_profile` (ignored release
+profile); the unchanged-frame overhead versus the previous binary is unmeasured.
+Consumer isolation, shared-input invalidation and pixel parity tests pass.
+Two production icon tests fail identically against the baseline in this environment.
+
+## 2026-11-07 — Share Settings theme recommendation lookups
+
+`working tree` · area: Settings appearance projection
+
+Build font and icon membership maps once per theme-grid projection instead of
+once per theme. Release CPU, real Settings component, 20 theme-state updates,
+100 themes and 240 fonts plus 240 icon themes: three alternating runs measured
+55.532–55.573 ms/update before and 12.760–12.847 ms/update after (4.32–4.36×).
+The workload includes service delivery and effect flushing, not paint or
+compositor presentation. No checked timing gate exists for this workload.
+
+## 2026-11-07 — Settings theme-switch local baseline
+
+`working tree` · area: Settings appearance profiling
+
+Release, CPU raster, one 920×900 Settings Appearance surface with 240 seeded
+resource entries; `theme_switch_frame_cost_profile` performs ten same-theme
+invalidations and first paints per run. Three consecutive runs measured mean
+`theme_changed` 3.609–3.778 ms and mean first paint 30.239–32.640 ms. These
+are local component timings, not request-to-compositor latency; no optimization
+or end-to-end speedup is claimed. The end-to-end trace remains open.
+
 ## 2026-09-30 — scroll and animation frames: wave 2 timed, wave 3 compositor blur via `ext-background-effect-v1`
 
 `working tree` · area: paint-only frames, presentation blur protocols, backdrop policy, styling spec

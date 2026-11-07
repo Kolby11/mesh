@@ -67,13 +67,14 @@ impl FrontendSurfaceComponent {
         self.tooltip_settings_revision = self.settings.revision();
     }
 
-    /// Like `refresh_tooltip_settings` but also merges theme component
-    /// defaults for `"tooltip"`. Called from `paint()` which has access to the
-    /// active theme. Variable references such as
+    /// Resolve unscaled settings and theme defaults before applying the current
+    /// scale once. Called from `paint()` which has access to the active theme.
+    /// Variable references such as
     /// `var(--animation-duration-short)` are resolved against the theme's token
     /// map.
     pub(super) fn refresh_tooltip_settings_from_theme(&mut self, theme: &Theme) {
-        self.refresh_tooltip_settings();
+        self.refresh_tooltip_settings_for_store_change();
+        self.tooltip_animation = tooltip::tooltip_animation_from_theme(theme);
         let Some(defaults) = theme.component_defaults("tooltip") else {
             self.scale_tooltip_offsets(theme.ui_scale());
             return;
@@ -118,9 +119,6 @@ impl FrontendSurfaceComponent {
             self.tooltip_settings.cursor_offset_y = v as f32;
         }
 
-        // The enter animation is pure theme CSS: `animation:` shorthand on
-        // the tooltip block plus a theme-level `@keyframes` rule.
-        self.tooltip_animation = tooltip::tooltip_animation_from_theme(theme);
         self.scale_tooltip_offsets(theme.ui_scale());
     }
 
@@ -610,4 +608,57 @@ pub(super) fn open_popover(node: &WidgetNode) -> Option<&WidgetNode> {
 pub(super) fn contains_open_popover(node: &WidgetNode) -> bool {
     (source_element_tag(node) == "popover" && popover_is_open(node))
         || node.children.iter().any(contains_open_popover)
+}
+
+#[cfg(test)]
+mod tooltip_settings_tests {
+    use super::*;
+    use crate::component::testing::test_frontend_component;
+
+    #[test]
+    fn scaled_tooltip_offsets_are_stable_across_repeated_theme_refreshes() {
+        let mut component = test_frontend_component("<template><box /></template>");
+        let settings = Arc::new(
+            mesh_core_config::SettingsStore::from_value(
+                "/tmp/mesh-tooltip-scale-refresh.json",
+                serde_json::json!({
+                    "revision": 1,
+                    "shell": { "tooltip": {
+                        "position": "left", "delay_ms": 23,
+                        "gap": 9, "cursor_offset_x": 11, "cursor_offset_y": 13
+                    }}
+                }),
+            )
+            .unwrap(),
+        );
+        component.apply_settings(&settings).unwrap();
+        let mut theme = Theme::new("scaled", "Scaled");
+        theme.set_ui_scale(1.5);
+
+        for themed_gap in [None, Some("4")] {
+            theme.defaults_mut().components.clear();
+            if let Some(gap) = themed_gap {
+                theme.defaults_mut().components.insert(
+                    "tooltip".into(),
+                    [("gap".into(), gap.into())].into_iter().collect(),
+                );
+            }
+            for _ in 0..8 {
+                component.refresh_tooltip_settings_from_theme(&theme);
+                assert_eq!(
+                    component.tooltip_settings.gap,
+                    if themed_gap.is_some() { 6.0 } else { 13.5 }
+                );
+                assert_eq!(component.tooltip_settings.cursor_offset_x, 16.5);
+                assert_eq!(component.tooltip_settings.cursor_offset_y, 19.5);
+                assert_eq!(component.tooltip_settings.position, "left");
+                assert_eq!(component.tooltip_settings.delay_ms, 23);
+            }
+        }
+
+        theme.defaults_mut().components.clear();
+        theme.set_ui_scale(1.0);
+        component.refresh_tooltip_settings_from_theme(&theme);
+        assert_eq!(component.tooltip_settings, settings.shell().tooltip);
+    }
 }

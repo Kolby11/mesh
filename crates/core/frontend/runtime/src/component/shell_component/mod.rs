@@ -15,8 +15,10 @@ use super::*;
 use crate::component::runtime::{
     ResolvedProps, merge_reloaded_props, resolve_props, script_has_service_read,
 };
-use mesh_core_frontend_shell_adapter::{ServiceInterfaceEventSubscription, ServiceObservationSummary};
 use mesh_core_elements::style::SurfaceExclusiveZone;
+use mesh_core_frontend_shell_adapter::{
+    ServiceInterfaceEventSubscription, ServiceObservationSummary,
+};
 
 impl FrontendSurfaceComponent {
     /// Refresh the immutable motion snapshot at a settings/frame boundary.
@@ -2160,9 +2162,57 @@ impl ShellComponent for FrontendSurfaceComponent {
             return false;
         }
 
+        // Another surface can reload this module through the shared catalog.
+        // The initiating surface already owns this compilation and must not
+        // initialize twice. Sibling roots use the source-reload lifecycle so
+        // storage is flushed before their replacements read it.
+        let replacement = state
+            .catalog
+            .module(self.id())
+            .filter(|entry| !std::ptr::eq(&*entry.compiled, &*self.compiled))
+            .map(|entry| entry.compiled.clone());
+        let root_changed = replacement.is_some();
+        let replacement = if let Some(compiled) = replacement {
+            let (previous_runtimes, unmount_error) = self.prepare_runtimes_for_reload();
+            if let Some(error) = unmount_error {
+                self.restore_runtimes_after_reload(previous_runtimes);
+                self.record_frontend_runtime_issue(
+                    "catalog replacement initialization",
+                    self.root_instance_key(),
+                    error,
+                );
+                return false;
+            }
+            let previous_compiled = std::mem::replace(&mut self.compiled, compiled);
+            let previous_catalog =
+                std::mem::replace(&mut self.frontend_catalog, state.catalog.clone());
+            match self.create_runtime(self.root_instance_key(), &self.compiled, &HashMap::new()) {
+                Ok(runtime) => {
+                    self.keyframe_sources.clear();
+                    self.selective_service_build_supported =
+                        self.compiled.supports_selective_service_build();
+                    self.element_metric_usage = element_metric_usage(&self.compiled);
+                    Some(runtime)
+                }
+                Err(error) => {
+                    self.compiled = previous_compiled;
+                    self.frontend_catalog = previous_catalog;
+                    self.restore_runtimes_after_reload(previous_runtimes);
+                    self.record_frontend_runtime_issue(
+                        "catalog replacement initialization",
+                        self.root_instance_key(),
+                        error,
+                    );
+                    return false;
+                }
+            }
+        } else {
+            None
+        };
+
         self.frontend_catalog = state.catalog;
         self.frontend_catalog_version = state.version;
-        if !state.affected_modules.contains(self.id()) {
+        if !root_changed && !state.affected_modules.contains(self.id()) {
             // The tree remains valid, but the catalog revision in the frame
             // must advance with the shared handle even when this surface does
             // not need a repaint.
@@ -2194,6 +2244,18 @@ impl ShellComponent for FrontendSurfaceComponent {
             } else {
                 retained.insert(instance_key, runtime);
             }
+        }
+        if let Some(runtime) = replacement {
+            let key = self
+                .instance_keys
+                .borrow_mut()
+                .intern(self.root_instance_key());
+            retained.insert(key, runtime);
+            self.runtime_failure.borrow_mut().take();
+            self.resolve_frontend_runtime_issue(
+                "catalog replacement initialization",
+                self.root_instance_key(),
+            );
         }
         *self.runtimes.lock().unwrap() = retained;
         self.rebuild_runtime_generation_index();

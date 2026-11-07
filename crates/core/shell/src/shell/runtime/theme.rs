@@ -1494,6 +1494,9 @@ impl Shell {
         &mut self,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         let requests = VecDeque::new();
+        if self.pending_control_plane_commit.is_some() || self.pending_profile_write.is_some() {
+            return Ok(requests);
+        }
         let now = std::time::Instant::now();
         if now < self.next_shell_settings_reload_check {
             return Ok(requests);

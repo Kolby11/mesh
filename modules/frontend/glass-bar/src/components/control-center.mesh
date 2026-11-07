@@ -69,7 +69,6 @@ effect(function()
     network_label = connected and ((network.ssid or "") ~= "" and network.ssid or network.kind or t("controls.connected")) or t("controls.offline")
     network_glyph = connected and (network.kind == "ethernet" and "network-wired" or "network-wireless-signal-excellent") or "network-wireless-offline"
     local level = power.level or 0
-    if level <= 1 then level *= 100 end
     battery_label = power.available and (tostring(math.floor(level + 0.5)) .. "%" .. (power.charging and (" · " .. t("controls.charging")) or (" · " .. t("controls.on_battery")))) or t("controls.power_unavailable")
 end)
 function onMute() audio.toggle_mute() end

@@ -8,7 +8,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::sync::Weak;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 thread_local! {
     static PAINT_CONSUMER: RefCell<Option<Weak<ResourceConsumerState>>> = const { RefCell::new(None) };
@@ -20,6 +20,39 @@ thread_local! {
 struct ResourceConsumerState {
     ready: AtomicBool,
     pending: Option<AtomicUsize>,
+    generation: AtomicU64,
+}
+
+static COMPLETION_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone)]
+pub(crate) struct ResourceCompletionSnapshot {
+    consumer: Option<Arc<ResourceConsumerState>>,
+    generation: u64,
+}
+
+impl PartialEq for ResourceCompletionSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        self.generation == other.generation
+            && match (&self.consumer, &other.consumer) {
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                (None, None) => true,
+                _ => false,
+            }
+    }
+}
+impl Eq for ResourceCompletionSnapshot {}
+
+pub(crate) fn completion_snapshot() -> ResourceCompletionSnapshot {
+    let consumer = PAINT_CONSUMER.with(|active| active.borrow().as_ref().and_then(Weak::upgrade));
+    let generation = consumer.as_ref().map_or_else(
+        || COMPLETION_GENERATION.load(Ordering::Acquire),
+        |state| state.generation.load(Ordering::Acquire),
+    );
+    ResourceCompletionSnapshot {
+        consumer,
+        generation,
+    }
 }
 
 #[derive(Default)]
@@ -31,13 +64,17 @@ impl ResourcePaintConsumer {
         Self(Arc::new(ResourceConsumerState {
             ready: AtomicBool::new(false),
             pending: Some(AtomicUsize::new(0)),
+            generation: AtomicU64::new(0),
         }))
     }
 
     /// Outstanding requests, or `None` when tracking was not enabled.
     /// A zero count does not rule out more requests on the next repaint.
     pub fn pending_requests(&self) -> Option<usize> {
-        self.0.pending.as_ref().map(|pending| pending.load(Ordering::Acquire))
+        self.0
+            .pending
+            .as_ref()
+            .map(|pending| pending.load(Ordering::Acquire))
     }
 
     /// Attribute resource requests in this scope to this consumer. Nested scopes
@@ -92,8 +129,9 @@ impl ResourceWaiters {
     }
 
     pub(crate) fn notify(mut self) {
-        crate::prepared_scene::resource_completed();
+        COMPLETION_GENERATION.fetch_add(1, Ordering::AcqRel);
         for consumer in self.0.drain(..).filter_map(|waiter| waiter.upgrade()) {
+            consumer.generation.fetch_add(1, Ordering::AcqRel);
             if let Some(pending) = &consumer.pending {
                 pending.fetch_sub(1, Ordering::AcqRel);
             }
@@ -462,9 +500,31 @@ mod tests {
             let _scope = dropped.enter();
             pending.insert("shared");
         }
+        let first_before = {
+            let _scope = first.enter();
+            super::completion_snapshot()
+        };
+        let unrelated_before = {
+            let _scope = unrelated.enter();
+            super::completion_snapshot()
+        };
+        let fallback_before = super::completion_snapshot();
         drop(dropped);
         assert_eq!(pending.0["shared"].0.len(), 3);
         pending.remove(&"shared").notify();
+        assert!(
+            first_before != {
+                let _scope = first.enter();
+                super::completion_snapshot()
+            }
+        );
+        assert!(
+            unrelated_before == {
+                let _scope = unrelated.enter();
+                super::completion_snapshot()
+            }
+        );
+        assert!(fallback_before != super::completion_snapshot());
         assert!(first.take_ready());
         assert!(second.take_ready());
         assert!(!unrelated.take_ready());

@@ -998,7 +998,10 @@ impl FrontendRenderEngine {
                         module_id,
                     );
                     let recording = cached.unwrap_or_else(|| {
-                        let epoch = crate::prepared_scene::resource_completion_epoch();
+                        let epoch = (
+                            crate::prepared_scene::resource_completion_epoch(),
+                            crate::surface::completion_snapshot(),
+                        );
                         let mut recorder = skia_safe::PictureRecorder::new();
                         let canvas = recorder.begin_recording(
                             skia_safe::Rect::from_wh(
@@ -1397,8 +1400,20 @@ fn push_scoop_border_commands(
     let (right, bottom) = (left + bounds.width as f32, top + bounds.height as f32);
     let shapes = style.corner_shape;
     for (shape, radius, cx, cy, width) in [
-        (shapes.top_left, radii.top_left, left, top, (widths.top + widths.left) / 2.0),
-        (shapes.top_right, radii.top_right, right, top, (widths.top + widths.right) / 2.0),
+        (
+            shapes.top_left,
+            radii.top_left,
+            left,
+            top,
+            (widths.top + widths.left) / 2.0,
+        ),
+        (
+            shapes.top_right,
+            radii.top_right,
+            right,
+            top,
+            (widths.top + widths.right) / 2.0,
+        ),
         (
             shapes.bottom_right,
             radii.bottom_right,

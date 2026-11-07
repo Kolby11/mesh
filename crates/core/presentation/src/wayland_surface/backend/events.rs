@@ -43,19 +43,13 @@ impl WaylandSurfaceBackend {
 
     fn release_expired_surface_focus_grab(&mut self) -> Result<(), PresentationError> {
         if self.state.release_expired_surface_focus_grab() {
-            match self.event_queue.flush() {
-                Ok(()) => {}
-                Err(error) => return Err(self.map_wayland_error("flush", error)),
-            }
+            self.flush_requests()?;
         }
         Ok(())
     }
 
     fn dispatch_pending(&mut self) -> Result<(), PresentationError> {
-        match self.event_queue.flush() {
-            Ok(()) => {}
-            Err(error) => return Err(self.map_wayland_error("flush", error)),
-        }
+        self.flush_requests()?;
         match self.event_queue.dispatch_pending(&mut self.state) {
             Ok(_) => {}
             Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
@@ -66,10 +60,7 @@ impl WaylandSurfaceBackend {
     }
 
     pub(super) fn dispatch_available(&mut self) -> Result<(), PresentationError> {
-        match self.event_queue.flush() {
-            Ok(()) => {}
-            Err(error) => return Err(self.map_wayland_error("flush", error)),
-        }
+        self.flush_requests()?;
 
         for _ in 0..32 {
             match self.event_queue.dispatch_pending(&mut self.state) {
@@ -156,10 +147,7 @@ impl WaylandSurfaceBackend {
 
         #[cfg(feature = "gpu")]
         self.poll_scene_completions();
-        match self.event_queue.flush() {
-            Ok(()) => {}
-            Err(error) => return Err(self.map_wayland_error("flush", error)),
-        }
+        let flush_blocked = self.flush_requests()?;
         match self.event_queue.dispatch_pending(&mut self.state) {
             Ok(_) => {}
             Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
@@ -179,8 +167,13 @@ impl WaylandSurfaceBackend {
         // longer clamped to a fixed 16ms loop cadence.
         let wayland_fd = read_guard.connection_fd();
         let ready_flags = PollFlags::IN | PollFlags::ERR | PollFlags::HUP;
+        let wayland_flags = if flush_blocked {
+            ready_flags | PollFlags::OUT
+        } else {
+            ready_flags
+        };
         let mut fds = vec![
-            PollFd::new(&wayland_fd, ready_flags),
+            PollFd::new(&wayland_fd, wayland_flags),
             PollFd::new(&eventfd_fd, ready_flags),
         ];
         #[cfg(feature = "gpu")]
@@ -194,25 +187,27 @@ impl WaylandSurfaceBackend {
         };
         let timeout_ms = timeout.as_millis().min(i32::MAX as u128) as i32;
 
-        let (wayland_ready, ipc_ready, scene_ready) = match poll(&mut fds, timeout_ms) {
-            Ok(0) => {
-                drop(read_guard);
-                #[cfg(feature = "gpu")]
-                self.poll_scene_completions();
-                return Ok(WaitResult::deadline_expired());
-            }
-            Err(rustix::io::Errno::INTR) => (false, false, false),
-            Ok(_) => (
-                fds[0].revents().intersects(ready_flags),
-                fds[1].revents().intersects(ready_flags),
-                fds.get(2)
-                    .is_some_and(|fd| fd.revents().intersects(ready_flags)),
-            ),
-            Err(err) => {
-                drop(read_guard);
-                return Err(self.connection_lost(format!("poll: {err}")));
-            }
-        };
+        let (wayland_ready, wayland_writable, ipc_ready, scene_ready) =
+            match poll(&mut fds, timeout_ms) {
+                Ok(0) => {
+                    drop(read_guard);
+                    #[cfg(feature = "gpu")]
+                    self.poll_scene_completions();
+                    return Ok(WaitResult::deadline_expired());
+                }
+                Err(rustix::io::Errno::INTR) => (false, false, false, false),
+                Ok(_) => (
+                    fds[0].revents().intersects(ready_flags),
+                    fds[0].revents().contains(PollFlags::OUT),
+                    fds[1].revents().intersects(ready_flags),
+                    fds.get(2)
+                        .is_some_and(|fd| fd.revents().intersects(ready_flags)),
+                ),
+                Err(err) => {
+                    drop(read_guard);
+                    return Err(self.connection_lost(format!("poll: {err}")));
+                }
+            };
 
         // Consume the eventfd counter so it doesn't keep firing.
         if ipc_ready {
@@ -238,6 +233,11 @@ impl WaylandSurfaceBackend {
             }
         } else {
             drop(read_guard);
+        }
+
+        if wayland_writable {
+            self.flush_requests()?;
+            wake_reason = WaitReason::WaylandEvent;
         }
 
         // If eventfd fired, that takes priority as the reported reason.
@@ -266,6 +266,11 @@ impl WaylandSurfaceBackend {
         })
     }
 
+    fn flush_requests(&mut self) -> Result<bool, PresentationError> {
+        flush_status(self.event_queue.flush())
+            .map_err(|error| self.map_wayland_error("flush", error))
+    }
+
     fn connection_lost(&mut self, reason: impl Into<String>) -> PresentationError {
         let reason = reason.into();
         self.state.mark_connection_lost(reason.clone());
@@ -287,5 +292,59 @@ impl WaylandSurfaceBackend {
             DispatchError::Backend(error) => self.map_wayland_error(context, error),
             error => PresentationError::SurfaceCreate(format!("{context}: {error}")),
         }
+    }
+}
+
+fn flush_status(result: Result<(), WaylandError>) -> Result<bool, WaylandError> {
+    match result {
+        Ok(()) => Ok(false),
+        Err(WaylandError::Io(error)) if error.kind() == ErrorKind::WouldBlock => Ok(true),
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod flush_tests {
+    use super::*;
+    use std::io::Read;
+    use std::os::unix::net::UnixStream;
+    use wayland_client::{protocol::wl_callback, Dispatch, QueueHandle};
+
+    struct Client;
+
+    impl Dispatch<wl_callback::WlCallback, ()> for Client {
+        fn event(
+            _: &mut Self,
+            _: &wl_callback::WlCallback,
+            _: wl_callback::Event,
+            _: &(),
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+        }
+    }
+
+    #[test]
+    fn full_wayland_socket_retries_after_peer_drains() {
+        let (client, mut server) = UnixStream::pair().unwrap();
+        server.set_nonblocking(true).unwrap();
+        let connection = Connection::from_socket(client).unwrap();
+        let queue = connection.new_event_queue::<Client>();
+        let handle = queue.handle();
+        let display = connection.display();
+        let mut blocked = false;
+        for _ in 0..256 {
+            for _ in 0..1024 {
+                display.sync(&handle, ());
+            }
+            if flush_status(queue.flush()).unwrap() {
+                blocked = true;
+                break;
+            }
+        }
+        assert!(blocked, "the peer must apply socket backpressure");
+        let mut bytes = [0; 65536];
+        while server.read(&mut bytes).is_ok() {}
+        assert!(!flush_status(queue.flush()).unwrap());
     }
 }

@@ -1,28 +1,28 @@
 # Status
 
-**Updated:** 2026-11-06
+**Updated:** 2026-11-07
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and
 measurements live in [`log/`](log/README.md).
 
 ## Now
 
-- Reduce theme and font change latency. Text-size dragging commits on release, icon revisions retain text layouts, and theme selection/mode/token composition runs on a worker; retained theme-tree invalidation, other preparation paths, and end-to-end measurements remain open.
+- Settings theme recommendation lookup and consumer-scoped scene invalidation are optimized and measured in the working tree. Cache admission while resources are pending, unchanged-frame overhead, observation snapshots, list virtualization and end-to-end settings latency remain open.
 
-- Validate independent text size and shell scale in a running shell, including profile switching, popup geometry and accessibility.
+- Read-only codebase improvement scan with section agents, as clarified by the user. Record source-backed findings and exact coverage in the November 6 audit directory. Existing uncommitted implementation edits predate this clarification.
 
-- Implement the requested SH-08, Material reference shell/composition, control parts, theme fixtures, slider glide, glass Settings readability, and style-index/gap fixes. The retained-layout key-adoption regression passes with the element crate tests.
+- Review the reported roughly four-second shell-wide settings delay through transactions, appearance resources and frontend/render invalidation. Global cache resets, repeated observation snapshots and broad resource effects are source-backed cost candidates; the end-to-end critical path remains unmeasured.
 
-- Continue the whole-codebase audit; sections 01–09 have review reports, including section 08's continuation and stated coverage limits. Sections 10–16 and cross-section review remain; resume from the coverage inventory.
-- Extract the frontend component runtime from shell (SH-08).
-- Implement the Material reference shell (08), including the desktop editor, widget picker, side rail and dock.
+- Source-reading coverage: sections 13, 14 and 16 have complete assigned-file reads. Section 11 has 83 full / 10 partial files; section 12 has 35 full / 8 partial / 35 unread. Frontend and shell remain partial; independent review layers and cross-section reconciliation remain open.
+
+- Earlier implementation work remains uncommitted and is not being extended during this scan: settings routing, appearance preparation, retained rendering, fixtures and component extraction. Validate it separately before treating backlog items as complete.
+
 
 ## Next
 
-- Investigate intermittent fractional retained-layout parity; the Settings scroll-shift failure turned out to be fractional-phase paint coverage, fixed separately.
-- Design style-only control parts for scrollbars and inputs; slider, progress, meter, checkbox, radio and switch have parts.
-- Fix the Settings and style-fixture tests that still expect glass panels under the solid themes.
-- Continue trusted live glass source work and the in-surface blur engine.
+- Finish unread frontend, rendering and shell inputs plus partial runtime bodies/tests from the audit inventory.
+- Complete independent review layers and cross-section reconciliation before issuing the final audit report.
+- Resume implementation and verification from the canonical backlog after the scan; earlier dirty changes remain unverified as a combined set.
 
 ## Blocked / known baselines
 

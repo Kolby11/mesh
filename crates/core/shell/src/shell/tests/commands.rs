@@ -3,6 +3,86 @@ use super::*;
 use mesh_core_backend::BackendIdentity;
 
 #[test]
+fn settings_file_notifications_skip_authoring_graph_loads() {
+    let mut shell = Shell::new();
+    let before = crate::shell::discovery::AUTHORING_GRAPH_LOADS.with(std::cell::Cell::get);
+    let mut pending = VecDeque::new();
+    let path = shell.settings_watch.path.clone();
+    shell.handle_shell_message(&mut pending, super::types::ShellMessage::FilesystemChanged {
+        generation: shell.file_watch_set.generation,
+        paths: Some(vec![path]),
+    }).unwrap();
+    assert_eq!(crate::shell::discovery::AUTHORING_GRAPH_LOADS.with(std::cell::Cell::get), before);
+    assert!(pending.is_empty());
+}
+
+#[test]
+fn profile_file_notification_waits_for_settings_commit_without_graph_load() {
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    let paths = mesh_core_module::package::ProfilePaths::from_root_graph(&dir.path().join("module.json")).unwrap();
+    let mut profile = mesh_core_module::package::ShellProfile::new();
+    paths.save("test", &profile).unwrap();
+    paths.set_active("test").unwrap();
+    let mut shell = Shell::new();
+    let path = paths.profile_path("test").unwrap();
+    profile.settings.insert("shell".into(), serde_json::json!({"fonts":{"base_size":18}}));
+    let profile = paths.save_if_revision("test", &profile, profile.revision).unwrap();
+    shell.pending_control_plane_commit = Some(crate::shell::runtime::PendingControlPlaneCommit {
+        worker: std::thread::spawn(|| ()),
+        theme: None,
+        locale: None,
+        theme_effect: false,
+        locale_effect: false,
+        call_ids: Vec::new(),
+        preparation_guard: None,
+    });
+    let before = crate::shell::discovery::AUTHORING_GRAPH_LOADS.with(std::cell::Cell::get);
+    let mut pending = VecDeque::new();
+    shell.handle_shell_message(&mut pending, super::types::ShellMessage::FilesystemChanged {
+        generation: shell.file_watch_set.generation,
+        paths: Some(vec![path.clone()]),
+    }).unwrap();
+    assert!(shell.pending_profile_file_reconciliation);
+    assert!(!shell.pending_graph_reconciliation);
+    assert!(shell.retry_pending_graph_reconciliation().is_empty());
+    shell.pending_control_plane_commit.take().unwrap().worker.join().unwrap();
+    shell.active_profile_authoring = Some(("test".into(), serde_json::to_value(&profile).unwrap()));
+    assert!(shell.retry_pending_graph_reconciliation().is_empty());
+    assert!(!shell.pending_profile_file_reconciliation);
+    assert_eq!(crate::shell::discovery::AUTHORING_GRAPH_LOADS.with(std::cell::Cell::get), before);
+    let mut external = profile.clone();
+    external.settings.insert("shell".into(), serde_json::json!({"fonts":{"base_size":22}}));
+    paths.save_if_revision("test", &external, profile.revision).unwrap();
+    shell.handle_shell_message(&mut pending, super::types::ShellMessage::FilesystemChanged {
+        generation: shell.file_watch_set.generation,
+        paths: Some(vec![path]),
+    }).unwrap();
+    assert_eq!(crate::shell::discovery::AUTHORING_GRAPH_LOADS.with(std::cell::Cell::get), before + 1);
+}
+
+#[test]
+#[ignore = "release profile of settings notifications versus broad graph reads"]
+fn settings_file_notification_profile() {
+    let mut shell = Shell::new();
+    let graph = shell.load_installed_module_graph_candidate().unwrap();
+    let modules = graph.modules().len();
+    shell.installed_module_graph = Some(graph);
+    let path = shell.settings_watch.path.clone();
+    for _ in 0..6 {
+        let started = std::time::Instant::now();
+        std::hint::black_box(shell.load_installed_module_graph_candidate().unwrap());
+        let baseline = started.elapsed();
+        let started = std::time::Instant::now();
+        shell.handle_shell_message(&mut VecDeque::new(), super::types::ShellMessage::FilesystemChanged {
+            generation: shell.file_watch_set.generation,
+            paths: Some(vec![path.clone()]),
+        }).unwrap();
+        eprintln!("settings notification {modules} modules: graph read {:.3}ms; routed {:.3}ms", baseline.as_secs_f64() * 1000.0, started.elapsed().as_secs_f64() * 1000.0);
+    }
+}
+
+#[test]
 fn a_core_debug_provider_command_is_applied_by_the_generic_dispatcher() {
     let mut shell = Shell::new();
     let capabilities = mesh_core_capability::CapabilitySet::from_ids(["service.debug.control"]);
@@ -693,7 +773,7 @@ fn retired_file_watch_generation_schedules_a_fresh_reload() {
     shell
         .handle_shell_message(
             &mut pending,
-            super::types::ShellMessage::FilesystemChanged { generation: 1 },
+            super::types::ShellMessage::FilesystemChanged { generation: 1, paths: None },
         )
         .unwrap();
 
