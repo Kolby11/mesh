@@ -1,0 +1,129 @@
+{
+  "name": "@mesh/bluetooth-interface",
+  "version": "1.0.0",
+  "description": "Standard Bluetooth adapter and device contract, independent of its providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.bluetooth",
+      "version": "1.0",
+      "domain": "bluetooth",
+      "relationship": "base",
+      "contract": {
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether a Bluetooth adapter is present"
+          },
+          "powered": {
+            "type": "boolean",
+            "description": "Whether the adapter is powered"
+          },
+          "scanning": {
+            "type": "boolean",
+            "description": "Whether discovery is running"
+          },
+          "adapter_name": {
+            "type": "string",
+            "description": "Adapter alias"
+          },
+          "paired_devices": {
+            "type": "Device[]",
+            "description": "Paired devices"
+          },
+          "nearby_devices": {
+            "type": "Device[]",
+            "description": "Discovered devices that are not paired"
+          },
+          "adapter_address": {
+            "type": "string",
+            "description": "Adapter hardware address"
+          },
+          "discoverable": {
+            "type": "boolean",
+            "description": "Whether other devices can find this adapter"
+          },
+          "pairable": {
+            "type": "boolean",
+            "description": "Whether the adapter accepts pairing requests"
+          }
+        },
+        "methods": {
+          "set_enabled": "(enabled: boolean) -> Result",
+          "scan": "() -> Result",
+          "pair": "(id: string) -> Result",
+          "connect": "(id: string) -> Result",
+          "disconnect": "(id: string) -> Result",
+          "forget": "(id: string) -> Result",
+          "set_trusted": "(id: string, enabled: boolean) -> Result",
+          "set_discoverable": "(enabled: boolean) -> Result",
+          "set_pairable": "(enabled: boolean) -> Result",
+          "set_adapter_name": "(name: string) -> Result"
+        },
+        "events": {},
+        "types": {
+          "Device": {
+            "id": "string",
+            "name": "string",
+            "kind": "string",
+            "paired": "boolean",
+            "connected": "boolean",
+            "address": "string",
+            "icon": "string",
+            "battery": "int",
+            "trusted": "boolean",
+            "blocked": "boolean",
+            "rssi": "int",
+            "vendor_id": "string",
+            "product_id": "string"
+          }
+        },
+        "capabilities": {
+          "required": [
+            "service.bluetooth.read"
+          ],
+          "optional": [
+            "service.bluetooth.control"
+          ],
+          "methods": {
+            "set_enabled": [
+              "service.bluetooth.control"
+            ],
+            "scan": [
+              "service.bluetooth.control"
+            ],
+            "pair": [
+              "service.bluetooth.control"
+            ],
+            "connect": [
+              "service.bluetooth.control"
+            ],
+            "disconnect": [
+              "service.bluetooth.control"
+            ],
+            "forget": [
+              "service.bluetooth.control"
+            ],
+            "set_trusted": [
+              "service.bluetooth.control"
+            ],
+            "set_discoverable": [
+              "service.bluetooth.control"
+            ],
+            "set_pairable": [
+              "service.bluetooth.control"
+            ],
+            "set_adapter_name": [
+              "service.bluetooth.control"
+            ]
+          },
+          "permissions": {
+            "service.bluetooth.read": "standard",
+            "service.bluetooth.control": "elevated"
+          }
+        }
+      }
+    }
+  }
+}

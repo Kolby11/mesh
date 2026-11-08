@@ -1,0 +1,52 @@
+{
+  "name": "@mesh/power-profile-interface",
+  "version": "1.0.0",
+  "description": "Standard power profile contract, independent of its providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.power-profile",
+      "version": "1.0",
+      "domain": "power-profile",
+      "relationship": "base",
+      "contract": {
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether a power profile service is reachable"
+          },
+          "profile": {
+            "type": "string",
+            "description": "Active profile: power-saver, balanced or performance"
+          },
+          "profiles": {
+            "type": "string[]",
+            "description": "Profiles the platform offers"
+          }
+        },
+        "methods": {
+          "set_profile": "(profile: string) -> Result"
+        },
+        "events": {},
+        "capabilities": {
+          "required": [
+            "service.power-profile.read"
+          ],
+          "optional": [
+            "service.power-profile.control"
+          ],
+          "methods": {
+            "set_profile": [
+              "service.power-profile.control"
+            ]
+          },
+          "permissions": {
+            "service.power-profile.read": "standard",
+            "service.power-profile.control": "elevated"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "name": "@mesh/idle-interface",
+  "version": "1.0.0",
+  "description": "Standard idle and screen-lock policy contract, independent of its providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.idle",
+      "version": "1.0",
+      "domain": "idle",
+      "relationship": "base",
+      "contract": {
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether an idle daemon can be run"
+          },
+          "managed": {
+            "type": "boolean",
+            "description": "Whether MESH runs the idle daemon"
+          },
+          "running": {
+            "type": "boolean",
+            "description": "Whether the managed daemon is running"
+          },
+          "dim_after_min": {
+            "type": "int",
+            "description": "Minutes until dimming; 0 disables"
+          },
+          "blank_after_min": {
+            "type": "int",
+            "description": "Minutes until the screen turns off; 0 disables"
+          },
+          "lock_after_min": {
+            "type": "int",
+            "description": "Minutes until the screen locks; 0 disables"
+          },
+          "suspend_after_min": {
+            "type": "int",
+            "description": "Minutes until suspend; 0 disables"
+          },
+          "lock_on_suspend": {
+            "type": "boolean",
+            "description": "Lock before suspending"
+          }
+        },
+        "methods": {
+          "set_managed": "(enabled: boolean) -> Result",
+          "set_timeout": "(kind: string, minutes: int) -> Result",
+          "set_lock_on_suspend": "(enabled: boolean) -> Result"
+        },
+        "events": {},
+        "capabilities": {
+          "required": [
+            "service.idle.read"
+          ],
+          "optional": [
+            "service.idle.control"
+          ],
+          "methods": {
+            "set_managed": [
+              "service.idle.control"
+            ],
+            "set_timeout": [
+              "service.idle.control"
+            ],
+            "set_lock_on_suspend": [
+              "service.idle.control"
+            ]
+          },
+          "permissions": {
+            "service.idle.read": "standard",
+            "service.idle.control": "elevated"
+          }
+        }
+      }
+    }
+  }
+}

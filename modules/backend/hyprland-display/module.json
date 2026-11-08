@@ -1,0 +1,56 @@
+{
+  "name": "@mesh/hyprland-display",
+  "version": "0.1.0",
+  "description": "Display outputs, scale, adaptive sync, HDR and night light through Hyprland and hyprsunset.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:hyprctl:[\"monitors\",\"-j\"]",
+        "exec.argv:hyprctl:[\"eval\",\"*\"]",
+        "exec.argv:hyprctl:[\"hyprsunset\",\"temperature\"]",
+        "exec.argv:hyprctl:[\"hyprsunset\",\"temperature\",\"*\"]",
+        "exec.argv:hyprctl:[\"hyprsunset\",\"identity\"]"
+      ],
+      "binaries": [
+        {
+          "name": "hyprctl",
+          "reason": "Read and change outputs and the hyprsunset colour temperature.",
+          "packages": {
+            "arch": "hyprland",
+            "nixos": "hyprland"
+          }
+        },
+        {
+          "name": "hyprsunset",
+          "reason": "Warm the colour temperature for night light.",
+          "packages": {
+            "arch": "hyprsunset",
+            "nixos": "hyprsunset"
+          }
+        }
+      ],
+      "modules": {
+        "@mesh/display-interface": "^1.0.0"
+      }
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": [
+        "en"
+      ]
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.display",
+        "version": "1.0",
+        "provider": "hyprland-display",
+        "label": "Hyprland outputs",
+        "priority": 100
+      }
+    ]
+  }
+}

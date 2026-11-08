@@ -42,6 +42,16 @@
             "type": "boolean",
             "default": false,
             "description": "Take over from another notification daemon that allows replacement."
+          },
+          "max_popups": {
+            "type": "number",
+            "default": 3,
+            "description": "How many popups are shown at once; older ones are hidden first."
+          },
+          "muted_apps": {
+            "type": "string",
+            "default": "",
+            "description": "Comma-separated application names whose notifications never pop up."
           }
         }
       }

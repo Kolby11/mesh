@@ -1,0 +1,64 @@
+{
+  "name": "@mesh/time-interface",
+  "version": "1.0.0",
+  "description": "Standard time zone and clock synchronisation contract, independent of its providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.time",
+      "version": "1.0",
+      "domain": "time",
+      "relationship": "base",
+      "contract": {
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether the time service is reachable"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA time zone name"
+          },
+          "ntp": {
+            "type": "boolean",
+            "description": "Whether network time synchronisation is enabled"
+          },
+          "ntp_synced": {
+            "type": "boolean",
+            "description": "Whether the clock is currently synchronised"
+          },
+          "timezones": {
+            "type": "string[]",
+            "description": "Every selectable IANA time zone"
+          }
+        },
+        "methods": {
+          "set_timezone": "(timezone: string) -> Result",
+          "set_ntp": "(enabled: boolean) -> Result"
+        },
+        "events": {},
+        "capabilities": {
+          "required": [
+            "service.time.read"
+          ],
+          "optional": [
+            "service.time.control"
+          ],
+          "methods": {
+            "set_timezone": [
+              "service.time.control"
+            ],
+            "set_ntp": [
+              "service.time.control"
+            ]
+          },
+          "permissions": {
+            "service.time.read": "standard",
+            "service.time.control": "elevated"
+          }
+        }
+      }
+    }
+  }
+}

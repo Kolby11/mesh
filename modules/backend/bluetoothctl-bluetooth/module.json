@@ -1,0 +1,60 @@
+{
+  "name": "@mesh/bluetoothctl-bluetooth",
+  "version": "0.1.0",
+  "description": "Bluetooth adapter and devices through BlueZ bluetoothctl.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:bluetoothctl:[\"show\"]",
+        "exec.argv:bluetoothctl:[\"devices\"]",
+        "exec.argv:bluetoothctl:[\"devices\",\"Paired\"]",
+        "exec.argv:bluetoothctl:[\"info\",\"*\"]",
+        "exec.argv:bluetoothctl:[\"power\",\"*\"]",
+        "exec.argv:bluetoothctl:[\"pair\",\"*\"]",
+        "exec.argv:bluetoothctl:[\"trust\",\"*\"]",
+        "exec.argv:bluetoothctl:[\"connect\",\"*\"]",
+        "exec.argv:bluetoothctl:[\"disconnect\",\"*\"]",
+        "exec.argv:bluetoothctl:[\"--timeout\",\"*\",\"scan\",\"on\"]",
+        "exec.argv:bluetoothctl:[\"remove\",\"*\"]",
+        "exec.argv:bluetoothctl:[\"untrust\",\"*\"]",
+        "exec.argv:bluetoothctl:[\"discoverable\",\"*\"]",
+        "exec.argv:bluetoothctl:[\"pairable\",\"*\"]",
+        "exec.argv:bluetoothctl:[\"system-alias\",\"*\"]"
+      ],
+      "binaries": [
+        {
+          "name": "bluetoothctl",
+          "reason": "Read and control the BlueZ adapter and devices.",
+          "packages": {
+            "arch": "bluez-utils",
+            "debian": "bluez",
+            "fedora": "bluez",
+            "nixos": "bluez"
+          }
+        }
+      ],
+      "modules": {
+        "@mesh/bluetooth-interface": "^1.0.0"
+      }
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": [
+        "en"
+      ]
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.bluetooth",
+        "version": "1.0",
+        "provider": "bluetoothctl-bluetooth",
+        "label": "BlueZ bluetoothctl",
+        "priority": 100
+      }
+    ]
+  }
+}

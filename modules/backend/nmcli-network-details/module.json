@@ -1,0 +1,58 @@
+{
+  "name": "@mesh/nmcli-network-details",
+  "version": "0.1.0",
+  "description": "Wi-Fi details, saved networks, VPN and hotspot through NetworkManager nmcli.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:nmcli:[\"-t\",\"-e\",\"yes\",\"-f\",\"IN-USE,SSID,BSSID,CHAN,FREQ,RATE,SIGNAL,SECURITY\",\"device\",\"wifi\",\"list\"]",
+        "exec.argv:nmcli:[\"-t\",\"-e\",\"yes\",\"-f\",\"NAME,UUID,TYPE,AUTOCONNECT,ACTIVE\",\"connection\",\"show\"]",
+        "exec.argv:nmcli:[\"-t\",\"-e\",\"no\",\"-f\",\"GENERAL.HWADDR,GENERAL.MTU,GENERAL.CONNECTION,IP4.ADDRESS,IP4.GATEWAY,IP4.DNS,IP6.ADDRESS,CAPABILITIES.SPEED\",\"device\",\"show\",\"*\"]",
+        "exec.argv:nmcli:[\"-t\",\"-f\",\"DEVICE,TYPE,STATE\",\"device\",\"status\"]",
+        "exec.argv:nmcli:[\"device\",\"wifi\",\"rescan\"]",
+        "exec.argv:nmcli:[\"device\",\"wifi\",\"connect\",\"*\"]",
+        "exec.argv:nmcli:[\"device\",\"wifi\",\"connect\",\"*\",\"password\",\"*\"]",
+        "exec.argv:nmcli:[\"device\",\"disconnect\",\"*\"]",
+        "exec.argv:nmcli:[\"connection\",\"delete\",\"id\",\"*\"]",
+        "exec.argv:nmcli:[\"connection\",\"modify\",\"id\",\"*\",\"connection.autoconnect\",\"*\"]",
+        "exec.argv:nmcli:[\"connection\",\"up\",\"id\",\"*\"]",
+        "exec.argv:nmcli:[\"connection\",\"down\",\"id\",\"*\"]",
+        "exec.argv:nmcli:[\"device\",\"wifi\",\"hotspot\",\"ifname\",\"*\",\"ssid\",\"*\",\"password\",\"*\"]"
+      ],
+      "binaries": [
+        {
+          "name": "nmcli",
+          "reason": "Read and control NetworkManager connections.",
+          "packages": {
+            "arch": "networkmanager",
+            "debian": "network-manager",
+            "fedora": "NetworkManager",
+            "nixos": "networkmanager"
+          }
+        }
+      ],
+      "modules": {
+        "@mesh/network-details-interface": "^1.0.0"
+      }
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": [
+        "en"
+      ]
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.network-details",
+        "version": "1.0",
+        "provider": "nmcli-network-details",
+        "label": "NetworkManager nmcli",
+        "priority": 100
+      }
+    ]
+  }
+}

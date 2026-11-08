@@ -1,0 +1,73 @@
+{
+  "name": "@mesh/audio-devices-interface",
+  "version": "1.0.0",
+  "description": "Audio output and input devices and per-application streams, independent of its providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.audio-devices",
+      "version": "1.0",
+      "domain": "audio-devices",
+      "relationship": "base",
+      "contract": {
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether the audio graph can be read"
+          },
+          "sinks": {
+            "type": "AudioNode[]",
+            "description": "Output devices"
+          },
+          "sources": {
+            "type": "AudioNode[]",
+            "description": "Input devices"
+          },
+          "streams": {
+            "type": "AudioNode[]",
+            "description": "Applications playing or recording"
+          }
+        },
+        "methods": {
+          "set_default": "(id: int) -> Result",
+          "set_volume": "(id: int, percent: int) -> Result",
+          "set_muted": "(id: int, muted: boolean) -> Result"
+        },
+        "events": {},
+        "types": {
+          "AudioNode": {
+            "id": "int",
+            "name": "string",
+            "default": "boolean",
+            "volume": "int",
+            "muted": "boolean"
+          }
+        },
+        "capabilities": {
+          "required": [
+            "service.audio-devices.read"
+          ],
+          "optional": [
+            "service.audio-devices.control"
+          ],
+          "methods": {
+            "set_default": [
+              "service.audio-devices.control"
+            ],
+            "set_volume": [
+              "service.audio-devices.control"
+            ],
+            "set_muted": [
+              "service.audio-devices.control"
+            ]
+          },
+          "permissions": {
+            "service.audio-devices.read": "standard",
+            "service.audio-devices.control": "elevated"
+          }
+        }
+      }
+    }
+  }
+}

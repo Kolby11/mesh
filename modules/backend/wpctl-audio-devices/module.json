@@ -1,0 +1,50 @@
+{
+  "name": "@mesh/wpctl-audio-devices",
+  "version": "0.1.0",
+  "description": "Audio devices and application streams through WirePlumber wpctl.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:wpctl:[\"status\"]",
+        "exec.argv:wpctl:[\"get-volume\",\"*\"]",
+        "exec.argv:wpctl:[\"set-default\",\"*\"]",
+        "exec.argv:wpctl:[\"set-volume\",\"*\",\"*\"]",
+        "exec.argv:wpctl:[\"set-mute\",\"*\",\"*\"]"
+      ],
+      "binaries": [
+        {
+          "name": "wpctl",
+          "reason": "Read and control the PipeWire graph.",
+          "packages": {
+            "arch": "wireplumber",
+            "debian": "wireplumber",
+            "fedora": "wireplumber",
+            "nixos": "wireplumber"
+          }
+        }
+      ],
+      "modules": {
+        "@mesh/audio-devices-interface": "^1.0.0"
+      }
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": [
+        "en"
+      ]
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.audio-devices",
+        "version": "1.0",
+        "provider": "wpctl-audio-devices",
+        "label": "WirePlumber wpctl",
+        "priority": 100
+      }
+    ]
+  }
+}

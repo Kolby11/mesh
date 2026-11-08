@@ -1,0 +1,88 @@
+{
+  "name": "@mesh/input-interface",
+  "version": "1.0.0",
+  "description": "Standard pointer and touchpad contract, independent of its providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.input",
+      "version": "1.0",
+      "domain": "input",
+      "relationship": "base",
+      "contract": {
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether the compositor accepts input options"
+          },
+          "pointer_speed": {
+            "type": "int",
+            "description": "Pointer speed from -10 to 10"
+          },
+          "natural_scroll": {
+            "type": "boolean",
+            "description": "Natural scrolling"
+          },
+          "tap_to_click": {
+            "type": "boolean",
+            "description": "Tap to click on touchpads"
+          },
+          "disable_while_typing": {
+            "type": "boolean",
+            "description": "Ignore the touchpad while typing"
+          },
+          "left_handed": {
+            "type": "boolean",
+            "description": "Swap primary and secondary buttons"
+          },
+          "cursor_size": {
+            "type": "int",
+            "description": "Cursor size in pixels"
+          }
+        },
+        "methods": {
+          "set_pointer_speed": "(value: int) -> Result",
+          "set_natural_scroll": "(enabled: boolean) -> Result",
+          "set_tap_to_click": "(enabled: boolean) -> Result",
+          "set_disable_while_typing": "(enabled: boolean) -> Result",
+          "set_left_handed": "(enabled: boolean) -> Result",
+          "set_cursor_size": "(size: int) -> Result"
+        },
+        "events": {},
+        "capabilities": {
+          "required": [
+            "service.input.read"
+          ],
+          "optional": [
+            "service.input.control"
+          ],
+          "methods": {
+            "set_pointer_speed": [
+              "service.input.control"
+            ],
+            "set_natural_scroll": [
+              "service.input.control"
+            ],
+            "set_tap_to_click": [
+              "service.input.control"
+            ],
+            "set_disable_while_typing": [
+              "service.input.control"
+            ],
+            "set_left_handed": [
+              "service.input.control"
+            ],
+            "set_cursor_size": [
+              "service.input.control"
+            ]
+          },
+          "permissions": {
+            "service.input.read": "standard",
+            "service.input.control": "elevated"
+          }
+        }
+      }
+    }
+  }
+}

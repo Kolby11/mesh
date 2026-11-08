@@ -1,0 +1,46 @@
+{
+  "name": "@mesh/hyprland-input",
+  "version": "0.1.0",
+  "description": "Pointer, touchpad and cursor options through Hyprland.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:hyprctl:[\"getoption\",\"*\",\"-j\"]",
+        "exec.argv:hyprctl:[\"eval\",\"*\"]",
+        "exec.argv:sh:[\"-c\",\"hyprctl setcursor \\\"${XCURSOR_THEME:-default}\\\" \\\"$1\\\"\",\"sh\",\"*\"]"
+      ],
+      "binaries": [
+        {
+          "name": "hyprctl",
+          "reason": "Read and change input options.",
+          "packages": {
+            "arch": "hyprland",
+            "nixos": "hyprland"
+          }
+        }
+      ],
+      "modules": {
+        "@mesh/input-interface": "^1.0.0"
+      }
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": [
+        "en"
+      ]
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.input",
+        "version": "1.0",
+        "provider": "hyprland-input",
+        "label": "Hyprland input",
+        "priority": 100
+      }
+    ]
+  }
+}

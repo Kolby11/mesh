@@ -1,0 +1,109 @@
+{
+  "name": "@mesh/hardware-interface",
+  "version": "1.0.0",
+  "description": "Standard machine identity, processor, memory, graphics and storage contract, independent of its providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.hardware",
+      "version": "1.0",
+      "domain": "hardware",
+      "relationship": "base",
+      "contract": {
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether hardware facts can be read"
+          },
+          "vendor": {
+            "type": "string",
+            "description": "System vendor"
+          },
+          "model": {
+            "type": "string",
+            "description": "Product name"
+          },
+          "product_version": {
+            "type": "string",
+            "description": "Product version"
+          },
+          "bios_version": {
+            "type": "string",
+            "description": "Firmware version"
+          },
+          "cpu_model": {
+            "type": "string",
+            "description": "Processor model name"
+          },
+          "cpu_cores": {
+            "type": "int",
+            "description": "Physical cores"
+          },
+          "cpu_threads": {
+            "type": "int",
+            "description": "Logical processors"
+          },
+          "cpu_max_mhz": {
+            "type": "int",
+            "description": "Maximum frequency in MHz; 0 when unknown"
+          },
+          "memory_total_bytes": {
+            "type": "int",
+            "description": "Installed memory"
+          },
+          "memory_available_bytes": {
+            "type": "int",
+            "description": "Memory available to applications"
+          },
+          "swap_total_bytes": {
+            "type": "int",
+            "description": "Swap size"
+          },
+          "swap_free_bytes": {
+            "type": "int",
+            "description": "Free swap"
+          },
+          "gpus": {
+            "type": "string[]",
+            "description": "Graphics adapters"
+          },
+          "disks": {
+            "type": "Disk[]",
+            "description": "Mounted physical file systems"
+          }
+        },
+        "methods": {
+          "refresh": "() -> Result"
+        },
+        "events": {},
+        "types": {
+          "Disk": {
+            "device": "string",
+            "mount": "string",
+            "filesystem": "string",
+            "total_bytes": "int",
+            "used_bytes": "int"
+          }
+        },
+        "capabilities": {
+          "required": [
+            "service.hardware.read"
+          ],
+          "optional": [
+            "service.hardware.control"
+          ],
+          "methods": {
+            "refresh": [
+              "service.hardware.control"
+            ]
+          },
+          "permissions": {
+            "service.hardware.read": "standard",
+            "service.hardware.control": "elevated"
+          }
+        }
+      }
+    }
+  }
+}

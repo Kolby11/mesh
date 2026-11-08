@@ -1,0 +1,53 @@
+{
+  "name": "@mesh/hypridle-idle",
+  "version": "0.1.0",
+  "description": "Idle dimming, screen off, lock and suspend through a MESH-owned hypridle instance.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$1\\\" > \\\"${XDG_RUNTIME_DIR:-/tmp}/mesh-hypridle.conf\\\"\",\"sh\",\"*\"]",
+        "exec.argv:sh:[\"-c\",\"exec hypridle -c \\\"${XDG_RUNTIME_DIR:-/tmp}/mesh-hypridle.conf\\\"\"]"
+      ],
+      "binaries": [
+        {
+          "name": "hypridle",
+          "reason": "Runs the idle timers.",
+          "packages": {
+            "arch": "hypridle",
+            "nixos": "hypridle"
+          }
+        },
+        {
+          "name": "hyprlock",
+          "reason": "Locks the screen.",
+          "packages": {
+            "arch": "hyprlock",
+            "nixos": "hyprlock"
+          }
+        }
+      ],
+      "modules": {
+        "@mesh/idle-interface": "^1.0.0"
+      }
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": [
+        "en"
+      ]
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.idle",
+        "version": "1.0",
+        "provider": "hypridle-idle",
+        "label": "hypridle",
+        "priority": 100
+      }
+    ]
+  }
+}

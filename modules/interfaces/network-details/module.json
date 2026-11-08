@@ -1,0 +1,129 @@
+{
+  "name": "@mesh/network-details-interface",
+  "version": "1.0.0",
+  "description": "Detailed Wi-Fi, saved-network, VPN and hotspot information and control, independent of its providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.network-details",
+      "version": "1.0",
+      "domain": "network-details",
+      "relationship": "base",
+      "contract": {
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether network details can be read"
+          },
+          "connection": {
+            "type": "Connection",
+            "description": "The primary active connection, empty fields when offline"
+          },
+          "networks": {
+            "type": "ScanResult[]",
+            "description": "Visible Wi-Fi networks, strongest access point per name"
+          },
+          "saved": {
+            "type": "Saved[]",
+            "description": "Saved Wi-Fi, Ethernet and VPN connections"
+          },
+          "hotspot_active": {
+            "type": "boolean",
+            "description": "Whether this machine is sharing its connection as a hotspot"
+          }
+        },
+        "methods": {
+          "refresh": "() -> Result",
+          "connect": "(ssid: string, password: string) -> Result",
+          "disconnect": "() -> Result",
+          "forget": "(name: string) -> Result",
+          "set_autoconnect": "(name: string, enabled: boolean) -> Result",
+          "connection_up": "(name: string) -> Result",
+          "connection_down": "(name: string) -> Result",
+          "set_hotspot": "(enabled: boolean, ssid: string, password: string) -> Result"
+        },
+        "events": {},
+        "types": {
+          "Connection": {
+            "kind": "string",
+            "name": "string",
+            "ssid": "string",
+            "bssid": "string",
+            "frequency_mhz": "int",
+            "channel": "int",
+            "band": "string",
+            "security": "string",
+            "signal": "int",
+            "rate_mbps": "int",
+            "interface": "string",
+            "mac": "string",
+            "ip4": "string",
+            "gateway": "string",
+            "dns": "string",
+            "ip6": "string",
+            "mtu": "int",
+            "speed_mbps": "int"
+          },
+          "ScanResult": {
+            "ssid": "string",
+            "bssid": "string",
+            "frequency_mhz": "int",
+            "channel": "int",
+            "band": "string",
+            "security": "string",
+            "signal": "int",
+            "rate_mbps": "int",
+            "saved": "boolean",
+            "active": "boolean"
+          },
+          "Saved": {
+            "name": "string",
+            "uuid": "string",
+            "kind": "string",
+            "autoconnect": "boolean",
+            "active": "boolean"
+          }
+        },
+        "capabilities": {
+          "required": [
+            "service.network-details.read"
+          ],
+          "optional": [
+            "service.network-details.control"
+          ],
+          "methods": {
+            "refresh": [
+              "service.network-details.control"
+            ],
+            "connect": [
+              "service.network-details.control"
+            ],
+            "disconnect": [
+              "service.network-details.control"
+            ],
+            "forget": [
+              "service.network-details.control"
+            ],
+            "set_autoconnect": [
+              "service.network-details.control"
+            ],
+            "connection_up": [
+              "service.network-details.control"
+            ],
+            "connection_down": [
+              "service.network-details.control"
+            ],
+            "set_hotspot": [
+              "service.network-details.control"
+            ]
+          },
+          "permissions": {
+            "service.network-details.read": "standard",
+            "service.network-details.control": "elevated"
+          }
+        }
+      }
+    }
+  }
+}

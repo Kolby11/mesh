@@ -155,6 +155,9 @@ local function notify(args)
     end
 
     local popup = not state.dnd or urgency >= 2
+    for muted in tostring(setting("muted_apps", "")):gmatch("[^,]+") do
+        if muted:gsub("^%s+", ""):gsub("%s+$", "") == tostring(app_name) and urgency < 2 then popup = false end
+    end
     local notification = {
         id = id,
         app_name = tostring(app_name),
@@ -180,6 +183,20 @@ local function notify(args)
             mesh.dbus_emit(service, "NotificationClosed", { list[index].id, EXPIRED })
         end
         table.remove(list, index)
+    end
+    local max_popups = math.max(1, math.floor(tonumber(setting("max_popups", 3)) or 3))
+    local shown = 0
+    for index, item in ipairs(list) do
+        if item.popup then
+            shown = shown + 1
+            if shown > max_popups then
+                local hidden = {}
+                for key, value in item do hidden[key] = value end
+                hidden.popup = false
+                list[index] = hidden
+                popup_deadline[item.id] = nil
+            end
+        end
     end
     publish(list)
 

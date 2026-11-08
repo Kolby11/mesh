@@ -1,0 +1,66 @@
+{
+  "name": "@mesh/sysfs-hardware",
+  "version": "0.1.0",
+  "description": "Machine identity, processor, memory, graphics and storage from /sys, /proc, df and lspci.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:cat:[\"/sys/class/dmi/id/product_name\"]",
+        "exec.argv:cat:[\"/sys/class/dmi/id/sys_vendor\"]",
+        "exec.argv:cat:[\"/sys/class/dmi/id/product_version\"]",
+        "exec.argv:cat:[\"/sys/class/dmi/id/bios_version\"]",
+        "exec.argv:cat:[\"/proc/cpuinfo\"]",
+        "exec.argv:cat:[\"/proc/meminfo\"]",
+        "exec.argv:cat:[\"/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq\"]",
+        "exec.argv:df:[\"-B1\",\"--output=source,fstype,size,used,target\",\"-x\",\"tmpfs\",\"-x\",\"devtmpfs\",\"-x\",\"squashfs\",\"-x\",\"overlay\",\"-x\",\"efivarfs\",\"-x\",\"ramfs\"]"
+      ],
+      "binaries": [
+        {
+          "name": "df",
+          "reason": "Read mounted file system usage.",
+          "packages": {
+            "arch": "coreutils",
+            "debian": "coreutils",
+            "fedora": "coreutils",
+            "nixos": "coreutils"
+          }
+        },
+        {
+          "name": "lspci",
+          "reason": "Name graphics adapters.",
+          "packages": {
+            "arch": "pciutils",
+            "debian": "pciutils",
+            "fedora": "pciutils",
+            "nixos": "pciutils"
+          }
+        }
+      ],
+      "modules": {
+        "@mesh/hardware-interface": "^1.0.0"
+      },
+      "optionalCapabilities": [
+        "exec.argv:lspci:[]"
+      ]
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": [
+        "en"
+      ]
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.hardware",
+        "version": "1.0",
+        "provider": "sysfs-hardware",
+        "label": "sysfs and procfs",
+        "priority": 100
+      }
+    ]
+  }
+}

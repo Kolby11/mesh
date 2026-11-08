@@ -1,0 +1,49 @@
+{
+  "name": "@mesh/timedatectl-time",
+  "version": "0.1.0",
+  "description": "Time zone and network time through systemd timedatectl.",
+  "private": true,
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "backend",
+    "uses": {
+      "capabilities": [
+        "exec.argv:timedatectl:[\"show\"]",
+        "exec.argv:timedatectl:[\"list-timezones\"]",
+        "exec.argv:timedatectl:[\"set-timezone\",\"*\"]",
+        "exec.argv:timedatectl:[\"set-ntp\",\"*\"]"
+      ],
+      "binaries": [
+        {
+          "name": "timedatectl",
+          "reason": "Read and set the time zone and network time.",
+          "packages": {
+            "arch": "systemd",
+            "debian": "systemd",
+            "fedora": "systemd",
+            "nixos": "systemd"
+          }
+        }
+      ],
+      "modules": {
+        "@mesh/time-interface": "^1.0.0"
+      }
+    },
+    "i18n": {
+      "defaultLocale": "en",
+      "supportedLocales": [
+        "en"
+      ]
+    },
+    "entry": "src/main.luau",
+    "implements": [
+      {
+        "interface": "mesh.time",
+        "version": "1.0",
+        "provider": "timedatectl-time",
+        "label": "systemd timedatectl",
+        "priority": 100
+      }
+    ]
+  }
+}

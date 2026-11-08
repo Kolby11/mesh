@@ -1,0 +1,92 @@
+{
+  "name": "@mesh/display-interface",
+  "version": "1.0.0",
+  "description": "Standard display output and comfort contract, independent of its providers.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "interface",
+    "interface": {
+      "name": "mesh.display",
+      "version": "1.0",
+      "domain": "display",
+      "relationship": "base",
+      "contract": {
+        "state": {
+          "available": {
+            "type": "boolean",
+            "description": "Whether the compositor reports outputs"
+          },
+          "outputs": {
+            "type": "Output[]",
+            "description": "Connected outputs in compositor order"
+          },
+          "night_light": {
+            "type": "boolean",
+            "description": "Whether the colour temperature is warmed"
+          },
+          "night_light_kelvin": {
+            "type": "int",
+            "description": "Current colour temperature in kelvin"
+          },
+          "adaptive_sync": {
+            "type": "boolean",
+            "description": "Whether variable refresh is active on any output"
+          }
+        },
+        "methods": {
+          "set_scale": "(name: string, scale: float) -> Result",
+          "set_night_light": "(enabled: boolean, kelvin: int) -> Result",
+          "set_adaptive_sync": "(enabled: boolean) -> Result",
+          "set_hdr": "(name: string, enabled: boolean) -> Result",
+          "set_mode": "(name: string, mode: string) -> Result"
+        },
+        "events": {},
+        "types": {
+          "Output": {
+            "name": "string",
+            "description": "string",
+            "width": "int",
+            "height": "int",
+            "refresh": "float",
+            "scale": "float",
+            "x": "int",
+            "y": "int",
+            "focused": "boolean",
+            "vrr": "boolean",
+            "hdr": "boolean",
+            "modes": "string[]"
+          }
+        },
+        "capabilities": {
+          "required": [
+            "service.display.read"
+          ],
+          "optional": [
+            "service.display.control"
+          ],
+          "methods": {
+            "set_scale": [
+              "service.display.control"
+            ],
+            "set_night_light": [
+              "service.display.control"
+            ],
+            "set_adaptive_sync": [
+              "service.display.control"
+            ],
+            "set_hdr": [
+              "service.display.control"
+            ],
+            "set_mode": [
+              "service.display.control"
+            ]
+          },
+          "permissions": {
+            "service.display.read": "standard",
+            "service.display.control": "elevated"
+          }
+        }
+      }
+    }
+  }
+}
