@@ -373,8 +373,10 @@ at the top of this file; prefer it over further single-pass scoping.
       Settings is fixed by giving each page its own slot column. A minimal pair of swapped branches does not
       reproduce it, so find the smallest trigger (embedded components laid out a frame after mount) and decide
       whether `{#if}` branches should carry their own identity, as `{#for}` blocks do.
-- [ ] Measure the shipped launcher, font, icon-theme and inspector lists under automatic windowing; wrapping
-      grids and uneven rows build in full by design, and the real data sets are not reproduced in tests.
+- [ ] Measure the shipped lists under automatic windowing with real data sets. By reading the markup: the dock
+      launcher's list mode (`app-list`, one `button` per app) can window, its grid (`flex-wrap`) builds in full;
+      the Settings font list is a paged `<scroll>` ("show more"), so it rarely reaches 100 rows; the inspector
+      `{#for row in …}` tables are the likely large ones. None has a fixture with a realistic count.
 - [ ] Uneven windowed lists estimate unmeasured rows from a fixed mean, so the scrollbar thumb and extent are
       approximate and scrolling far then back can shift content by the difference between estimate and
       measurement. Anchor the scroll offset to the first visible row when measurements replace estimates.
