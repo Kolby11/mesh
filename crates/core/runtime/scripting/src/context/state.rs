@@ -528,7 +528,16 @@ impl ScriptState {
         };
         windows.insert(
             list_id.to_owned(),
-            serde_json::json!([range.first as u64, range.last as u64, range.extent]),
+            match range.spacers {
+                Some((lead, trail)) => serde_json::json!([
+                    range.first as u64,
+                    range.last as u64,
+                    range.extent,
+                    lead,
+                    trail
+                ]),
+                None => serde_json::json!([range.first as u64, range.last as u64, range.extent]),
+            },
         );
         let value = Value::Object(windows);
         let fingerprint = {
@@ -553,6 +562,10 @@ impl VariableStore for ScriptState {
             first: usize::try_from(range.first()?.as_u64()?).ok()?,
             last: usize::try_from(range.get(1)?.as_u64()?).ok()?,
             extent: range.get(2)?.as_f64()? as f32,
+            spacers: range
+                .get(3)
+                .zip(range.get(4))
+                .and_then(|(lead, trail)| Some((lead.as_f64()? as f32, trail.as_f64()? as f32))),
         })
     }
 

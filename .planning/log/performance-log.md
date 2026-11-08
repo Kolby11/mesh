@@ -10287,3 +10287,7 @@ Page switches, same fixture and binaries, `--profile profiling`, three runs each
 ## 2026-11-08 — Viewport-limited scroll replay on a fully built 2,000-row list
 
 Same fixture and command as the pruned hit-test entry above (`windowed_list_profile`, `MESH_PROFILE_UNEVEN=1 MESH_PROFILE_UNWINDOWED_ONLY=1`, `--release`), pruned hit tests already in place, two passes of three runs. Scroll frame (`TwoFingerScroll` + paint, 20-frame mean): before 5.78–7.49 ms, after 1.17–1.77 ms (about 4–5x). First paint and the settle frames (219–361 ms) are unchanged. Not measured: live pointer-motion frames, GPU raster, or lists with overlapping rows (kept by bounds, not culled).
+
+## 2026-11-08 — Windowing uneven rows
+
+`windowed_list_profile`, `MESH_PROFILE_UNEVEN=1 MESH_PROFILE_UNWINDOWED_ONLY=1`, `--release`, 2,000 rows with row 5 at 55 px, two passes of three runs. Settle (3 frames after first paint): before 219–361 ms, after 1.1–1.8 ms. Scroll frame: before 1.2–1.8 ms (after replay pruning), after 0.21–0.29 ms. First paint 25–27 ms in both. Not measured: the shipped lists, a list with many differently sized rows in the viewport, or scroll jumps when estimates are replaced (not tested).

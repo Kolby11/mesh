@@ -1282,6 +1282,7 @@ pub struct FrontendSurfaceComponent {
     element_metric_usage: ElementMetricUsage,
     /// Whether the last retained tree contained a windowed `{#for}` list.
     virtual_lists_seen: bool,
+    virtual_pitches: virtual_list::PitchCache,
     /// Cache of resolved surface shortcuts keyed by the already-cached
     /// `KeyboardSettings` plus active locale. Resolution clones manifest
     /// declarations, checks overrides, and localizes triggers, so avoid doing
@@ -1652,6 +1653,7 @@ impl FrontendSurfaceComponent {
             runtime_style_diagnostic_fingerprint: None,
             element_metric_usage,
             virtual_lists_seen: false,
+            virtual_pitches: Default::default(),
             resolved_surface_shortcuts_cache: RefCell::new(None),
             pending_assigned_write: RefCell::new(None),
             key_hints: Default::default(),

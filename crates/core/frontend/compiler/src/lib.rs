@@ -1362,6 +1362,7 @@ mod tests {
                 first,
                 last,
                 extent: if last == usize::MAX { 0.0 } else { 40.0 },
+                spacers: None,
             })
         }
 

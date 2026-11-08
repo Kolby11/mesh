@@ -517,6 +517,7 @@ fn virtual_window_round_trips_per_list_and_reports_changes() {
         first,
         last,
         extent,
+        spacers: None,
     };
     let mut state = ScriptState::new();
     assert_eq!(state.virtual_window("main#10"), None);

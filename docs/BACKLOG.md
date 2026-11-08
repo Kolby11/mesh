@@ -375,11 +375,9 @@ at the top of this file; prefer it over further single-pass scoping.
       whether `{#if}` branches should carry their own identity, as `{#for}` blocks do.
 - [ ] Measure the shipped launcher, font, icon-theme and inspector lists under automatic windowing; wrapping
       grids and uneven rows build in full by design, and the real data sets are not reproduced in tests.
-- [ ] Lists that must stay fully built (uneven rows, no scroller) switch from a windowed first frame to a full
-      build on the second, a ~300 ms frame at 2,000 rows. Window uneven rows against estimated sizes, or build
-      the first frame in full. Scroll frames are pruned already; pruning only holds while the component has no
-      pending change, and non-retained scrollers are never pruned below. Replay still scans every content
-      entry linearly.
+- [ ] Uneven windowed lists estimate unmeasured rows from a fixed mean, so the scrollbar thumb and extent are
+      approximate and scrolling far then back can shift content by the difference between estimate and
+      measurement. Anchor the scroll offset to the first visible row when measurements replace estimates.
 - [ ] A windowed list holds its first frame back for one settle frame (wrong scrollbar, partial rows) because
       layout is needed to measure; consider settling in the same paint before presentation.
 

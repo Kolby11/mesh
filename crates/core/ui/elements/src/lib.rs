@@ -106,6 +106,10 @@ pub struct VirtualRange {
     /// Main-axis size of one item in px, gap excluded; zero when not yet
     /// measured.
     pub extent: f32,
+    /// Main-axis px of the leading and trailing spacers when the items are not
+    /// all the same size, measured where known and estimated elsewhere. `None`
+    /// derives both from `extent`.
+    pub spacers: Option<(f32, f32)>,
 }
 
 impl VirtualRange {
@@ -114,6 +118,7 @@ impl VirtualRange {
         first: 0,
         last: usize::MAX,
         extent: 0.0,
+        spacers: None,
     };
 
     pub fn is_full(self) -> bool {

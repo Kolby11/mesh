@@ -269,18 +269,45 @@ fn large_plain_list_is_windowed_automatically_and_scrolls_like_a_full_one() {
 }
 
 #[test]
-fn large_plain_list_with_uneven_rows_is_built_in_full() {
+fn large_plain_list_with_uneven_rows_is_windowed_and_scrolls_to_the_end() {
     let theme = Theme::new("empty", "Empty");
-    let source = list_source(300, "", "row", "").replace(
+    let source = list_source(2_000, "", "row", "").replace(
         r#"<box class="row">"#,
-        r#"<box class="row" style:height={item == 5 and "55px" or "20px"}>"#,
+        r#"<box class="row" style:height={item % 7 == 0 and "55px" or "20px"}>"#,
     );
     let mut component = test_frontend_component(&source);
     Arc::make_mut(&mut component.settings)
         .set_namespace("shell", serde_json::json!({"motion":{"reduced":true}}));
     let mut pixels = PixelBuffer::new(200, 140);
-    paint_frames(&mut component, &theme, &mut pixels, 4);
-    assert_eq!(scroll_list_children(&component), 300);
+    paint_frames(&mut component, &theme, &mut pixels, 6);
+    assert!(
+        scroll_list_children(&component) < 100,
+        "uneven rows are windowed, {} built",
+        scroll_list_children(&component)
+    );
+
+    let viewport = first_node_by_tag(component.last_tree.as_ref().unwrap(), "scroll").unwrap();
+    let (x, y) = (viewport.layout.x + 10.0, viewport.layout.y + 10.0);
+    for _ in 0..4 {
+        component
+            .handle_input(
+                &theme,
+                200,
+                140,
+                ComponentInput::TwoFingerScroll {
+                    x,
+                    y,
+                    dx: 0.0,
+                    dy: -100_000.0,
+                },
+            )
+            .unwrap();
+        paint_frames(&mut component, &theme, &mut pixels, 6);
+    }
+    let text = rendered_text(&component);
+    assert!(text.contains(&"2000".to_string()), "{text:?}");
+    assert!(!text.contains(&"1".to_string()), "{text:?}");
+    assert!(scroll_list_children(&component) < 100);
 }
 
 /// Counts the nodes a pruned traversal descends into.
@@ -312,7 +339,7 @@ fn painted_extent_pruning_matches_the_full_hit_test_on_a_scrolled_uneven_list() 
         pointer_hit_test, pointer_hit_test_pruned, pointer_press_hit, pointer_press_hit_pruned,
     };
     let theme = Theme::new("empty", "Empty");
-    let source = list_source(300, "", "row", "")
+    let source = list_source(90, "", "row", "")
         .replace(
             r#"<box class="row">"#,
             r#"<button class="row" onclick={function() end} style:height={item == 5 and "55px" or "20px"}>"#,
@@ -323,7 +350,7 @@ fn painted_extent_pruning_matches_the_full_hit_test_on_a_scrolled_uneven_list() 
         .set_namespace("shell", serde_json::json!({"motion":{"reduced":true}}));
     let mut pixels = PixelBuffer::new(200, 140);
     paint_frames(&mut component, &theme, &mut pixels, 4);
-    assert_eq!(scroll_list_children(&component), 300);
+    assert_eq!(scroll_list_children(&component), 90);
 
     let viewport = first_node_by_tag(component.last_tree.as_ref().unwrap(), "scroll").unwrap();
     let (vx, vy) = (viewport.layout.x, viewport.layout.y);
@@ -380,8 +407,8 @@ fn painted_extent_pruning_matches_the_full_hit_test_on_a_scrolled_uneven_list() 
         pointer_hit_test_pruned(tree, x, y, Some(&counting as &dyn PaintedExtents));
         eprintln!("scroll {scroll}: visited {}", counting.visited.get());
         assert!(
-            counting.visited.get() < 60,
-            "a hit visits {} of 300 rows' nodes",
+            counting.visited.get() < 40,
+            "a hit visits {} of 90 rows' nodes",
             counting.visited.get()
         );
     }

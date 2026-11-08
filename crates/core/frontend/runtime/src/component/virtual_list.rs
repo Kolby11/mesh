@@ -9,6 +9,7 @@
 use super::FrontendSurfaceComponent;
 use mesh_core_elements::style::FlexDirection;
 use mesh_core_elements::{Prop, VirtualRange, WidgetNode};
+use std::collections::HashMap;
 
 /// A focused row stays built while it is within this many items of the window;
 /// further away it is released rather than building everything in between.
@@ -34,7 +35,11 @@ impl FrontendSurfaceComponent {
     /// any changed. The range lives in the owning instance's script state, so
     /// the ordinary state-change path invalidates its memo.
     pub(super) fn update_virtual_windows(&mut self, tree: &WidgetNode) {
-        let (choices, seen) = choose_virtual_windows(tree, self.focused_key.as_deref());
+        let (choices, seen) = choose_virtual_windows(
+            tree,
+            self.focused_key.as_deref(),
+            &mut self.virtual_pitches,
+        );
         self.virtual_lists_seen = seen;
         let mut changed = false;
         {
@@ -53,6 +58,34 @@ impl FrontendSurfaceComponent {
         }
         if changed {
             self.invalidate_script_state();
+        }
+    }
+}
+
+/// Measured item pitches for the lists whose items differ in size, keyed by
+/// list identity. A list enters this mode when its built items are not all the
+/// same size and stays in it until its length changes.
+#[derive(Debug, Default)]
+pub(super) struct PitchCache {
+    lists: HashMap<String, ListPitches>,
+}
+
+#[derive(Debug, Default)]
+struct ListPitches {
+    total: usize,
+    /// Distance from each item to the next along the scroll axis, gap
+    /// included; zero until the item has been built and laid out.
+    pitches: Vec<f32>,
+    /// Pitch assumed for items not yet measured. Fixed when the list enters
+    /// this mode, so later measurements do not move content under the viewport.
+    estimate: f32,
+}
+
+impl ListPitches {
+    fn pitch(&self, index: usize) -> f32 {
+        match self.pitches.get(index) {
+            Some(pitch) if *pitch > 0.0 => *pitch,
+            _ => self.estimate,
         }
     }
 }
@@ -95,17 +128,26 @@ fn parse_meta(node: &WidgetNode) -> Option<SpacerMeta<'_>> {
 pub(super) fn choose_virtual_windows(
     tree: &WidgetNode,
     focused_key: Option<&str>,
+    cache: &mut PitchCache,
 ) -> (Vec<VirtualWindowChoice>, bool) {
     let mut choices = Vec::new();
     let mut seen = false;
     let mut ancestors = Vec::new();
-    walk(tree, focused_key, &mut ancestors, &mut choices, &mut seen);
+    walk(
+        tree,
+        focused_key,
+        cache,
+        &mut ancestors,
+        &mut choices,
+        &mut seen,
+    );
     (choices, seen)
 }
 
 fn walk<'a>(
     node: &'a WidgetNode,
     focused_key: Option<&str>,
+    cache: &mut PitchCache,
     ancestors: &mut Vec<&'a WidgetNode>,
     choices: &mut Vec<VirtualWindowChoice>,
     seen: &mut bool,
@@ -118,7 +160,7 @@ fn walk<'a>(
         {
             handled.push(meta.list_id);
             *seen = true;
-            if let Some(range) = choose_for_list(node, ancestors, &meta, focused_key) {
+            if let Some(range) = choose_for_list(node, ancestors, &meta, focused_key, cache) {
                 choices.push(VirtualWindowChoice {
                     list_id: meta.list_id.to_owned(),
                     range,
@@ -127,7 +169,7 @@ fn walk<'a>(
         }
     }
     for child in &node.children {
-        walk(child, focused_key, ancestors, choices, seen);
+        walk(child, focused_key, cache, ancestors, choices, seen);
     }
     ancestors.pop();
 }
@@ -138,6 +180,7 @@ fn choose_for_list(
     ancestors: &[&WidgetNode],
     meta: &SpacerMeta<'_>,
     focused_key: Option<&str>,
+    cache: &mut PitchCache,
 ) -> Option<VirtualRange> {
     let column = !matches!(parent.computed_style.direction, FlexDirection::Row);
     let position = |node: &WidgetNode| if column { node.layout.y } else { node.layout.x };
@@ -174,19 +217,31 @@ fn choose_for_list(
     };
 
     let pitch = uniform_pitch(items, &position);
+    let variable = cache.lists.contains_key(meta.list_id)
+        || if meta.extent > 0.0 {
+            match pitch {
+                Some(measured) => (measured - (meta.extent + gap)).abs() > PITCH_TOLERANCE,
+                None => items.len() >= 3,
+            }
+        } else {
+            pitch.is_none_or(|pitch| pitch - gap <= 0.0) && items.len() >= 3
+        };
+    if variable {
+        return choose_variable(
+            parent,
+            &spacer_indices,
+            items,
+            meta,
+            (gap, scroller, column),
+            focused_key,
+            cache,
+        );
+    }
     let extent = if meta.extent > 0.0 {
-        if let Some(measured) = pitch
-            && (measured - (meta.extent + gap)).abs() > PITCH_TOLERANCE
-        {
-            return Some(VirtualRange::FULL);
-        }
         meta.extent
     } else {
-        // Not yet measured: infer the item size, or give up on windowing when
-        // the items are not all the same size.
         match pitch {
             Some(pitch) if pitch - gap > 0.0 => pitch - gap,
-            _ if items.len() >= 3 => return Some(VirtualRange::FULL),
             _ => return None,
         }
     };
@@ -224,6 +279,119 @@ fn choose_for_list(
         first,
         last,
         extent,
+        spacers: None,
+    })
+}
+
+/// Window selection for a list whose items differ in size: spacers are sums of
+/// measured item pitches, with the fixed estimate standing in for items that
+/// have not been built yet.
+fn choose_variable(
+    parent: &WidgetNode,
+    spacer_indices: &[usize],
+    items: &[WidgetNode],
+    meta: &SpacerMeta<'_>,
+    (gap, scroller, column): (f32, &WidgetNode, bool),
+    focused_key: Option<&str>,
+    cache: &mut PitchCache,
+) -> Option<VirtualRange> {
+    let position = |node: &WidgetNode| if column { node.layout.y } else { node.layout.x };
+    let size = |node: &WidgetNode| if column { node.layout.height } else { node.layout.width };
+    let entered = !cache.lists.contains_key(meta.list_id);
+    let list = cache.lists.entry(meta.list_id.to_owned()).or_default();
+    if list.total != meta.total {
+        *list = ListPitches {
+            total: meta.total,
+            pitches: vec![0.0; meta.total],
+            estimate: 0.0,
+        };
+    }
+    let trailing = (meta.last < meta.total)
+        .then(|| spacer_indices.last().and_then(|&at| parent.children.get(at)))
+        .flatten();
+    for (offset, item) in items.iter().enumerate() {
+        let next = items.get(offset + 1).or(trailing);
+        let pitch = match next {
+            Some(next) => position(next) - position(item),
+            None => size(item) + gap,
+        };
+        if let Some(slot) = list.pitches.get_mut(meta.first + offset) {
+            *slot = pitch.max(0.0);
+        }
+    }
+    if list.estimate <= 0.0 {
+        let known: Vec<f32> = list.pitches.iter().copied().filter(|p| *p > 0.0).collect();
+        list.estimate = if known.is_empty() && entered && meta.extent > 0.0 {
+            meta.extent + gap
+        } else {
+            known.iter().sum::<f32>() / known.len().max(1) as f32
+        };
+    }
+    if list.estimate <= 0.0 {
+        return None;
+    }
+
+    let main = |node: &WidgetNode| size(node);
+    let leading = (meta.first > 0)
+        .then(|| spacer_indices.first().and_then(|&at| parent.children.get(at)))
+        .flatten();
+    let list_start = leading.map_or_else(|| position(&items[0]), |spacer| position(spacer));
+    let scroll = scroller.resolved_scroll_metrics();
+    let (scroll_offset, viewport) = if column {
+        (scroll.y, scroller.layout.height)
+    } else {
+        (scroll.x, scroller.layout.width)
+    };
+    let band_start = position(scroller) + scroll_offset - list_start;
+    let band_end = band_start + viewport;
+    let mut visible_first = meta.total;
+    let mut visible_last = meta.total;
+    let mut start = 0.0_f32;
+    for index in 0..meta.total {
+        let end = start + list.pitch(index);
+        if visible_first == meta.total && end > band_start {
+            visible_first = index;
+        }
+        if start >= band_end {
+            visible_last = index;
+            break;
+        }
+        start = end;
+    }
+    let visible_first = visible_first.min(visible_last);
+
+    let covered = (meta.first == 0 || visible_first >= meta.first)
+        && (meta.last == meta.total || visible_last <= meta.last);
+    let (first, last) = if covered {
+        (meta.first, meta.last)
+    } else {
+        let first = visible_first.saturating_sub(meta.overscan);
+        let last = (visible_last + meta.overscan).min(meta.total).max(first);
+        keep_focused_item(
+            (first, last),
+            focused_item_ordinal(items, meta.first, focused_key),
+        )
+    };
+    let skipped = |range: std::ops::Range<usize>| {
+        if range.is_empty() {
+            0.0
+        } else {
+            (range.map(|index| list.pitch(index)).sum::<f32>() - gap).max(0.0)
+        }
+    };
+    let (lead, trail) = (skipped(0..first), skipped(last..meta.total));
+    let recorded = |spacer: Option<&WidgetNode>| spacer.map_or(0.0, main);
+    let settled = (lead - recorded(leading)).abs() < 0.5
+        && (trail - recorded(trailing)).abs() < 0.5
+        && (meta.extent - list.estimate).abs() < 0.01;
+    if covered && settled {
+        return None;
+    }
+    Some(VirtualRange {
+        first,
+        last,
+        extent: list.estimate,
+        spacers: Some((lead, trail)),
     })
 }
 
@@ -279,7 +447,7 @@ mod tests {
     const EXTENT: f32 = 40.0;
 
     fn choose(tree: &WidgetNode) -> (Vec<VirtualWindowChoice>, bool) {
-        choose_virtual_windows(tree, None)
+        choose_virtual_windows(tree, None, &mut PitchCache::default())
     }
 
     fn spacer(meta: &str, pos: f32) -> WidgetNode {
@@ -341,6 +509,7 @@ mod tests {
                 first,
                 last,
                 extent: EXTENT,
+                spacers: None,
             },
         }]
     }
@@ -404,30 +573,69 @@ mod tests {
         assert_eq!((chosen.first, chosen.last), (0, 26));
     }
 
-    #[test]
-    fn items_of_different_sizes_make_the_list_build_in_full() {
-        let (choices, _) = choose(&tree_with(
-            (0, 26, 500),
-            0.0,
-            |index| if index == 5 { 90.0 } else { 40.0 },
-            0.0,
-            0.0,
-        ));
-        assert_eq!(choices.len(), 1);
-        assert_eq!(choices[0].range, VirtualRange::FULL);
+    fn uneven(index: usize) -> f32 {
+        if index % 5 == 0 { 90.0 } else { 40.0 }
     }
 
     #[test]
-    fn a_recorded_extent_that_no_longer_matches_builds_in_full() {
-        let (choices, _) = choose(&tree_with(
-            (0, 26, 500),
-            0.0,
-            |_| 64.0,
-            0.0,
-            EXTENT,
-        ));
+    fn items_of_different_sizes_window_against_an_estimated_pitch() {
+        let (choices, _) = choose(&tree_with((0, 26, 500), 0.0, uneven, 0.0, 0.0));
         assert_eq!(choices.len(), 1);
-        assert_eq!(choices[0].range, VirtualRange::FULL);
+        let range = choices[0].range;
+        // Items 0, 5, .. 25 are 90px: 6 * 90 + 20 * 40 = 1340 over 26 items.
+        let estimate = 1340.0 / 26.0;
+        assert_eq!((range.first, range.last), (0, 26));
+        assert!((range.extent - estimate).abs() < 0.01);
+        let (lead, trail) = range.spacers.unwrap();
+        assert_eq!(lead, 0.0);
+        assert!((trail - 474.0 * estimate).abs() < 0.5);
+    }
+
+    #[test]
+    fn a_recorded_extent_that_no_longer_matches_measures_the_real_pitch() {
+        let (choices, _) = choose(&tree_with((0, 26, 500), 0.0, |_| 64.0, 0.0, EXTENT));
+        assert_eq!(choices.len(), 1);
+        let range = choices[0].range;
+        assert_eq!(range.extent, 64.0);
+        assert_eq!(range.spacers, Some((0.0, 474.0 * 64.0)));
+    }
+
+    #[test]
+    fn a_settled_uneven_list_asks_for_no_change() {
+        let mut cache = PitchCache::default();
+        let (first, _) = choose_virtual_windows(
+            &tree_with((0, 26, 500), 0.0, uneven, 0.0, 0.0),
+            None,
+            &mut cache,
+        );
+        let range = first[0].range;
+        let mut settled = tree_with((0, 26, 500), 0.0, uneven, 0.0, range.extent);
+        let list = &mut settled.children[0].children[0];
+        list.children.last_mut().unwrap().layout.height = range.spacers.unwrap().1;
+        let (second, _) = choose_virtual_windows(&settled, None, &mut cache);
+        assert!(second.is_empty(), "{second:?}");
+    }
+
+    #[test]
+    fn scrolling_an_uneven_list_uses_cumulative_pitches() {
+        let mut cache = PitchCache::default();
+        choose_virtual_windows(
+            &tree_with((0, 26, 500), 0.0, uneven, 0.0, 0.0),
+            None,
+            &mut cache,
+        );
+        let estimate = 1340.0 / 26.0;
+        let (choices, _) = choose_virtual_windows(
+            &tree_with((0, 26, 500), 10_000.0, uneven, 0.0, estimate),
+            None,
+            &mut cache,
+        );
+        let range = choices[0].range;
+        let visible = (10_000.0 / estimate) as usize;
+        assert!(range.first <= visible && range.first + 6 >= visible, "{range:?}");
+        let (lead, trail) = range.spacers.unwrap();
+        assert!((lead - range.first as f32 * estimate).abs() < estimate + 1.0);
+        assert!(trail > 0.0);
     }
 
     #[test]
@@ -457,7 +665,7 @@ mod tests {
     fn a_focused_row_just_above_the_new_window_stays_built() {
         let mut tree = tree(0, 7, 100, 1000.0);
         let key = focus_item(&mut tree, 0, 3);
-        let (choices, _) = choose_virtual_windows(&tree, Some(key));
+        let (choices, _) = choose_virtual_windows(&tree, Some(key), &mut PitchCache::default());
         assert_eq!(choices, range(3, 32));
     }
 
@@ -465,7 +673,7 @@ mod tests {
     fn a_focused_row_below_the_new_window_stays_built() {
         let mut tree = tree(23, 32, 100, 0.0);
         let key = focus_item(&mut tree, 23, 30);
-        let (choices, _) = choose_virtual_windows(&tree, Some(key));
+        let (choices, _) = choose_virtual_windows(&tree, Some(key), &mut PitchCache::default());
         assert_eq!(choices, range(0, 31));
     }
 
@@ -473,14 +681,18 @@ mod tests {
     fn a_focused_row_far_from_the_window_is_released() {
         let mut tree = tree(0, 7, 2_000, 70_000.0);
         let key = focus_item(&mut tree, 0, 3);
-        let (choices, _) = choose_virtual_windows(&tree, Some(key));
+        let (choices, _) = choose_virtual_windows(&tree, Some(key), &mut PitchCache::default());
         assert_eq!(choices.len(), 1);
         assert!(choices[0].range.first > FOCUS_KEEP_DISTANCE);
     }
 
     #[test]
     fn focus_outside_the_list_does_not_change_the_window() {
-        let (with_focus, _) = choose_virtual_windows(&tree(0, 7, 100, 1000.0), Some("elsewhere"));
+        let (with_focus, _) = choose_virtual_windows(
+            &tree(0, 7, 100, 1000.0),
+            Some("elsewhere"),
+            &mut PitchCache::default(),
+        );
         assert_eq!(with_focus, range(23, 32));
     }
 }

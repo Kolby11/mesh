@@ -780,8 +780,16 @@ where
         let windowing = windowing.expect("spacers exist only for windowed loops");
         // Layout adds one `gap` between the spacer and its neighbouring item
         // that the skipped items would not have had after their last one.
-        let skipped_extent =
-            (skipped as f32 * (windowing.extent + main_axis_gap) - main_axis_gap).max(0.0);
+        let skipped_extent = match windowing.spacers {
+            Some((lead, trail)) => {
+                if leading {
+                    lead
+                } else {
+                    trail
+                }
+            }
+            None => (skipped as f32 * (windowing.extent + main_axis_gap) - main_axis_gap).max(0.0),
+        };
         virtual_spacer(
             skipped_extent,
             spacer_axis,
@@ -957,6 +965,8 @@ struct Windowing {
     /// Item size along the scroll axis, gap excluded; zero until measured.
     extent: f32,
     overscan: usize,
+    /// Spacer sizes chosen by the host for items of unequal size.
+    spacers: Option<(f32, f32)>,
     /// Inferred from measurement rather than declared with `window=`.
     auto: bool,
 }
@@ -1011,6 +1021,7 @@ fn virtual_windowing(
         range: (first.min(last), last),
         extent,
         overscan,
+        spacers: chosen.and_then(|chosen| chosen.spacers),
         auto: declared.is_none(),
     })
 }
