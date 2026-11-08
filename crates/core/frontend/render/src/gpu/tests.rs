@@ -915,7 +915,7 @@ mod frame_cost {
                 1,
                 move || {
                     Ok::<_, crate::gpu::scene::GpuSceneError>(FinishedSceneRenderer(
-                        crate::gpu::scene::GpuSceneRenderer::new(drm_device)?,
+                        crate::gpu::scene::GpuSceneRenderer::new(drm_device, false)?,
                     ))
                 },
                 || {},
@@ -1024,7 +1024,7 @@ mod frame_cost {
         crate::scene_thread::SceneRenderThread::spawn(
             1,
             move || {
-                let mut inner = crate::gpu::scene::GpuSceneRenderer::new(device)?;
+                let mut inner = crate::gpu::scene::GpuSceneRenderer::new(device, false)?;
                 if baseline {
                     inner.disable_residency();
                 }
@@ -1426,6 +1426,42 @@ mod frame_cost {
                 summary(&parallel),
                 summary(&single_direct),
                 summary(&single_deferred),
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn gpu_resize_allocation_workload() {
+        const STEPS: u32 = 200;
+        for node in render_nodes() {
+            let Ok(mut context) = GpuContext::on_drm_device(node) else {
+                continue;
+            };
+            if !context.supports_dmabuf_export() {
+                continue;
+            }
+            let renderer = context.renderer().to_owned();
+            let mut samples = Vec::new();
+            for _ in 0..=SAMPLES {
+                let started = Instant::now();
+                for step in 0..STEPS {
+                    let (width, height) = (1800 + step, 1200);
+                    let retained = context.offscreen_target(width, height).unwrap();
+                    let ring = [
+                        context.dmabuf_target(width, height).unwrap(),
+                        context.dmabuf_target(width, height).unwrap(),
+                        context.dmabuf_target(width, height).unwrap(),
+                    ];
+                    context.finish();
+                    drop((retained, ring));
+                }
+                samples.push(started.elapsed());
+            }
+            samples.remove(0);
+            eprintln!(
+                "{renderer}: reallocate retained target + 3 dmabuf slots per size change: {}",
+                summary_for(&samples, STEPS as usize)
             );
         }
     }

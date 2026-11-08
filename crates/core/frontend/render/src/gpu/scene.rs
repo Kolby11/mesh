@@ -25,6 +25,8 @@ struct Slot {
 
 struct SurfaceState {
     retained: GpuTarget,
+    /// The extent last drawn, which may be smaller than `retained`.
+    rendered: (u32, u32),
     slots: Vec<Slot>,
     _reservation: mesh_core_resources::ResourceByteReservation,
 }
@@ -33,8 +35,13 @@ struct SurfaceState {
 /// an output never calls GL, even after renderer shutdown or surface removal.
 pub struct GpuSceneOutput {
     pub planes: DmabufPlanes,
+    /// The allocated buffer extent. With size classes it can exceed the
+    /// rendered extent; the consumer crops to `rendered_width` ×
+    /// `rendered_height`.
     pub width: u32,
     pub height: u32,
+    pub rendered_width: u32,
+    pub rendered_height: u32,
     pub damage: Vec<DamageRect>,
     leased: Arc<AtomicU8>,
 }
@@ -122,20 +129,34 @@ pub struct GpuSceneRenderer {
     residency: ImageResidency,
     context: GpuContext,
     budget: mesh_core_resources::ResourceByteBudget,
+    size_classes: bool,
     #[cfg(test)]
     rasterizations: usize,
+}
+
+/// Allocation granularity in physical pixels. A drag-resize reallocates the
+/// retained target, the dmabuf ring and the compositor imports once per class
+/// rather than once per pixel step.
+const SIZE_CLASS: u32 = 64;
+
+fn size_class(extent: u32) -> u32 {
+    extent.div_ceil(SIZE_CLASS).saturating_mul(SIZE_CLASS)
 }
 
 impl GpuSceneRenderer {
     /// Construct on the worker on the compositor's device. Probe descriptors
     /// before enabling this renderer; unsupported export falls back to SHM.
-    pub fn new(device: u64) -> Result<Self, GpuSceneError> {
+    ///
+    /// `size_classes` rounds allocations up to [`SIZE_CLASS`]; enable it only
+    /// when the consumer can crop the buffer to the rendered extent.
+    pub fn new(device: u64, size_classes: bool) -> Result<Self, GpuSceneError> {
         let context = GpuContext::on_drm_device(device).map_err(GpuSceneError::Gpu)?;
         Ok(Self {
             surfaces: BTreeMap::new(),
             residency: ImageResidency::new(64 * 1024 * 1024),
             context,
             budget: mesh_core_resources::ResourceByteBudget::new(512 * 1024 * 1024),
+            size_classes,
             #[cfg(test)]
             rasterizations: 0,
         })
@@ -227,13 +248,22 @@ impl SceneRenderer for GpuSceneRenderer {
         self.residency.prepare(&snapshot.resources().images);
         let scale = snapshot.scale();
         let size = snapshot.resources().size();
-        let resized = self
-            .surfaces
-            .get(&snapshot.surface())
-            .is_none_or(|state| (state.retained.width(), state.retained.height()) != size);
-        let bytes = crate::surface::checked_pixel_bytes(size.0, size.1, 4)
+        let allocation = if self.size_classes {
+            (size_class(size.0), size_class(size.1))
+        } else {
+            size
+        };
+        let reallocated = self.surfaces.get(&snapshot.surface()).is_none_or(|state| {
+            (state.retained.width(), state.retained.height()) != allocation
+        });
+        let redrawn = reallocated
+            || self
+                .surfaces
+                .get(&snapshot.surface())
+                .is_none_or(|state| state.rendered != size);
+        let bytes = crate::surface::checked_pixel_bytes(allocation.0, allocation.1, 4)
             .ok_or(GpuSceneError::ResourceBudget)?;
-        if resized {
+        if reallocated {
             self.surfaces.remove(&snapshot.surface());
             let reservation = self
                 .budget
@@ -241,12 +271,13 @@ impl SceneRenderer for GpuSceneRenderer {
                 .ok_or(GpuSceneError::ResourceBudget)?;
             let retained = self
                 .context
-                .offscreen_target(size.0, size.1)
+                .offscreen_target(allocation.0, allocation.1)
                 .map_err(GpuSceneError::Gpu)?;
             self.surfaces.insert(
                 snapshot.surface(),
                 SurfaceState {
                     retained,
+                    rendered: size,
                     slots: Vec::new(),
                     _reservation: reservation,
                 },
@@ -262,7 +293,8 @@ impl SceneRenderer for GpuSceneRenderer {
             width: size.0,
             height: size.1,
         };
-        let damage = if resized || frame.requires_full_replay() {
+        state.rendered = size;
+        let damage = if redrawn || frame.requires_full_replay() {
             vec![full]
         } else {
             crate::DeviceDamage::from_logical(
@@ -346,11 +378,12 @@ impl GpuSceneRenderer {
             .get_mut(&surface)
             .expect("retry retains its raster target");
         let size = (state.retained.width(), state.retained.height());
+        let rendered = state.rendered;
         let full = DamageRect {
             x: 0,
             y: 0,
-            width: size.0,
-            height: size.1,
+            width: rendered.0,
+            height: rendered.1,
         };
         let bytes = crate::surface::checked_pixel_bytes(size.0, size.1, 4)
             .ok_or(GpuSceneError::ResourceBudget)?;
@@ -390,6 +423,8 @@ impl GpuSceneRenderer {
             planes,
             width: size.0,
             height: size.1,
+            rendered_width: rendered.0,
+            rendered_height: rendered.1,
             damage: copied,
             leased: Arc::clone(&slot.leased),
         })
@@ -476,9 +511,13 @@ mod tests {
     }
 
     fn worker() -> Option<SceneRenderThread<InspectRenderer>> {
+        worker_with(false)
+    }
+
+    fn worker_with(size_classes: bool) -> Option<SceneRenderThread<InspectRenderer>> {
         let result = SceneRenderThread::spawn(
             2,
-            || {
+            move || {
                 let nodes = std::fs::read_dir("/dev/dri").map_err(GpuSceneError::Descriptor)?;
                 let mut error = GpuSceneError::Gpu(super::super::GpuError::DmabufExport);
                 for node in nodes
@@ -486,7 +525,7 @@ mod tests {
                     .filter(|node| node.file_name().to_string_lossy().starts_with("renderD"))
                 {
                     let device = node.metadata().map_err(GpuSceneError::Descriptor)?.rdev();
-                    match GpuSceneRenderer::new(device).and_then(|mut renderer| {
+                    match GpuSceneRenderer::new(device, size_classes).and_then(|mut renderer| {
                         renderer.probe()?;
                         Ok(renderer)
                     }) {
@@ -513,8 +552,18 @@ mod tests {
         color: skia_safe::Color,
         patch: bool,
     ) -> crate::scene_thread::SceneSnapshot<PreparedScene> {
+        let size = (canvas.width(), canvas.height());
+        record_sized(canvas, color, patch, size)
+    }
+
+    fn record_sized(
+        canvas: &mut SceneCanvas,
+        color: skia_safe::Color,
+        patch: bool,
+        size: (u32, u32),
+    ) -> crate::scene_thread::SceneSnapshot<PreparedScene> {
         let mut plan = FramePaintPlan::empty();
-        plan.inputs.surface_size = Some((32, 24));
+        plan.inputs.surface_size = Some(size);
         plan.inputs.resource_revision = 7;
         plan.damage.logical = vec![DamageRect {
             x: 4,
@@ -641,6 +690,121 @@ mod tests {
         drop(held);
         for release in releases {
             release.release();
+        }
+    }
+
+    /// A resize that stays inside a 64 px class keeps the allocation, and the
+    /// grown area is drawn rather than inherited from the stale margin.
+    #[test]
+    fn scene_worker_keeps_the_allocation_across_a_resize_within_a_class() {
+        let Some(worker) = worker_with(true) else {
+            return;
+        };
+        let mut small = SceneCanvas::new(32, 24).unwrap();
+        let key = small.surface;
+        let first = worker
+            .submit(record(&mut small, skia_safe::Color::BLUE, true))
+            .unwrap();
+        let (first_output, first_pixels) = worker
+            .wait_completed(key, Duration::from_secs(10))
+            .unwrap()
+            .output
+            .unwrap();
+        assert_eq!((first_output.width, first_output.height), (64, 64));
+        assert_eq!(
+            (first_output.rendered_width, first_output.rendered_height),
+            (32, 24)
+        );
+        assert_eq!(
+            first_pixels.get_pixel(6, 6),
+            mesh_core_elements::Color {
+                r: 0,
+                g: 0,
+                b: 255,
+                a: 255
+            }
+        );
+        assert!(worker.acknowledge_presented(key, first));
+        let first_release = first_output.attached();
+
+        let mut grown = SceneCanvas::new(40, 30).unwrap();
+        grown.surface = key;
+        let second = worker
+            .submit(record(&mut grown, skia_safe::Color::GREEN, true))
+            .unwrap();
+        let (second_output, second_pixels) = worker
+            .wait_completed(key, Duration::from_secs(10))
+            .unwrap()
+            .output
+            .unwrap();
+        assert_eq!((second_output.width, second_output.height), (64, 64));
+        assert_eq!(
+            (second_output.rendered_width, second_output.rendered_height),
+            (40, 30)
+        );
+        assert_eq!(
+            second_pixels.get_pixel(6, 6),
+            mesh_core_elements::Color {
+                r: 0,
+                g: 255,
+                b: 0,
+                a: 255
+            }
+        );
+        assert_eq!(second_pixels.get_pixel(36, 28).r, 255, "grown area is drawn");
+        assert!(second_output.damage.contains(&DamageRect {
+            x: 0,
+            y: 0,
+            width: 40,
+            height: 30
+        }));
+        assert!(worker.acknowledge_presented(key, second));
+        worker.remove_surface(key);
+        worker.shutdown().unwrap();
+        first_release.retire();
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn scene_worker_resize_drag_workload() {
+        const STEPS: u32 = 200;
+        for size_classes in [false, true, false, true, false, true] {
+            let Some(worker) = worker_with(size_classes) else {
+                return;
+            };
+            let mut key = None;
+            let mut previous: Option<(u64, GpuSceneOutput)> = None;
+            let started = std::time::Instant::now();
+            for step in 0..STEPS {
+                let (width, height) = (1800 + step, 1200);
+                let mut canvas = SceneCanvas::new(width, height).unwrap();
+                let key = *key.get_or_insert(canvas.surface);
+                canvas.surface = key;
+                let commit = worker
+                    .submit(record_sized(
+                        &mut canvas,
+                        skia_safe::Color::BLUE,
+                        true,
+                        (width, height),
+                    ))
+                    .unwrap();
+                let (output, _) = worker
+                    .wait_completed(key, Duration::from_secs(10))
+                    .unwrap()
+                    .output
+                    .unwrap();
+                assert!(worker.acknowledge_presented(key, commit));
+                output.attached();
+                if let Some((_, old)) = previous.replace((0, output)) {
+                    old.attached().release();
+                }
+            }
+            let elapsed = started.elapsed();
+            eprintln!(
+                "size_classes={size_classes}: {:.3} ms per 1px resize step ({STEPS} steps, 1800x1200 -> 2000x1200)",
+                elapsed.as_secs_f64() * 1000.0 / f64::from(STEPS)
+            );
+            worker.shutdown().unwrap();
         }
     }
 

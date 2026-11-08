@@ -392,12 +392,8 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
 - [ ] Multi-rect damage replays the selection once per rect when it contains a
       layer scope (`painter/tree.rs:363,596`); paint once under a canvas `clip_region`,
       not the rects' union, or translucent pixels between rects composite twice.
-- [ ] A scroll viewport is one opaque replay span, so damage inside it replays
-      all content including offscreen rows (`display_list/build.rs:684`).
 - [ ] Popover show rebuilds the retained GPU target and dmabuf ring. Keep the
       target while hidden and pool dmabuf slots per size in `GpuPresenter`.
-- [ ] GPU target and dmabuf ring reallocate on every size change; round both up
-      to 64 px classes like the SHM path and crop with the viewport.
 - [ ] Opacity: single-primitive leaves open a `save_layer`; fold alpha into the
       paint instead. Animated opacity/transform layers have no raster cache.
 - [ ] The GPU painter keeps CPU-tuned choices (A8 atlas rounded fills, shader
@@ -422,8 +418,8 @@ From the 2026-09-30 Settings scroll session profile; evidence and A/B numbers
 in the [performance log](../.planning/log/performance-log.md). Roughly in order
 of payoff.
 
-- [ ] Fractional momentum scroll frames, and scopes over a non-uniform backdrop
-      (gradient, image, partial cover), still replay the whole viewport; a
+- [ ] Scopes over a non-uniform backdrop (gradient, image, partial cover) still
+      replay the whole viewport when they scroll; a
       transparent content raster could cover them ([design](../.planning/todos/pending/2026-09-30-scroll-raster-cache.md)).
 - [ ] In-surface blur re-blurs and repaints a frosted element's whole read
       region on any nearby change (a hover inside a frosted panel is ~7x a plain

@@ -29,6 +29,9 @@ pub(in crate::wayland_surface) struct DmabufProtocol {
     /// `wl_buffer`s attached and not yet released by the compositor.
     pub(in crate::wayland_surface) busy: HashSet<ObjectId>,
     releases: HashMap<ObjectId, GpuBufferRelease>,
+    /// Whether `wp_viewporter` can crop an oversized buffer to the rendered
+    /// extent, which lets the scene worker allocate in size classes.
+    size_classes: bool,
 }
 
 impl DmabufProtocol {
@@ -37,11 +40,15 @@ impl DmabufProtocol {
         // Version 4 reports the main device in feedback; the object only has
         // to live until the first `done`, so its handle is not retained.
         let _ = state.get_default_feedback(qh);
+        let size_classes = globals
+            .contents()
+            .with_list(|list| list.iter().any(|global| global.interface == "wp_viewporter"));
         Self {
             state,
             feedback: None,
             busy: HashSet::new(),
             releases: HashMap::new(),
+            size_classes,
         }
     }
 
@@ -186,6 +193,7 @@ impl GpuPresenter {
         if dmabuf.state.version().is_none() {
             return Err("compositor lacks zwp_linux_dmabuf_v1".into());
         }
+        let size_classes = dmabuf.size_classes;
         let device = dmabuf
             .main_device()
             .ok_or("compositor reported no dmabuf main device")?;
@@ -201,7 +209,7 @@ impl GpuPresenter {
         let worker = SceneRenderThread::spawn(
             64,
             move || {
-                let mut renderer = GpuSceneRenderer::new(device)?;
+                let mut renderer = GpuSceneRenderer::new(device, size_classes)?;
                 let planes = renderer.probe()?;
                 let _ = send_probe.send(planes);
                 Ok(renderer)
@@ -653,7 +661,7 @@ impl WaylandSurfaceBackend {
         }
         let (logical_w, logical_h) = entry.resolved_extent(output_size);
         let scale = entry.scale;
-        let (physical_w, physical_h) = (output.width, output.height);
+        let (physical_w, physical_h) = (output.rendered_width, output.rendered_height);
         let mut device_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]> =
             mesh_core_render::DeviceDamage::from_logical(
                 &pending.damage,

@@ -1,5 +1,30 @@
 # MESH Performance Log
 
+## 2026-11-08 — GPU scene targets allocate in 64 px size classes
+
+`working tree after 1412dcf2` · area: GPU scene worker, dmabuf presentation
+
+The scene worker allocated its retained target and every dmabuf slot at the
+exact rendered size, so a drag-resize recreated all of them, and the
+compositor imported a new `wl_buffer` for each, on every pixel step. When
+`wp_viewporter` is bound, allocations now round up to 64 physical px; the
+output carries both the buffer and the rendered extent and presentation crops
+with the existing viewport source. A resize inside a class keeps the allocation
+and redraws the full rendered area. Without viewporter, allocation stays exact.
+
+Release, `scene_worker_resize_drag_workload` (ignored), 1800×1200 → 2000×1200 in
+1 px steps, 200 steps through the scene worker with readback, three
+interleaved pairs on the NVIDIA RTX 4060 render node (first pair discarded as
+warm-up): exact 4.641–4.693 ms/step vs classes 3.809–3.929 ms/step (about 0.8
+ms, 17%). Most of the remaining step is harness readback. Allocation alone,
+`gpu_resize_allocation_workload`, retained target + 3 dmabuf slots per size
+change: NVIDIA 1.230–1.369 ms, AMD Radeon 780M 3.228–5.625 ms; classes pay that
+about once per 64 px instead of per px. Compositor-side import cost and a live
+Hyprland drag are not measured.
+`scene_worker_keeps_the_allocation_across_a_resize_within_a_class` covers
+allocation reuse and redraw of the grown area. `panel_chrome_and_text_paint_alike_on_gpu`
+fails identically on the baseline.
+
 ## 2026-11-07 — Scope scene invalidation to resource consumers
 
 `working tree` · area: recorded GPU scenes
