@@ -310,6 +310,27 @@ fn large_plain_list_with_uneven_rows_is_windowed_and_scrolls_to_the_end() {
     assert!(scroll_list_children(&component) < 100);
 }
 
+#[test]
+fn a_windowed_list_is_settled_by_its_first_paint() {
+    let theme = Theme::new("empty", "Empty");
+    let mut component = test_frontend_component(&list_source(2_000, "", "row", ""));
+    Arc::make_mut(&mut component.settings)
+        .set_namespace("shell", serde_json::json!({"motion":{"reduced":true}}));
+    let mut pixels = PixelBuffer::new(200, 140);
+    paint_frames(&mut component, &theme, &mut pixels, 1);
+    let viewport = first_node_by_tag(component.last_tree.as_ref().unwrap(), "scroll").unwrap();
+    let max = viewport.resolved_scroll_metrics().max_y;
+    assert!(
+        (max - (2_000.0 * 20.0 - 100.0)).abs() < 1.0,
+        "the first presented frame already has the full scroll extent: {max}"
+    );
+    assert!(scroll_list_children(&component) < 40);
+    assert!(
+        !component.wants_render(),
+        "nothing is left to settle after the first paint"
+    );
+}
+
 /// Counts the nodes a pruned traversal descends into.
 struct CountingExtents<'a> {
     inner: &'a dyn mesh_core_interaction::PaintedExtents,

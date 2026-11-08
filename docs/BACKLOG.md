@@ -378,8 +378,9 @@ at the top of this file; prefer it over further single-pass scoping.
 - [ ] Uneven windowed lists estimate unmeasured rows from a fixed mean, so the scrollbar thumb and extent are
       approximate and scrolling far then back can shift content by the difference between estimate and
       measurement. Anchor the scroll offset to the first visible row when measurements replace estimates.
-- [ ] A windowed list holds its first frame back for one settle frame (wrong scrollbar, partial rows) because
-      layout is needed to measure; consider settling in the same paint before presentation.
+- [ ] A windowed list settles in the same paint only on raster canvases; a GPU canvas still presents the
+      unsettled first frame. Check that a second scene submission in one `paint` is safe, then drop the raster
+      restriction in `paint_settled`.
 
 ### Render sweep findings
 

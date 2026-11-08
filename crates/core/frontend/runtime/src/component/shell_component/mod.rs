@@ -1075,793 +1075,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         canvas: &mut SurfaceCanvas,
         scale: f32,
     ) -> Result<(), ComponentError> {
-        let _span = tracing::debug_span!("paint", surface = %self.id()).entered();
-        let frame_work = mesh_core_elements::frame_work::Scope::new(self.profiling_enabled);
-        self.paint_scale = scale;
-        self.prepare_interaction_frame();
-        // Capture and clear dirty flags up front. paint is the work-doer; if
-        // anything during paint (measured_size change, active animation) needs
-        // another frame, it sets a flag again and wants_render picks it up.
-        let (requested_width, requested_height) = self.requested_layout_size();
-        // The fallback for an unmeasured surface is the *content* extent, never
-        // the padded one. When these were one argument, a surface that had not
-        // measured itself yet fell back to the padded surface and laid its first
-        // frame out — and recorded `last_surface_size` — against the tooltip
-        // reserve, e.g. 1920x201 for a 1920x56 bar.
-        let bound = extent.compositor_bound();
-        let content_width = if requested_width == 0 || (bound && extent.content_width_known()) {
-            extent.content_width().max(1)
-        } else {
-            requested_width.max(1)
-        };
-        let content_height = if requested_height == 0 || (bound && extent.content_height_known()) {
-            extent.content_height().max(1)
-        } else {
-            requested_height.max(1)
-        };
-        // An axis with neither a measurement of its own nor a size from the
-        // shell has no layout box yet. The numbers above still stand in for it
-        // (the buffer and the damage rects need real pixels), but the surface
-        // root lays it out as `auto` so this paint measures what the content
-        // wants instead of what the placeholder allows — a 56px bar in a 1px
-        // stand-in surface measures 1px, and `render_layout` would then send
-        // that 1px on to the compositor as the bar's height, for good.
-        self.unmeasured_root_axes = (
-            requested_width == 0 && !extent.content_width_known(),
-            requested_height == 0 && !extent.content_height_known(),
-        );
-        if !self.unmeasured_root_axes.0 {
-            self.last_definite_root_size.0 = Some(content_width);
-        }
-        if !self.unmeasured_root_axes.1 {
-            self.last_definite_root_size.1 = Some(content_height);
-        }
-        // Observe the content size BEFORE snapshotting dirty flags: a size
-        // change raises STYLE|LAYOUT|PAINT|METRICS, and this very paint is the
-        // one that rebuilds at the new size — snapshotting first would leave
-        // those flags pending and burn one extra full frame per resize.
-        self.observe_surface_size(content_width, content_height);
-        // Settle effects BEFORE the dirty flags are snapshotted, so an effect
-        // that does invalidate lands in this frame rather than costing an
-        // extra one, and so the path decision below can see whether the effects
-        // changed anything a template reads.
-        let paint_ran_effects = self.reactive_effects_pending;
-        self.run_pending_effects();
-        self.wake_due_animation_hold(std::time::Instant::now());
-        let animation_only_frame = std::mem::take(&mut self.animation_only_dirty);
-        if self.surface_entering && !self.popup_promoted {
-            // A top-level surface reopens straight into its resting styles.
-            // Animating from an entering pose would let global width/height
-            // transitions squash the first settled frame of drawers like the
-            // debug inspector, so it has no entering frame to paint.
-            self.surface_entering = false;
-            self.snap_transitions_once = true;
-        }
-        let snap_transitions = std::mem::take(&mut self.snap_transitions_once);
-        // Seeding focus from the retained tree lets this paint's restyle
-        // include it, rather than raising a second pass after the build.
-        if self.pending_auto_focus
-            && self.focused_key.is_none()
-            && let Some(tree) = self.last_tree.clone()
-            && next_focus_target(&tree, None, false).is_some()
-        {
-            self.apply_pending_auto_focus(&tree);
-        }
-        // `wants_render` also holds for live animations and child-surface
-        // lifecycles, so a frame can arrive with nothing dirty. The retained
-        // tree is current as it stands: such a frame repaints, it does not
-        // rebuild every node.
-        let clean_frame = !self.dirty && !self.style_only_dirty && self.dirty_types.is_empty();
-        let (requires_tree_rebuild, can_use_retained_path, dirty_types, _) =
-            self.take_dirty_for_paint();
-        self.record_component_frame_dirty(dirty_types);
-        let dirty_types = if clean_frame {
-            ComponentDirtyFlags::PAINT
-        } else {
-            dirty_types
-        };
-        let paint_width = extent.padded_width().max(content_width).max(1);
-        let paint_height = extent.padded_height().max(content_height).max(1);
-        self.publish_virtual_viewport_hint(paint_width.max(paint_height) as f32);
-        // The paint buffer's physical size tracks `paint_width`/`paint_height`
-        // (content plus the tooltip overlay reserve, times scale), not the
-        // content-only dimensions `observe_surface_size` watches above. A
-        // tooltip appearing/disappearing changes the buffer size without
-        // changing content size, so the caller (`Shell::render_components`)
-        // reallocates a fresh, zeroed `PixelBuffer` that `observe_surface_size`
-        // never notices. Without forcing a full repaint here, only the dirty
-        // diff gets drawn into the new buffer and everything else stays
-        // transparent.
-        if self.last_painted_buffer_size != Some((canvas.width(), canvas.height())) {
-            self.surface_pixels_invalid = true;
-        }
-        self.last_painted_buffer_size = Some((canvas.width(), canvas.height()));
-        // Pointer-enter handlers can update script state while the same input
-        // event changes the hovered pseudo-state. The narrow script builder
-        // intentionally reuses native subtrees, including their computed
-        // styles; using it for this combined invalidation would leave those
-        // subtrees with their pre-hover appearance even though annotation has
-        // correctly marked them hovered. A full build keeps the script update
-        // and interaction restyle in one coherent frame. Service-only narrow
-        // updates still use the selective path below.
-        let combined_script_and_interaction_update = dirty_types
-            .contains(ComponentDirtyFlags::SCRIPT_NARROW)
-            && dirty_types.contains(ComponentDirtyFlags::STATE);
-        let use_retained_style_path = !requires_tree_rebuild
-            && (can_use_retained_path || clean_frame)
-            && self.last_tree.is_some()
-            && !self.reactive_effects_pending
-            && !combined_script_and_interaction_update;
-        // Mirrors `finalize_tree`'s paint-only restyle: the retained styles are
-        // reused as they are, so no transition can start this frame.
-        let styles_unchanged = use_retained_style_path
-            && !dirty_types.is_empty()
-            && dirty_types
-                .difference(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS)
-                .is_empty();
-        let run_style_animation_pass = self.should_run_style_animation_pass(styles_unchanged);
-        let previous_animation_snapshot =
-            (run_style_animation_pass && use_retained_style_path && !snap_transitions)
-                .then(|| self.last_frame_snapshot.clone())
-                .flatten();
-        let previous_visual_styles = if previous_animation_snapshot.is_none()
-            && run_style_animation_pass
-            && !snap_transitions
-            && self.last_tree.is_some()
-        {
-            self.take_previous_visual_styles()
-        } else {
-            HashMap::new()
-        };
-        let surface_css_props = self.surface_css_props();
-        self.pending_animation_pass =
-            run_style_animation_pass.then(|| super::animation::PendingAnimationPass {
-                previous_snapshot: previous_animation_snapshot,
-                previous_visual_styles,
-            });
-        // Patched bindings changed authored attributes without a rebuild, so
-        // their nodes still need the post-update style diagnostics.
-        let patched_node_count = self.patched_binding_nodes.len() as u64;
-        let bindings_patched = patched_node_count > 0;
-        let subtrees_replaced = self.component_subtrees_patched;
-        let mut tree_was_rebuilt = false;
-        let mut tree = if dirty_types.contains(ComponentDirtyFlags::SCRIPT_NARROW)
-            && !combined_script_and_interaction_update
-        {
-            tree_was_rebuilt = true;
-            self.narrow_script_update(theme, content_width, content_height, &surface_css_props)
-        } else if use_retained_style_path {
-            match self.restyle_retained_tree(
-                theme,
-                content_width,
-                content_height,
-                dirty_types,
-                animation_only_frame,
-                &surface_css_props,
-            ) {
-                Some(t) => t,
-                None => {
-                    tree_was_rebuilt = true;
-                    self.build_tree_with_surface_css_props(
-                        theme,
-                        content_width,
-                        content_height,
-                        &surface_css_props,
-                    )
-                }
-            }
-        } else {
-            tree_was_rebuilt = true;
-            self.build_tree_with_surface_css_props(
-                theme,
-                content_width,
-                content_height,
-                &surface_css_props,
-            )
-        };
-        self.component_subtrees_patched = false;
-        let structure_rebuilt = tree_was_rebuilt || subtrees_replaced;
-        self.effects_changed_templates = false;
-        self.apply_pending_auto_focus(&tree);
-        self.apply_pending_embedded_popover_focus(&tree);
-        let stable_interaction_inputs = !structure_rebuilt
-            && bindings_patched
-            && self
-                .layout_state
-                .changed_nodes
-                .as_ref()
-                .is_some_and(HashSet::is_empty)
-            && self.text_patch_preserves_interaction_targets(&tree);
-        if structure_rebuilt
-            || (bindings_patched && !stable_interaction_inputs)
-            || self.primitives_need_focus_refresh()
-        {
-            self.refresh_focus_scopes(&tree);
-        }
-        if !stable_interaction_inputs {
-            self.prune_stale_interaction_targets(&tree);
-        }
-        if structure_rebuilt || (bindings_patched && !stable_interaction_inputs) {
-            self.refresh_disclosures(&tree);
-        }
-        #[cfg(test)]
-        {
-            self.style_animation_passes += u64::from(run_style_animation_pass);
-        }
-        let mut animation_dirty_roots = self.animation_pass_dirty_roots.take().unwrap_or_default();
-        self.record_interaction_frame_dirty(
-            animation_dirty_roots.iter().copied(),
-            mesh_core_interaction::InteractionDirtyFlags::ANIMATION,
-        );
-        if !animation_dirty_roots.is_empty() {
-            // The previous frame's cached child text is valid only outside all
-            // changes made this frame, including any preceding script/restyle.
-            self.retained_update_dirty_nodes
-                .extend(animation_dirty_roots.iter().copied());
-            if let (Some(previous), Some(roots)) =
-                (&self.last_frame_snapshot, &self.retained_update_dirty_roots)
-            {
-                if let Some(normalized) = previous.normalize_accessibility_dirty(
-                    &mut tree,
-                    &self.retained_update_dirty_nodes,
-                    roots,
-                ) {
-                    self.retained_update_dirty_nodes.extend(normalized);
-                } else {
-                    self.retained_update_dirty_roots = None;
-                }
-            } else {
-                mesh_core_elements::normalize_accessibility_with_validated_structure(&mut tree);
-            }
-        }
-        if !animation_dirty_roots.is_empty() {
-            let selection_dirty = self.annotate_selection_tree(&mut tree, theme, false);
-            self.retained_update_dirty_nodes.extend(selection_dirty);
-        }
-        let retained_update_dirty_roots = self.retained_update_dirty_roots.take();
-        #[cfg(test)]
-        let retained_update_dirty_roots =
-            retained_update_dirty_roots.filter(|_| !self.force_full_retained_update);
-        // Animation-sampled nodes are already single dirty nodes above. The
-        // sampling pass reports every node whose own sample changed. Layout's
-        // change report already includes ancestors and siblings it moved.
-        animation_dirty_roots.clear();
-        self.animation_dirty_node_ids_scratch = animation_dirty_roots;
-        self.advance_interaction_frame(
-            mesh_core_interaction::InteractionFramePhase::AnimationSampled,
-        );
-        // Render fingerprints are synchronized inside the authoritative
-        // retained-tree pass, so this stage now covers that consolidated work.
-        let render_object_started = std::time::Instant::now();
-        for &id in &self.retained_update_dirty_nodes {
-            self.frame_dirty.mark(
-                id,
-                mesh_core_elements::ChangeClass::PAINT
-                    | mesh_core_elements::ChangeClass::A11Y
-                    | mesh_core_elements::ChangeClass::HIT,
-            );
-        }
-        let retained_dirty = if let (Some(roots), Some(snapshot)) = (
-            retained_update_dirty_roots.as_ref(),
-            self.last_frame_snapshot.as_ref(),
-        ) {
-            self.retained_tree
-                .synchronize_changes(&tree, snapshot, &self.frame_dirty, roots)
-        } else {
-            self.retained_tree.synchronize_rebuilt_tree(&tree)
-        };
-        #[cfg(test)]
-        if std::env::var_os("MESH_VERIFY_RETAINED").is_some() {
-            self.retained_tree.assert_complete(&tree);
-        }
-        let retained_tree_generation = self.retained_tree.generation();
-        let render_object_dirty = self.retained_tree.render_dirty();
-        self.record_profiling_stage_with_elapsed(
-            mesh_core_debug::ProfilingStage::RenderObjectSync,
-            render_object_started.elapsed(),
-            Some("rebuild"),
-        );
-        self.capture_finalized_frame(&tree);
-        if structure_rebuilt || bindings_patched {
-            self.record_runtime_style_diagnostics_after_retained_update(
-                &mut tree,
-                theme,
-                retained_tree_generation,
-                content_width,
-                content_height,
-                &surface_css_props,
-            );
-        }
-
-        let tooltip = self.compute_tooltip_state(
-            theme,
-            &tree,
-            retained_tree_generation,
-            paint_width,
-            paint_height,
-        );
-
-        let surface_damage = DamageRect {
-            x: 0,
-            y: 0,
-            width: paint_width,
-            height: paint_height,
-        };
-        let content_damage = DamageRect {
-            x: 0,
-            y: 0,
-            width: content_width.max(1),
-            height: content_height.max(1),
-        };
-        let display_list_started = std::time::Instant::now();
-        let display_list_span = tracing::debug_span!("display_list_update").entered();
-        self.retained_display_list
-            .set_backdrop_blur_policy(self.paint_context.backdrop_policy);
-        self.retained_display_list
-            .set_refraction_source(self.paint_context.backdrop.source_beneath);
-        let display_list_metrics = self.retained_display_list.update_for_retained_fingerprints(
-            &tree,
-            retained_tree_generation,
-            render_object_dirty,
-            self.retained_tree.render_dirty_node_ids(),
-            &|id| self.retained_tree.render_fingerprint(id),
-            content_width,
-            content_height,
-            self.surface_pixels_invalid,
-            true,
-        );
-        drop(display_list_span);
-        self.record_profiling_stage_with_elapsed(
-            mesh_core_debug::ProfilingStage::RetainedDisplayListUpdate,
-            display_list_started.elapsed(),
-            Some("rebuild"),
-        );
-        let current_tooltip_damage =
-            tooltip_damage_rect(tooltip.as_ref(), paint_width, paint_height);
-        let mut tooltip_damage_rects = std::mem::take(&mut self.tooltip_damage_scratch);
-        damage_rects_from_options_into(
-            [current_tooltip_damage, self.last_tooltip_damage],
-            surface_damage,
-            &mut tooltip_damage_rects,
-        );
-        let current_visual_commands = (
-            self.retained_display_list.paint_commands_snapshot(),
-            content_damage,
-        );
-        let mut dirty_node_visual_damage_rects =
-            std::mem::take(&mut self.dirty_node_visual_damage_scratch);
-        dirty_node_visual_damage_rects.clear();
-        let mut visual_damage_rects = std::mem::take(&mut self.visual_damage_scratch);
-        visual_damage_rects.clear();
-        // Only these dirty kinds move painted pixels without a display-entry
-        // change, so only they need the dirty nodes' previous and current
-        // painted bounds; other frames skip both command scans.
-        if render_object_dirty.reordered > 0
-            || render_object_dirty.transform > 0
-            || render_object_dirty.opacity > 0
-            || render_object_dirty.material > 0
-        {
-            let dirty_ids = self.retained_tree.render_dirty_node_ids();
-            let (mut previous, mut current) =
-                std::mem::take(&mut self.visual_damage_lookup_scratch);
-            previous.clear();
-            current.clear();
-            if let Some((commands, surface)) = &self.last_visual_commands {
-                mesh_core_render::display_list::visual_damage_rects_into(
-                    commands,
-                    *surface,
-                    |id| dirty_ids.contains(&id),
-                    &mut previous,
-                );
-            }
-            mesh_core_render::display_list::visual_damage_rects_into(
-                &current_visual_commands.0,
-                content_damage,
-                |id| dirty_ids.contains(&id),
-                &mut current,
-            );
-            damage_rects_for_node_ids_into(
-                &current,
-                dirty_ids,
-                &previous,
-                content_damage,
-                &mut dirty_node_visual_damage_rects,
-            );
-            self.visual_damage_lookup_scratch = (previous, current);
-            merge_damage_rects(
-                &mut visual_damage_rects,
-                dirty_node_visual_damage_rects.iter().copied(),
-                surface_damage,
-            );
-        }
-        let effective_damage_rects = std::mem::take(&mut self.effective_damage_scratch);
-        let mut effective_damage = select_effective_damage_rects(
-            display_list_metrics,
-            self.retained_display_list.damage_rects(),
-            surface_damage,
-            requires_tree_rebuild,
-            &visual_damage_rects,
-            &tooltip_damage_rects,
-            effective_damage_rects,
-        );
-        // Blur regions are all-or-nothing: a backdrop-filter node re-reads the
-        // pixels beneath it and a `filter: blur()` layer resolves as one image,
-        // so damage touching either must repaint the whole region or the blur
-        // would mix freshly painted and stale-frame pixels.
-        if !effective_damage.full_surface
-            && self
-                .retained_display_list
-                .expand_damage_for_blur_regions(&mut effective_damage.rects)
-        {
-            effective_damage.rect = bounding_damage_rect(&effective_damage.rects, surface_damage);
-        }
-        // Key caps sit on top of the surface's pixels, so showing, moving or
-        // removing them repaints the whole surface.
-        if (self.key_hints_visible() || self.key_hints.repaint) && !effective_damage.full_surface {
-            effective_damage = EffectiveDamage {
-                rects: vec![surface_damage],
-                rect: Some(surface_damage),
-                full_surface: true,
-                policy: DisplayListRepaintPolicy::FullSurface,
-            };
-        }
-        let complete_scene = canvas.is_scene();
-        let has_parent_damage = !effective_damage.rects.is_empty();
-        if has_parent_damage && let SurfaceCanvas::Scene(scene) = canvas {
-            let mut plan = self.retained_display_list.frame_paint_plan().clone();
-            plan.inputs.surface_size = Some((paint_width, paint_height));
-            plan.damage.logical = effective_damage.rects.clone().into();
-            plan.damage.surface = surface_damage;
-            plan.damage.logical_bounds = effective_damage.rect.unwrap_or_default();
-            plan.damage.full_surface = effective_damage.full_surface;
-            scene.begin(&plan);
-        }
-        // Shared-tree animation can change only a promoted child. Keep the
-        // parent's pixels and complete GPU scene when its damage is empty.
-        let mut session = has_parent_damage.then(|| canvas.session());
-        let present_override = if complete_scene {
-            None
-        } else {
-            session.as_mut().and_then(|session| {
-                self.shift_scrolled_viewports(
-                    &mut effective_damage,
-                    session,
-                    scale,
-                    current_tooltip_damage,
-                )
-            })
-        };
-        let _paint_damage = if effective_damage.full_surface {
-            Some(surface_damage)
-        } else {
-            effective_damage.rect
-        };
-        {
-            let measured_geometry = measured_surface_geometry(
-                &tree,
-                (content_width, content_height),
-                self.surface_layout.edge,
-            );
-            let measured_size = measured_geometry.content_size;
-            if self.measured_size != Some(measured_size) {
-                self.measured_size = Some(measured_size);
-                // Only schedule a surface reconfigure when the measurement
-                // actually disagrees with the size this paint laid out
-                // against. `observe_surface_size` clears `measured_size`
-                // whenever the available size changes, so without this guard
-                // the None → Some re-measure after a self-inflicted resize
-                // (content measured smaller, surface reconfigured to match)
-                // would invalidate one extra frame per settle and oscillating
-                // tests/surfaces would never converge.
-                if measured_size != (content_width, content_height) {
-                    self.invalidate_surface_config();
-                }
-            }
-            if self.surface_fills_output != measured_geometry.fills_output
-                || self.surface_spans_width != measured_geometry.spans_width
-            {
-                self.surface_fills_output = measured_geometry.fills_output;
-                self.surface_spans_width = measured_geometry.spans_width;
-                self.invalidate_surface_config();
-            }
-            if self.surface_layout.exclusive_zone != measured_geometry.exclusive_zone
-                || [
-                    self.surface_layout.margin_top,
-                    self.surface_layout.margin_right,
-                    self.surface_layout.margin_bottom,
-                    self.surface_layout.margin_left,
-                ] != measured_geometry.margins
-            {
-                self.surface_layout.exclusive_zone = measured_geometry.exclusive_zone;
-                self.surface_layout.margin_top = measured_geometry.margins[0];
-                self.surface_layout.margin_right = measured_geometry.margins[1];
-                self.surface_layout.margin_bottom = measured_geometry.margins[2];
-                self.surface_layout.margin_left = measured_geometry.margins[3];
-                self.surface_policy = self
-                    .surface_policy_generation
-                    .update(self.surface_layout.policy_snapshot(0))
-                    .current;
-                self.invalidate_surface_config();
-            }
-        }
-        // Element metrics depend on geometry plus ref/id/scroll attributes,
-        // not paint-only style or interaction state. Avoid rebuilding and
-        // fingerprinting the full JSON snapshot when the retained diff proves
-        // those inputs are unchanged.
-        let element_metrics_changed = retained_dirty_affects_element_metrics(retained_dirty);
-        if self.element_metric_usage.any() && element_metrics_changed {
-            self.publish_element_metrics(&tree, self.element_metric_usage);
-        }
-
-        if (self.virtual_lists_seen || requires_tree_rebuild)
-            && (requires_tree_rebuild
-                || !dirty_types
-                    .difference(ComponentDirtyFlags::PAINT)
-                    .is_empty())
-        {
-            self.update_virtual_windows(&tree);
-        }
-
-        let effective_damage_area = effective_damage.damage_area(display_list_metrics.surface_area);
-        let paint_bounding_rect = matches!(
-            effective_damage.policy,
-            DisplayListRepaintPolicy::BoundingRect
-        ) && effective_damage.rects.len() > 1
-            && effective_damage.rect.is_some_and(|damage| {
-                effective_damage_area > 0
-                    && damage.area() <= effective_damage_area.saturating_mul(3)
-            });
-        let selected_paint = if paint_bounding_rect {
-            self.retained_display_list
-                .select_paint_commands(effective_damage.rect, effective_damage.policy)
-        } else {
-            self.retained_display_list
-                .select_paint_commands_for_rects(&effective_damage.rects, effective_damage.policy)
-        };
-        #[cfg(test)]
-        if self.focused_proof_enabled {
-            let focused_proof_snapshot = mesh_core_render::build_focused_proof_snapshot(
-                &tree,
-                render_object_dirty,
-                display_list_metrics,
-                &selected_paint,
-            );
-            for diagnostic in &focused_proof_snapshot.diagnostics {
-                self.record_focused_proof_diagnostic(diagnostic);
-            }
-            self.focused_proof_snapshot = Some(focused_proof_snapshot);
-        }
-        let narrow_path = self.narrow_path_active;
-        let affected_count = self.affected_node_count;
-        self.narrow_path_active = false;
-        self.affected_node_count = 0;
-        self.invalidation_snapshot = Some(mesh_core_debug::ProfilingInvalidationSnapshot {
-            node_visits: Default::default(),
-            full_rebuild: requires_tree_rebuild,
-            retained_path: use_retained_style_path,
-            retained_generation: self.retained_tree.generation(),
-            component: dirty_types.to_debug_counts(),
-            retained: retained_dirty.to_debug_counts(),
-            paint: retained_paint_snapshot(selected_paint.metrics(), &effective_damage),
-            text: mesh_core_debug::TextCacheSnapshot::default(),
-            narrow_path,
-            affected_node_count: affected_count,
-            patched_node_count,
-        });
-        tracing::trace!(
-            "retained widget tree '{}' generation={} dirty={:?}",
-            self.id(),
-            self.retained_tree.generation(),
-            retained_dirty
-        );
-        tracing::trace!(
-            "component '{}' invalidation={:?} retained_path={}",
-            self.id(),
-            dirty_types,
-            use_retained_style_path
-        );
-        tracing::trace!(
-            "retained render fingerprints '{}' generation={} dirty={:?}",
-            self.id(),
-            retained_tree_generation,
-            render_object_dirty
-        );
-
-        let paint_started = std::time::Instant::now();
-        let full_selection;
-        let full_damage;
-        let (record_selection, record_damage) = if complete_scene && has_parent_damage {
-            full_selection = self
-                .retained_display_list
-                .select_paint_commands(Some(surface_damage), DisplayListRepaintPolicy::FullSurface);
-            full_damage = EffectiveDamage {
-                rects: vec![surface_damage],
-                rect: Some(surface_damage),
-                full_surface: true,
-                policy: DisplayListRepaintPolicy::FullSurface,
-            };
-            (&full_selection, &full_damage)
-        } else {
-            (&selected_paint, &effective_damage)
-        };
-        let paint_metrics = session
-            .as_mut()
-            .map(|session| {
-                let metrics = self.paint_pixel_regions(
-                    theme,
-                    session,
-                    scale,
-                    record_selection,
-                    record_damage,
-                    paint_bounding_rect,
-                    tooltip.as_ref(),
-                    current_tooltip_damage,
-                );
-                if record_damage.full_surface && self.key_hints_visible() {
-                    self.paint_key_hints(session, scale, &tree);
-                }
-                metrics
-            })
-            .unwrap_or_default();
-        self.key_hints.repaint = false;
-        self.advance_interaction_frame(mesh_core_interaction::InteractionFramePhase::PaintReady);
-        self.retained_display_list.mark_painted();
-        if effective_damage.full_surface {
-            self.buffer_overlaid = false;
-            self.last_present_damage_rects.clear();
-            self.last_present_damage_rects.push(surface_damage);
-        } else if let Some(present) = present_override {
-            for rect in present {
-                push_damage_rect(&mut self.last_present_damage_rects, rect, surface_damage);
-            }
-        } else if !effective_damage.rects.is_empty() {
-            for &rect in &effective_damage.rects {
-                push_damage_rect(&mut self.last_present_damage_rects, rect, surface_damage);
-            }
-        }
-        // When effective_damage.rects is empty, leave last_present_damage_rects unchanged
-        // (accumulates across immediate-rerender passes, matching old merge_optional_damage behaviour)
-        self.last_visual_commands = Some(current_visual_commands);
-        let traversal_micros = paint_metrics
-            .traversal_micros
-            .saturating_sub(paint_metrics.text.shaping_micros)
-            .saturating_sub(paint_metrics.icon_image_raster_micros);
-        self.record_profiling_stage_with_elapsed(
-            mesh_core_debug::ProfilingStage::PaintTraversal,
-            std::time::Duration::from_micros(traversal_micros),
-            Some("rebuild"),
-        );
-        self.record_profiling_stage_with_elapsed(
-            mesh_core_debug::ProfilingStage::TextShaping,
-            std::time::Duration::from_micros(paint_metrics.text.shaping_micros),
-            Some("rebuild"),
-        );
-        self.record_profiling_stage_with_elapsed(
-            mesh_core_debug::ProfilingStage::IconImageRaster,
-            std::time::Duration::from_micros(paint_metrics.icon_image_raster_micros),
-            Some("rebuild"),
-        );
-        for class in mesh_core_render::PaintCommandClass::ALL {
-            let metrics = paint_metrics.command_attribution.get(class);
-            if metrics.command_count == 0 {
-                continue;
-            }
-            self.record_profiling_stage_with_elapsed(
-                mesh_core_debug::ProfilingStage::PaintTraversal,
-                std::time::Duration::from_micros(metrics.elapsed_micros),
-                Some(&format!("attribution:paint_command:{}", class.label())),
-            );
-        }
-        if let Some(snapshot) = self.invalidation_snapshot.as_mut() {
-            snapshot.text = text_cache_snapshot(paint_metrics.text);
-            snapshot.paint.raster_cache_hits = paint_metrics.raster_cache_hits;
-            snapshot.paint.raster_cache_misses = paint_metrics.raster_cache_misses;
-            snapshot.paint.raster_cache_bypasses = paint_metrics.raster_cache_bypasses;
-            snapshot.paint.raster_cache_opaque_hits = paint_metrics.raster_cache_opaque_hits;
-            snapshot.paint.raster_cache_translucent_hits =
-                paint_metrics.raster_cache_translucent_hits;
-            snapshot.paint.glyph_cache_hits = paint_metrics.glyph_cache_hits;
-            snapshot.paint.glyph_cache_misses = paint_metrics.glyph_cache_misses;
-            snapshot.paint.glyph_cache_entries = paint_metrics.glyph_cache_entries;
-            snapshot.paint.glyph_cache_capacity = paint_metrics.glyph_cache_capacity;
-            snapshot.paint.font_bytes_cache_hits = paint_metrics.font_bytes_cache_hits;
-            snapshot.paint.font_bytes_cache_misses = paint_metrics.font_bytes_cache_misses;
-            snapshot.paint.font_bytes_cache_entries = paint_metrics.font_bytes_cache_entries;
-            snapshot.paint.font_bytes_cache_capacity = paint_metrics.font_bytes_cache_capacity;
-            snapshot.paint.skia_glyph_cache_hits = paint_metrics.skia_glyph_cache_hits;
-            snapshot.paint.skia_glyph_cache_misses = paint_metrics.skia_glyph_cache_misses;
-            snapshot.paint.skia_glyph_cache_entries = paint_metrics.skia_glyph_cache_entries;
-            snapshot.paint.skia_glyph_cache_capacity = paint_metrics.skia_glyph_cache_capacity;
-        }
-        if self.profiling_enabled && has_parent_damage {
-            mesh_core_debug::allocation::with_tracking_suspended(|| {
-                self.profiling_records
-                    .borrow_mut()
-                    .push(ComponentProfilingRecord {
-                        stage: mesh_core_debug::ProfilingStage::Paint,
-                        duration: paint_started.elapsed(),
-                        module_id: Some(self.compiled.manifest.package.id.clone()),
-                        trigger_kind: Some("rebuild".to_string()),
-                    });
-            });
-        }
-        self.tooltip_damage_scratch = tooltip_damage_rects;
-        self.dirty_node_visual_damage_scratch = dirty_node_visual_damage_rects;
-        self.visual_damage_scratch = visual_damage_rects;
-        self.effective_damage_scratch = std::mem::take(&mut effective_damage.rects);
-        let mut child_dirty = self.retained_tree.render_dirty_node_ids().clone();
-        child_dirty.extend(self.frame_dirty.iter().filter_map(|(id, class)| {
-            class
-                .contains(mesh_core_elements::ChangeClass::STRUCTURE)
-                .then_some(id)
-        }));
-        let structural = self.retained_tree.last_dirty();
-        self.child_surface_cache.borrow_mut().update(
-            &tree,
-            self.last_frame_snapshot.as_ref(),
-            &child_dirty,
-            structure_rebuilt
-                || structural.inserted > 0
-                || structural.removed > 0
-                || structural.children > 0,
-            self.frame_revision,
-        );
-        let visit_surface_id = self.profiling_enabled.then(|| self.id().to_owned());
-        if let Some(snapshot) = self.invalidation_snapshot.as_mut() {
-            snapshot.node_visits = frame_work.snapshot();
-            for (pass, visits) in &snapshot.node_visits {
-                tracing::debug!(target: "mesh_profiling", surface = visit_surface_id.as_deref().unwrap_or(""),
-                    pass = pass.as_str(), node_visits = visits, "frame node visits");
-            }
-        }
-        if structure_rebuilt {
-            fn live_instances(node: &WidgetNode, ids: &mut HashSet<String>) {
-                if let Some(instance) = node.memo_instance() {
-                    ids.insert(instance.to_owned());
-                }
-                for child in &node.children {
-                    live_instances(child, ids);
-                }
-            }
-            let mut ids = HashSet::new();
-            live_instances(&tree, &mut ids);
-            self.component_prop_recipes
-                .borrow_mut()
-                .retain(|id, _| ids.contains(id.as_ref()));
-            self.template_binding_index = template_patch::TemplateBindingIndex::build(
-                &tree,
-                &self.component_prop_recipes.borrow(),
-            );
-        }
-        self.last_tree = Some(tree);
-        self.frame_dirty.clear();
-        self.advance_interaction_frame(
-            mesh_core_interaction::InteractionFramePhase::SemanticsReady,
-        );
-        self.last_tooltip_damage = current_tooltip_damage;
-        self.surface_pixels_invalid = false;
-        self.clear_runtime_dirty_states();
-        if paint_ran_effects || structure_rebuilt || bindings_patched {
-            let requests = self.drain_effect_side_channels();
-            let requests = self.record_frontend_host_effects(requests);
-            self.pending_paint_requests.extend(requests);
-        }
-        self.publish_frontend_frame();
-        if self.reactive_binding_pending.replace(false) {
-            self.reactive_effects_pending = true;
-            self.invalidate_script_state_narrow();
-        }
-        if self.surface_entering {
-            // A promoted popup's second frame transitions from the entering
-            // pose into place, restyling the marker away.
-            self.surface_entering = false;
-            self.invalidate_interaction_restyle();
-        }
-        if self.surface_exiting {
-            self.exit_frame_painted = true;
-        }
-
-        Ok(())
+        self.paint_settled(theme, extent, canvas, scale)
     }
 
     fn theme_changed(&mut self) -> Result<(), ComponentError> {
@@ -2966,3 +2180,828 @@ fn retained_dirty_affects_element_metrics(dirty: RetainedTreeDirtySummary) -> bo
         || dirty.attributes > 0
         || dirty.children > 0
 }
+
+
+impl FrontendSurfaceComponent {
+    /// Paints, then paints again when the pass changed a windowed list's
+    /// range, so the surface is presented with the rows it will show rather
+    /// than one frame later. Damage accumulates across the passes. GPU
+    /// canvases keep the single pass.
+    fn paint_settled(
+        &mut self,
+        theme: &Theme,
+        extent: SurfaceExtent,
+        canvas: &mut SurfaceCanvas,
+        scale: f32,
+    ) -> Result<(), ComponentError> {
+        self.virtual_window_changed = false;
+        self.paint_pass(theme, extent, canvas, scale)?;
+        for _ in 0..MAX_SETTLE_PASSES {
+            if !self.virtual_window_changed || canvas.as_raster_mut().is_none() {
+                break;
+            }
+            self.virtual_window_changed = false;
+            self.paint_pass(theme, extent, canvas, scale)?;
+        }
+        Ok(())
+    }
+
+    fn paint_pass(
+        &mut self,
+        theme: &Theme,
+        extent: SurfaceExtent,
+        canvas: &mut SurfaceCanvas,
+        scale: f32,
+    ) -> Result<(), ComponentError> {
+        let _span = tracing::debug_span!("paint", surface = %self.id()).entered();
+        let frame_work = mesh_core_elements::frame_work::Scope::new(self.profiling_enabled);
+        self.paint_scale = scale;
+        self.prepare_interaction_frame();
+        // Capture and clear dirty flags up front. paint is the work-doer; if
+        // anything during paint (measured_size change, active animation) needs
+        // another frame, it sets a flag again and wants_render picks it up.
+        let (requested_width, requested_height) = self.requested_layout_size();
+        // The fallback for an unmeasured surface is the *content* extent, never
+        // the padded one. When these were one argument, a surface that had not
+        // measured itself yet fell back to the padded surface and laid its first
+        // frame out — and recorded `last_surface_size` — against the tooltip
+        // reserve, e.g. 1920x201 for a 1920x56 bar.
+        let bound = extent.compositor_bound();
+        let content_width = if requested_width == 0 || (bound && extent.content_width_known()) {
+            extent.content_width().max(1)
+        } else {
+            requested_width.max(1)
+        };
+        let content_height = if requested_height == 0 || (bound && extent.content_height_known()) {
+            extent.content_height().max(1)
+        } else {
+            requested_height.max(1)
+        };
+        // An axis with neither a measurement of its own nor a size from the
+        // shell has no layout box yet. The numbers above still stand in for it
+        // (the buffer and the damage rects need real pixels), but the surface
+        // root lays it out as `auto` so this paint measures what the content
+        // wants instead of what the placeholder allows — a 56px bar in a 1px
+        // stand-in surface measures 1px, and `render_layout` would then send
+        // that 1px on to the compositor as the bar's height, for good.
+        self.unmeasured_root_axes = (
+            requested_width == 0 && !extent.content_width_known(),
+            requested_height == 0 && !extent.content_height_known(),
+        );
+        if !self.unmeasured_root_axes.0 {
+            self.last_definite_root_size.0 = Some(content_width);
+        }
+        if !self.unmeasured_root_axes.1 {
+            self.last_definite_root_size.1 = Some(content_height);
+        }
+        // Observe the content size BEFORE snapshotting dirty flags: a size
+        // change raises STYLE|LAYOUT|PAINT|METRICS, and this very paint is the
+        // one that rebuilds at the new size — snapshotting first would leave
+        // those flags pending and burn one extra full frame per resize.
+        self.observe_surface_size(content_width, content_height);
+        // Settle effects BEFORE the dirty flags are snapshotted, so an effect
+        // that does invalidate lands in this frame rather than costing an
+        // extra one, and so the path decision below can see whether the effects
+        // changed anything a template reads.
+        let paint_ran_effects = self.reactive_effects_pending;
+        self.run_pending_effects();
+        self.wake_due_animation_hold(std::time::Instant::now());
+        let animation_only_frame = std::mem::take(&mut self.animation_only_dirty);
+        if self.surface_entering && !self.popup_promoted {
+            // A top-level surface reopens straight into its resting styles.
+            // Animating from an entering pose would let global width/height
+            // transitions squash the first settled frame of drawers like the
+            // debug inspector, so it has no entering frame to paint.
+            self.surface_entering = false;
+            self.snap_transitions_once = true;
+        }
+        let snap_transitions = std::mem::take(&mut self.snap_transitions_once);
+        // Seeding focus from the retained tree lets this paint's restyle
+        // include it, rather than raising a second pass after the build.
+        if self.pending_auto_focus
+            && self.focused_key.is_none()
+            && let Some(tree) = self.last_tree.clone()
+            && next_focus_target(&tree, None, false).is_some()
+        {
+            self.apply_pending_auto_focus(&tree);
+        }
+        // `wants_render` also holds for live animations and child-surface
+        // lifecycles, so a frame can arrive with nothing dirty. The retained
+        // tree is current as it stands: such a frame repaints, it does not
+        // rebuild every node.
+        let clean_frame = !self.dirty && !self.style_only_dirty && self.dirty_types.is_empty();
+        let (requires_tree_rebuild, can_use_retained_path, dirty_types, _) =
+            self.take_dirty_for_paint();
+        self.record_component_frame_dirty(dirty_types);
+        let dirty_types = if clean_frame {
+            ComponentDirtyFlags::PAINT
+        } else {
+            dirty_types
+        };
+        let paint_width = extent.padded_width().max(content_width).max(1);
+        let paint_height = extent.padded_height().max(content_height).max(1);
+        self.publish_virtual_viewport_hint(paint_width.max(paint_height) as f32);
+        // The paint buffer's physical size tracks `paint_width`/`paint_height`
+        // (content plus the tooltip overlay reserve, times scale), not the
+        // content-only dimensions `observe_surface_size` watches above. A
+        // tooltip appearing/disappearing changes the buffer size without
+        // changing content size, so the caller (`Shell::render_components`)
+        // reallocates a fresh, zeroed `PixelBuffer` that `observe_surface_size`
+        // never notices. Without forcing a full repaint here, only the dirty
+        // diff gets drawn into the new buffer and everything else stays
+        // transparent.
+        if self.last_painted_buffer_size != Some((canvas.width(), canvas.height())) {
+            self.surface_pixels_invalid = true;
+        }
+        self.last_painted_buffer_size = Some((canvas.width(), canvas.height()));
+        // Pointer-enter handlers can update script state while the same input
+        // event changes the hovered pseudo-state. The narrow script builder
+        // intentionally reuses native subtrees, including their computed
+        // styles; using it for this combined invalidation would leave those
+        // subtrees with their pre-hover appearance even though annotation has
+        // correctly marked them hovered. A full build keeps the script update
+        // and interaction restyle in one coherent frame. Service-only narrow
+        // updates still use the selective path below.
+        let combined_script_and_interaction_update = dirty_types
+            .contains(ComponentDirtyFlags::SCRIPT_NARROW)
+            && dirty_types.contains(ComponentDirtyFlags::STATE);
+        let use_retained_style_path = !requires_tree_rebuild
+            && (can_use_retained_path || clean_frame)
+            && self.last_tree.is_some()
+            && !self.reactive_effects_pending
+            && !combined_script_and_interaction_update;
+        // Mirrors `finalize_tree`'s paint-only restyle: the retained styles are
+        // reused as they are, so no transition can start this frame.
+        let styles_unchanged = use_retained_style_path
+            && !dirty_types.is_empty()
+            && dirty_types
+                .difference(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS)
+                .is_empty();
+        let run_style_animation_pass = self.should_run_style_animation_pass(styles_unchanged);
+        let previous_animation_snapshot =
+            (run_style_animation_pass && use_retained_style_path && !snap_transitions)
+                .then(|| self.last_frame_snapshot.clone())
+                .flatten();
+        let previous_visual_styles = if previous_animation_snapshot.is_none()
+            && run_style_animation_pass
+            && !snap_transitions
+            && self.last_tree.is_some()
+        {
+            self.take_previous_visual_styles()
+        } else {
+            HashMap::new()
+        };
+        let surface_css_props = self.surface_css_props();
+        self.pending_animation_pass =
+            run_style_animation_pass.then(|| super::animation::PendingAnimationPass {
+                previous_snapshot: previous_animation_snapshot,
+                previous_visual_styles,
+            });
+        // Patched bindings changed authored attributes without a rebuild, so
+        // their nodes still need the post-update style diagnostics.
+        let patched_node_count = self.patched_binding_nodes.len() as u64;
+        let bindings_patched = patched_node_count > 0;
+        let subtrees_replaced = self.component_subtrees_patched;
+        let mut tree_was_rebuilt = false;
+        let mut tree = if dirty_types.contains(ComponentDirtyFlags::SCRIPT_NARROW)
+            && !combined_script_and_interaction_update
+        {
+            tree_was_rebuilt = true;
+            self.narrow_script_update(theme, content_width, content_height, &surface_css_props)
+        } else if use_retained_style_path {
+            match self.restyle_retained_tree(
+                theme,
+                content_width,
+                content_height,
+                dirty_types,
+                animation_only_frame,
+                &surface_css_props,
+            ) {
+                Some(t) => t,
+                None => {
+                    tree_was_rebuilt = true;
+                    self.build_tree_with_surface_css_props(
+                        theme,
+                        content_width,
+                        content_height,
+                        &surface_css_props,
+                    )
+                }
+            }
+        } else {
+            tree_was_rebuilt = true;
+            self.build_tree_with_surface_css_props(
+                theme,
+                content_width,
+                content_height,
+                &surface_css_props,
+            )
+        };
+        self.component_subtrees_patched = false;
+        let structure_rebuilt = tree_was_rebuilt || subtrees_replaced;
+        self.effects_changed_templates = false;
+        self.apply_pending_auto_focus(&tree);
+        self.apply_pending_embedded_popover_focus(&tree);
+        let stable_interaction_inputs = !structure_rebuilt
+            && bindings_patched
+            && self
+                .layout_state
+                .changed_nodes
+                .as_ref()
+                .is_some_and(HashSet::is_empty)
+            && self.text_patch_preserves_interaction_targets(&tree);
+        if structure_rebuilt
+            || (bindings_patched && !stable_interaction_inputs)
+            || self.primitives_need_focus_refresh()
+        {
+            self.refresh_focus_scopes(&tree);
+        }
+        if !stable_interaction_inputs {
+            self.prune_stale_interaction_targets(&tree);
+        }
+        if structure_rebuilt || (bindings_patched && !stable_interaction_inputs) {
+            self.refresh_disclosures(&tree);
+        }
+        #[cfg(test)]
+        {
+            self.style_animation_passes += u64::from(run_style_animation_pass);
+        }
+        let mut animation_dirty_roots = self.animation_pass_dirty_roots.take().unwrap_or_default();
+        self.record_interaction_frame_dirty(
+            animation_dirty_roots.iter().copied(),
+            mesh_core_interaction::InteractionDirtyFlags::ANIMATION,
+        );
+        if !animation_dirty_roots.is_empty() {
+            // The previous frame's cached child text is valid only outside all
+            // changes made this frame, including any preceding script/restyle.
+            self.retained_update_dirty_nodes
+                .extend(animation_dirty_roots.iter().copied());
+            if let (Some(previous), Some(roots)) =
+                (&self.last_frame_snapshot, &self.retained_update_dirty_roots)
+            {
+                if let Some(normalized) = previous.normalize_accessibility_dirty(
+                    &mut tree,
+                    &self.retained_update_dirty_nodes,
+                    roots,
+                ) {
+                    self.retained_update_dirty_nodes.extend(normalized);
+                } else {
+                    self.retained_update_dirty_roots = None;
+                }
+            } else {
+                mesh_core_elements::normalize_accessibility_with_validated_structure(&mut tree);
+            }
+        }
+        if !animation_dirty_roots.is_empty() {
+            let selection_dirty = self.annotate_selection_tree(&mut tree, theme, false);
+            self.retained_update_dirty_nodes.extend(selection_dirty);
+        }
+        let retained_update_dirty_roots = self.retained_update_dirty_roots.take();
+        #[cfg(test)]
+        let retained_update_dirty_roots =
+            retained_update_dirty_roots.filter(|_| !self.force_full_retained_update);
+        // Animation-sampled nodes are already single dirty nodes above. The
+        // sampling pass reports every node whose own sample changed. Layout's
+        // change report already includes ancestors and siblings it moved.
+        animation_dirty_roots.clear();
+        self.animation_dirty_node_ids_scratch = animation_dirty_roots;
+        self.advance_interaction_frame(
+            mesh_core_interaction::InteractionFramePhase::AnimationSampled,
+        );
+        // Render fingerprints are synchronized inside the authoritative
+        // retained-tree pass, so this stage now covers that consolidated work.
+        let render_object_started = std::time::Instant::now();
+        for &id in &self.retained_update_dirty_nodes {
+            self.frame_dirty.mark(
+                id,
+                mesh_core_elements::ChangeClass::PAINT
+                    | mesh_core_elements::ChangeClass::A11Y
+                    | mesh_core_elements::ChangeClass::HIT,
+            );
+        }
+        let retained_dirty = if let (Some(roots), Some(snapshot)) = (
+            retained_update_dirty_roots.as_ref(),
+            self.last_frame_snapshot.as_ref(),
+        ) {
+            self.retained_tree
+                .synchronize_changes(&tree, snapshot, &self.frame_dirty, roots)
+        } else {
+            self.retained_tree.synchronize_rebuilt_tree(&tree)
+        };
+        #[cfg(test)]
+        if std::env::var_os("MESH_VERIFY_RETAINED").is_some() {
+            self.retained_tree.assert_complete(&tree);
+        }
+        let retained_tree_generation = self.retained_tree.generation();
+        let render_object_dirty = self.retained_tree.render_dirty();
+        self.record_profiling_stage_with_elapsed(
+            mesh_core_debug::ProfilingStage::RenderObjectSync,
+            render_object_started.elapsed(),
+            Some("rebuild"),
+        );
+        self.capture_finalized_frame(&tree);
+        if structure_rebuilt || bindings_patched {
+            self.record_runtime_style_diagnostics_after_retained_update(
+                &mut tree,
+                theme,
+                retained_tree_generation,
+                content_width,
+                content_height,
+                &surface_css_props,
+            );
+        }
+
+        let tooltip = self.compute_tooltip_state(
+            theme,
+            &tree,
+            retained_tree_generation,
+            paint_width,
+            paint_height,
+        );
+
+        let surface_damage = DamageRect {
+            x: 0,
+            y: 0,
+            width: paint_width,
+            height: paint_height,
+        };
+        let content_damage = DamageRect {
+            x: 0,
+            y: 0,
+            width: content_width.max(1),
+            height: content_height.max(1),
+        };
+        let display_list_started = std::time::Instant::now();
+        let display_list_span = tracing::debug_span!("display_list_update").entered();
+        self.retained_display_list
+            .set_backdrop_blur_policy(self.paint_context.backdrop_policy);
+        self.retained_display_list
+            .set_refraction_source(self.paint_context.backdrop.source_beneath);
+        let display_list_metrics = self.retained_display_list.update_for_retained_fingerprints(
+            &tree,
+            retained_tree_generation,
+            render_object_dirty,
+            self.retained_tree.render_dirty_node_ids(),
+            &|id| self.retained_tree.render_fingerprint(id),
+            content_width,
+            content_height,
+            self.surface_pixels_invalid,
+            true,
+        );
+        drop(display_list_span);
+        self.record_profiling_stage_with_elapsed(
+            mesh_core_debug::ProfilingStage::RetainedDisplayListUpdate,
+            display_list_started.elapsed(),
+            Some("rebuild"),
+        );
+        let current_tooltip_damage =
+            tooltip_damage_rect(tooltip.as_ref(), paint_width, paint_height);
+        let mut tooltip_damage_rects = std::mem::take(&mut self.tooltip_damage_scratch);
+        damage_rects_from_options_into(
+            [current_tooltip_damage, self.last_tooltip_damage],
+            surface_damage,
+            &mut tooltip_damage_rects,
+        );
+        let current_visual_commands = (
+            self.retained_display_list.paint_commands_snapshot(),
+            content_damage,
+        );
+        let mut dirty_node_visual_damage_rects =
+            std::mem::take(&mut self.dirty_node_visual_damage_scratch);
+        dirty_node_visual_damage_rects.clear();
+        let mut visual_damage_rects = std::mem::take(&mut self.visual_damage_scratch);
+        visual_damage_rects.clear();
+        // Only these dirty kinds move painted pixels without a display-entry
+        // change, so only they need the dirty nodes' previous and current
+        // painted bounds; other frames skip both command scans.
+        if render_object_dirty.reordered > 0
+            || render_object_dirty.transform > 0
+            || render_object_dirty.opacity > 0
+            || render_object_dirty.material > 0
+        {
+            let dirty_ids = self.retained_tree.render_dirty_node_ids();
+            let (mut previous, mut current) =
+                std::mem::take(&mut self.visual_damage_lookup_scratch);
+            previous.clear();
+            current.clear();
+            if let Some((commands, surface)) = &self.last_visual_commands {
+                mesh_core_render::display_list::visual_damage_rects_into(
+                    commands,
+                    *surface,
+                    |id| dirty_ids.contains(&id),
+                    &mut previous,
+                );
+            }
+            mesh_core_render::display_list::visual_damage_rects_into(
+                &current_visual_commands.0,
+                content_damage,
+                |id| dirty_ids.contains(&id),
+                &mut current,
+            );
+            damage_rects_for_node_ids_into(
+                &current,
+                dirty_ids,
+                &previous,
+                content_damage,
+                &mut dirty_node_visual_damage_rects,
+            );
+            self.visual_damage_lookup_scratch = (previous, current);
+            merge_damage_rects(
+                &mut visual_damage_rects,
+                dirty_node_visual_damage_rects.iter().copied(),
+                surface_damage,
+            );
+        }
+        let effective_damage_rects = std::mem::take(&mut self.effective_damage_scratch);
+        let mut effective_damage = select_effective_damage_rects(
+            display_list_metrics,
+            self.retained_display_list.damage_rects(),
+            surface_damage,
+            requires_tree_rebuild,
+            &visual_damage_rects,
+            &tooltip_damage_rects,
+            effective_damage_rects,
+        );
+        // Blur regions are all-or-nothing: a backdrop-filter node re-reads the
+        // pixels beneath it and a `filter: blur()` layer resolves as one image,
+        // so damage touching either must repaint the whole region or the blur
+        // would mix freshly painted and stale-frame pixels.
+        if !effective_damage.full_surface
+            && self
+                .retained_display_list
+                .expand_damage_for_blur_regions(&mut effective_damage.rects)
+        {
+            effective_damage.rect = bounding_damage_rect(&effective_damage.rects, surface_damage);
+        }
+        // Key caps sit on top of the surface's pixels, so showing, moving or
+        // removing them repaints the whole surface.
+        if (self.key_hints_visible() || self.key_hints.repaint) && !effective_damage.full_surface {
+            effective_damage = EffectiveDamage {
+                rects: vec![surface_damage],
+                rect: Some(surface_damage),
+                full_surface: true,
+                policy: DisplayListRepaintPolicy::FullSurface,
+            };
+        }
+        let complete_scene = canvas.is_scene();
+        let has_parent_damage = !effective_damage.rects.is_empty();
+        if has_parent_damage && let SurfaceCanvas::Scene(scene) = canvas {
+            let mut plan = self.retained_display_list.frame_paint_plan().clone();
+            plan.inputs.surface_size = Some((paint_width, paint_height));
+            plan.damage.logical = effective_damage.rects.clone().into();
+            plan.damage.surface = surface_damage;
+            plan.damage.logical_bounds = effective_damage.rect.unwrap_or_default();
+            plan.damage.full_surface = effective_damage.full_surface;
+            scene.begin(&plan);
+        }
+        // Shared-tree animation can change only a promoted child. Keep the
+        // parent's pixels and complete GPU scene when its damage is empty.
+        let mut session = has_parent_damage.then(|| canvas.session());
+        let present_override = if complete_scene {
+            None
+        } else {
+            session.as_mut().and_then(|session| {
+                self.shift_scrolled_viewports(
+                    &mut effective_damage,
+                    session,
+                    scale,
+                    current_tooltip_damage,
+                )
+            })
+        };
+        let _paint_damage = if effective_damage.full_surface {
+            Some(surface_damage)
+        } else {
+            effective_damage.rect
+        };
+        {
+            let measured_geometry = measured_surface_geometry(
+                &tree,
+                (content_width, content_height),
+                self.surface_layout.edge,
+            );
+            let measured_size = measured_geometry.content_size;
+            if self.measured_size != Some(measured_size) {
+                self.measured_size = Some(measured_size);
+                // Only schedule a surface reconfigure when the measurement
+                // actually disagrees with the size this paint laid out
+                // against. `observe_surface_size` clears `measured_size`
+                // whenever the available size changes, so without this guard
+                // the None → Some re-measure after a self-inflicted resize
+                // (content measured smaller, surface reconfigured to match)
+                // would invalidate one extra frame per settle and oscillating
+                // tests/surfaces would never converge.
+                if measured_size != (content_width, content_height) {
+                    self.invalidate_surface_config();
+                }
+            }
+            if self.surface_fills_output != measured_geometry.fills_output
+                || self.surface_spans_width != measured_geometry.spans_width
+            {
+                self.surface_fills_output = measured_geometry.fills_output;
+                self.surface_spans_width = measured_geometry.spans_width;
+                self.invalidate_surface_config();
+            }
+            if self.surface_layout.exclusive_zone != measured_geometry.exclusive_zone
+                || [
+                    self.surface_layout.margin_top,
+                    self.surface_layout.margin_right,
+                    self.surface_layout.margin_bottom,
+                    self.surface_layout.margin_left,
+                ] != measured_geometry.margins
+            {
+                self.surface_layout.exclusive_zone = measured_geometry.exclusive_zone;
+                self.surface_layout.margin_top = measured_geometry.margins[0];
+                self.surface_layout.margin_right = measured_geometry.margins[1];
+                self.surface_layout.margin_bottom = measured_geometry.margins[2];
+                self.surface_layout.margin_left = measured_geometry.margins[3];
+                self.surface_policy = self
+                    .surface_policy_generation
+                    .update(self.surface_layout.policy_snapshot(0))
+                    .current;
+                self.invalidate_surface_config();
+            }
+        }
+        // Element metrics depend on geometry plus ref/id/scroll attributes,
+        // not paint-only style or interaction state. Avoid rebuilding and
+        // fingerprinting the full JSON snapshot when the retained diff proves
+        // those inputs are unchanged.
+        let element_metrics_changed = retained_dirty_affects_element_metrics(retained_dirty);
+        if self.element_metric_usage.any() && element_metrics_changed {
+            self.publish_element_metrics(&tree, self.element_metric_usage);
+        }
+
+        if (self.virtual_lists_seen || requires_tree_rebuild)
+            && (requires_tree_rebuild
+                || !dirty_types
+                    .difference(ComponentDirtyFlags::PAINT)
+                    .is_empty())
+        {
+            self.update_virtual_windows(&tree);
+        }
+
+        let effective_damage_area = effective_damage.damage_area(display_list_metrics.surface_area);
+        let paint_bounding_rect = matches!(
+            effective_damage.policy,
+            DisplayListRepaintPolicy::BoundingRect
+        ) && effective_damage.rects.len() > 1
+            && effective_damage.rect.is_some_and(|damage| {
+                effective_damage_area > 0
+                    && damage.area() <= effective_damage_area.saturating_mul(3)
+            });
+        let selected_paint = if paint_bounding_rect {
+            self.retained_display_list
+                .select_paint_commands(effective_damage.rect, effective_damage.policy)
+        } else {
+            self.retained_display_list
+                .select_paint_commands_for_rects(&effective_damage.rects, effective_damage.policy)
+        };
+        #[cfg(test)]
+        if self.focused_proof_enabled {
+            let focused_proof_snapshot = mesh_core_render::build_focused_proof_snapshot(
+                &tree,
+                render_object_dirty,
+                display_list_metrics,
+                &selected_paint,
+            );
+            for diagnostic in &focused_proof_snapshot.diagnostics {
+                self.record_focused_proof_diagnostic(diagnostic);
+            }
+            self.focused_proof_snapshot = Some(focused_proof_snapshot);
+        }
+        let narrow_path = self.narrow_path_active;
+        let affected_count = self.affected_node_count;
+        self.narrow_path_active = false;
+        self.affected_node_count = 0;
+        self.invalidation_snapshot = Some(mesh_core_debug::ProfilingInvalidationSnapshot {
+            node_visits: Default::default(),
+            full_rebuild: requires_tree_rebuild,
+            retained_path: use_retained_style_path,
+            retained_generation: self.retained_tree.generation(),
+            component: dirty_types.to_debug_counts(),
+            retained: retained_dirty.to_debug_counts(),
+            paint: retained_paint_snapshot(selected_paint.metrics(), &effective_damage),
+            text: mesh_core_debug::TextCacheSnapshot::default(),
+            narrow_path,
+            affected_node_count: affected_count,
+            patched_node_count,
+        });
+        tracing::trace!(
+            "retained widget tree '{}' generation={} dirty={:?}",
+            self.id(),
+            self.retained_tree.generation(),
+            retained_dirty
+        );
+        tracing::trace!(
+            "component '{}' invalidation={:?} retained_path={}",
+            self.id(),
+            dirty_types,
+            use_retained_style_path
+        );
+        tracing::trace!(
+            "retained render fingerprints '{}' generation={} dirty={:?}",
+            self.id(),
+            retained_tree_generation,
+            render_object_dirty
+        );
+
+        let paint_started = std::time::Instant::now();
+        let full_selection;
+        let full_damage;
+        let (record_selection, record_damage) = if complete_scene && has_parent_damage {
+            full_selection = self
+                .retained_display_list
+                .select_paint_commands(Some(surface_damage), DisplayListRepaintPolicy::FullSurface);
+            full_damage = EffectiveDamage {
+                rects: vec![surface_damage],
+                rect: Some(surface_damage),
+                full_surface: true,
+                policy: DisplayListRepaintPolicy::FullSurface,
+            };
+            (&full_selection, &full_damage)
+        } else {
+            (&selected_paint, &effective_damage)
+        };
+        let paint_metrics = session
+            .as_mut()
+            .map(|session| {
+                let metrics = self.paint_pixel_regions(
+                    theme,
+                    session,
+                    scale,
+                    record_selection,
+                    record_damage,
+                    paint_bounding_rect,
+                    tooltip.as_ref(),
+                    current_tooltip_damage,
+                );
+                if record_damage.full_surface && self.key_hints_visible() {
+                    self.paint_key_hints(session, scale, &tree);
+                }
+                metrics
+            })
+            .unwrap_or_default();
+        self.key_hints.repaint = false;
+        self.advance_interaction_frame(mesh_core_interaction::InteractionFramePhase::PaintReady);
+        self.retained_display_list.mark_painted();
+        if effective_damage.full_surface {
+            self.buffer_overlaid = false;
+            self.last_present_damage_rects.clear();
+            self.last_present_damage_rects.push(surface_damage);
+        } else if let Some(present) = present_override {
+            for rect in present {
+                push_damage_rect(&mut self.last_present_damage_rects, rect, surface_damage);
+            }
+        } else if !effective_damage.rects.is_empty() {
+            for &rect in &effective_damage.rects {
+                push_damage_rect(&mut self.last_present_damage_rects, rect, surface_damage);
+            }
+        }
+        // When effective_damage.rects is empty, leave last_present_damage_rects unchanged
+        // (accumulates across immediate-rerender passes, matching old merge_optional_damage behaviour)
+        self.last_visual_commands = Some(current_visual_commands);
+        let traversal_micros = paint_metrics
+            .traversal_micros
+            .saturating_sub(paint_metrics.text.shaping_micros)
+            .saturating_sub(paint_metrics.icon_image_raster_micros);
+        self.record_profiling_stage_with_elapsed(
+            mesh_core_debug::ProfilingStage::PaintTraversal,
+            std::time::Duration::from_micros(traversal_micros),
+            Some("rebuild"),
+        );
+        self.record_profiling_stage_with_elapsed(
+            mesh_core_debug::ProfilingStage::TextShaping,
+            std::time::Duration::from_micros(paint_metrics.text.shaping_micros),
+            Some("rebuild"),
+        );
+        self.record_profiling_stage_with_elapsed(
+            mesh_core_debug::ProfilingStage::IconImageRaster,
+            std::time::Duration::from_micros(paint_metrics.icon_image_raster_micros),
+            Some("rebuild"),
+        );
+        for class in mesh_core_render::PaintCommandClass::ALL {
+            let metrics = paint_metrics.command_attribution.get(class);
+            if metrics.command_count == 0 {
+                continue;
+            }
+            self.record_profiling_stage_with_elapsed(
+                mesh_core_debug::ProfilingStage::PaintTraversal,
+                std::time::Duration::from_micros(metrics.elapsed_micros),
+                Some(&format!("attribution:paint_command:{}", class.label())),
+            );
+        }
+        if let Some(snapshot) = self.invalidation_snapshot.as_mut() {
+            snapshot.text = text_cache_snapshot(paint_metrics.text);
+            snapshot.paint.raster_cache_hits = paint_metrics.raster_cache_hits;
+            snapshot.paint.raster_cache_misses = paint_metrics.raster_cache_misses;
+            snapshot.paint.raster_cache_bypasses = paint_metrics.raster_cache_bypasses;
+            snapshot.paint.raster_cache_opaque_hits = paint_metrics.raster_cache_opaque_hits;
+            snapshot.paint.raster_cache_translucent_hits =
+                paint_metrics.raster_cache_translucent_hits;
+            snapshot.paint.glyph_cache_hits = paint_metrics.glyph_cache_hits;
+            snapshot.paint.glyph_cache_misses = paint_metrics.glyph_cache_misses;
+            snapshot.paint.glyph_cache_entries = paint_metrics.glyph_cache_entries;
+            snapshot.paint.glyph_cache_capacity = paint_metrics.glyph_cache_capacity;
+            snapshot.paint.font_bytes_cache_hits = paint_metrics.font_bytes_cache_hits;
+            snapshot.paint.font_bytes_cache_misses = paint_metrics.font_bytes_cache_misses;
+            snapshot.paint.font_bytes_cache_entries = paint_metrics.font_bytes_cache_entries;
+            snapshot.paint.font_bytes_cache_capacity = paint_metrics.font_bytes_cache_capacity;
+            snapshot.paint.skia_glyph_cache_hits = paint_metrics.skia_glyph_cache_hits;
+            snapshot.paint.skia_glyph_cache_misses = paint_metrics.skia_glyph_cache_misses;
+            snapshot.paint.skia_glyph_cache_entries = paint_metrics.skia_glyph_cache_entries;
+            snapshot.paint.skia_glyph_cache_capacity = paint_metrics.skia_glyph_cache_capacity;
+        }
+        if self.profiling_enabled && has_parent_damage {
+            mesh_core_debug::allocation::with_tracking_suspended(|| {
+                self.profiling_records
+                    .borrow_mut()
+                    .push(ComponentProfilingRecord {
+                        stage: mesh_core_debug::ProfilingStage::Paint,
+                        duration: paint_started.elapsed(),
+                        module_id: Some(self.compiled.manifest.package.id.clone()),
+                        trigger_kind: Some("rebuild".to_string()),
+                    });
+            });
+        }
+        self.tooltip_damage_scratch = tooltip_damage_rects;
+        self.dirty_node_visual_damage_scratch = dirty_node_visual_damage_rects;
+        self.visual_damage_scratch = visual_damage_rects;
+        self.effective_damage_scratch = std::mem::take(&mut effective_damage.rects);
+        let mut child_dirty = self.retained_tree.render_dirty_node_ids().clone();
+        child_dirty.extend(self.frame_dirty.iter().filter_map(|(id, class)| {
+            class
+                .contains(mesh_core_elements::ChangeClass::STRUCTURE)
+                .then_some(id)
+        }));
+        let structural = self.retained_tree.last_dirty();
+        self.child_surface_cache.borrow_mut().update(
+            &tree,
+            self.last_frame_snapshot.as_ref(),
+            &child_dirty,
+            structure_rebuilt
+                || structural.inserted > 0
+                || structural.removed > 0
+                || structural.children > 0,
+            self.frame_revision,
+        );
+        let visit_surface_id = self.profiling_enabled.then(|| self.id().to_owned());
+        if let Some(snapshot) = self.invalidation_snapshot.as_mut() {
+            snapshot.node_visits = frame_work.snapshot();
+            for (pass, visits) in &snapshot.node_visits {
+                tracing::debug!(target: "mesh_profiling", surface = visit_surface_id.as_deref().unwrap_or(""),
+                    pass = pass.as_str(), node_visits = visits, "frame node visits");
+            }
+        }
+        if structure_rebuilt {
+            fn live_instances(node: &WidgetNode, ids: &mut HashSet<String>) {
+                if let Some(instance) = node.memo_instance() {
+                    ids.insert(instance.to_owned());
+                }
+                for child in &node.children {
+                    live_instances(child, ids);
+                }
+            }
+            let mut ids = HashSet::new();
+            live_instances(&tree, &mut ids);
+            self.component_prop_recipes
+                .borrow_mut()
+                .retain(|id, _| ids.contains(id.as_ref()));
+            self.template_binding_index = template_patch::TemplateBindingIndex::build(
+                &tree,
+                &self.component_prop_recipes.borrow(),
+            );
+        }
+        self.last_tree = Some(tree);
+        self.frame_dirty.clear();
+        self.advance_interaction_frame(
+            mesh_core_interaction::InteractionFramePhase::SemanticsReady,
+        );
+        self.last_tooltip_damage = current_tooltip_damage;
+        self.surface_pixels_invalid = false;
+        self.clear_runtime_dirty_states();
+        if paint_ran_effects || structure_rebuilt || bindings_patched {
+            let requests = self.drain_effect_side_channels();
+            let requests = self.record_frontend_host_effects(requests);
+            self.pending_paint_requests.extend(requests);
+        }
+        self.publish_frontend_frame();
+        if self.reactive_binding_pending.replace(false) {
+            self.reactive_effects_pending = true;
+            self.invalidate_script_state_narrow();
+        }
+        if self.surface_entering {
+            // A promoted popup's second frame transitions from the entering
+            // pose into place, restyling the marker away.
+            self.surface_entering = false;
+            self.invalidate_interaction_restyle();
+        }
+        if self.surface_exiting {
+            self.exit_frame_painted = true;
+        }
+
+        Ok(())
+    }
+}
+
+/// Extra paints allowed to settle windowed lists before presenting.
+const MAX_SETTLE_PASSES: usize = 2;

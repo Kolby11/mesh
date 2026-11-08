@@ -57,6 +57,7 @@ impl FrontendSurfaceComponent {
             }
         }
         if changed {
+            self.virtual_window_changed = true;
             self.invalidate_script_state();
         }
     }
