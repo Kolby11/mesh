@@ -377,9 +377,8 @@ at the top of this file; prefer it over further single-pass scoping.
       launcher's list mode (`app-list`, one `button` per app) can window, its grid (`flex-wrap`) builds in full;
       the Settings font list is a paged `<scroll>` ("show more"), so it rarely reaches 100 rows; the inspector
       `{#for row in …}` tables are the likely large ones. None has a fixture with a realistic count.
-- [ ] Uneven windowed lists estimate unmeasured rows from a fixed mean, so the scrollbar thumb and extent are
-      approximate and scrolling far then back can shift content by the difference between estimate and
-      measurement. Anchor the scroll offset to the first visible row when measurements replace estimates.
+- [ ] Uneven windowed lists still show an approximate scrollbar thumb and extent until rows are measured; the
+      visible row is anchored, but the thumb can move as estimates are replaced.
 - [ ] A windowed list settles in the same paint only on raster canvases; a GPU canvas still presents the
       unsettled first frame. Check that a second scene submission in one `paint` is safe, then drop the raster
       restriction in `paint_settled`.
