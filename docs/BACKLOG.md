@@ -395,12 +395,15 @@ or `gpu_frame_cost_workload` before landing. Roughly in order of payoff.
 - [ ] Popover show rebuilds the retained GPU target and dmabuf ring. Keep the
       target while hidden and pool dmabuf slots per size in `GpuPresenter`.
 - [ ] Opacity: single-primitive leaves open a `save_layer`; fold alpha into the
-      paint instead. Animated opacity/transform layers have no raster cache.
+      paint instead, only for nodes whose fill, border, shadow and text cannot
+      overlap (a node command paints several primitives). Animated
+      opacity/transform layers have no raster cache.
 - [ ] The GPU painter keeps CPU-tuned choices (A8 atlas rounded fills, shader
       clips, CPU-rastered shadows/gradients); try analytic `draw_rrect`/
       `clip_rrect` and mask-filter shadows on Ganesh behind a parity test.
-- [ ] Skia context: no persistent shader cache; one flush plus fence per
-      surface per frame instead of one per frame.
+- [ ] Skia context: one flush plus fence per surface per frame instead of one per
+      frame. A persistent Skia shader cache needs `GrContextOptions::PersistentCache`,
+      which `skia-safe` 0.97 does not bind; driver GL program caches already persist.
 - [ ] Glyph pages re-upload the whole page when they grow; upload only the new cells.
 - [ ] Images exceeding the 64 MiB `SKIA_IMAGE_CACHE` budget (including mipmaps; anything
       much above 4K) are still copied and re-uploaded every paint. A zero-copy wrap needs a
