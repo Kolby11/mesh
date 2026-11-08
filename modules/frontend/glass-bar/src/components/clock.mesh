@@ -5,6 +5,7 @@
             <column class="stack">
                 <text class="small">{minutes}</text>
                 <text class="small small-dim">{seconds}</text>
+                <text class="small small-dim" hidden={meridiem == ""}>{meridiem}</text>
             </column>
             <Calendar />
         </button>
@@ -20,9 +21,19 @@
 
 <script lang="luau">
 local Calendar = require("./calendar.mesh")
+local settings_ok, settings_service = pcall(require, "mesh.settings")
+if not settings_ok then settings_service = nil end
+-- Preferences the Settings module stores under its own namespace.
+local function pref(name, fallback)
+    local ns = settings_service and settings_service.namespaces and settings_service.namespaces["@mesh/settings"]
+    local global = ns and ns.props and ns.props.global
+    if global and global[name] ~= nil then return global[name] end
+    return fallback
+end
 hours = "--"
 minutes = "--"
 seconds = "--"
+meridiem = ""
 day = "--"
 weekday = ""
 month = ""
@@ -35,7 +46,13 @@ end
 
 local function tick()
     local now = os.time()
-    hours = date("%H", now)
+    if pref("clock_24h", true) then
+        hours = date("%H", now)
+        meridiem = ""
+    else
+        hours = date("%I", now)
+        meridiem = date("%p", now)
+    end
     minutes = date("%M", now)
     seconds = date("%S", now)
     day = date("%d", now)
@@ -44,7 +61,10 @@ local function tick()
     full_label = mesh.locale.format_date(now, "full") .. " " .. mesh.locale.format_time(now)
 end
 
-tick()
+effect(function()
+    local _ = settings_service and settings_service.namespaces
+    tick()
+end)
 task.spawn(function()
     while true do
         task.sleep(1000)

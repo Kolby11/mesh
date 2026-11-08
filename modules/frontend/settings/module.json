@@ -1,7 +1,7 @@
 {
   "name": "@mesh/settings",
   "version": "0.1.0",
-  "description": "Backend-aware desktop settings for connectivity, audio, appearance, device details, and modules.",
+  "description": "Backend-aware desktop settings for connectivity, audio, display, power, notifications, input, accessibility, apps, privacy, appearance, device details, and modules.",
   "mesh": {
     "apiVersion": "0.1",
     "kind": "ui",
@@ -18,7 +18,20 @@
       "optionalInterfaces": {
         "mesh.network": ">=1.0",
         "mesh.bluetooth": ">=1.0",
-        "mesh.device": ">=1.0"
+        "mesh.device": ">=1.0",
+        "mesh.notifications": ">=1.0",
+        "mesh.power": ">=1.0",
+        "mesh.brightness": ">=1.0",
+        "mesh.apps": ">=1.0",
+        "mesh.session": ">=1.0",
+        "mesh.display": ">=1.0",
+        "mesh.input": ">=1.0",
+        "mesh.power-profile": ">=1.0",
+        "mesh.time": ">=1.0",
+        "mesh.idle": ">=1.0",
+        "mesh.network-details": ">=1.0",
+        "mesh.hardware": ">=1.0",
+        "mesh.audio-devices": ">=1.0"
       },
       "resources": {
         "icons": [
@@ -44,7 +57,32 @@
         "service.packages.read",
         "service.packages.control",
         "service.keybinds.read",
-        "service.keybinds.control"
+        "service.keybinds.control",
+        "service.notifications.read",
+        "service.notifications.control",
+        "service.power.read",
+        "service.brightness.read",
+        "service.brightness.control",
+        "service.apps.read",
+        "service.apps.launch",
+        "service.session.read",
+        "service.session.control",
+        "service.display.read",
+        "service.display.control",
+        "service.input.read",
+        "service.input.control",
+        "service.power-profile.read",
+        "service.power-profile.control",
+        "service.time.read",
+        "service.time.control",
+        "service.idle.read",
+        "service.idle.control",
+        "service.network-details.read",
+        "service.network-details.control",
+        "service.hardware.read",
+        "service.hardware.control",
+        "service.audio-devices.read",
+        "service.audio-devices.control"
       ],
       "modules": {
         "@mesh/shell-ui-interface": ">=1.0.0",
@@ -73,7 +111,17 @@
         "window-new",
         "window-restore",
         "input-keyboard",
-        "lock"
+        "lock",
+        "video-display",
+        "input-mouse",
+        "battery-good",
+        "notifications",
+        "preferences-desktop-locale",
+        "preferences-desktop-accessibility",
+        "applications-all",
+        "security-high",
+        "view-grid",
+        "system-users"
       ]
     },
     "surface": {

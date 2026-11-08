@@ -73,7 +73,12 @@ hidden = false
 
 local audio_ok, audio = pcall(require, "mesh.audio@>=1.0")
 if not audio_ok then audio = nil end
-local t = import("mesh.i18n", "t")
+local raw_t = import("mesh.i18n", "t")
+-- An empty or missing key yields no text instead of the "!!" miss marker.
+local function t(key, ...)
+    if key == nil or key == "" then return "" end
+    return raw_t(key, ...)
+end
 local volume_presentation = require("@mesh/volume-presentation/volume")
 
 audio_status = "audio.waiting"

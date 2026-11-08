@@ -1,0 +1,1615 @@
+<props>
+{
+    page = { type = "string", default = "notifications" },
+}
+</props>
+
+<template>
+    <column class="settings-page" hidden={hidden}>
+        <row class="pref-detail-head" hidden={detail == ""}>
+            <button class="pref-back" aria-label={t('pref.back')} onclick={onBack}>
+                <text class="pref-back-chevron">‹</text>
+                <text class="pref-back-label">{t('pref.back')}</text>
+            </button>
+            <text class="pref-detail-title">{detail_title}</text>
+        </row>
+        <column class="settings-empty-state" hidden={empty_title == ""}>
+            <text class="settings-card-title">{empty_title}</text>
+            <text class="settings-card-meta">{empty_copy}</text>
+        </column>
+        {#for section in view key={section.id}}
+            <column class="pref-section">
+                <text class="pref-section-title" hidden={section.title_text == "" and section.title == ""}>{section.title_text ~= "" and section.title_text or t(section.title)}</text>
+                <text class="pref-section-copy" hidden={section.copy_text == ""}>{section.copy_text}</text>
+                <column class="pref-group">
+                    {#for row in section.rows key={row.id}}
+                        <box class="pref-divider" hidden={row.first} />
+                        {#if row.kind == "nav"}
+                            <button class="pref-row pref-row-nav" class:pref-row-first={row.first} aria-label={row.label_text ~= "" and row.label_text or t(row.label)} onclick={onNav(row.id)}>
+                                <text class="pref-title">{row.label_text ~= "" and row.label_text or t(row.label)}</text>
+                                <row class="pref-nav-end">
+                                    <text class="pref-nav-value">{row.value_text}</text>
+                                    <text class="pref-nav-chevron">›</text>
+                                </row>
+                            </button>
+                        {/if}
+                        {#if row.kind == "action" and row.label_text == ""}
+                            <button class="pref-row pref-row-nav" class:pref-row-first={row.first} disabled={row.disabled} aria-label={t(row.label)} onclick={onAction(row.id)}>
+                                <column class="pref-copy">
+                                    <text class="pref-title" class:pref-title-danger={row.danger} class:pref-title-disabled={row.disabled}>{t(row.label)}</text>
+                                    <text class="pref-hint" hidden={row.copy_text == ""}>{row.copy_text}</text>
+                                </column>
+                            </button>
+                        {/if}
+                        {#if row.kind ~= "nav" and not (row.kind == "action" and row.label_text == "")}
+                            <row class="pref-row" class:pref-row-first={row.first}>
+                                <column class="pref-copy">
+                                    <text class="pref-title">{row.label_text ~= "" and row.label_text or t(row.label)}</text>
+                                    <text class="pref-hint" hidden={row.copy_text == ""}>{row.copy_text}</text>
+                                    {#if row.kind == "choice"}
+                                        <row class="pref-choices">
+                                            {#for opt in row.options key={opt.id}}
+                                                <button class="pref-choice" class:pref-choice-active={opt.active} aria-pressed={opt.active} disabled={row.disabled} onclick={onChoice(row.id, opt.id)}>
+                                                    <text>{t(opt.label)}</text>
+                                                </button>
+                                            {/for}
+                                        </row>
+                                    {/if}
+                                </column>
+                                {#if row.kind == "switch"}
+                                    <button class="pref-switch" class:pref-switch-on={row.on} role="switch" aria-checked={row.on} aria-label={row.label_text ~= "" and row.label_text or t(row.label)} disabled={row.disabled} onclick={onToggle(row.id)}>
+                                        <box class="pref-switch-thumb" class:pref-switch-thumb-on={row.on} />
+                                    </button>
+                                {/if}
+                                {#if row.kind == "stepper"}
+                                    <row class="pref-stepper">
+                                        <button class="pref-step" aria-label={t('pref.decrease')} disabled={row.disabled} onclick={onStep(row.id, -1)}><text>−</text></button>
+                                        <text class="pref-value">{row.value_text}</text>
+                                        <button class="pref-step" aria-label={t('pref.increase')} disabled={row.disabled} onclick={onStep(row.id, 1)}><text>+</text></button>
+                                    </row>
+                                {/if}
+                                {#if row.kind == "text"}
+                                    <input class="pref-input" value={row.query} oninput={onFieldInput} placeholder={row.placeholder} aria-label={t(row.label)} />
+                                {/if}
+                                {#if row.kind == "secret"}
+                                    <password class="pref-input" value={row.query} oninput={onSecretInput} placeholder={row.placeholder} aria-label={t(row.label)} />
+                                {/if}
+                                {#if row.kind == "meter"}
+                                    <column class="pref-meter-box">
+                                        <progress class="pref-meter" value={row.fraction} min="0" max="1" />
+                                        <text class="pref-hint pref-meter-text">{row.value_text}</text>
+                                    </column>
+                                {/if}
+                                {#if row.kind == "info"}
+                                    <text class="pref-info">{row.value_text}</text>
+                                {/if}
+                                {#if row.kind == "action"}
+                                    <button class="pref-action" class:pref-action-danger={row.danger} disabled={row.disabled} onclick={onAction(row.id)}>
+                                        <text>{t(row.action_label)}</text>
+                                    </button>
+                                {/if}
+                            </row>
+                        {/if}
+                    {/for}
+                </column>
+            </column>
+        {/for}
+    </column>
+</template>
+
+<script lang="luau">
+hidden = false
+
+local raw_t = import("mesh.i18n", "t")
+-- An empty or missing key yields no text instead of the "!!" miss marker.
+local function t(key, ...)
+    if key == nil or key == "" then return "" end
+    return raw_t(key, ...)
+end
+
+local function optional(name)
+    local ok, service = pcall(require, name)
+    if ok then return service end
+    return nil
+end
+
+local settings = optional("mesh.settings")
+local notifications = optional("mesh.notifications@>=1.0")
+local power = optional("mesh.power@>=1.0")
+local brightness = optional("mesh.brightness@>=1.0")
+local apps = optional("mesh.apps@>=1.0")
+local session = optional("mesh.session@>=1.0")
+local display = optional("mesh.display@>=1.0")
+local input = optional("mesh.input@>=1.0")
+local profile = optional("mesh.power-profile@>=1.0")
+local clock = optional("mesh.time@>=1.0")
+local idle = optional("mesh.idle@>=1.0")
+local packages = optional("mesh.packages")
+local debug_service = optional("mesh.debug")
+local theme = optional("mesh.theme")
+local net = optional("mesh.network@>=1.0")
+local nd = optional("mesh.network-details@>=1.0")
+local bt = optional("mesh.bluetooth@>=1.0")
+local hw = optional("mesh.hardware@>=1.0")
+local device = optional("mesh.device@>=1.0")
+local audio_devices = optional("mesh.audio-devices@>=1.0")
+
+local SETTINGS_MODULE = "@mesh/settings"
+local NOTIFICATIONS_MODULE = "@mesh/freedesktop-notifications"
+
+-- Declared in main.mesh `<props>`, which is what makes them configurable;
+-- keep the defaults in step with that block.
+local DEFAULTS = {
+    clock_24h = true,
+    first_day = "monday",
+    show_battery_percent = true,
+    low_battery_percent = 15,
+    reduce_motion = false,
+    high_contrast = false,
+    reduce_transparency = false,
+}
+
+view = {}
+empty_title = ""
+empty_copy = ""
+detail_title = ""
+detail = ""
+field_text = ""
+secret_text = ""
+
+-- A copy key that has no catalog entry renders nothing rather than the miss marker.
+local function tc(key)
+    if key == nil or key == "" then return "" end
+    local value = raw_t(key)
+    if string.sub(value, 1, 2) == "!!" then return "" end
+    return value
+end
+
+local function usable(service)
+    return service ~= nil and service.available ~= false
+end
+
+local function number(value, fallback)
+    return tonumber(value) or fallback
+end
+
+local function module_prop(module_id, name, fallback)
+    local ns = settings and settings.namespaces and settings.namespaces[module_id]
+    local global = ns and ns.props and ns.props.global
+    if global and global[name] ~= nil then return global[name] end
+    return fallback
+end
+
+local function write_prop(module_id, name, value)
+    if settings and type(settings.set_prop) == "function" then
+        settings.set_prop(module_id, nil, name, value)
+    end
+end
+
+local function stored(id)
+    return module_prop(SETTINGS_MODULE, id, DEFAULTS[id])
+end
+
+local HAS_COPY = {
+    ["adaptive_sync"] = true,
+    ["apps_empty"] = true,
+    ["auto_time"] = true,
+    ["banner_duration_s"] = true,
+    ["banner_position"] = true,
+    ["base_size"] = true,
+    ["blank_after_min"] = true,
+    ["brightness"] = true,
+    ["caps_empty"] = true,
+    ["clock_24h"] = true,
+    ["cursor_size"] = true,
+    ["dim_after_min"] = true,
+    ["disable_while_typing"] = true,
+    ["discoverable"] = true,
+    ["dnd"] = true,
+    ["first_day"] = true,
+    ["group_by_app"] = true,
+    ["hdr"] = true,
+    ["high_contrast"] = true,
+    ["history"] = true,
+    ["history_days"] = true,
+    ["hotspot_password"] = true,
+    ["idle_managed"] = true,
+    ["large_cursor"] = true,
+    ["left_handed"] = true,
+    ["locale"] = true,
+    ["lock_on_suspend"] = true,
+    ["lock_screen_content"] = true,
+    ["lock_timeout_min"] = true,
+    ["low_battery_percent"] = true,
+    ["max_banners"] = true,
+    ["natural_scroll"] = true,
+    ["night_light"] = true,
+    ["night_light_kelvin"] = true,
+    ["notify_app"] = true,
+    ["output_hdr"] = true,
+    ["output_scale"] = true,
+    ["outputs"] = true,
+    ["pointer_speed"] = true,
+    ["power_draw"] = true,
+    ["power_health"] = true,
+    ["power_mode"] = true,
+    ["power_remaining"] = true,
+    ["power_state"] = true,
+    ["privacy_indicators"] = true,
+    ["profiles_empty"] = true,
+    ["reduce_motion"] = true,
+    ["reduce_transparency"] = true,
+    ["screen_reader"] = true,
+    ["screen_share_prompt"] = true,
+    ["session_poweroff"] = true,
+    ["session_reboot"] = true,
+    ["session_service"] = true,
+    ["session_suspend"] = true,
+    ["shell_scale"] = true,
+    ["show_battery_percent"] = true,
+    ["startup_notify"] = true,
+    ["sticky_keys"] = true,
+    ["suspend_after_min"] = true,
+    ["tap_to_click"] = true,
+    ["thick_focus_ring"] = true,
+    ["units"] = true,
+    ["user_name"] = true,
+    ["wifi_enabled"] = true,
+    ["wifi_password"] = true,
+    ["zone_search"] = true,
+}
+
+local function copy_key(id)
+    if HAS_COPY[id] then return "pref." .. id .. ".copy" end
+    return ""
+end
+
+local function sw(id, extra)
+    local row = { id = id, kind = "switch", label = "pref." .. id, copy = copy_key(id) }
+    if extra then for k, v in pairs(extra) do row[k] = v end end
+    return row
+end
+
+local function choice(id, options, extra)
+    local row = { id = id, kind = "choice", label = "pref." .. id, copy = copy_key(id), options = options }
+    if extra then for k, v in pairs(extra) do row[k] = v end end
+    return row
+end
+
+local function stepper(id, step, lo, hi, extra)
+    local row = { id = id, kind = "stepper", label = "pref." .. id, copy = copy_key(id), step = step, min = lo, max = hi }
+    if extra then for k, v in pairs(extra) do row[k] = v end end
+    return row
+end
+
+local function info(id, get)
+    return { id = id, kind = "info", label = "pref." .. id, copy = "", get = get }
+end
+
+local function action(id, action_label, run, extra)
+    local row = { id = id, kind = "action", label = "pref." .. id, copy = copy_key(id), action_label = action_label, run = run }
+    if extra then for k, v in pairs(extra) do row[k] = v end end
+    return row
+end
+
+local function percent(value)
+    return string.format("%d%%", math.floor((tonumber(value) or 0) + 0.5))
+end
+
+local function suffix(unit)
+    return function(value) return tostring(math.floor((tonumber(value) or 0) + 0.5)) .. unit end
+end
+
+local function minutes_or_never(value)
+    local minutes = math.floor(tonumber(value) or 0)
+    if minutes <= 0 then return t("pref.never") end
+    return string.format("%d min", minutes)
+end
+
+local function duration_text(value)
+    local minutes = math.floor(tonumber(value) or 0)
+    if minutes <= 0 then return t("pref.never") end
+    if minutes < 60 then return string.format("%d min", minutes) end
+    return string.format("%d h %02d min", math.floor(minutes / 60), minutes % 60)
+end
+
+-- A service-backed row is unusable while its provider is missing.
+local function needs(service)
+    return function() return not usable(service) end
+end
+
+local PAGES = {}
+
+PAGES.notifications = {
+    { id = "delivery", title = "pref.section.delivery", copy = "pref.section.delivery.copy", rows = {
+        sw("dnd", {
+            get = function() return usable(notifications) and notifications.dnd == true end,
+            set = function(value) if usable(notifications) then notifications.set_dnd(value) end end,
+            disabled = needs(notifications),
+        }),
+        stepper("banner_duration_s", 1, 2, 30, {
+            fmt = suffix(" s"),
+            get = function() return number(module_prop(NOTIFICATIONS_MODULE, "timeout_seconds", 6), 6) end,
+            set = function(value) write_prop(NOTIFICATIONS_MODULE, "timeout_seconds", value) end,
+        }),
+        stepper("max_banners", 1, 1, 8, {
+            get = function() return number(module_prop(NOTIFICATIONS_MODULE, "max_popups", 3), 3) end,
+            set = function(value) write_prop(NOTIFICATIONS_MODULE, "max_popups", value) end,
+        }),
+        stepper("history", 10, 10, 200, {
+            get = function() return number(module_prop(NOTIFICATIONS_MODULE, "history", 50), 50) end,
+            set = function(value) write_prop(NOTIFICATIONS_MODULE, "history", value) end,
+        }),
+    } },
+}
+
+local PROFILE_TO_UI = { ["power-saver"] = "saver", balanced = "balanced", performance = "performance" }
+local UI_TO_PROFILE = { saver = "power-saver", balanced = "balanced", performance = "performance" }
+
+local function idle_row(kind, id, step, hi)
+    return stepper(id, step, 0, hi, {
+        fmt = minutes_or_never,
+        get = function() return usable(idle) and number(idle[kind .. "_after_min"], 0) or 0 end,
+        set = function(value) if usable(idle) then idle.set_timeout(kind, value) end end,
+        disabled = function() return not usable(idle) or idle.managed ~= true end,
+    })
+end
+
+PAGES.power = {
+    { id = "battery", title = "pref.section.battery", copy = "pref.section.battery.copy", rows = {
+        info("power_state", function()
+            if not usable(power) then return t("pref.unavailable") end
+            return (power.charging and t("pref.charging") or t("pref.on_battery")) .. " · " .. percent(power.level)
+        end),
+        info("power_remaining", function()
+            if not usable(power) then return t("pref.unavailable") end
+            if power.charging then return duration_text(power.time_to_full_minutes) end
+            return duration_text(power.time_remaining_minutes)
+        end),
+        info("power_health", function()
+            if not usable(power) or (tonumber(power.health_percent) or 0) <= 0 then return t("pref.unavailable") end
+            return percent(power.health_percent)
+        end),
+        info("power_draw", function()
+            if not usable(power) then return t("pref.unavailable") end
+            return string.format("%.1f W", tonumber(power.power_draw_watts) or 0)
+        end),
+    } },
+    { id = "profile", title = "pref.section.profile", copy = "", rows = {
+        choice("power_mode", { "saver", "balanced", "performance" }, {
+            get = function() return usable(profile) and (PROFILE_TO_UI[profile.profile] or "balanced") or "balanced" end,
+            set = function(value) if usable(profile) then profile.set_profile(UI_TO_PROFILE[value] or "balanced") end end,
+            disabled = needs(profile),
+        }),
+        sw("show_battery_percent"),
+        stepper("low_battery_percent", 5, 5, 50, { fmt = suffix("%") }),
+    } },
+    { id = "idle", title = "pref.section.idle", copy = "pref.section.idle.copy", rows = {
+        sw("idle_managed", {
+            get = function() return usable(idle) and idle.managed == true end,
+            set = function(value) if usable(idle) then idle.set_managed(value) end end,
+            disabled = needs(idle),
+        }),
+        idle_row("dim", "dim_after_min", 1, 60),
+        idle_row("blank", "blank_after_min", 1, 120),
+        idle_row("suspend", "suspend_after_min", 5, 240),
+    } },
+    { id = "session", title = "pref.section.session", copy = "", rows = {
+        action("session_suspend", "pref.suspend", function() if usable(session) then session.suspend() end end, { disabled = needs(session) }),
+        action("session_reboot", "pref.restart", function() if usable(session) then session.reboot() end end, { disabled = needs(session) }),
+        action("session_poweroff", "pref.power_off", function() if usable(session) then session.poweroff() end end, { danger = true, disabled = needs(session) }),
+    } },
+}
+
+local function theme_shell()
+    local state = settings and settings.namespaces and settings.namespaces.shell or {}
+    return state.fonts or {}
+end
+
+local function focused_output()
+    if not usable(display) then return nil end
+    for _, output in ipairs(display.outputs or {}) do
+        if output.focused then return output end
+    end
+    return (display.outputs or {})[1]
+end
+
+local function find_output_by_name(name)
+    if not usable(display) then return nil end
+    for _, output in ipairs(display.outputs or {}) do
+        if output.name == name then return output end
+    end
+    return nil
+end
+
+local function output_rows()
+    local rows = {}
+    if not usable(display) then
+        rows[1] = info("outputs", function() return t("pref.unavailable") end)
+        return rows
+    end
+    for _, output in ipairs(display.outputs or {}) do
+        rows[#rows + 1] = {
+            id = "out:" .. output.name, kind = "nav", label = "pref.raw", label_text = output.name, copy = "",
+            value = string.format("%d×%d @ %d Hz", number(output.width, 0), number(output.height, 0), math.floor(number(output.refresh, 0) + 0.5)),
+        }
+    end
+    return rows
+end
+
+PAGES.display = {
+    { id = "screen", title = "pref.section.screen", copy = "", rows = {
+        stepper("brightness", 10, 5, 100, {
+            fmt = suffix("%"),
+            get = function() return usable(brightness) and number(brightness.level, 0) or 0 end,
+            set = function(value) if usable(brightness) then brightness.set(value) end end,
+            disabled = needs(brightness),
+        }),
+        stepper("shell_scale", 25, 75, 200, {
+            fmt = suffix("%"),
+            get = function() return number(theme_shell().shell_scale, 100) end,
+            set = function(value) if theme then theme.set_shell_scale(value) end end,
+            disabled = function() return theme == nil end,
+        }),
+    } },
+    { id = "comfort", title = "pref.section.comfort", copy = "pref.section.comfort.copy", rows = {
+        sw("night_light", {
+            get = function() return usable(display) and display.night_light == true end,
+            set = function(value) if usable(display) then display.set_night_light(value, number(display.night_light_kelvin, 4500)) end end,
+            disabled = needs(display),
+        }),
+        stepper("night_light_kelvin", 250, 2500, 6000, {
+            fmt = suffix(" K"),
+            get = function() return usable(display) and number(display.night_light_kelvin, 4500) or 4500 end,
+            set = function(value) if usable(display) then display.set_night_light(display.night_light == true, value) end end,
+            disabled = needs(display),
+        }),
+        sw("adaptive_sync", {
+            get = function() return usable(display) and display.adaptive_sync == true end,
+            set = function(value) if usable(display) then display.set_adaptive_sync(value) end end,
+            disabled = needs(display),
+        }),
+    } },
+}
+
+PAGES.pointer = {
+    { id = "pointer", title = "pref.section.pointer", copy = "", rows = {
+        stepper("pointer_speed", 1, -10, 10, {
+            get = function() return usable(input) and number(input.pointer_speed, 0) or 0 end,
+            set = function(value) if usable(input) then input.set_pointer_speed(value) end end,
+            disabled = needs(input),
+        }),
+        sw("left_handed", {
+            get = function() return usable(input) and input.left_handed == true end,
+            set = function(value) if usable(input) then input.set_left_handed(value) end end,
+            disabled = needs(input),
+        }),
+        stepper("cursor_size", 8, 16, 96, {
+            fmt = suffix(" px"),
+            get = function() return usable(input) and number(input.cursor_size, 24) or 24 end,
+            set = function(value) if usable(input) then input.set_cursor_size(value) end end,
+            disabled = needs(input),
+        }),
+    } },
+    { id = "scroll", title = "pref.section.touchpad", copy = "", rows = {
+        sw("natural_scroll", {
+            get = function() return usable(input) and input.natural_scroll == true end,
+            set = function(value) if usable(input) then input.set_natural_scroll(value) end end,
+            disabled = needs(input),
+        }),
+        sw("tap_to_click", {
+            get = function() return usable(input) and input.tap_to_click == true end,
+            set = function(value) if usable(input) then input.set_tap_to_click(value) end end,
+            disabled = needs(input),
+        }),
+        sw("disable_while_typing", {
+            get = function() return usable(input) and input.disable_while_typing == true end,
+            set = function(value) if usable(input) then input.set_disable_while_typing(value) end end,
+            disabled = needs(input),
+        }),
+    } },
+}
+
+PAGES.language = {
+    { id = "language", title = "pref.section.language", copy = "", rows = {
+        info("locale", function()
+            local current = tostring(mesh.locale.current() or "en")
+            if string.sub(current, 1, 2) == "sk" then return t("language.slovak.native") end
+            if string.sub(current, 1, 2) == "en" then return t("language.english.native") end
+            return current
+        end),
+    } },
+    { id = "time", title = "pref.section.time", copy = "pref.section.time.copy", rows = {
+        sw("auto_time", {
+            get = function() return usable(clock) and clock.ntp == true end,
+            set = function(value) if usable(clock) then clock.set_ntp(value) end end,
+            disabled = needs(clock),
+        }),
+        info("timezone", function() return usable(clock) and tostring(clock.timezone) or t("pref.unavailable") end),
+    } },
+    { id = "formats", title = "pref.section.clock", copy = "pref.section.clock.copy", rows = {
+        sw("clock_24h"),
+        choice("first_day", { "monday", "sunday", "saturday" }),
+        choice("units", { "metric", "imperial" }, {
+            get = function() return module_prop("@mesh/open-meteo-weather", "unit", "C") == "F" and "imperial" or "metric" end,
+            set = function(value) write_prop("@mesh/open-meteo-weather", "unit", value == "imperial" and "F" or "C") end,
+        }),
+    } },
+}
+
+local TOKENS = {}
+TOKENS.reduce_motion = {
+    on = {
+        ["animation-duration-fast"] = 0, ["animation-duration-short"] = 0, ["animation-duration-medium"] = 0,
+        ["animation-duration-long"] = 0, ["animation-duration-extra-long"] = 0,
+    },
+    off = {
+        ["animation-duration-fast"] = "null", ["animation-duration-short"] = "null", ["animation-duration-medium"] = "null",
+        ["animation-duration-long"] = "null", ["animation-duration-extra-long"] = "null",
+    },
+}
+TOKENS.high_contrast = {
+    on = {
+        ["color-outline"] = "var(--color-on-surface)", ["color-outline-variant"] = "var(--color-on-surface)",
+        ["color-on-surface-variant"] = "var(--color-on-surface)",
+    },
+    off = { ["color-outline"] = "null", ["color-outline-variant"] = "null", ["color-on-surface-variant"] = "null" },
+}
+local GLASS_TIERS = { "pill", "card", "dock", "panel", "flare", "lens" }
+TOKENS.reduce_transparency = { on = {
+    ["effect-backdrop-blur-surface-radius"] = 0, ["effect-backdrop-blur-popup-radius"] = 0,
+    ["effect-backdrop-blur-surface-background"] = "var(--color-surface)",
+    ["effect-backdrop-blur-popup-background"] = "var(--color-surface-container)",
+}, off = {
+    ["effect-backdrop-blur-surface-radius"] = "null", ["effect-backdrop-blur-popup-radius"] = "null",
+    ["effect-backdrop-blur-surface-background"] = "null", ["effect-backdrop-blur-popup-background"] = "null",
+} }
+for _, tier in ipairs(GLASS_TIERS) do
+    TOKENS.reduce_transparency.on["@mesh/glass-material.glass.backdrop." .. tier] = "none"
+    TOKENS.reduce_transparency.off["@mesh/glass-material.glass.backdrop." .. tier] = "null"
+end
+
+local function apply_tokens(id, enabled)
+    local set = TOKENS[id] and (enabled and TOKENS[id].on or TOKENS[id].off)
+    if not set or not theme then return end
+    local patch = {}
+    for name, value in pairs(set) do
+        patch[name] = value == "null" and mesh.json.null or value
+    end
+    theme.set_tokens(patch)
+end
+
+local function token_switch(id)
+    return sw(id, {
+        set = function(value)
+            apply_tokens(id, value)
+            write_prop(SETTINGS_MODULE, id, value)
+        end,
+        disabled = function() return theme == nil end,
+    })
+end
+
+PAGES.accessibility = {
+    { id = "assist", title = "pref.section.assist", copy = "pref.section.assist.copy", rows = {
+        stepper("base_size", 1, 10, 32, {
+            fmt = suffix(" px"),
+            get = function() return number(theme_shell().base_size, 14) end,
+            set = function(value) if theme then theme.set_font_size(value) end end,
+            disabled = function() return theme == nil end,
+        }),
+        sw("large_cursor", {
+            get = function() return usable(input) and number(input.cursor_size, 24) >= 40 end,
+            set = function(value) if usable(input) then input.set_cursor_size(value and 48 or 24) end end,
+            disabled = needs(input),
+        }),
+    } },
+    { id = "vision", title = "pref.section.vision", copy = "", rows = {
+        token_switch("high_contrast"),
+        token_switch("reduce_motion"),
+        token_switch("reduce_transparency"),
+    } },
+}
+
+PAGES.privacy = {
+    { id = "lock", title = "pref.section.lock", copy = "pref.section.lock.copy", rows = {
+        sw("lock_on_suspend", {
+            get = function() return usable(idle) and idle.lock_on_suspend == true end,
+            set = function(value) if usable(idle) then idle.set_lock_on_suspend(value) end end,
+            disabled = function() return not usable(idle) or idle.managed ~= true end,
+        }),
+        idle_row("lock", "lock_timeout_min", 1, 60),
+    } },
+}
+
+local function capability_rows()
+    local rows = {}
+    local graph = debug_service and type(debug_service.module_graph) == "table" and debug_service.module_graph or {}
+    for _, entry in ipairs(graph) do
+        local uses = entry.uses or {}
+        local caps = uses.capabilities or entry.capabilities or {}
+        if type(caps) == "table" and #caps > 0 and #rows < 14 then
+            local id = tostring(entry.module_id or "")
+            local shown = {}
+            for i = 1, math.min(#caps, 3) do shown[#shown + 1] = tostring(caps[i]) end
+            local text = table.concat(shown, ", ") .. (#caps > 3 and string.format(" +%d", #caps - 3) or "")
+            rows[#rows + 1] = { id = "cap:" .. id, kind = "info", label = "pref.cap_module", label_text = id, copy = "", get = function() return text end }
+        end
+    end
+    return rows
+end
+
+PAGES.apps = {}
+PAGES.shell = {}
+PAGES.users = {
+    { id = "account", title = "pref.section.account", copy = "pref.section.account.copy", rows = {
+        info("user_name", function()
+            local ok, name = pcall(function() return os.getenv("USER") end)
+            if ok and name and name ~= "" then return name end
+            return t("pref.unavailable")
+        end),
+        info("session_service", function() return usable(session) and t("common.active") or t("pref.unavailable") end),
+    } },
+}
+
+local function zone_section()
+    local zones = usable(clock) and clock.timezones or {}
+    local rows = { { id = "zone_search", kind = "text", label = "pref.zone_search", copy = "pref.zone_search.copy", query = field_text, placeholder = t("pref.search_placeholder") } }
+    local needle = string.lower(field_text)
+    if needle ~= "" then
+        local shown = 0
+        for _, zone in ipairs(zones) do
+            if shown < 6 and string.find(string.lower(zone), needle, 1, true) then
+                shown = shown + 1
+                local active = usable(clock) and clock.timezone == zone
+                rows[#rows + 1] = action("zone:" .. zone, active and "common.active" or "pref.select", function()
+                    if usable(clock) and not active then clock.set_timezone(zone) end
+                end, { label_text = zone, copy = "", disabled = active })
+            end
+        end
+    end
+    return { id = "zone", title = "pref.section.zone", copy = "", rows = rows }
+end
+
+-- ---------------------------------------------------------------------------
+-- Drill-down pages. A list page shows its rows; a nav row opens a detail view
+-- (`detail` holds the row id) that begins with a Back action.
+-- ---------------------------------------------------------------------------
+
+local LISTS = {}
+local DETAIL = {}
+
+local function nav(id, label_text, value)
+    return { id = id, kind = "nav", label = "pref.raw", label_text = label_text, copy = "", value = value or "" }
+end
+
+local function kv(id, value)
+    return { id = id, kind = "info", label = "pref.kv." .. id, copy = "", get = function() return tostring(value) end }
+end
+
+local function field(id, placeholder)
+    return { id = id, kind = "text", label = "pref." .. id, copy = copy_key(id), query = field_text, placeholder = placeholder or "" }
+end
+
+local function secret(id)
+    return { id = id, kind = "secret", label = "pref." .. id, copy = copy_key(id), query = secret_text, placeholder = "" }
+end
+
+local function meter(id, label_text, fraction, text)
+    return { id = id, kind = "meter", label = "pref.raw", label_text = label_text, copy = "", fraction = fraction, text = text }
+end
+
+-- A detail view shows its title in the header next to the Back button.
+local function back(title)
+    detail_title = tostring(title or "")
+    return { id = "detail_back", title = "", copy = "", rows = {} }
+end
+
+local function bytes_text(value)
+    local n = tonumber(value) or 0
+    local units = { "B", "KB", "MB", "GB", "TB" }
+    local i = 1
+    while n >= 1024 and i < #units do n = n / 1024; i = i + 1 end
+    if i == 1 then return string.format("%d B", n) end
+    return string.format("%.1f %s", n, units[i])
+end
+
+local function empty(text) return text == nil or text == "" end
+
+local function or_dash(text)
+    if empty(text) then return t("pref.unavailable") end
+    return tostring(text)
+end
+
+-- ===== Wi-Fi ================================================================
+
+local function wifi_on() return usable(net) and net.wifi_enabled == true end
+
+local function find_ap(ssid)
+    for _, n in ipairs(usable(nd) and nd.networks or {}) do
+        if n.ssid == ssid then return n end
+    end
+    return nil
+end
+
+local function find_saved(name)
+    for _, s in ipairs(usable(nd) and nd.saved or {}) do
+        if s.name == name then return s end
+    end
+    return nil
+end
+
+local function ap_summary(n)
+    return n.security .. " · " .. n.band .. " · " .. percent(n.signal)
+end
+
+LISTS.wifi = function()
+    local sections = {}
+    sections[#sections + 1] = { id = "radio", title = "pref.section.wifi", copy = "", rows = {
+        sw("wifi_enabled", {
+            get = wifi_on,
+            set = function(value) if usable(net) then net.set_wifi_enabled(value) end end,
+            disabled = needs(net),
+        }),
+        action("wifi_scan", "pref.scan", function()
+            if usable(nd) then nd.refresh() elseif usable(net) then net.scan() end
+        end, { disabled = function() return not wifi_on() end }),
+    } }
+    if not usable(nd) then
+        sections[#sections + 1] = { id = "none", title = "pref.section.wifi_details", copy = "", rows = { info("nd_missing", function() return t("pref.unavailable") end) } }
+        return sections
+    end
+    local c = nd.connection or {}
+    local current = {}
+    if c.kind == "wifi" or c.kind == "ethernet" then
+        local label = c.kind == "wifi" and c.ssid or c.name
+        local value = c.kind == "wifi" and (percent(c.signal) .. " · " .. or_dash(c.security)) or or_dash(c.ip4)
+        current[#current + 1] = nav("conn", label, value)
+    else
+        current[#current + 1] = info("net_offline", function() return t("common.not_connected") end)
+    end
+    sections[#sections + 1] = { id = "current", title = "pref.section.current_network", copy = "", rows = current }
+
+    local saved = {}
+    for _, s in ipairs(nd.saved or {}) do
+        if s.kind == "wifi" or s.kind == "ethernet" then
+            saved[#saved + 1] = nav("saved:" .. s.name, s.name, s.active and t("common.connected") or (s.autoconnect and t("pref.auto_connect") or ""))
+        end
+    end
+    if #saved > 0 then
+        sections[#sections + 1] = { id = "saved", title = "pref.section.saved_networks", copy = "pref.section.saved_networks.copy", rows = saved }
+    end
+
+    if wifi_on() then
+        local nearby = {}
+        for _, n in ipairs(nd.networks or {}) do
+            if not n.active and #nearby < 20 then nearby[#nearby + 1] = nav("ap:" .. n.ssid, n.ssid, ap_summary(n)) end
+        end
+        if #nearby == 0 then nearby[1] = info("no_networks", function() return "" end) end
+        sections[#sections + 1] = { id = "available", title = "pref.section.available_networks", copy = "", rows = nearby }
+    end
+
+    local vpns = {}
+    for _, s in ipairs(nd.saved or {}) do
+        if s.kind == "vpn" then
+            local name = s.name
+            vpns[#vpns + 1] = sw("vpn:" .. name, {
+                label_text = name, copy = "",
+                get = function() local live = find_saved(name); return live ~= nil and live.active == true end,
+                set = function(value) if value then nd.connection_up(name) else nd.connection_down(name) end end,
+            })
+        end
+    end
+    if #vpns > 0 then
+        sections[#sections + 1] = { id = "vpn", title = "pref.section.vpn", copy = "pref.section.vpn.copy", rows = vpns }
+    end
+    sections[#sections + 1] = { id = "sharing", title = "pref.section.sharing", copy = "", rows = {
+        nav("hotspot", t("pref.hotspot"), nd.hotspot_active and t("common.active") or ""),
+    } }
+    return sections
+end
+
+local function connection_rows(c)
+    local rows = {}
+    local function add(id, value) if not empty(value) and value ~= 0 then rows[#rows + 1] = kv(id, value) end end
+    if c.kind == "wifi" then
+        add("ssid", c.ssid)
+        add("signal", percent(c.signal))
+        add("security", c.security)
+        add("band", c.band)
+        add("channel", c.channel)
+        add("frequency", c.frequency_mhz > 0 and (c.frequency_mhz .. " MHz") or "")
+        add("link_speed", c.rate_mbps > 0 and (c.rate_mbps .. " Mbps") or "")
+        add("bssid", c.bssid)
+    else
+        add("link_speed", c.speed_mbps > 0 and (c.speed_mbps .. " Mbps") or "")
+    end
+    add("interface", c.interface)
+    add("ip4", c.ip4)
+    add("gateway", c.gateway)
+    add("dns", c.dns)
+    add("ip6", c.ip6)
+    add("mac", c.mac)
+    add("mtu", c.mtu)
+    return rows
+end
+
+local function manage_rows(name)
+    local saved = find_saved(name)
+    local rows = {}
+    if not saved then return rows end
+    rows[#rows + 1] = sw("autoconnect", {
+        get = function() local live = find_saved(name); return live ~= nil and live.autoconnect == true end,
+        set = function(value) nd.set_autoconnect(name, value) end,
+    })
+    rows[#rows + 1] = action("forget", "pref.forget", function() nd.forget(name); detail = "" end, { danger = true })
+    return rows
+end
+
+DETAIL.wifi = function(id)
+    local sections = {}
+    if not usable(nd) then return sections end
+    if id == "conn" then
+        local c = nd.connection or {}
+        sections[#sections + 1] = back(c.kind == "wifi" and c.ssid or c.name)
+        sections[#sections + 1] = { id = "details", title = "pref.section.connection_details", copy = "", rows = connection_rows(c) }
+        local rows = {
+            action("disconnect", "pref.disconnect", function() nd.disconnect(); detail = "" end, { disabled = function() return not usable(nd) end }),
+        }
+        for _, r in ipairs(manage_rows(c.name)) do rows[#rows + 1] = r end
+        sections[#sections + 1] = { id = "manage", title = "pref.section.manage", copy = "", rows = rows }
+    elseif id:sub(1, 3) == "ap:" then
+        local ssid = id:sub(4)
+        local n = find_ap(ssid)
+        sections[#sections + 1] = back(ssid)
+        if n then
+            local rows = {
+                kv("security", n.security), kv("signal", percent(n.signal)), kv("band", n.band), kv("channel", n.channel),
+                kv("frequency", n.frequency_mhz .. " MHz"), kv("link_speed", n.rate_mbps .. " Mbps"), kv("bssid", n.bssid),
+            }
+            sections[#sections + 1] = { id = "details", title = "pref.section.connection_details", copy = "", rows = rows }
+            local actions = {}
+            if not n.saved and n.security ~= "Open" then actions[#actions + 1] = secret("wifi_password") end
+            actions[#actions + 1] = action("connect", "pref.connect", function()
+                nd.connect(ssid, secret_text)
+                secret_text = ""
+            end, { disabled = function() return not n.saved and n.security ~= "Open" and #secret_text < 8 end })
+            for _, r in ipairs(manage_rows(ssid)) do actions[#actions + 1] = r end
+            sections[#sections + 1] = { id = "manage", title = "pref.section.manage", copy = "", rows = actions }
+        end
+    elseif id:sub(1, 6) == "saved:" then
+        local name = id:sub(7)
+        local s = find_saved(name)
+        sections[#sections + 1] = back(name)
+        if s then
+            local rows = { kv("kind", s.kind == "wifi" and "Wi-Fi" or "Ethernet"), kv("status", s.active and t("common.connected") or t("common.not_connected")) }
+            sections[#sections + 1] = { id = "details", title = "pref.section.connection_details", copy = "", rows = rows }
+            local actions = {}
+            if s.active then
+                actions[#actions + 1] = action("disconnect", "pref.disconnect", function() nd.connection_down(name) end)
+            else
+                actions[#actions + 1] = action("connect", "pref.connect", function() nd.connection_up(name) end)
+            end
+            for _, r in ipairs(manage_rows(name)) do actions[#actions + 1] = r end
+            sections[#sections + 1] = { id = "manage", title = "pref.section.manage", copy = "", rows = actions }
+        end
+    elseif id == "hotspot" then
+        sections[#sections + 1] = back(t("pref.hotspot"))
+        sections[#sections + 1] = { id = "hotspot", title = "pref.section.hotspot", copy = "pref.section.hotspot.copy", rows = {
+            kv("status", nd.hotspot_active and t("common.active") or t("common.disabled")),
+            field("hotspot_name", t("pref.hotspot_name.placeholder")),
+            secret("hotspot_password"),
+            nd.hotspot_active
+                and action("hotspot_stop", "pref.stop", function() nd.set_hotspot(false, "", "") end)
+                or action("hotspot_start", "pref.start", function() nd.set_hotspot(true, field_text, secret_text); secret_text = "" end, {
+                    disabled = function() return field_text == "" or #secret_text < 8 end,
+                }),
+        } }
+    end
+    return sections
+end
+
+-- ===== Bluetooth ============================================================
+
+local BT_KINDS = {
+    ["audio-headphones"] = "pref.btkind.headphones", ["audio-headset"] = "pref.btkind.headphones", ["audio-card"] = "pref.btkind.audio",
+    ["input-keyboard"] = "pref.btkind.keyboard", ["input-mouse"] = "pref.btkind.mouse", ["input-gaming"] = "pref.btkind.controller",
+    ["input-tablet"] = "pref.btkind.tablet", phone = "pref.btkind.phone", computer = "pref.btkind.computer", ["video-display"] = "pref.btkind.display",
+    printer = "pref.btkind.printer",
+}
+
+local function bt_kind(device_entry)
+    local key = BT_KINDS[device_entry.icon or ""]
+    return key and t(key) or t("pref.btkind.other")
+end
+
+local function find_bt(id)
+    if not usable(bt) then return nil end
+    for _, d in ipairs(bt.paired_devices or {}) do if d.id == id then return d, true end end
+    for _, d in ipairs(bt.nearby_devices or {}) do if d.id == id then return d, false end end
+    return nil
+end
+
+local function bt_summary(d)
+    local parts = {}
+    if d.connected then parts[#parts + 1] = t("common.connected") end
+    if (d.battery or -1) >= 0 then parts[#parts + 1] = d.battery .. "%" end
+    if #parts == 0 then parts[1] = bt_kind(d) end
+    return table.concat(parts, " · ")
+end
+
+LISTS.bluetooth = function()
+    local sections = {}
+    sections[#sections + 1] = { id = "radio", title = "pref.section.bluetooth", copy = "", rows = {
+        sw("bt_power", {
+            get = function() return usable(bt) and bt.powered == true end,
+            set = function(value) if usable(bt) then bt.set_enabled(value) end end,
+            disabled = needs(bt),
+        }),
+        action("bt_scan", "pref.scan", function() bt.scan() end, { disabled = function() return not usable(bt) or bt.powered ~= true or bt.scanning == true end }),
+        nav("adapter", t("pref.adapter"), usable(bt) and bt.adapter_name or ""),
+    } }
+    if not usable(bt) then return sections end
+    local paired = {}
+    for _, d in ipairs(bt.paired_devices or {}) do paired[#paired + 1] = nav("dev:" .. d.id, d.name, bt_summary(d)) end
+    if #paired == 0 then paired[1] = info("no_paired", function() return "" end) end
+    sections[#sections + 1] = { id = "paired", title = "pref.section.paired_devices", copy = "", rows = paired }
+    if bt.powered then
+        local nearby = {}
+        for _, d in ipairs(bt.nearby_devices or {}) do nearby[#nearby + 1] = nav("dev:" .. d.id, d.name, bt_kind(d)) end
+        if #nearby == 0 then nearby[1] = info("no_nearby", function() return bt.scanning and t("common.scanning") or "" end) end
+        sections[#sections + 1] = { id = "nearby", title = "pref.section.nearby_devices", copy = "", rows = nearby }
+    end
+    return sections
+end
+
+DETAIL.bluetooth = function(id)
+    local sections = {}
+    if not usable(bt) then return sections end
+    if id == "adapter" then
+        sections[#sections + 1] = back(t("pref.adapter"))
+        sections[#sections + 1] = { id = "adapter", title = "pref.section.adapter", copy = "", rows = {
+            kv("adapter_name", bt.adapter_name), kv("bt_address", bt.adapter_address),
+            field("adapter_rename", bt.adapter_name),
+            action("adapter_rename", "pref.rename", function() bt.set_adapter_name(field_text); field_text = "" end, { disabled = function() return field_text == "" end }),
+            sw("discoverable", { get = function() return bt.discoverable == true end, set = function(value) bt.set_discoverable(value) end }),
+            sw("pairable", { get = function() return bt.pairable == true end, set = function(value) bt.set_pairable(value) end }),
+        } }
+    elseif id:sub(1, 4) == "dev:" then
+        local mac = id:sub(5)
+        local d, paired = find_bt(mac)
+        sections[#sections + 1] = back(d and d.name or mac)
+        if d then
+            local rows = { kv("bt_type", bt_kind(d)), kv("bt_address", d.address), kv("status", bt_summary(d)) }
+            if (d.battery or -1) >= 0 then rows[#rows + 1] = meter("bt_battery", t("pref.kv.bt_battery"), d.battery / 100, d.battery .. "%") end
+            if (d.rssi or 0) ~= 0 then rows[#rows + 1] = kv("bt_rssi", d.rssi .. " dBm") end
+            if not empty(d.vendor_id) then rows[#rows + 1] = kv("bt_ids", d.vendor_id .. ":" .. d.product_id) end
+            sections[#sections + 1] = { id = "details", title = "pref.section.device_details", copy = "", rows = rows }
+            local actions = {}
+            if paired then
+                if d.connected then
+                    actions[#actions + 1] = action("bt_disconnect", "pref.disconnect", function() bt.disconnect(mac) end)
+                else
+                    actions[#actions + 1] = action("bt_connect", "pref.connect", function() bt.connect(mac) end)
+                end
+                actions[#actions + 1] = sw("bt_trusted", { get = function() local live = find_bt(mac); return live ~= nil and live.trusted == true end, set = function(value) bt.set_trusted(mac, value) end })
+                actions[#actions + 1] = action("bt_forget", "pref.forget", function() bt.forget(mac); detail = "" end, { danger = true })
+            else
+                actions[#actions + 1] = action("bt_pair", "pref.pair", function() bt.pair(mac) end)
+            end
+            sections[#sections + 1] = { id = "manage", title = "pref.section.manage", copy = "", rows = actions }
+        end
+    end
+    return sections
+end
+
+-- ===== About (device) and storage ==========================================
+
+LISTS.device = function()
+    local sections = {}
+    local hw_ok = usable(hw)
+    local model = hw_ok and (empty(hw.product_version) and hw.model or (hw.product_version .. " (" .. hw.model .. ")")) or ""
+    sections[#sections + 1] = { id = "identity", title = "pref.section.identity", copy = "", rows = {
+        kv("device_model", or_dash(model)), kv("device_vendor", or_dash(hw_ok and hw.vendor or "")),
+        kv("hostname", or_dash(usable(device) and device.hostname or "")), kv("firmware", or_dash(hw_ok and hw.bios_version or "")),
+    } }
+    local uptime = usable(device) and tonumber(device.uptime_seconds) or 0
+    sections[#sections + 1] = { id = "software", title = "pref.section.software", copy = "", rows = {
+        kv("os", usable(device) and (device.os_name .. " " .. device.os_version) or t("pref.unavailable")),
+        kv("kernel", or_dash(usable(device) and device.kernel or "")), kv("arch", or_dash(usable(device) and device.architecture or "")),
+        kv("desktop", or_dash(usable(device) and device.desktop or "")), kv("uptime", uptime > 0 and duration_text(uptime / 60) or t("pref.unavailable")),
+    } }
+    local cpu_rows = {
+        kv("cpu_model", or_dash(hw_ok and hw.cpu_model or "")),
+        kv("cpu_cores", hw_ok and (hw.cpu_cores .. " / " .. hw.cpu_threads) or t("pref.unavailable")),
+    }
+    if hw_ok and hw.cpu_max_mhz > 0 then cpu_rows[#cpu_rows + 1] = kv("cpu_max", string.format("%.2f GHz", hw.cpu_max_mhz / 1000)) end
+    for i, gpu in ipairs(hw_ok and hw.gpus or {}) do cpu_rows[#cpu_rows + 1] = { id = "gpu:" .. i, kind = "info", label = "pref.kv.gpu", copy = "", get = function() return gpu end } end
+    sections[#sections + 1] = { id = "hardware", title = "pref.section.hardware", copy = "", rows = cpu_rows }
+    if hw_ok and hw.memory_total_bytes > 0 then
+        local used = hw.memory_total_bytes - hw.memory_available_bytes
+        local rows = { meter("memory", t("pref.kv.memory"), used / hw.memory_total_bytes, bytes_text(used) .. " / " .. bytes_text(hw.memory_total_bytes)) }
+        if hw.swap_total_bytes > 0 then
+            local swap_used = hw.swap_total_bytes - hw.swap_free_bytes
+            rows[#rows + 1] = meter("swap", t("pref.kv.swap"), swap_used / hw.swap_total_bytes, bytes_text(swap_used) .. " / " .. bytes_text(hw.swap_total_bytes))
+        end
+        sections[#sections + 1] = { id = "memory", title = "pref.section.memory", copy = "", rows = rows }
+    end
+    if hw_ok and #hw.disks > 0 then
+        local root = hw.disks[1]
+        for _, disk in ipairs(hw.disks) do if disk.mount == "/" then root = disk end end
+        sections[#sections + 1] = { id = "storage", title = "pref.section.storage", copy = "", rows = {
+            nav("storage", t("pref.storage"), bytes_text(root.total_bytes - root.used_bytes) .. " " .. t("pref.free")),
+        } }
+    end
+    local net_rows = {}
+    if usable(nd) and (nd.connection or {}).kind ~= "none" then
+        local c = nd.connection
+        net_rows = { kv("ip4", or_dash(c.ip4)), kv("mac", or_dash(c.mac)), kv("interface", or_dash(c.interface)) }
+    else
+        net_rows = { kv("ip4", t("common.not_connected")) }
+    end
+    sections[#sections + 1] = { id = "network", title = "pref.section.network", copy = "", rows = net_rows }
+    if usable(display) then
+        local rows = {}
+        for _, o in ipairs(display.outputs or {}) do
+            rows[#rows + 1] = { id = "out:" .. o.name, kind = "info", label = "pref.raw", label_text = o.name, copy = "", get = function()
+                return string.format("%d×%d @ %d Hz · %.2f×", o.width, o.height, math.floor(o.refresh + 0.5), o.scale)
+            end }
+        end
+        if #rows > 0 then sections[#sections + 1] = { id = "displays", title = "pref.section.displays", copy = "", rows = rows } end
+    end
+    if usable(power) then
+        sections[#sections + 1] = { id = "battery", title = "pref.section.battery", copy = "", rows = {
+            kv("battery_level", percent(power.level) .. (power.charging and (" · " .. t("pref.charging")) or "")),
+            kv("battery_health", (tonumber(power.health_percent) or 0) > 0 and percent(power.health_percent) or t("pref.unavailable")),
+        } }
+    end
+    local graph = debug_service and type(debug_service.module_graph) == "table" and debug_service.module_graph or {}
+    local backends = 0
+    for _, entry in ipairs(graph) do if entry.kind == "backend" then backends = backends + 1 end end
+    sections[#sections + 1] = { id = "runtime", title = "pref.section.runtime", copy = "", rows = {
+        kv("modules_known", #graph), kv("modules_backend", backends),
+    } }
+    return sections
+end
+
+DETAIL.device = function(id)
+    local sections = {}
+    if id == "storage" and usable(hw) then
+        sections[#sections + 1] = back(t("pref.storage"))
+        for i, disk in ipairs(hw.disks or {}) do
+            sections[#sections + 1] = { id = "disk" .. i, title = "pref.raw", title_text = disk.mount, copy = "", rows = {
+                meter("disk_use", t("pref.kv.disk_use"), disk.total_bytes > 0 and disk.used_bytes / disk.total_bytes or 0,
+                    bytes_text(disk.used_bytes) .. " / " .. bytes_text(disk.total_bytes)),
+                kv("disk_free", bytes_text(disk.total_bytes - disk.used_bytes)), kv("disk_device", disk.device), kv("disk_fs", disk.filesystem),
+            } }
+        end
+    end
+    return sections
+end
+
+-- ===== Sound ================================================================
+
+local function audio_nodes(kind)
+    if not usable(audio_devices) then return {} end
+    return audio_devices[kind] or {}
+end
+
+local function find_node(kind, id)
+    for _, n in ipairs(audio_nodes(kind)) do if tostring(n.id) == id then return n end end
+    return nil
+end
+
+local function node_summary(n)
+    local text = percent(n.volume)
+    if n.muted then text = t("audio.muted") end
+    if n.default then text = text .. " · " .. t("common.default") end
+    return text
+end
+
+LISTS.audio = function()
+    local sections = {}
+    if not usable(audio_devices) then
+        sections[1] = { id = "none", title = "pref.section.audio", copy = "", rows = { info("audio_missing", function() return t("pref.unavailable") end) } }
+        return sections
+    end
+    local function list(kind, prefix, title, empty_id)
+        local rows = {}
+        for _, n in ipairs(audio_nodes(kind)) do rows[#rows + 1] = nav(prefix .. ":" .. n.id, n.name, node_summary(n)) end
+        if #rows == 0 then rows[1] = info(empty_id, function() return "" end) end
+        sections[#sections + 1] = { id = kind, title = title, copy = "", rows = rows }
+    end
+    list("sinks", "sinks", "pref.section.output_devices", "no_sinks")
+    list("sources", "sources", "pref.section.input_devices", "no_sources")
+    list("streams", "streams", "pref.section.applications", "no_streams")
+    return sections
+end
+
+DETAIL.audio = function(id)
+    local sections = {}
+    local kind, node_id = id:match("^(%a+):(%d+)$")
+    if not kind then return sections end
+    local node = find_node(kind, node_id)
+    sections[#sections + 1] = back(node and node.name or node_id)
+    if not node then return sections end
+    local numeric = tonumber(node_id)
+    local rows = {
+        kv("node_id", node_id),
+        stepper("node_volume", 5, 0, 150, {
+            fmt = suffix("%"),
+            get = function() local live = find_node(kind, node_id); return live and live.volume or 0 end,
+            set = function(value) audio_devices.set_volume(numeric, value) end,
+        }),
+        sw("node_muted", {
+            get = function() local live = find_node(kind, node_id); return live ~= nil and live.muted == true end,
+            set = function(value) audio_devices.set_muted(numeric, value) end,
+        }),
+    }
+    if kind ~= "streams" and not node.default then
+        rows[#rows + 1] = action("node_default", "pref.make_default", function() audio_devices.set_default(numeric) end)
+    end
+    sections[#sections + 1] = { id = "node", title = "pref.section.device_details", copy = "", rows = rows }
+    return sections
+end
+
+DETAIL.display = function(id)
+    local sections = {}
+    local name = id:match("^out:(.+)$")
+    local output = name and find_output_by_name(name)
+    if not output then return sections end
+    sections[#sections + 1] = back(name)
+    local resolutions, refreshes, seen_res, seen_hz = {}, {}, {}, {}
+    local current = string.format("%dx%d", output.width, output.height)
+    for _, mode in ipairs(output.modes or {}) do
+        local res, hz = mode:match("^(%d+x%d+)@([%d%.]+)")
+        if res then
+            if not seen_res[res] then seen_res[res] = true; resolutions[#resolutions + 1] = { res = res, mode = mode } end
+            if res == current and not seen_hz[hz] then seen_hz[hz] = true; refreshes[#refreshes + 1] = mode end
+        end
+    end
+    sections[#sections + 1] = { id = "out", title = "pref.section.connection_details", copy = "", rows = {
+        kv("out_description", output.description),
+        kv("out_mode", string.format("%d×%d @ %.2f Hz", output.width, output.height, output.refresh)),
+        kv("out_position", output.x .. ", " .. output.y),
+        kv("out_vrr", output.vrr and t("common.enabled") or t("common.disabled")),
+        stepper("output_scale", 0.25, 0.5, 3, {
+            label_key = "pref.output_scale", fmt = function(value) return string.format("%.2f×", tonumber(value) or 1) end,
+            get = function() local live = find_output_by_name(name); return live and number(live.scale, 1) or 1 end,
+            set = function(value) display.set_scale(name, value) end,
+        }),
+        sw("output_hdr", {
+            get = function() local live = find_output_by_name(name); return live ~= nil and live.hdr == true end,
+            set = function(value) display.set_hdr(name, value) end,
+        }),
+    } }
+    local res_rows = {}
+    for _, entry in ipairs(resolutions) do
+        local active = entry.res == current
+        res_rows[#res_rows + 1] = action("res:" .. entry.res, active and "common.active" or "pref.select", function() display.set_mode(name, entry.mode) end,
+            { label_text = (entry.res:gsub("x", "×")), copy = "", disabled = active })
+    end
+    sections[#sections + 1] = { id = "resolution", title = "pref.section.resolution", copy = "", rows = res_rows }
+    local hz_rows = {}
+    for _, mode in ipairs(refreshes) do
+        local hz = tonumber(mode:match("@([%d%.]+)")) or 0
+        local active = math.floor(hz + 0.5) == math.floor(output.refresh + 0.5)
+        hz_rows[#hz_rows + 1] = action("hz:" .. mode, active and "common.active" or "pref.select", function() display.set_mode(name, mode) end,
+            { label_text = string.format("%d Hz", math.floor(hz + 0.5)), copy = "", disabled = active })
+    end
+    sections[#sections + 1] = { id = "refresh", title = "pref.section.refresh_rate", copy = "", rows = hz_rows }
+    return sections
+end
+
+-- Applications that have posted a notification can be muted individually.
+local function muted_list()
+    local list = {}
+    for name in tostring(module_prop(NOTIFICATIONS_MODULE, "muted_apps", "")):gmatch("[^,]+") do
+        list[(name:gsub("^%s+", ""):gsub("%s+$", ""))] = true
+    end
+    return list
+end
+
+local function write_muted(list)
+    local names = {}
+    for name in pairs(list) do names[#names + 1] = name end
+    table.sort(names)
+    write_prop(NOTIFICATIONS_MODULE, "muted_apps", table.concat(names, ","))
+end
+
+local function notification_app_rows()
+    local rows, seen = {}, {}
+    local muted = muted_list()
+    for name in pairs(muted) do seen[name] = true end
+    local names = {}
+    for name in pairs(muted) do names[#names + 1] = name end
+    for _, item in ipairs(usable(notifications) and notifications.notifications or {}) do
+        local name = tostring(item.app_name or "")
+        if name ~= "" and not seen[name] then seen[name] = true; names[#names + 1] = name end
+    end
+    table.sort(names)
+    for _, name in ipairs(names) do
+        rows[#rows + 1] = sw("notify:" .. name, {
+            label_text = name, copy = "pref.notify_app.copy",
+            get = function() return not muted_list()[name] end,
+            set = function(value)
+                local list = muted_list()
+                list[name] = (not value) or nil
+                write_muted(list)
+            end,
+        })
+    end
+    return rows
+end
+
+local function find_app(id)
+    if not usable(apps) then return nil end
+    for _, list in ipairs({ apps.apps or {}, apps.installed or {} }) do
+        for _, app in ipairs(list) do if tostring(app.id) == id then return app end end
+    end
+    return nil
+end
+
+DETAIL.apps = function(id)
+    local sections = {}
+    local app_id = id:match("^app:(.+)$")
+    local app = app_id and find_app(app_id)
+    if not app then return sections end
+    sections[#sections + 1] = back(tostring(app.name or app_id))
+    local running = false
+    for _, a in ipairs(apps.apps or {}) do if tostring(a.id) == app_id and a.running then running = true end end
+    sections[#sections + 1] = { id = "app", title = "pref.section.app_info", copy = "", rows = {
+        kv("app_name", tostring(app.name or app_id)), kv("app_id", app_id),
+        kv("app_status", running and t("pref.running") or t("pref.not_running")),
+        kv("app_windows", tostring(number(app.windows, 0))),
+        action("app_launch", "pref.launch", function() apps.activate(app_id) end),
+    } }
+    return sections
+end
+
+local function dynamic_sections(page)
+    if page == "notifications" then
+        local rows = notification_app_rows()
+        if #rows == 0 then return {} end
+        return { { id = "notify_apps", title = "pref.section.notify_apps", copy = "pref.section.notify_apps.copy", rows = rows } }
+    elseif page == "display" then
+        return { { id = "outputs", title = "pref.section.outputs", copy = "pref.section.outputs.copy", rows = output_rows() } }
+    elseif page == "language" then
+        return { zone_section() }
+    elseif page == "apps" then
+        local list = {}
+        local installed = usable(apps) and type(apps.installed) == "table" and apps.installed or {}
+        for i = 1, math.min(#installed, 12) do
+            local app = installed[i]
+            local id = tostring(app.id or app.name or i)
+            list[#list + 1] = nav("app:" .. id, tostring(app.name or id), app.running and t("pref.running") or "")
+        end
+        if #list == 0 then list[1] = info("apps_empty", function() return t("pref.apps_empty") end) end
+        return { { id = "installed", title = "pref.section.installed", copy = "pref.section.installed.copy", rows = list } }
+    elseif page == "privacy" then
+        local rows = capability_rows()
+        if #rows == 0 then rows[1] = info("caps_empty", function() return t("pref.unavailable") end) end
+        return { { id = "capabilities", title = "pref.section.capabilities", copy = "pref.section.capabilities.copy", rows = rows } }
+    elseif page == "shell" then
+        local list = {}
+        local profiles = packages and type(packages.profiles) == "table" and packages.profiles or {}
+        local active = packages and packages.active_profile or ""
+        for _, id in ipairs(profiles) do
+            local is_active = id == active
+            list[#list + 1] = action("profile:" .. id, is_active and "common.active" or "pref.switch", function()
+                if packages and not is_active then packages.switch_profile(id) end
+            end, { label_text = tostring(id), copy = "", disabled = is_active })
+        end
+        if #list == 0 then list[1] = info("profiles_empty", function() return t("pref.unavailable") end) end
+        return { { id = "profiles", title = "pref.section.profiles", copy = "pref.section.profiles.copy", rows = list } }
+    end
+    return {}
+end
+
+
+local row_index = {}
+
+local function current_value(row)
+    if row.get then return row.get() end
+    return stored(row.id)
+end
+
+local function row_disabled(row)
+    if type(row.disabled) == "function" then return row.disabled() end
+    return row.disabled == true
+end
+
+local function format_value(def, value)
+    if def.fmt then return def.fmt(value) end
+    return tostring(tonumber(value) or 0)
+end
+
+local MISSING = {
+    wifi = function()
+        if not usable(net) and not usable(nd) then return "wifi.service_unavailable", "wifi.install_provider" end
+    end,
+    bluetooth = function()
+        if not usable(bt) then return "bluetooth.service_unavailable", "bluetooth.install_mesh_backend" end
+    end,
+}
+
+local function build_view(page)
+    row_index = {}
+    detail_title = ""
+    local missing = MISSING[page]
+    local title_key, copy_key
+    if missing then title_key, copy_key = missing() end
+    empty_title = title_key and t(title_key) or ""
+    empty_copy = copy_key and t(copy_key) or ""
+    local sections = {}
+    local source = {}
+    if detail ~= "" and DETAIL[page] then
+        for _, section in ipairs(DETAIL[page](detail)) do source[#source + 1] = section end
+        if #source == 0 then detail = "" end
+    end
+    if detail == "" or not DETAIL[page] then
+        if LISTS[page] then
+            for _, section in ipairs(LISTS[page]()) do source[#source + 1] = section end
+        end
+        for _, section in ipairs(PAGES[page] or {}) do source[#source + 1] = section end
+        for _, section in ipairs(dynamic_sections(page)) do source[#source + 1] = section end
+    end
+    for _, section in ipairs(source) do
+        local rows = {}
+        for _, def in ipairs(section.rows) do
+            row_index[def.id] = def
+            local value = (def.kind == "switch" or def.kind == "stepper" or def.kind == "choice") and current_value(def) or nil
+            local row = {
+                id = def.id, kind = def.kind, label = def.label, copy_text = tc(def.copy), disabled = row_disabled(def),
+                on = def.kind == "switch" and value == true or false, query = def.query or "", placeholder = def.placeholder or "",
+                value_text = "", label_text = def.label_text or "", action_label = def.action_label or "",
+                danger = def.danger == true, options = {}, fraction = math.clamp(tonumber(def.fraction) or 0, 0, 1),
+            }
+            if def.kind == "stepper" then
+                row.value_text = format_value(def, value)
+            elseif def.kind == "info" then
+                row.value_text = def.get and tostring(def.get()) or ""
+            elseif def.kind == "nav" then
+                row.value_text = def.value or ""
+            elseif def.kind == "meter" then
+                row.value_text = def.text or ""
+            elseif def.kind == "choice" then
+                for _, option in ipairs(def.options) do
+                    row.options[#row.options + 1] = { id = option, label = "pref." .. def.id .. "." .. option, active = tostring(value) == option }
+                end
+            end
+            row.first = #rows == 0
+            rows[#rows + 1] = row
+        end
+        if #rows > 0 then sections[#sections + 1] = { id = section.id, title = section.title, title_text = section.title_text or "", copy_text = tc(section.copy), rows = rows } end
+    end
+    view = sections
+end
+
+effect(function()
+    local page = props.page
+    -- Subscribe to every source a row can read.
+    local _ = {
+        notifications and notifications.dnd, power and power.level, power and power.charging, brightness and brightness.level,
+        apps and apps.installed, packages and packages.active_profile, settings and settings.namespaces,
+        display and display.outputs, display and display.night_light, display and display.night_light_kelvin, display and display.adaptive_sync,
+        input and input.pointer_speed, input and input.natural_scroll, input and input.tap_to_click, input and input.disable_while_typing,
+        input and input.left_handed, input and input.cursor_size, profile and profile.profile,
+        clock and clock.timezone, clock and clock.ntp, clock and clock.timezones,
+        idle and idle.managed, idle and idle.dim_after_min, idle and idle.blank_after_min, idle and idle.lock_after_min,
+        idle and idle.suspend_after_min, idle and idle.lock_on_suspend, field_text, secret_text, detail,
+        net and net.wifi_enabled, nd and nd.connection, nd and nd.networks, nd and nd.saved, nd and nd.hotspot_active,
+        bt and bt.powered, bt and bt.scanning, bt and bt.paired_devices, bt and bt.nearby_devices, bt and bt.adapter_name,
+        bt and bt.discoverable, bt and bt.pairable, hw and hw.memory_available_bytes, hw and hw.disks, device and device.uptime_seconds,
+        audio_devices and audio_devices.sinks, audio_devices and audio_devices.sources, audio_devices and audio_devices.streams,
+    }
+    local ok, failure = pcall(build_view, page)
+    if not ok then
+        mesh.log.warn("settings page '" .. tostring(page) .. "' failed: " .. tostring(failure))
+        detail = ""
+        empty_title = t("pref.page_failed")
+        empty_copy = tostring(failure)
+    end
+end)
+
+local function write(def, value)
+    if def.set then def.set(value) else write_prop(SETTINGS_MODULE, def.id, value) end
+end
+
+function onToggle(id)
+    local def = row_index[id]
+    if not def or row_disabled(def) then return end
+    write(def, not (current_value(def) == true))
+end
+
+function onChoice(id, option)
+    local def = row_index[id]
+    if not def or row_disabled(def) then return end
+    write(def, option)
+end
+
+function onStep(id, direction)
+    local def = row_index[id]
+    if not def or row_disabled(def) then return end
+    local current = tonumber(current_value(def)) or def.min
+    local next_value = math.clamp(current + direction * (def.step or 1), def.min or 0, def.max or 100)
+    if next_value == math.floor(next_value) then next_value = math.floor(next_value) end
+    write(def, next_value)
+end
+
+function onAction(id)
+    local def = row_index[id]
+    if def and not row_disabled(def) and def.run then def.run() end
+end
+
+function onBack()
+    detail = ""
+    field_text = ""
+    secret_text = ""
+end
+
+function onNav(id)
+    detail = id
+    field_text = ""
+    secret_text = ""
+end
+
+function onSecretInput(value)
+    if type(value) == "table" then value = value.value end
+    secret_text = tostring(value or "")
+end
+
+function onFieldInput(value)
+    if type(value) == "table" then value = value.value end
+    field_text = tostring(value or "")
+end
+
+function onSearchInput(value)
+    if type(value) == "table" then value = value.value end
+    field_text = tostring(value or "")
+end
+</script>
+
+<style>
+    .pref-section { width: 100%; gap: 8px; height: auto; flex-shrink: 0; }
+    .pref-section-title {
+        padding-left: 4px;
+        color: var(--glass-settings-text-muted);
+        font-size: var(--typography-size-xs);
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+    }
+    .pref-section-copy { padding-left: 4px; color: var(--glass-settings-text-muted); font-size: var(--typography-size-xs); line-height: 1.45; }
+    .pref-group {
+        width: 100%;
+        height: auto;
+        flex-shrink: 0;
+        gap: 0;
+        border-radius: var(--radius-md);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--glass-settings-rim);
+        background: var(--glass-settings-inset);
+    }
+    .pref-row {
+        width: 100%;
+        min-height: 52px;
+        padding: 10px 16px;
+        gap: 16px;
+        align-items: center;
+        justify-content: space-between;
+        border-radius: 0;
+        border-width: 0;
+        background: transparent;
+    }
+    .pref-divider { width: 100%; height: 1px; flex-shrink: 0; background-color: var(--color-outline-variant); opacity: 0.6; }
+    .pref-row-nav:hover { background: var(--glass-control-fill-hover); }
+    .pref-row-nav:focus-visible { background: var(--glass-control-fill-hover); }
+    .pref-copy { flex-grow: 1; min-width: 0; gap: 2px; height: auto; }
+    .pref-title { color: var(--glass-settings-text); font-size: var(--typography-size-sm); font-weight: 600; }
+    .pref-title-danger { color: var(--color-error); }
+    .pref-title-disabled { opacity: 0.45; }
+    .pref-hint { color: var(--glass-settings-text-muted); font-size: var(--typography-size-xs); line-height: 1.4; }
+    .pref-info { color: var(--glass-settings-text-muted); font-size: var(--typography-size-sm); text-align: right; max-width: 60%; }
+    .pref-nav-end { align-items: center; gap: 8px; flex-shrink: 0; }
+    .pref-nav-value { color: var(--glass-settings-text-muted); font-size: var(--typography-size-sm); }
+    .pref-nav-chevron { color: var(--glass-settings-text-muted); font-size: 20px; }
+
+    .pref-detail-head { width: 100%; height: auto; flex-shrink: 0; align-items: center; gap: 12px; padding-bottom: 4px; }
+    .pref-back {
+        padding: 6px 12px 6px 8px;
+        gap: 4px;
+        align-items: center;
+        border-radius: 999px;
+        border-width: 0;
+        background: transparent;
+        color: var(--glass-settings-text);
+    }
+    .pref-back:hover { background: var(--glass-control-fill-hover); }
+    .pref-back-chevron { font-size: 22px; }
+    .pref-back-label { font-size: var(--typography-size-sm); font-weight: 600; }
+    .pref-detail-title { color: var(--glass-settings-text); font-size: var(--typography-size-lg); font-weight: 700; }
+
+    .pref-switch {
+        width: 44px;
+        height: 26px;
+        padding: 3px;
+        flex-shrink: 0;
+        border-radius: 999px;
+        border-width: 0;
+        background: var(--glass-settings-inset);
+        background-color: var(--color-surface-container-highest);
+    }
+    .pref-switch-on { background-color: var(--color-primary); }
+    .pref-switch:disabled { opacity: 0.4; }
+    .pref-switch-thumb { width: 20px; height: 20px; border-radius: 999px; background-color: var(--color-on-surface-variant); }
+    .pref-switch-thumb-on { background-color: var(--color-on-primary); margin-left: 18px; }
+
+    .pref-stepper { align-items: center; gap: 4px; flex-shrink: 0; }
+    .pref-step {
+        width: 32px;
+        height: 32px;
+        padding: 0;
+        border-radius: 999px;
+        border-width: 0;
+        background-color: var(--color-surface-container-highest);
+        color: var(--color-on-surface);
+        justify-content: center;
+        align-items: center;
+    }
+    .pref-step:hover { background-color: var(--color-surface-bright); }
+    .pref-step:disabled { opacity: 0.4; }
+    .pref-value { min-width: 76px; text-align: center; color: var(--glass-settings-text); font-size: var(--typography-size-sm); font-weight: 600; }
+
+    .pref-input {
+        width: 220px;
+        height: 36px;
+        padding: 6px 12px;
+        flex-shrink: 0;
+        border-radius: var(--radius-md);
+        border-width: 1px;
+        border-style: solid;
+        border-color: var(--glass-settings-rim);
+        background: var(--color-surface-container-lowest);
+        color: var(--glass-settings-text);
+    }
+    .pref-input:focus-visible { border-color: var(--color-primary); }
+
+    .pref-meter-box { width: 220px; gap: 4px; flex-shrink: 0; height: auto; }
+    .pref-meter { width: 100%; height: 6px; border-radius: 999px; background: var(--color-surface-container-highest); }
+    .pref-meter::fill { background: var(--color-primary); border-radius: 999px; }
+    .pref-meter-text { text-align: right; }
+
+    .pref-choices { width: 100%; gap: 6px; margin-top: 8px; height: auto; }
+    .pref-choice {
+        min-height: 34px;
+        padding: 4px 10px;
+        flex-grow: 1;
+        flex-shrink: 1;
+        justify-content: center;
+        align-items: center;
+        border-radius: var(--radius-md);
+        border-width: 0;
+        background-color: var(--color-surface-container-highest);
+        color: var(--glass-settings-text);
+        font-size: var(--typography-size-sm);
+    }
+    .pref-choice:hover { background-color: var(--color-surface-bright); }
+    .pref-choice-active { background-color: var(--color-primary); color: var(--color-on-primary); font-weight: 700; }
+    .pref-choice:disabled { opacity: 0.4; }
+
+    .pref-action {
+        min-height: 34px;
+        padding: 6px 16px;
+        flex-shrink: 0;
+        border-radius: 999px;
+        border-width: 0;
+        background-color: var(--color-surface-container-highest);
+        color: var(--glass-settings-text);
+        font-size: var(--typography-size-sm);
+        font-weight: 600;
+    }
+    .pref-action:hover { background-color: var(--color-surface-bright); }
+    .pref-action:disabled { opacity: 0.4; }
+    .pref-action-danger { color: var(--color-error); }
+</style>

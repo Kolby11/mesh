@@ -1,3 +1,15 @@
+<props>
+{
+    clock_24h = { type = "bool", default = true },
+    first_day = { type = "enum", options = { "monday", "sunday", "saturday" }, default = "monday" },
+    show_battery_percent = { type = "bool", default = true },
+    low_battery_percent = { type = "int", default = 15, min = 5, max = 50 },
+    reduce_motion = { type = "bool", default = false },
+    high_contrast = { type = "bool", default = false },
+    reduce_transparency = { type = "bool", default = false },
+}
+</props>
+
 <template>
     <dialog class="settings-shell" aria-label={t('settings.title')}>
         <row class="settings-layout">
@@ -5,7 +17,7 @@
                 <text class="sidebar-title">{t('settings.title')}</text>
                 <input class="sidebar-search" value={search_query} oninput={onSearch} placeholder={t('settings.search')} aria-label={t('settings.search')} />
 
-                <column class="sidebar-scroll">
+                <scroll class="sidebar-scroll">
                     <tabs class="sidebar-groups" aria-label={t('settings.categories')} aria-orientation="vertical">
                         <column class="settings-navigation" hidden={not (nav_visible("wifi") or nav_visible("audio") or nav_visible("bluetooth"))}>
                         <tab class="settings-nav-item" selected={active_page == "wifi"} hidden={not nav_visible("wifi")} onactivate={showWifi} title={t('nav.wifi.tooltip')}>
@@ -39,8 +51,50 @@
                             <text class="nav-title">{t('nav.advanced')}</text>
                         </tab>
                         </column>
+                        <column class="settings-navigation" hidden={not (nav_visible("display") or nav_visible("pointer") or nav_visible("power") or nav_visible("notifications") or nav_visible("language") or nav_visible("accessibility") or nav_visible("apps") or nav_visible("privacy") or nav_visible("shell") or nav_visible("users"))}>
+                        <tab class="settings-nav-item" selected={active_page == "display"} hidden={not nav_visible("display")} onactivate={showDisplay} title={t('nav.display.tooltip')}>
+                            <box class="nav-tile nav-tile-blue"><icon class="nav-icon" name="video-display" size="16" /></box>
+                            <text class="nav-title">{t('nav.display')}</text>
+                        </tab>
+                        <tab class="settings-nav-item" selected={active_page == "pointer"} hidden={not nav_visible("pointer")} onactivate={showPointer} title={t('nav.pointer.tooltip')}>
+                            <box class="nav-tile nav-tile-grey"><icon class="nav-icon" name="input-mouse" size="16" /></box>
+                            <text class="nav-title">{t('nav.pointer')}</text>
+                        </tab>
+                        <tab class="settings-nav-item" selected={active_page == "power"} hidden={not nav_visible("power")} onactivate={showPower} title={t('nav.power.tooltip')}>
+                            <box class="nav-tile nav-tile-green"><icon class="nav-icon" name="battery-good" size="16" /></box>
+                            <text class="nav-title">{t('nav.power')}</text>
+                        </tab>
+                        <tab class="settings-nav-item" selected={active_page == "notifications"} hidden={not nav_visible("notifications")} onactivate={showNotifications} title={t('nav.notifications.tooltip')}>
+                            <box class="nav-tile nav-tile-red"><icon class="nav-icon" name="notifications" size="16" /></box>
+                            <text class="nav-title">{t('nav.notifications')}</text>
+                        </tab>
+                        <tab class="settings-nav-item" selected={active_page == "language"} hidden={not nav_visible("language")} onactivate={showLanguage} title={t('nav.language.tooltip')}>
+                            <box class="nav-tile nav-tile-indigo"><icon class="nav-icon" name="preferences-desktop-locale" size="16" /></box>
+                            <text class="nav-title">{t('nav.language')}</text>
+                        </tab>
+                        <tab class="settings-nav-item" selected={active_page == "accessibility"} hidden={not nav_visible("accessibility")} onactivate={showAccessibility} title={t('nav.accessibility.tooltip')}>
+                            <box class="nav-tile nav-tile-purple"><icon class="nav-icon" name="preferences-desktop-accessibility" size="16" /></box>
+                            <text class="nav-title">{t('nav.accessibility')}</text>
+                        </tab>
+                        <tab class="settings-nav-item" selected={active_page == "apps"} hidden={not nav_visible("apps")} onactivate={showApps} title={t('nav.apps.tooltip')}>
+                            <box class="nav-tile nav-tile-orange"><icon class="nav-icon" name="applications-all" size="16" /></box>
+                            <text class="nav-title">{t('nav.apps')}</text>
+                        </tab>
+                        <tab class="settings-nav-item" selected={active_page == "privacy"} hidden={not nav_visible("privacy")} onactivate={showPrivacy} title={t('nav.privacy.tooltip')}>
+                            <box class="nav-tile nav-tile-green"><icon class="nav-icon" name="security-high" size="16" /></box>
+                            <text class="nav-title">{t('nav.privacy')}</text>
+                        </tab>
+                        <tab class="settings-nav-item" selected={active_page == "shell"} hidden={not nav_visible("shell")} onactivate={showShell} title={t('nav.shell.tooltip')}>
+                            <box class="nav-tile nav-tile-indigo"><icon class="nav-icon" name="view-grid" size="16" /></box>
+                            <text class="nav-title">{t('nav.shell')}</text>
+                        </tab>
+                        <tab class="settings-nav-item" selected={active_page == "users"} hidden={not nav_visible("users")} onactivate={showUsers} title={t('nav.users.tooltip')}>
+                            <box class="nav-tile nav-tile-blue"><icon class="nav-icon" name="system-users" size="16" /></box>
+                            <text class="nav-title">{t('nav.users')}</text>
+                        </tab>
+                        </column>
                     </tabs>
-                </column>
+                </scroll>
             </column>
 
             <column class="settings-workspace">
@@ -65,25 +119,55 @@
                 <scroll ref="settings_scroll" class="settings-scroll">
                     <column class="settings-page-stack">
                         <column class="settings-page-slot" hidden={active_page ~= "wifi"}>
-                            {#if active_page == "wifi"}<WifiPage />{/if}
+                            {#if active_page == "wifi"}<PrefsPage page="wifi" />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "audio"}>
-                            {#if active_page == "audio"}<AudioPage />{/if}
+                            {#if active_page == "audio"}<AudioPage /><PrefsPage page="audio" />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "bluetooth"}>
-                            {#if active_page == "bluetooth"}<BluetoothPage />{/if}
+                            {#if active_page == "bluetooth"}<PrefsPage page="bluetooth" />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "appearance"}>
                             {#if active_page == "appearance"}<AppearancePage />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "device"}>
-                            {#if active_page == "device"}<DeviceInfoPage />{/if}
+                            {#if active_page == "device"}<PrefsPage page="device" />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "keyboard"}>
                             {#if active_page == "keyboard"}<KeyboardPage />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "advanced"}>
                             {#if active_page == "advanced"}<AdvancedPage />{/if}
+                        </column>
+                        <column class="settings-page-slot" hidden={active_page ~= "display"}>
+                            {#if active_page == "display"}<PrefsPage page="display" />{/if}
+                        </column>
+                        <column class="settings-page-slot" hidden={active_page ~= "pointer"}>
+                            {#if active_page == "pointer"}<PrefsPage page="pointer" />{/if}
+                        </column>
+                        <column class="settings-page-slot" hidden={active_page ~= "power"}>
+                            {#if active_page == "power"}<PrefsPage page="power" />{/if}
+                        </column>
+                        <column class="settings-page-slot" hidden={active_page ~= "notifications"}>
+                            {#if active_page == "notifications"}<PrefsPage page="notifications" />{/if}
+                        </column>
+                        <column class="settings-page-slot" hidden={active_page ~= "language"}>
+                            {#if active_page == "language"}<PrefsPage page="language" />{/if}
+                        </column>
+                        <column class="settings-page-slot" hidden={active_page ~= "accessibility"}>
+                            {#if active_page == "accessibility"}<PrefsPage page="accessibility" />{/if}
+                        </column>
+                        <column class="settings-page-slot" hidden={active_page ~= "apps"}>
+                            {#if active_page == "apps"}<PrefsPage page="apps" />{/if}
+                        </column>
+                        <column class="settings-page-slot" hidden={active_page ~= "privacy"}>
+                            {#if active_page == "privacy"}<PrefsPage page="privacy" />{/if}
+                        </column>
+                        <column class="settings-page-slot" hidden={active_page ~= "shell"}>
+                            {#if active_page == "shell"}<PrefsPage page="shell" />{/if}
+                        </column>
+                        <column class="settings-page-slot" hidden={active_page ~= "users"}>
+                            {#if active_page == "users"}<PrefsPage page="users" />{/if}
                         </column>
                     </column>
                 </scroll>
@@ -96,11 +180,14 @@
 local AdvancedPage = require("./components/advanced-page.mesh")
 local AppearancePage = require("./components/appearance-page.mesh")
 local AudioPage = require("./components/audio-page.mesh")
-local BluetoothPage = require("./components/bluetooth-page.mesh")
-local DeviceInfoPage = require("./components/device-info-page.mesh")
 local KeyboardPage = require("./components/keyboard-page.mesh")
-local WifiPage = require("./components/wifi-page.mesh")
-local t = import("mesh.i18n", "t")
+local PrefsPage = require("./components/prefs-page.mesh")
+local raw_t = import("mesh.i18n", "t")
+-- An empty or missing key yields no text instead of the "!!" miss marker.
+local function t(key, ...)
+    if key == nil or key == "" then return "" end
+    return raw_t(key, ...)
+end
 
 -- The active page drives the nav highlight, the visible page slot and the
 -- header copy straight from the template. Only the active page is built, but
@@ -134,6 +221,16 @@ function showAppearance() activate("appearance") end
 function showDevice() activate("device") end
 function showKeyboard() activate("keyboard") end
 function showAdvanced() activate("advanced") end
+function showDisplay() activate("display") end
+function showPointer() activate("pointer") end
+function showPower() activate("power") end
+function showNotifications() activate("notifications") end
+function showLanguage() activate("language") end
+function showAccessibility() activate("accessibility") end
+function showApps() activate("apps") end
+function showPrivacy() activate("privacy") end
+function showShell() activate("shell") end
+function showUsers() activate("users") end
 
 function onClose()
     mesh.shell.hide_surface("@mesh/settings")
@@ -317,6 +414,8 @@ end
         width: 100%;
         min-height: 0;
         flex-grow: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
     }
 
     .sidebar-groups {

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "revision": 237,
+  "revision": 275,
   "from": {
     "module": "@mesh/glass"
   },
@@ -10,11 +10,19 @@
   "resources": {},
   "nodeSlots": {},
   "settings": {
+    "@mesh/settings": {
+      "props": {
+        "global": {
+          "low_battery_percent": 15.0,
+          "show_battery_percent": true
+        }
+      }
+    },
     "shell": {
       "fonts": {
         "base_size": 14,
         "shell_scale": 100,
-        "ui_family": "Noto Sans"
+        "ui_family": "Rubik"
       },
       "i18n": {
         "fallback_locale": "en",
@@ -22,7 +30,7 @@
         "policy": "manual"
       },
       "icons": {
-        "default_pack": "Papirus"
+        "default_pack": "Papirus-Dark"
       },
       "keyboard": {
         "assigned": {
@@ -38,7 +46,7 @@
         }
       },
       "theme": {
-        "active": "@mesh/material:material",
+        "active": "@mesh/catppuccin-mocha:catppuccin-mocha",
         "tokens": {
           "@mesh/glass-material.glass.backdrop.card": "blur(10.8px) refract(4.5px 3.6px) dispersion(0.3px)",
           "@mesh/glass-material.glass.backdrop.dock": "blur(9px) refract(4.1px 3.2px) dispersion(0.3px)",

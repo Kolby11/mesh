@@ -141,7 +141,12 @@ local GlassButton = require("@mesh/glass-controls")
 hidden = false
 
 local debug_service = require("mesh.debug")
-local t = import("mesh.i18n", "t")
+local raw_t = import("mesh.i18n", "t")
+-- An empty or missing key yields no text instead of the "!!" miss marker.
+local function t(key, ...)
+    if key == nil or key == "" then return "" end
+    return raw_t(key, ...)
+end
 
 function openCompositionEditor()
     mesh.shell.show_surface("@mesh/composition-editor")

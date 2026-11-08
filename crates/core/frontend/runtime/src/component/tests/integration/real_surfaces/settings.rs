@@ -536,6 +536,49 @@ fn settings_pages_render_their_template_conditionals_without_errors() {
 }
 
 #[test]
+fn settings_preference_pages_render_without_script_errors() {
+    let theme = default_theme();
+    let mut settings =
+        real_frontend_module_component("@mesh/settings", super::super::debug::settings_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+    for handler in [
+        "showDisplay",
+        "showPointer",
+        "showPower",
+        "showNotifications",
+        "showLanguage",
+        "showAccessibility",
+        "showApps",
+        "showPrivacy",
+        "showShell",
+        "showUsers",
+    ] {
+        settings
+            .call_namespaced_handler(&format!("__mesh_embed__::@mesh/settings::{handler}"), &[])
+            .unwrap();
+        settings
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .unwrap();
+        let diagnostics = settings.diagnostics.as_ref().expect("diagnostics handle");
+        let script_errors: Vec<_> = diagnostics
+            .active_issues()
+            .into_iter()
+            .filter(|issue| issue.message.contains("script error"))
+            .map(|issue| issue.message)
+            .collect();
+        assert!(
+            script_errors.is_empty(),
+            "{handler}: preference page scripts and bindings should evaluate: {script_errors:#?}"
+        );
+        let tree = settings.last_tree.as_ref().expect("settings tree");
+        assert!(
+            count_class_token(tree, "pref-section") > 0,
+            "{handler}: the page renders at least one section"
+        );
+    }
+}
+
+#[test]
 fn appearance_theme_cards_stack_their_preview_above_the_label() {
     // Shipped themes lay buttons out as rows; the card must still give its
     // preview the full card width rather than squeezing it beside the label.
@@ -908,7 +951,7 @@ fn settings_navigation_is_one_tab_stop_with_arrow_keys_inside() {
 
     key(&mut settings, "End", false);
     paint(&mut settings);
-    assert!(active_page(&settings).contains("showAdvanced"));
+    assert!(active_page(&settings).contains("showUsers"));
     key(&mut settings, "ArrowDown", false);
     paint(&mut settings);
     assert!(active_page(&settings).contains("showWifi"), "arrows wrap");
@@ -1075,5 +1118,91 @@ fn full_rebuilds_and_page_switches_leave_the_settings_surface_idle() {
             !settings.wants_render(),
             "switching to {page} must leave nothing animating"
         );
+    }
+}
+
+#[test]
+fn settings_pages_never_render_the_missing_translation_marker() {
+    let theme = default_theme();
+    let mut settings =
+        real_frontend_module_component("@mesh/settings", super::super::debug::settings_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+    for handler in [
+        "showWifi", "showAudio", "showBluetooth", "showAppearance", "showDevice", "showKeyboard",
+        "showAdvanced", "showDisplay", "showPointer", "showPower", "showNotifications",
+        "showLanguage", "showAccessibility", "showApps", "showPrivacy", "showShell", "showUsers",
+    ] {
+        settings
+            .call_namespaced_handler(&format!("__mesh_embed__::@mesh/settings::{handler}"), &[])
+            .unwrap();
+        settings
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .unwrap();
+        let mut texts = Vec::new();
+        crate::component::testing::collect_text_content(settings.last_tree.as_ref().unwrap(), &mut texts);
+        let marked: Vec<_> = texts.iter().filter(|text| text.contains("!!")).collect();
+        assert!(marked.is_empty(), "{handler}: untranslated text {marked:?}");
+    }
+}
+
+#[test]
+fn settings_detail_pages_render_service_data() {
+    let theme = default_theme();
+    let mut settings =
+        real_frontend_module_component("@mesh/settings", super::super::debug::settings_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+    let updates = [
+        ("mesh.network-details", "@mesh/nmcli-network-details", serde_json::json!({
+            "available": true,
+            "connection": { "kind": "wifi", "name": "Home", "ssid": "Home", "bssid": "AA:BB:CC:DD:EE:FF", "frequency_mhz": 5180, "channel": 36,
+                "band": "5 GHz", "security": "WPA2", "signal": 71, "rate_mbps": 866, "interface": "wlan0", "mac": "00:11:22:33:44:55",
+                "ip4": "192.168.1.20/24", "gateway": "192.168.1.1", "dns": "1.1.1.1", "ip6": "", "mtu": 1500, "speed_mbps": 0 },
+            "networks": [{ "ssid": "Home", "bssid": "AA:BB:CC:DD:EE:FF", "frequency_mhz": 5180, "channel": 36, "band": "5 GHz", "security": "WPA2", "signal": 71, "rate_mbps": 866, "saved": true, "active": true },
+                { "ssid": "Cafe", "bssid": "11:22:33:44:55:66", "frequency_mhz": 2412, "channel": 1, "band": "2.4 GHz", "security": "Open", "signal": 40, "rate_mbps": 72, "saved": false, "active": false }],
+            "saved": [{ "name": "Home", "uuid": "u1", "kind": "wifi", "autoconnect": true, "active": true }, { "name": "Work VPN", "uuid": "u2", "kind": "vpn", "autoconnect": false, "active": false }],
+            "hotspot_active": false
+        })),
+        ("mesh.network", "@mesh/networkmanager-network", serde_json::json!({ "available": true, "wifi_enabled": true, "connectivity": "full", "kind": "wifi", "ssid": "Home", "signal": 71, "interface_name": "wlan0", "networks": [] })),
+        ("mesh.bluetooth", "@mesh/bluetoothctl-bluetooth", serde_json::json!({
+            "available": true, "powered": true, "scanning": false, "adapter_name": "desk", "adapter_address": "00:11:22:33:44:AA", "discoverable": false, "pairable": true,
+            "paired_devices": [{ "id": "58:18:62:0B:47:84", "address": "58:18:62:0B:47:84", "name": "Headphones", "kind": "audio-headphones", "icon": "audio-headphones", "paired": true, "connected": true, "trusted": true, "blocked": false, "battery": 80, "rssi": 0, "vendor_id": "", "product_id": "" }],
+            "nearby_devices": []
+        })),
+        ("mesh.hardware", "@mesh/sysfs-hardware", serde_json::json!({
+            "available": true, "vendor": "ACME", "model": "X1", "product_version": "Pro", "bios_version": "1.0", "cpu_model": "Test CPU", "cpu_cores": 4, "cpu_threads": 8, "cpu_max_mhz": 4000,
+            "memory_total_bytes": 17179869184u64, "memory_available_bytes": 8589934592u64, "swap_total_bytes": 1073741824u64, "swap_free_bytes": 1073741824u64,
+            "gpus": ["Test GPU"], "disks": [{ "device": "/dev/sda1", "mount": "/", "filesystem": "ext4", "total_bytes": 500107862016u64, "used_bytes": 100021572403u64 }]
+        })),
+        ("mesh.audio-devices", "@mesh/wpctl-audio-devices", serde_json::json!({
+            "available": true,
+            "sinks": [{ "id": 51, "name": "Speakers", "default": true, "volume": 60, "muted": false }],
+            "sources": [{ "id": 52, "name": "Mic", "default": true, "volume": 40, "muted": false }],
+            "streams": [{ "id": 90, "name": "Player", "default": false, "volume": 100, "muted": false }]
+        })),
+    ];
+    for (service, module, payload) in updates {
+        settings
+            .handle_service_event(&ServiceEvent::Updated { service: service.into(), source_module: module.into(), payload })
+            .unwrap();
+    }
+    for (handler, expected) in [
+        ("showWifi", "Cafe"),
+        ("showBluetooth", "Headphones"),
+        ("showDevice", "Test CPU"),
+        ("showAudio", "Speakers"),
+    ] {
+        settings
+            .call_namespaced_handler(&format!("__mesh_embed__::@mesh/settings::{handler}"), &[])
+            .unwrap();
+        settings
+            .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+            .unwrap();
+        let mut texts = Vec::new();
+        crate::component::testing::collect_text_content(settings.last_tree.as_ref().unwrap(), &mut texts);
+        let diagnostics = settings.diagnostics.as_ref().expect("diagnostics handle");
+        let errors: Vec<_> = diagnostics.active_issues().into_iter().filter(|i| i.message.contains("script error")).map(|i| i.message).collect();
+        assert!(errors.is_empty(), "{handler}: {errors:#?}");
+        assert!(texts.iter().any(|t| t.contains(expected)), "{handler}: expected {expected:?} in {texts:?}");
+        assert!(texts.iter().all(|t| !t.contains("!!")), "{handler}: untranslated {texts:?}");
     }
 }

@@ -22,6 +22,15 @@
     </popover>
 </template>
 <script lang="luau">
+local settings_ok, settings_service = pcall(require, "mesh.settings")
+if not settings_ok then settings_service = nil end
+-- Preferences the Settings module stores under its own namespace.
+local function pref(name, fallback)
+    local ns = settings_service and settings_service.namespaces and settings_service.namespaces["@mesh/settings"]
+    local global = ns and ns.props and ns.props.global
+    if global and global[name] ~= nil then return global[name] end
+    return fallback
+end
 local t = import("mesh.i18n", "t")
 open = false
 month_offset = 0
@@ -44,14 +53,15 @@ effect(function()
     local shown_year, shown_month = math.floor(total / 12), total % 12 + 1
     month_label = t("calendar.month." .. tostring(shown_month)) .. " " .. tostring(shown_year)
     local weekdays = {}
-    for index = 1, 7 do weekdays[index] = t("calendar.weekday." .. tostring(index)) end
+    local week_start = ({ monday = 1, sunday = 7, saturday = 6 })[pref("first_day", "monday")] or 1
+    for index = 1, 7 do weekdays[index] = t("calendar.weekday." .. tostring((week_start + index - 2) % 7 + 1)) end
     weekday_labels = weekdays
     today_label = mesh.locale.format_date(now, "full")
     -- Gregorian weekday of the first, Monday first; no timezone/DST arithmetic.
     local y = shown_year - (shown_month < 3 and 1 or 0)
     local offsets = {0,3,2,5,0,3,5,1,4,6,2,4}
     local sunday_first = (y + math.floor(y/4) - math.floor(y/100) + math.floor(y/400) + offsets[shown_month] + 1) % 7
-    local first = (sunday_first + 6) % 7
+    local first = (sunday_first + 8 - week_start) % 7
     local previous_month = shown_month == 1 and 12 or shown_month - 1
     local previous_year = shown_month == 1 and shown_year - 1 or shown_year
     local previous_days = days_in_month(previous_year, previous_month)

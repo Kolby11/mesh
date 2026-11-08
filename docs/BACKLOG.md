@@ -18,6 +18,8 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---
 
+- [ ] Settings pages and shell surfaces: add the controls that have no backend yet (Wi-Fi static IP/DNS and metered connections, Bluetooth per-device rename, per-app sound routing, keyboard layouts, screen reader, sticky keys, banner position, notification grouping, lock-screen content, privacy indicators, default apps, startup apps, device rename); build the lock screen, OSD and window switcher. [Design](../.planning/todos/pending/2026-11-08-settings-and-shell-surfaces.md).
+- [ ] Verify the Nocturne, Paper, Tapedeck and Bubblegum packs in a running shell, reconcile Liquid Glass with its canvas board (the pack's primary `#0a84ff` fails 4.5:1 against white text), and add the bevel/offset-shadow part tokens Tapedeck and Bubblegum need beyond `--glass-shadow-pill`. [Design](../.planning/todos/pending/2026-11-08-settings-and-shell-surfaces.md).
 - [ ] Measure consumer-scoped scene-cache overhead on unchanged frames and scope cache admission to relevant pending resources; admission still waits for unrelated jobs.
 - [ ] Prevent repeated paints from multiplying tooltip offsets at non-default shell scale when theme defaults omit offsets.
 - [ ] Correct glass-bar volume scrolling and low-battery percentages; its handlers read the wrong scroll payload and its control center rescales percentages at or below one.

@@ -149,7 +149,12 @@ local settings_ok, settings_service = pcall(require, "mesh.settings")
 if not settings_ok then settings_service = nil end
 local packages_ok, packages = pcall(require, "mesh.packages")
 if not packages_ok then packages = nil end
-local t = import("mesh.i18n", "t")
+local raw_t = import("mesh.i18n", "t")
+-- An empty or missing key yields no text instead of the "!!" miss marker.
+local function t(key, ...)
+    if key == nil or key == "" then return "" end
+    return raw_t(key, ...)
+end
 
 theme_value = "material"
 locale_value = "en"

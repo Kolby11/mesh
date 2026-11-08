@@ -21,7 +21,7 @@
         </button>
         <row class="status-pill status-chip status-battery" class:status-battery-low={battery_low} title={battery_label} aria-label={battery_label}>
             <icon class="status-glyph status-glyph-dark" name={battery_glyph} size="13" />
-            <text class="status-label status-label-dark">{battery_text}</text>
+            <text class="status-label status-label-dark" hidden={not battery_show}>{battery_text}</text>
         </row>
         <button class="status-pill status-round control-trigger" ref="glassControls" title={t("controls.title")} aria-label={t("controls.title")} aria-haspopup="true">
             <icon class="status-glyph" name="settings" size="16" />
@@ -31,6 +31,15 @@
 </template>
 
 <script lang="luau">
+local settings_ok, settings_service = pcall(require, "mesh.settings")
+if not settings_ok then settings_service = nil end
+-- Preferences the Settings module stores under its own namespace.
+local function pref(name, fallback)
+    local ns = settings_service and settings_service.namespaces and settings_service.namespaces["@mesh/settings"]
+    local global = ns and ns.props and ns.props.global
+    if global and global[name] ~= nil then return global[name] end
+    return fallback
+end
 local t = import("mesh.i18n", "t")
 local ControlCenter = require("./control-center.mesh")
 local audio = require("mesh.audio")
@@ -52,6 +61,7 @@ battery_glyph = "battery-full"
 battery_text = "--"
 battery_label = t("status.battery")
 battery_low = false
+battery_show = true
 
 effect(function()
     if network.available ~= true or network.kind == "none" then
@@ -93,7 +103,8 @@ effect(function()
     local level = power.level or 0
     level = math.clamp(math.floor(level + 0.5), 0, 100)
     battery_text = tostring(level) .. "%"
-    battery_low = level <= 15 and not power.charging
+    battery_show = pref("show_battery_percent", true)
+    battery_low = level <= (tonumber(pref("low_battery_percent", 15)) or 15) and not power.charging
     battery_glyph = power.charging and "battery-full-charging"
         or level >= 90 and "battery-full"
         or level >= 50 and "battery-good"

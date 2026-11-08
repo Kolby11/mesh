@@ -18,7 +18,7 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/workspaces-widget`, `@mesh/window-title-widget`, `@mesh/clock-widget`, `@mesh/brightness-widget`, `@mesh/volume-widget`, `@mesh/theme-widget`, `@mesh/language-widget`, `@mesh/battery-widget`, `@mesh/settings-widget` | embedded | `src/main.mesh` | Independent `mesh.navigation.item` contributions any bar can host; per-instance props come from profile placements |
 | `@mesh/audio-popover` | embedded | `src/main.mesh` | Audio control surface |
 | `@mesh/quick-settings` | embedded | `src/main.mesh` | Quick settings surface |
-| `@mesh/settings` | surface | `src/main.mesh` | Settings surface using the shared glass material family and active theme palette |
+| `@mesh/settings` | surface | `src/main.mesh` | Settings surface using the shared glass material family and active theme palette; Appearance, Keyboard and Advanced pages, the master volume of Audio, and data-driven pages with list → detail drill-down (Wi-Fi, Bluetooth, Sound devices, Display, Power, Notifications, Language & Time, Accessibility, Apps, Privacy, Shell Layout, About, Storage, Users) in `components/prefs-page.mesh` |
 | `@mesh/debug-inspector` | surface | `src/main.mesh` | Runtime inspection surface |
 | `@mesh/composition-editor` | surface | `src/main.mesh` | Replaceable visual editor for author-declared component slots |
 | `@mesh/text-selection-proof` | surface | `src/main.mesh` | Text-selection proof surface |
@@ -140,6 +140,16 @@ stale artwork requests are cancelled when the track's art URL changes.
 | `@mesh/liquid-glass` | theme | Neutral white glass palette over a deep blue base with system-blue accents; tunes `@mesh/glass-material` |
 | `@mesh/frutiger-aero` | theme | Frutiger Aero palette: frosted-white glass, sky and aqua blues, grass-green accents, Noto Sans; light (default) and dark modes; tunes `@mesh/glass-material` |
 | `@mesh/vitrum` | theme | Vitrum palette, after the niri glass shell: lit-from-within glass tinted by a violet accent with a mint second hue, rounded parts, Inter; dark (default) and light modes; tunes `@mesh/glass-material` |
+| `@mesh/nocturne` | theme | Nocturne palette on Material surfaces: deep violet tonal surfaces, mint second hue, orange tertiary, generous rounding, Inter; dark only |
+| `@mesh/paper` | theme | Paper palette on Material surfaces: warm cream, ink text, deep green accent, hairline borders, Fraunces brand face; light only |
+| `@mesh/tapedeck` | theme | Tapedeck palette: grey chrome, navy accent, square corners, black outlines, hard offset shadows and a bevel on glass pills; IBM Plex Mono; light only |
+| `@mesh/bubblegum` | theme | Bubblegum palette: pastel pink and lavender, plum outlines, hard offset shadows, large radii; Fredoka and Nunito; light only |
+| `@mesh/display-interface`, `@mesh/input-interface`, `@mesh/power-profile-interface`, `@mesh/time-interface`, `@mesh/bluetooth-interface`, `@mesh/idle-interface` | interface | `module.json` | `mesh.display` (outputs, scale, HDR, adaptive sync, night light), `mesh.input` (pointer, touchpad, cursor), `mesh.power-profile`, `mesh.time` (time zone, NTP), `mesh.bluetooth`, `mesh.idle` (idle timers, lock policy) |
+| `@mesh/hyprland-display`, `@mesh/hyprland-input` | backend | `src/main.luau` | Hyprland providers over `hyprctl eval`/`getoption` and `hyprsunset`; changes are runtime-only, so the last values persist in `self.storage` and are re-applied at start |
+| `@mesh/power-profiles-daemon`, `@mesh/timedatectl-time`, `@mesh/bluetoothctl-bluetooth` | backend | `src/main.luau` | `powerprofilesctl`, `timedatectl` and BlueZ `bluetoothctl` providers |
+| `@mesh/hypridle-idle` | backend | `src/main.luau` | Runs a MESH-owned hypridle only while "Let MESH manage idle" is on; turn off any other hypridle first |
+| `@mesh/network-details-interface`, `@mesh/hardware-interface`, `@mesh/audio-devices-interface` | interface | `module.json` | `mesh.network-details` (connection details, scan results, saved networks, VPN, hotspot), `mesh.hardware` (model, processor, memory, graphics, disks), `mesh.audio-devices` (outputs, inputs and per-application streams) |
+| `@mesh/nmcli-network-details`, `@mesh/sysfs-hardware`, `@mesh/wpctl-audio-devices` | backend | `src/main.luau` | `nmcli`, `/sys` + `/proc` + `df` + `lspci`, and `wpctl` providers |
 | `@mesh/volume-presentation` | library | Luau `require("@mesh/volume-presentation/volume")`: level normalization, scroll steps and the semantic volume icon shared by every audio frontend |
 | `@mesh/glass-material` | library | Shared surface gradients, translucent fills, text, accents, rims, hovers, shadows and `--glass-backdrop-{pill,card,dock,panel,flare,lens}` blur/refraction materials; defaults derive from any theme, with Liquid Glass and Frutiger Aero tuning them |
 | `@mesh/shell-ui-interface` | interface | Named UI extension-point contracts a host surface renders foreign module UI into |
