@@ -1,0 +1,40 @@
+{
+  "name": "@mesh/tapedeck",
+  "version": "0.1.0",
+  "description": "Tapedeck: retro grey chrome with navy title bars, square corners, black outlines and hard offset shadows; IBM Plex Mono throughout.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "contributes": {
+      "themes": [
+        {
+          "id": "tapedeck",
+          "label": "Tapedeck",
+          "modes": {
+            "light": "theme.css"
+          },
+          "default_mode": "light",
+          "mode_metadata": {
+            "light": {
+              "color_scheme": "light",
+              "contrast": "normal"
+            }
+          },
+          "tokenContract": "1.1",
+          "recommends": {
+            "fonts": [
+              "IBM Plex Mono",
+              "VT323",
+              "Noto Sans"
+            ],
+            "icons": [
+              "Phosphor",
+              "Papirus"
+            ],
+            "compositor_glass": false
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "@mesh/paper",
+  "version": "0.1.0",
+  "description": "Paper: warm cream surfaces, ink text, a deep green accent with vermilion secondary, hairline borders, flat (no shadows) and a Fraunces brand face.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "contributes": {
+      "themes": [
+        {
+          "id": "paper",
+          "label": "Paper",
+          "modes": {
+            "light": "theme.css"
+          },
+          "default_mode": "light",
+          "mode_metadata": {
+            "light": {
+              "color_scheme": "light",
+              "contrast": "normal"
+            }
+          },
+          "tokenContract": "1.1",
+          "recommends": {
+            "fonts": [
+              "Fraunces",
+              "Inter",
+              "IBM Plex Mono",
+              "Noto Sans"
+            ],
+            "icons": [
+              "Phosphor",
+              "Papirus"
+            ],
+            "compositor_glass": false
+          }
+        }
+      ]
+    }
+  }
+}

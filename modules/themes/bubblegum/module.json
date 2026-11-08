@@ -1,0 +1,40 @@
+{
+  "name": "@mesh/bubblegum",
+  "version": "0.1.0",
+  "description": "Bubblegum: chunky pastel pink and lavender with deep plum outlines, hard offset shadows, large radii; Fredoka and Nunito.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "contributes": {
+      "themes": [
+        {
+          "id": "bubblegum",
+          "label": "Bubblegum",
+          "modes": {
+            "light": "theme.css"
+          },
+          "default_mode": "light",
+          "mode_metadata": {
+            "light": {
+              "color_scheme": "light",
+              "contrast": "normal"
+            }
+          },
+          "tokenContract": "1.1",
+          "recommends": {
+            "fonts": [
+              "Fredoka",
+              "Nunito",
+              "Noto Sans"
+            ],
+            "icons": [
+              "Phosphor",
+              "Papirus"
+            ],
+            "compositor_glass": false
+          }
+        }
+      ]
+    }
+  }
+}

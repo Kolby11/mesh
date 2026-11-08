@@ -1,0 +1,399 @@
+:root {
+  --color-selection-background: #2c6a4d;
+  --color-selection-foreground: #ffffff;
+  --icon-size-sm: 16px;
+  --icon-size-md: 20px;
+  --icon-size-lg: 24px;
+  --animation-curves-bezier-emphasized: cubic-bezier(0.2, 0.0, 0, 1.0);
+  --animation-curves-bezier-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1.0);
+  --animation-curves-bezier-standard: cubic-bezier(0.2, 0.0, 0, 1.0);
+  --animation-curves-bezier-standard-accelerate: cubic-bezier(0.3, 0.0, 1, 1.0);
+  --animation-curves-bezier-standard-decelerate: cubic-bezier(0.0, 0.0, 0, 1.0);
+  --animation-default-border-radius: border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+  --animation-default-opacity: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+  --animation-duration-extra-long: 500;
+  --animation-duration-fast: 90;
+  --animation-duration-instant: 0;
+  --animation-duration-long: 360;
+  --animation-duration-medium: 240;
+  --animation-duration-short: 150;
+  --animation-opacity-disabled: 0.38;
+  --animation-scale-hover: 1.02;
+  --animation-scale-press: 0.98;
+  --effect-backdrop-blur-surface-radius: 20px;
+  --effect-backdrop-blur-popup-radius: 14px;
+  --effect-backdrop-blur-surface-background: #efe9db5c;
+  --effect-backdrop-blur-popup-background: #f0eadc47;
+  --base16-base00: #efe9db;
+  --base16-base01: #f6f2e8;
+  --base16-base02: #e8e0cd;
+  --base16-base03: #d9d0ba;
+  --base16-base04: #5a5548;
+  --base16-base05: #1c1a15;
+  --base16-base06: #1c1a15;
+  --base16-base07: #111111;
+  --base16-base08: #b3261e;
+  --base16-base09: #1f5f8b;
+  --base16-base0A: #8a5a00;
+  --base16-base0B: #2c6a4d;
+  --base16-base0C: #1f5f8b;
+  --base16-base0D: #2c6a4d;
+  --base16-base0E: #a83f26;
+  --base16-base0F: #1f5f8b;
+  --border-style-default: solid;
+  --border-width-hairline: 1;
+  --border-width-medium: 2;
+  --border-width-none: 0;
+  --border-width-thick: 3;
+  --border-width-thin: 1;
+  --color-background: #efe9db;
+  --color-border: #d9d0ba;
+  --color-border-muted: #eae4d6;
+  --color-disabled: #b3afa6;
+  --color-error: #b3261e;
+  --color-error-container: #f6d2cf;
+  --color-info: #1f5f8b;
+  --color-info-container: #cfdade;
+  --color-inverse-on-surface: #f6f2e8;
+  --color-inverse-primary: #cfe6d8;
+  --color-inverse-surface: #2b2820;
+  --color-link: #2c6a4d;
+  --color-on-background: #1c1a15;
+  --color-on-disabled: #e8e0cd;
+  --color-on-error: #ffffff;
+  --color-on-error-container: #1c1a15;
+  --color-on-info: #ffffff;
+  --color-on-info-container: #1c1a15;
+  --color-on-link: #ffffff;
+  --color-on-primary: #ffffff;
+  --color-on-primary-container: #0f3322;
+  --color-on-primary-fixed: #0f3322;
+  --color-on-primary-fixed-variant: #2c6a4d;
+  --color-on-secondary: #ffffff;
+  --color-on-secondary-container: #4a1708;
+  --color-on-secondary-fixed: #4a1708;
+  --color-on-secondary-fixed-variant: #a83f26;
+  --color-on-success: #ffffff;
+  --color-on-success-container: #1c1a15;
+  --color-on-surface: #1c1a15;
+  --color-on-surface-variant: #5a5548;
+  --color-on-tertiary: #ffffff;
+  --color-on-tertiary-container: #1c1a15;
+  --color-on-tertiary-fixed: #1c1a15;
+  --color-on-tertiary-fixed-variant: #1f5f8b;
+  --color-on-warning: #ffffff;
+  --color-on-warning-container: #1c1a15;
+  --color-outline: #a79e86;
+  --color-outline-variant: #d9d0ba;
+  --color-primary: #2c6a4d;
+  --color-primary-container: #cfe6d8;
+  --color-primary-fixed: #cfe6d8;
+  --color-primary-fixed-dim: #2c6a4d;
+  --color-scrim: #000000;
+  --color-secondary: #a83f26;
+  --color-secondary-container: #f3d5cb;
+  --color-secondary-fixed: #f3d5cb;
+  --color-secondary-fixed-dim: #a83f26;
+  --color-shadow: #000000;
+  --color-success: #2c6a4d;
+  --color-success-container: #d2dcd2;
+  --color-surface: #fbf9f3;
+  --color-surface-bright: #ddd3bc;
+  --color-surface-container: #f0eadc;
+  --color-surface-container-high: #e8e0cd;
+  --color-surface-container-highest: #ddd3bc;
+  --color-surface-container-low: #f6f2e8;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-dim: #efe9db;
+  --color-surface-tint: #2c6a4d;
+  --color-surface-variant: #e8e0cd;
+  --color-tertiary: #1f5f8b;
+  --color-tertiary-container: #cbd7dc;
+  --color-tertiary-fixed: #cbd7dc;
+  --color-tertiary-fixed-dim: #1f5f8b;
+  --color-warning: #8a5a00;
+  --color-warning-container: #e4d9c2;
+  --elevation-2xl: 12;
+  --elevation-lg: 6;
+  --elevation-md: 3;
+  --elevation-none: 0;
+  --elevation-sm: 1;
+  --elevation-xl: 8;
+  --radius-2xl: 28;
+  --radius-full: 9999;
+  --radius-lg: 10;
+  --radius-md: 6;
+  --radius-none: 0;
+  --radius-sm: 3;
+  --radius-xl: 14;
+  --shadow-colored-primary: 0 0 0 1px #2c6a4d;
+  --shadow-umbra-lg: 0 4px 12px rgba(60,45,20,0.14);
+  --shadow-umbra-md: 0 2px 6px rgba(60,45,20,0.12);
+  --shadow-umbra-sm: 0 1px 2px rgba(60,45,20,0.10);
+  --shape-corner-extra-large: 14;
+  --shape-corner-extra-small: 3;
+  --shape-corner-full: 9999;
+  --shape-corner-large: 10;
+  --shape-corner-medium: 6;
+  --shape-corner-small: 3;
+  --spacing-2xl: 40;
+  --spacing-3xl: 48;
+  --spacing-4xl: 64;
+  --spacing-inset-comfortable: 16;
+  --spacing-inset-compact: 12;
+  --spacing-inset-loose: 24;
+  --spacing-lg: 24;
+  --spacing-md: 16;
+  --spacing-sm: 8;
+  --spacing-xl: 32;
+  --spacing-xs: 4;
+  --state-dragged-opacity: 0.16;
+  --state-focus-opacity: 0.12;
+  --state-hover-opacity: 0.08;
+  --state-pressed-opacity: 0.12;
+  --typography-family: Inter;
+  --typography-family-brand: Fraunces;
+  --typography-family-plain: Inter;
+  --typography-line-height-normal: 1.4;
+  --typography-line-height-relaxed: 1.6;
+  --typography-line-height-tight: 1.15;
+  --typography-scale-body-large-line-height: 24;
+  --typography-scale-body-large-size: 16;
+  --typography-scale-body-large-weight: 400;
+  --typography-scale-body-medium-line-height: 20;
+  --typography-scale-body-medium-size: 14;
+  --typography-scale-body-medium-weight: 400;
+  --typography-scale-body-small-line-height: 16;
+  --typography-scale-body-small-size: 12;
+  --typography-scale-body-small-weight: 400;
+  --typography-scale-display-large-line-height: 64;
+  --typography-scale-display-large-size: 57;
+  --typography-scale-display-large-weight: 400;
+  --typography-scale-display-medium-line-height: 52;
+  --typography-scale-display-medium-size: 45;
+  --typography-scale-display-medium-weight: 400;
+  --typography-scale-display-small-line-height: 44;
+  --typography-scale-display-small-size: 36;
+  --typography-scale-display-small-weight: 400;
+  --typography-scale-headline-large-line-height: 40;
+  --typography-scale-headline-large-size: 32;
+  --typography-scale-headline-large-weight: 400;
+  --typography-scale-headline-medium-line-height: 36;
+  --typography-scale-headline-medium-size: 28;
+  --typography-scale-headline-medium-weight: 400;
+  --typography-scale-headline-small-line-height: 32;
+  --typography-scale-headline-small-size: 24;
+  --typography-scale-headline-small-weight: 400;
+  --typography-scale-label-large-line-height: 20;
+  --typography-scale-label-large-size: 14;
+  --typography-scale-label-large-weight: 500;
+  --typography-scale-label-medium-line-height: 16;
+  --typography-scale-label-medium-size: 12;
+  --typography-scale-label-medium-weight: 500;
+  --typography-scale-label-small-line-height: 16;
+  --typography-scale-label-small-size: 11;
+  --typography-scale-label-small-weight: 500;
+  --typography-scale-title-large-line-height: 28;
+  --typography-scale-title-large-size: 22;
+  --typography-scale-title-large-weight: 500;
+  --typography-scale-title-medium-line-height: 24;
+  --typography-scale-title-medium-size: 16;
+  --typography-scale-title-medium-weight: 500;
+  --typography-scale-title-small-line-height: 20;
+  --typography-scale-title-small-size: 14;
+  --typography-scale-title-small-weight: 500;
+  --typography-size-2xl: 24;
+  --typography-size-3xl: 32;
+  --typography-size-lg: 16;
+  --typography-size-md: 14;
+  --typography-size-sm: 12;
+  --typography-size-xl: 20;
+  --typography-size-xs: 11;
+  --typography-tracking-normal: 0;
+  --typography-tracking-tight: -0.02;
+  --typography-tracking-wide: 0.02;
+  --typography-weight-bold: 700;
+  --typography-weight-light: 300;
+  --typography-weight-medium: 500;
+  --typography-weight-regular: 400;
+  --typography-weight-semibold: 600;
+}
+
+row {
+  flex-direction: row;
+  width: fit;
+  height: fit;
+  padding: 0;
+  gap: 8;
+  background: transparent;
+}
+
+column {
+  flex-direction: column;
+  width: fit;
+  height: fit;
+  padding: 0;
+  gap: 8;
+  background: transparent;
+}
+
+box {
+  width: fit;
+  height: fit;
+  background: transparent;
+}
+
+button {
+  flex-direction: row;
+  padding: 10;
+  gap: 8;
+  border-radius: 12;
+  background: #e8e0cd;
+}
+
+input {
+  flex-direction: row;
+  height: 44;
+  padding: 10;
+  gap: 8;
+  border-width: 1;
+  border-color: #d9d0ba;
+  border-radius: 10;
+  background: #ffffff;
+}
+
+slider {
+  flex-direction: row;
+  height: 36;
+  padding: 8;
+  gap: 8;
+}
+
+scroll {
+  flex-direction: column;
+  height: 220;
+  padding: 0;
+  gap: 8;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: transparent;
+}
+
+icon {
+  width: 18;
+  height: 18;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+text {
+  height: 22;
+  font-size: 14;
+  background: transparent;
+}
+
+span {
+  flex-direction: row;
+  align-self: start;
+  padding: 0;
+  gap: 0;
+  background: transparent;
+}
+
+popover {
+  padding: 0;
+  gap: 0;
+  background: transparent;
+}
+
+node {
+  display: flex;
+  width: auto;
+  height: auto;
+  padding: 0;
+  margin: 0;
+  gap: 0;
+  border-width: 0;
+  border-color: transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-on-surface);
+  font-family: var(--typography-family);
+  font-size: var(--typography-size-md);
+  font-weight: var(--typography-weight-regular);
+  line-height: var(--typography-line-height-normal);
+  opacity: 1;
+  overflow: visible;
+  flex-direction: row;
+  flex-grow: 0;
+  flex-shrink: 1;
+  align-items: stretch;
+  align-self: auto;
+  justify-content: start;
+  transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard), color var(--animation-duration-short) var(--animation-curves-bezier-standard), border-color var(--animation-duration-short) var(--animation-curves-bezier-standard), opacity var(--animation-duration-medium) var(--animation-curves-bezier-standard), border-radius var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate), border-width var(--animation-duration-medium) var(--animation-curves-bezier-standard), width var(--animation-duration-medium) var(--animation-curves-bezier-standard), height var(--animation-duration-medium) var(--animation-curves-bezier-standard), padding var(--animation-duration-medium) var(--animation-curves-bezier-standard), margin var(--animation-duration-medium) var(--animation-curves-bezier-standard), transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate);
+}
+
+tooltip {
+  animation: tooltip-enter var(--animation-duration-short) ease-out;
+  cursor-offset-x: 14;
+  cursor-offset-y: 18;
+  delay: 300;
+  gap: 6;
+  position: bottom;
+}
+
+/* Tooltip enter animation: expands outward from the box center while fading
+   in. Stops may declare `opacity` and `transform` (scale/translate). */
+@keyframes tooltip-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Material is solid and tonal: the shared glass family keeps its role colours
+   but draws opaque tonal fills and no backdrop blur, refraction or compositor
+   blur region. */
+@module "@mesh/glass-material" {
+  :root {
+    --glass-surface-pill: linear-gradient(#e8e0cd, #e8e0cd);
+    --glass-surface-recording: linear-gradient(#f6d2cf, #f6d2cf);
+    --glass-surface-weather: linear-gradient(#f0eadc, #f0eadc);
+    --glass-surface-media: linear-gradient(#e8e0cd, #e8e0cd);
+    --glass-surface-dock: linear-gradient(#e8e0cd, #e8e0cd);
+    --glass-surface-flare: linear-gradient(#ddd3bc, #ddd3bc);
+    --glass-surface-lens: linear-gradient(#ddd3bc, #ddd3bc);
+    --glass-surface-panel: linear-gradient(#f0eadc, #f0eadc);
+    --glass-surface-focused: linear-gradient(#cfe6d8, #cfe6d8);
+    --glass-surface-battery: linear-gradient(#cfe6d8, #cfe6d8);
+    --glass-surface-battery-low: linear-gradient(#f6d2cf, #f6d2cf);
+    --glass-surface-control: linear-gradient(#f3d5cb, #f3d5cb);
+    --glass-surface-active: linear-gradient(#2c6a4d, #2c6a4d);
+    --glass-fill-subtle: #ddd3bc;
+    --glass-fill-occupied: #f3d5cb;
+    --glass-fill-inset: #f6f2e8;
+    --glass-fill-artwork: #ddd3bc;
+    --glass-meter-track: #ddd3bc;
+    --glass-settings-surface: linear-gradient(#f0eadc, #f0eadc);
+    --glass-settings-inset: #f6f2e8;
+    --glass-settings-selected: linear-gradient(#cfe6d8, #cfe6d8);
+    --glass-control-fill-selected: linear-gradient(#cfe6d8, #cfe6d8);
+    --glass-control-fill-primary: linear-gradient(#2c6a4d, #2c6a4d);
+    --glass-control-fill-danger: linear-gradient(#f6d2cf, #f6d2cf);
+    --glass-text: #1c1a15;
+    --glass-rim-inset: #d9d0ba;
+    --glass-backdrop-pill: none;
+    --glass-backdrop-card: none;
+    --glass-backdrop-dock: none;
+    --glass-backdrop-panel: none;
+    --glass-backdrop-flare: none;
+    --glass-backdrop-lens: none;
+    --glass-shadow-pill: none;
+    --glass-shadow-lens: none;
+  }
+}

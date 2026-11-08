@@ -1,0 +1,42 @@
+{
+  "name": "@mesh/nocturne",
+  "version": "0.1.0",
+  "description": "Nocturne: deep violet tonal surfaces with a mint second hue, orange tertiary, generous rounding and Inter; dark only.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "theme",
+    "contributes": {
+      "themes": [
+        {
+          "id": "nocturne",
+          "label": "Nocturne",
+          "modes": {
+            "dark": "theme.css"
+          },
+          "default_mode": "dark",
+          "mode_metadata": {
+            "dark": {
+              "color_scheme": "dark",
+              "contrast": "normal"
+            }
+          },
+          "tokenContract": "1.1",
+          "recommends": {
+            "composition": "@mesh/desk",
+            "fonts": [
+              "Inter",
+              "JetBrains Mono",
+              "Noto Sans"
+            ],
+            "icons": [
+              "Phosphor",
+              "Papirus-Dark",
+              "WhiteSur-dark"
+            ],
+            "compositor_glass": false
+          }
+        }
+      ]
+    }
+  }
+}
