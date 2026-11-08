@@ -33,6 +33,13 @@ fn material_profile_switch_retires_its_roots_and_restores_them() {
     }
     std::fs::write(dir.path().join("active-profile"), "material\n").unwrap();
     let mut shell = Shell::new();
+    // The real audio, network, power and window-manager providers cannot start
+    // in a unit test; this test is about which roots a switch retires.
+    shell.replay = Some(super::super::replay_hooks::ReplayHarness {
+        suppress_backends: true,
+        driver: Box::new(|_| super::super::replay_hooks::ReplayStep { wake_at: None }),
+        wake_at: None,
+    });
     shell.presentation_engine =
         mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
     shell.discover_modules();

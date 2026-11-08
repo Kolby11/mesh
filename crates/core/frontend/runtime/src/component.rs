@@ -18,7 +18,7 @@ use mesh_core_interaction::{
     find_node_by_key, find_node_path_at, find_node_with_bounds_by_key, find_nodes_by_keys,
     find_scrollable_at_with_limits, find_scrollbar_at, is_editable_input_key, is_input_key,
     is_slider_key, measure_content_size, next_focus_target,
-    node_can_receive_target as tree_target_is_eligible, node_is_source, pointer_event_handler_hit,
+    node_can_receive_target as tree_target_is_eligible, node_is_source,
     pointer_press_hit, scroll_into_view_offsets, scroll_limits, source_element_tag,
 };
 mod animation;
@@ -402,6 +402,24 @@ pub fn tooltip_overlay_extra_for_content(width: u32, height: u32) -> (u32, u32) 
 }
 
 pub(super) const ERROR_PLACEHOLDER_MAX_WIDTH: f32 = 320.0;
+
+pub(super) struct PaintedBounds<'a>(&'a RetainedDisplayList);
+
+impl mesh_core_interaction::PaintedExtents for PaintedBounds<'_> {
+    fn subtree_bounds(&self, id: NodeId) -> Option<mesh_core_interaction::ContentBounds> {
+        let bounds = self.0.painted_subtree_bounds(id)?;
+        Some((
+            bounds.x as f32,
+            bounds.y as f32,
+            bounds.x as f32 + bounds.width as f32,
+            bounds.y as f32 + bounds.height as f32,
+        ))
+    }
+
+    fn is_retained_scroll_owner(&self, id: NodeId) -> bool {
+        self.0.is_retained_scroll_owner(id)
+    }
+}
 
 bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -1999,6 +2017,19 @@ impl FrontendSurfaceComponent {
 
     pub(super) fn invalidate_text_state(&mut self) {
         self.invalidate(ComponentDirtyFlags::TEXT_RELAYOUT);
+    }
+
+    /// Painted extents for pruning pointer hit tests, available only while
+    /// the retained display list describes the live tree. Any pending change
+    /// can move or add nodes the list has not seen.
+    pub(super) fn painted_extents(&self) -> Option<PaintedBounds<'_>> {
+        let settled = !self.dirty
+            && !self.style_only_dirty
+            && !self.animation_only_dirty
+            && !self.next_frame_only_dirty
+            && self.dirty_types.is_empty()
+            && self.frame_dirty.iter().next().is_none();
+        settled.then_some(PaintedBounds(&self.retained_display_list))
     }
 
     pub(super) fn invalidate_paint(&mut self) {

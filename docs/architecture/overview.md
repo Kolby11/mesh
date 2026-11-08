@@ -130,6 +130,7 @@ including trailing scrollbar spans. Repairs find owner ranges through retained
 command positions and copy only touched leaves. Ancestor rebuilds offset and
 share clean child branches, and immutable frame plans share the repaired span
 storage directly.
+Pointer hit tests skip a subtree whose painted extent, taken from the retained display list, excludes the point, but only while no change is pending; nodes without a recorded extent are always visited.
 Text-only binding patches also retain focus scopes, disclosures and interaction
 targets when all dirty paths preserve styles, state, geometry and non-text
 attributes. Other input changes keep the ordinary reconciliation path.

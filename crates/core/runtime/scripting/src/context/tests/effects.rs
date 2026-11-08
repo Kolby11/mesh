@@ -219,7 +219,7 @@ fn bundled_media_views_follow_position_and_reconcile_unacknowledged_seeks() {
             .0;
         let mut ctx = ScriptContext::new(
             path,
-            CapabilitySet::from_ids(["service.media.read", "service.media.control"]),
+            CapabilitySet::from_ids(["service.media.read", "service.media.control", "locale.read"]),
         )
         .unwrap();
         let mut catalog = mesh_core_service::InterfaceCatalog::default();

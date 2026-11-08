@@ -3496,3 +3496,105 @@ fn launcher_cells_leave_room_for_their_focus_outline() {
         );
     }
 }
+
+/// Node counts of each shipped glass surface and how many sit under roots that
+/// are built but not shown. Run with
+/// `cargo test -p mesh-core-frontend-runtime --lib glass_surface_node_survey -- --ignored --nocapture`.
+#[test]
+#[ignore = "measurement, not a gate"]
+fn glass_surface_node_survey() {
+    fn size(node: &WidgetNode) -> usize {
+        1 + node.children.iter().map(size).sum::<usize>()
+    }
+    fn is_hidden_root(node: &WidgetNode) -> bool {
+        node.attributes.get(Prop::Hidden).is_some_and(|value| value == "true")
+            || node.computed_style.display == mesh_core_elements::style::Display::None
+            || node.computed_style.visibility != mesh_core_elements::style::Visibility::Visible
+    }
+    fn closed_overlay_root(node: &WidgetNode) -> bool {
+        matches!(node.tag.as_str(), "popover" | "dialog" | "menu" | "sheet")
+            && node.attributes.get(Prop::Open).is_none_or(|value| value != "true")
+    }
+    fn hidden_nodes(node: &WidgetNode, top: &mut Vec<(usize, String)>) -> usize {
+        if is_hidden_root(node) || closed_overlay_root(node) {
+            let total = size(node);
+            top.push((
+                total,
+                format!(
+                    "{} class={:?}",
+                    node.tag,
+                    node.attributes.get(Prop::Class).map(String::as_str).unwrap_or("")
+                ),
+            ));
+            return total;
+        }
+        node.children.iter().map(|child| hidden_nodes(child, top)).sum()
+    }
+
+    let catalog = GlassCatalog::new();
+    let theme = theme();
+    for name in GLASS_MODULES {
+        let mut component = catalog.mount(name);
+        let mut pixels = PixelBuffer::new(1_280, 800);
+        let started = std::time::Instant::now();
+        if component
+            .paint_raster(&theme, SurfaceExtent::unpadded(1_280, 800), &mut pixels, 1.0)
+            .is_err()
+        {
+            println!("SURVEY {name}: paint failed");
+            continue;
+        }
+        let first_paint = started.elapsed().as_secs_f64() * 1e3;
+        let tree = component.last_tree.as_ref().unwrap();
+        let total = size(tree);
+        let mut top = Vec::new();
+        let hidden = hidden_nodes(tree, &mut top);
+        top.sort_by_key(|(size, _)| std::cmp::Reverse(*size));
+        let runtimes = component.runtimes.lock().unwrap().len();
+        println!(
+            "SURVEY {name}: {total} nodes, {hidden} under hidden or closed roots ({:.0}%), {runtimes} runtimes, first paint {first_paint:.0} ms (debug); largest hidden: {:?}",
+            100.0 * hidden as f64 / total.max(1) as f64,
+            top.iter().take(3).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// Full-rebuild cost of the glass bar. Run with `--profile profiling`; the
+/// component sources compile from disk at run time, so variants of the module
+/// can be compared with one binary.
+#[test]
+#[ignore = "measurement, not a gate"]
+fn glass_bar_rebuild_profile() {
+    let catalog = GlassCatalog::new();
+    let theme = theme();
+    let extent = SurfaceExtent::unpadded(1_280, 800);
+    let mut component = catalog.mount("glass-bar");
+    let mut pixels = PixelBuffer::new(1_280, 800);
+    let started = std::time::Instant::now();
+    component.paint_raster(&theme, extent, &mut pixels, 1.0).unwrap();
+    let first = started.elapsed().as_secs_f64() * 1e3;
+    for _ in 0..3 {
+        component.paint_raster(&theme, extent, &mut pixels, 1.0).unwrap();
+    }
+    let nodes = {
+        fn size(node: &WidgetNode) -> usize {
+            1 + node.children.iter().map(size).sum::<usize>()
+        }
+        size(component.last_tree.as_ref().unwrap())
+    };
+    let mut repaint = Vec::new();
+    for _ in 0..60 {
+        component.invalidate_script_state();
+        let started = std::time::Instant::now();
+        component.paint_raster(&theme, extent, &mut pixels, 1.0).unwrap();
+        repaint.push(started.elapsed().as_secs_f64() * 1e3);
+    }
+    repaint.sort_by(f64::total_cmp);
+    println!(
+        "GLASSBAR {nodes} nodes, {} runtimes, first paint {first:.1} ms, full-rebuild repaint ms min {:.2} median {:.2} p90 {:.2}",
+        component.runtimes.lock().unwrap().len(),
+        repaint[0],
+        repaint[repaint.len() / 2],
+        repaint[repaint.len() * 9 / 10]
+    );
+}

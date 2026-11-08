@@ -282,6 +282,7 @@ impl FramePaintPlan {
             FramePaintReplay {
                 spans: Arc::new(PaintSpanSequence::default()),
                 layer_scopes: Vec::new().into(),
+                scroll_content: Default::default(),
             },
             FramePaintDamage {
                 logical: Vec::new().into(),
@@ -350,6 +351,17 @@ pub struct FramePaintReplaySpan {
 pub struct FramePaintReplay {
     pub spans: Arc<PaintSpanSequence>,
     pub layer_scopes: Arc<[(usize, usize)]>,
+    pub(super) scroll_content: Arc<std::sync::OnceLock<Vec<ScrollContentScope>>>,
+}
+
+/// A retained scroll owner's content: the command range between its push and
+/// pop, as entries in command order with their content-space bounds. Replay
+/// reads the entries to skip content outside the viewport.
+#[derive(Debug, Clone)]
+pub(super) struct ScrollContentScope {
+    pub(super) push: usize,
+    pub(super) pop: usize,
+    pub(super) entries: Vec<(usize, usize, DamageRect)>,
 }
 
 #[derive(Debug, Clone)]

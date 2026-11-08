@@ -38,6 +38,67 @@ pub struct InspectHit<'a> {
     pub bounds: ContentBounds,
 }
 
+/// Painted extents retained from the last display-list build. A hit test that
+/// holds one skips a subtree when the point lies outside everything the
+/// subtree paints, instead of visiting every descendant.
+pub trait PaintedExtents {
+    /// Surface-space bounds of everything `id`'s subtree painted, or `None`
+    /// when the node was not painted or is unknown. For a node below a
+    /// retained scroll owner, bounds are in the owner's unscrolled content
+    /// space.
+    fn subtree_bounds(&self, id: mesh_core_elements::NodeId) -> Option<ContentBounds>;
+
+    /// Whether `id` replays its content at its scroll offset, which makes the
+    /// bounds of everything below it content-space.
+    fn is_retained_scroll_owner(&self, id: mesh_core_elements::NodeId) -> bool;
+}
+
+/// Slack for the display list's integer rounding of painted bounds.
+const EXTENT_SLOP: f32 = 1.0;
+
+#[derive(Clone, Copy)]
+struct Prune<'a> {
+    extents: &'a dyn PaintedExtents,
+    /// Added to a surface point to put it in the space of the bounds below the
+    /// current node: the summed scroll of retained owners above it.
+    shift: (f32, f32),
+}
+
+impl<'a> Prune<'a> {
+    fn new(extents: &'a dyn PaintedExtents) -> Self {
+        Self {
+            extents,
+            shift: (0.0, 0.0),
+        }
+    }
+
+    /// Pruning state for `node`'s children. A scrolling node that does not
+    /// replay its content bakes the offset current at build time into the
+    /// bounds below it, so a live offset can disagree with them and nothing
+    /// beneath it is pruned.
+    fn below(mut self, node: &WidgetNode) -> Option<Self> {
+        let scroll = node.resolved_scroll_metrics();
+        if self.extents.is_retained_scroll_owner(node.id) {
+            self.shift.0 += scroll.x;
+            self.shift.1 += scroll.y;
+        } else if scroll.x != 0.0 || scroll.y != 0.0 || scroll.max_x > 0.0 || scroll.max_y > 0.0 {
+            return None;
+        }
+        Some(self)
+    }
+
+    fn excludes(&self, child: &WidgetNode, x: f32, y: f32) -> bool {
+        let Some((left, top, right, bottom)) = self.extents.subtree_bounds(child.id) else {
+            return false;
+        };
+        let (x, y) = (x + self.shift.0, y + self.shift.1);
+        x < left - EXTENT_SLOP
+            || x >= right + EXTENT_SLOP
+            || y < top - EXTENT_SLOP
+            || y >= bottom + EXTENT_SLOP
+    }
+}
+
 pub fn inspect_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<InspectHit<'_>> {
     inspect_hit_test_affine(
         node,
@@ -193,6 +254,16 @@ fn find_node_with_parent_transform<'a>(
 }
 
 pub fn pointer_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<PointerHit> {
+    pointer_hit_test_pruned(node, x, y, None)
+}
+
+/// [`pointer_hit_test`] skipping subtrees whose painted extent excludes the point.
+pub fn pointer_hit_test_pruned(
+    node: &WidgetNode,
+    x: f32,
+    y: f32,
+    extents: Option<&dyn PaintedExtents>,
+) -> Option<PointerHit> {
     let mut hit = pointer_hit_test_reversed_affine(
         node,
         x,
@@ -200,6 +271,7 @@ pub fn pointer_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<PointerHit>
         root_transform(0.0, 0.0),
         &AffineClipStack::default(),
         None,
+        extents.map(Prune::new),
     )?;
     hit.path.reverse();
     Some(hit)
@@ -208,12 +280,23 @@ pub fn pointer_hit_test(node: &WidgetNode, x: f32, y: f32) -> Option<PointerHit>
 /// Press targeting in one traversal: the deepest pointer-focusable node, or
 /// failing that the deepest ancestor with a click or pointerdown handler, plus its bounds.
 pub fn pointer_press_hit(node: &WidgetNode, x: f32, y: f32) -> PointerPressHit<'_> {
+    pointer_press_hit_pruned(node, x, y, None)
+}
+
+/// [`pointer_press_hit`] skipping subtrees whose painted extent excludes the point.
+pub fn pointer_press_hit_pruned<'a>(
+    node: &'a WidgetNode,
+    x: f32,
+    y: f32,
+    extents: Option<&dyn PaintedExtents>,
+) -> PointerPressHit<'a> {
     let mut hit = pointer_press_hit_affine(
         node,
         x,
         y,
         root_transform(0.0, 0.0),
         &AffineClipStack::default(),
+        extents.map(Prune::new),
     )
     .unwrap_or_default();
     hit.target = hit.focusable.or(hit.target);
@@ -228,6 +311,18 @@ pub fn pointer_event_handler_hit<'a>(
     y: f32,
     event_name: &str,
 ) -> Option<PointerEventHandlerHit<'a>> {
+    pointer_event_handler_hit_pruned(node, x, y, event_name, None)
+}
+
+/// [`pointer_event_handler_hit`] skipping subtrees whose painted extent
+/// excludes the point.
+pub fn pointer_event_handler_hit_pruned<'a>(
+    node: &'a WidgetNode,
+    x: f32,
+    y: f32,
+    event_name: &str,
+    extents: Option<&dyn PaintedExtents>,
+) -> Option<PointerEventHandlerHit<'a>> {
     pointer_event_handler_hit_affine(
         node,
         x,
@@ -235,6 +330,7 @@ pub fn pointer_event_handler_hit<'a>(
         event_name,
         root_transform(0.0, 0.0),
         &AffineClipStack::default(),
+        extents.map(Prune::new),
     )
 }
 
@@ -633,6 +729,7 @@ fn pointer_event_handler_hit_affine<'a>(
     event_name: &str,
     parent_transform: AffineTransform,
     clips: &AffineClipStack,
+    prune: Option<Prune<'_>>,
 ) -> Option<PointerEventHandlerHit<'a>> {
     if !node_allows(node, InteractionTarget::Pointer) || !clips.contains(x, y) {
         return None;
@@ -644,10 +741,20 @@ fn pointer_event_handler_hit_affine<'a>(
     }
     let child_world = child_world_transform(world, node);
     let child_clips = push_node_clip(clips, node, world);
+    let prune = prune.and_then(|prune| prune.below(node));
     for child in mesh_core_elements::children_in_paint_order(node).rev() {
-        if let Some(hit) =
-            pointer_event_handler_hit_affine(child, x, y, event_name, child_world, &child_clips)
-        {
+        if prune.is_some_and(|prune| prune.excludes(child, x, y)) {
+            continue;
+        }
+        if let Some(hit) = pointer_event_handler_hit_affine(
+            child,
+            x,
+            y,
+            event_name,
+            child_world,
+            &child_clips,
+            prune,
+        ) {
             return Some(hit);
         }
     }
@@ -666,6 +773,7 @@ fn pointer_press_hit_affine<'a>(
     y: f32,
     parent_transform: AffineTransform,
     clips: &AffineClipStack,
+    prune: Option<Prune<'_>>,
 ) -> Option<PointerPressHit<'a>> {
     if !node_allows(node, InteractionTarget::Pointer) || !clips.contains(x, y) {
         return None;
@@ -678,8 +786,14 @@ fn pointer_press_hit_affine<'a>(
     let child_world = child_world_transform(world, node);
     let child_clips = push_node_clip(clips, node, world);
     let mut hit = PointerPressHit::default();
+    let prune = prune.and_then(|prune| prune.below(node));
     for child in mesh_core_elements::children_in_paint_order(node).rev() {
-        if let Some(child_hit) = pointer_press_hit_affine(child, x, y, child_world, &child_clips) {
+        if prune.is_some_and(|prune| prune.excludes(child, x, y)) {
+            continue;
+        }
+        if let Some(child_hit) =
+            pointer_press_hit_affine(child, x, y, child_world, &child_clips, prune)
+        {
             hit = child_hit;
             break;
         }
@@ -708,6 +822,7 @@ fn pointer_hit_test_reversed_affine<'a>(
     parent_transform: AffineTransform,
     clips: &AffineClipStack,
     inherited_tooltip: Option<TooltipTarget<'a>>,
+    prune: Option<Prune<'_>>,
 ) -> Option<PointerHit> {
     if !node_allows(node, InteractionTarget::Pointer) || !clips.contains(x, y) {
         return None;
@@ -730,9 +845,13 @@ fn pointer_hit_test_reversed_affine<'a>(
     let tooltip = owner_tooltip.or(inherited_tooltip);
     let child_world = child_world_transform(world, node);
     let child_clips = push_node_clip(clips, node, world);
+    let prune = prune.and_then(|prune| prune.below(node));
     for child in mesh_core_elements::children_in_paint_order(node).rev() {
+        if prune.is_some_and(|prune| prune.excludes(child, x, y)) {
+            continue;
+        }
         if let Some(mut hit) =
-            pointer_hit_test_reversed_affine(child, x, y, child_world, &child_clips, tooltip)
+            pointer_hit_test_reversed_affine(child, x, y, child_world, &child_clips, tooltip, prune)
         {
             if let Some(key) = node.mesh_key() {
                 hit.path.push(key.to_owned());
@@ -964,6 +1083,140 @@ mod tests {
         assert_eq!(
             retain_hover_path(&root, &previous, &outside, 10.0, 35.0),
             None
+        );
+    }
+
+    struct FakeExtents {
+        bounds: std::collections::HashMap<mesh_core_elements::NodeId, ContentBounds>,
+        retained: Vec<mesh_core_elements::NodeId>,
+    }
+
+    impl PaintedExtents for FakeExtents {
+        fn subtree_bounds(&self, id: mesh_core_elements::NodeId) -> Option<ContentBounds> {
+            self.bounds.get(&id).copied()
+        }
+
+        fn is_retained_scroll_owner(&self, id: mesh_core_elements::NodeId) -> bool {
+            self.retained.contains(&id)
+        }
+    }
+
+    fn exact_extents(tree: &WidgetNode, retained: &[usize]) -> FakeExtents {
+        let mut extents = FakeExtents {
+            bounds: Default::default(),
+            retained: retained.iter().map(|&i| tree.children[i].id).collect(),
+        };
+        fn walk(node: &WidgetNode, out: &mut FakeExtents) -> ContentBounds {
+            let mut bounds = (
+                node.layout.x,
+                node.layout.y,
+                node.layout.x + node.layout.width,
+                node.layout.y + node.layout.height,
+            );
+            for child in &node.children {
+                bounds = union_bounds(Some(bounds), walk(child, out));
+            }
+            out.bounds.insert(node.id, bounds);
+            bounds
+        }
+        walk(tree, &mut extents);
+        extents
+    }
+
+    #[test]
+    fn extents_skip_subtrees_and_agree_with_the_full_hit_test() {
+        let tree = indexed_tree(40, 3);
+        let extents = exact_extents(&tree, &[]);
+        for y in (0..800).step_by(7) {
+            for x in (0..60).step_by(5) {
+                let (x, y) = (x as f32 + 0.5, y as f32 + 0.5);
+                assert_eq!(
+                    pointer_hit_test(&tree, x, y),
+                    pointer_hit_test_pruned(&tree, x, y, Some(&extents)),
+                );
+            }
+        }
+        let mut shrunk = exact_extents(&tree, &[]);
+        let row = &tree.children[3];
+        shrunk.bounds.insert(row.id, (0.0, 0.0, 1.0, 1.0));
+        assert_eq!(
+            pointer_hit_test_pruned(&tree, 10.0, 70.0, Some(&shrunk)).map(|hit| hit.path),
+            Some(vec!["root".to_string()]),
+            "a subtree whose extent excludes the point is skipped"
+        );
+    }
+
+    #[test]
+    fn unknown_nodes_are_never_pruned() {
+        let tree = indexed_tree(5, 2);
+        let extents = FakeExtents {
+            bounds: Default::default(),
+            retained: Vec::new(),
+        };
+        assert_eq!(
+            pointer_hit_test(&tree, 10.0, 50.0),
+            pointer_hit_test_pruned(&tree, 10.0, 50.0, Some(&extents)),
+        );
+    }
+
+    #[test]
+    fn retained_scroll_owner_shifts_the_point_into_content_space() {
+        let mut tree = indexed_tree(40, 1);
+        tree.children.truncate(1);
+        let mut scroller = WidgetNode::new("scroll");
+        scroller.set_mesh_key("scroller");
+        scroller.layout = LayoutRect {
+            x: 0.0,
+            y: 0.0,
+            width: 20.0,
+            height: 40.0,
+        };
+        scroller.computed_style.overflow_y = mesh_core_elements::style::Overflow::Scroll;
+        for index in 0..20 {
+            let mut row = WidgetNode::new("button");
+            row.set_mesh_key(format!("r{index}"));
+            row.layout = LayoutRect {
+                x: 0.0,
+                y: index as f32 * 20.0,
+                width: 20.0,
+                height: 20.0,
+            };
+            scroller.children.push(row);
+        }
+        scroller.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+            y: 100.0,
+            max_y: 360.0,
+            content_height: 400.0,
+            ..Default::default()
+        });
+        tree.children = vec![scroller].into();
+        tree.layout.height = 40.0;
+        tree.layout.width = 20.0;
+
+        let mut extents = exact_extents(&tree, &[0]);
+        extents
+            .bounds
+            .insert(tree.children[0].id, (0.0, 0.0, 20.0, 40.0));
+        let full = pointer_hit_test(&tree, 10.0, 5.0).map(|hit| hit.path);
+        assert_eq!(
+            full,
+            Some(vec![
+                "root".to_string(),
+                "scroller".to_string(),
+                "r5".to_string()
+            ])
+        );
+        assert_eq!(
+            pointer_hit_test_pruned(&tree, 10.0, 5.0, Some(&extents)).map(|hit| hit.path),
+            full,
+            "content-space bounds are compared at the scrolled point"
+        );
+
+        extents.retained.clear();
+        assert_eq!(
+            pointer_hit_test_pruned(&tree, 10.0, 5.0, Some(&extents)).map(|hit| hit.path),
+            full,
+            "a scroller that does not replay its content disables pruning below it"
         );
     }
 

@@ -2007,7 +2007,16 @@ impl Shell {
             package_rollback: package_rollback.take(),
             profile_switch_ack: profile_switch_ack.take(),
         };
-        if !changed.is_empty() {
+        // A harness that leaves host-backed providers unspawned has no runtime
+        // for the candidates to prepare, so the switch commits without them.
+        #[cfg(test)]
+        let backends_suppressed = self
+            .replay
+            .as_ref()
+            .is_some_and(|replay| replay.suppress_backends);
+        #[cfg(not(test))]
+        let backends_suppressed = false;
+        if !changed.is_empty() && !backends_suppressed {
             let Some(ctx) = self.backend_respawn.clone() else {
                 if let Some(rollback) = pending.rollback.take() {
                     let _ = rollback.restore();

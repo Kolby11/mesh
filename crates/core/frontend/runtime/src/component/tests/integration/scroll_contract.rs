@@ -283,6 +283,110 @@ fn large_plain_list_with_uneven_rows_is_built_in_full() {
     assert_eq!(scroll_list_children(&component), 300);
 }
 
+/// Counts the nodes a pruned traversal descends into.
+struct CountingExtents<'a> {
+    inner: &'a dyn mesh_core_interaction::PaintedExtents,
+    visited: std::cell::Cell<usize>,
+}
+
+impl mesh_core_interaction::PaintedExtents for CountingExtents<'_> {
+    fn subtree_bounds(
+        &self,
+        id: mesh_core_elements::NodeId,
+    ) -> Option<mesh_core_interaction::ContentBounds> {
+        self.inner.subtree_bounds(id)
+    }
+
+    fn is_retained_scroll_owner(&self, id: mesh_core_elements::NodeId) -> bool {
+        self.visited.set(self.visited.get() + 1);
+        self.inner.is_retained_scroll_owner(id)
+    }
+}
+
+/// Pruned hit tests must agree with the full traversal at every point, at the
+/// top, in the middle and at the end of a fully built uneven list.
+#[test]
+fn painted_extent_pruning_matches_the_full_hit_test_on_a_scrolled_uneven_list() {
+    use mesh_core_interaction::{
+        PaintedExtents, pointer_event_handler_hit, pointer_event_handler_hit_pruned,
+        pointer_hit_test, pointer_hit_test_pruned, pointer_press_hit, pointer_press_hit_pruned,
+    };
+    let theme = Theme::new("empty", "Empty");
+    let source = list_source(300, "", "row", "")
+        .replace(
+            r#"<box class="row">"#,
+            r#"<button class="row" onclick={function() end} style:height={item == 5 and "55px" or "20px"}>"#,
+        )
+        .replace("</text></box>{/for}", "</text></button>{/for}");
+    let mut component = test_frontend_component(&source);
+    Arc::make_mut(&mut component.settings)
+        .set_namespace("shell", serde_json::json!({"motion":{"reduced":true}}));
+    let mut pixels = PixelBuffer::new(200, 140);
+    paint_frames(&mut component, &theme, &mut pixels, 4);
+    assert_eq!(scroll_list_children(&component), 300);
+
+    let viewport = first_node_by_tag(component.last_tree.as_ref().unwrap(), "scroll").unwrap();
+    let (vx, vy) = (viewport.layout.x, viewport.layout.y);
+    for scroll in [0.0_f32, -1_234.0, -50_000.0] {
+        if scroll != 0.0 {
+            component
+                .handle_input(
+                    &theme,
+                    200,
+                    140,
+                    ComponentInput::TwoFingerScroll {
+                        x: vx + 10.0,
+                        y: vy + 10.0,
+                        dx: 0.0,
+                        dy: scroll,
+                    },
+                )
+                .unwrap();
+        }
+        paint_frames(&mut component, &theme, &mut pixels, 4);
+        let extents = component
+            .painted_extents()
+            .expect("a settled component exposes its painted extents");
+        let tree = component.last_tree.as_ref().unwrap();
+        for yi in -2..150 {
+            for xi in (-2..210).step_by(7) {
+                let (x, y) = (xi as f32 + 0.5, yi as f32 + 0.5);
+                let dyn_extents = Some(&extents as &dyn PaintedExtents);
+                assert_eq!(
+                    pointer_hit_test(tree, x, y),
+                    pointer_hit_test_pruned(tree, x, y, dyn_extents),
+                    "hit at ({x}, {y}) scrolled {scroll}"
+                );
+                let full = pointer_press_hit(tree, x, y);
+                let pruned = pointer_press_hit_pruned(tree, x, y, dyn_extents);
+                assert_eq!(
+                    full.target.map(|hit| (hit.key, hit.bounds)),
+                    pruned.target.map(|hit| (hit.key, hit.bounds)),
+                    "press at ({x}, {y}) scrolled {scroll}"
+                );
+                assert_eq!(
+                    pointer_event_handler_hit(tree, x, y, "click").map(|hit| (hit.key, hit.bounds)),
+                    pointer_event_handler_hit_pruned(tree, x, y, "click", dyn_extents)
+                        .map(|hit| (hit.key, hit.bounds)),
+                    "click handler at ({x}, {y}) scrolled {scroll}"
+                );
+            }
+        }
+        let counting = CountingExtents {
+            inner: &extents,
+            visited: std::cell::Cell::new(0),
+        };
+        let (x, y) = (vx + 10.0, vy + 10.0);
+        pointer_hit_test_pruned(tree, x, y, Some(&counting as &dyn PaintedExtents));
+        eprintln!("scroll {scroll}: visited {}", counting.visited.get());
+        assert!(
+            counting.visited.get() < 60,
+            "a hit visits {} of 300 rows' nodes",
+            counting.visited.get()
+        );
+    }
+}
+
 #[test]
 fn short_plain_list_is_untouched() {
     let theme = Theme::new("empty", "Empty");
@@ -307,7 +411,10 @@ fn focused_row_stays_built_when_a_windowed_list_scrolls_away() {
 
     let tree = component.last_tree.as_ref().unwrap();
     let list = &first_node_by_tag(tree, "scroll").unwrap().children[0];
-    let focused = list.children[3].mesh_key().expect("row has a key").to_owned();
+    let focused = list.children[3]
+        .mesh_key()
+        .expect("row has a key")
+        .to_owned();
     component.focused_key = Some(focused.clone());
     let viewport = first_node_by_tag(tree, "scroll").unwrap();
     let (x, y) = (viewport.layout.x + 10.0, viewport.layout.y + 10.0);
@@ -327,7 +434,10 @@ fn focused_row_stays_built_when_a_windowed_list_scrolls_away() {
     paint_frames(&mut component, &theme, &mut pixels, 4);
 
     let text = rendered_text(&component);
-    assert!(text.contains(&"51".to_string()), "window followed the scroll: {text:?}");
+    assert!(
+        text.contains(&"51".to_string()),
+        "window followed the scroll: {text:?}"
+    );
     let list = &first_node_by_tag(component.last_tree.as_ref().unwrap(), "scroll")
         .unwrap()
         .children[0];
@@ -337,7 +447,10 @@ fn focused_row_stays_built_when_a_windowed_list_scrolls_away() {
             .any(|child| child.mesh_key() == Some(focused.as_str())),
         "the focused row is still built"
     );
-    assert!(list.children.len() < 120, "only the window and the focused span is built");
+    assert!(
+        list.children.len() < 120,
+        "only the window and the focused span is built"
+    );
 }
 
 #[test]

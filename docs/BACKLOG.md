@@ -26,11 +26,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Measure end-to-end theme, font-family and size changes across visible surfaces and resource readiness, including compositor presentation feedback; preserve valid retained work and final-value correctness.
 - [ ] Implement the Material reference shell (`08-material-desktop`): editable desktop widget grid, widget picker, editing toolbar, side rail and dock, with a composition/profile and token-based theme. [Design](../.planning/todos/pending/2026-10-27-reference-shells.md).
 - [ ] Give `@mesh/material` its own composition once `08-material-desktop` lands; the theme recommends `@mesh/desk` until then.
-- [ ] `bundled_media_views_follow_position_and_reconcile_unacknowledged_seeks` fails on a clean `HEAD` with
-      `CapabilityDenied("mesh.i18n")`: the test's capability set lacks what the bundled media views now import.
-- [ ] `material_profile_switch_retires_its_roots_and_restores_them` fails on a clean `HEAD`: the real
-      audio/brightness/media/network/power/wm providers are changed candidates and the test has no
-      backend runtime. Add a test-only backend stub so profile-switch tests need not start real providers.
 - [ ] Update the Settings and style-fixture tests that still expect glass panels under the solid themes (`clicking_a_theme_card_repaints_settings_in_the_new_theme_in_one_frame`, `settings_glass_surfaces_follow_the_active_theme_palette`, two `style::tests::fixtures` colours); the themes moved to Material surfaces on 2026-10-29 and the expected looks are undecided.
 - [ ] Make liquid-glass Settings readable over applications with a light, translucent outer panel and calmer inner controls; the shared glass palette is too transparent.
 - [ ] **Styleable control parts:** add scrollbar (`::track`, `::thumb`) and input (`::placeholder`, `::caret`, `::selection`) parts; the renderer still hardcodes their looks, and neither fits the child-node model. [Design](../.planning/todos/pending/2026-10-29-control-parts.md).
@@ -381,9 +376,10 @@ at the top of this file; prefer it over further single-pass scoping.
 - [ ] Measure the shipped launcher, font, icon-theme and inspector lists under automatic windowing; wrapping
       grids and uneven rows build in full by design, and the real data sets are not reproduced in tests.
 - [ ] Lists that must stay fully built (uneven rows, no scroller) switch from a windowed first frame to a full
-      build on the second, a ~300 ms frame at 2,000 rows, and then pay ~9 ms per scroll frame: both pointer hit
-      tests visit every row (~45% of the frame) and a scroll viewport replays every row's commands (~30%).
-      Prune both with retained subtree extents, or window uneven rows against estimated sizes.
+      build on the second, a ~300 ms frame at 2,000 rows. Window uneven rows against estimated sizes, or build
+      the first frame in full. Scroll frames are pruned already; pruning only holds while the component has no
+      pending change, and non-retained scrollers are never pruned below. Replay still scans every content
+      entry linearly.
 - [ ] A windowed list holds its first frame back for one settle frame (wrong scrollbar, partial rows) because
       layout is needed to measure; consider settling in the same paint before presentation.
 

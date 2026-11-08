@@ -390,7 +390,14 @@ impl FrontendSurfaceComponent {
                     }
 
                     self.clear_selection();
-                    let press_hit = pointer_press_hit(tree, x, y);
+                    let press_hit = mesh_core_interaction::pointer_press_hit_pruned(
+                        tree,
+                        x,
+                        y,
+                        self.painted_extents()
+                            .as_ref()
+                            .map(|extents| extents as &dyn mesh_core_interaction::PaintedExtents),
+                    );
                     if let Some(target) = press_hit.target {
                         let node_key = target.key.to_owned();
                         let focusable_key = press_hit.focusable.map(|hit| hit.key.to_owned());
@@ -670,7 +677,14 @@ impl FrontendSurfaceComponent {
 
                 // Update hover state for CSS :hover and the tooltip system.
                 self.hovered_pos = (x, y);
-                let mut pointer_hit = mesh_core_interaction::pointer_hit_test(tree, x, y);
+                let mut pointer_hit = mesh_core_interaction::pointer_hit_test_pruned(
+                    tree,
+                    x,
+                    y,
+                    self.painted_extents()
+                        .as_ref()
+                        .map(|extents| extents as &dyn mesh_core_interaction::PaintedExtents),
+                );
                 let mut new_event_path = pointer_hit
                     .as_mut()
                     .map(|hit| std::mem::take(&mut hit.path))

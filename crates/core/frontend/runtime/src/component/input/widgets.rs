@@ -372,11 +372,7 @@ impl FrontendSurfaceComponent {
         find_node_by_key(tree, key).is_some_and(|node| node_is_source(node, &["option"]))
     }
 
-    pub(in crate::component) fn is_menu_item_key(
-        &self,
-        tree: &WidgetNode,
-        key: &str,
-    ) -> bool {
+    pub(in crate::component) fn is_menu_item_key(&self, tree: &WidgetNode, key: &str) -> bool {
         find_node_by_key(tree, key).is_some_and(|node| {
             node_is_source(node, &["menu-item", "command-item", "preference-row"])
         })
@@ -580,15 +576,40 @@ impl FrontendSurfaceComponent {
         sibling_source_key(tree, key, item_tags, backward)
     }
 
+    fn pointer_handler_hit<'t>(
+        &self,
+        tree: &'t WidgetNode,
+        x: f32,
+        y: f32,
+        event_name: &str,
+    ) -> Option<mesh_core_interaction::PointerEventHandlerHit<'t>> {
+        mesh_core_interaction::pointer_event_handler_hit_pruned(
+            tree,
+            x,
+            y,
+            event_name,
+            self.painted_extents()
+                .as_ref()
+                .map(|extents| extents as &dyn mesh_core_interaction::PaintedExtents),
+        )
+    }
+
     pub(in crate::component) fn pointer_event_target_key(
         &self,
         tree: &WidgetNode,
         x: f32,
         y: f32,
     ) -> Option<String> {
-        pointer_press_hit(tree, x, y)
-            .target
-            .map(|target| target.key.to_owned())
+        mesh_core_interaction::pointer_press_hit_pruned(
+            tree,
+            x,
+            y,
+            self.painted_extents()
+                .as_ref()
+                .map(|extents| extents as &dyn mesh_core_interaction::PaintedExtents),
+        )
+        .target
+        .map(|target| target.key.to_owned())
     }
 
     pub(in crate::component) fn captured_release_key(
@@ -842,7 +863,7 @@ impl FrontendSurfaceComponent {
         dx: f32,
         dy: f32,
     ) -> Result<Option<Vec<CoreRequest>>, ComponentError> {
-        let Some(hit) = pointer_event_handler_hit(tree, x, y, "scroll") else {
+        let Some(hit) = self.pointer_handler_hit(tree, x, y, "scroll") else {
             return Ok(None);
         };
         let (left, top, right, bottom) = hit.bounds;
@@ -889,7 +910,7 @@ impl FrontendSurfaceComponent {
         dx: f32,
         dy: f32,
     ) -> Result<Option<Vec<CoreRequest>>, ComponentError> {
-        let Some(hit) = pointer_event_handler_hit(tree, x, y, "twofingerscroll") else {
+        let Some(hit) = self.pointer_handler_hit(tree, x, y, "twofingerscroll") else {
             return Ok(None);
         };
         let event = add_event_fields(
@@ -1214,7 +1235,7 @@ impl FrontendSurfaceComponent {
         fingers: u32,
     ) -> Option<GestureTargetCapture> {
         let (x, y) = self.hovered_pos;
-        let hit = pointer_event_handler_hit(tree, x, y, event_name)?;
+        let hit = self.pointer_handler_hit(tree, x, y, event_name)?;
         Some(GestureTargetCapture {
             node_key: hit.key.to_string(),
             fingers,

@@ -71,6 +71,23 @@ impl RetainedDisplayList {
             .map(|subtree| subtree.generation)
     }
 
+    /// Bounds of everything `node_id`'s subtree painted in the last build, or
+    /// `None` when it painted nothing or was never built. Descendants of a
+    /// retained scroll owner report unscrolled content-space bounds; see
+    /// [`Self::is_retained_scroll_owner`].
+    pub fn painted_subtree_bounds(&self, node_id: NodeId) -> Option<DamageRect> {
+        let bounds = self.subtrees.get(&node_id)?.command_span?.bounds;
+        (bounds.width > 0 && bounds.height > 0).then_some(bounds)
+    }
+
+    /// Whether `node_id` replays its content at its scroll offset, leaving the
+    /// bounds of everything below it in content space.
+    pub fn is_retained_scroll_owner(&self, node_id: NodeId) -> bool {
+        self.subtrees
+            .get(&node_id)
+            .is_some_and(|subtree| subtree.scroll_viewport.is_some())
+    }
+
     pub fn update(
         &mut self,
         root: &WidgetNode,
@@ -1030,6 +1047,7 @@ impl RetainedDisplayList {
             FramePaintReplay {
                 spans,
                 layer_scopes: self.layer_scopes.clone().into(),
+                scroll_content: Default::default(),
             },
             damage,
         ));
@@ -1215,7 +1233,7 @@ impl RetainedDisplayList {
             return SelectedDisplayListPaint {
                 commands: plan.topology.commands.as_ref(),
                 kinds: plan.topology.kinds.as_ref(),
-                selection: SelectedDisplayListSelection::All,
+                selection: self.select_all(),
                 metrics,
                 backdrop_regions: plan.effects.backdrop_regions.as_ref(),
             };
@@ -1234,7 +1252,7 @@ impl RetainedDisplayList {
             return SelectedDisplayListPaint {
                 commands: plan.topology.commands.as_ref(),
                 kinds: plan.topology.kinds.as_ref(),
-                selection: SelectedDisplayListSelection::All,
+                selection: self.select_all(),
                 metrics,
                 backdrop_regions: plan.effects.backdrop_regions.as_ref(),
             };
@@ -1313,7 +1331,7 @@ impl RetainedDisplayList {
             return SelectedDisplayListPaint {
                 commands: plan.topology.commands.as_ref(),
                 kinds: plan.topology.kinds.as_ref(),
-                selection: SelectedDisplayListSelection::All,
+                selection: self.select_all(),
                 metrics,
                 backdrop_regions: plan.effects.backdrop_regions.as_ref(),
             };
@@ -1373,11 +1391,129 @@ impl RetainedDisplayList {
             }
         }
         self.widen_selection_to_layer_scopes(&mut selected);
+        self.skip_offscreen_scroll_content(&mut selected);
         let command_count = selected
             .iter()
             .map(|span| span.end.saturating_sub(span.start))
             .sum();
         (selected, matched_spans, command_count)
+    }
+
+    /// Every command, minus content a retained scroll owner would replay
+    /// outside its viewport.
+    fn select_all(&self) -> SelectedDisplayListSelection {
+        let plan = self.frame_plan.as_ref();
+        if self.scroll_content_scopes().is_empty() {
+            return SelectedDisplayListSelection::All;
+        }
+        let mut selected = vec![SelectedCommandSpan {
+            start: 0,
+            end: plan.topology.commands.len(),
+        }];
+        self.skip_offscreen_scroll_content(&mut selected);
+        let command_count = selected.iter().map(|span| span.end - span.start).sum();
+        SelectedDisplayListSelection::Spans {
+            spans: selected,
+            command_count,
+        }
+    }
+
+    fn scroll_content_scopes(&self) -> &[ScrollContentScope] {
+        let plan = self.frame_plan.as_ref();
+        plan.replay.scroll_content.get_or_init(|| {
+            let mut scopes = Vec::new();
+            let mut open: Option<ScrollContentScope> = None;
+            let mut nested: Vec<usize> = Vec::new();
+            for (index, command) in plan.topology.commands.iter().enumerate() {
+                let Some(scope) = open.as_mut() else {
+                    if command.kind == DisplayPaintCommandKind::PushScrollContent {
+                        open = Some(ScrollContentScope {
+                            push: index,
+                            pop: index,
+                            entries: Vec::new(),
+                        });
+                    }
+                    continue;
+                };
+                match command.kind {
+                    DisplayPaintCommandKind::PushScrollContent => nested.push(index),
+                    DisplayPaintCommandKind::PopScrollContent => {
+                        if let Some(start) = nested.pop() {
+                            let bounds = plan
+                                .topology
+                                .commands
+                                .get(start)
+                                .map_or(DamageRect::default(), command_bounds);
+                            scope.entries.push((start, index + 1, bounds));
+                        } else {
+                            scope.pop = index;
+                            scopes.extend(open.take());
+                        }
+                    }
+                    _ if nested.is_empty() => {
+                        scope
+                            .entries
+                            .push((index, index + 1, command_bounds(command)));
+                    }
+                    _ => {}
+                }
+            }
+            scopes
+        })
+    }
+
+    /// Drops the content commands of each fully selected retained scroll
+    /// owner whose content-space bounds miss the scrolled viewport. The push,
+    /// the pop and everything outside the scope stay, so layers stay balanced.
+    pub(in crate::display_list) fn skip_offscreen_scroll_content(
+        &self,
+        selected: &mut Vec<SelectedCommandSpan>,
+    ) {
+        let commands = &self.frame_plan.topology.commands;
+        for scope in self.scroll_content_scopes() {
+            let Some(at) = selected
+                .iter()
+                .position(|span| span.start <= scope.push && span.end > scope.pop)
+            else {
+                continue;
+            };
+            let Some(push) = commands.get(scope.push) else {
+                continue;
+            };
+            // Whole pixels and one of slack on each side cover the rounding of
+            // the recorded bounds.
+            let scrolls = &push.node.scrollbars;
+            let left = push.clip.x as f32 + scrolls.scroll_x - 1.0;
+            let top = push.clip.y as f32 + scrolls.scroll_y - 1.0;
+            let right = (push.clip.x + push.clip.width) as f32 + scrolls.scroll_x + 1.0;
+            let bottom = (push.clip.y + push.clip.height) as f32 + scrolls.scroll_y + 1.0;
+            let mut kept: Vec<SelectedCommandSpan> = Vec::new();
+            for &(start, end, bounds) in &scope.entries {
+                let empty = bounds.width == 0 || bounds.height == 0;
+                let visible = (bounds.x as f32) < right
+                    && (bounds.x as f32 + bounds.width as f32) > left
+                    && (bounds.y as f32) < bottom
+                    && (bounds.y as f32 + bounds.height as f32) > top;
+                if !(empty || visible) {
+                    continue;
+                }
+                match kept.last_mut() {
+                    Some(last) if last.end == start => last.end = end,
+                    _ => kept.push(SelectedCommandSpan { start, end }),
+                }
+            }
+            let span = selected[at];
+            let mut replacement = vec![SelectedCommandSpan {
+                start: span.start,
+                end: scope.push + 1,
+            }];
+            replacement.extend(kept);
+            replacement.push(SelectedCommandSpan {
+                start: scope.pop,
+                end: span.end,
+            });
+            selected.splice(at..=at, replacement);
+        }
     }
 
     /// Replaying half an effect layer would drop either its push (changing the

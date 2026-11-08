@@ -77,6 +77,84 @@ fn scroll_scope_reuses_offscreen_content_commands_and_entries() {
 }
 
 #[test]
+fn full_surface_replay_skips_content_outside_the_scrolled_viewport() {
+    let mut root = node(1, "scroll-area", 4.0, 6.0, 120.0, 80.0);
+    root.computed_style.overflow_y = Overflow::Hidden;
+    root.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+        max_y: 720.0,
+        content_width: 120.0,
+        content_height: 800.0,
+        ..Default::default()
+    });
+    for index in 0..40 {
+        root.children.push(node(
+            2 + index,
+            "text",
+            8.0,
+            8.0 + index as f32 * 20.0,
+            80.0,
+            18.0,
+        ));
+    }
+    let mut list = RetainedDisplayList::default();
+    list.update(&root, 160, 100, true, true);
+    let mut objects = crate::RenderObjectTree::default();
+    objects.update(&root);
+    for offset in [0.0_f32, 300.5, 720.0, 5.0] {
+        root.scroll_metrics.as_mut().unwrap().y = offset;
+        let dirty = objects.update(&root);
+        list.update_with_dirty_nodes(
+            &root,
+            dirty,
+            objects.dirty_node_ids(),
+            160,
+            100,
+            false,
+            true,
+        );
+        let selected = list.select_paint_commands(
+            Some(DamageRect {
+                x: 0,
+                y: 0,
+                width: 160,
+                height: 100,
+            }),
+            DisplayListRepaintPolicy::FullSurface,
+        );
+        let kinds: Vec<_> = selected
+            .iter_with_kinds()
+            .map(|(c, k)| (c.node.id, k))
+            .collect();
+        assert!(
+            kinds.len() < 20,
+            "{} of {} commands replayed at {offset}",
+            kinds.len(),
+            list.paint_commands().len()
+        );
+        for kind in [
+            DisplayPaintCommandKind::PushScrollContent,
+            DisplayPaintCommandKind::PopScrollContent,
+        ] {
+            assert!(
+                kinds.iter().any(|(_, k)| *k == kind),
+                "{kind:?} at {offset}"
+            );
+        }
+        for index in 0..40_u64 {
+            let top = 8.0 + index as f32 * 20.0 - offset;
+            let visible = top + 18.0 > 6.0 && top < 86.0;
+            let id = (2 + index) as NodeId;
+            if visible {
+                assert!(
+                    kinds.iter().any(|(node, _)| *node == id),
+                    "row {index} is on screen at {offset}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn sparse_entry_patch_matches_full_collection_for_material_updates() {
     let mut root = node(1, "row", 0.0, 0.0, 120.0, 40.0);
     let unchanged = node(2, "box", 0.0, 0.0, 50.0, 20.0);
