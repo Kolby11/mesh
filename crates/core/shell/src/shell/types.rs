@@ -541,6 +541,13 @@ pub(super) enum ShellMessage {
     ControlPlaneSettingsCommitFinished {
         result: Result<super::runtime::ControlPlaneSettingsCommit, String>,
     },
+    GraphCandidateLoaded {
+        ticket: u64,
+        result: Result<
+            mesh_core_module::package::InstalledModuleGraph,
+            mesh_core_module::package::ModuleManifestError,
+        >,
+    },
     ProfileWriteFinished {
         operation: ProfileWriteOperation,
         result: Result<DurableProfileWriteResult, String>,

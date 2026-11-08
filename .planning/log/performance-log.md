@@ -1,5 +1,26 @@
 # MESH Performance Log
 
+## 2026-11-08 — Watcher-triggered graph reconcile reads the graph off the shell thread
+
+`working tree after b4a1b8e6` · area: shell loop stalls, hot reload
+
+Every filesystem change that reached `reconcile_installed_graph` read and parsed
+the whole installed graph on the shell thread, even when nothing changed. With
+a file-watcher channel the read now runs on a worker and returns as
+`ShellMessage::GraphCandidateLoaded`; requests that arrive during the read
+coalesce into one rerun, and a read that raced a commit (`graph_epoch`) is
+redone. Diff and activation stay on the shell thread. Without the channel
+(tests, headless) the read is synchronous.
+
+Release, shipped `config/` and `modules/`, `shell_thread_reload_stall_profile`
+(ignored), 7 samples each: candidate load 213.814–233.457 ms; unchanged-graph
+reconcile 214.634–235.720 ms on the shell thread before, 5.941–7.930 ms after
+(request + completion; clone, diff and profile comparison remain). Settings
+apply 0.001–0.002 ms and theme reload 0.032–0.068 ms were already negligible;
+startup `mount_components` is 229–253 ms and unchanged. Graph reads for
+user-initiated profile switches and package operations are still synchronous.
+Shell suite 434 passed, 0 failed, 15 ignored.
+
 ## 2026-11-08 — GPU scene targets allocate in 64 px size classes
 
 `working tree after 1412dcf2` · area: GPU scene worker, dmabuf presentation

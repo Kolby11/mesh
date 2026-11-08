@@ -869,6 +869,7 @@ impl Shell {
                 "control_plane_settings_commit_finished"
             }
             ShellMessage::ProfileWriteFinished { .. } => "profile_write_finished",
+            ShellMessage::GraphCandidateLoaded { .. } => "graph_candidate_loaded",
         };
         match message {
             ShellMessage::BackendServiceUpdate {
@@ -1224,6 +1225,9 @@ impl Shell {
                         self.release_parked_durable_writes();
                     }
                 }
+            }
+            ShellMessage::GraphCandidateLoaded { ticket, result } => {
+                pending.extend(self.finish_graph_candidate_load(ticket, result));
             }
             ShellMessage::ControlPlaneSettingsCommitFinished { result } => {
                 let Some(pending_commit) = self.pending_control_plane_commit.take() else {

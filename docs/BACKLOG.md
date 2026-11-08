@@ -441,9 +441,12 @@ of payoff.
 - [ ] Bring child popup surfaces into the parallel CPU raster phase and move
       the SHM copy off the shell thread; both still run inside reconcile/present.
 - [ ] Tile-parallel raster for large damage, above a measured threshold only.
-- [ ] Move blocking file IO off the shell thread — i18n catalog mounts,
-      settings and theme reloads, and icon/SVG cache-miss rasterization on the
-      paint path — via `spawn_blocking` plus completion events.
+- [ ] Move the remaining blocking file IO off the shell thread: the graph reads
+      behind user-initiated profile switches and package operations
+      (`runtime/request.rs`, `backend/lifecycle.rs`; ~215 ms each on the shipped
+      graph), startup `mount_components` (~230–250 ms), i18n catalog mounts, and
+      icon/SVG cache-miss rasterization on the paint path. Settings apply and
+      theme reload already measure under 0.1 ms.
 
 ### Runtime boundary
 

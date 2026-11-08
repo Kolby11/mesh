@@ -991,6 +991,78 @@ fn cpu_dock_fixture_visits() -> Vec<BTreeMap<String, u64>> {
 
 // WAYLAND_DISPLAY=wayland-1 taskset -c 6 cargo test -p mesh-core-shell --release --lib \
 //   live_glass_replay -- --ignored --nocapture --test-threads=1
+// cargo test -p mesh-core-shell --release --lib shell_thread_reload_stall_profile -- --ignored --nocapture
+#[test]
+#[ignore = "release-only: times blocking reloads on the shell thread against the shipped config"]
+fn shell_thread_reload_stall_profile() {
+    let _sandbox = Sandbox::new();
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
+    let started = Instant::now();
+    shell.mount_components().unwrap();
+    eprintln!("mount_components (startup): {:.3} ms", started.elapsed().as_secs_f64() * 1e3);
+    let time = |name: &str, run: &mut dyn FnMut()| {
+        let mut samples = Vec::new();
+        for _ in 0..7 {
+            let started = Instant::now();
+            run();
+            samples.push(started.elapsed().as_secs_f64() * 1e3);
+        }
+        samples.sort_by(f64::total_cmp);
+        eprintln!(
+            "{name}: min {:.3} median {:.3} max {:.3} ms",
+            samples[0],
+            samples[samples.len() / 2],
+            samples[samples.len() - 1]
+        );
+    };
+    time("apply_settings_to_components", &mut || {
+        shell.apply_settings_to_components().unwrap();
+    });
+    time("load_installed_module_graph_candidate (disk read + parse)", &mut || {
+        let _ = shell.load_installed_module_graph_candidate().unwrap();
+    });
+    let candidate = shell.load_installed_module_graph_candidate().unwrap();
+    time("graph diff against the active graph", &mut || {
+        let _ = shell
+            .installed_module_graph
+            .as_ref()
+            .map(|active| active.diff(&candidate).is_empty());
+    });
+    time("reconcile_installed_graph (unchanged graph)", &mut || {
+        let _ = shell.reconcile_installed_graph();
+    });
+    time("reconcile_installed_graph (forced)", &mut || {
+        let _ = shell.reconcile_installed_graph();
+    });
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    shell.file_watcher_tx = Some(tx);
+    let mut blocked = Vec::new();
+    for _ in 0..7 {
+        let started = Instant::now();
+        let _ = shell.reconcile_installed_graph();
+        let request = started.elapsed();
+        let message = rx.blocking_recv().unwrap();
+        let started = Instant::now();
+        let mut pending = std::collections::VecDeque::new();
+        shell.handle_shell_message(&mut pending, message).unwrap();
+        blocked.push((request + started.elapsed()).as_secs_f64() * 1e3);
+    }
+    blocked.sort_by(f64::total_cmp);
+    eprintln!(
+        "reconcile_installed_graph on a worker, shell-thread time (request + completion): min {:.3} median {:.3} max {:.3} ms",
+        blocked[0],
+        blocked[blocked.len() / 2],
+        blocked[blocked.len() - 1]
+    );
+    shell.file_watcher_tx = None;
+    time("reload_theme_if_changed", &mut || {
+        shell.next_theme_reload_check = Instant::now();
+        let _ = shell.reload_theme_if_changed();
+    });
+}
+
 #[test]
 #[ignore = "live compositor: replays the glass workloads against the real shell"]
 fn live_glass_replay() {

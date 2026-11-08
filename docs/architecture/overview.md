@@ -188,7 +188,9 @@ Notifications retain their changed paths. Known settings writes bypass graph
 loading when the configured profile matches the committed document; profile
 notifications wait for pending durable writes before checking that identity.
 Unknown paths, directory changes and watcher overflow keep broad reconciliation.
-Graph changes observed during activation are coalesced and reconciled from the
+A watcher-triggered graph reconcile reads and parses the on-disk graph on a
+worker; requests that arrive during the read coalesce into one rerun, and a read
+that raced a commit is discarded. Graph changes observed during activation are coalesced and reconciled from the
 latest filesystem state after the pending candidate commits or aborts. Profile
 pointer and authored content changes also trigger reconciliation when the module
 graph is unchanged; retired watcher events remain hints to reread current state.

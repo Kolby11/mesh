@@ -757,6 +757,12 @@ pub struct Shell {
     pending_resource_preparation: Option<profile::PendingResourcePreparation>,
     pending_profile_switch: Option<profile::PendingProfileSwitch>,
     pending_graph_reconciliation: bool,
+    /// The off-thread read of the on-disk graph a reconcile is waiting for.
+    pending_graph_load: Option<profile::PendingGraphLoad>,
+    /// Bumped whenever the committed graph changes, so a load that read the
+    /// disk against an older commit is discarded rather than activated.
+    graph_epoch: u64,
+    graph_load_ticket: u64,
     pending_profile_file_reconciliation: bool,
     active_profile_authoring: Option<(String, serde_json::Value)>,
     pending_control_plane_commit: Option<runtime::PendingControlPlaneCommit>,

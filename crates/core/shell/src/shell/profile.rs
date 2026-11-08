@@ -476,6 +476,15 @@ pub(super) struct PendingProfileSwitch {
     profile_switch_ack: Option<super::types::IpcProfileSwitchResponseSender>,
 }
 
+/// A graph read in flight on a worker. `rerun` records a reconcile request
+/// that arrived meanwhile; the finished read is then discarded and redone.
+pub(super) struct PendingGraphLoad {
+    pub(super) ticket: u64,
+    pub(super) epoch: u64,
+    pub(super) force: bool,
+    pub(super) rerun: bool,
+}
+
 pub(super) struct PendingResourcePreparation {
     profile_id: String,
     profile: ShellProfile,
@@ -810,17 +819,93 @@ impl Shell {
         self.reconcile_installed_graph_inner(false)
     }
 
-    fn reconcile_installed_graph_inner(&mut self, force: bool) -> VecDeque<SourcedRequest> {
-        if self.profile_transition_pending()
+    fn graph_reconciliation_blocked(&self) -> bool {
+        self.profile_transition_pending()
             || !self.pending_backend_runtimes.is_empty()
             || self.pending_control_plane_commit.is_some()
             || self.pending_profile_write.is_some()
-        {
+    }
+
+    fn reconcile_installed_graph_inner(&mut self, force: bool) -> VecDeque<SourcedRequest> {
+        if self.graph_reconciliation_blocked() {
             self.pending_graph_reconciliation = true;
             return VecDeque::new();
         }
         self.pending_graph_reconciliation = false;
-        let candidate = match self.load_installed_module_graph_candidate() {
+        // Reading and parsing every manifest takes hundreds of milliseconds on
+        // the shipped graph, so a live shell does it on a worker. Without the
+        // watcher channel (tests, headless tools) the read stays synchronous.
+        if let Some(tx) = self.file_watcher_tx.clone() {
+            self.request_graph_candidate_load(tx, force);
+            return VecDeque::new();
+        }
+        let candidate = self.load_installed_module_graph_candidate();
+        self.finish_graph_reconciliation(force, candidate)
+    }
+
+    fn request_graph_candidate_load(
+        &mut self,
+        tx: tokio::sync::mpsc::UnboundedSender<ShellMessage>,
+        force: bool,
+    ) {
+        if let Some(pending) = self.pending_graph_load.as_mut() {
+            pending.force |= force;
+            pending.rerun = true;
+            return;
+        }
+        self.graph_load_ticket += 1;
+        let ticket = self.graph_load_ticket;
+        self.pending_graph_load = Some(PendingGraphLoad {
+            ticket,
+            epoch: self.graph_epoch,
+            force,
+            rerun: false,
+        });
+        let path = self.installed_module_graph_path();
+        let committed = self.installed_module_graph.clone();
+        let wake = self.wake_handle.clone();
+        std::thread::spawn(move || {
+            let result = super::discovery::load_installed_module_graph_candidate(
+                &path,
+                committed.as_ref(),
+            );
+            let _ = tx.send(ShellMessage::GraphCandidateLoaded { ticket, result });
+            if let Some(wake) = wake {
+                wake.wake();
+            }
+        });
+    }
+
+    pub(in crate::shell) fn finish_graph_candidate_load(
+        &mut self,
+        ticket: u64,
+        result: Result<InstalledModuleGraph, mesh_core_module::package::ModuleManifestError>,
+    ) -> VecDeque<SourcedRequest> {
+        let Some(pending) = self.pending_graph_load.take() else {
+            return VecDeque::new();
+        };
+        if pending.ticket != ticket {
+            self.pending_graph_load = Some(pending);
+            return VecDeque::new();
+        }
+        // Files changed while the worker read them, or the active graph moved
+        // underneath it: what it read may be stale.
+        if pending.rerun || pending.epoch != self.graph_epoch {
+            return self.reconcile_installed_graph_inner(pending.force);
+        }
+        if self.graph_reconciliation_blocked() {
+            self.pending_graph_reconciliation = true;
+            return VecDeque::new();
+        }
+        self.finish_graph_reconciliation(pending.force, result)
+    }
+
+    fn finish_graph_reconciliation(
+        &mut self,
+        force: bool,
+        candidate: Result<InstalledModuleGraph, mesh_core_module::package::ModuleManifestError>,
+    ) -> VecDeque<SourcedRequest> {
+        let candidate = match candidate {
             Ok(candidate) => candidate,
             Err(error) => {
                 let message = format!(
@@ -2441,6 +2526,7 @@ impl Shell {
         }
 
         self.installed_module_graph = Some(plan.graph.clone());
+        self.graph_epoch += 1;
         self.active_profile_authoring = pending
             .profile_authoring
             .take()

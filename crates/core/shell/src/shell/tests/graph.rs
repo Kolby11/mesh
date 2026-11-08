@@ -1069,6 +1069,96 @@ fn idle_profile_authoring_edits_reconcile_without_graph_changes() {
     }
 }
 
+fn mounted_composition_shell(dir: &Path) -> Shell {
+    composition_switch_fixture(dir);
+    let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(true);
+    shell.discover_modules();
+    shell.resolve_modules().unwrap();
+    shell.load_frontend_components().unwrap();
+    let mut requests = shell.mount_components().unwrap();
+    shell.drain_requests(&mut requests).unwrap();
+    shell
+}
+
+#[test]
+fn live_reconcile_reads_the_graph_on_a_worker_and_activates_the_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_settings, _graph, _lock) = isolated_settings_file(dir.path());
+    let mut shell = mounted_composition_shell(dir.path());
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    shell.file_watcher_tx = Some(tx);
+    fs::write(dir.path().join("active-profile"), "second\n").unwrap();
+
+    let mut requests = shell.reconcile_installed_graph();
+    assert!(requests.is_empty());
+    assert!(shell.pending_graph_load.is_some(), "the read is in flight");
+    assert_eq!(shell.active_profile_id.as_deref(), Some("first"));
+
+    let message = rx.blocking_recv().expect("graph load completion");
+    assert!(matches!(
+        message,
+        crate::shell::ShellMessage::GraphCandidateLoaded { .. }
+    ));
+    shell.handle_shell_message(&mut requests, message).unwrap();
+    assert!(shell.pending_graph_load.is_none());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while shell.active_profile_id.as_deref() != Some("second") {
+        requests.extend(shell.poll_pending_resource_preparation());
+        requests.extend(shell.retry_pending_graph_reconciliation());
+        shell.drain_requests(&mut requests).unwrap();
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn reconcile_requests_during_a_graph_read_coalesce_into_one_rerun() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_settings, _graph, _lock) = isolated_settings_file(dir.path());
+    let mut shell = mounted_composition_shell(dir.path());
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    shell.file_watcher_tx = Some(tx);
+
+    shell.reconcile_installed_graph();
+    let first = shell.graph_load_ticket;
+    shell.reconcile_installed_graph();
+    shell.reconcile_installed_graph();
+    assert_eq!(shell.graph_load_ticket, first, "no second worker while one reads");
+    assert!(shell.pending_graph_load.as_ref().unwrap().rerun);
+
+    let message = rx.blocking_recv().unwrap();
+    shell
+        .handle_shell_message(&mut VecDeque::new(), message)
+        .unwrap();
+    assert_eq!(shell.graph_load_ticket, first + 1, "one rerun reads again");
+    let message = rx.blocking_recv().unwrap();
+    shell
+        .handle_shell_message(&mut VecDeque::new(), message)
+        .unwrap();
+    assert!(shell.pending_graph_load.is_none());
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn a_graph_read_that_raced_a_commit_is_discarded() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_settings, _graph, _lock) = isolated_settings_file(dir.path());
+    let mut shell = mounted_composition_shell(dir.path());
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    shell.file_watcher_tx = Some(tx);
+
+    shell.reconcile_installed_graph();
+    let first = shell.graph_load_ticket;
+    shell.graph_epoch += 1;
+    let message = rx.blocking_recv().unwrap();
+    shell
+        .handle_shell_message(&mut VecDeque::new(), message)
+        .unwrap();
+    assert_eq!(shell.graph_load_ticket, first + 1, "stale read is redone");
+}
+
 #[test]
 fn retired_watcher_event_reconciles_current_profile() {
     let dir = tempfile::tempdir().unwrap();

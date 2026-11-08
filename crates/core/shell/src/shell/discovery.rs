@@ -44,7 +44,7 @@ pub(in crate::shell) fn test_module_graph_path() -> &'static Path {
 /// Load a candidate graph. Once a graph is committed, a module whose
 /// `module.json` stops loading keeps its committed manifest, so saving a
 /// half-finished edit does not deactivate it.
-fn load_installed_module_graph_candidate(
+pub(in crate::shell) fn load_installed_module_graph_candidate(
     root_module_graph_path: &Path,
     committed: Option<&InstalledModuleGraph>,
 ) -> Result<InstalledModuleGraph, mesh_core_module::package::ModuleManifestError> {
@@ -1902,6 +1902,9 @@ impl Shell {
                 .and_then(|(id, profile)| {
                     serde_json::to_value(profile).ok().map(|value| (id, value))
                 }),
+            pending_graph_load: None,
+            graph_epoch: 0,
+            graph_load_ticket: 0,
             pending_control_plane_commit: None,
             pending_profile_write: None,
             parked_durable_writes: Vec::new(),
@@ -1965,6 +1968,7 @@ impl Shell {
         };
         self.active_profile_id = None;
         self.installed_module_graph = None;
+        self.graph_epoch += 1;
         self.modules.clear();
         self.effective_capabilities = Arc::new(HashMap::new());
         self.interfaces
@@ -2195,6 +2199,7 @@ impl Shell {
         self.sync_module_graph_health(&graph);
         self.locale = locale;
         self.installed_module_graph = Some(graph);
+        self.graph_epoch += 1;
         match interface_catalog {
             Ok(catalog) => self.interfaces.replace_catalog(catalog),
             Err(error) => {
