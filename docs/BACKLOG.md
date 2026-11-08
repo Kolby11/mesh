@@ -446,13 +446,10 @@ of payoff.
 - [ ] Tile-parallel raster for large damage, above a measured threshold only.
 - [ ] Move the remaining blocking file IO off the shell thread: the graph reads
       behind user-initiated profile switches and package operations
-      (`runtime/request.rs`, `backend/lifecycle.rs`; ~215 ms each on the shipped
-      graph), startup `mount_components` (~230–250 ms), i18n catalog mounts, and
-      icon/SVG cache-miss rasterization on the paint path. Settings apply and
-      theme reload already measure under 0.1 ms.
-
-### Runtime boundary
-
+      (`runtime/request.rs`, `backend/lifecycle.rs`; about 75-90 ms each on the
+      shipped graph), i18n catalog mounts, and icon/SVG cache-miss rasterization
+      on the paint path. Settings apply and theme reload already measure under
+      0.1 ms.
 - [ ] Handler sync still reads compound table globals, because nested in-place
       mutations never assign through `_ENV`. Eliminating those reads needs
       recursively tracked tables or Rust-owned reactive values (R).

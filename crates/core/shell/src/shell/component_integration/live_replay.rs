@@ -991,6 +991,27 @@ fn cpu_dock_fixture_visits() -> Vec<BTreeMap<String, u64>> {
 
 // WAYLAND_DISPLAY=wayland-1 taskset -c 6 cargo test -p mesh-core-shell --release --lib \
 //   live_glass_replay -- --ignored --nocapture --test-threads=1
+// cargo test -p mesh-core-shell --release --lib installed_graph_load_loop -- --ignored --nocapture
+#[test]
+#[ignore = "release-only: loops the shipped graph load for sampling profilers"]
+fn installed_graph_load_loop() {
+    let _sandbox = Sandbox::new();
+    let shell = Shell::new();
+    let iterations: usize = std::env::var("MESH_BENCH_ITERATIONS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(20);
+    std::hint::black_box(shell.load_installed_module_graph_candidate().unwrap());
+    let started = Instant::now();
+    for _ in 0..iterations {
+        std::hint::black_box(shell.load_installed_module_graph_candidate().unwrap());
+    }
+    eprintln!(
+        "installed graph load (warm): {:.3} ms each over {iterations}",
+        started.elapsed().as_secs_f64() * 1e3 / iterations as f64
+    );
+}
+
 // cargo test -p mesh-core-shell --release --lib shell_thread_reload_stall_profile -- --ignored --nocapture
 #[test]
 #[ignore = "release-only: times blocking reloads on the shell thread against the shipped config"]

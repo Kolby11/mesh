@@ -1,5 +1,42 @@
 # MESH Performance Log
 
+## 2026-11-08 — Graph loads stop re-hashing and re-parsing unchanged modules
+
+`working tree after 090ecbc3` · area: installed-graph load, `.mesh` parsing
+
+**Correction to the entry below.** Its "startup `mount_components` is 229–253
+ms" was a harness artifact: the profile never loaded the graph, so the first
+`sync_composition_service_state` in `mount_components` paid the one graph load
+(`load_installed_module_graph_cached`). There is no 230 ms mount cost; the cost
+is the graph load itself.
+
+`perf` (release, `installed_graph_load_loop`, 30 loads, 999 Hz) put the load at
+about 229 ms, dominated by SHA-256 (15–17%) and `memmove` (about 10%) from
+`module_tree_digest` reading and hashing every module file twice per load
+(`graph_revision` input and `with_content_revision`, 18 MB), plus 59
+`parse_component` calls (523 KB) at about a quarter of the load, repeated for the
+same unchanged sources on every reload. Two memos:
+
+- `module_tree_digest_excluding` keys a result on each file's relative path,
+  length, mtime in nanoseconds and executable bit, and trusts an entry only when
+  its newest file is over 2 s old (the racy-timestamp rule), so a same-length
+  edit inside one timestamp tick is re-read. Bounded to 512 trees.
+- `parse_component` memoizes successful results on the full source text (hash,
+  then equality), 256 entries / 8 MiB, sources over 1 MiB bypass it, failures are
+  never retained.
+
+Release, shipped `config/` and `modules/`, warm loads: 228.991 ms before; 185.099
+–188.701 ms with the digest memo; 76.800–77.837 ms with both (three runs of 20
+loads). `shell_thread_reload_stall_profile`, 7 samples: synchronous candidate
+load 207.557–233.457 ms before, 75.783–88.878 ms after; unchanged-graph
+reconcile 210.329–235.720 ms before, 79.237–96.707 ms after. The worker path's
+shell-thread time is unchanged at 6.7–9.3 ms. These synchronous loads still run
+for profile switches, module enables and provider selection, now about a third
+as long. Cold first loads in a fresh process do not benefit; startup is unchanged
+except where the graph is read twice. Before/after suites: module 348 passed with
+the same 3 failures as the baseline, component 116, frontend-runtime 748, shell
+434, no new failures.
+
 ## 2026-11-08 — Watcher-triggered graph reconcile reads the graph off the shell thread
 
 `working tree after b4a1b8e6` · area: shell loop stalls, hot reload

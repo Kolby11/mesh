@@ -193,8 +193,76 @@ impl ParseError {
     }
 }
 
+/// Parses and validates a component.
+///
+/// Parsing is pure, so successful results are memoized on the full source text
+/// (hashed, then compared for equality, never trusted on the hash alone). A
+/// graph load, the frontend compiler and the diagnostics scans parse the same
+/// unchanged sources repeatedly, and a hot reload re-reads all of them.
 pub fn parse_component(source: &str) -> Result<ComponentFile, ParseError> {
-    parse_component_impl(source, true, false)
+    static MEMO: std::sync::Mutex<Option<ParseMemo>> = std::sync::Mutex::new(None);
+
+    if source.len() > PARSE_MEMO_MAX_SOURCE {
+        return parse_component_impl(source, true, false);
+    }
+    parse_component_memoized(&MEMO, source)
+}
+
+/// Sources above this size are parsed without being retained.
+const PARSE_MEMO_MAX_SOURCE: usize = 1 << 20;
+/// Retained parse results are bounded in count and in total source bytes.
+const PARSE_MEMO_MAX_ENTRIES: usize = 256;
+const PARSE_MEMO_MAX_BYTES: usize = 8 << 20;
+
+struct ParseMemo {
+    entries: std::collections::HashMap<u64, Vec<(std::sync::Arc<str>, ComponentFile)>>,
+    entry_count: usize,
+    bytes: usize,
+    hasher: std::collections::hash_map::RandomState,
+}
+
+fn parse_component_memoized(
+    memo: &std::sync::Mutex<Option<ParseMemo>>,
+    source: &str,
+) -> Result<ComponentFile, ParseError> {
+    use std::hash::{BuildHasher, Hash, Hasher};
+
+    let hash_of = |memo: &ParseMemo| {
+        let mut hasher = memo.hasher.build_hasher();
+        source.hash(&mut hasher);
+        hasher.finish()
+    };
+    if let Ok(guard) = memo.lock()
+        && let Some(memo) = guard.as_ref()
+        && let Some(bucket) = memo.entries.get(&hash_of(memo))
+        && let Some((_, component)) = bucket.iter().find(|(text, _)| &**text == source)
+    {
+        return Ok(component.clone());
+    }
+    let component = parse_component_impl(source, true, false)?;
+    if let Ok(mut guard) = memo.lock() {
+        let memo = guard.get_or_insert_with(|| ParseMemo {
+            entries: Default::default(),
+            entry_count: 0,
+            bytes: 0,
+            hasher: Default::default(),
+        });
+        if memo.entry_count >= PARSE_MEMO_MAX_ENTRIES
+            || memo.bytes + source.len() > PARSE_MEMO_MAX_BYTES
+        {
+            memo.entries.clear();
+            memo.entry_count = 0;
+            memo.bytes = 0;
+        }
+        let hash = hash_of(memo);
+        memo.entries
+            .entry(hash)
+            .or_default()
+            .push((std::sync::Arc::from(source), component.clone()));
+        memo.entry_count += 1;
+        memo.bytes += source.len();
+    }
+    Ok(component)
 }
 
 /// Parse the structural component tree for editor tooling while allowing
@@ -1056,6 +1124,41 @@ mod tests {
         },
         template::{AttributeValue, TemplateNode},
     };
+
+    #[test]
+    fn memoized_parses_match_a_fresh_parse_and_follow_source_edits() {
+        let first = "<template><text>one</text></template>";
+        let second = "<template><text>two</text></template>";
+        let fresh = parse_component_impl(first, true, false).unwrap();
+        for _ in 0..3 {
+            let memoized = parse_component(first).unwrap();
+            assert_eq!(format!("{memoized:?}"), format!("{fresh:?}"));
+        }
+        let edited = parse_component(second).unwrap();
+        assert_ne!(format!("{edited:?}"), format!("{fresh:?}"));
+        assert_eq!(
+            format!("{:?}", parse_component(first).unwrap()),
+            format!("{fresh:?}")
+        );
+    }
+
+    #[test]
+    fn memoization_never_retains_a_failed_parse() {
+        let broken = "<template><text>unclosed</template>";
+        assert!(parse_component(broken).is_err());
+        assert!(parse_component(broken).is_err());
+    }
+
+    #[test]
+    fn the_parse_memo_stays_bounded() {
+        let memo = std::sync::Mutex::new(None);
+        for index in 0..PARSE_MEMO_MAX_ENTRIES * 2 {
+            let source = format!("<template><text>{index}</text></template>");
+            parse_component_memoized(&memo, &source).unwrap();
+        }
+        let guard = memo.lock().unwrap();
+        assert!(guard.as_ref().unwrap().entry_count <= PARSE_MEMO_MAX_ENTRIES);
+    }
 
     #[test]
     fn parse_minimal_component() {

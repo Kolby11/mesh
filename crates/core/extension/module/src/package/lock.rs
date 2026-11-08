@@ -589,6 +589,40 @@ pub(crate) fn module_source_digest(root: &Path) -> Result<String, ModuleManifest
     module_tree_digest_excluding(root, Some("module.json"))
 }
 
+/// A file's identity for the digest memo: relative path, length, modification
+/// time in nanoseconds and the executable bit.
+type FileStamp = (String, u64, i128, bool);
+
+/// Entries whose newest file changed within this window are not trusted: an
+/// edit that keeps the length and lands in the same timestamp tick would
+/// otherwise be invisible (the "racy" case of stat-based change detection).
+const DIGEST_MEMO_SETTLE: std::time::Duration = std::time::Duration::from_secs(2);
+const DIGEST_MEMO_ENTRIES: usize = 512;
+
+struct DigestMemoEntry {
+    stamps: Vec<FileStamp>,
+    digest: String,
+}
+
+static DIGEST_MEMO: std::sync::Mutex<
+    Option<std::collections::HashMap<(PathBuf, Option<String>), DigestMemoEntry>>,
+> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+thread_local! {
+    static DIGEST_FULL_COMPUTATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn mtime_nanos(metadata: &fs::Metadata) -> i128 {
+    match metadata.modified() {
+        Ok(time) => match time.duration_since(std::time::UNIX_EPOCH) {
+            Ok(after) => after.as_nanos() as i128,
+            Err(before) => -(before.duration().as_nanos() as i128),
+        },
+        Err(_) => 0,
+    }
+}
+
 fn module_tree_digest_excluding(
     root: &Path,
     excluded: Option<&str>,
@@ -603,13 +637,33 @@ fn module_tree_digest_excluding(
     files.sort();
     files.retain(|path| Some(path.as_str()) != excluded);
 
-    let mut hasher = Sha256::new();
+    let mut stamps = Vec::with_capacity(files.len());
     for relative in &files {
         let path = root.join(relative);
         let metadata = fs::metadata(&path).map_err(|source| ModuleManifestError::Io {
             path: path.clone(),
             source,
         })?;
+        stamps.push((
+            relative.clone(),
+            metadata.len(),
+            mtime_nanos(&metadata),
+            is_executable(&metadata),
+        ));
+    }
+    let key = (root.to_path_buf(), excluded.map(str::to_owned));
+    if let Ok(memo) = DIGEST_MEMO.lock()
+        && let Some(entry) = memo.as_ref().and_then(|memo| memo.get(&key))
+        && entry.stamps == stamps
+    {
+        return Ok(entry.digest.clone());
+    }
+
+    #[cfg(test)]
+    DIGEST_FULL_COMPUTATIONS.with(|count| count.set(count.get() + 1));
+    let mut hasher = Sha256::new();
+    for (relative, _, _, executable) in &stamps {
+        let path = root.join(relative);
         let contents = fs::read(&path).map_err(|source| ModuleManifestError::Io {
             path: path.clone(),
             source,
@@ -617,11 +671,31 @@ fn module_tree_digest_excluding(
         // Path and length are framed so that concatenation cannot collide.
         hasher.update((relative.len() as u64).to_le_bytes());
         hasher.update(relative.as_bytes());
-        hasher.update([u8::from(is_executable(&metadata))]);
+        hasher.update([u8::from(*executable)]);
         hasher.update((contents.len() as u64).to_le_bytes());
         hasher.update(&contents);
     }
-    Ok(format!("sha256:{:x}", hasher.finalize()))
+    let digest = format!("sha256:{:x}", hasher.finalize());
+
+    let settled = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|now| now.as_nanos() as i128 - DIGEST_MEMO_SETTLE.as_nanos() as i128)
+        .ok()
+        .is_some_and(|cutoff| stamps.iter().all(|stamp| stamp.2 <= cutoff));
+    if settled && let Ok(mut memo) = DIGEST_MEMO.lock() {
+        let memo = memo.get_or_insert_with(Default::default);
+        if memo.len() >= DIGEST_MEMO_ENTRIES {
+            memo.clear();
+        }
+        memo.insert(
+            key,
+            DigestMemoEntry {
+                stamps,
+                digest: digest.clone(),
+            },
+        );
+    }
+    Ok(digest)
 }
 
 #[cfg(unix)]
@@ -702,6 +776,59 @@ pub fn has_local_edits(root: &Path, locked: &LockedModule) -> Result<bool, Modul
 
 #[cfg(test)]
 mod tests {
+
+    fn full_computations() -> usize {
+        DIGEST_FULL_COMPUTATIONS.with(std::cell::Cell::get)
+    }
+
+    fn age(path: &Path) {
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+    }
+
+    #[test]
+    fn tree_digest_memo_skips_unchanged_settled_trees_and_sees_edits() {
+        let dir = temp_dir("digest-memo");
+        fs::write(dir.join("module.json"), "{}").unwrap();
+        fs::write(dir.join("a.mesh"), "one").unwrap();
+        age(&dir.join("module.json"));
+        age(&dir.join("a.mesh"));
+
+        let first = module_tree_digest(&dir).unwrap();
+        let computed = full_computations();
+        assert_eq!(module_tree_digest(&dir).unwrap(), first);
+        assert_eq!(full_computations(), computed, "settled tree is not re-read");
+
+        fs::write(dir.join("a.mesh"), "three").unwrap();
+        age(&dir.join("a.mesh"));
+        let edited = module_tree_digest(&dir).unwrap();
+        assert_ne!(edited, first);
+        assert_eq!(full_computations(), computed + 1);
+
+        fs::write(dir.join("b.mesh"), "added").unwrap();
+        age(&dir.join("b.mesh"));
+        assert_ne!(module_tree_digest(&dir).unwrap(), edited);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tree_digest_memo_does_not_trust_recent_edits() {
+        let dir = temp_dir("digest-memo-racy");
+        fs::write(dir.join("module.json"), "{}").unwrap();
+        fs::write(dir.join("a.mesh"), "one").unwrap();
+        let first = module_tree_digest(&dir).unwrap();
+        let computed = full_computations();
+        fs::write(dir.join("a.mesh"), "two").unwrap();
+        let second = module_tree_digest(&dir).unwrap();
+        assert_ne!(second, first, "same-length edit inside the settle window");
+        assert_eq!(full_computations(), computed + 1);
+        let _ = fs::remove_dir_all(dir);
+    }
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
