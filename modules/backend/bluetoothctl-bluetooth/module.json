@@ -8,6 +8,7 @@
     "kind": "backend",
     "uses": {
       "capabilities": [
+        "dbus.subscribe:system:org.bluez",
         "exec.argv:bluetoothctl:[\"show\"]",
         "exec.argv:bluetoothctl:[\"devices\"]",
         "exec.argv:bluetoothctl:[\"devices\",\"Paired\"]",

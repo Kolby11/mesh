@@ -6,6 +6,8 @@
 
 local FORMAT = "{{status}}\t{{playerName}}\t{{mpris:length}}\t{{position}}\t{{mpris:artUrl}}\t{{xesam:artist}}\t{{xesam:album}}\t{{xesam:title}}"
 local POSITION_POLL_MS = 2000
+local IDLE_POLL_MS = 10000
+local POSITION_TOLERANCE = 1.5
 
 local EMPTY = {
     available = false, state = "stopped", player = "", title = "", artist = "",
@@ -77,8 +79,35 @@ local function parse(line)
     }, fields[5] or ""
 end
 
+local poll_ms = 0
+
+local function set_poll(interval)
+    if poll_ms == interval then return end
+    poll_ms = interval
+    mesh.service.set_poll_interval(interval)
+end
+
+-- Consumers extrapolate the position from `updated_at`. A sample that agrees
+-- with that extrapolation keeps the previous pair, so an uneventful poll
+-- leaves the state identical and publishes nothing.
+local function keep_extrapolated_position(next_state)
+    for _, key in { "available", "state", "player", "title", "artist", "album", "length" } do
+        if next_state[key] ~= state[key] then return end
+    end
+    local expected = state.position
+    if state.state == "playing" then
+        expected += next_state.updated_at - state.updated_at
+    end
+    if math.abs(next_state.position - expected) <= POSITION_TOLERANCE then
+        next_state.position = state.position
+        next_state.updated_at = state.updated_at
+    end
+end
+
 local function commit(self, next_state, url)
     local track_changed = next_state.title ~= state.title or next_state.artist ~= state.artist
+    keep_extrapolated_position(next_state)
+    set_poll(next_state.state == "playing" and POSITION_POLL_MS or IDLE_POLL_MS)
     url = url or ""
     local file = url:match("^file://(.+)$")
     next_state.art_path = file and url_decode(file) or (url == art_url and art_path or "")
@@ -123,7 +152,7 @@ local function sample(self)
 end
 
 function start(self)
-    mesh.service.set_poll_interval(POSITION_POLL_MS)
+    set_poll(POSITION_POLL_MS)
     if not mesh.exec_stream("playerctl", { "--follow", "metadata", "--format", FORMAT }) then
         mesh.log.warn("[mpris-media] metadata stream unavailable; polling")
     end

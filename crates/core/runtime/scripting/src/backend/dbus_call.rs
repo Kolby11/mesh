@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -222,6 +224,7 @@ fn encode_key(signature: &Signature, key: &str) -> Result<Value<'static>, String
     }
 }
 
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(super) enum BusTarget {
     System,
     Session,
@@ -252,33 +255,71 @@ impl BusTarget {
     }
 }
 
-/// Perform one method call on a private connection and return the reply
-/// record. Every failure, including D-Bus error replies, is a record with
-/// `success = false`; malformed calls are reported the same way.
-pub(super) fn call(bus: &BusTarget, call: &MethodCall, timeout: Duration, limit: usize) -> Json {
-    let outcome = std::thread::scope(|scope| {
-        // A dedicated thread keeps this safe from callers that already run
-        // inside a Tokio runtime.
-        scope
-            .spawn(|| {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|error| (String::new(), error.to_string()))?;
-                runtime.block_on(async {
-                    tokio::time::timeout(timeout, perform(bus, call, limit))
-                        .await
-                        .unwrap_or_else(|_| {
-                            Err((
-                                String::new(),
-                                format!("D-Bus call timed out after {timeout:?}"),
-                            ))
-                        })
+type CallOutcome = Result<(String, Vec<Json>), (String, String)>;
+
+struct CallJob {
+    bus: BusTarget,
+    destination: String,
+    path: String,
+    interface: String,
+    member: String,
+    args: Option<Structure<'static>>,
+    timeout: Duration,
+    limit: usize,
+    reply: std::sync::mpsc::SyncSender<CallOutcome>,
+}
+
+type Connections = Arc<Mutex<HashMap<BusTarget, Connection>>>;
+
+/// One thread owns a connection per bus for every method call in the process.
+/// Authenticating a fresh connection costs far more than the call it carries,
+/// and providers issue calls in bursts (one per device or access point).
+fn call_service() -> Option<&'static tokio::sync::mpsc::UnboundedSender<CallJob>> {
+    static SERVICE: OnceLock<Option<tokio::sync::mpsc::UnboundedSender<CallJob>>> =
+        OnceLock::new();
+    SERVICE
+        .get_or_init(|| {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .ok()?;
+            let (jobs, mut pending) = tokio::sync::mpsc::unbounded_channel::<CallJob>();
+            std::thread::Builder::new()
+                .name("mesh-dbus-call".into())
+                .spawn(move || {
+                    let connections = Connections::default();
+                    runtime.block_on(async move {
+                        while let Some(job) = pending.recv().await {
+                            tokio::spawn(run_job(Arc::clone(&connections), job));
+                        }
+                    });
                 })
-            })
-            .join()
-            .unwrap_or_else(|_| Err((String::new(), "D-Bus call worker panicked".into())))
-    });
+                .ok()?;
+            Some(jobs)
+        })
+        .as_ref()
+}
+
+async fn run_job(connections: Connections, job: CallJob) {
+    let timeout = job.timeout;
+    let outcome = tokio::time::timeout(timeout, perform(&connections, &job))
+        .await
+        .unwrap_or_else(|_| Err(timed_out(timeout)));
+    let _ = job.reply.send(outcome);
+}
+
+fn timed_out(timeout: Duration) -> (String, String) {
+    (
+        String::new(),
+        format!("D-Bus call timed out after {timeout:?}"),
+    )
+}
+
+/// Perform one method call and return the reply record. Every failure,
+/// including D-Bus error replies, is a record with `success = false`;
+/// malformed calls are reported the same way, before any connection is used.
+pub(super) fn call(bus: &BusTarget, call: &MethodCall, timeout: Duration, limit: usize) -> Json {
+    let outcome = submit(bus, call, timeout, limit);
     match outcome {
         Ok((signature, body)) => json!({
             "success": true, "signature": signature, "body": body, "error": "", "error_name": "",
@@ -289,39 +330,102 @@ pub(super) fn call(bus: &BusTarget, call: &MethodCall, timeout: Duration, limit:
     }
 }
 
-async fn perform(
-    bus: &BusTarget,
-    call: &MethodCall,
-    limit: usize,
-) -> Result<(String, Vec<Json>), (String, String)> {
+fn submit(bus: &BusTarget, call: &MethodCall, timeout: Duration, limit: usize) -> CallOutcome {
     let plain = |error: String| (String::new(), error);
     let args = encode_args(call).map_err(plain)?;
-    let connection = bus
-        .connect()
-        .await
-        .map_err(|error| plain(format!("D-Bus connection failed: {error}")))?;
-    let reply = match &args {
-        Some(args) => {
-            connection
-                .call_method(
-                    Some(call.destination.as_str()),
-                    call.path.as_str(),
-                    Some(call.interface.as_str()),
-                    call.member.as_str(),
-                    args,
-                )
-                .await
-        }
-        None => {
-            connection
-                .call_method(
-                    Some(call.destination.as_str()),
-                    call.path.as_str(),
-                    Some(call.interface.as_str()),
-                    call.member.as_str(),
-                    &(),
-                )
-                .await
+    let (reply, outcome) = std::sync::mpsc::sync_channel(1);
+    let job = CallJob {
+        bus: bus.clone(),
+        destination: call.destination.clone(),
+        path: call.path.clone(),
+        interface: call.interface.clone(),
+        member: call.member.clone(),
+        args,
+        timeout,
+        limit,
+        reply,
+    };
+    call_service()
+        .and_then(|service| service.send(job).ok())
+        .ok_or_else(|| plain("D-Bus call worker is unavailable".into()))?;
+    // The worker enforces the deadline; the margin only covers a worker that
+    // stopped answering.
+    outcome
+        .recv_timeout(timeout + Duration::from_secs(1))
+        .unwrap_or_else(|_| Err(timed_out(timeout)))
+}
+
+fn cached_connection(connections: &Connections, bus: &BusTarget) -> Option<Connection> {
+    connections
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(bus)
+        .cloned()
+}
+
+fn forget_connection(connections: &Connections, bus: &BusTarget) {
+    connections
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(bus);
+}
+
+async fn perform(connections: &Connections, job: &CallJob) -> CallOutcome {
+    let plain = |error: String| (String::new(), error);
+    let mut reused = true;
+    let mut connection = cached_connection(connections, &job.bus);
+    let reply = loop {
+        let active = match connection.take() {
+            Some(active) => active,
+            None => {
+                reused = false;
+                let fresh = job
+                    .bus
+                    .connect()
+                    .await
+                    .map_err(|error| plain(format!("D-Bus connection failed: {error}")))?;
+                connections
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .insert(job.bus.clone(), fresh.clone());
+                fresh
+            }
+        };
+        let reply = match &job.args {
+            Some(args) => {
+                active
+                    .call_method(
+                        Some(job.destination.as_str()),
+                        job.path.as_str(),
+                        Some(job.interface.as_str()),
+                        job.member.as_str(),
+                        args,
+                    )
+                    .await
+            }
+            None => {
+                active
+                    .call_method(
+                        Some(job.destination.as_str()),
+                        job.path.as_str(),
+                        Some(job.interface.as_str()),
+                        job.member.as_str(),
+                        &(),
+                    )
+                    .await
+            }
+        };
+        match reply {
+            // A cached connection whose bus went away never delivered the
+            // call, so it is safe to repeat on a fresh one.
+            Err(zbus::Error::InputOutput(_)) if reused => {
+                forget_connection(connections, &job.bus);
+            }
+            Err(error @ zbus::Error::InputOutput(_)) => {
+                forget_connection(connections, &job.bus);
+                break Err(error);
+            }
+            reply => break reply,
         }
     };
     let reply = reply.map_err(|error| match error {
@@ -331,8 +435,8 @@ async fn perform(
         error => plain(error.to_string()),
     })?;
     let body = reply.body();
-    if body.len() > limit {
-        return Err(plain(format!("D-Bus reply exceeds {limit} bytes")));
+    if body.len() > job.limit {
+        return Err(plain(format!("D-Bus reply exceeds {} bytes", job.limit)));
     }
     let fields = if body.is_empty() {
         Vec::new()
@@ -499,6 +603,68 @@ mod tests {
                 .unwrap()
                 .contains("exceeds 16 bytes")
         );
+    }
+
+    // cargo test -p mesh-core-scripting --release -- dbus_call_burst_profile --ignored --nocapture
+    #[test]
+    #[ignore = "release-only D-Bus call burst benchmark"]
+    fn dbus_call_burst_profile() {
+        let bus = bus();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        serve(&runtime, &bus.1);
+        let target = BusTarget::Address(bus.1.clone());
+        let timeout = Duration::from_secs(3);
+        let echo = method("Echo", "s", json!(["x"]));
+        // The former path: a thread, a runtime and an authenticated
+        // connection for every call.
+        let private = |address: &str| {
+            std::thread::scope(|scope| {
+                scope
+                    .spawn(|| {
+                        let runtime = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                            .unwrap();
+                        runtime.block_on(async {
+                            let connection = zbus::connection::Builder::address(address)
+                                .unwrap()
+                                .build()
+                                .await
+                                .unwrap();
+                            connection
+                                .call_method(
+                                    Some("org.mesh.Test"),
+                                    "/org/mesh/Test",
+                                    Some("org.mesh.Test"),
+                                    "Echo",
+                                    &("x",),
+                                )
+                                .await
+                                .unwrap();
+                        })
+                    })
+                    .join()
+                    .unwrap()
+            })
+        };
+        assert_eq!(call(&target, &echo, timeout, 65536)["success"], true);
+        for run in 0..3 {
+            let started = std::time::Instant::now();
+            for _ in 0..40 {
+                private(&bus.1);
+            }
+            let before = started.elapsed();
+            let started = std::time::Instant::now();
+            for _ in 0..40 {
+                assert_eq!(call(&target, &echo, timeout, 65536)["success"], true);
+            }
+            let after = started.elapsed();
+            let ratio = before.as_secs_f64() / after.as_secs_f64();
+            eprintln!(
+                "dbus call burst: calls=40 run={run} private={before:?} shared={after:?} ratio={ratio:.1}"
+            );
+            assert!(ratio > 2.0, "dbus_call_shared_connection_speedup must exceed 2x");
+        }
     }
 
     #[test]

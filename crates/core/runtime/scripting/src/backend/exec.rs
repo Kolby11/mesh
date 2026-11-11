@@ -643,6 +643,7 @@ fn run_bounded_command(
 
     let started = Instant::now();
     let mut termination = Termination::Completed;
+    let exit = ExitWaiter::new(&child);
     let status = loop {
         if cancel.load(Ordering::Acquire) {
             termination = if capture.overflowed() {
@@ -661,7 +662,7 @@ fn run_bounded_command(
         if let Some(status) = child.try_wait()? {
             break status;
         }
-        thread::sleep(Duration::from_millis(1));
+        exit.wait(timeout.saturating_sub(started.elapsed()));
     };
 
     let mut stdout = stdout_reader
@@ -701,6 +702,43 @@ fn run_bounded_command(
 fn configure_argv0(command: &mut StdCommand, argv0: &str) {
     #[cfg(unix)]
     command.arg0(argv0);
+}
+
+/// Sleeps until the child exits, bounded so cancellation and the deadline are
+/// still observed. A pidfd wakes on exit itself; without one the wait falls
+/// back to a short sleep between `try_wait` probes.
+struct ExitWaiter(Option<std::os::fd::OwnedFd>);
+
+impl ExitWaiter {
+    const CANCEL_CHECK: Duration = Duration::from_millis(20);
+    const PROBE: Duration = Duration::from_millis(1);
+
+    fn new(child: &std::process::Child) -> Self {
+        use std::os::fd::FromRawFd;
+        // SAFETY: pidfd_open takes a pid and flags and returns a new
+        // descriptor or -1; the descriptor is owned here and nowhere else.
+        let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, child.id() as libc::pid_t, 0) };
+        Self((fd >= 0).then(|| unsafe { std::os::fd::OwnedFd::from_raw_fd(fd as i32) }))
+    }
+
+    fn wait(&self, remaining: Duration) {
+        use std::os::fd::AsRawFd;
+        let Some(fd) = &self.0 else {
+            thread::sleep(Self::PROBE.min(remaining));
+            return;
+        };
+        let wait = Self::CANCEL_CHECK.min(remaining).max(Self::PROBE);
+        let mut poll = libc::pollfd {
+            fd: fd.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: `poll` points at one valid pollfd for the duration of the call.
+        let ready = unsafe { libc::poll(&mut poll, 1, wait.as_millis() as libc::c_int) };
+        if ready < 0 {
+            thread::sleep(Self::PROBE);
+        }
+    }
 }
 
 fn read_limited(
@@ -863,6 +901,27 @@ mod tests {
         for bad in ["", "sk SK", "x;rm", "a/b", &"x".repeat(65)] {
             assert!(ExecLocale::parse(bad).is_err(), "{bad:?}");
         }
+    }
+
+    // cargo test -p mesh-core-scripting --release -- short_exec_latency_profile --ignored --nocapture
+    #[test]
+    #[ignore = "release-only short exec latency benchmark"]
+    fn short_exec_latency_profile() {
+        let service = service(SandboxConfig::default());
+        for run in 0..3 {
+            let started = Instant::now();
+            for _ in 0..200 {
+                let result = service
+                    .run("true", &[], 1024, Duration::from_secs(2))
+                    .unwrap();
+                assert!(result.success);
+            }
+            eprintln!(
+                "short exec: program=true calls=200 run={run} total={:?}",
+                started.elapsed()
+            );
+        }
+        service.shutdown();
     }
 
     #[test]

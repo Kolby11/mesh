@@ -68,7 +68,7 @@ pub use surface::{
     paint_selected_display_list_regions_for_module_with_profiling_metrics_and_attribution_in_session,
     poll_glyph_raster_jobs, poll_icon_raster_jobs, poll_icon_resolution_jobs,
     poll_image_decode_jobs, resource_completion_waker_installed, set_backdrop_blur_policy,
-    set_backdrop_frame, set_backdrop_image, set_blur_quality, set_font_aliases, set_font_database,
+    set_backdrop_frame, set_backdrop_image, set_blur_quality, set_font_aliases, set_font_database, set_shared_font_aliases,
     set_resource_completion_waker, set_tooltip_center_x, set_tooltip_paint_font_family,
     set_tooltip_paint_opacity, set_tooltip_paint_scale, set_tooltip_paint_style,
 };

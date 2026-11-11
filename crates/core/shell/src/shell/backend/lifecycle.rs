@@ -1199,7 +1199,7 @@ impl Shell {
         interface: &str,
         provider_id: &str,
         identity: mesh_core_backend::BackendIdentity,
-        event: ServiceEvent,
+        event: &ServiceEvent,
     ) -> bool {
         let matches_pending = self
             .pending_backend_runtimes
@@ -1220,7 +1220,7 @@ impl Shell {
             service,
             source_module: _,
             payload,
-        } = self.normalize_service_event(event)
+        } = self.normalize_service_event(event.clone())
         else {
             return true;
         };

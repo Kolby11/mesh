@@ -257,6 +257,11 @@ pub fn set_font_aliases(aliases: BTreeMap<String, String>) {
     SharedTextMeasurer.set_font_aliases(aliases.into_iter().collect());
 }
 
+/// [`set_font_aliases`] for a map the caller retains across frames.
+pub fn set_shared_font_aliases(aliases: &std::collections::HashMap<String, String>) {
+    SharedTextMeasurer.set_shared_font_aliases(aliases);
+}
+
 /// Set the chrome used by the next tooltip paint on this thread's renderer.
 /// The shell calls this from its paint path so tooltips follow the active
 /// theme's `tooltip {}` rule.

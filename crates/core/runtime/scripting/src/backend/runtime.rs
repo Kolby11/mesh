@@ -128,6 +128,9 @@ pub struct BackendScriptEvent {
     pub identity: mesh_core_runtime::BackendIdentity,
 }
 
+/// Registry slot for the compiled `on_stream_line` batch adapter.
+const STREAM_LINE_ADAPTER: &str = "mesh.backend.stream_line_adapter";
+
 impl BackendScriptEvent {
     pub(crate) fn queued_output_bytes(&self) -> usize {
         serde_json::to_vec(&serde_json::json!({
@@ -988,16 +991,26 @@ impl BackendScriptContext {
         let handler = if let Ok(handler) = globals.get::<Function>("on_stream_batch") {
             handler
         } else if let Ok(line_handler) = globals.get::<Function>("on_stream_line") {
-            self.backend_lua()?
-                .load(
-                    r#"
-                local handler = ...
-                return function(self, program, lines)
-                    for _, line in ipairs(lines) do handler(self, program, line) end
+            let lua = self.backend_lua()?;
+            let bind = match lua.named_registry_value::<Option<Function>>(STREAM_LINE_ADAPTER) {
+                Ok(Some(bind)) => Ok(bind),
+                _ => lua
+                    .load(
+                        r#"
+                return function(handler)
+                    return function(self, program, lines)
+                        for _, line in ipairs(lines) do handler(self, program, line) end
+                    end
                 end
             "#,
-                )
-                .call(line_handler)
+                    )
+                    .call::<Function>(())
+                    .and_then(|bind| {
+                        lua.set_named_registry_value(STREAM_LINE_ADAPTER, &bind)?;
+                        Ok(bind)
+                    }),
+            };
+            bind.and_then(|bind| bind.call(line_handler))
                 .map_err(|error| BackendScriptError::Runtime {
                     module_id: self.module_id.clone(),
                     message: error.to_string(),
@@ -2230,6 +2243,12 @@ impl BackendScriptContext {
                 return Err(mlua::Error::external(format!("missing capability fs.read:{path}")));
             }
             let limit = resources.output_limit() as usize;
+            // Kernel pseudo-files are answered from memory, so a worker
+            // thread and a task suspension cost more than the read itself.
+            if path.starts_with("/proc/") || path.starts_with("/sys/") {
+                let value = super::task_io::read_file(&path, limit);
+                return super::task_io::TaskIo::ready(lua, value, resources.clone());
+            }
             owner.spawn(lua, resources.clone(), move || {
                 Ok(super::task_io::read_file(&path, limit))
             })

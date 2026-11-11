@@ -385,6 +385,36 @@ at the top of this file; prefer it over further single-pass scoping.
       unsettled first frame. Check that a second scene submission in one `paint` is safe, then drop the raster
       restriction in `paint_settled`.
 
+### Scan findings
+
+From the 2026-11-11 code scan; none is measured. The fixed part of that scan is in the
+[performance log](../.planning/log/performance-log.md).
+
+- [ ] Settings providers still poll subprocesses for the whole session: `hyprland-input` (6 `hyprctl` per 5 s),
+      `hyprland-display` (2 per 3 s), `wpctl-audio-devices` (per-stream `wpctl` per 3 s), `nmcli-network-details`
+      (5 per 10 s), `timedatectl-time`. Drive them from the Hyprland event socket, PipeWire and NetworkManager
+      signals, or poll only while a consumer is showing (needs a host signal for that).
+- [ ] Input routed to a promoted popup deep-copies its subtree on every pointer event
+      (`handle_child_surface_input` offsets a clone of the retained node). Translate the pointer instead, or cache
+      the offset copy on a key that covers pre-paint binding patches.
+- [ ] `service_observation_summary` clones every runtime's tracked fields and subscriptions after each painted
+      frame. Gate it on a revision bumped by every tracking mutation; a missed bump drops service updates.
+- [ ] `ServiceEvent::Updated` carries an owned payload, so each receiving component hashes and copies it, and each
+      runtime copies it again into `ScriptState`. Carry an `Arc` and fingerprint from the shell.
+- [ ] Every service event settles effects on all hidden components (`deliver_service_event` tail), whether or
+      not they received it. Settle only the components that did, once timer and IPC writes are shown to settle
+      elsewhere.
+- [ ] `{#for}` bodies deep-clone the loop locals for each bound attribute and text expression
+      (`LayeredStore::template_locals`). Share one snapshot per item.
+- [ ] `t()` builds a full `LocalizedTextResolution` (provenance, key and fallback clones) on every hit; build it
+      only on a miss.
+- [ ] `synchronize_callback_references` re-evaluates every bound reference handler after each state sync, one per
+      `{#for}` row. Needs a gate that still sees raw function globals reassigned in `_ENV`.
+- [ ] Each presented GPU frame creates a new `wl_buffer` for one of three recurring dmabuf slots. Reuse buffers
+      per slot and size; measure compositor import cost first.
+- [ ] `mesh.exec` still starts three threads per call and `TaskIo::spawn` one per host operation; a small worker
+      pool would bound both.
+
 ### Render sweep findings
 
 From a read-only code sweep on 2026-10-19; nothing below is measured yet.

@@ -1,4 +1,5 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::{Arc, Mutex};
 
 use crate::{ResourceAssetHandle, ResourcePreparationToken, SystemResourceCatalog};
 
@@ -87,6 +88,18 @@ pub struct FontRegistry {
     host_database: fontdb::Database,
     database: fontdb::Database,
     revision: u64,
+    reference_aliases: ReferenceAliasCache,
+}
+
+/// Per-module renderer alias maps for one registry revision. A cloned
+/// registry starts empty.
+#[derive(Debug, Default)]
+struct ReferenceAliasCache(Mutex<(u64, HashMap<String, Arc<HashMap<String, String>>>)>);
+
+impl Clone for ReferenceAliasCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
 }
 
 impl Default for FontRegistry {
@@ -103,6 +116,7 @@ impl Default for FontRegistry {
             host_database: database.clone(),
             database,
             revision: 0,
+            reference_aliases: ReferenceAliasCache::default(),
         }
     }
 }
@@ -417,6 +431,32 @@ impl FontRegistry {
                 self.resolve_for_module(module_id, &role).family,
             );
         }
+        aliases
+    }
+
+    /// [`Self::reference_aliases_for_module`] built once per module and
+    /// registry revision; the paint path asks for it on every frame.
+    pub fn shared_reference_aliases_for_module(
+        &self,
+        module_id: &str,
+    ) -> Arc<HashMap<String, String>> {
+        let mut cache = self
+            .reference_aliases
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if cache.0 != self.revision {
+            *cache = (self.revision, HashMap::new());
+        }
+        if let Some(aliases) = cache.1.get(module_id) {
+            return Arc::clone(aliases);
+        }
+        let aliases = Arc::new(
+            self.reference_aliases_for_module(module_id)
+                .into_iter()
+                .collect::<HashMap<_, _>>(),
+        );
+        cache.1.insert(module_id.to_owned(), Arc::clone(&aliases));
         aliases
     }
 
@@ -899,5 +939,75 @@ mod tests {
             registry.resolve_for_module("@mesh/frontend", "body").source,
             FontResolutionSource::SystemFallback
         );
+    }
+
+    #[test]
+    fn shared_reference_aliases_follow_registry_revisions() {
+        let mut registry = registry();
+        registry
+            .replace(vec![default_pack()], vec!["default".into()])
+            .unwrap();
+        let first = registry.shared_reference_aliases_for_module("@mesh/frontend");
+        assert!(Arc::ptr_eq(
+            &first,
+            &registry.shared_reference_aliases_for_module("@mesh/frontend")
+        ));
+        assert_eq!(first.get("body").map(String::as_str), Some("Inter"));
+
+        registry
+            .set_frontend_bindings(vec![(
+                "@mesh/frontend".into(),
+                FontFrontendBindings {
+                    author_overrides: BTreeMap::from([("body".into(), "JetBrains Mono".into())]),
+                    ..Default::default()
+                },
+            )])
+            .unwrap();
+        let updated = registry.shared_reference_aliases_for_module("@mesh/frontend");
+        assert_eq!(
+            *updated,
+            registry
+                .reference_aliases_for_module("@mesh/frontend")
+                .into_iter()
+                .collect::<HashMap<_, _>>()
+        );
+        assert_ne!(*first, *updated);
+        assert!(
+            registry
+                .clone()
+                .shared_reference_aliases_for_module("@mesh/frontend")
+                .eq(&updated)
+        );
+    }
+
+    // cargo test -p mesh-core-resources --release -- shared_reference_aliases_profile --ignored --nocapture
+    #[test]
+    #[ignore = "release-only per-frame font alias lookup benchmark"]
+    fn shared_reference_aliases_profile() {
+        let mut registry = registry();
+        registry
+            .replace(vec![default_pack()], vec!["default".into()])
+            .unwrap();
+        for run in 0..3 {
+            let started = std::time::Instant::now();
+            for _ in 0..100_000 {
+                std::hint::black_box(
+                    registry
+                        .reference_aliases_for_module("@mesh/frontend")
+                        .into_iter()
+                        .collect::<HashMap<_, _>>(),
+                );
+            }
+            let rebuilt = started.elapsed();
+            let started = std::time::Instant::now();
+            for _ in 0..100_000 {
+                std::hint::black_box(registry.shared_reference_aliases_for_module("@mesh/frontend"));
+            }
+            let shared = started.elapsed();
+            eprintln!(
+                "font aliases: packs=1 roles=7 calls=100000 run={run} rebuilt={rebuilt:?} shared={shared:?} ratio={:.1}",
+                rebuilt.as_secs_f64() / shared.as_secs_f64()
+            );
+        }
     }
 }

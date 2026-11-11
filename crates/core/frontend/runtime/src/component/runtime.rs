@@ -868,9 +868,9 @@ impl FrontendSurfaceComponent {
         for (service_name, payload) in &self.cached_service_payloads {
             let interface = format!("mesh.{service_name}");
             if script_has_service_read(&script_ctx, &interface, service_name) {
-                script_ctx.apply_service_payload_with_generation(
+                script_ctx.apply_shared_service_payload_with_generation(
                     service_name,
-                    payload.value.as_ref(),
+                    &payload.value,
                     payload.fingerprint,
                     Some(&payload.source_module),
                     payload.generation,

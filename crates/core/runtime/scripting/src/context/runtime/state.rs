@@ -59,6 +59,28 @@ impl ScriptContext {
         )
     }
 
+    /// [`Self::apply_service_payload_with_generation`] sharing the caller's
+    /// snapshot instead of copying it into this context.
+    pub fn apply_shared_service_payload_with_generation(
+        &mut self,
+        service: &str,
+        payload: &Arc<Value>,
+        payload_fingerprint: u64,
+        source_module: Option<&str>,
+        source_generation: u64,
+    ) -> bool {
+        if !self.can_read_service_interface(service) {
+            return false;
+        }
+        self.service_context_state.lock().unwrap().update_shared(
+            service,
+            payload,
+            payload_fingerprint,
+            source_module,
+            source_generation,
+        )
+    }
+
     /// Generation of the last capability-authorized service snapshot in this
     /// context. Equal payloads do not advance it.
     pub fn service_context_generation(&self) -> u64 {

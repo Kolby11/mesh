@@ -1541,6 +1541,18 @@ impl SharedTextMeasurer {
         RENDERER.with(|renderer| renderer.borrow().set_font_aliases(aliases));
     }
 
+    /// [`Self::set_font_aliases`] for a map the caller keeps; it is copied
+    /// only when it differs from the active one.
+    pub fn set_shared_font_aliases(&self, aliases: &HashMap<String, String>) {
+        RENDERER.with(|renderer| {
+            let renderer = renderer.borrow();
+            let mut engine = renderer.engine.borrow_mut();
+            if engine.font_aliases != *aliases {
+                engine.set_font_aliases(aliases.clone());
+            }
+        });
+    }
+
     pub fn cache_metrics(&self) -> TextCacheMetrics {
         RENDERER.with(|renderer| renderer.borrow().cache_metrics())
     }

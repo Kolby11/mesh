@@ -882,12 +882,12 @@ impl Shell {
                     &interface,
                     &provider_id,
                     identity,
-                    event.clone(),
+                    &event,
                 ) || self.capture_profile_backend_update_at_identity(
                     &interface,
                     &provider_id,
                     identity,
-                    event.clone(),
+                    &event,
                 ) {
                     return Ok(());
                 }

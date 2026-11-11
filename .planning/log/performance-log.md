@@ -10374,3 +10374,34 @@ Same fixture and command as the pruned hit-test entry above (`windowed_list_prof
 ## 2026-11-08 — Windowing uneven rows
 
 `windowed_list_profile`, `MESH_PROFILE_UNEVEN=1 MESH_PROFILE_UNWINDOWED_ONLY=1`, `--release`, 2,000 rows with row 5 at 55 px, two passes of three runs. Settle (3 frames after first paint): before 219–361 ms, after 1.1–1.8 ms. Scroll frame: before 1.2–1.8 ms (after replay pruning), after 0.21–0.29 ms. First paint 25–27 ms in both. Not measured: the shipped lists, a list with many differently sized rows in the viewport, or scroll jumps when estimates are replaced (not tested).
+
+## 2026-11-11 — Backend host I/O and service-update scan
+
+A read-only scan of every crate and the shipped modules, then fixes for the findings that held up. The frame pipeline was not where the cost was: on `main` before these changes, three `--release` runs of `appearance_frame_cost_profile` gave 0.028–0.040 ms/frame for an unrelated service update, 0.058–0.080 ms paint-only and 2.449–3.337 ms resource-list scroll, and `navigation_hover_profile` gave a 0.763–0.812 ms step p50. The measurable costs were in backend host calls and in providers that poll subprocesses.
+
+Measured, all `cargo test --release`, three runs each:
+
+- **Shared D-Bus call connection.** `mesh.dbus_call` built a thread, a current-thread runtime and an authenticated connection per call; one worker thread now holds a connection per bus and retries once when a cached connection reports an I/O error. `dbus_call_burst_profile` (40 `Echo` calls against a private `dbus-daemon` session bus): 21.343–23.688 ms per-call connections vs 4.771–5.333 ms shared, 4.4–4.9x, gated at 2x. The system bus was not measured.
+- **Exec waits on a pidfd.** `run_bounded_command` slept 1 ms between `try_wait` probes; it now polls a pidfd with a 20 ms cancellation check, falling back to the 1 ms probe without one. `short_exec_latency_profile` (200 `true` runs): 562.100–670.724 ms before vs 457.557–474.253 ms after (1.2–1.4x), and a long command no longer wakes a thread 1,000 times a second. Cancellation and deadline latency rise from 1 ms to at most 20 ms.
+- **Compiled contract validation.** State, event and method payloads matched named types by re-parsing every field's type string per array row and cloning the base type per item. `compiled_type_validation_profile` (128 rows of a 10-field type, 2,000 iterations): 69.201–77.959 ms declared vs 48.058–49.705 ms compiled, 1.44–1.57x across two runs, gated at 1.25x. The declared path in that comparison already has the per-item clone removed.
+- **Font alias map per paint.** The shell rebuilt `reference_aliases_for_module` for every painted surface. `shared_reference_aliases_profile` (one pack, seven roles, 100,000 calls): 127.368–127.637 ms rebuilt vs 1.969–1.999 ms from the registry's per-revision cache (64x); that is about 1.3 µs per paint with one pack, so the absolute gain is small.
+
+Landed without a measurable change on the two frame profiles above (after: 0.027–0.030 ms/frame service update, 0.060–0.062 ms paint-only, 2.521–2.550 ms scroll, 0.760–0.790 ms hover step p50, all inside baseline spread). They remove work those workloads do not exercise or that is below their noise; none is a claimed speedup:
+
+- `changed_dependencies_preserve_matches` returns before the full rule-list comparison in `is_for` when a node's classes and state are unchanged.
+- Theme style rules build their `@theme:…` diagnostic selector only when diagnostics are collected.
+- A service update computes `json_field_diff` once, and runtimes share the component's cached payload `Arc` instead of each copying the snapshot into its service context.
+- `BackendServiceUpdate` no longer clones the event twice before the pending-backend and profile-switch capture checks.
+- A pointer move over an unchanged hover path reuses its node ids.
+- `mesh.read_file` answers `/proc/` and `/sys/` paths inline rather than through a worker thread and task suspension.
+- The `on_stream_line` batch adapter is compiled once per VM, and the D-Bus provider sweep ticks only while calls are pending.
+
+Provider changes, not timed (the gain is process spawns that no longer happen):
+
+- `@mesh/bluetoothctl-bluetooth` polled every 4 s, spawning `bluetoothctl show`, two `devices` listings and one `info` per paired and nearby device. It now subscribes to `org.bluez` signals, re-reads 2 s after one, and otherwise polls every 60 s.
+- `@mesh/power-profiles-daemon` polled two `powerprofilesctl` spawns every 5 s; it now refreshes on `net.hadess.PowerProfiles` signals with a 60 s poll.
+- `@mesh/mpris-media` stamped `updated_at` on every 2 s sample, so each poll published a new state. A sample within 1.5 s of the extrapolated position keeps the previous `position`/`updated_at`, and the poll slows to 10 s while nothing plays.
+- `live_bluetooth_idles_on_bluez_signals` and `live_power_profiles_idle_on_daemon_signals` (ignored, need the daemons) confirm both providers start, subscribe and settle on the 60 s interval. The signal-to-refresh path was not exercised live.
+
+Checked and dropped: a TTL on icon file-freshness probes. `9b5a2abe` removed exactly that cache after measuring direct `metadata` probes as faster.
+

@@ -145,7 +145,15 @@ impl StyleRuleIndex {
         new: &StyleNodeAttrs<'_>,
         context: StyleContext,
     ) -> bool {
-        if !self.is_for(rules) || old.tag != new.tag || old.id != new.id {
+        if old.tag != new.tag || old.id != new.id {
+            return false;
+        }
+        // Checked before `is_for`, which compares every rule: with no changed
+        // input there is no dependency to consult, whatever the index holds.
+        if old.state_mask == new.state_mask && old.classes.iter().eq(new.classes.iter()) {
+            return true;
+        }
+        if !self.is_for(rules) {
             return false;
         }
         // A host's part rules restyle its parts, so their host half counts

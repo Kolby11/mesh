@@ -8,6 +8,7 @@
     "kind": "backend",
     "uses": {
       "capabilities": [
+        "dbus.subscribe:system:net.hadess.PowerProfiles",
         "exec.argv:powerprofilesctl:[\"get\"]",
         "exec.argv:powerprofilesctl:[\"list\"]",
         "exec.argv:powerprofilesctl:[\"set\",\"*\"]"

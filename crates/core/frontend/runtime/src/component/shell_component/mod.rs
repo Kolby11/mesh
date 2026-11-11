@@ -426,6 +426,13 @@ impl ShellComponent for FrontendSurfaceComponent {
             source_module,
             generation,
         );
+        // The cache keeps an older snapshot when this one is stale, so only a
+        // matching entry may stand in for the event's payload.
+        let shared_payload = self
+            .cached_service_payloads
+            .get(service_name.as_str())
+            .filter(|cached| cached.fingerprint == payload_fingerprint)
+            .map(|cached| Arc::clone(&cached.value));
         let mut needs_rebuild = false;
         // Whether every runtime this update dirties has a complete record of
         // the template expressions reading the changed fields.
@@ -455,13 +462,25 @@ impl ShellComponent for FrontendSurfaceComponent {
                 );
                 continue;
             }
-            if !runtime.script_ctx.apply_service_payload_with_generation(
-                service_name,
-                payload,
-                payload_fingerprint,
-                Some(source_module),
-                generation,
-            ) {
+            let applied = match &shared_payload {
+                Some(shared) => runtime
+                    .script_ctx
+                    .apply_shared_service_payload_with_generation(
+                        service_name,
+                        shared,
+                        payload_fingerprint,
+                        Some(source_module),
+                        generation,
+                    ),
+                None => runtime.script_ctx.apply_service_payload_with_generation(
+                    service_name,
+                    payload,
+                    payload_fingerprint,
+                    Some(source_module),
+                    generation,
+                ),
+            };
+            if !applied {
                 self.sync_runtime_generation(
                     instance_key,
                     runtime.script_ctx.state().mutation_generation(),
@@ -542,19 +561,13 @@ impl ShellComponent for FrontendSurfaceComponent {
                     .extend(readers);
             }
             self.reactive_effects_pending = true;
-            let narrow_nodes = if let Some(ref prev) = previous_payload {
-                let fields = json_field_diff(service_name, prev, payload);
-                let mut nodes = HashSet::new();
-                for (service, field) in fields {
-                    nodes.extend(
-                        self.node_service_field_deps
-                            .nodes_reading_field(&service, &field),
-                    );
-                }
-                nodes
-            } else {
-                HashSet::new()
-            };
+            let mut narrow_nodes = HashSet::new();
+            for (service, field) in changed_fields.iter().flatten() {
+                narrow_nodes.extend(
+                    self.node_service_field_deps
+                        .nodes_reading_field(service, field),
+                );
+            }
             if narrow_nodes.is_empty() && template_reads_known && service_binding_readers_empty {
                 // No evaluated expression reads a changed field, so only an
                 // effect write can reach the tree. Settle effects now: when

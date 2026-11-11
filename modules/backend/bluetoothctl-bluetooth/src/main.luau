@@ -1,7 +1,9 @@
 -- Bluetooth through bluetoothctl.
 --
--- Discovery runs as a bounded stream so a scan never blocks commands; the
--- state is re-read on a poll and after every command.
+-- Discovery runs as a bounded stream so a scan never blocks commands. BlueZ
+-- signals mark the state dirty and the next poll re-reads it; every refresh
+-- spawns one bluetoothctl per device, so an idle adapter is only re-read on
+-- the slow safety poll and after commands.
 
 state = {
     available = false,
@@ -15,9 +17,13 @@ state = {
     nearby_devices = {},
 }
 
-local POLL_MS = 4000
+local IDLE_POLL_MS = 60000
+local DIRTY_POLL_MS = 2000
+local UNMONITORED_POLL_MS = 4000
 local SCAN_SECONDS = "12"
 local scan_stream = nil
+local monitor = nil
+local dirty = false
 
 local function log_warn(message)
     mesh.log.warn("[bluetoothctl-bluetooth] " .. message)
@@ -98,16 +104,36 @@ local function refresh()
 end
 
 function start(self)
-    mesh.service.set_poll_interval(POLL_MS)
+    mesh.service.set_poll_interval(IDLE_POLL_MS)
+    -- ObjectManager announces devices from the root path, so the namespace
+    -- cannot be narrowed to /org/bluez.
+    monitor = mesh.dbus_subscribe("system", { sender = "org.bluez", path_namespace = "/" })
+    if not monitor then mesh.service.set_poll_interval(UNMONITORED_POLL_MS) end
     refresh()
 end
 
 function on_poll(self)
     refresh()
+    if dirty then
+        dirty = false
+        mesh.service.set_poll_interval(IDLE_POLL_MS)
+    end
+end
+
+function on_stream_line(self, program, _line)
+    if monitor == nil or program ~= monitor.program or dirty then
+        return
+    end
+    dirty = true
+    mesh.service.set_poll_interval(DIRTY_POLL_MS)
 end
 
 function on_stream_closed(self, program, _success)
-    if program == "bluetoothctl" then
+    if monitor ~= nil and program == monitor.program then
+        monitor = nil
+        dirty = false
+        mesh.service.set_poll_interval(UNMONITORED_POLL_MS)
+    elseif program == "bluetoothctl" then
         scan_stream = nil
         refresh()
     end

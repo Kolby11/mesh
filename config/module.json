@@ -50,6 +50,7 @@
         "exec.argv:wpctl:[\"set-mute\",\"*\",\"*\"]"
       ],
       "@mesh/bluetoothctl-bluetooth": [
+        "dbus.subscribe:system:org.bluez",
         "exec.argv:bluetoothctl:[\"show\"]",
         "exec.argv:bluetoothctl:[\"devices\"]",
         "exec.argv:bluetoothctl:[\"devices\",\"Paired\"]",
@@ -79,6 +80,7 @@
         "exec.argv:sh:[\"-c\",\"hyprctl setcursor \\\"${XCURSOR_THEME:-default}\\\" \\\"$1\\\"\",\"sh\",\"*\"]"
       ],
       "@mesh/power-profiles-daemon": [
+        "dbus.subscribe:system:net.hadess.PowerProfiles",
         "exec.argv:powerprofilesctl:[\"get\"]",
         "exec.argv:powerprofilesctl:[\"list\"]",
         "exec.argv:powerprofilesctl:[\"set\",\"*\"]"

@@ -108,6 +108,9 @@ interface, plus `org.freedesktop.DBus.Introspectable.Introspect`, at that
 destination; UPower and NetworkManager read their state this way. `GetAll`
 replies carry `body[1].value[<Property>].value`.
 
+Calls from every provider share one connection per bus, so a burst of calls
+does not pay for a connection each. Grants are still checked per call.
+
 ```lua
 local reply = mesh.dbus_call("system", {
     destination = "org.freedesktop.UPower",

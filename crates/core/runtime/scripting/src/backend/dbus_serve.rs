@@ -489,7 +489,7 @@ async fn serve(
                     }
                 }
             }
-            _ = sweep.tick() => {
+            _ = sweep.tick(), if !pending.is_empty() => {
                 let expired = pending
                     .iter()
                     .filter(|(_, (_, received))| received.elapsed() >= CALL_DEADLINE)

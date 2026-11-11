@@ -2230,7 +2230,7 @@ impl Shell {
         interface: &str,
         provider_id: &str,
         identity: mesh_core_backend::BackendIdentity,
-        event: ServiceEvent,
+        event: &ServiceEvent,
     ) -> bool {
         let Some(pending) = self.pending_profile_switch.as_ref() else {
             return false;
@@ -2253,7 +2253,7 @@ impl Shell {
             return false;
         }
         let actual_provider_id = candidate.provider_id.clone();
-        let ServiceEvent::Updated { payload, .. } = self.normalize_service_event(event) else {
+        let ServiceEvent::Updated { payload, .. } = self.normalize_service_event(event.clone()) else {
             return true;
         };
         if !self.validate_service_state_shape(interface, &actual_provider_id, &payload) {

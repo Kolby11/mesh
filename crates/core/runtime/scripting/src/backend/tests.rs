@@ -4639,6 +4639,53 @@ fn bundled_cava_discards_superseded_frames_and_clears_on_exit() {
     assert_eq!(ctx.poll_interval_ms(), 5000);
 }
 
+/// Start a shipped provider with its manifest grants and return its settled
+/// initial state and poll interval.
+async fn start_live_backend(module: &str, directory: &str) -> (BackendState, u64) {
+    let manifest: serde_json::Value = serde_json::from_str(&bundled_backend_script(&format!(
+        "../../../../modules/backend/{directory}/module.json"
+    )))
+    .unwrap();
+    let grants = manifest["mesh"]["uses"]["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|value| value.as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    let mut ctx = BackendScriptContext::new_with_capabilities(module, grants);
+    ctx.load_script(&bundled_backend_script(&format!(
+        "../../../../modules/backend/{directory}/src/main.luau"
+    )))
+    .unwrap();
+    let mut initial = ctx.call_init().unwrap();
+    while ctx.start_pending() {
+        let run = settle(&mut ctx).await;
+        assert!(run.errors.is_empty(), "{:?}", run.errors);
+        initial = run.state.or(initial);
+    }
+    (initial.unwrap(), ctx.poll_interval_ms())
+}
+
+#[tokio::test]
+#[ignore = "requires BlueZ on the system bus and bluetoothctl"]
+async fn live_bluetooth_idles_on_bluez_signals() {
+    let (state, poll_ms) =
+        start_live_backend("@mesh/bluetoothctl-bluetooth", "bluetoothctl-bluetooth").await;
+    println!("live bluetooth initial: {state:?}");
+    assert_eq!(state["available"], true);
+    assert_eq!(poll_ms, 60_000, "the signal subscription must replace polling");
+}
+
+#[tokio::test]
+#[ignore = "requires power-profiles-daemon on the system bus"]
+async fn live_power_profiles_idle_on_daemon_signals() {
+    let (state, poll_ms) =
+        start_live_backend("@mesh/power-profiles-daemon", "power-profiles-daemon").await;
+    println!("live power profiles initial: {state:?}");
+    assert_eq!(state["available"], true);
+    assert_eq!(poll_ms, 60_000, "the signal subscription must replace polling");
+}
+
 #[tokio::test]
 #[ignore = "requires a live MPRIS player and playerctl"]
 async fn live_mpris_publishes_playerctl_position() {

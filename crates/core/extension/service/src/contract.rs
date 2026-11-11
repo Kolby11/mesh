@@ -298,7 +298,7 @@ impl CompiledContract {
                     "missing required state field '{}' for {interface}",
                     field.name
                 )),
-                Some(value) if !field.type_expr.matches_with_types(value, &self.types) => warnings
+                Some(value) if !field.type_expr.matches_compiled(value, &self.schemas.types) => warnings
                     .push(format!(
                         "state field '{}' for {interface} expected {}, got {}",
                         field.name,
@@ -380,7 +380,7 @@ impl CompiledContract {
             return vec![format!("method '{method}' is not declared for {interface}")];
         };
         match &schema.returns {
-            Some(returns) if !returns.matches_with_types(result, &self.types) => vec![format!(
+            Some(returns) if !returns.matches_compiled(result, &self.schemas.types) => vec![format!(
                 "method '{method}' for {interface} returned {returns}, got {}",
                 json_type_name(result)
             )],
@@ -405,7 +405,7 @@ impl CompiledContract {
         for field in fields {
             match object.get(&field.name) {
                 None if !field.type_expr.optional => warnings.push(message(field, None)),
-                Some(value) if !field.type_expr.matches_with_types(value, &self.types) => {
+                Some(value) if !field.type_expr.matches_compiled(value, &self.schemas.types) => {
                     warnings.push(message(field, Some(json_type_name(value))))
                 }
                 _ => {}
@@ -802,64 +802,131 @@ impl TypeExpr {
         depth: usize,
         remaining: &mut usize,
     ) -> bool {
-        if depth > 64 || *remaining == 0 {
-            return false;
-        }
-        *remaining -= 1;
-        if value.is_null() {
-            return self.optional;
-        }
-        if self.array {
-            // Luau has one table type, so a provider cannot spell `[]`: its
-            // empty table serializes as `{}`. Treat that as the empty array.
-            if value.as_object().is_some_and(|object| object.is_empty()) {
-                return true;
-            }
-            return value.as_array().is_some_and(|items| {
-                items.iter().all(|item| {
-                    let item_expr = Self {
-                        base: self.base.clone(),
-                        array: false,
-                        optional: false,
-                    };
-                    item_expr.matches_inner(item, types, depth + 1, remaining)
+        value_matches(
+            &self.base,
+            self.array,
+            self.optional,
+            value,
+            &|name, object, depth, remaining| {
+                types.get(name).is_some_and(|definition| {
+                    definition.fields.iter().all(|field| {
+                        let Ok(field_type) = TypeExpr::parse(&field.arg_type) else {
+                            return false;
+                        };
+                        match object.get(&field.name) {
+                            Some(value) => {
+                                field_type.matches_inner(value, types, depth + 1, remaining)
+                            }
+                            None => field_type.optional,
+                        }
+                    })
                 })
-            });
-        }
-        match &self.base {
-            BaseType::String => value.is_string(),
-            BaseType::Int => value.as_i64().is_some() || value.as_u64().is_some(),
-            BaseType::Float => value.is_number(),
-            BaseType::Boolean => value.is_boolean(),
-            BaseType::Blob => value
-                .as_str()
-                .is_some_and(mesh_core_resources::blob::is_blob_handle),
-            BaseType::Object => value.is_object(),
-            BaseType::Any => true,
-            BaseType::Named(name) if name == BUILTIN_RESULT_TYPE => {
-                let Some(object) = value.as_object() else {
-                    return false;
-                };
-                object.get("ok").is_some_and(|ok| ok.is_boolean())
-                    && object
-                        .get("error")
-                        .is_none_or(|error| error.is_string() || error.is_null())
-            }
-            BaseType::Named(name) => types.get(name).is_some_and(|definition| {
-                let Some(object) = value.as_object() else {
-                    return false;
-                };
-                definition.fields.iter().all(|field| {
-                    let Ok(field_type) = TypeExpr::parse(&field.arg_type) else {
-                        return false;
-                    };
-                    match object.get(&field.name) {
-                        Some(value) => field_type.matches_inner(value, types, depth + 1, remaining),
-                        None => field_type.optional,
-                    }
+            },
+            depth,
+            remaining,
+        )
+    }
+
+    /// [`Self::matches_with_types`] against a compiled type graph, whose field
+    /// expressions are already parsed. Validation of every published state,
+    /// event and method payload goes through here.
+    pub fn matches_compiled(
+        &self,
+        value: &JsonValue,
+        types: &BTreeMap<String, CompiledTypeSchema>,
+    ) -> bool {
+        self.matches_compiled_inner(value, types, 0, &mut 65_536)
+    }
+
+    fn matches_compiled_inner(
+        &self,
+        value: &JsonValue,
+        types: &BTreeMap<String, CompiledTypeSchema>,
+        depth: usize,
+        remaining: &mut usize,
+    ) -> bool {
+        value_matches(
+            &self.base,
+            self.array,
+            self.optional,
+            value,
+            &|name, object, depth, remaining| {
+                types.get(name).is_some_and(|schema| {
+                    schema
+                        .fields
+                        .iter()
+                        .all(|field| match object.get(&field.name) {
+                            Some(value) => field.type_expr.matches_compiled_inner(
+                                value,
+                                types,
+                                depth + 1,
+                                remaining,
+                            ),
+                            None => field.type_expr.optional,
+                        })
                 })
-            }),
+            },
+            depth,
+            remaining,
+        )
+    }
+}
+
+type NamedObjectMatcher<'a> =
+    dyn Fn(&str, &serde_json::Map<String, JsonValue>, usize, &mut usize) -> bool + 'a;
+
+/// Structural match shared by the declared and compiled type graphs;
+/// `named` checks an object against a user-declared type.
+fn value_matches(
+    base: &BaseType,
+    array: bool,
+    optional: bool,
+    value: &JsonValue,
+    named: &NamedObjectMatcher<'_>,
+    depth: usize,
+    remaining: &mut usize,
+) -> bool {
+    if depth > 64 || *remaining == 0 {
+        return false;
+    }
+    *remaining -= 1;
+    if value.is_null() {
+        return optional;
+    }
+    if array {
+        // Luau has one table type, so a provider cannot spell `[]`: its
+        // empty table serializes as `{}`. Treat that as the empty array.
+        if value.as_object().is_some_and(|object| object.is_empty()) {
+            return true;
         }
+        return value.as_array().is_some_and(|items| {
+            items
+                .iter()
+                .all(|item| value_matches(base, false, false, item, named, depth + 1, remaining))
+        });
+    }
+    match base {
+        BaseType::String => value.is_string(),
+        BaseType::Int => value.as_i64().is_some() || value.as_u64().is_some(),
+        BaseType::Float => value.is_number(),
+        BaseType::Boolean => value.is_boolean(),
+        BaseType::Blob => value
+            .as_str()
+            .is_some_and(mesh_core_resources::blob::is_blob_handle),
+        BaseType::Object => value.is_object(),
+        BaseType::Any => true,
+        BaseType::Named(name) if name == BUILTIN_RESULT_TYPE => {
+            let Some(object) = value.as_object() else {
+                return false;
+            };
+            object.get("ok").is_some_and(|ok| ok.is_boolean())
+                && object
+                    .get("error")
+                    .is_none_or(|error| error.is_string() || error.is_null())
+        }
+        BaseType::Named(name) => value
+            .as_object()
+            .is_some_and(|object| named(name, object, depth, remaining)),
     }
 }
 
@@ -2770,5 +2837,56 @@ mod tests {
             contract.method_result_warnings("set_volume", &serde_json::json!(1)),
             ["method 'set_volume' for mesh.audio returned Result, got number"]
         );
+    }
+
+    // cargo test -p mesh-core-service --release -- compiled_type_validation_profile --ignored --nocapture
+    #[test]
+    #[ignore = "release-only compiled contract validation benchmark"]
+    fn compiled_type_validation_profile() {
+        assert!(!cfg!(debug_assertions), "run with --release");
+        let contract = serde_json::json!({
+            "types": {
+                "Device": {
+                    "id": "int", "name": "string", "description": "string?",
+                    "kind": "string", "volume": "float", "muted": "boolean",
+                    "active": "boolean", "port": "string?", "channels": "int",
+                    "tags": "string[]"
+                }
+            }
+        });
+        let parsed = parse_interface_contract("mesh.test", "1.0", &contract).unwrap();
+        let compiled = parsed
+            .clone()
+            .compile(DeclarationProvenance::default())
+            .unwrap();
+        let rows: Vec<_> = (0..128)
+            .map(|index| {
+                serde_json::json!({
+                    "id": index, "name": format!("device-{index}"), "kind": "sink",
+                    "volume": 0.5, "muted": false, "active": index == 3,
+                    "port": null, "channels": 2, "tags": ["input", "output"],
+                })
+            })
+            .collect();
+        let value = JsonValue::Array(rows);
+        let expr = TypeExpr::parse("Device[]").unwrap();
+        assert!(expr.matches_with_types(&value, &parsed.types));
+        assert!(expr.matches_compiled(&value, &compiled.schemas.types));
+        let time = |run: &dyn Fn() -> bool| {
+            let started = std::time::Instant::now();
+            for _ in 0..2000 {
+                assert!(std::hint::black_box(run()));
+            }
+            started.elapsed()
+        };
+        for run in 0..3 {
+            let declared = time(&|| expr.matches_with_types(&value, &parsed.types));
+            let precompiled = time(&|| expr.matches_compiled(&value, &compiled.schemas.types));
+            let ratio = declared.as_secs_f64() / precompiled.as_secs_f64();
+            eprintln!(
+                "contract validation: rows=128 fields=10 iterations=2000 run={run} declared={declared:?} compiled={precompiled:?} ratio={ratio:.2}"
+            );
+            assert!(ratio > 1.25, "compiled_type_validation_speedup must exceed 1.25x");
+        }
     }
 }

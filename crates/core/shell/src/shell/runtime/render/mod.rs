@@ -855,9 +855,10 @@ impl Shell {
                     });
                 }
 
-                let module_id = self.components[index].component.id().to_string();
-                mesh_core_render::set_font_aliases(
-                    self.font_registry.reference_aliases_for_module(&module_id),
+                mesh_core_render::set_shared_font_aliases(
+                    &self
+                        .font_registry
+                        .shared_reference_aliases_for_module(self.components[index].component.id()),
                 );
                 let paint_context = mesh_core_render::PaintContext {
                     blur_quality: blur_quality_from_settings(&self.settings.render.blur),
@@ -1725,9 +1726,10 @@ impl Shell {
         // A raster canvas only records: replay is what rasterizes, and this
         // paint is never replayed.
         canvas.set_deferred_raster(true);
-        let module_id = self.components[index].component.id().to_string();
-        mesh_core_render::set_font_aliases(
-            self.font_registry.reference_aliases_for_module(&module_id),
+        mesh_core_render::set_shared_font_aliases(
+            &self
+                .font_registry
+                .shared_reference_aliases_for_module(self.components[index].component.id()),
         );
         let started = std::time::Instant::now();
         let _resource_scope = self.components[index].resource_paints.enter();

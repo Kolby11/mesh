@@ -699,10 +699,16 @@ impl FrontendSurfaceComponent {
                     new_event_path = retained;
                 }
                 let new_key = new_event_path.last().cloned();
-                let new_path = new_event_path
-                    .iter()
-                    .map(|key| runtime_node_id_for_key(key))
-                    .collect::<Vec<_>>();
+                // Both paths are always written together, so an unchanged key
+                // path already has its ids.
+                let new_path = if new_event_path == self.hovered_event_path {
+                    self.hovered_path.clone()
+                } else {
+                    new_event_path
+                        .iter()
+                        .map(|key| runtime_node_id_for_key(key))
+                        .collect::<Vec<_>>()
+                };
                 tracing::trace!(
                     "[hover] pointer=({x:.1},{y:.1}) path={:?} hit={:?} prev={:?}",
                     new_event_path,

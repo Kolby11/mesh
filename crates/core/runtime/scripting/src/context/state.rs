@@ -40,6 +40,45 @@ impl ServiceContextState {
         source_module: Option<&str>,
         source_generation: u64,
     ) -> bool {
+        self.update_with(
+            service,
+            payload,
+            || Arc::new(payload.clone()),
+            fingerprint,
+            source_module,
+            source_generation,
+        )
+    }
+
+    /// [`Self::update`] for a snapshot the caller already holds behind an
+    /// `Arc`; every context on a surface then shares one copy of it.
+    pub fn update_shared(
+        &mut self,
+        service: &str,
+        payload: &Arc<Value>,
+        fingerprint: u64,
+        source_module: Option<&str>,
+        source_generation: u64,
+    ) -> bool {
+        self.update_with(
+            service,
+            payload,
+            || Arc::clone(payload),
+            fingerprint,
+            source_module,
+            source_generation,
+        )
+    }
+
+    fn update_with(
+        &mut self,
+        service: &str,
+        payload: &Value,
+        stored: impl FnOnce() -> Arc<Value>,
+        fingerprint: u64,
+        source_module: Option<&str>,
+        source_generation: u64,
+    ) -> bool {
         if let Some(current) = self.payloads.get(service) {
             if source_generation == 0 && current.source_generation != 0 {
                 return false;
@@ -73,7 +112,7 @@ impl ServiceContextState {
                 source_module: source_module.map(str::to_owned),
                 source_generation,
                 fingerprint,
-                value: Arc::new(payload.clone()),
+                value: stored(),
             },
         );
         true
