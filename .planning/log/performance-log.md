@@ -10429,3 +10429,9 @@ A revision counter was rejected before implementation: expression, effect and ca
 
 `service_observation_token_profile` (ignored, `--release`, real Settings Appearance surface with 11 runtimes, 10,000 calls, three runs): summary 46.09–46.13 ms, token 10.16–10.17 ms, 4.5x. That is about 4.6 µs to 1.0 µs per painted Settings frame, plus the skipped summary comparison. `service_observation_token_follows_the_summary` checks that the token is stable while nothing changes and moves when the summary does.
 
+## 2026-11-11 — One `wl_buffer` per exported GPU target
+
+The scene worker renders into at most three dmabuf targets per surface. The ring nevertheless created a new `zwp_linux_buffer_params_v1` and `wl_buffer` for every presented frame, and destroyed the previous one for that slot. That costs fd duplication and transfer on every frame, plus a dmabuf import in the compositor for each new buffer object. Exports now carry a process-unique `target` id, and the ring re-attaches the existing buffer when the same target comes back released. The worker exports a target only after the compositor released it, so the reused buffer is never busy. A new target or a resize still imports.
+
+Not timed: `scene_pipelining_profile` is paced by frame callbacks on the client side and cannot see compositor import time. Correctness was checked live on Hyprland: `MESH_REQUIRE_GPU=1 cargo test -p mesh-core-presentation --features gpu --test live_compositor_matrix` passes, including six presented scene frames across the three targets and `scene_frame_in_flight_survives_hide_resize_and_destroy`.
+

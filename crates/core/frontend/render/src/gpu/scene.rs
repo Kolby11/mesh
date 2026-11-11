@@ -16,7 +16,12 @@ const OUTPUT_OWNED: u8 = 1;
 const COMPOSITOR_OWNED: u8 = 2;
 const RETIRED: u8 = 3;
 
+/// Process-unique identities for exported targets, so a consumer can keep one
+/// protocol buffer per target across frames.
+static NEXT_TARGET_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 struct Slot {
+    id: u64,
     target: DmabufTarget,
     leased: Arc<AtomicU8>,
     pending: Vec<DamageRect>,
@@ -43,6 +48,9 @@ pub struct GpuSceneOutput {
     pub rendered_width: u32,
     pub rendered_height: u32,
     pub damage: Vec<DamageRect>,
+    /// Identifies the exported target. Equal ids name the same dmabuf storage
+    /// and planes, so an import made for one output serves the next.
+    pub target: u64,
     leased: Arc<AtomicU8>,
 }
 
@@ -403,6 +411,7 @@ impl GpuSceneRenderer {
                 .try_reserve(bytes)
                 .ok_or(GpuSceneError::ResourceBudget)?;
             slots.push(Slot {
+                id: NEXT_TARGET_ID.fetch_add(1, Ordering::Relaxed),
                 target: self
                     .context
                     .dmabuf_target(size.0, size.1)
@@ -426,6 +435,7 @@ impl GpuSceneRenderer {
             rendered_width: rendered.0,
             rendered_height: rendered.1,
             damage: copied,
+            target: slot.id,
             leased: Arc::clone(&slot.leased),
         })
     }

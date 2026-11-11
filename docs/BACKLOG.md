@@ -403,8 +403,8 @@ From the 2026-11-11 code scan; none is measured. The fixed part of that scan is 
       only on a miss.
 - [ ] `synchronize_callback_references` re-evaluates every bound reference handler after each state sync, one per
       `{#for}` row. Needs a gate that still sees raw function globals reassigned in `_ENV`.
-- [ ] Each presented GPU frame creates a new `wl_buffer` for one of three recurring dmabuf slots. Reuse buffers
-      per slot and size; measure compositor import cost first.
+- [ ] Measure the compositor-side cost saved by reusing `wl_buffer`s per GPU target; the client-paced
+      `scene_pipelining_profile` cannot see dmabuf import time.
 - [ ] `mesh.exec` still starts three threads per call and `TaskIo::spawn` one per host operation; a small worker
       pool would bound both.
 

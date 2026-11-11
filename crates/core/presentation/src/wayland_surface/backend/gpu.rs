@@ -332,6 +332,20 @@ impl DmabufRing {
                 planes.fourcc, planes.modifier
             )));
         }
+        // The worker exports a target again only after the compositor
+        // released it, so its buffer can be attached again without a new
+        // import.
+        if let Some(index) = self.slots.iter().position(|slot| {
+            slot.output.target == output.target && !dmabuf.busy.contains(&slot.buffer.id())
+        }) {
+            let generation = generations.allocate_buffer()?;
+            let copied = output.damage.iter().copied().collect();
+            let slot = &mut self.slots[index];
+            slot.generation = generation;
+            slot.output = output;
+            slot.pending_damage.clear();
+            return Ok(Some((index, copied)));
+        }
         let generation = generations.allocate_buffer()?;
         let params = dmabuf
             .state
