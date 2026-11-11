@@ -10421,3 +10421,11 @@ Follow-up to the scan entry above. Five Settings providers ran subprocesses for 
 
 Together with the Bluetooth and power-profile changes above, an idle session drops from roughly 3–6 process spawns per second to about one `cat` per 30 s plus 60 s safety polls. Spawn counts are read from the code, not counted. `live_settings_providers_idle_on_host_events` (ignored; run in a Hyprland session with PipeWire, NetworkManager and timedated) confirms each provider subscribes, publishes `available = true` and settles on the 60 s poll. Delivery of a real change event was not exercised, because triggering one would change the live desktop.
 
+## 2026-11-11 — Service observation summary checked by fingerprint
+
+After every painted component frame the shell rebuilt `service_observation_summary`: it cloned each runtime's tracked-field and event-subscription maps, then built and sorted three vectors, only to find them equal to the stored summary. Components now report `service_observation_token`, an allocation-free, order-independent sum of per-item hashes over exactly the data the summary is built from (services with tracked fields, subscribed events, declared services). The shell rebuilds and compares the summary only when the token differs from the one recorded at that component's last check.
+
+A revision counter was rejected before implementation: expression, effect and callback evaluation take and restore the tracked map on nearly every interactive frame, so a mutation counter would almost never stay still.
+
+`service_observation_token_profile` (ignored, `--release`, real Settings Appearance surface with 11 runtimes, 10,000 calls, three runs): summary 46.09–46.13 ms, token 10.16–10.17 ms, 4.5x. That is about 4.6 µs to 1.0 µs per painted Settings frame, plus the skipped summary comparison. `service_observation_token_follows_the_summary` checks that the token is stable while nothing changes and moves when the summary does.
+

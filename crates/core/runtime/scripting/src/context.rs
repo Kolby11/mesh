@@ -11,7 +11,7 @@ pub use errors::{
     ServiceCallCompletion,
 };
 pub(crate) use runtime::tasks;
-pub use runtime::{LuauLibraries, ScriptContext, SurfaceVm};
+pub use runtime::{LuauLibraries, ScriptContext, SurfaceVm, observation_item_hash};
 pub use state::{LocaleBoundState, ScriptState};
 
 #[cfg(test)]

@@ -337,6 +337,28 @@ impl ScriptContext {
         self.tracked_service_fields.lock().unwrap().clone()
     }
 
+    /// Order-independent fingerprint of what [`Self::tracked_service_fields`]
+    /// and [`Self::subscribed_interface_events`] report: each service with a
+    /// tracked field and each subscribed event, summed without allocating.
+    /// Equal fingerprints across frames mean an unchanged observation set.
+    pub fn service_observation_fingerprint(&self) -> u64 {
+        let mut fingerprint = 0u64;
+        for (service, fields) in self.tracked_service_fields.lock().unwrap().iter() {
+            if !fields.is_empty() {
+                fingerprint = fingerprint.wrapping_add(observation_item_hash(0, service, ""));
+            }
+        }
+        for (service, events) in self.subscribed_interface_events.lock().unwrap().iter() {
+            for (event, count) in events {
+                if *count > 0 {
+                    fingerprint =
+                        fingerprint.wrapping_add(observation_item_hash(1, service, event));
+                }
+            }
+        }
+        fingerprint
+    }
+
     pub fn has_tracked_fields_for_service(&self, service: &str) -> bool {
         self.tracked_service_fields
             .lock()
@@ -552,4 +574,15 @@ mod tests {
         assert_eq!(context.state.get("label"), Some(old_value.clone()));
         assert_eq!(context.state.get("title"), Some(old_title.clone()));
     }
+}
+
+/// One item of a service observation fingerprint. Items are summed, so the
+/// hash must not be a plain XOR of its parts, or repeated items would cancel.
+pub fn observation_item_hash(kind: u8, service: &str, member: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    kind.hash(&mut hasher);
+    service.hash(&mut hasher);
+    member.hash(&mut hasher);
+    hasher.finish()
 }

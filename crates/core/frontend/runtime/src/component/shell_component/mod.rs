@@ -680,6 +680,17 @@ impl ShellComponent for FrontendSurfaceComponent {
             .any(|runtime| Self::runtime_observes_service_event(runtime, event))
     }
 
+    fn service_observation_token(&self) -> Option<u64> {
+        let runtimes = self.runtimes.lock().ok()?;
+        let mut token = runtimes.values().fold(0u64, |token, runtime| {
+            token.wrapping_add(runtime.script_ctx.service_observation_fingerprint())
+        });
+        for service in &self.declared_service_names {
+            token = token.wrapping_add(mesh_core_scripting::observation_item_hash(2, service, ""));
+        }
+        Some(token)
+    }
+
     fn service_observation_summary(&self) -> Option<ServiceObservationSummary> {
         let Ok(runtimes) = self.runtimes.lock() else {
             return None;

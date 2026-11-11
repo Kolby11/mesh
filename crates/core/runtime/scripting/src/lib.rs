@@ -34,6 +34,7 @@ pub use backend::{
 pub use context::{
     ElementAction, LocaleBoundState, LuauLibraries, PublishedEvent, ScriptContext, ScriptDiagnostic,
     ScriptDiagnosticCategory, ScriptError, ScriptInterfaceImport, ScriptState, SurfaceVm,
+    observation_item_hash,
 };
 pub use operation::{OperationRegistry, OperationRejection, ShellOperation};
 pub use session::{

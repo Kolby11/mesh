@@ -181,6 +181,8 @@ pub(super) struct ServiceDeliveryIndex {
     pub(super) interface_events: HashMap<String, HashMap<String, Vec<usize>>>,
     pub(super) delivery_epoch: u64,
     pub(super) component_epochs: Vec<u64>,
+    /// Each component's observation token at its last summary check.
+    pub(super) observation_tokens: Vec<Option<u64>>,
 }
 
 impl Default for ServiceDeliveryIndex {
@@ -197,6 +199,7 @@ impl Default for ServiceDeliveryIndex {
             interface_events: HashMap::new(),
             delivery_epoch: 0,
             component_epochs: Vec::new(),
+            observation_tokens: Vec::new(),
         }
     }
 }
@@ -210,6 +213,25 @@ impl ServiceDeliveryIndex {
     /// subscriptions. Only rebuild the shell index when that summary changes;
     /// a paint that merely redraws a surface must not turn the next service
     /// update back into a full-component scan.
+    /// Whether `token` is the one recorded at this component's last summary
+    /// check, so its summary cannot have changed since. Records it otherwise.
+    pub(super) fn observation_token_unchanged(
+        &mut self,
+        component_index: usize,
+        token: Option<u64>,
+    ) -> bool {
+        let Some(token) = token else {
+            return false;
+        };
+        if self.observation_tokens.len() <= component_index {
+            self.observation_tokens.resize(component_index + 1, None);
+        }
+        let slot = &mut self.observation_tokens[component_index];
+        let unchanged = *slot == Some(token);
+        *slot = Some(token);
+        unchanged
+    }
+
     pub(super) fn mark_dirty_if_summary_changed(
         &mut self,
         component_index: usize,

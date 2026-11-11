@@ -1673,6 +1673,12 @@ pub trait ShellComponent: Send {
     fn service_observation_summary(&self) -> Option<ServiceObservationSummary> {
         None
     }
+    /// A value that changes whenever [`Self::service_observation_summary`]
+    /// would, computed without building the summary. `None` means the
+    /// component cannot tell, and the summary is read every time.
+    fn service_observation_token(&self) -> Option<u64> {
+        None
+    }
     fn wants_tick(&self) -> bool {
         true
     }

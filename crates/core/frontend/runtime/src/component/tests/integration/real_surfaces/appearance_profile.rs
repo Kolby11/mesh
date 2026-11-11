@@ -947,3 +947,53 @@ fn all_texts(node: &WidgetNode, output: &mut Vec<String>) {
         all_texts(child, output);
     }
 }
+
+#[test]
+fn service_observation_token_follows_the_summary() {
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(920, 900);
+    let settings = appearance_surface(&theme, &mut buffer);
+    let token = settings.service_observation_token();
+    let summary = settings.service_observation_summary();
+    assert!(token.is_some());
+    assert!(
+        summary
+            .as_ref()
+            .is_some_and(|summary| !summary.update_services.is_empty()),
+        "the Appearance page reads services"
+    );
+    assert_eq!(settings.service_observation_token(), token);
+    for runtime in settings.runtimes.lock().unwrap().values() {
+        runtime.script_ctx.clear_tracked_service_fields();
+        runtime.script_ctx.clear_subscribed_interface_events();
+    }
+    assert_ne!(settings.service_observation_summary(), summary);
+    assert_ne!(settings.service_observation_token(), token);
+}
+
+// cargo test -p mesh-core-frontend-runtime --release -- service_observation_token_profile --ignored --nocapture
+#[test]
+#[ignore = "release-only per-frame service observation check"]
+fn service_observation_token_profile() {
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(920, 900);
+    let settings = appearance_surface(&theme, &mut buffer);
+    let runtimes = settings.runtimes.lock().unwrap().len();
+    for run in 0..3 {
+        let started = Instant::now();
+        for _ in 0..10_000 {
+            std::hint::black_box(settings.service_observation_summary());
+        }
+        let summary = started.elapsed();
+        let started = Instant::now();
+        for _ in 0..10_000 {
+            std::hint::black_box(settings.service_observation_token());
+        }
+        let token = started.elapsed();
+        eprintln!(
+            "service observation: runtimes={runtimes} frames=10000 run={run} summary={summary:?} token={token:?} ratio={:.1}",
+            summary.as_secs_f64() / token.as_secs_f64()
+        );
+    }
+}
+

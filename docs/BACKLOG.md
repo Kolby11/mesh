@@ -392,8 +392,6 @@ From the 2026-11-11 code scan; none is measured. The fixed part of that scan is 
 - [ ] Input routed to a promoted popup deep-copies its subtree on every pointer event
       (`handle_child_surface_input` offsets a clone of the retained node). Translate the pointer instead, or cache
       the offset copy on a key that covers pre-paint binding patches.
-- [ ] `service_observation_summary` clones every runtime's tracked fields and subscriptions after each painted
-      frame. Gate it on a revision bumped by every tracking mutation; a missed bump drops service updates.
 - [ ] `ServiceEvent::Updated` carries an owned payload, so each receiving component hashes and copies it, and each
       runtime copies it again into `ScriptState`. Carry an `Arc` and fingerprint from the shell.
 - [ ] Every service event settles effects on all hidden components (`deliver_service_event` tail), whether or

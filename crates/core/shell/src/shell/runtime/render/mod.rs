@@ -960,11 +960,17 @@ impl Shell {
 
             // Component(VM)-level profiling + invalidation are recorded once,
             // regardless of how many surface targets the component drives.
-            let observation_summary = self.components[index]
-                .component
-                .service_observation_summary();
-            self.service_delivery_index
-                .mark_dirty_if_summary_changed(index, observation_summary);
+            let observation_token = self.components[index].component.service_observation_token();
+            if !self
+                .service_delivery_index
+                .observation_token_unchanged(index, observation_token)
+            {
+                let observation_summary = self.components[index]
+                    .component
+                    .service_observation_summary();
+                self.service_delivery_index
+                    .mark_dirty_if_summary_changed(index, observation_summary);
+            }
             for record in component_stage_records {
                 let module_id = record
                     .module_id

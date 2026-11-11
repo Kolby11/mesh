@@ -16,6 +16,7 @@ mod template;
 mod vm;
 
 pub use context::*;
+pub use state::observation_item_hash;
 pub use libraries::LuauLibraries;
 pub use vm::*;
 
