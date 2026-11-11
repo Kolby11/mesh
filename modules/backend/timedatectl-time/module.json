@@ -8,6 +8,7 @@
     "kind": "backend",
     "uses": {
       "capabilities": [
+        "dbus.subscribe:system:org.freedesktop.timedate1",
         "exec.argv:timedatectl:[\"show\"]",
         "exec.argv:timedatectl:[\"list-timezones\"]",
         "exec.argv:timedatectl:[\"set-timezone\",\"*\"]",

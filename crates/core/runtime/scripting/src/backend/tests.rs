@@ -4687,6 +4687,23 @@ async fn live_power_profiles_idle_on_daemon_signals() {
 }
 
 #[tokio::test]
+#[ignore = "requires a Hyprland session, PipeWire, NetworkManager and timedated"]
+async fn live_settings_providers_idle_on_host_events() {
+    for (module, directory) in [
+        ("@mesh/hyprland-display", "hyprland-display"),
+        ("@mesh/hyprland-input", "hyprland-input"),
+        ("@mesh/wpctl-audio-devices", "wpctl-audio-devices"),
+        ("@mesh/nmcli-network-details", "nmcli-network-details"),
+        ("@mesh/timedatectl-time", "timedatectl-time"),
+    ] {
+        let (state, poll_ms) = start_live_backend(module, directory).await;
+        println!("live {module}: poll={poll_ms} available={}", state["available"]);
+        assert_eq!(state["available"], true, "{module}");
+        assert_eq!(poll_ms, 60_000, "{module} must replace polling with host events");
+    }
+}
+
+#[tokio::test]
 #[ignore = "requires a live MPRIS player and playerctl"]
 async fn live_mpris_publishes_playerctl_position() {
     let manifest: serde_json::Value = serde_json::from_str(&bundled_backend_script(

@@ -10405,3 +10405,19 @@ Provider changes, not timed (the gain is process spawns that no longer happen):
 
 Checked and dropped: a TTL on icon file-freshness probes. `9b5a2abe` removed exactly that cache after measuring direct `metadata` probes as faster.
 
+## 2026-11-11 — Settings providers follow host events instead of polling
+
+Follow-up to the scan entry above. Five Settings providers ran subprocesses for the whole session, whether or not Settings was open. They now re-read when the host reports a change and otherwise poll every 60 s. Each falls back to its original interval when its event source is unavailable:
+
+| Provider | Before | After |
+| --- | --- | --- |
+| `@mesh/hyprland-display` | `hyprctl monitors -j` + `hyprsunset temperature` every 3 s | Hyprland `.socket2.sock` monitor add/remove, focused-monitor and config-reload events, 300 ms after the event |
+| `@mesh/hyprland-input` | six `hyprctl getoption` every 5 s | `configreloaded` on the same socket |
+| `@mesh/wpctl-audio-devices` | `wpctl status` + one `get-volume` per stream every 3 s | PipeWire Node/Metadata invalidations (`pipewire.observe`), 250 ms coalescing |
+| `@mesh/nmcli-network-details` | five `nmcli` every 10 s | NetworkManager signals, 1.5 s after a change; strength/last-seen-only updates keep the 10 s cadence |
+| `@mesh/timedatectl-time` | `timedatectl show` every 10 s | `org.freedesktop.timedate1` signals |
+
+`@mesh/device-info` re-read about ten identity probes every 30 s; it now re-reads only `/proc/uptime` there and runs the full set every tenth minute.
+
+Together with the Bluetooth and power-profile changes above, an idle session drops from roughly 3–6 process spawns per second to about one `cat` per 30 s plus 60 s safety polls. Spawn counts are read from the code, not counted. `live_settings_providers_idle_on_host_events` (ignored; run in a Hyprland session with PipeWire, NetworkManager and timedated) confirms each provider subscribes, publishes `available = true` and settles on the 60 s poll. Delivery of a real change event was not exercised, because triggering one would change the live desktop.
+

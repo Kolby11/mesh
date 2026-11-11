@@ -17,6 +17,7 @@
     },
     "capabilityApprovals": {
       "@mesh/nmcli-network-details": [
+        "dbus.subscribe:system:org.freedesktop.NetworkManager",
         "exec.argv:nmcli:[\"-t\",\"-e\",\"yes\",\"-f\",\"IN-USE,SSID,BSSID,CHAN,FREQ,RATE,SIGNAL,SECURITY\",\"device\",\"wifi\",\"list\"]",
         "exec.argv:nmcli:[\"-t\",\"-e\",\"yes\",\"-f\",\"NAME,UUID,TYPE,AUTOCONNECT,ACTIVE\",\"connection\",\"show\"]",
         "exec.argv:nmcli:[\"-t\",\"-e\",\"no\",\"-f\",\"GENERAL.HWADDR,GENERAL.MTU,GENERAL.CONNECTION,IP4.ADDRESS,IP4.GATEWAY,IP4.DNS,IP6.ADDRESS,CAPABILITIES.SPEED\",\"device\",\"show\",\"*\"]",
@@ -43,6 +44,7 @@
         "exec.argv:lspci:[]"
       ],
       "@mesh/wpctl-audio-devices": [
+        "pipewire.observe",
         "exec.argv:wpctl:[\"status\"]",
         "exec.argv:wpctl:[\"get-volume\",\"*\"]",
         "exec.argv:wpctl:[\"set-default\",\"*\"]",
@@ -68,6 +70,9 @@
         "exec.argv:bluetoothctl:[\"system-alias\",\"*\"]"
       ],
       "@mesh/hyprland-display": [
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$HYPRLAND_INSTANCE_SIGNATURE\\\"\"]",
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\\\"\"]",
+        "net.socket",
         "exec.argv:hyprctl:[\"monitors\",\"-j\"]",
         "exec.argv:hyprctl:[\"eval\",\"*\"]",
         "exec.argv:hyprctl:[\"hyprsunset\",\"temperature\"]",
@@ -75,6 +80,9 @@
         "exec.argv:hyprctl:[\"hyprsunset\",\"identity\"]"
       ],
       "@mesh/hyprland-input": [
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$HYPRLAND_INSTANCE_SIGNATURE\\\"\"]",
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\\\"\"]",
+        "net.socket",
         "exec.argv:hyprctl:[\"getoption\",\"*\",\"-j\"]",
         "exec.argv:hyprctl:[\"eval\",\"*\"]",
         "exec.argv:sh:[\"-c\",\"hyprctl setcursor \\\"${XCURSOR_THEME:-default}\\\" \\\"$1\\\"\",\"sh\",\"*\"]"
@@ -86,6 +94,7 @@
         "exec.argv:powerprofilesctl:[\"set\",\"*\"]"
       ],
       "@mesh/timedatectl-time": [
+        "dbus.subscribe:system:org.freedesktop.timedate1",
         "exec.argv:timedatectl:[\"show\"]",
         "exec.argv:timedatectl:[\"list-timezones\"]",
         "exec.argv:timedatectl:[\"set-timezone\",\"*\"]",

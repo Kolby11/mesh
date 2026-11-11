@@ -13,6 +13,61 @@ state = {
 }
 
 local POLL_MS = 3000
+
+-- Hyprland's event socket (.socket2.sock) announces the changes this provider
+-- shows, so it re-reads shortly after one of those events and otherwise polls
+-- slowly. Without the socket it keeps the original poll.
+local WATCHED_EVENTS = { monitoradded = true, monitoraddedv2 = true, monitorremoved = true, monitorremovedv2 = true, focusedmon = true, focusedmonv2 = true, configreloaded = true }
+local IDLE_POLL_MS = 60000
+local EVENT_DELAY_MS = 300
+local event_stream = nil
+local dirty = false
+
+local function shell_value(script)
+    local result = mesh.exec("sh", { "-c", script })
+    local value = result.success and (result.stdout or ""):gsub("%s+$", "") or ""
+    return value ~= "" and value or nil
+end
+
+local function subscribe_events()
+    local sig = shell_value("printf '%s' \"$HYPRLAND_INSTANCE_SIGNATURE\"")
+    if not sig then return nil end
+    local dirs = {}
+    local xdg = shell_value("printf '%s' \"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\"")
+    if xdg then dirs[#dirs + 1] = xdg .. "/hypr/" .. sig end
+    dirs[#dirs + 1] = "/tmp/hypr/" .. sig
+    for _, dir in dirs do
+        local socket = dir .. "/.socket2.sock"
+        local started = mesh.socket_stream(socket)
+        if started then
+            return type(started) == "table" and started.program or ("socket:" .. socket)
+        end
+    end
+    return nil
+end
+
+local function settled_poll_ms()
+    return event_stream and IDLE_POLL_MS or POLL_MS
+end
+
+function on_stream_batch(self, program, lines)
+    if event_stream == nil or program ~= event_stream or dirty then return end
+    for _, line in lines do
+        if WATCHED_EVENTS[line:match("^(%w+)>>") or ""] then
+            dirty = true
+            mesh.service.set_poll_interval(EVENT_DELAY_MS)
+            return
+        end
+    end
+end
+
+function on_stream_closed(self, program, _success)
+    if event_stream ~= nil and program == event_stream then
+        event_stream = nil
+        dirty = false
+        mesh.service.set_poll_interval(POLL_MS)
+    end
+end
 local IDENTITY_KELVIN = 6000
 local DEFAULT_NIGHT_KELVIN = 4500
 
@@ -112,7 +167,8 @@ local function apply_night(enabled, kelvin)
 end
 
 function start(self)
-    mesh.service.set_poll_interval(POLL_MS)
+    event_stream = subscribe_events()
+    mesh.service.set_poll_interval(settled_poll_ms())
     refresh()
     local saved = self.storage
     if saved.adaptive_sync ~= nil and saved.adaptive_sync ~= state.adaptive_sync then
@@ -134,6 +190,10 @@ end
 
 function on_poll(self)
     refresh()
+    if dirty then
+        dirty = false
+        mesh.service.set_poll_interval(settled_poll_ms())
+    end
 end
 
 function on_command_set_scale(self)

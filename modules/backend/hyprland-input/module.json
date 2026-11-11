@@ -8,6 +8,9 @@
     "kind": "backend",
     "uses": {
       "capabilities": [
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"$HYPRLAND_INSTANCE_SIGNATURE\\\"\"]",
+        "exec.argv:sh:[\"-c\",\"printf '%s' \\\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\\\"\"]",
+        "net.socket",
         "exec.argv:hyprctl:[\"getoption\",\"*\",\"-j\"]",
         "exec.argv:hyprctl:[\"eval\",\"*\"]",
         "exec.argv:sh:[\"-c\",\"hyprctl setcursor \\\"${XCURSOR_THEME:-default}\\\" \\\"$1\\\"\",\"sh\",\"*\"]"

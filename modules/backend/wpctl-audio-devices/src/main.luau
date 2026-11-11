@@ -3,6 +3,12 @@
 state = { available = false, sinks = {}, sources = {}, streams = {} }
 
 local POLL_MS = 3000
+-- PipeWire Node/Metadata invalidations mark the lists dirty; the re-read runs
+-- after a short delay so a volume drag costs one refresh, not one per step.
+local IDLE_POLL_MS = 60000
+local DIRTY_POLL_MS = 250
+local monitor = nil
+local dirty = false
 
 local function log_warn(message)
     mesh.log.warn("[wpctl-audio-devices] " .. message)
@@ -62,12 +68,32 @@ local function refresh()
 end
 
 function start(self)
-    mesh.service.set_poll_interval(POLL_MS)
+    local started = mesh.pipewire_subscribe()
+    monitor = started and started.program or nil
+    mesh.service.set_poll_interval(monitor and IDLE_POLL_MS or POLL_MS)
     refresh()
 end
 
 function on_poll(self)
     refresh()
+    if dirty then
+        dirty = false
+        mesh.service.set_poll_interval(IDLE_POLL_MS)
+    end
+end
+
+function on_stream_batch(self, program, _lines)
+    if monitor == nil or program ~= monitor or dirty then return end
+    dirty = true
+    mesh.service.set_poll_interval(DIRTY_POLL_MS)
+end
+
+function on_stream_closed(self, program, _success)
+    if monitor ~= nil and program == monitor then
+        monitor = nil
+        dirty = false
+        mesh.service.set_poll_interval(POLL_MS)
+    end
 end
 
 local function run(args)

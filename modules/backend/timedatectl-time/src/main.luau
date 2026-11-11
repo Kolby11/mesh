@@ -6,6 +6,10 @@
 state = { available = false, timezone = "", ntp = false, ntp_synced = false, timezones = {} }
 
 local POLL_MS = 10000
+-- timedated announces time zone and NTP changes on the system bus; the slow
+-- poll only keeps the synchronization flag current.
+local IDLE_POLL_MS = 60000
+local monitor = nil
 local zones = {}
 
 local function log_warn(message)
@@ -34,12 +38,28 @@ function start(self)
     if listed.success then
         for line in (listed.stdout or ""):gmatch("[^\n]+") do zones[#zones + 1] = line end
     end
-    mesh.service.set_poll_interval(POLL_MS)
+    local started = mesh.dbus_subscribe("system", {
+        sender = "org.freedesktop.timedate1",
+        path_namespace = "/org/freedesktop/timedate1",
+    })
+    monitor = started and started.program or nil
+    mesh.service.set_poll_interval(monitor and IDLE_POLL_MS or POLL_MS)
     refresh()
 end
 
 function on_poll(self)
     refresh()
+end
+
+function on_stream_batch(self, program, _lines)
+    if monitor ~= nil and program == monitor then refresh() end
+end
+
+function on_stream_closed(self, program, _success)
+    if monitor ~= nil and program == monitor then
+        monitor = nil
+        mesh.service.set_poll_interval(POLL_MS)
+    end
 end
 
 function on_command_set_timezone(self)

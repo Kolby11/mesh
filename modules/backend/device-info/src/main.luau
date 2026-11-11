@@ -177,13 +177,24 @@ local function read_state()
     }
 end
 
+-- Identity and hardware change rarely, so a poll re-reads only the uptime and
+-- the full probe set (about ten processes) runs every IDENTITY_POLLS polls.
+local IDENTITY_POLLS = 20
+local polls_since_identity = 0
+
 function start(self)
-    -- Identity and hardware change rarely; uptime is refreshed often enough
-    -- for an open settings page without repeatedly spawning expensive probes.
     mesh.service.set_poll_interval(30000)
     state = read_state()
 end
 
 function on_poll(self)
-    state = read_state()
+    polls_since_identity += 1
+    if polls_since_identity >= IDENTITY_POLLS then
+        polls_since_identity = 0
+        state = read_state()
+        return
+    end
+    local next_state = table.clone(state)
+    next_state.uptime_seconds = parse_uptime_seconds(run("cat", { "/proc/uptime" }))
+    state = next_state
 end

@@ -8,6 +8,7 @@
     "kind": "backend",
     "uses": {
       "capabilities": [
+        "dbus.subscribe:system:org.freedesktop.NetworkManager",
         "exec.argv:nmcli:[\"-t\",\"-e\",\"yes\",\"-f\",\"IN-USE,SSID,BSSID,CHAN,FREQ,RATE,SIGNAL,SECURITY\",\"device\",\"wifi\",\"list\"]",
         "exec.argv:nmcli:[\"-t\",\"-e\",\"yes\",\"-f\",\"NAME,UUID,TYPE,AUTOCONNECT,ACTIVE\",\"connection\",\"show\"]",
         "exec.argv:nmcli:[\"-t\",\"-e\",\"no\",\"-f\",\"GENERAL.HWADDR,GENERAL.MTU,GENERAL.CONNECTION,IP4.ADDRESS,IP4.GATEWAY,IP4.DNS,IP6.ADDRESS,CAPABILITIES.SPEED\",\"device\",\"show\",\"*\"]",

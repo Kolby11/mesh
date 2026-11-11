@@ -16,6 +16,15 @@ state = {
 }
 
 local POLL_MS = 10000
+-- NetworkManager signals schedule the re-read. Access-point strength and
+-- last-seen updates arrive continuously while the radio scans, so they keep
+-- the original ten-second cadence; any other change is read promptly.
+local IDLE_POLL_MS = 60000
+local CHANGE_DELAY_MS = 1500
+local NOISE_DELAY_MS = 10000
+local NOISE = { Strength = true, LastSeen = true }
+local monitor = nil
+local pending_ms = nil
 local HOTSPOT = "Hotspot"
 local SAVED_KINDS = {
     ["802-11-wireless"] = "wifi", ["802-3-ethernet"] = "ethernet", vpn = "vpn", wireguard = "vpn",
@@ -206,12 +215,56 @@ local function finish(result)
 end
 
 function start(self)
-    mesh.service.set_poll_interval(POLL_MS)
+    local started = mesh.dbus_subscribe("system", {
+        sender = "org.freedesktop.NetworkManager",
+        path_namespace = "/org/freedesktop/NetworkManager",
+    })
+    monitor = started and started.program or nil
+    mesh.service.set_poll_interval(monitor and IDLE_POLL_MS or POLL_MS)
     refresh()
 end
 
 function on_poll(self)
     refresh()
+    if pending_ms ~= nil then
+        pending_ms = nil
+        mesh.service.set_poll_interval(IDLE_POLL_MS)
+    end
+end
+
+local function delay_for(line)
+    local ok, signal = pcall(mesh.json.decode, line)
+    if not ok or type(signal) ~= "table" or signal.member ~= "PropertiesChanged" then
+        return CHANGE_DELAY_MS
+    end
+    local fields = signal.body or {}
+    for key in pairs(fields[2] and fields[2].value or {}) do
+        if not NOISE[key] then return CHANGE_DELAY_MS end
+    end
+    for _, key in ipairs(fields[3] and fields[3].value or {}) do
+        if not NOISE[key] then return CHANGE_DELAY_MS end
+    end
+    return NOISE_DELAY_MS
+end
+
+function on_stream_batch(self, program, lines)
+    if monitor == nil or program ~= monitor or pending_ms == CHANGE_DELAY_MS then return end
+    for _, line in lines do
+        local delay = delay_for(line)
+        if pending_ms == nil or delay < pending_ms then
+            pending_ms = delay
+            mesh.service.set_poll_interval(delay)
+        end
+        if delay == CHANGE_DELAY_MS then return end
+    end
+end
+
+function on_stream_closed(self, program, _success)
+    if monitor ~= nil and program == monitor then
+        monitor = nil
+        pending_ms = nil
+        mesh.service.set_poll_interval(POLL_MS)
+    end
 end
 
 function on_command_refresh(self)

@@ -8,6 +8,7 @@
     "kind": "backend",
     "uses": {
       "capabilities": [
+        "pipewire.observe",
         "exec.argv:wpctl:[\"status\"]",
         "exec.argv:wpctl:[\"get-volume\",\"*\"]",
         "exec.argv:wpctl:[\"set-default\",\"*\"]",

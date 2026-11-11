@@ -44,7 +44,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Bound and deduplicate persistent painter diagnostics; rejected commands currently append repeated records across frames without normal-service retirement. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/12-rendering-and-paint.md).
 - [ ] Map masked-input selection endpoints from source UTF-8 offsets to displayed mask positions; IME selection currently slices the shorter mask using original byte indices. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/12-rendering-and-paint.md).
 - [ ] Invalidate wallpaper preview caches by source freshness and retry repaired failures; path-only entries currently keep stale thumbnails, colors and panoramas. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/11-luau-runtime-and-sandbox.md).
-- [ ] Separate stable device-information probes from uptime refresh; the backend reruns all hardware/identity subprocesses every thirty seconds. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/11-luau-runtime-and-sandbox.md).
 - [ ] Define optional-value clearing in surface policy patches; `between(base, target)` currently cannot represent Some-to-None transitions. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/13-surface-policy-and-configuration.md).
 - [ ] Scope and offload LSP registry refreshes; every unsaved document edit currently hashes the full graph and rediscovers host fonts/icons synchronously. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/16-developer-and-authoring-tools.md).
 - [ ] Index semantic-token coordinates instead of rescanning each document prefix; coordinate work currently grows quadratically with token-dense source. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/16-developer-and-authoring-tools.md).
@@ -390,10 +389,6 @@ at the top of this file; prefer it over further single-pass scoping.
 From the 2026-11-11 code scan; none is measured. The fixed part of that scan is in the
 [performance log](../.planning/log/performance-log.md).
 
-- [ ] Settings providers still poll subprocesses for the whole session: `hyprland-input` (6 `hyprctl` per 5 s),
-      `hyprland-display` (2 per 3 s), `wpctl-audio-devices` (per-stream `wpctl` per 3 s), `nmcli-network-details`
-      (5 per 10 s), `timedatectl-time`. Drive them from the Hyprland event socket, PipeWire and NetworkManager
-      signals, or poll only while a consumer is showing (needs a host signal for that).
 - [ ] Input routed to a promoted popup deep-copies its subtree on every pointer event
       (`handle_child_surface_input` offsets a clone of the retained node). Translate the pointer instead, or cache
       the offset copy on a key that covers pre-paint binding patches.
