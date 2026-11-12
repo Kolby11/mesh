@@ -404,7 +404,7 @@ fn scan_braced_expression(source: &str, start: usize) -> Result<usize, ParseErro
         }
         if source[cursor..].starts_with("--") {
             cursor += 2;
-            if source[cursor..].starts_with('[') {
+            if is_long_bracket_opener(source, cursor) {
                 let Some(end) = scan_long_bracket_string(source, cursor) else {
                     return Err(error_at(
                         source,
@@ -507,6 +507,20 @@ fn scan_short_string(source: &str, start: usize) -> Result<Option<usize>, ParseE
         }
     }
     Err(error_at(source, start, "unterminated string in expression"))
+}
+
+/// Whether `[`, any number of `=`, then `[` starts at `start`. Only that
+/// opens a long string or comment; `--[x` is an ordinary line comment.
+fn is_long_bracket_opener(source: &str, start: usize) -> bool {
+    let bytes = source.as_bytes();
+    if bytes.get(start) != Some(&b'[') {
+        return false;
+    }
+    let mut cursor = start + 1;
+    while bytes.get(cursor) == Some(&b'=') {
+        cursor += 1;
+    }
+    bytes.get(cursor) == Some(&b'[')
 }
 
 fn scan_long_bracket_string(source: &str, start: usize) -> Option<usize> {
@@ -680,5 +694,22 @@ fn error_at(source: &str, offset: usize, message: impl Into<String>) -> ParseErr
             offset
         ),
         span: SourceSpan::new(offset, offset.saturating_add(1).min(source.len())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_long_bracket_opener_starts_a_long_comment() {
+        let line = "{value --[x] not a long comment\n}";
+        assert_eq!(scan_braced_expression(line, 0).unwrap(), line.len());
+
+        let long = "{value --[==[ } ]] } ]==]\n}";
+        assert_eq!(scan_braced_expression(long, 0).unwrap(), long.len());
+
+        let error = scan_braced_expression("{value --[[ never closed }", 0).unwrap_err();
+        assert!(format!("{error:?}").contains("unterminated long comment"));
     }
 }

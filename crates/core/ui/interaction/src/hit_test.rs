@@ -1040,6 +1040,33 @@ mod tests {
     use mesh_core_elements::{EventHandlerCall, LayoutRect, WidgetNode};
 
     #[test]
+    fn a_shape_without_drawable_geometry_has_no_hit_area() {
+        let shape_hit = |kind: &str, points: &str| {
+            let mut root = WidgetNode::new("surface");
+            root.set_mesh_key("root");
+            root.layout = LayoutRect {
+                x: 0.0,
+                y: 0.0,
+                width: 100.0,
+                height: 100.0,
+            };
+            let mut shape = WidgetNode::new("shape");
+            shape.set_mesh_key("shape");
+            shape.layout = root.layout;
+            shape.attributes.insert(Prop::Type, kind.to_string());
+            shape.attributes.insert(Prop::Points, points.to_string());
+            root.children.push(shape);
+            pointer_hit_test(&root, 50.0, 40.0)
+                .map(|hit| hit.path)
+                .unwrap_or_default()
+        };
+
+        assert_eq!(shape_hit("polygon", "0,0 100,0 50,100"), ["root", "shape"]);
+        assert_eq!(shape_hit("polygon", "bad"), ["root"]);
+        assert_eq!(shape_hit("blob", "0,0 100,0 50,100"), ["root"]);
+    }
+
+    #[test]
     fn hover_survives_its_own_transform_but_not_another_hit() {
         let mut root = WidgetNode::new("surface");
         root.set_mesh_key("root");

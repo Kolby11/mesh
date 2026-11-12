@@ -495,7 +495,7 @@ pub fn prop_value_to_css(def: &PropDef, value: &PropValue) -> Result<String, Pro
         (PropType::Duration, PropValue::Number(value)) => {
             format!("{}ms", format_prop_number(*value))
         }
-        (PropType::Int, PropValue::Number(value)) => format!("{}", *value as i64),
+        (PropType::Int, PropValue::Number(value)) => format_prop_number(*value),
         (PropType::Token, PropValue::String(value)) if !is_css_var_reference(value.trim()) => {
             format!("var({})", token_prop_css_name(value))
         }
@@ -780,12 +780,10 @@ fn type_error(def: &PropDef, expected: &str, value: &PropValue) -> PropValidatio
     }
 }
 
+/// Decimal text for a finite prop number. `f64`'s `Display` never uses an
+/// exponent, so integral values beyond `i64` keep their magnitude.
 fn format_prop_number(n: f64) -> String {
-    if n.fract() == 0.0 {
-        format!("{}", n as i64)
-    } else {
-        n.to_string()
-    }
+    if n == 0.0 { "0".to_string() } else { n.to_string() }
 }
 
 fn is_css_size_value(value: &str) -> bool {
@@ -1030,6 +1028,36 @@ mod prop_value_conversion_tests {
             normalize_prop_value(definition, PropValue::String("300ms".into())),
             Ok(PropValue::Number(300.0))
         );
+    }
+
+    #[test]
+    fn numeric_props_keep_their_value_in_css_beyond_the_i64_range() {
+        let component = parse_component(
+            r#"
+<props>
+{
+    count = { type = "int", default = 1 },
+    ratio = { type = "number", default = 1 },
+    wait = { type = "duration", default = 1 },
+}
+</props>
+<template><box /></template>
+"#,
+        )
+        .expect("component with numeric props");
+        let props = component.props.expect("props block").props;
+        let css = |name: &str, value: f64| {
+            let definition = props.iter().find(|prop| prop.name == name).unwrap();
+            prop_value_to_css(definition, &PropValue::Number(value)).unwrap()
+        };
+
+        assert_eq!(css("count", 1e20), "100000000000000000000");
+        assert_eq!(css("count", -1e20), "-100000000000000000000");
+        assert_eq!(css("count", 42.0), "42");
+        assert_eq!(css("ratio", 1e20), "100000000000000000000");
+        assert_eq!(css("ratio", -0.0), "0");
+        assert_eq!(css("ratio", 0.25), "0.25");
+        assert_eq!(css("wait", 1e20), "100000000000000000000ms");
     }
 
     #[test]

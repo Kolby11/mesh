@@ -39,14 +39,16 @@ impl MethodSignature {
             .iter()
             .map(|argument| TypeExpr::parse(&argument.arg_type).map_err(|error| error.to_string()))
             .collect::<Vec<_>>();
+        // Arguments are positional, so every position up to the last
+        // required one must be supplied, optional or not.
         let required = args
             .iter()
-            .filter(|value_type| {
+            .rposition(|value_type| {
                 !value_type
                     .as_ref()
                     .is_ok_and(|value_type| value_type.optional)
             })
-            .count();
+            .map_or(0, |last_required| last_required + 1);
         let granted = contract.is_some_and(|contract| {
             crate::operation::method_capabilities_granted(capabilities, contract, method)
         });

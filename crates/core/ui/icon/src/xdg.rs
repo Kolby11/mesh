@@ -120,41 +120,10 @@ pub fn parse_glyph_map_bytes_with_cancellation(
     let raw = std::str::from_utf8(bytes).map_err(|_| "glyph map is not UTF-8".to_string())?;
     let trimmed = raw.trim_start();
     if trimmed.starts_with('{') {
-        let value: serde_json::Value = serde_json::from_str(raw)
+        let mut json = serde_json::Deserializer::from_str(raw);
+        let result = serde::Deserializer::deserialize_any(&mut json, JsonGlyphMap { cancellation })
+            .and_then(|result| json.end().map(|()| result))
             .map_err(|error| format!("glyph map JSON is invalid: {error}"))?;
-        let object = value
-            .as_object()
-            .ok_or_else(|| "glyph map JSON must be an object".to_string())?;
-        if object.len() > MAX_GLYPH_MAP_ENTRIES {
-            return Err(format!(
-                "glyph map contains more than {} entries",
-                MAX_GLYPH_MAP_ENTRIES
-            ));
-        }
-        let mut result = HashMap::with_capacity(object.len());
-        for (name, value) in object {
-            if cancellation.is_cancelled() {
-                return Err("resource preparation cancelled".into());
-            }
-            if name.trim().is_empty() {
-                return Err("glyph map contains an empty glyph name".into());
-            }
-            let value = value
-                .as_str()
-                .ok_or_else(|| format!("glyph '{name}' must map to one Unicode character"))?;
-            let mut chars = value.chars();
-            let Some(character) = chars.next() else {
-                return Err(format!("glyph '{name}' maps to an empty value"));
-            };
-            if chars.next().is_some() {
-                return Err(format!(
-                    "glyph '{name}' must map to exactly one Unicode character"
-                ));
-            }
-            if result.insert(name.clone(), character as u32).is_some() {
-                return Err(format!("glyph map contains duplicate glyph '{name}'"));
-            }
-        }
         if result.is_empty() {
             return Err("glyph map contains no entries".into());
         }
@@ -218,6 +187,66 @@ pub fn parse_glyph_map_bytes_with_cancellation(
         return Err("glyph map contains no entries".into());
     }
     Ok(result)
+}
+
+/// Reads a JSON glyph map entry by entry, so a repeated name is seen before
+/// a map type could collapse it.
+struct JsonGlyphMap<'a> {
+    cancellation: &'a ResourcePreparationToken,
+}
+
+impl<'de> serde::de::Visitor<'de> for JsonGlyphMap<'_> {
+    type Value = HashMap<String, u32>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("an object of glyph names to single characters")
+    }
+
+    fn visit_map<A>(self, mut entries: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        use serde::de::Error;
+
+        let mut result = HashMap::new();
+        while let Some(name) = entries.next_key::<String>()? {
+            if self.cancellation.is_cancelled() {
+                return Err(A::Error::custom("resource preparation cancelled"));
+            }
+            if result.len() >= MAX_GLYPH_MAP_ENTRIES {
+                return Err(A::Error::custom(format!(
+                    "glyph map contains more than {MAX_GLYPH_MAP_ENTRIES} entries"
+                )));
+            }
+            if name.trim().is_empty() {
+                return Err(A::Error::custom("glyph map contains an empty glyph name"));
+            }
+            let value = entries.next_value::<serde_json::Value>()?;
+            let Some(value) = value.as_str() else {
+                return Err(A::Error::custom(format!(
+                    "glyph '{name}' must map to one Unicode character"
+                )));
+            };
+            let mut chars = value.chars();
+            let Some(character) = chars.next() else {
+                return Err(A::Error::custom(format!(
+                    "glyph '{name}' maps to an empty value"
+                )));
+            };
+            if chars.next().is_some() {
+                return Err(A::Error::custom(format!(
+                    "glyph '{name}' must map to exactly one Unicode character"
+                )));
+            }
+            if result.contains_key(&name) {
+                return Err(A::Error::custom(format!(
+                    "glyph map contains duplicate glyph '{name}'"
+                )));
+            }
+            result.insert(name, character as u32);
+        }
+        Ok(result)
+    }
 }
 
 /// Validate a complete font file while the resource candidate is being
@@ -407,6 +436,15 @@ fn font_freshness(path: &Path) -> Option<FontFreshness> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_glyph_maps_reject_repeated_names_and_trailing_content() {
+        let error =
+            parse_glyph_map_bytes(br#"{"settings":"a","close":"b","settings":"c"}"#).unwrap_err();
+        assert!(error.contains("duplicate glyph 'settings'"), "{error}");
+        assert!(parse_glyph_map_bytes(br#"{"settings":"a"} {"close":"b"}"#).is_err());
+        assert!(parse_glyph_map_bytes(b"{}").unwrap_err().contains("no entries"));
+    }
 
     #[test]
     fn parses_json_glyph_maps_without_truncating_unicode() {

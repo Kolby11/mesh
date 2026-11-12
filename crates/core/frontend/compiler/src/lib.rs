@@ -954,17 +954,15 @@ mod tests {
             "AdvancedPage",
             "AppearancePage",
             "AudioPage",
-            "BluetoothPage",
-            "DeviceInfoPage",
             "KeyboardPage",
-            "WifiPage",
+            "PrefsPage",
         ] {
             assert!(
                 compiled.has_local_component(None, page),
                 "settings should register {page}"
             );
         }
-        assert_eq!(compiled.watched_paths.len(), 8);
+        assert_eq!(compiled.watched_paths.len(), 6);
 
         let tree = compiled.build_preview_tree(&mesh_core_theme::default_theme(), 1280, 900);
         let settings_shell =

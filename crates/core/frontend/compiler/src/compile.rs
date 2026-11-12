@@ -1264,7 +1264,13 @@ fn validate_expression(
     loop_locals: &HashSet<String>,
     span: SourceSpan,
 ) -> Result<(), CompileFrontendError> {
-    for identifier in referenced_identifiers(expr) {
+    // The compiled expression's references respect lexical scope, so inline
+    // function parameters and locals are not mistaken for component symbols.
+    let identifiers = match mesh_core_expression::compile_expression(expr) {
+        Ok(expression) => expression.referenced_identifiers().to_vec(),
+        Err(_) => referenced_identifiers(expr),
+    };
+    for identifier in identifiers {
         if allowed_symbols.contains(&identifier)
             || loop_locals.contains(&identifier)
             || is_template_builtin(&identifier)

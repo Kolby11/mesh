@@ -477,42 +477,7 @@ fn parse_transition_item(item: &str) -> TransitionStyle {
             easing = parse_easing_keyword(token);
             continue;
         }
-        match token {
-            "all" => properties = TransitionProperties::all(),
-            "border-radius" => properties.border_radius = true,
-            "border-width" => properties.border_width = true,
-            "opacity" => properties.opacity = true,
-            "background-color" | "background" => properties.background_color = true,
-            "border-color" => properties.border_color = true,
-            "color" => properties.color = true,
-            "width" => properties.width = true,
-            "height" => properties.height = true,
-            "padding" => properties.padding = true,
-            "margin" => properties.margin = true,
-            "transform" => properties.transform = true,
-            "box-shadow" => properties.box_shadow = true,
-            "filter" => properties.filter = true,
-            "backdrop-filter" => properties.backdrop_filter = true,
-            "min-width" => properties.min_width = true,
-            "max-width" => properties.max_width = true,
-            "min-height" => properties.min_height = true,
-            "max-height" => properties.max_height = true,
-            "font-size" => properties.font_size = true,
-            "letter-spacing" => properties.letter_spacing = true,
-            "line-height" => properties.line_height = true,
-            "gap" => properties.gap = true,
-            "top" => properties.inset_top = true,
-            "right" => properties.inset_right = true,
-            "bottom" => properties.inset_bottom = true,
-            "left" => properties.inset_left = true,
-            "inset" => {
-                properties.inset_top = true;
-                properties.inset_right = true;
-                properties.inset_bottom = true;
-                properties.inset_left = true;
-            }
-            _ => {}
-        }
+        properties = properties.union(TransitionProperties::of_property(token));
     }
 
     TransitionStyle {

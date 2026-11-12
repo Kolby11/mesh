@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "revision": 275,
+  "revision": 285,
   "from": {
     "module": "@mesh/glass"
   },
@@ -22,7 +22,7 @@
       "fonts": {
         "base_size": 14,
         "shell_scale": 100,
-        "ui_family": "Rubik"
+        "ui_family": "Noto Sans"
       },
       "i18n": {
         "fallback_locale": "en",
@@ -30,7 +30,7 @@
         "policy": "manual"
       },
       "icons": {
-        "default_pack": "Papirus-Dark"
+        "default_pack": "Papirus"
       },
       "keyboard": {
         "assigned": {
@@ -46,7 +46,7 @@
         }
       },
       "theme": {
-        "active": "@mesh/catppuccin-mocha:catppuccin-mocha",
+        "active": "@mesh/material:material",
         "tokens": {
           "@mesh/glass-material.glass.backdrop.card": "blur(10.8px) refract(4.5px 3.6px) dispersion(0.3px)",
           "@mesh/glass-material.glass.backdrop.dock": "blur(9px) refract(4.1px 3.2px) dispersion(0.3px)",

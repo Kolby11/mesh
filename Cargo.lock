@@ -2358,6 +2358,7 @@ dependencies = [
  "anyhow",
  "icon",
  "mesh-core-resources",
+ "serde",
  "serde_json",
  "tempfile",
  "tracing",

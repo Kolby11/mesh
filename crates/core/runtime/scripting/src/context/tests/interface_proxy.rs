@@ -256,6 +256,46 @@ end
 }
 
 #[test]
+fn an_optional_argument_before_a_required_one_does_not_relax_arity() {
+    let caps = CapabilitySet::from_ids(["service.audio.control"]);
+    let mut ctx = ScriptContext::new_for_instance(
+        "@test/audio-widget",
+        "@test/audio-widget",
+        "@test/audio-widget#bottom",
+        caps,
+    )
+    .unwrap();
+    ctx.set_interface_catalog(audio_catalog_with_set_volume_args(&[
+        ("device_id", "string?"),
+        ("percent", "float"),
+        ("ramp_ms", "float?"),
+    ]));
+    ctx.load_script(
+        r#"
+function only_the_optional()
+    require("mesh.audio@>=1.0").set_volume("default")
+end
+
+function nil_then_required()
+    require("mesh.audio@>=1.0").set_volume(nil, 55)
+end
+
+function all_three()
+    require("mesh.audio@>=1.0").set_volume("default", 55, 200)
+end
+"#,
+    )
+    .unwrap();
+
+    let error = ctx.call_handler("only_the_optional", &[]).unwrap_err();
+    assert!(error.to_string().contains("expects 2..3 arguments, got 1"), "{error}");
+    assert!(ctx.drain_published_events().is_empty());
+    ctx.call_handler("nil_then_required", &[]).unwrap();
+    ctx.call_handler("all_three", &[]).unwrap();
+    assert_eq!(ctx.drain_published_events().len(), 2);
+}
+
+#[test]
 fn service_ticket_cancel_publishes_correlated_cancellation() {
     let caps = CapabilitySet::from_ids(["service.audio.control"]);
     let mut ctx = ScriptContext::new_for_instance(

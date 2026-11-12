@@ -415,14 +415,7 @@ impl<'a> StyleResolver<'a> {
         let mut rest = value;
 
         loop {
-            let var_pos = rest.find("var(");
-            let prop_pos = rest.find("prop(");
-            let Some((start, is_prop)) = (match (var_pos, prop_pos) {
-                (Some(v), Some(p)) if p < v => Some((p, true)),
-                (Some(v), _) => Some((v, false)),
-                (None, Some(p)) => Some((p, true)),
-                (None, None) => None,
-            }) else {
+            let Some((start, is_prop)) = next_unquoted_reference(rest) else {
                 break;
             };
 
@@ -704,5 +697,61 @@ impl<'a> StyleResolver<'a> {
             | CachedThemeTokenValue::Number(_)
             | CachedThemeTokenValue::Bool(_) => None,
         }
+    }
+}
+
+/// The first `var(` or `prop(` in `value` that is not inside a quoted
+/// string, and whether it is `prop(`. Quoted text such as an asset filename
+/// is literal. A quote with no closing partner is an ordinary character.
+fn next_unquoted_reference(value: &str) -> Option<(usize, bool)> {
+    let bytes = value.as_bytes();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            quote @ (b'"' | b'\'') => {
+                let mut end = cursor + 1;
+                let mut closed = None;
+                while end < bytes.len() {
+                    match bytes[end] {
+                        b'\\' => end += 1,
+                        byte if byte == quote => {
+                            closed = Some(end);
+                            break;
+                        }
+                        _ => {}
+                    }
+                    end += 1;
+                }
+                cursor = closed.unwrap_or(cursor) + 1;
+            }
+            b'v' if bytes[cursor..].starts_with(b"var(") => return Some((cursor, false)),
+            b'p' if bytes[cursor..].starts_with(b"prop(") => return Some((cursor, true)),
+            _ => cursor += 1,
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod reference_scan_tests {
+    use super::next_unquoted_reference;
+
+    #[test]
+    fn references_inside_quoted_text_are_literal() {
+        assert_eq!(next_unquoted_reference("1px var(--a)"), Some((4, false)));
+        assert_eq!(next_unquoted_reference("prop(size) var(--a)"), Some((0, true)));
+        assert_eq!(
+            next_unquoted_reference(r#"url("assets/var(--missing).png")"#),
+            None
+        );
+        assert_eq!(
+            next_unquoted_reference(r#"url('a\'var(--x).png') var(--tint)"#),
+            Some((23, false))
+        );
+        assert_eq!(
+            next_unquoted_reference(r#""Noto Sans", var(--font-ui)"#),
+            Some((13, false))
+        );
+        assert_eq!(next_unquoted_reference("it's var(--a)"), Some((5, false)));
     }
 }

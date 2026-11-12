@@ -21,6 +21,11 @@ pub(super) fn temp_storage_root(name: &str) -> PathBuf {
 }
 
 pub(super) fn audio_catalog() -> InterfaceCatalog {
+    audio_catalog_with_set_volume_args(&[("device_id", "string"), ("percent", "float")])
+}
+
+/// The audio catalog with `set_volume` declared as `(name, type)` arguments.
+pub(super) fn audio_catalog_with_set_volume_args(arguments: &[(&str, &str)]) -> InterfaceCatalog {
     let mut catalog = InterfaceCatalog::default();
     catalog.register_contract(InterfaceContract {
         interface: "mesh.audio".into(),
@@ -31,16 +36,13 @@ pub(super) fn audio_catalog() -> InterfaceCatalog {
         methods: vec![
             InterfaceMethod {
                 name: "set_volume".into(),
-                args: vec![
-                    InterfaceArgument {
-                        name: "device_id".into(),
-                        arg_type: "string".into(),
-                    },
-                    InterfaceArgument {
-                        name: "percent".into(),
-                        arg_type: "float".into(),
-                    },
-                ],
+                args: arguments
+                    .iter()
+                    .map(|(name, arg_type)| InterfaceArgument {
+                        name: (*name).into(),
+                        arg_type: (*arg_type).into(),
+                    })
+                    .collect(),
                 returns: Some("Result".into()),
                 coalesce: false.into(),
                 state_binding: None,

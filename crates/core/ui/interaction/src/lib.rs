@@ -128,7 +128,8 @@ pub(crate) fn node_contains_with_transform(
     }
     match mesh_core_elements::ShapeGeometry::from_node(node) {
         Some(shape) => shape.contains(local_x, local_y),
-        None => true,
+        // A shape paints only its geometry, so one with none has no hit area.
+        None => node.tag != "shape",
     }
 }
 

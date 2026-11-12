@@ -149,6 +149,19 @@ fn transition_shorthand_parses_step_end_keyword() {
 }
 
 #[test]
+fn transition_shorthand_selects_the_same_properties_as_the_longhand() {
+    for name in ["padding-left", "row-gap", "margin-top", "border-top-width", "font"] {
+        let shorthand = resolve_single_decl("transition", &format!("{name} 120ms linear"));
+        assert_eq!(
+            shorthand.transitions[0].properties,
+            parse_transition_properties(name),
+            "{name}"
+        );
+        assert!(!shorthand.transitions[0].properties.is_empty(), "{name}");
+    }
+}
+
+#[test]
 fn animation_shorthand_parses_steps_with_inner_space() {
     let style = resolve_single_decl("animation", "pulse 1s steps(3, jump-none) infinite");
     assert_eq!(

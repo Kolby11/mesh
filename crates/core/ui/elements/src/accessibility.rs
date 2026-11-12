@@ -703,15 +703,18 @@ fn normalized_info(
         .or(attributes.value)
         .cloned()
         .or(info.state.value);
-    info.state.value_min = attributes
-        .aria_valuemin
-        .and_then(|value| value.trim().parse().ok())
-        .or_else(|| attributes.min.and_then(|value| value.trim().parse().ok()))
+    // `"NaN".parse::<f32>()` succeeds; a non-finite bound is treated like an
+    // unparseable one so it cannot fail frame snapshot validation.
+    let finite = |value: Option<&String>| {
+        value
+            .and_then(|value| value.trim().parse::<f32>().ok())
+            .filter(|value| value.is_finite())
+    };
+    info.state.value_min = finite(attributes.aria_valuemin)
+        .or_else(|| finite(attributes.min))
         .or(info.state.value_min);
-    info.state.value_max = attributes
-        .aria_valuemax
-        .and_then(|value| value.trim().parse().ok())
-        .or_else(|| attributes.max.and_then(|value| value.trim().parse().ok()))
+    info.state.value_max = finite(attributes.aria_valuemax)
+        .or_else(|| finite(attributes.max))
         .or(info.state.value_max);
 
     info.focused = live_accessibility_focus(node);
@@ -1055,6 +1058,8 @@ mod tests {
         attr(&mut node, "tooltip", "Tooltip text");
         attr(&mut node, "aria-valuemin", "not a number");
         attr(&mut node, "min", "3");
+        attr(&mut node, "aria-valuemax", "NaN");
+        attr(&mut node, "max", "inf");
         attr(&mut node, "value", "7");
         node.accessibility.role = AccessibilityRole::Button;
         root.children.push(node);
@@ -1069,6 +1074,7 @@ mod tests {
         assert_eq!(info.role, AccessibilityRole::Button);
         assert_eq!(info.description.as_deref(), Some("Title text"));
         assert_eq!(info.state.value_min, Some(3.0));
+        assert_eq!(info.state.value_max, None);
         assert_eq!(info.state.value.as_deref(), Some("7"));
     }
 

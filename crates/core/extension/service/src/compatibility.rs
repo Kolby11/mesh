@@ -537,15 +537,16 @@ fn diff_arguments(
 ) {
     for (index, argument) in locked.iter().enumerate() {
         match candidate.get(index) {
+            // Breaking even when optional: an existing caller may still pass
+            // it, and the proxy rejects more arguments than the method declares.
             None => changes.push(ContractChange {
-                class: if is_optional(&argument.arg_type) {
-                    CompatibilityClass::Additive
-                } else {
-                    CompatibilityClass::Breaking
-                },
+                class: CompatibilityClass::Breaking,
                 path: format!("{path}.args.{}", argument.name),
                 detail: if is_optional(&argument.arg_type) {
-                    format!("optional argument '{}' was removed", argument.name)
+                    format!(
+                        "optional argument '{}' was removed; callers supplying it break",
+                        argument.name
+                    )
                 } else {
                     format!("argument '{}' was removed", argument.name)
                 },
@@ -874,6 +875,26 @@ mod tests {
         let diff = diff_contracts(&base(), &optional);
         assert!(!diff.is_breaking());
         assert_eq!(diff.class(), CompatibilityClass::Additive);
+    }
+
+    #[test]
+    fn removing_an_optional_argument_is_breaking() {
+        let with_optional = contract(
+            r#"{
+                "state": { "percent": "float", "muted": "boolean" },
+                "methods": {
+                    "set_volume": "(percent: float, device_id: string?) -> Result"
+                },
+                "events": { "VolumeChanged": { "level": "float" } },
+                "capabilities": { "required": ["service.audio.read"] }
+            }"#,
+        );
+        let diff = diff_contracts(&with_optional, &base());
+        assert!(diff.is_breaking());
+        assert!(
+            diff.breaking_changes()
+                .any(|change| change.path.ends_with("args.device_id"))
+        );
     }
 
     #[test]

@@ -156,6 +156,37 @@ fn style_background_image_url_resolves_backend_neutral_source() {
 }
 
 #[test]
+fn style_background_image_url_keeps_reference_text_inside_a_quoted_filename() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let rules = vec![StyleRule {
+        selector: Selector::Class("panel".to_string()),
+        declarations: vec![mesh_core_component::style::Declaration {
+            property: "background-image".to_string(),
+            value: StyleValue::Literal("url(\"assets/var(--missing).png\")".to_string()),
+        }],
+        container_query: None,
+    }];
+
+    let (style, diagnostics) = resolver.resolve_node_style_with_diagnostics(
+        &rules,
+        "box",
+        &["panel".to_string()],
+        None,
+        StyleContext::default(),
+        NodeState::default(),
+    );
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(
+        style.background_paint,
+        BackgroundPaint::Image(StyleImageSource {
+            path: "assets/var(--missing).png".to_string(),
+        })
+    );
+}
+
+#[test]
 fn style_background_linear_gradient_resolves_two_colors() {
     let theme = mesh_core_theme::default_theme();
     let resolver = StyleResolver::new(&theme);

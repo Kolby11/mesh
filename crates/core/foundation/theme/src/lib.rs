@@ -1214,7 +1214,7 @@ impl Theme {
     pub fn token(&self, name: &str) -> Option<&TokenValue> {
         self.tokens
             .get(name)
-            .or_else(|| match split_explicit_module_token(name) {
+            .or_else(|| match split_explicit_module_token(&self.modules, name) {
                 Some((module_id, token_name)) => self
                     .modules
                     .get(module_id)
@@ -1243,7 +1243,7 @@ impl Theme {
         // Resolve outside the lock: recursive aliases and fallback diagnostics
         // retain their root-specific paths, and concurrent readers never block
         // on a token graph traversal.
-        let resolved = self.resolve_named_token(&name, &mut Vec::new());
+        let resolved = self.resolve_named_token(&name, &mut TokenTrail::default());
         let mut cache = self.resolved_tokens.write().unwrap();
         cache.entry(name).or_insert(resolved).clone().map(Some)
     }
@@ -1254,8 +1254,7 @@ impl Theme {
     /// substitution, such as animation declarations. A missing reference may
     /// use the CSS fallback form `var(--missing, fallback)`.
     pub fn resolve_token_references(&self, raw: &str) -> Result<String, ThemeTokenError> {
-        let mut stack = Vec::new();
-        self.resolve_string_references(raw, &mut stack)
+        self.resolve_string_references(raw, &mut TokenTrail::default())
     }
 
     /// Every token whose dotted name starts with `group`.
@@ -1290,10 +1289,10 @@ impl Theme {
     fn resolve_named_token(
         &self,
         name: &str,
-        stack: &mut Vec<String>,
+        stack: &mut TokenTrail,
     ) -> Result<TokenValue, ThemeTokenError> {
-        if let Some(position) = stack.iter().position(|entry| entry == name) {
-            let mut cycle = stack[position..].to_vec();
+        if let Some(position) = stack.names.iter().position(|entry| entry == name) {
+            let mut cycle = stack.names[position..].to_vec();
             cycle.push(name.to_string());
             return Err(ThemeTokenError::Cycle(cycle));
         }
@@ -1301,26 +1300,32 @@ impl Theme {
         let Some(value) = self.token(name).cloned() else {
             return Err(ThemeTokenError::Missing(name.to_string()));
         };
-        stack.push(name.to_string());
+        if stack.depth() >= MAX_TOKEN_RESOLUTION_DEPTH {
+            return Err(ThemeTokenError::TooDeep(name.to_string()));
+        }
+        stack.names.push(name.to_string());
         let resolved = match value {
             TokenValue::String(value) => {
                 let trimmed = value.trim();
                 if let Some(reference) = exact_var_reference(trimmed) {
-                    self.resolve_reference_value(reference, stack)?
+                    self.resolve_reference_value(reference, stack)
                 } else {
-                    TokenValue::String(self.resolve_string_references(&value, stack)?)
+                    self.resolve_string_references(&value, stack)
+                        .map(TokenValue::String)
                 }
             }
-            value => value,
+            value => Ok(value),
         };
-        stack.pop();
-        Ok(resolved)
+        // Popped on failure too: a caller may recover through a fallback and
+        // keep resolving with this trail.
+        stack.names.pop();
+        resolved
     }
 
     fn resolve_reference_value(
         &self,
         reference: &str,
-        stack: &mut Vec<String>,
+        stack: &mut TokenTrail,
     ) -> Result<TokenValue, ThemeTokenError> {
         let name = canonical_token_name(reference);
         if let Some(value) = self.token(&name) {
@@ -1333,7 +1338,7 @@ impl Theme {
     fn resolve_string_references(
         &self,
         raw: &str,
-        stack: &mut Vec<String>,
+        stack: &mut TokenTrail,
     ) -> Result<String, ThemeTokenError> {
         let mut output = String::with_capacity(raw.len());
         let mut rest = raw;
@@ -1356,7 +1361,13 @@ impl Theme {
                 Ok(value) => output.push_str(&value.to_string()),
                 Err(ThemeTokenError::Missing(_)) if fallback.is_some() => {
                     let fallback = fallback.unwrap_or_default();
-                    output.push_str(&self.resolve_string_references(fallback, stack)?)
+                    if stack.depth() >= MAX_TOKEN_RESOLUTION_DEPTH {
+                        return Err(ThemeTokenError::TooDeep(reference.to_string()));
+                    }
+                    stack.fallbacks += 1;
+                    let resolved = self.resolve_string_references(fallback, stack);
+                    stack.fallbacks -= 1;
+                    output.push_str(&resolved?)
                 }
                 Err(error) => return Err(error),
             }
@@ -1375,6 +1386,25 @@ pub enum ThemeTokenError {
     Cycle(Vec<String>),
     #[error("malformed theme token reference in '{0}'")]
     Malformed(String),
+    #[error("theme token '{0}' is nested more than {MAX_TOKEN_RESOLUTION_DEPTH} references deep")]
+    TooDeep(String),
+}
+
+/// Longest chain of aliases and nested fallbacks one token may resolve
+/// through. Resolution recurses, so the bound also limits native stack use.
+pub const MAX_TOKEN_RESOLUTION_DEPTH: usize = 64;
+
+/// The tokens and fallbacks currently being resolved, outermost first.
+#[derive(Default)]
+struct TokenTrail {
+    names: Vec<String>,
+    fallbacks: usize,
+}
+
+impl TokenTrail {
+    fn depth(&self) -> usize {
+        self.names.len() + self.fallbacks
+    }
 }
 
 /// Normalize a CSS custom-property name or an existing dotted token name.
@@ -1634,11 +1664,12 @@ fn merge_theme_module(
             );
         }
     }
+    let rule_start = target.rules.len();
     target.rules.extend(layer.rules.clone());
     for (index, rule) in layer.rules.iter().enumerate() {
         for property in rule.declarations.iter().map(|(property, _)| property) {
             provenance.insert(
-                format!("rules.module:{module_id}.{index}.{property}"),
+                format!("rules.module:{module_id}.{0}.{property}", rule_start + index),
                 source.clone(),
             );
         }
@@ -1657,7 +1688,7 @@ fn apply_user_token_override(
             "user theme token '{token}' must use a dotted name"
         )));
     }
-    if let Some((module_id, local_name)) = split_explicit_module_token(token) {
+    if let Some((module_id, local_name)) = split_explicit_module_token(&composed.modules, token) {
         let Some(module) = composed.modules.get_mut(module_id) else {
             return Err(ThemeError::Composition(format!(
                 "user theme token '{token}' targets an unknown module"
@@ -2214,12 +2245,27 @@ fn parse_token_value(value: &str) -> TokenValue {
     }
 }
 
-fn split_explicit_module_token(name: &str) -> Option<(&str, &str)> {
+/// Split `@scope/module.token.name` into the module ID and its local token.
+///
+/// Module IDs may themselves contain dots, so the longest known module ID
+/// that prefixes the name wins; an unknown module falls back to the first dot.
+fn split_explicit_module_token<'a>(
+    modules: &HashMap<String, ThemeModule>,
+    name: &'a str,
+) -> Option<(&'a str, &'a str)> {
     if !name.starts_with('@') {
         return None;
     }
 
-    let (module_id, token_name) = name.split_once('.')?;
+    let known = name
+        .match_indices('.')
+        .rev()
+        .map(|(dot, _)| (&name[..dot], &name[dot + 1..]))
+        .find(|(module_id, token_name)| !token_name.is_empty() && modules.contains_key(*module_id));
+    let (module_id, token_name) = match known {
+        Some(split) => split,
+        None => name.split_once('.')?,
+    };
     if module_id.is_empty() || token_name.is_empty() {
         return None;
     }
@@ -2239,6 +2285,100 @@ mod tests {
             );
         }
         theme
+    }
+
+    #[test]
+    fn scoped_tokens_resolve_for_module_ids_that_contain_dots() {
+        let mut theme = Theme::new("tokens", "Tokens");
+        let mut dotted = ThemeModule::default();
+        dotted
+            .tokens
+            .insert("glass.tint".into(), TokenValue::String("#010203".into()));
+        theme.modules.insert("@acme/panel.v2".into(), dotted);
+        let mut plain = ThemeModule::default();
+        plain
+            .tokens
+            .insert("v2.glass.tint".into(), TokenValue::String("#040506".into()));
+        theme.modules.insert("@acme/panel".into(), plain);
+
+        assert_eq!(
+            theme.token("@acme/panel.v2.glass.tint"),
+            Some(&TokenValue::String("#010203".into()))
+        );
+        assert_eq!(
+            split_explicit_module_token(&theme.modules, "@acme/other.glass.tint"),
+            Some(("@acme/other", "glass.tint"))
+        );
+
+        apply_user_token_override(
+            &mut theme,
+            "@acme/panel.v2.glass.tint",
+            TokenValue::String("#ffffff".into()),
+        )
+        .unwrap();
+        assert_eq!(
+            theme.modules["@acme/panel.v2"].tokens["glass.tint"],
+            TokenValue::String("#ffffff".into())
+        );
+        assert_eq!(
+            theme.modules["@acme/panel"].tokens["v2.glass.tint"],
+            TokenValue::String("#040506".into())
+        );
+    }
+
+    #[test]
+    fn alias_and_fallback_chains_are_bounded() {
+        let chain = |length: usize| {
+            let mut theme = Theme::new("tokens", "Tokens");
+            for index in 0..length {
+                let value = if index + 1 == length {
+                    "#123456".to_string()
+                } else {
+                    format!("var(--chain-t{})", index + 1)
+                };
+                theme
+                    .tokens
+                    .insert(format!("chain.t{index}"), TokenValue::String(value));
+            }
+            theme
+        };
+        assert_eq!(
+            chain(MAX_TOKEN_RESOLUTION_DEPTH)
+                .resolve_token_value("chain.t0")
+                .unwrap(),
+            Some(TokenValue::String("#123456".into()))
+        );
+        assert_eq!(
+            chain(5_000).resolve_token_value("chain.t0"),
+            Err(ThemeTokenError::TooDeep(format!(
+                "chain.t{MAX_TOKEN_RESOLUTION_DEPTH}"
+            )))
+        );
+
+        let theme = theme_with_tokens(&[]);
+        let mut nested = "red".to_string();
+        for index in 0..5_000 {
+            nested = format!("var(--missing-m{index}, {nested})");
+        }
+        assert!(matches!(
+            theme.resolve_token_references(&nested),
+            Err(ThemeTokenError::TooDeep(_))
+        ));
+    }
+
+    #[test]
+    fn a_failed_reference_recovered_by_a_fallback_leaves_no_false_cycle() {
+        let theme = theme_with_tokens(&[
+            ("color.broken", "var(--color-absent)"),
+            (
+                "color.pair",
+                "var(--color-broken, blue) var(--color-broken, green)",
+            ),
+        ]);
+        assert_eq!(
+            theme.resolve_token_value("color.pair").unwrap(),
+            Some(TokenValue::String("blue green".into()))
+        );
     }
 
     #[test]
@@ -2808,7 +2948,7 @@ mod tests {
             ("malformed", "var("),
         ]);
         for name in ["a", "b", "fallback", "missing-alias", "malformed"] {
-            let expected = theme.resolve_named_token(name, &mut Vec::new()).map(Some);
+            let expected = theme.resolve_named_token(name, &mut TokenTrail::default()).map(Some);
             assert_eq!(theme.resolve_token_value(name), expected);
             assert_eq!(theme.resolve_token_value(name), expected);
         }
@@ -2936,6 +3076,41 @@ mod tests {
             Some(&TokenValue::String("#123456".into()))
         );
         assert_ne!(previous.revision, engine.active_snapshot().revision);
+    }
+
+    #[test]
+    fn merged_module_rules_record_provenance_at_their_final_index() {
+        let layer = |css: &str| {
+            parse_theme_css("layer", "Layer", css)
+                .expect("theme layer")
+                .modules
+                .remove("@mesh/bar")
+                .expect("module block")
+        };
+        let first = layer(r#"@module "@mesh/bar" { .edge { color: #111; } }"#);
+        let second = layer(r#"@module "@mesh/bar" { .edge { opacity: 0.5; } }"#);
+        let pack = ThemeProvenance::ThemePack {
+            id: "pack".into(),
+            mode: "dark".into(),
+        };
+        let mut target = ThemeModule::default();
+        let mut provenance = BTreeMap::new();
+        merge_theme_module("@mesh/bar", &mut target, &first, &mut provenance, &pack);
+        merge_theme_module(
+            "@mesh/bar",
+            &mut target,
+            &second,
+            &mut provenance,
+            &ThemeProvenance::UserOverride,
+        );
+
+        assert_eq!(target.rules.len(), 2);
+        assert_eq!(provenance.get("rules.module:@mesh/bar.0.color"), Some(&pack));
+        assert_eq!(
+            provenance.get("rules.module:@mesh/bar.1.opacity"),
+            Some(&ThemeProvenance::UserOverride)
+        );
+        assert_eq!(provenance.get("rules.module:@mesh/bar.0.opacity"), None);
     }
 
     #[test]
@@ -3580,7 +3755,7 @@ mod dependency_measurements {
                     for _ in 0..reads {
                         black_box(
                             theme
-                                .resolve_named_token(black_box("bench.t0"), &mut Vec::new())
+                                .resolve_named_token(black_box("bench.t0"), &mut TokenTrail::default())
                                 .unwrap(),
                         );
                     }

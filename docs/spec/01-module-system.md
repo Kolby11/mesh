@@ -464,6 +464,13 @@ same keyed objects; there is no list form:
 - `events` maps an event name to its payload, a field-to-type map.
 - `types` maps a PascalCase name to its field-to-type map.
 
+Every declared name (state field, method, argument, event, payload field,
+type and type field) must be a Luau identifier that is not a keyword, because
+consumers read members as `service.name` and tooling generates declarations
+from them. An optional argument (`T?`) may be omitted only when no required
+argument follows it. Adding a trailing optional argument is additive; removing
+any argument, optional or not, is breaking.
+
 Object key order carries no meaning (manifests parse into sorted maps), which
 is why ordered method arguments live in the signature string. Contracts also
 declare capabilities and optional features. Tooling compiles inline and

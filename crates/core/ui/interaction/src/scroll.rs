@@ -384,8 +384,7 @@ fn find_scrollbar_at_affine(
     }
     let child_world = child_world_transform(world, node);
     let child_clips = push_node_clip(clips, node, world);
-    node.children
-        .iter()
+    mesh_core_elements::children_in_paint_order(node)
         .rev()
         .find_map(|child| find_scrollbar_at_affine(child, x, y, child_world, &child_clips))
 }
@@ -719,6 +718,31 @@ mod scrollbar_tests {
         node.layout.width = width;
         node.layout.height = height;
         node
+    }
+
+    #[test]
+    fn overlapping_scrollbars_hit_the_sibling_painted_on_top() {
+        let mut root = node("root", "surface", 0.0, 0.0, 300.0, 200.0);
+        let mut ids = Vec::new();
+        for (key, z_index) in [("raised", 1), ("authored-last", 0)] {
+            let mut scroll = node(key, "box", 40.0, 20.0, 100.0, 100.0);
+            scroll.computed_style.z_index = z_index;
+            scroll.computed_style.overflow_y = mesh_core_elements::style::Overflow::Auto;
+            scroll.scroll_metrics = Some(WidgetScrollMetrics {
+                max_y: 200.0,
+                content_height: 300.0,
+                ..Default::default()
+            });
+            ids.push(scroll.id);
+            root.children.push(scroll);
+        }
+
+        let hit = find_scrollbar_at(&root, 132.0, 50.0).expect("vertical scrollbar hit");
+        assert_eq!(hit.node_id, ids[0]);
+
+        root.children[0].computed_style.z_index = 0;
+        let hit = find_scrollbar_at(&root, 132.0, 50.0).expect("vertical scrollbar hit");
+        assert_eq!(hit.node_id, ids[1]);
     }
 
     #[test]

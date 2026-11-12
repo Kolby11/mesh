@@ -8,6 +8,7 @@ license.workspace = true
 mesh-core-resources = { workspace = true }
 icon = "0.2"
 anyhow = "1"
+serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 ttf-parser = "0.21"

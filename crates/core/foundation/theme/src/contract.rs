@@ -101,7 +101,7 @@ pub fn is_standard_token(name: &str) -> bool {
 
 pub fn is_private_token(name: &str) -> bool {
     let name = super::canonical_token_name(name);
-    let Some((module, _)) = super::split_explicit_module_token(&name) else {
+    let Some((module, _)) = super::split_explicit_module_token(&std::collections::HashMap::new(), &name) else {
         return false;
     };
     let Some((publisher, unit)) = module

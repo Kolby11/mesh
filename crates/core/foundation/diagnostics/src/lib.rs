@@ -359,7 +359,7 @@ impl Diagnostics {
         let now = SystemTime::now();
         let mut state = self.lock_state();
         if issue_code == DIAGNOSTIC_OVERFLOW_ISSUE_CODE {
-            self.record_overflow_locked(&mut state, now);
+            self.record_overflow_locked(&mut state, now, None);
             drop(state);
             self.generation.fetch_add(1, Ordering::Relaxed);
             return false;
@@ -393,7 +393,7 @@ impl Diagnostics {
             }
             newly_active
         } else if state.issues.len() >= MAX_ISSUES_PER_INSTANCE.saturating_sub(1) {
-            self.record_overflow_locked(&mut state, now);
+            self.record_overflow_locked(&mut state, now, Some(severity));
             capacity_exceeded = true;
             false
         } else {
@@ -420,7 +420,7 @@ impl Diagnostics {
             true
         };
         if input_truncated && !capacity_exceeded {
-            self.record_overflow_locked(&mut state, now);
+            self.record_overflow_locked(&mut state, now, None);
         }
         drop(state);
         self.generation.fetch_add(1, Ordering::Relaxed);
@@ -595,11 +595,31 @@ impl Diagnostics {
         self.lock_state().error_count
     }
 
-    fn record_overflow_locked(&self, state: &mut DiagnosticsState, now: SystemTime) {
+    /// Record the bounded overflow issue. `omitted` is the severity of an
+    /// issue dropped for capacity, so the overflow issue never reports a
+    /// milder state than the issues it stands for.
+    fn record_overflow_locked(
+        &self,
+        state: &mut DiagnosticsState,
+        now: SystemTime,
+        omitted: Option<IssueSeverity>,
+    ) {
+        let severity = omitted.map_or(IssueSeverity::Warning, |omitted| {
+            omitted.max(IssueSeverity::Warning)
+        });
         if let Some(issue) = state.issues.get_mut(DIAGNOSTIC_OVERFLOW_ISSUE_CODE) {
+            let was_error = issue.active && issue.severity == IssueSeverity::Error;
+            issue.severity = if issue.active {
+                issue.severity.max(severity)
+            } else {
+                severity
+            };
             issue.last_seen = now;
             issue.count = issue.count.saturating_add(1);
             issue.active = true;
+            if issue.severity == IssueSeverity::Error && !was_error {
+                state.error_count = state.error_count.saturating_add(1);
+            }
             return;
         }
 
@@ -614,6 +634,9 @@ impl Diagnostics {
                 state.issues.remove(&evicted);
             }
         }
+        if severity == IssueSeverity::Error {
+            state.error_count = state.error_count.saturating_add(1);
+        }
         state.issues.insert(
             DIAGNOSTIC_OVERFLOW_ISSUE_CODE.to_string(),
             DiagnosticIssue {
@@ -621,7 +644,7 @@ impl Diagnostics {
                 instance_id: self.instance_id.clone(),
                 issue_code: DIAGNOSTIC_OVERFLOW_ISSUE_CODE.to_string(),
                 category: DiagnosticCategory::Runtime,
-                severity: IssueSeverity::Warning,
+                severity,
                 message: DIAGNOSTIC_OVERFLOW_MESSAGE.to_string(),
                 source_path: None,
                 source_span: None,
@@ -1231,6 +1254,43 @@ mod tests {
                 .all(|issue| issue.message.len() <= MAX_ISSUE_MESSAGE_BYTES)
         );
         assert!(snapshot.health.to_string().len() <= MAX_HEALTH_SUMMARY_BYTES);
+    }
+
+    #[test]
+    fn an_error_dropped_for_capacity_keeps_health_at_error() {
+        let diagnostics = Diagnostics::new_instance("@test/module", "instance");
+        for index in 0..MAX_ISSUES_PER_INSTANCE * 2 {
+            diagnostics.record_issue(
+                format!("issue-{index:06}"),
+                IssueSeverity::Warning,
+                "diagnostic message",
+            );
+        }
+        assert!(matches!(
+            diagnostics.snapshot().health,
+            HealthStatus::Degraded(_)
+        ));
+        assert_eq!(diagnostics.error_count(), 0);
+
+        for _ in 0..2 {
+            diagnostics.record_issue("late-error", IssueSeverity::Error, "broken");
+        }
+        let snapshot = diagnostics.snapshot();
+        assert!(
+            snapshot
+                .issues
+                .iter()
+                .all(|issue| issue.issue_code != "late-error")
+        );
+        assert!(matches!(snapshot.health, HealthStatus::Error(_)));
+        assert_eq!(diagnostics.error_count(), 1);
+
+        assert!(diagnostics.resolve_issue(DIAGNOSTIC_OVERFLOW_ISSUE_CODE));
+        diagnostics.record_issue("late-warning", IssueSeverity::Warning, "minor");
+        assert!(matches!(
+            diagnostics.snapshot().health,
+            HealthStatus::Degraded(_)
+        ));
     }
 
     #[test]

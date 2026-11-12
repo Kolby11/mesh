@@ -165,6 +165,7 @@ impl CompiledContract {
                 message,
             });
         }
+        validate_symbol_names(&contract)?;
         validate_unique_symbols(&contract)?;
         validate_coalescing_keys(&contract)?;
         validate_features(&contract)?;
@@ -985,6 +986,60 @@ fn validate_coalescing_keys(contract: &InterfaceContract) -> Result<(), Contract
                     });
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+const LUAU_KEYWORDS: &[&str] = &[
+    "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in", "local",
+    "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
+];
+
+/// Whether `name` can be written as a bare Luau identifier, which generated
+/// declarations, mocks and `service.member` access all require.
+pub fn is_luau_identifier(name: &str) -> bool {
+    name.chars()
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+        && name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        && !LUAU_KEYWORDS.contains(&name)
+}
+
+fn validate_symbol_names(contract: &InterfaceContract) -> Result<(), ContractError> {
+    let check = |kind: &str, name: &str| {
+        if is_luau_identifier(name) {
+            Ok(())
+        } else {
+            Err(ContractError::InvalidDeclaration {
+                interface: contract.interface.clone(),
+                message: format!(
+                    "{kind} name '{name}' is not a Luau identifier (letters, digits and '_', not starting with a digit, not a keyword)"
+                ),
+            })
+        }
+    };
+    for field in &contract.state_fields {
+        check("state field", &field.name)?;
+    }
+    for method in &contract.methods {
+        check("method", &method.name)?;
+        for argument in &method.args {
+            check("method argument", &argument.name)?;
+        }
+    }
+    for event in &contract.events {
+        check("event", &event.name)?;
+        for field in &event.payload {
+            check("event payload field", &field.name)?;
+        }
+    }
+    for (name, definition) in &contract.types {
+        check("named type", name)?;
+        for field in &definition.fields {
+            check("type field", &field.name)?;
         }
     }
     Ok(())
@@ -2286,6 +2341,26 @@ mod tests {
             .compile(DeclarationProvenance::unknown())
             .unwrap_err();
         assert!(matches!(error, ContractError::InvalidDeclaration { .. }));
+    }
+
+    #[test]
+    fn compiled_contract_rejects_symbols_that_are_not_luau_identifiers() {
+        for declaration in [
+            serde_json::json!({ "state": { "end": "float" } }),
+            serde_json::json!({ "state": { "is-muted": "boolean" } }),
+            serde_json::json!({ "methods": { "function": "()" } }),
+            serde_json::json!({ "methods": { "set": "(local: float)" } }),
+            serde_json::json!({ "events": { "Volume.Changed": { "level": "float" } } }),
+            serde_json::json!({ "events": { "Changed": { "1st": "float" } } }),
+        ] {
+            let outcome = parse_interface_contract("mesh.audio", "1.0", &declaration)
+                .and_then(|parsed| parsed.compile(DeclarationProvenance::unknown()).map(|_| ()));
+            assert!(
+                matches!(outcome, Err(ContractError::InvalidDeclaration { .. })),
+                "{declaration}"
+            );
+        }
+        assert!(is_luau_identifier("_volume2"));
     }
 
     #[test]
