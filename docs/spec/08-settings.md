@@ -12,6 +12,14 @@ stored overrides**
 props, manifest surface placement, and shell prop declarations. The store
 holds *only values the user changed*.
 
+**Shipped — Advanced Settings optimistic edits:** component prop, provider and
+module-enabled controls keep a request-scoped display override only while their
+service call is pending. Completion clears that request's override, including on
+failure, and returns display ownership to authoritative snapshots. An older
+completion cannot clear a newer edit. Profile changes discard pending display
+state; instance teardown cancels the instance-owned waiting tasks. A failed
+request displays a localized update-failed notice.
+
 Ordered customizable-slot placements are sparse profile composition, not
 settings-store preferences. They live in profile nodeSlots records because
 they affect the activation closure and runtime component tree. Source defaults

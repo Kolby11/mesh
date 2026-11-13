@@ -199,6 +199,7 @@
   "advanced.no_modules_published": "Zatiaľ neboli zverejnené žiadne nainštalované moduly",
   "advanced.of": "z",
   "advanced.modules_match": "modulov zodpovedá",
+  "advanced.update_failed": "Aktualizácia zlyhala",
   "advanced.switching_live": "Prebieha prepnutie",
   "advanced.applying_live": "Prebieha použitie",
   "advanced.module_preferences": "Predvoľby modulov",

@@ -21,6 +21,15 @@ commands, and fallback policy in Luau. They do not grant domain control access.
 
 ## Delivery and lifetime
 
+Normal shell turns reap completed retired service/bridge task records and restart
+timers. Retired backends remain owned until both tasks finish, preserving
+authored stop hooks and the bounded shutdown join for tasks still running.
+
+Subprocess streams register their process task and publish `started` before
+workers can publish output, EOF, failures or exit. Queue overflow can still
+drop records according to the bounded queue policy; it cannot move a handle
+back to running after its terminal status.
+
 `on_stream_event(self, event)` receives `started`, `line`, `eof`, `failed`,
 `exited` and `overflow` records, with the owning handle in `event.stream`.
 The line payload is `event.line`. Alternatively, define

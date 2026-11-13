@@ -1134,6 +1134,14 @@ default for a malformed argument.
   Synchronous `mesh.exec` waits release a multithreaded Tokio runtime's worker
   so independent tasks can progress. Outside Tokio, or on a current-thread
   runtime, they retain the ordinary blocking behavior.
+- **Shipped — backend task retirement.** Normal shell turns discard completed
+  retired backend task records and restart timers. A retired backend remains
+  owned until both service and event bridge finish; running tasks remain
+  available to the bounded shutdown join.
+- **Shipped — subprocess stream startup ordering.** Subprocess workers begin
+  publishing only after process registration and `started` publication. Immediate
+  output or exit cannot precede startup or be overwritten by a late running
+  status; bounded queue overflow may still discard records.
 - **Shipped — native backend events.** Capability-gated D-Bus signals, PipeWire
   Node/Metadata invalidations, route netlink groups, wlr foreign-toplevel events,
   inotify watches and Unix socket streams use the bounded, generation-owned

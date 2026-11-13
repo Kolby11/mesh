@@ -199,6 +199,7 @@
   "advanced.no_modules_published": "No installed modules published yet",
   "advanced.of": "of",
   "advanced.modules_match": "modules match",
+  "advanced.update_failed": "Update failed",
   "advanced.switching_live": "Switching live",
   "advanced.applying_live": "Applying live",
   "advanced.module_preferences": "Module preferences",

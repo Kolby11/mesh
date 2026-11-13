@@ -120,6 +120,10 @@ Text and numeric controls use one native runtime input path. Source tags configu
 | `stepper` | Numeric input with stepper source semantics and default step metadata. |
 
 Text inputs support `value`, `placeholder`, `disabled`, `readonly`, `required`, `invalid`, `oninput`, and `onchange`. Runtime edits dispatch `oninput` for immediate value updates and keep `onchange` compatibility for committed/current value handlers.
+Masked inputs interpret selection and caret offsets in source UTF-8 bytes, then
+map valid character boundaries to displayed mask positions; invalid offsets
+are ignored.
+
 
 ```xml
 <search value="{query}" placeholder="Search modules" oninput={on_query_input} />

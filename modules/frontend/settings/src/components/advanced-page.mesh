@@ -172,6 +172,27 @@ local pending_module_enabled = {}
 local provider_notice = ""
 local module_notice = ""
 local pending_props = {}
+optimistic_revision = 0
+local packages = require("mesh.packages")
+local pending_profile = packages and packages.active_profile
+
+local function settle_edit(pending, key, edit, send)
+    optimistic_revision = optimistic_revision + 1
+    task.spawn(function()
+        local succeeded, completion = pcall(function() return send():await() end)
+        if pending[key] ~= edit then return end
+        pending[key] = nil
+        optimistic_revision = optimistic_revision + 1
+        if not succeeded or completion.status ~= "ok"
+            or (type(completion.result) == "table" and completion.result.ok == false) then
+            provider_notice = "advanced.update_failed"
+            module_notice = "advanced.update_failed"
+        else
+            provider_notice = ""
+            module_notice = ""
+        end
+    end)
+end
 selected_prop_scope_module = ""
 selected_prop_scope_instance = ""
 
@@ -284,6 +305,16 @@ local function update_local_prop(module_id, name, value, has_override, instance_
 end
 
 effect(function()
+    if optimistic_revision == nil then return end
+    local profile = packages and packages.active_profile
+    if profile ~= pending_profile then
+        table.clear(pending_props)
+        table.clear(pending_providers)
+        table.clear(pending_module_enabled)
+        provider_notice = ""
+        module_notice = ""
+        pending_profile = profile
+    end
     local graph = {}
     if debug_service and type(debug_service.module_graph) == "table" then
         graph = debug_service.module_graph
@@ -339,7 +370,7 @@ effect(function()
         local candidates = provider_candidates[interface] or {}
         provider_rows[#provider_rows + 1] = {
             interface = interface,
-            provider = pending_providers[interface] or active_providers[interface] or pair.provider,
+            provider = pending_providers[interface] and pending_providers[interface].value or active_providers[interface] or pair.provider,
             action_hidden = #candidates < 2,
         }
     end
@@ -353,8 +384,9 @@ effect(function()
     for i = 1, math.min(#matched, 12) do
         local entry = matched[i]
         local module_id = tostring(entry.module_id or "")
-        local enabled = pending_module_enabled[module_id]
-        if enabled == nil then enabled = entry.enabled ~= false end
+        local edit = pending_module_enabled[module_id]
+        local enabled = entry.enabled ~= false
+        if edit ~= nil then enabled = edit.value end
         local uses = entry.uses or {}
         local provides = entry.provides or {}
         local diagnostics = entry.diagnostics or {}
@@ -498,11 +530,14 @@ end)
 local function write_prop(method, module_id, name, value, instance_id)
     local settings = require("mesh.settings")
     local scope = instance_id ~= "" and instance_id or nil
-    if method == "unset_prop" then
-        settings.unset_prop(module_id, scope, name)
-    else
-        settings.set_prop(module_id, scope, name, value)
-    end
+    local key = pending_key(module_id, instance_id, name)
+    local edit = pending_props[key]
+    settle_edit(pending_props, key, edit, function()
+        if method == "unset_prop" then
+            return settings.unset_prop(module_id, scope, name)
+        end
+        return settings.set_prop(module_id, scope, name, value)
+    end)
 end
 
 function onPropScopeNext(module_id, current, instances)
@@ -599,17 +634,23 @@ function onProviderNext(interface, current)
         if provider == current then index = i end
     end
     local provider_id = candidates[(index % #candidates) + 1]
-    pending_providers[interface] = provider_id
+    local edit = { value = provider_id }
+    pending_providers[interface] = edit
     provider_notice = "advanced.switching_live"
-    require("mesh.packages").set_provider(interface, provider_id)
+    settle_edit(pending_providers, interface, edit, function()
+        return packages.set_provider(interface, provider_id)
+    end)
 end
 
 function onModuleToggle(module_id, current_enabled)
     if module_id == "" or module_id == "@mesh/settings" then return end
     local enabled = not current_enabled
-    pending_module_enabled[module_id] = enabled
+    local edit = { value = enabled }
+    pending_module_enabled[module_id] = edit
     module_notice = "advanced.applying_live"
-    require("mesh.packages").set_module_enabled(module_id, enabled)
+    settle_edit(pending_module_enabled, module_id, edit, function()
+        return packages.set_module_enabled(module_id, enabled)
+    end)
 end
 
 function onModuleDetails(module_id)

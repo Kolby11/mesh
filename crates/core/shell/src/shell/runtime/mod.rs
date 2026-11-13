@@ -578,6 +578,7 @@ impl Shell {
 
             let prewarm_after = std::time::Instant::now() + SURFACE_PREWARM_DELAY;
             while !self.core.shutting_down {
+                self.reap_completed_backend_tasks();
                 let loop_started = std::time::Instant::now();
                 if loop_started >= self.next_watch_reconcile {
                     self.next_watch_reconcile =
@@ -1797,6 +1798,43 @@ mod tests {
             panic!("expected state update");
         };
         assert_eq!(payload["value"], serde_json::json!(999));
+    }
+
+    #[test]
+    fn completed_backend_records_are_reaped_without_aborting_live_tasks() {
+        let runtime = Runtime::new().unwrap();
+        let mut shell = Shell::new();
+        let finished = runtime.spawn(async {});
+        let finished_bridge = runtime.spawn(async {});
+        let finished_timer = runtime.spawn(async {});
+        runtime.block_on(async {
+            while !finished.is_finished() || !finished_bridge.is_finished() || !finished_timer.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        });
+        shell.retiring_backend_runtimes.push(BackendRuntimeTasks::new(finished, finished_bridge));
+        shell.backend_restart_tasks.push(finished_timer);
+        let (release, wait) = tokio::sync::oneshot::channel::<()>();
+        let live = BackendRuntimeTasks::new(
+            runtime.spawn(async {}),
+            runtime.spawn(async { std::future::pending::<()>().await }),
+        );
+        shell.retiring_backend_runtimes.push(live.clone());
+        shell.backend_restart_tasks.push(runtime.spawn(async { let _ = wait.await; }));
+        shell.reap_completed_backend_tasks();
+        assert_eq!(shell.retiring_backend_runtimes.len(), 1);
+        assert_eq!(shell.backend_restart_tasks.len(), 1);
+        assert!(!live.is_finished());
+        release.send(()).unwrap();
+        live.abort();
+        runtime.block_on(async {
+            while !live.is_finished() || !shell.backend_restart_tasks[0].is_finished() {
+                tokio::task::yield_now().await;
+            }
+        });
+        shell.reap_completed_backend_tasks();
+        assert!(shell.retiring_backend_runtimes.is_empty());
+        assert!(shell.backend_restart_tasks.is_empty());
     }
 
     #[test]

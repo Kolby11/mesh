@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-11-11
+**Updated:** 2026-11-13
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and measurements live in [`log/`](log/README.md).
 
@@ -11,6 +11,8 @@ Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and measurem
 - The 2026-11-11 performance scan landed its backend I/O fixes (shared D-Bus connection, pidfd exec waits, compiled contract validation) and signal-driven Bluetooth/power-profile providers; its unfixed findings are under "Scan findings" in the backlog.
 
 ## Next
+
+- Continue scoped backlog correctness work after subprocess startup ordering, masked-input selection mapping and completed backend task retirement and Advanced Settings optimistic reconciliation; fixes and focused regressions are complete.
 
 - Address independent correctness defects from the recent audit in scoped waves, prioritizing input, rendering and backend lifecycle. Keep shared tracking changes centralized.
 - Continue the incomplete whole-codebase audit and reconcile its coverage.

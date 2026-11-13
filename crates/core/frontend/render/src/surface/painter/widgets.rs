@@ -21,6 +21,17 @@ fn scrollbar_colors(color: Color) -> (Color, Color) {
     (with_alpha(0.20), with_alpha(0.64))
 }
 
+fn input_display_offset(value: &str, masked: bool, offset: usize) -> Option<usize> {
+    if offset > value.len() || !value.is_char_boundary(offset) {
+        return None;
+    }
+    Some(if masked {
+        value[..offset].chars().count()
+    } else {
+        offset
+    })
+}
+
 impl FrontendRenderEngine {
     pub(super) fn render_display_input_node(
         &self,
@@ -82,16 +93,11 @@ impl FrontendRenderEngine {
             (y + (style.padding.top * scale) as i32 + ((inner_height - glyph_height) / 2).max(0))
                 .max(0) as u32;
 
-        let selected = input
-            .selection
-            .filter(|(start, end)| {
-                *start <= display_text.len()
-                    && *end <= display_text.len()
-                    && display_text.is_char_boundary(*start)
-                    && display_text.is_char_boundary(*end)
-                    && start != end
-            })
-            .map(|(start, end)| (start.min(end), start.max(end)));
+        let selected = input.selection.and_then(|(start, end)| {
+            let start = input_display_offset(&input.value, input.mask_text, start)?;
+            let end = input_display_offset(&input.value, input.mask_text, end)?;
+            (start != end).then_some((start.min(end), start.max(end)))
+        });
         let mut selection_rect = None;
         if input.focused
             && let Some((start, end)) = selected
@@ -189,16 +195,7 @@ impl FrontendRenderEngine {
 
             let cursor = input
                 .cursor
-                .filter(|cursor| {
-                    *cursor <= input.value.len() && input.value.is_char_boundary(*cursor)
-                })
-                .map(|cursor| {
-                    if input.mask_text {
-                        input.value[..cursor].chars().count()
-                    } else {
-                        cursor
-                    }
-                });
+                .and_then(|cursor| input_display_offset(&input.value, input.mask_text, cursor));
             let caret_width = preedit
                 .map(|preedit| {
                     self.text_renderer
@@ -538,6 +535,20 @@ fn push_scroll_part_commands(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn masked_input_offsets_follow_displayed_characters() {
+        let value = "aé🦀z";
+        assert_eq!(input_display_offset(value, true, 1), Some(1));
+        assert_eq!(input_display_offset(value, true, 3), Some(2));
+        assert_eq!(input_display_offset(value, true, 7), Some(3));
+        assert_eq!(input_display_offset(value, true, value.len()), Some(4));
+        assert_eq!(input_display_offset(value, false, 7), Some(7));
+        for invalid in [2, 4, 5, 6, 9] {
+            assert_eq!(input_display_offset(value, true, invalid), None);
+            assert_eq!(input_display_offset(value, false, invalid), None);
+        }
+    }
 
     #[test]
     fn scrollbar_colors_preserve_the_resolved_theme_color() {

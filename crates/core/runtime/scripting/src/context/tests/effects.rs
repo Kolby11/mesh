@@ -277,3 +277,74 @@ count = utf8.len(text)
     assert_eq!(ctx.state().get("cut"), Some(json!("éé")));
     assert_eq!(ctx.state().get("count"), Some(json!(5)));
 }
+
+#[test]
+fn advanced_settings_reconciles_pending_edits_by_request_and_profile() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let source = std::fs::read_to_string(root.join("modules/frontend/settings/src/components/advanced-page.mesh")).unwrap();
+    let script = source.split_once("<script lang=\"luau\">").unwrap().1.split_once("</script>").unwrap().0;
+    let prefix = r#"
+local completions = {}
+local serial = 0
+local function send(...)
+    serial = serial + 1
+    local id = serial
+    return { await = function()
+        while completions[id] == nil do task.sleep(1) end
+        return completions[id]
+    end }
+end
+local mock_packages = { active_profile = "first", set_module_enabled = send, set_provider = send }
+local mock_settings = { set_prop = send, unset_prop = send }
+local function require(name)
+    if name == "mesh.packages" then return mock_packages end
+    if name == "mesh.settings" then return mock_settings end
+    return {}
+end
+local function import(...) return function(key) return key end end
+"#;
+    let suffix = r#"
+function complete(id, status)
+    completions[id] = { status = status, result = { ok = status == "ok" } }
+end
+function inspect_pending()
+    pending_module = pending_module_enabled["@test/module"] ~= nil
+    local count = 0
+    for _ in pairs(pending_props) do count = count + 1 end
+    pending_prop_count = count
+    notice = module_notice
+end
+function switch_profile()
+    mock_packages.active_profile = "second"
+    optimistic_revision = optimistic_revision + 1
+end
+"#;
+    let mut ctx = ScriptContext::new("@test/advanced", CapabilitySet::default()).unwrap();
+    ctx.load_script(&format!("{prefix}\n{script}\n{suffix}")).unwrap();
+    assert!(ctx.run_reactive_effects().is_empty());
+    ctx.call_handler("onModuleToggle", &[json!("@test/module"), json!(true)]).unwrap();
+    ctx.call_handler("onModuleToggle", &[json!("@test/module"), json!(false)]).unwrap();
+    ctx.call_handler("complete", &[json!(1), json!("ok")]).unwrap();
+    assert!(ctx.run_due_tasks(std::time::Instant::now() + std::time::Duration::from_millis(20)).is_empty());
+    ctx.call_handler("inspect_pending", &[]).unwrap();
+    assert_eq!(ctx.state().get("pending_module"), Some(json!(true)));
+    ctx.call_handler("complete", &[json!(2), json!("error")]).unwrap();
+    assert!(ctx.run_due_tasks(std::time::Instant::now() + std::time::Duration::from_millis(40)).is_empty());
+    ctx.call_handler("inspect_pending", &[]).unwrap();
+    assert_eq!(ctx.state().get("pending_module"), Some(json!(false)));
+    assert_eq!(ctx.state().get("notice"), Some(json!("advanced.update_failed")));
+    ctx.call_handler("onPropToggle", &[json!("@test/module"), json!("enabled"), json!(false), json!("")]).unwrap();
+    ctx.call_handler("complete", &[json!(3), json!("ok")]).unwrap();
+    assert!(ctx.run_due_tasks(std::time::Instant::now() + std::time::Duration::from_millis(50)).is_empty());
+    ctx.call_handler("inspect_pending", &[]).unwrap();
+    assert_eq!(ctx.state().get("pending_prop_count"), Some(json!(0)));
+    ctx.call_handler("onPropToggle", &[json!("@test/module"), json!("enabled"), json!(false), json!("")]).unwrap();
+    ctx.call_handler("switch_profile", &[]).unwrap();
+    assert!(ctx.run_reactive_effects().is_empty());
+    ctx.call_handler("inspect_pending", &[]).unwrap();
+    assert_eq!(ctx.state().get("pending_prop_count"), Some(json!(0)));
+    ctx.call_handler("complete", &[json!(4), json!("error")]).unwrap();
+    assert!(ctx.run_due_tasks(std::time::Instant::now() + std::time::Duration::from_millis(60)).is_empty());
+    ctx.call_handler("inspect_pending", &[]).unwrap();
+    assert_eq!(ctx.state().get("notice"), Some(json!("")));
+}

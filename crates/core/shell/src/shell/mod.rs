@@ -979,6 +979,11 @@ impl BackendRuntimeTasks {
         }
     }
 
+    fn is_finished(&self) -> bool {
+        self.service.lock().unwrap().as_ref().is_none_or(JoinHandle::is_finished)
+            && self.bridge.lock().unwrap().as_ref().is_none_or(JoinHandle::is_finished)
+    }
+
     fn abort(&self) {
         if let Some(task) = self.service.lock().unwrap().as_ref() {
             task.abort();

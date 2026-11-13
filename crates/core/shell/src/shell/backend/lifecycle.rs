@@ -7,6 +7,11 @@ use tokio::task::JoinHandle;
 const BACKEND_STOP_DEADLINE: Duration = Duration::from_secs(2);
 
 impl Shell {
+    pub(in crate::shell) fn reap_completed_backend_tasks(&mut self) {
+        self.retiring_backend_runtimes.retain(|tasks| !tasks.is_finished());
+        self.backend_restart_tasks.retain(|task| !task.is_finished());
+    }
+
     /// Request every live backend to stop through its command channel and
     /// synchronously join the service and bridge tasks. The command sender is
     /// dropped before waiting so the backend guard can invoke authored `stop`,
@@ -624,7 +629,7 @@ impl Shell {
     }
 
     /// Close a backend's command ingress and retain both runtime task handles
-    /// for the shutdown join. Closing the command channel lets the backend
+    /// until completion or the shutdown join. Closing the command channel lets the backend
     /// lifecycle guard run the authored stop hook and flush durable storage;
     /// abort is reserved for the bounded final cleanup path.
     pub(in crate::shell) fn retire_backend_runtime_slot(&mut self, slot: BackendRuntimeSlot) {

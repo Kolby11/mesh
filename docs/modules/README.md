@@ -82,6 +82,11 @@ widths and a stacked layout at 960px or below. The dock reserves space above the
 shelf for its selected and neighboring lenses to rise. Motion uses theme timing
 and easing, with separate entrance animations for islands, cards and popups.
 
+The Advanced Settings page correlates optimistic prop, provider and module
+edits with their individual service calls. Completed or failed calls release
+local overrides; stale completions cannot replace newer edits. Changing profiles
+clears pending display state, and failures show a localized notice.
+
 ## Service providers
 
 | Module | Kind | Entrypoint | Interface/integration |

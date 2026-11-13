@@ -514,6 +514,8 @@ pub(crate) fn spawn_stream_with_launch_program(
     argv0: String,
     locale: &super::exec::ExecLocale,
 ) -> std::io::Result<StreamHandle> {
+    let executor = tokio::runtime::Handle::try_current()
+        .map_err(|_| std::io::Error::other("exec_stream requires a Tokio runtime"))?;
     let stream = state.register(program, args)?;
     let mut command = Command::new(&launch_program);
     if let Some(value) = locale.lc_all() {
@@ -545,17 +547,19 @@ pub(crate) fn spawn_stream_with_launch_program(
     let accounted = Arc::new(AtomicBool::new(false));
     let task_state = Arc::clone(state);
     let task_stream = stream.clone();
-    let task_accounted = Arc::clone(&accounted);
-    let task_resources = state.resources.clone();
-    let task = tokio::runtime::Handle::try_current()
-        .map_err(|_| std::io::Error::other("exec_stream requires a Tokio runtime"))?
-        .spawn(async move {
-            let _budget = ChildBudgetGuard {
-                resources: task_resources,
-                accounted: task_accounted,
-            };
+    let budget = ChildBudgetGuard {
+        resources: state.resources.clone(),
+        accounted: Arc::clone(&accounted),
+    };
+    let (start_tx, start_rx) = oneshot::channel();
+    let task = executor.spawn(async move {
+        let _budget = budget;
+        // Registration and Started publication must precede output, overflow
+        // stop requests and terminal status updates on other executor threads.
+        if start_rx.await.is_ok() {
             run_stream(task_state, task_stream, child, stdout, stderr, stop_rx).await;
-        });
+        }
+    });
 
     state.insert_process(StreamProcess {
         stream: stream.clone(),
@@ -567,6 +571,7 @@ pub(crate) fn spawn_stream_with_launch_program(
         stream: stream.clone(),
         kind: StreamEventKind::Started,
     });
+    let _ = start_tx.send(());
     Ok(stream)
 }
 
@@ -762,6 +767,38 @@ fn exit_signal(_status: &std::process::ExitStatus) -> Option<i32> {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn immediate_exit_cannot_precede_started_or_restore_running_status() {
+        for _ in 0..64 {
+            let state = StreamState::new();
+            let stream =
+                spawn_stream(&state, "sh".into(), vec!["-c".into(), "printf done".into()]).unwrap();
+            let events = tokio::time::timeout(Duration::from_secs(5), async {
+                let mut events = Vec::new();
+                loop {
+                    state.wait_for_event().await;
+                    events.extend(state.drain_events());
+                    if events
+                        .iter()
+                        .any(|event| matches!(event.kind, StreamEventKind::Exited(_)))
+                    {
+                        break events;
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert!(matches!(events[0].kind, StreamEventKind::Started));
+            assert!(
+                events.iter().any(
+                    |event| matches!(&event.kind, StreamEventKind::Line(line) if line == "done")
+                )
+            );
+            assert!(matches!(stream.status(), StreamStatus::Exited(_)));
+            state.shutdown().await;
+        }
+    }
 
     #[tokio::test]
     async fn streams_have_distinct_handles_even_for_same_program() {

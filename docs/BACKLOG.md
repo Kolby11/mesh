@@ -41,17 +41,14 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Align fixed-descendant transforms in subtree preclipping and compositor blur-region collection with actual painting; inherited transforms can reject or misplace viewport-fixed content. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/12-rendering-and-paint.md).
 - [ ] Retain bounded ready SVG rasters with linked-resource freshness; external-resource SVG results are consumed once and rerasterize on later independent paints. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/12-rendering-and-paint.md).
 - [ ] Bound and deduplicate persistent painter diagnostics; rejected commands currently append repeated records across frames without normal-service retirement. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/12-rendering-and-paint.md).
-- [ ] Map masked-input selection endpoints from source UTF-8 offsets to displayed mask positions; IME selection currently slices the shorter mask using original byte indices. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/12-rendering-and-paint.md).
 - [ ] Invalidate wallpaper preview caches by source freshness and retry repaired failures; path-only entries currently keep stale thumbnails, colors and panoramas. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/11-luau-runtime-and-sandbox.md).
 - [ ] Define optional-value clearing in surface policy patches; `between(base, target)` currently cannot represent Some-to-None transitions. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/13-surface-policy-and-configuration.md).
 - [ ] Scope and offload LSP registry refreshes; every unsaved document edit currently hashes the full graph and rediscovers host fonts/icons synchronously. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/16-developer-and-authoring-tools.md).
 - [ ] Index semantic-token coordinates instead of rescanning each document prefix; coordinate work currently grows quadratically with token-dense source. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/16-developer-and-authoring-tools.md).
 - [ ] Use parsed block spans and declared component props in authoring queries; raw tag searches and public-script-member lookup currently misidentify blocks and input completions. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/16-developer-and-authoring-tools.md).
 - [ ] Apply socket connection deadlines and cancellation during establishment; blocking Unix connect currently precedes configured read/write timeouts. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/11-luau-runtime-and-sandbox.md).
-- [ ] Admit subprocess streams and publish Started before worker execution; immediate output or exit can currently precede registration and overwrite terminal status. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/11-luau-runtime-and-sandbox.md).
 - [ ] Preserve supervised failure/quarantine history through backend readiness and continue bounded recovery after replacement initialization fails; completion currently resets history and pending failures stop retries. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/15-shell-core-and-orchestration.md).
 - [ ] Bound backend ingress through the final shell consumer; bridges currently drain bounded producer queues into an unbounded inbox before coalescing. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/15-shell-core-and-orchestration.md).
-- [ ] Reap completed retired backend and restart-timer task records during service; bookkeeping currently grows until shell shutdown. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/15-shell-core-and-orchestration.md).
 - [ ] Dispatch sourced effects returned by bound-state publication and rollback; hidden components currently run and drain effects whose shell requests are then discarded. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/15-shell-core-and-orchestration.md).
 - [ ] Reclaim completed service-call results when tickets/awaiters no longer retain them; discarded control tickets currently leave results resident until context reload or uninit. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/11-luau-runtime-and-sandbox.md).
 - [ ] Validate exact backlog-item removal in the claimed feature commit and share runner policy; both launchers currently check mutable worktree state and accept multiple removals. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/16-developer-and-authoring-tools.md).
@@ -134,6 +131,23 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 - [ ] Prevent scheduler contention from exhausting the frontend callback wall-clock budget before
       a component initializes; the inspector can render an error placeholder under CPU contention.
+
+## Shell design capabilities
+
+Scope and source evidence: [capability assessment](../.planning/todos/pending/2026-11-13-design-capabilities.md).
+
+- [ ] Verify and document kerning/tabular-number shaping, tracking and leading end to end; feature plumbing and spacing exist, but real-font measurement/paint and fallback behavior need coverage.
+- [ ] Add font metric sizing and readable text measures (x-height adjustment, `ch`/`ex` or equivalent), plus optical/baseline alignment guidance; current dimensions do not expose font-relative measures.
+- [ ] Design bounded widow avoidance/balanced UI wrapping; ordinary wrapping does not establish last-line quality or locale-safe balancing.
+- [ ] Define layout-shift prevention for delayed resources and font replacement, with intrinsic-size reservation and stable counter/placeholder examples; verify existing sizing mechanisms before adding APIs.
+- [ ] Define touch-target sizing/hit expansion and theme affordance checks; cover overlaps, transforms, clipping, semantic bounds and actual touch delivery rather than relying on scrollbar hit slop.
+- [ ] Expose authoritative safe-area/usable-content insets to components, distinguishing output work areas, surface-local constraints and occlusion; define unsupported-compositor fallback and multi-output/scale updates.
+- [ ] Implement accessible editable combobox behavior using input/listbox/popup primitives where possible; existing `select`/menu behavior does not establish IME, active-option and async filtering semantics.
+- [ ] Verify progressive-disclosure focus, semantics and lazy-child lifetime; publish nested/advanced-settings patterns using existing details/popovers rather than a new element.
+- [ ] Complete resolved-trigger animation origins and stable-key stagger authoring; origins/delays exist, but constrained popup placement, dynamic lists and reduced-motion behavior need a documented contract.
+- [ ] Verify interruptible animation lifecycle across keyframes, delays and surface show/hide; sampled transition reversal exists, while cancellation/completion and rapid-toggle behavior need coverage.
+- [ ] Add explicit perceptual color interpolation with OKLCH hue/alpha/gamut rules; OKLCH parsing already exists and does not imply perceptual interpolation or wide-gamut presentation.
+- [ ] Design scoped shared-element transitions with ready destinations, geometry/clip mapping, cancellation, focus and reduced motion; start within one surface before proving cross-surface support.
 
 ## Change-proportional frame pipeline — next implementation priority
 
@@ -291,7 +305,6 @@ evidence and test workloads are in the linked reports.
 
 - [ ] Provide a real evaluator for production preview expressions; the current no-composition path returns null while unit tests use Luau. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Assess collision-safe equality for frontend memo fingerprints; the 64-bit hash alone decides reuse. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
-- [ ] Reconcile advanced Settings optimistic edits with authoritative results; pending props, provider and module states currently override later snapshots indefinitely. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] **S10-PERF-001 / S10-PERF-002 / S10-PERF-003:** Cache tree/style preparation and recursive imports by
       content revision, and narrow effect/state observation summaries after
       measuring rebuild and service-update workloads. [Audit](../.planning/codebase/audits/2026-09-01-whole-codebase/sections/10-frontend-compiler-and-host.md)
