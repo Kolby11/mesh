@@ -49,7 +49,9 @@ mesh rollback [<generation>]     # restore a previous lock generation
 mesh lock verify                 # recompute digests; report local edits
 mesh uninstall <module-id>       # refuses while something still requires it
 mesh profile add <profile> <module-id>     # add a root or provider choice
-mesh profile remove <profile> <module-id>  # unwire it from that profile
+mesh profile remove <profile> <module#instance>  # delete an added root, reset an
+                                 # override, or disable an inherited root
+mesh profile enable|disable <profile> <module#instance>  # works on inherited roots
 mesh list                        # installed modules, kinds, versions, health
 mesh providers [<interface>]     # implementers + active provider; set with:
 mesh providers <profile> <interface> <module-id>

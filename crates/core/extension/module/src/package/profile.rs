@@ -57,6 +57,33 @@ pub struct ShellProfile {
     pub settings: BTreeMap<String, serde_json::Value>,
 }
 
+/// What [`ShellProfile::remove_root`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RootRemoval {
+    /// The profile's own root was deleted.
+    Removed,
+    /// The profile's override was deleted; the composition's root remains.
+    ResetToInherited,
+    /// An inherited root now has an `active: false` override.
+    DeactivatedInherited,
+    /// Neither the profile nor its composition has the root.
+    Missing,
+}
+
+/// The roots a profile inherits from its composition, before its own deltas.
+pub fn inherited_roots<'a>(
+    profile: &ShellProfile,
+    manifests: impl IntoIterator<Item = &'a ModuleManifest>,
+) -> Result<BTreeMap<String, ProfileRootInstance>, ModuleManifestError> {
+    if profile.from.is_none() {
+        return Ok(BTreeMap::new());
+    }
+    let mut base = profile.clone();
+    base.roots.clear();
+    base.node_slots.clear();
+    Ok(super::resolve_composition(&base, manifests)?.spec.roots)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProfileRootInstance {
@@ -376,20 +403,62 @@ impl ShellProfile {
         Ok(instance_id)
     }
 
-    pub fn set_instance_active(
+    /// Activate or deactivate a root, writing a sparse `active` override when
+    /// the root is inherited from the profile's composition (`inherited`, see
+    /// [`inherited_roots`]) rather than declared by the profile itself.
+    pub fn set_root_active(
         &mut self,
         instance_id: &str,
         active: bool,
+        inherited: &BTreeMap<String, ProfileRootInstance>,
     ) -> Result<(), ModuleManifestError> {
-        let instance = self.roots.get_mut(instance_id).ok_or_else(|| {
-            ModuleManifestError::Validation(format!("profile has no root instance {instance_id}"))
-        })?;
-        instance.active = Some(active);
+        if let Some(instance) = self.roots.get_mut(instance_id) {
+            instance.active = Some(active);
+            return Ok(());
+        }
+        let Some(base) = inherited.get(instance_id) else {
+            return Err(ModuleManifestError::Validation(format!(
+                "profile has no root instance {instance_id}"
+            )));
+        };
+        self.roots.insert(
+            instance_id.to_string(),
+            ProfileRootInstance {
+                module: base.module.clone(),
+                entrypoint: base.entrypoint.clone(),
+                active: Some(active),
+                surface: None,
+            },
+        );
         Ok(())
     }
 
-    pub fn remove_instance(&mut self, instance_id: &str) -> bool {
-        self.roots.remove(instance_id).is_some()
+    /// Remove a root from the profile's effective composition. A root the
+    /// profile added is deleted; an override of an inherited root is reset to
+    /// the composition's version; an inherited root without an override is
+    /// deactivated, because the composition would otherwise bring it back.
+    pub fn remove_root(
+        &mut self,
+        instance_id: &str,
+        inherited: &BTreeMap<String, ProfileRootInstance>,
+    ) -> RootRemoval {
+        match (self.roots.remove(instance_id), inherited.get(instance_id)) {
+            (Some(_), None) => RootRemoval::Removed,
+            (Some(_), Some(_)) => RootRemoval::ResetToInherited,
+            (None, Some(base)) => {
+                self.roots.insert(
+                    instance_id.to_string(),
+                    ProfileRootInstance {
+                        module: base.module.clone(),
+                        entrypoint: base.entrypoint.clone(),
+                        active: Some(false),
+                        surface: None,
+                    },
+                );
+                RootRemoval::DeactivatedInherited
+            }
+            (None, None) => RootRemoval::Missing,
+        }
     }
 
     /// Whether any profile-owned root, provider, service, resource, node-slot
@@ -2118,6 +2187,49 @@ mod tests {
         profile.remove_module_references("@mesh/audio");
         assert!(!profile.references_module("@mesh/audio"));
         assert!(profile.references_module("@mesh/desktop"));
+    }
+
+    #[test]
+    fn inherited_roots_can_be_deactivated_reset_and_removed() {
+        let desk = ModuleManifest::from_json_str(
+            r#"{"name":"@me/desk","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition",
+                "compose":{"roots":{"@me/panel#top":{"module":"@me/panel"}}}}}"#,
+        )
+        .unwrap();
+        let clock = ModuleManifest::from_json_str(
+            r#"{"name":"@me/clock","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
+        )
+        .unwrap();
+        let mut profile = ShellProfile::from_json_str(
+            r#"{"schemaVersion":3,"from":{"module":"@me/desk"}}"#,
+        )
+        .unwrap();
+        let inherited = inherited_roots(&profile, [&desk, &clock]).unwrap();
+        assert_eq!(inherited.keys().collect::<Vec<_>>(), ["@me/panel#top"]);
+
+        profile.set_root_active("@me/panel#top", false, &inherited).unwrap();
+        assert_eq!(profile.roots["@me/panel#top"].active, Some(false));
+        let effective = crate::package::resolve_composition(&profile, [&desk, &clock])
+            .unwrap()
+            .to_profile();
+        assert!(!effective.roots["@me/panel#top"].is_active());
+
+        assert_eq!(
+            profile.remove_root("@me/panel#top", &inherited),
+            RootRemoval::ResetToInherited
+        );
+        assert!(profile.roots.is_empty());
+        assert_eq!(
+            profile.remove_root("@me/panel#top", &inherited),
+            RootRemoval::DeactivatedInherited
+        );
+        assert_eq!(profile.roots["@me/panel#top"].active, Some(false));
+
+        let added = profile.add_root(&clock).unwrap();
+        assert_eq!(profile.remove_root(&added, &inherited), RootRemoval::Removed);
+        assert_eq!(profile.remove_root(&added, &inherited), RootRemoval::Missing);
+        assert!(profile.set_root_active("@me/none#x", true, &inherited).is_err());
+        profile.validate().unwrap();
     }
 
     #[test]

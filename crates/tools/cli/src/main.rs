@@ -919,8 +919,9 @@ fn cmd_profile(args: &[String]) {
             let mut profile = paths
                 .load(profile_id)
                 .unwrap_or_else(|error| exit_error(error));
+            let inherited = profile_inherited_roots(&profile);
             profile
-                .set_instance_active(instance_id, active)
+                .set_root_active(instance_id, active, &inherited)
                 .unwrap_or_else(|error| exit_error(error));
             save_profile_revision(&paths, profile_id, &profile)
                 .unwrap_or_else(|error| exit_error(error));
@@ -943,14 +944,24 @@ fn cmd_profile(args: &[String]) {
             let mut profile = paths
                 .load(profile_id)
                 .unwrap_or_else(|error| exit_error(error));
-            if !profile.remove_instance(instance_id) {
-                exit_error(format!(
+            let inherited = profile_inherited_roots(&profile);
+            let message = match profile.remove_root(instance_id, &inherited) {
+                mesh_core_module::package::RootRemoval::Removed => {
+                    format!("removed {instance_id} from profile {profile_id}")
+                }
+                mesh_core_module::package::RootRemoval::ResetToInherited => format!(
+                    "reset {instance_id} in profile {profile_id} to its composition's settings"
+                ),
+                mesh_core_module::package::RootRemoval::DeactivatedInherited => format!(
+                    "disabled {instance_id} in profile {profile_id}; its composition still declares it"
+                ),
+                mesh_core_module::package::RootRemoval::Missing => exit_error(format!(
                     "profile {profile_id} has no instance {instance_id}"
-                ));
-            }
+                )),
+            };
             save_profile_revision(&paths, profile_id, &profile)
                 .unwrap_or_else(|error| exit_error(error));
-            println!("removed {instance_id} from profile {profile_id}");
+            println!("{message}");
         }
         Some("set") => {
             let profile_id = required_arg(
@@ -1024,6 +1035,24 @@ fn cmd_profile(args: &[String]) {
             "unknown profile subcommand: {other}\nsubcommands: list, create, use, show, add, enable, disable, remove, set, unset, prune"
         )),
     }
+}
+
+/// The roots `profile` inherits from its composition, read from the installed
+/// graph; empty for a profile without a composition.
+fn profile_inherited_roots(
+    profile: &mesh_core_module::package::ShellProfile,
+) -> std::collections::BTreeMap<String, mesh_core_module::package::ProfileRootInstance> {
+    if profile.from.is_none() {
+        return Default::default();
+    }
+    let graph = load_authoring_snapshot();
+    let manifests = graph
+        .modules()
+        .into_iter()
+        .map(|module| module.manifest.clone())
+        .collect::<Vec<_>>();
+    mesh_core_module::package::inherited_roots(profile, manifests.iter())
+        .unwrap_or_else(|error| exit_error(error))
 }
 
 fn required_arg<'a>(args: &'a [String], index: usize, usage: &str) -> &'a str {
