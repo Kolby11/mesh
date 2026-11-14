@@ -493,6 +493,7 @@ struct AbsoluteToken {
 
 struct TokenBuilder<'a> {
     source: &'a str,
+    lines: crate::util::LineIndex<'a>,
     tokens: Vec<AbsoluteToken>,
 }
 
@@ -500,6 +501,7 @@ impl<'a> TokenBuilder<'a> {
     fn new(source: &'a str) -> Self {
         Self {
             source,
+            lines: crate::util::LineIndex::new(source),
             tokens: Vec::new(),
         }
     }
@@ -551,7 +553,7 @@ impl<'a> TokenBuilder<'a> {
     }
 
     fn line_and_character(&self, offset: usize) -> Option<(u32, u32)> {
-        let position = crate::util::offset_to_position(self.source, offset);
+        let position = self.lines.position(offset);
         Some((position.line, position.character))
     }
 }
@@ -561,6 +563,36 @@ mod tests {
     use tower_lsp::lsp_types::SemanticTokensResult;
 
     use super::*;
+
+    // cargo test -p mesh-tools-lsp --release -- semantic_tokens_release_benchmark --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn semantic_tokens_release_benchmark() {
+        for rows in [250usize, 1_000, 4_000] {
+            let body = (0..rows)
+                .map(|row| format!("    <box class=\"row-{row}\" visible=\"{{shown}}\"><text>{{label}}</text></box>\n"))
+                .collect::<String>();
+            let source = format!("<script>\nlocal shown = true\nlocal label = \"x\"\n</script>\n<template>\n{body}</template>\n");
+            let doc = Document::new(
+                tower_lsp::lsp_types::Url::parse("file:///bench.mesh").unwrap(),
+                source.clone(),
+            );
+            let mut samples = (0..5)
+                .map(|_| {
+                    let started = std::time::Instant::now();
+                    std::hint::black_box(full(&doc));
+                    started.elapsed().as_secs_f64() * 1e3
+                })
+                .collect::<Vec<_>>();
+            samples.sort_by(f64::total_cmp);
+            eprintln!(
+                "rows={rows} bytes={} min={:.2}ms max={:.2}ms",
+                source.len(),
+                samples[0],
+                samples[4]
+            );
+        }
+    }
 
     #[test]
     fn props_semantic_tokens_use_luau_tokens_and_skip_comments() {

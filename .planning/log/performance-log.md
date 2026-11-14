@@ -10435,3 +10435,27 @@ The scene worker renders into at most three dmabuf targets per surface. The ring
 
 Not timed: `scene_pipelining_profile` is paced by frame callbacks on the client side and cannot see compositor import time. Correctness was checked live on Hyprland: `MESH_REQUIRE_GPU=1 cargo test -p mesh-core-presentation --features gpu --test live_compositor_matrix` passes, including six presented scene frames across the three targets and `scene_frame_in_flight_survives_hide_resize_and_destroy`.
 
+
+## 2026-11-14 — LSP semantic-token coordinates from a line index
+
+Audit S16-PERF-23: `TokenBuilder::push` converted each token offset with
+`offset_to_position`, which scans the document from its start, so a full
+semantic-token request was quadratic in document size. `util::LineIndex` records
+line starts once per request; a position is a binary search plus a UTF-16 count
+within the offset's line. `line_index_matches_offset_to_position_at_every_byte`
+checks parity at every byte of a mixed ASCII/accented/emoji/tab source,
+including past the end.
+
+`semantic_tokens_release_benchmark` (ignored, `--release`, synthetic `.mesh`
+with a script and N rows of `<box class visible="{…}"><text>{…}</text></box>`,
+5 runs, min–max):
+
+| Rows (bytes) | Before | After |
+| --- | --- | --- |
+| 250 (17 KB) | 28.5–29.7 ms | 0.26–0.38 ms |
+| 1,000 (70 KB) | 459–461 ms | 1.05–1.33 ms |
+| 4,000 (283 KB) | 7,393–7,413 ms | 4.59–5.91 ms |
+
+Before was measured by restoring the old call in the same tree. Other
+`offset_to_position` callers convert a handful of offsets per request and are
+unchanged.

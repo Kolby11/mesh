@@ -164,9 +164,56 @@ pub fn offset_to_position(source: &str, offset: usize) -> Position {
     Position::new(line, character)
 }
 
+/// Byte offsets of each line start, for repeated [`offset_to_position`]
+/// conversions over one document without rescanning it from the start.
+pub struct LineIndex<'a> {
+    source: &'a str,
+    line_starts: Vec<usize>,
+}
+
+impl<'a> LineIndex<'a> {
+    pub fn new(source: &'a str) -> Self {
+        let line_starts = std::iter::once(0)
+            .chain(source.match_indices('\n').map(|(index, _)| index + 1))
+            .collect();
+        Self {
+            source,
+            line_starts,
+        }
+    }
+
+    /// Same result as [`offset_to_position`], in time proportional to the
+    /// length of the offset's line.
+    pub fn position(&self, offset: usize) -> Position {
+        let mut offset = offset.min(self.source.len());
+        while !self.source.is_char_boundary(offset) {
+            offset -= 1;
+        }
+        let line = self.line_starts.partition_point(|start| *start <= offset) - 1;
+        let character = self.source[self.line_starts[line]..offset]
+            .chars()
+            .map(|ch| ch.len_utf16() as u32)
+            .sum();
+        Position::new(line as u32, character)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn line_index_matches_offset_to_position_at_every_byte() {
+        let source = "a\né😀b\n\n\tz€\nlast";
+        let index = LineIndex::new(source);
+        for offset in 0..=source.len() + 2 {
+            assert_eq!(
+                index.position(offset),
+                offset_to_position(source, offset),
+                "offset {offset}"
+            );
+        }
+    }
 
     #[test]
     fn converts_utf16_positions_to_utf8_offsets() {
