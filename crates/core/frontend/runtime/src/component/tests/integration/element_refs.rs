@@ -148,6 +148,55 @@ end
 }
 
 #[test]
+fn tab_to_a_control_below_the_viewport_scrolls_it_into_view() {
+    let mut component = test_frontend_component(
+        r#"
+<style>
+scroll { width: 160px; height: 60px; overflow-y: auto; }
+.content { height: 240px; flex-shrink: 0; }
+.spacer { height: 200px; }
+button { height: 30px; }
+</style>
+<template>
+    <scroll>
+        <column class="content">
+            <button>First</button>
+            <box class="spacer" />
+            <button>Last</button>
+        </column>
+    </scroll>
+</template>
+"#,
+    );
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(160, 120);
+    component
+        .paint_raster(
+            &theme,
+            SurfaceExtent::unpadded(160, 120).bound_by_compositor(true),
+            &mut buffer,
+            1.0,
+        )
+        .unwrap();
+    let tab = ComponentInput::KeyPressed {
+        key: "Tab".into(),
+        modifiers: KeyModifiers::default(),
+    };
+
+    component.handle_input(&theme, 160, 120, tab.clone()).unwrap();
+    let first = component.focused_key.clone();
+    assert!(component.scroll_animations.is_empty());
+    component.handle_input(&theme, 160, 120, tab).unwrap();
+
+    assert_ne!(component.focused_key, first, "Tab should reach the offscreen button");
+    let animation = component
+        .scroll_animations
+        .get(&runtime_node_id_for_key("root/0"))
+        .expect("focusing the offscreen button should scroll its viewport");
+    assert!(animation.target.y > 100.0, "{:?}", animation.target);
+}
+
+#[test]
 fn refs_scroll_into_view_smoothly_scrolls_the_container_to_reveal_the_target() {
     // A script calling `refs.<name>:scroll_into_view()` enqueues an element action
     // that the shell turns into scroll-offset adjustments on the real overflowing

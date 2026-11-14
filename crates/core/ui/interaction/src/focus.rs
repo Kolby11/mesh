@@ -239,7 +239,13 @@ fn collect_focus_traversal_with_transform(
     }
 
     let child_transform = child_world_transform(world, node);
-    let child_clips = push_node_clip(clips, node, world);
+    // Content scrolled out of a scroll container's viewport stays reachable:
+    // focusing it scrolls it into view. Clips inside the content still apply.
+    let child_clips = if node_scrolls_contents(node) {
+        AffineClipStack::default()
+    } else {
+        push_node_clip(clips, node, world)
+    };
     let child_group = if crate::node_is_source(node, &["tabs"]) {
         Some(node.id)
     } else {
@@ -350,9 +356,58 @@ fn node_is_native_focusable(node: &WidgetNode) -> bool {
         )
 }
 
+fn node_scrolls_contents(node: &WidgetNode) -> bool {
+    node.computed_style.overflow_x.is_scrollable() || node.computed_style.overflow_y.is_scrollable()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn laid_out(key: &str, tag: &str, y: f32, height: f32) -> WidgetNode {
+        let mut node = WidgetNode::new(tag);
+        node.set_mesh_key(key);
+        node.layout.width = 100.0;
+        node.layout.y = y;
+        node.layout.height = height;
+        node
+    }
+
+    /// `root` holds a 100px viewport whose content puts `b` and `c` below it,
+    /// and an `overflow: hidden` box whose clipped child stays unreachable.
+    fn scrolled_tree(overflow: mesh_core_elements::style::Overflow) -> WidgetNode {
+        let mut viewport = laid_out("root/0", "column", 0.0, 100.0);
+        viewport.computed_style.overflow_y = overflow;
+        viewport.scroll_metrics.get_or_insert_default().max_y = 500.0;
+        for (index, y) in [10.0, 300.0, 550.0].into_iter().enumerate() {
+            viewport
+                .children
+                .push(laid_out(&format!("root/0/{index}"), "button", y, 30.0));
+        }
+        let mut root = laid_out("root", "column", 0.0, 400.0);
+        root.children.push(viewport);
+        root
+    }
+
+    #[test]
+    fn tab_reaches_controls_scrolled_out_of_view_in_both_directions() {
+        use mesh_core_elements::style::Overflow;
+
+        let tree = scrolled_tree(Overflow::Auto);
+        let keys = collect_focus_traversal(&tree);
+        assert_eq!(keys, ["root/0/0", "root/0/1", "root/0/2"]);
+        assert_eq!(
+            next_focus_target(&tree, Some("root/0/0"), false).as_deref(),
+            Some("root/0/1")
+        );
+        assert_eq!(
+            next_focus_target(&tree, Some("root/0/0"), true).as_deref(),
+            Some("root/0/2")
+        );
+
+        let hidden = scrolled_tree(Overflow::Hidden);
+        assert_eq!(collect_focus_traversal(&hidden), ["root/0/0"]);
+    }
 
     fn target(key: &str, left: f32, top: f32, bottom: f32, index: usize) -> FocusTraversalTarget {
         FocusTraversalTarget {

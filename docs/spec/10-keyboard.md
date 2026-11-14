@@ -11,7 +11,11 @@ surface** (`keyboard_mode` + runtime focus transfers, shell-owned).
 
 **Status: shipped.**
 
-- `Tab` / `Shift+Tab` move through the final rendered visual order.
+- `Tab` / `Shift+Tab` move through the final rendered visual order. Controls
+  scrolled outside a scroll container's viewport stay in the order, and
+  focusing one scrolls each scrollable ancestor just enough to show it
+  (smoothly, unless reduced motion is on). Content clipped by `overflow: hidden`
+  is not reachable.
   `tabindex` overrides: `0` = normal order, positive sorts earlier, `-1` =
   pointer/script-focusable but skipped by Tab.
 - A `tabs` group is one Tab stop: the focused tab while focus is inside the

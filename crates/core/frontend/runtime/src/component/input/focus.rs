@@ -66,7 +66,29 @@ impl FrontendSurfaceComponent {
         backward: bool,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         let next_key = next_focus_target(tree, self.focused_key.as_deref(), backward);
-        self.set_focus_target(tree, next_key, true)
+        let requests = self.set_focus_target(tree, next_key, true)?;
+        if let Some(key) = self.focused_key.clone() {
+            self.reveal_keyboard_focus(tree, &key);
+        }
+        Ok(requests)
+    }
+
+    /// Scroll each scrollable ancestor just enough to show a control that
+    /// keyboard traversal reached outside its viewport.
+    fn reveal_keyboard_focus(&mut self, tree: &WidgetNode, key: &str) {
+        let options = serde_json::json!({ "smooth": true, "duration": 160 });
+        let mut moved = false;
+        for (container, target) in scroll_into_view_offsets(tree, key, &self.scroll_offsets) {
+            let current = self
+                .scroll_offsets
+                .get(&container)
+                .copied()
+                .unwrap_or_default();
+            moved |= self.apply_scroll_target(container, current, target, &options);
+        }
+        if moved {
+            self.invalidate(ComponentDirtyFlags::PAINT | ComponentDirtyFlags::METRICS);
+        }
     }
 
     pub(super) fn pointer_focus_visible_for_key(&self, tree: &WidgetNode, key: &str) -> bool {
