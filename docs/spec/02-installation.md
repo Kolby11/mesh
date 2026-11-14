@@ -280,7 +280,9 @@ approvals, and stores the upstream id, version and a snapshot of its tree in
 `.mesh-fork/` (module discovery never loads that snapshot). The active
 profile is rewired to the copy: roots, background services and providers that used upstream, and
 `upstream:<contribution>` placements in customizable slots — including host
-defaults the profile had not overridden — now name the fork. The profile's
+defaults the profile had not overridden — now name the fork. An active root
+`<upstream>#<name>` moves to `<fork>#<name>` with its settings and node slots;
+the old key is deleted, or deactivated when the composition supplies it. The profile's
 `dependencyForks` map also resolves declared module dependencies, component
 imports, Luau library namespaces and token families to that tracked fork.
 Other profiles retain their own choices. Candidate activation rejects missing

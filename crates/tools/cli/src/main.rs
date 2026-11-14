@@ -1277,9 +1277,13 @@ fn cmd_module_fork(args: &[String]) {
             })
         })
         .collect::<Vec<_>>();
+    let inherited =
+        mesh_core_module::package::inherited_roots(&profile, manifests.iter().copied())
+            .unwrap_or_else(|error| exit_error(error));
     let (next, changed) = mesh_core_module::package::rewire_profile(
         &profile,
         &effective,
+        &inherited,
         &slot_defaults,
         upstream_id,
         &fork_id,

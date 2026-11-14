@@ -446,11 +446,18 @@ pub fn merge3(base: &str, fork: &str, upstream: &str) -> (String, bool) {
 /// The active profile's sparse delta after replacing every use of `upstream`
 /// with `fork`: roots, providers, and placements in customizable slots
 /// (including host defaults the profile did not override). `effective` is
-/// the composition-resolved profile; `slot_defaults` yields each active
+/// the composition-resolved profile, `inherited` the roots its composition
+/// supplies (see [`super::inherited_roots`]), and `slot_defaults` each active
 /// root's `(instance, slot, default references)`.
+///
+/// An instance id begins with its module id, so an active root of `upstream`
+/// moves to `<fork>#<suffix>` as a complete root of the profile, taking its
+/// settings and node slots along. The old key is deleted when the profile owned
+/// it and deactivated when the composition supplies it.
 pub fn rewire_profile(
     profile: &ShellProfile,
     effective: &ShellProfile,
+    inherited: &std::collections::BTreeMap<String, super::ProfileRootInstance>,
     slot_defaults: &[(String, String, Vec<String>)],
     upstream: &str,
     fork: &str,
@@ -459,20 +466,46 @@ pub fn rewire_profile(
     let mut changed = next.dependency_forks.get(upstream).map(String::as_str) != Some(fork);
     next.dependency_forks
         .insert(upstream.to_string(), fork.to_string());
+    let mut renamed = std::collections::BTreeMap::new();
     for (instance, root) in &effective.roots {
-        if root.module == upstream {
-            let entry =
-                next.roots
-                    .entry(instance.clone())
-                    .or_insert_with(|| super::ProfileRootInstance {
-                        module: String::new(),
-                        entrypoint: root.entrypoint.clone(),
-                        active: None,
-                        surface: None,
-                    });
-            entry.module = fork.to_string();
-            changed = true;
+        if root.module != upstream || !root.is_active() {
+            continue;
         }
+        let Some(suffix) = instance.strip_prefix(&format!("{upstream}#")) else {
+            continue;
+        };
+        let moved = format!("{fork}#{suffix}");
+        next.roots.remove(instance);
+        if let Some(base) = inherited.get(instance) {
+            next.roots.insert(
+                instance.clone(),
+                super::ProfileRootInstance {
+                    module: base.module.clone(),
+                    entrypoint: base.entrypoint.clone(),
+                    active: Some(false),
+                    surface: None,
+                },
+            );
+        }
+        next.roots.insert(
+            moved.clone(),
+            super::ProfileRootInstance {
+                module: fork.to_string(),
+                entrypoint: root.entrypoint.clone(),
+                active: Some(true),
+                surface: root.surface.clone(),
+            },
+        );
+        if let Some(settings) = next
+            .settings
+            .remove(instance)
+            .or_else(|| effective.settings.get(instance).cloned())
+        {
+            next.settings.insert(moved.clone(), settings);
+        }
+        next.node_slots.remove(instance);
+        renamed.insert(instance.clone(), moved);
+        changed = true;
     }
     for (interface, provider) in &effective.providers {
         if provider == upstream {
@@ -531,9 +564,12 @@ pub fn rewire_profile(
                 touched = true;
             }
         }
-        if touched {
+        let moved = renamed.get(&instance);
+        // A moved root takes every slot with it: nothing is inherited under
+        // its new key.
+        if touched || moved.is_some() {
             next.node_slots
-                .entry(instance)
+                .entry(moved.cloned().unwrap_or(instance))
                 .or_default()
                 .insert(slot, NodeSlotOverride { nodes });
             changed = true;
@@ -758,8 +794,9 @@ mod tests {
             "end".to_string(),
             vec!["@mesh/clock:clock".to_string()],
         )];
+        let none = std::collections::BTreeMap::new();
         let (next, changed) =
-            rewire_profile(&profile, &effective, &defaults, "@mesh/clock", "@me/clock");
+            rewire_profile(&profile, &effective, &none, &defaults, "@mesh/clock", "@me/clock");
         assert!(changed);
         let start = &next.node_slots["@mesh/bar#default"]["start"].nodes;
         assert_eq!(start[0].contribution, "@me/clock:clock");
@@ -770,11 +807,18 @@ mod tests {
         );
         assert!(next.roots.is_empty());
 
-        let (next, _) = rewire_profile(&profile, &effective, &[], "@mesh/bar", "@me/bar");
-        assert_eq!(next.roots["@mesh/bar#default"].module, "@me/bar");
+        let (next, _) = rewire_profile(&profile, &effective, &none, &[], "@mesh/bar", "@me/bar");
+        assert!(!next.roots.contains_key("@mesh/bar#default"));
+        assert_eq!(next.roots["@me/bar#default"].module, "@me/bar");
+        assert_eq!(
+            next.node_slots["@me/bar#default"]["start"].nodes[0].contribution,
+            "@mesh/clock:clock"
+        );
+        next.validate().unwrap();
         let (next, _) = rewire_profile(
             &profile,
             &effective,
+            &none,
             &[],
             "@mesh/clock-backend",
             "@me/clock-backend",
@@ -787,10 +831,64 @@ mod tests {
         let profile = ShellProfile::new();
         let mut effective = ShellProfile::new();
         effective.background_services.insert("@mesh/service".into());
-        let (next, changed) =
-            rewire_profile(&profile, &effective, &[], "@mesh/service", "@local/service");
+        let (next, changed) = rewire_profile(
+            &profile,
+            &effective,
+            &Default::default(),
+            &[],
+            "@mesh/service",
+            "@local/service",
+        );
         assert!(changed);
         assert!(next.remove_background_services.contains("@mesh/service"));
         assert!(next.background_services.contains("@local/service"));
+    }
+
+    #[test]
+    fn forking_an_inherited_root_rekeys_it_and_deactivates_the_original() {
+        let desk = crate::package::ModuleManifest::from_json_str(
+            r#"{"name":"@me/desk","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"composition",
+                "compose":{"roots":{"@mesh/bar#top":{"module":"@mesh/bar","surface":{"anchor":"top"}}},
+                "settings":{"@mesh/bar#top":{"props":{"dense":true}}}}}}"#,
+        )
+        .unwrap();
+        let bar = crate::package::ModuleManifest::from_json_str(
+            r#"{"name":"@mesh/bar","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui","entry":"main.mesh"}}"#,
+        )
+        .unwrap();
+        let mut fork = bar.clone();
+        fork.name = "@me/bar".into();
+        let manifests = [&desk, &bar, &fork];
+        let profile = ShellProfile::from_json_str(
+            r#"{"schemaVersion":3,"from":{"module":"@me/desk"}}"#,
+        )
+        .unwrap();
+        let effective = crate::package::resolve_composition(&profile, manifests)
+            .unwrap()
+            .to_profile();
+        let inherited = crate::package::inherited_roots(&profile, manifests).unwrap();
+
+        let (next, changed) =
+            rewire_profile(&profile, &effective, &inherited, &[], "@mesh/bar", "@me/bar");
+        assert!(changed);
+        next.validate().unwrap();
+        assert_eq!(next.roots["@mesh/bar#top"].active, Some(false));
+        let moved = &next.roots["@me/bar#top"];
+        assert_eq!(moved.module, "@me/bar");
+        assert_eq!(moved.active, Some(true));
+        assert_eq!(next.settings["@me/bar#top"]["props"]["dense"], true);
+
+        let rewired = crate::package::resolve_composition(&next, manifests).unwrap();
+        assert!(rewired.orphaned_overrides.is_empty(), "{:?}", rewired.orphaned_overrides);
+        let runtime = rewired.to_profile();
+        assert!(!runtime.roots["@mesh/bar#top"].is_active());
+        assert!(runtime.roots["@me/bar#top"].is_active());
+        assert_eq!(
+            runtime.roots["@me/bar#top"]
+                .surface
+                .as_ref()
+                .and_then(|surface| surface.anchor.as_deref()),
+            Some("top")
+        );
     }
 }
