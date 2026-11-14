@@ -637,13 +637,16 @@ fn write_new_file(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError
 fn write_atomic(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> {
     super::validate_no_symlink_path(path, "module store write target")?;
     super::transaction::maybe_inject_failure("store.write.before")?;
-    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+    let (temporary, mut file) = match create_unique_temporary(path) {
+        Ok(created) => created,
+        Err(source) => {
+            return Err(ModuleManifestError::Io {
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
     let result = (|| {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&temporary)?;
         file.write_all(content)?;
         file.sync_all()?;
         fs::rename(&temporary, path)?;
@@ -657,6 +660,40 @@ fn write_atomic(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> 
         });
     }
     super::transaction::maybe_inject_failure("store.write.after")
+}
+
+/// Creates a fresh sibling of `path` for an atomic replace. `O_EXCL` with
+/// `O_NOFOLLOW` never opens a planted file or symlink, and the per-call
+/// counter keeps concurrent writers in one process on distinct names.
+fn create_unique_temporary(path: &Path) -> std::io::Result<(std::path::PathBuf, fs::File)> {
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let mut last_error = None;
+    for _ in 0..16 {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.subsec_nanos());
+        let temporary = path.with_extension(format!(
+            "tmp-{}-{}-{nonce:08x}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(&temporary)
+        {
+            Ok(file) => return Ok((temporary, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                last_error = Some(error);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(last_error.unwrap_or_else(|| std::io::Error::from(std::io::ErrorKind::AlreadyExists)))
 }
 
 fn sync_directory(path: Option<&Path>) -> std::io::Result<()> {
@@ -795,6 +832,39 @@ mod tests {
         ));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn atomic_writes_never_follow_a_planted_temporary_symlink() {
+        let root = temp_dir("planted-temporary");
+        let target = root.join("active");
+        let victim = root.join("victim");
+        fs::write(&victim, b"untouched").unwrap();
+        let predictable = target.with_extension(format!("tmp-{}", std::process::id()));
+        std::os::unix::fs::symlink(&victim, &predictable).unwrap();
+
+        let writers: Vec<_> = (0..8)
+            .map(|index| {
+                let target = target.clone();
+                std::thread::spawn(move || {
+                    write_atomic(&target, format!("generation-{index}").as_bytes()).unwrap()
+                })
+            })
+            .collect();
+        for writer in writers {
+            writer.join().unwrap();
+        }
+
+        assert_eq!(fs::read(&victim).unwrap(), b"untouched");
+        assert!(fs::read_to_string(&target).unwrap().starts_with("generation-"));
+        let leftovers: Vec<_> = fs::read_dir(&root)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| *path != target && *path != victim && *path != predictable)
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn module(root: &Path, body: &str) {

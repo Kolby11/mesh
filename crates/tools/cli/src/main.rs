@@ -1013,10 +1013,9 @@ fn cmd_profile(args: &[String]) {
                 println!("profile {profile_id} has no orphaned overrides");
                 return;
             }
-            for instance_id in &resolved.orphaned_overrides {
-                profile.roots.remove(instance_id);
-                profile.settings.remove(instance_id);
-                println!("pruned {instance_id}");
+            for orphan in &resolved.orphaned_overrides {
+                profile.prune_orphaned_override(orphan);
+                println!("pruned {orphan}");
             }
             save_profile_revision(&paths, profile_id, &profile)
                 .unwrap_or_else(|error| exit_error(error));

@@ -771,8 +771,10 @@ pub struct CustomizableHostSlot {
 /// One module's contribution to an extension point.
 ///
 /// `entry` is a module-relative `.mesh` component compiled as an alternate root
-/// of the contributing module: it runs in its own VM with its own capabilities
-/// and settings namespace, inside the host's tree.
+/// of the contributing module. It renders inside the host's tree but executes
+/// in its own private script environment with the contributing module's
+/// capability grants and settings namespace; that environment may share the
+/// surface's Luau VM (spec 00 §7).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ExtensionPointContribution {
     pub id: String,

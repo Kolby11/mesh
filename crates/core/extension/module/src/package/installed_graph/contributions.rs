@@ -521,11 +521,9 @@ pub(in crate::package) fn resolve_extension_points(
             continue;
         };
         if let Some(requirement) = &host.version_req
-            && let (Some(request), Some(declared)) = (
-                parse_version_req(requirement),
-                parse_contract_version(&declaration.version),
-            )
-            && !request.matches(&declared)
+            && !parse_version_req(requirement)
+                .zip(parse_contract_version(&declaration.version))
+                .is_some_and(|(request, declared)| request.matches(&declared))
         {
             diagnostics.push(super::ModuleGraphDiagnostic {
                 module_id: host.module_id.clone(),
@@ -616,7 +614,23 @@ pub(in crate::package) fn resolve_extension_points(
                 .then_with(|| left.contribution_id.cmp(&right.contribution_id))
         });
     }
-    for ((host_module_id, point), entries) in &resolved {
+    (resolved, diagnostics)
+}
+
+/// Keeps only the first entry, in final render order, at each extension point
+/// that accepts a single contribution, reporting the ones it drops. Runs after
+/// composition overrides, so a composition can choose the winner.
+pub(in crate::package) fn enforce_single_contributions(
+    contributions: &ModuleContributionIndex,
+    resolved: &mut HashMap<(String, String), Vec<ResolvedExtensionPointContribution>>,
+) -> Vec<super::ModuleGraphDiagnostic> {
+    let declarations: HashMap<&str, &DeclaredExtensionPoint> = contributions
+        .extension_points
+        .iter()
+        .map(|declaration| (declaration.name.as_str(), declaration))
+        .collect();
+    let mut diagnostics = Vec::new();
+    for ((host_module_id, point), entries) in resolved.iter_mut() {
         let Some(declaration) = declarations.get(point.as_str()) else {
             continue;
         };
@@ -626,19 +640,22 @@ pub(in crate::package) fn resolve_extension_points(
                 contribution_id: Some(format!("{host_module_id}:hosts:{point}")),
                 status: "extension_point_overfilled".into(),
                 message: format!(
-                    "{point} accepts one contribution, but {} modules contribute to {host_module_id}: {}",
+                    "{point} accepts one contribution, but {} modules contribute to {host_module_id}: {}; only {} is rendered",
                     entries.len(),
                     entries
                         .iter()
                         .map(|entry| entry.source_module_id.as_str())
                         .collect::<Vec<_>>()
-                        .join(", ")
+                        .join(", "),
+                    entries[0].source_module_id
                 ),
             });
+            // The first entry in render order wins, so the choice is deterministic.
+            entries.truncate(1);
         }
     }
 
-    (resolved, diagnostics)
+    diagnostics
 }
 
 fn extension_point_prop_error(
@@ -666,9 +683,14 @@ fn extension_point_prop_error(
                     contribution.id
                 ));
             }
-            // An unparseable declared type is the interface module's bug and is
-            // already reported there; do not blame the contributor for it.
-            Err(_) => {}
+            // Manifest validation rejects unparseable declared types; fail closed
+            // if one still reaches resolution.
+            Err(error) => {
+                return Some(format!(
+                    "{} declares prop '{name}' with invalid type {type_expression}: {error}",
+                    declaration.name
+                ));
+            }
         }
     }
     None

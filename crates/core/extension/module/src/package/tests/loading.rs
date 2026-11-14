@@ -405,3 +405,43 @@ fn retained_manifests_require_unchanged_source_and_identity_in_both_discovery_mo
         fs::remove_dir_all(root).unwrap();
     }
 }
+
+#[test]
+fn a_malformed_detached_signature_rejects_only_its_own_module() {
+    let root = temp_dir("malformed-detached-signature");
+    let config_dir = root.join("config");
+    let modules_dir = root.join("modules");
+    fs::create_dir_all(&config_dir).unwrap();
+    for (path, id) in [("panel", "@me/panel"), ("signed", "@me/signed")] {
+        let module_dir = modules_dir.join(path);
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(
+            module_dir.join("module.json"),
+            format!(
+                r#"{{ "name": "{id}", "version": "0.1.0", "mesh": {{ "apiVersion": "0.1", "kind": "ui", "entry": "src/main.mesh" }} }}"#
+            ),
+        )
+        .unwrap();
+    }
+    fs::write(modules_dir.join("signed").join(MODULE_SIGNATURE_FILE), "{ not json").unwrap();
+    fs::write(
+        config_dir.join("module.json"),
+        r#"{ "name": "@me/config", "version": "0.1.0", "mesh": { "schemaVersion": 1, "modulesDir": "../modules" } }"#,
+    )
+    .unwrap();
+
+    let graph = load_installed_module_graph(&config_dir.join("module.json")).unwrap();
+
+    assert!(graph.module("@me/panel").unwrap().enabled);
+    assert!(!graph.module("@me/signed").unwrap().enabled);
+    assert!(
+        graph
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.module_id == "@me/signed"),
+        "{:?}",
+        graph.diagnostics()
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}

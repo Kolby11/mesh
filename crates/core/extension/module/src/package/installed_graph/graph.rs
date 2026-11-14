@@ -1069,6 +1069,10 @@ impl InstalledModuleGraph {
                 |entry, module_id| entry.source_module_id = module_id,
             );
         }
+        manual_diagnostics.extend(enforce_single_contributions(
+            &contributions,
+            &mut extension_points,
+        ));
         // A user override with no matching root is retained, never dropped: an
         // upstream rename must not silently discard the user's work.
         for instance_id in &composition.orphaned_overrides {

@@ -633,6 +633,49 @@ mod tests {
     }
 
     #[test]
+    fn pruning_orphans_removes_roots_settings_and_node_slots() {
+        let desk = composition(
+            "@alice/desk",
+            None,
+            r#"{"roots":{"@mesh/panel#top":{"module":"@mesh/panel"}}}"#,
+        );
+        let slot = r#"{"bar":{"nodes":[{"id":"clock","use":"@mesh/clock:widget"}]}}"#;
+        let mut profile = profile(&format!(
+            r#"{{"schemaVersion":3,"from":{{"module":"@alice/desk"}},
+                "roots":{{"@mesh/gone#default":{{"module":"@mesh/gone"}}}},
+                "settings":{{"@mesh/gone#default":{{"x":1}}}},
+                "nodeSlots":{{"@mesh/gone#default":{slot},"@mesh/old#side":{slot},
+                    "@mesh/panel#top":{slot}}}}}"#
+        ));
+        let resolved = resolve_composition(&profile, [&desk]).unwrap();
+        assert_eq!(
+            resolved.orphaned_overrides,
+            vec![
+                "@mesh/gone#default",
+                "nodeSlots.@mesh/gone#default",
+                "nodeSlots.@mesh/old#side"
+            ]
+        );
+
+        for orphan in &resolved.orphaned_overrides {
+            profile.prune_orphaned_override(orphan);
+        }
+
+        assert!(profile.roots.is_empty());
+        assert!(profile.settings.is_empty());
+        assert_eq!(
+            profile.node_slots.keys().collect::<Vec<_>>(),
+            vec!["@mesh/panel#top"]
+        );
+        assert!(
+            resolve_composition(&profile, [&desk])
+                .unwrap()
+                .orphaned_overrides
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn an_extends_cycle_is_rejected() {
         let a = composition("@me/a", Some("@me/b"), "{}");
         let b = composition("@me/b", Some("@me/a"), "{}");

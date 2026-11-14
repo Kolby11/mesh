@@ -1,4 +1,4 @@
-use super::super::trust::TrustAssessment;
+use super::super::trust::{SignedProvenance, TrustAssessment};
 use super::super::{
     InstalledModuleEntry, MeshLock, ModuleId, ModuleManifest, ModuleManifestDiagnostic,
     ModuleManifestError, ModuleStore, ProfilePaths, RootModuleGraphManifest, ShellProfile,
@@ -332,38 +332,31 @@ fn load_installed_module_graph_with(
         .iter()
         .map(|loaded| {
             let module_id = loaded.manifest.name.clone();
-            let (trust, digest, signature) = if let Some(entry) = lock.modules.get(&module_id) {
-                (entry.trust, entry.digest.clone(), entry.signature.clone())
+            let assessment = if let Some(entry) = lock.modules.get(&module_id) {
+                root.trust_policy.assess(
+                    &module_id,
+                    &loaded.manifest.version,
+                    &entry.digest,
+                    entry.trust,
+                    entry.signature.as_ref(),
+                )
             } else {
-                let module_root = loaded.path.parent().ok_or_else(|| {
-                    ModuleManifestError::Validation(format!(
-                        "module {} manifest has no containing directory",
-                        loaded.manifest.name
-                    ))
-                })?;
-                let signature = load_module_signature(module_root)?;
-                let digest = if signature.is_some() {
-                    module_tree_digest(module_root)?
-                } else {
-                    String::new()
-                };
-                let trust = if signature.is_some() {
-                    TrustTier::Verified
-                } else {
-                    TrustTier::for_unlocked_module(&module_id)
-                };
-                (trust, digest, signature)
+                match unlocked_module_provenance(loaded) {
+                    Ok((trust, digest, signature)) => root.trust_policy.assess(
+                        &module_id,
+                        &loaded.manifest.version,
+                        &digest,
+                        trust,
+                        signature.as_ref(),
+                    ),
+                    // A malformed or unreadable detached signature rejects
+                    // only its own module; the rest of the graph still loads.
+                    Err(error) => TrustAssessment::rejected(TrustTier::Verified, error.to_string()),
+                }
             };
-            let assessment = root.trust_policy.assess(
-                &module_id,
-                &loaded.manifest.version,
-                &digest,
-                trust,
-                signature.as_ref(),
-            );
-            Ok::<_, ModuleManifestError>((module_id, assessment))
+            (module_id, assessment)
         })
-        .collect::<Result<std::collections::BTreeMap<String, TrustAssessment>, _>>()?;
+        .collect::<std::collections::BTreeMap<String, TrustAssessment>>();
     Ok(InstalledModuleGraph::from_parts_with_provenance(
         root,
         modules,
@@ -371,6 +364,30 @@ fn load_installed_module_graph_with(
         provenance_by_module,
     )?
     .with_isolated_modules(isolated))
+}
+
+/// Trust tier, tree digest and detached signature of a module with no lock entry.
+fn unlocked_module_provenance(
+    loaded: &LoadedModuleManifest,
+) -> Result<(TrustTier, String, Option<SignedProvenance>), ModuleManifestError> {
+    let module_root = loaded.path.parent().ok_or_else(|| {
+        ModuleManifestError::Validation(format!(
+            "module {} manifest has no containing directory",
+            loaded.manifest.name
+        ))
+    })?;
+    let Some(signature) = load_module_signature(module_root)? else {
+        return Ok((
+            TrustTier::for_unlocked_module(&loaded.manifest.name),
+            String::new(),
+            None,
+        ));
+    };
+    Ok((
+        TrustTier::Verified,
+        module_tree_digest(module_root)?,
+        Some(signature),
+    ))
 }
 
 fn isolated_module_diagnostic(

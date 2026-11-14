@@ -119,6 +119,7 @@ pub(super) fn loaded_module(
             license: None,
             repository: None,
             mesh: MeshModuleSection {
+                normalized: false,
                 api_version: "0.1".into(),
                 kind,
                 entry: None,

@@ -197,6 +197,10 @@ impl ModuleManifest {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MeshModuleSection {
+    /// Set once `uses`/`provides` have been folded into the effective
+    /// sections, so later normalization does not append them again.
+    #[serde(skip)]
+    pub(crate) normalized: bool,
     #[serde(rename = "apiVersion")]
     pub api_version: String,
     pub kind: ModuleKind,
@@ -404,6 +408,9 @@ fn reject_legacy_surface_geometry(input: &str, path: &Path) -> Result<(), Module
 
 impl MeshModuleSection {
     fn normalize(&mut self) {
+        if std::mem::replace(&mut self.normalized, true) {
+            return;
+        }
         if let Some(entry) = &self.entry
             && self.entrypoints.main.is_none()
         {
@@ -609,6 +616,9 @@ impl MeshModuleSection {
         }
         for (point_name, host) in &self.hosts {
             validate_extension_point_name("mesh.hosts", point_name)?;
+            if let Some(version) = &host.version {
+                validate_version_requirement("mesh.hosts", point_name, version)?;
+            }
             for (slot_name, slot) in &host.slots {
                 if slot_name.trim().is_empty() {
                     return Err(ModuleManifestError::Validation(format!(
@@ -1584,6 +1594,12 @@ impl MeshExtensionPointDeclaration {
                 return Err(ModuleManifestError::Validation(format!(
                     "mesh.extensionPoints '{point_name}' prop '{}' must declare a type",
                     prop.name
+                )));
+            }
+            if let Err(error) = mesh_core_service::TypeExpr::parse(&prop.prop_type) {
+                return Err(ModuleManifestError::Validation(format!(
+                    "mesh.extensionPoints '{point_name}' prop '{}' has invalid type '{}': {error}",
+                    prop.name, prop.prop_type
                 )));
             }
         }

@@ -350,7 +350,7 @@ impl Diagnostics {
         source_path: Option<String>,
         source_span: Option<DiagnosticSourceSpan>,
     ) -> bool {
-        let (issue_code, code_truncated) = truncate_owned(issue_code, MAX_ISSUE_CODE_BYTES);
+        let (issue_code, code_truncated) = bounded_issue_code(issue_code);
         let (message, message_truncated) = truncate_owned(message, MAX_ISSUE_MESSAGE_BYTES);
         let (source_path, source_path_truncated) = source_path
             .map(|path| truncate_owned(path, MAX_ISSUE_SOURCE_PATH_BYTES))
@@ -428,8 +428,9 @@ impl Diagnostics {
     }
 
     pub fn resolve_issue(&self, issue_code: &str) -> bool {
+        let (issue_code, _) = bounded_issue_code(issue_code.to_owned());
         let mut state = self.lock_state();
-        let resolved = state.issues.get_mut(issue_code).is_some_and(|issue| {
+        let resolved = state.issues.get_mut(&issue_code).is_some_and(|issue| {
             if !issue.active {
                 return false;
             }
@@ -655,6 +656,23 @@ impl Diagnostics {
             },
         );
     }
+}
+
+/// Bounds an issue code to [`MAX_ISSUE_CODE_BYTES`] while keeping it a stable,
+/// distinct identity: an oversized code keeps a readable prefix followed by
+/// `#` and a 64-bit FNV-1a digest of the whole original code, so recording and
+/// resolving the same long code agree and codes sharing a prefix stay apart.
+fn bounded_issue_code(code: String) -> (String, bool) {
+    if code.len() <= MAX_ISSUE_CODE_BYTES {
+        return (code, false);
+    }
+    let digest = code.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0000_0100_0000_01b3)
+    });
+    let suffix = format!("#{digest:016x}");
+    let (mut prefix, _) = truncate_owned(code, MAX_ISSUE_CODE_BYTES - suffix.len());
+    prefix.push_str(&suffix);
+    (prefix, true)
 }
 
 fn truncate_owned(mut value: String, max_bytes: usize) -> (String, bool) {
@@ -1315,7 +1333,7 @@ mod tests {
             .iter()
             .find(|issue| issue.issue_code != DIAGNOSTIC_OVERFLOW_ISSUE_CODE)
             .expect("the bounded issue should remain visible");
-        assert_eq!(issue.issue_code.len(), MAX_ISSUE_CODE_BYTES);
+        assert!(issue.issue_code.len() <= MAX_ISSUE_CODE_BYTES);
         assert_eq!(issue.message.len(), MAX_ISSUE_MESSAGE_BYTES);
         assert_eq!(
             issue.source_path.as_ref().map(String::len),
@@ -1327,6 +1345,34 @@ mod tests {
                 .iter()
                 .any(|issue| issue.issue_code == DIAGNOSTIC_OVERFLOW_ISSUE_CODE)
         );
+    }
+
+    #[test]
+    fn long_issue_codes_stay_distinct_and_resolvable() {
+        let diagnostics = Diagnostics::new_instance("@test/module", "instance");
+        let shared = "ž".repeat(MAX_ISSUE_CODE_BYTES);
+        let first = format!("{shared}:first");
+        let second = format!("{shared}:second");
+
+        diagnostics.record_issue(first.clone(), IssueSeverity::Error, "one");
+        diagnostics.record_issue(second.clone(), IssueSeverity::Warning, "two");
+        let active = |diagnostics: &Diagnostics| {
+            diagnostics
+                .snapshot()
+                .issues
+                .into_iter()
+                .filter(|issue| issue.active && issue.issue_code != DIAGNOSTIC_OVERFLOW_ISSUE_CODE)
+                .map(|issue| issue.message)
+                .collect::<Vec<_>>()
+        };
+        let mut messages = active(&diagnostics);
+        messages.sort();
+        assert_eq!(messages, vec!["one", "two"]);
+
+        assert!(diagnostics.resolve_issue(&first));
+        assert_eq!(active(&diagnostics), vec!["two"]);
+        assert!(diagnostics.resolve_issue(&second));
+        assert!(active(&diagnostics).is_empty());
     }
 
     // cargo test -p mesh-core-diagnostics --release -- diagnostics_snapshot_release_benchmark --ignored --nocapture

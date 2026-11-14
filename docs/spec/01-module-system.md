@@ -711,9 +711,14 @@ Rules:
 - Render order is `(order, source module id, contribution id)` — deterministic
   across rebuilds.
 - `multiple: false` means at most one contribution; more is
-  `extension_point_overfilled`.
+  `extension_point_overfilled`, and only the first in render order is
+  rendered. The check runs after composition overrides, so a composition
+  chooses the winner by suppressing or ordering the others.
+- A host's `version` must be a valid range; an invalid range is a manifest
+  error, and resolution fails closed on any range it cannot parse.
 - Contribution props are typechecked against the declaration using the same
-  type grammar as service contracts (§4).
+  type grammar as service contracts (§4). A declaration whose prop type does
+  not parse is a manifest error.
 - **A contribution creates no dependency edge on the host.** The edge terminates
   at the contract, so a host that itself depends on a contributor is not a
   cycle. Module-keyed slots made that adapter pattern unloadable.
@@ -944,7 +949,8 @@ inherited service uses subtraction deltas while retaining composition provenance
 A user override keyed to a root the composition no longer declares is
 **retained and reported** (`orphaned_profile_override`), never dropped —
 discarding it would lose the user's work on every upstream rename.
-`mesh profile prune` clears them on request.
+`mesh profile prune` clears them on request, including the `nodeSlots` maps
+keyed by a removed or orphaned root.
 
 Profiles are stored as `profiles/<id>.json`; `active-profile` contains the
 selected id. Their positive root list is not an installed-module allow-list:
@@ -1287,8 +1293,9 @@ path source under it is rejected, so only the unlocked shipped tree is `core`.
 A detached `module.sig` contains the key id, algorithm, and
 base64 signature over the canonical module id/version/digest payload. Keys are
 configured under the root graph's `trustPolicy.keys`; an unknown key, changed
-payload, unsupported algorithm, or malformed signature blocks the module before
-dependency, provider, or frontend contribution activation. Threats and
+payload, unsupported algorithm, or malformed or unreadable signature blocks
+that module before dependency, provider, or frontend contribution activation;
+other modules in the graph still load. Threats and
 mitigations: capability sandbox (no ambient fs/net/process in Luau),
 core-owned grant decisions, execution budgets/isolation for resource abuse,
 reserved `@mesh` scope, capability-diff re-approval on update. The root graph may set

@@ -270,6 +270,82 @@ fn a_single_valued_point_reports_when_more_than_one_module_fills_it() {
         contributor("@mesh/b", "b", 0),
     ]);
     assert_eq!(statuses(&graph, "extension_point_overfilled").len(), 1);
+    let rendered: Vec<_> = graph
+        .extension_point_contributions("@mesh/settings", POINT)
+        .iter()
+        .map(|contribution| contribution.source_module_id.as_str())
+        .collect();
+    assert_eq!(rendered, vec!["@mesh/a"]);
+}
+
+#[test]
+fn a_composition_chooses_which_contribution_fills_a_single_valued_point() {
+    let modules = vec![
+        declaring_interface(false),
+        host("@mesh/settings", None),
+        contributor("@mesh/a", "a", 0),
+        contributor("@mesh/b", "b", 0),
+    ];
+    let descriptors: Vec<(&str, ModuleKind)> = modules
+        .iter()
+        .map(|module| (module.manifest.name.as_str(), module.manifest.mesh.kind))
+        .collect();
+    let root = root_with_modules(&descriptors, &[], None);
+    let mut composition = CompositionContext::default();
+    composition.slots.insert(
+        POINT.to_string(),
+        SlotOverride {
+            suppress: BTreeSet::from(["@mesh/a".to_string()]),
+            ..SlotOverride::default()
+        },
+    );
+    let graph = InstalledModuleGraph::from_parts_with_composition(root, modules, composition)
+        .unwrap();
+
+    assert!(statuses(&graph, "extension_point_overfilled").is_empty());
+    let rendered: Vec<_> = graph
+        .extension_point_contributions("@mesh/settings", POINT)
+        .iter()
+        .map(|contribution| contribution.source_module_id.as_str())
+        .collect();
+    assert_eq!(rendered, vec!["@mesh/b"]);
+}
+
+#[test]
+fn an_invalid_host_version_range_is_rejected_when_the_graph_loads() {
+    let modules = vec![
+        declaring_interface(true),
+        host("@mesh/settings", Some("not a range")),
+        contributor("@mesh/navigation-bar", "nav", 0),
+    ];
+    let descriptors: Vec<(&str, ModuleKind)> = modules
+        .iter()
+        .map(|module| (module.manifest.name.as_str(), module.manifest.mesh.kind))
+        .collect();
+    let root = root_with_modules(&descriptors, &[], None);
+
+    let error = InstalledModuleGraph::from_parts(root, modules).unwrap_err();
+    assert!(error.to_string().contains("not a range"), "{error}");
+}
+
+#[test]
+fn manifests_reject_invalid_host_ranges_and_prop_types() {
+    let host = r#"{"name":"@me/host","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui",
+        "entrypoints":{"default":"src/main.mesh"},
+        "hosts":{"mesh.settings.page":{"version":"not a range"}}}}"#;
+    let error = ModuleManifest::from_json_str(host).unwrap_err().to_string();
+    assert!(error.contains("not a range"), "{error}");
+
+    let interface = r#"{"name":"@me/points","version":"1.0.0","mesh":{"apiVersion":"0.1",
+        "kind":"interface","extensionPoints":{"mesh.settings.page":{"version":"1.0.0",
+        "props":{"title":"list<"}}}}}"#;
+    let error = ModuleManifest::from_json_str(interface).unwrap_err().to_string();
+    assert!(error.contains("invalid type"), "{error}");
+
+    let valid = r#"{"name":"@me/points","version":"1.0.0","mesh":{"apiVersion":"0.1",
+        "kind":"interface","extensionPoints":{"mesh.settings.page":{"version":"1.0.0",
+        "props":{"title":"string?","tags":"string[]"}}}}}"#;
+    ModuleManifest::from_json_str(valid).unwrap();
 }
 
 /// The Stage 5 gate: composition override > module page > generated fallback.

@@ -123,6 +123,7 @@ fn module_manifest_parses_backend_module_json() {
         manifest.mesh.capabilities.required,
         vec!["exec.argv:wpctl:[\"get-volume\"]"]
     );
+    assert_eq!(manifest.mesh.dependencies.binaries.len(), 1);
     assert_eq!(manifest.mesh.dependencies.binaries[0].name, "wpctl");
     assert_eq!(manifest.mesh.i18n.default_locale.as_deref(), Some("en"));
     assert_eq!(manifest.mesh.i18n.supported_locales, vec!["en", "sk"]);
@@ -1063,4 +1064,23 @@ fn uninstall_forgets_approvals_and_disabled_state_bound_to_the_source() {
     assert!(!root.capability_approvals.contains_key("@me/tool"));
     assert!(root.capability_approvals.contains_key("@me/other"));
     assert!(!root.forget_uninstalled_module("@me/tool"));
+}
+
+#[test]
+fn runtime_conversion_does_not_repeat_normalization() {
+    let manifest = ModuleManifest::from_json_str(
+        r#"{"name":"@me/widget","version":"0.1.0","mesh":{"apiVersion":"0.1","kind":"ui",
+            "entry":"src/main.mesh",
+            "uses":{"binaries":[{"name":"wpctl","reason":"volume"}],
+                "capabilities":["exec.argv:wpctl:[\"get-volume\"]"]},
+            "provides":{"extensionPoints":{"mesh.settings.page":[
+                {"id":"page","entry":"src/page.mesh"}]}}}}"#,
+    )
+    .unwrap();
+
+    let runtime = manifest.into_runtime_manifest();
+
+    assert_eq!(runtime.dependencies.binaries.len(), 1);
+    assert_eq!(runtime.capabilities.required.len(), 1);
+    assert_eq!(runtime.extension_point_contributions["mesh.settings.page"].len(), 1);
 }

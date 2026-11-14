@@ -424,6 +424,21 @@ impl ShellProfile {
     }
 
     /// Remove all profile-owned references to a forcibly uninstalled module.
+    /// Removes one entry of [`EffectiveComposition::orphaned_overrides`]:
+    /// `nodeSlots.<instance>` drops that instance's slot map, and a root
+    /// instance id drops the root together with its settings and slot map.
+    ///
+    /// [`EffectiveComposition::orphaned_overrides`]: super::EffectiveComposition::orphaned_overrides
+    pub fn prune_orphaned_override(&mut self, orphan: &str) {
+        if let Some(instance_id) = orphan.strip_prefix("nodeSlots.") {
+            self.node_slots.remove(instance_id);
+            return;
+        }
+        self.roots.remove(orphan);
+        self.settings.remove(orphan);
+        self.node_slots.remove(orphan);
+    }
+
     pub fn remove_module_references(&mut self, module_id: &str) {
         if self
             .from
@@ -1041,6 +1056,7 @@ impl ProfilePaths {
         expected_revision: u64,
         _lock: &ControlPlaneLock,
     ) -> Result<ShellProfile, ModuleManifestError> {
+        profile.validate()?;
         if profile.revision != expected_revision {
             return Err(ModuleManifestError::Validation(format!(
                 "profile revision conflict: expected {expected_revision}, found {}",
@@ -1860,6 +1876,37 @@ mod tests {
             .expect_err("stale profile locale writes must not overwrite a newer choice");
         assert!(error.to_string().contains("profile revision conflict"));
         assert_eq!(paths.load("work").unwrap().revision, 2);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn revision_checked_profile_save_rejects_an_invalid_candidate() {
+        let root = std::env::temp_dir().join(format!(
+            "mesh-profile-invalid-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let graph_path = root.join("module.json");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&graph_path, "{}").unwrap();
+        let paths = ProfilePaths::from_root_graph(&graph_path).unwrap();
+        paths.save_if_revision("work", &ShellProfile::new(), 0).unwrap();
+        let before = std::fs::read(paths.profile_path("work").unwrap()).unwrap();
+
+        let mut namespace = paths.load("work").unwrap();
+        namespace
+            .settings
+            .insert("bogus".into(), serde_json::json!({ "x": 1 }));
+        let mut schema = paths.load("work").unwrap();
+        schema.schema_version = PROFILE_SCHEMA_VERSION + 1;
+        for candidate in [namespace, schema] {
+            paths
+                .save_if_revision("work", &candidate, 1)
+                .expect_err("an invalid candidate must not be persisted");
+        }
+
+        assert_eq!(std::fs::read(paths.profile_path("work").unwrap()).unwrap(), before);
+        assert_eq!(paths.load("work").unwrap().revision, 1);
         std::fs::remove_dir_all(root).ok();
     }
 
