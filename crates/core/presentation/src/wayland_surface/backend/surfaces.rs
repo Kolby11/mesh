@@ -836,19 +836,71 @@ impl WaylandSurfaceBackend {
         output: &wl_output::WlOutput,
     ) -> Option<(u32, u32)> {
         output_state.info(output).and_then(|info| {
-            info.logical_size
-                .or_else(|| {
-                    info.modes
-                        .iter()
-                        .find(|mode| mode.current)
-                        .map(|mode| (mode.dimensions.0, mode.dimensions.1))
-                })
-                .and_then(|(width, height)| {
-                    let width = u32::try_from(width).ok()?;
-                    let height = u32::try_from(height).ok()?;
-                    Some((width, height))
-                })
+            if let Some((width, height)) = info.logical_size {
+                return Some((u32::try_from(width).ok()?, u32::try_from(height).ok()?));
+            }
+            let mode = info.modes.iter().find(|mode| mode.current)?;
+            logical_size_from_mode(mode.dimensions, info.scale_factor, info.transform)
         })
+    }
+}
+
+/// Logical extent of an output that reports only its current mode: mode
+/// dimensions are physical pixels before the output transform, so a rotated
+/// output swaps axes and the integer scale divides them, truncating as wlroots
+/// does for its effective resolution.
+fn logical_size_from_mode(
+    (width, height): (i32, i32),
+    scale: i32,
+    transform: wl_output::Transform,
+) -> Option<(u32, u32)> {
+    use wl_output::Transform;
+
+    let width = u32::try_from(width).ok().filter(|width| *width > 0)?;
+    let height = u32::try_from(height).ok().filter(|height| *height > 0)?;
+    let (width, height) = match transform {
+        Transform::_90 | Transform::_270 | Transform::Flipped90 | Transform::Flipped270 => {
+            (height, width)
+        }
+        _ => (width, height),
+    };
+    let scale = u32::try_from(scale).unwrap_or(1).max(1);
+    Some(((width / scale).max(1), (height / scale).max(1)))
+}
+
+#[cfg(test)]
+mod logical_size_tests {
+    use super::logical_size_from_mode;
+    use super::wl_output::Transform;
+
+    #[test]
+    fn mode_fallback_applies_scale_and_rotation() {
+        assert_eq!(
+            logical_size_from_mode((3840, 2160), 1, Transform::Normal),
+            Some((3840, 2160))
+        );
+        assert_eq!(
+            logical_size_from_mode((3840, 2160), 2, Transform::Normal),
+            Some((1920, 1080))
+        );
+        assert_eq!(
+            logical_size_from_mode((3840, 2160), 2, Transform::_90),
+            Some((1080, 1920))
+        );
+        assert_eq!(
+            logical_size_from_mode((2560, 1600), 2, Transform::Flipped270),
+            Some((800, 1280))
+        );
+        assert_eq!(
+            logical_size_from_mode((1920, 1080), 1, Transform::Flipped180),
+            Some((1920, 1080))
+        );
+        assert_eq!(
+            logical_size_from_mode((1920, 1080), 0, Transform::Normal),
+            Some((1920, 1080))
+        );
+        assert_eq!(logical_size_from_mode((0, 1080), 1, Transform::Normal), None);
+        assert_eq!(logical_size_from_mode((-1, 1080), 1, Transform::Normal), None);
     }
 }
 
