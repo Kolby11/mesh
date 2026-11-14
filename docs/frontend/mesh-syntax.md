@@ -281,6 +281,9 @@ Embed dynamic values directly in element content using `{}`:
 
 The runtime tracks the referenced variable and re-renders the text node when it changes. Do not use `:content=` — that syntax is not valid.
 
+Braces inside an XML comment (`<!-- … -->`) or a CDATA section (`<![CDATA[ … ]]>`)
+are literal: a comment is discarded, and CDATA renders as text.
+
 ### Static attributes
 
 Write static attributes as XML-style name/value pairs:

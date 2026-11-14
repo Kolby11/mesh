@@ -175,7 +175,16 @@ struct MarkupState {
 
 impl MarkupState {
     fn advance(&mut self, source: &str) {
-        for ch in source.chars() {
+        let mut cursor = 0;
+        while let Some(ch) = source[cursor..].chars().next() {
+            if !self.in_tag
+                && self.quote.is_none()
+                && let Some(length) = brace::literal_section_len(&source[cursor..])
+            {
+                cursor += length;
+                continue;
+            }
+            cursor += ch.len_utf8();
             if let Some(quote) = self.quote {
                 if ch == quote {
                     self.quote = None;
@@ -1517,6 +1526,41 @@ mod tests {
             panic!("expected empty-state element");
         };
         assert_eq!(empty_state.tag_kind, SourceTag::EmptyState);
+    }
+
+    #[test]
+    fn braces_and_quotes_inside_comments_and_cdata_are_literal() {
+        let source = r#"<!-- {#if broken } don't { --><box title="{label}"><![CDATA[{not an expression} }]]><text>{value}</text></box>"#;
+        let template = parse_markup(source, &HashMap::new()).expect("template parses");
+
+        let [TemplateNode::Element(boxed)] = template.root.as_slice() else {
+            panic!("expected one box element, got {:?}", template.root);
+        };
+        let title = boxed
+            .attributes
+            .iter()
+            .find(|attribute| attribute.name == "title")
+            .expect("title attribute");
+        assert!(
+            matches!(title.value, AttributeValue::Binding(ref expression) if expression == "label"),
+            "{:?}",
+            title.value
+        );
+        let box_start = source.find("<box").unwrap();
+        assert_eq!(boxed.span.start, box_start);
+        let [
+            TemplateNode::Text(cdata),
+            TemplateNode::Element(text),
+        ] = boxed.children.as_slice()
+        else {
+            panic!("expected CDATA text then a text element: {:?}", boxed.children);
+        };
+        assert_eq!(cdata.content, "{not an expression} }");
+        assert!(
+            matches!(text.children.as_slice(), [TemplateNode::Expr(_)]),
+            "{:?}",
+            text.children
+        );
     }
 
     #[test]

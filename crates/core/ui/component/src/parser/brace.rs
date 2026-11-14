@@ -76,15 +76,48 @@ impl BraceLex {
     }
 }
 
+/// Byte length of an XML comment or CDATA section at the start of `rest`,
+/// through its terminator or to the end of an unterminated one. Braces inside
+/// either are literal text, not template syntax.
+pub(super) fn literal_section_len(rest: &str) -> Option<usize> {
+    let (open, close) = if rest.starts_with("<!--") {
+        ("<!--", "-->")
+    } else if rest.starts_with("<![CDATA[") {
+        ("<![CDATA[", "]]>")
+    } else {
+        return None;
+    };
+    Some(
+        rest[open.len()..]
+            .find(close)
+            .map_or(rest.len(), |end| open.len() + end + close.len()),
+    )
+}
+
 pub(super) fn lex(source: &str) -> Result<BraceLex, ParseError> {
     let mut tokens = Vec::new();
     let mut cursor = 0;
+    let mut in_tag = false;
+    let mut quote = None;
 
     while cursor < source.len() {
         let ch = source[cursor..]
             .chars()
             .next()
             .expect("cursor stays on a UTF-8 boundary");
+        if !in_tag
+            && let Some(length) = literal_section_len(&source[cursor..])
+        {
+            cursor += length;
+            continue;
+        }
+        match (ch, quote) {
+            (_, Some(open)) if ch == open => quote = None,
+            ('\'' | '"', None) if in_tag => quote = Some(ch),
+            ('<', None) if !in_tag => in_tag = true,
+            ('>', None) if in_tag => in_tag = false,
+            _ => {}
+        }
         if ch == '{' {
             let close = scan_braced_expression(source, cursor)?;
             let token = classify(source, cursor, close)?;
