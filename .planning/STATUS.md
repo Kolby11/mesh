@@ -1,6 +1,6 @@
 # Status
 
-**Updated:** 2026-11-13
+**Updated:** 2026-11-14
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and measurements live in [`log/`](log/README.md).
 
@@ -9,6 +9,8 @@ Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and measurem
 - A correctness wave is in flight: optional service-feature visibility, optional surface-policy clearing, stepped animation deadlines, and XDG resource precedence.
 
 - The 2026-11-11 performance scan landed its backend I/O fixes (shared D-Bus connection, pidfd exec waits, compiled contract validation) and signal-driven Bluetooth/power-profile providers; its unfixed findings are under "Scan findings" in the backlog.
+
+- 2026-11-14 audit correctness sweep landed (see the November log): module graph trust/closure, extension points, profiles and forks, store races, bounded reads, style inheritance and reference bounds, stylesheet images, focus traversal and scroll-into-view, template parsing, service contracts and mocks, socket connects, ticket-owned call results, LSP semantic tokens.
 
 ## Next
 
