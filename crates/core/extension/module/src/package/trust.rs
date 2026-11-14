@@ -350,8 +350,14 @@ fn verification_directory() -> Result<PathBuf, String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("system clock is before Unix epoch: {error}"))?
         .as_nanos();
-    let directory =
-        std::env::temp_dir().join(format!("mesh-provenance-{}-{nonce}", std::process::id()));
+    // Graph loading verifies modules in parallel; the sequence keeps their
+    // workspaces apart when two read the same clock tick.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let directory = std::env::temp_dir().join(format!(
+        "mesh-provenance-{}-{nonce}-{sequence}",
+        std::process::id()
+    ));
     fs::create_dir(&directory)
         .map_err(|error| format!("failed to create signature verification workspace: {error}"))?;
     Ok(directory)

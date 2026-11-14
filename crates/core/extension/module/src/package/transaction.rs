@@ -1319,11 +1319,15 @@ fn sync_path(path: &Path) -> Result<(), ModuleManifestError> {
     Ok(())
 }
 
+/// A process-unique value for staging names: wall-clock nanoseconds plus a
+/// sequence number, so two calls on one clock tick still differ.
 fn monotonic_nonce() -> u128 {
-    std::time::SystemTime::now()
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
-        .as_nanos()
+        .as_nanos();
+    (nanos << 16) ^ u128::from(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
 }
 
 pub fn parse_git_source(source: &str) -> Result<(String, Option<String>), ModuleManifestError> {
