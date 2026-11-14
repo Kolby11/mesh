@@ -76,7 +76,7 @@ pub(super) fn create_interface_proxy(
     source_instance_id: String,
     source_capabilities: CapabilitySet,
     service_context_state: Arc<Mutex<ServiceContextState>>,
-    service_call_completions: Arc<Mutex<HashMap<u64, super::ServiceCallCompletion>>>,
+    service_call_completions: super::SharedServiceCallCompletions,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
@@ -148,7 +148,7 @@ fn create_service_proxy(
     source_instance_id: String,
     source_capabilities: CapabilitySet,
     service_context_state: Arc<Mutex<ServiceContextState>>,
-    service_call_completions: Arc<Mutex<HashMap<u64, super::ServiceCallCompletion>>>,
+    service_call_completions: super::SharedServiceCallCompletions,
     tracked_service_fields: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     subscribed_interface_events: Arc<Mutex<HashMap<String, HashMap<String, usize>>>>,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
@@ -765,11 +765,11 @@ fn command_result_table(
 fn service_call_snapshot(
     lua: &Lua,
     call_id: u64,
-    completions: &Arc<Mutex<HashMap<u64, super::ServiceCallCompletion>>>,
+    completions: &super::SharedServiceCallCompletions,
 ) -> mlua::Result<Table> {
     let snapshot = lua.create_table()?;
     snapshot.set("call_id", call_id)?;
-    let completion = completions.lock().unwrap().get(&call_id).cloned();
+    let completion = completions.lock().unwrap().get(call_id).cloned();
     if let Some(completion) = completion {
         snapshot.set("done", true)?;
         snapshot.set("status", completion.status)?;
@@ -788,7 +788,7 @@ fn create_service_call_ticket(
     source_module_id: String,
     source_instance_id: String,
     source_capabilities: CapabilitySet,
-    completions: Arc<Mutex<HashMap<u64, super::ServiceCallCompletion>>>,
+    completions: super::SharedServiceCallCompletions,
     published_events: Arc<Mutex<Vec<PublishedEvent>>>,
     pending_side_channels: Arc<AtomicBool>,
     resources: ResourceBudget,
@@ -804,7 +804,10 @@ fn create_service_call_ticket(
         service_call_snapshot(lua, call_id, &poll_completions)
     })?;
     ticket.set("poll", poll)?;
-    ticket.raw_set("__mesh_awaited_call", super::runtime::AwaitedCall(call_id))?;
+    ticket.raw_set(
+        "__mesh_awaited_call",
+        super::runtime::AwaitedCall::leased(call_id, &completions),
+    )?;
     ticket.set(
         "await",
         super::runtime::realm_await_function(lua)?.bind(ticket.clone())?,
@@ -823,7 +826,7 @@ fn create_service_call_ticket(
         "cancel",
         lua.create_function(move |_lua, _args: mlua::Variadic<LuaValue>| {
             if cancel_requested_for_call.swap(true, Ordering::AcqRel)
-                || cancel_completions.lock().unwrap().contains_key(&call_id)
+                || cancel_completions.lock().unwrap().contains(call_id)
             {
                 return Ok(false);
             }

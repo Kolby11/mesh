@@ -220,7 +220,7 @@ pub(crate) fn drive(
     };
     if is_token(AWAIT_TOKEN_KEY)? {
         let call_id = match values.next() {
-            Some(LuaValue::UserData(call)) => call.borrow::<AwaitedCall>()?.0,
+            Some(LuaValue::UserData(call)) => call.borrow::<AwaitedCall>()?.call_id(),
             _ => return Err(mlua::Error::external("ticket:await() lost its call id")),
         };
         let key = lua.create_registry_value(thread)?;
@@ -282,7 +282,50 @@ const AWAIT_FUNCTION_KEY: &str = "__mesh_task_await_fn";
 
 /// A ticket's call id, carried opaquely through the `await` yield. Frontend
 /// call ids start at 2^63, beyond what a Luau number holds exactly.
-pub(crate) struct AwaitedCall(pub(crate) u64);
+///
+/// It is stored on the ticket, so it also owns the ticket's result: when the
+/// ticket is collected, the result is released from the context's store.
+pub(crate) struct AwaitedCall {
+    call_id: u64,
+    completions: std::sync::Weak<std::sync::Mutex<crate::context::ServiceCallCompletions>>,
+}
+
+impl AwaitedCall {
+    pub(crate) fn leased(
+        call_id: u64,
+        completions: &crate::context::SharedServiceCallCompletions,
+    ) -> Self {
+        Self {
+            call_id,
+            completions: std::sync::Arc::downgrade(completions),
+        }
+    }
+
+    /// A call whose result is not kept in a context's completion store.
+    pub(crate) fn unleased(call_id: u64) -> Self {
+        Self {
+            call_id,
+            completions: std::sync::Weak::new(),
+        }
+    }
+
+    pub(crate) fn call_id(&self) -> u64 {
+        self.call_id
+    }
+}
+
+impl Drop for AwaitedCall {
+    fn drop(&mut self) {
+        // Collection can run inside any Lua allocation; never block on a lock
+        // this thread might already hold. A skipped release only keeps one
+        // result until the context reloads.
+        if let Some(completions) = self.completions.upgrade()
+            && let Ok(mut completions) = completions.try_lock()
+        {
+            completions.release(self.call_id);
+        }
+    }
+}
 
 impl mlua::UserData for AwaitedCall {}
 

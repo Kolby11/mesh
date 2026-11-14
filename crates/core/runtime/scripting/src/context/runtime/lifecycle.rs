@@ -346,27 +346,36 @@ impl ScriptContext {
     ///
     /// The result is intentionally stored outside Lua. A backend completion
     /// can therefore arrive between handler calls without mutating the shared
-    /// VM or executing arbitrary script code on the shell thread.
+    /// VM or executing arbitrary script code on the shell thread. It is kept
+    /// while the ticket is reachable; a result for a collected ticket is
+    /// accepted and discarded. Returns false only for a duplicate.
     pub fn complete_service_call(
         &mut self,
         call_id: u64,
         status: impl Into<String>,
         result: Value,
     ) -> bool {
-        let mut completions = self.service_call_completions.lock().unwrap();
-        if completions.contains_key(&call_id) {
-            return false;
-        }
-        completions.insert(
+        let inserted = self.service_call_completions.lock().unwrap().insert(
             call_id,
             super::super::ServiceCallCompletion {
                 status: status.into(),
                 result,
             },
         );
-        drop(completions);
+        if !inserted {
+            return false;
+        }
         self.tasks.lock().unwrap().wake(call_id);
         true
+    }
+
+    /// Completed results still held, after a full collection releases those
+    /// whose tickets are unreachable.
+    #[cfg(test)]
+    pub(crate) fn retained_service_call_results(&self) -> usize {
+        self.lua().gc_collect().unwrap();
+        self.lua().gc_collect().unwrap();
+        self.service_call_completions.lock().unwrap().len()
     }
 
     pub fn drain_diagnostics(&mut self) -> Vec<ScriptDiagnostic> {

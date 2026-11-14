@@ -218,6 +218,69 @@ end
 }
 
 #[test]
+fn completed_results_live_only_as_long_as_their_tickets() {
+    let caps = CapabilitySet::from_ids(["service.audio.control"]);
+    let mut ctx = ScriptContext::new_for_instance(
+        "@test/audio-widget",
+        "@test/audio-widget",
+        "@test/audio-widget#bottom",
+        caps,
+    )
+    .unwrap();
+    ctx.set_interface_catalog(audio_catalog());
+    ctx.load_script(
+        r#"
+local audio = require("mesh.audio@>=1.0")
+function discard()
+    audio.set_volume("default", 10)
+end
+function keep()
+    kept = audio.set_volume("default", 20)
+end
+function inspect()
+    local snapshot = kept:poll()
+    kept_done = snapshot.done
+    kept_percent = snapshot.result and snapshot.result.percent or -1
+end
+function release()
+    kept = nil
+end
+"#,
+    )
+    .unwrap();
+    let mut call = |handler: &str| {
+        ctx.call_handler(handler, &[]).unwrap();
+        ctx.drain_published_events()
+            .iter()
+            .find_map(|event| event.call_id)
+    };
+
+    let discarded = (0..1_000)
+        .map(|_| call("discard").unwrap())
+        .collect::<Vec<_>>();
+    let kept = call("keep").unwrap();
+    let late = call("discard").unwrap();
+    assert_eq!(ctx.retained_service_call_results(), 0);
+
+    for call_id in discarded {
+        ctx.complete_service_call(call_id, "completed", serde_json::json!({ "percent": 10 }));
+    }
+    assert!(ctx.complete_service_call(kept, "completed", serde_json::json!({ "percent": 20 })));
+    assert_eq!(ctx.retained_service_call_results(), 1);
+
+    for _ in 0..2 {
+        ctx.call_handler("inspect", &[]).unwrap();
+        assert_eq!(ctx.state.get("kept_done"), Some(serde_json::json!(true)));
+        assert_eq!(ctx.state.get("kept_percent"), Some(serde_json::json!(20)));
+    }
+
+    assert!(ctx.complete_service_call(late, "completed", serde_json::json!({})));
+    assert!(!ctx.complete_service_call(kept, "completed", serde_json::json!({})));
+    ctx.call_handler("release", &[]).unwrap();
+    assert_eq!(ctx.retained_service_call_results(), 0);
+}
+
+#[test]
 fn interface_proxy_validates_method_arity_and_types_without_confusing_table_args() {
     let caps = CapabilitySet::from_ids(["service.audio.control"]);
     let mut ctx = ScriptContext::new_for_instance(

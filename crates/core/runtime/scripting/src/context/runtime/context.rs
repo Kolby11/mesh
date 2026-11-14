@@ -3,7 +3,7 @@ use super::super::lookup::{lua_err, map_lua_error};
 use super::super::state::ServiceContextState;
 use super::super::{
     PublishedEvent, ScriptDiagnostic, ScriptDiagnosticCategory, ScriptError, ScriptInterfaceImport,
-    ScriptState, ServiceCallCompletion,
+    ScriptState,
 };
 use super::*;
 use crate::policy::RuntimePolicy;
@@ -140,7 +140,7 @@ pub struct ScriptContext {
     /// Terminal results for correlated service-call tickets created by this
     /// context. The shell writes completions through the owning component;
     /// Luau ticket handles read this store without crossing the VM boundary.
-    pub(super) service_call_completions: Arc<Mutex<HashMap<u64, ServiceCallCompletion>>>,
+    pub(super) service_call_completions: super::super::SharedServiceCallCompletions,
     /// The module-scoped locale and catalog snapshot currently visible to
     /// `mesh.locale.current()` and `mesh.i18n.t()`.
     pub(super) locale_cell: Arc<Mutex<LocaleCell>>,
@@ -388,7 +388,7 @@ impl ScriptContext {
             shared_element_metrics: Arc::new(Mutex::new(ElementMetricsStore::default())),
             cached_self_table: None,
             service_context_state: Arc::new(Mutex::new(ServiceContextState::default())),
-            service_call_completions: Arc::new(Mutex::new(HashMap::new())),
+            service_call_completions: Default::default(),
             locale_cell: Arc::new(Mutex::new(LocaleCell::default())),
             localized_misses: Arc::new(Mutex::new(Vec::new())),
             prop_layers: Arc::new(Mutex::new(serde_json::Value::Null)),

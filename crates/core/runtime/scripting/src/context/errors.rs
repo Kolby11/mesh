@@ -31,6 +31,64 @@ pub struct ServiceCallCompletion {
     pub result: Value,
 }
 
+/// Calls whose ticket was collected before they completed, kept so a late
+/// result is dropped instead of stored. Bounded: past this many the oldest
+/// call ids are forgotten.
+const MAX_ABANDONED_SERVICE_CALLS: usize = 4096;
+
+/// Terminal service-call results held for their tickets. A result lives until
+/// its ticket is collected or the context reloads.
+#[derive(Debug, Default)]
+pub(crate) struct ServiceCallCompletions {
+    results: std::collections::HashMap<u64, ServiceCallCompletion>,
+    abandoned: std::collections::BTreeSet<u64>,
+}
+
+impl ServiceCallCompletions {
+    pub fn get(&self, call_id: u64) -> Option<&ServiceCallCompletion> {
+        self.results.get(&call_id)
+    }
+
+    pub fn contains(&self, call_id: u64) -> bool {
+        self.results.contains_key(&call_id)
+    }
+
+    /// Accepts a terminal result, storing it unless its ticket is already
+    /// gone. Returns false only for a duplicate.
+    pub fn insert(&mut self, call_id: u64, completion: ServiceCallCompletion) -> bool {
+        if self.abandoned.remove(&call_id) {
+            return true;
+        }
+        if self.results.contains_key(&call_id) {
+            return false;
+        }
+        self.results.insert(call_id, completion);
+        true
+    }
+
+    /// The ticket for `call_id` was collected: drop its result, or remember
+    /// to drop one that has not arrived yet.
+    pub fn release(&mut self, call_id: u64) {
+        if self.results.remove(&call_id).is_none() {
+            self.abandoned.insert(call_id);
+            while self.abandoned.len() > MAX_ABANDONED_SERVICE_CALLS {
+                self.abandoned.pop_first();
+            }
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.results.clear();
+        self.abandoned.clear();
+    }
+
+    pub fn len(&self) -> usize {
+        self.results.len()
+    }
+}
+
+pub(crate) type SharedServiceCallCompletions = std::sync::Arc<std::sync::Mutex<ServiceCallCompletions>>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScriptDiagnosticCategory {
     Lifecycle,

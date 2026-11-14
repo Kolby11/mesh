@@ -100,7 +100,7 @@ fn ticket(
     resources: crate::policy::ResourceBudget,
 ) -> mlua::Result<Table> {
     let ticket = lua.create_table()?;
-    ticket.set("__mesh_awaited_call", lua.create_userdata(AwaitedCall(id))?)?;
+    ticket.set("__mesh_awaited_call", lua.create_userdata(AwaitedCall::unleased(id))?)?;
     let snapshot = Arc::new(Mutex::new(None::<Table>));
     ticket.set(
         "poll",

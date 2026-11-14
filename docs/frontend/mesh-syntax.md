@@ -968,6 +968,11 @@ milliseconds.
 | `ticket:await()` | Inside `task.spawn`, suspend the task until the service call completes, then return its snapshot (`done`, `status`, `result`). Elsewhere it returns the current snapshot without waiting, like `ticket:poll()`. |
 | `handle:cancel()` / `task.cancel(handle)` | Drop a pending task. Returns whether it was still pending. |
 
+A service call's result is kept while its ticket is reachable, so `poll()` and
+`await()` can read it any number of times. Discarding the ticket releases the
+result; a call whose ticket is discarded before it completes has its result
+dropped on arrival.
+
 ```lua
 local refresh = nil
 
