@@ -960,7 +960,9 @@ inherited service uses subtraction deltas while retaining composition provenance
 
 A user override keyed to a root the composition no longer declares is
 **retained and reported** (`orphaned_profile_override`), never dropped —
-discarding it would lose the user's work on every upstream rename.
+discarding it would lose the user's work on every upstream rename. A root the
+profile explicitly activates for an installed UI module (what `mesh-shell
+profile add` writes) is the user's own addition, not an orphan.
 `mesh profile prune` clears them on request, including the `nodeSlots` maps
 keyed by a removed or orphaned root.
 

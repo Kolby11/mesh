@@ -190,11 +190,17 @@ pub fn resolve_composition<'a>(
     profile: &ShellProfile,
     manifests: impl IntoIterator<Item = &'a ModuleManifest>,
 ) -> Result<EffectiveComposition, ModuleManifestError> {
+    let manifests = manifests.into_iter().collect::<Vec<_>>();
     let compositions: HashMap<&str, &ModuleManifest> = manifests
-        .into_iter()
+        .iter()
         .filter(|manifest| manifest.mesh.kind == ModuleKind::Composition)
-        .map(|manifest| (manifest.name.as_str(), manifest))
+        .map(|manifest| (manifest.name.as_str(), *manifest))
         .collect();
+    let mountable = |module_id: &str| {
+        manifests
+            .iter()
+            .any(|manifest| manifest.name == module_id && manifest.mesh.kind.is_mountable_root())
+    };
 
     let mut spec = CompositionSpec::default();
     let source_module = profile.from.as_ref().map(|from| from.module.clone());
@@ -230,8 +236,13 @@ pub fn resolve_composition<'a>(
 
     let mut orphaned_overrides = Vec::new();
     let profile_spec = profile.as_composition_spec();
-    for instance_id in profile_spec.roots.keys() {
-        if profile.from.is_some() && !spec.roots.contains_key(instance_id) {
+    // A root the composition does not declare is the user's own when the
+    // profile explicitly activates an installed UI module (as `profile add`
+    // does); otherwise it overrides a root the composition dropped and is
+    // reported as orphaned.
+    for (instance_id, root) in &profile_spec.roots {
+        let added = root.active == Some(true) && mountable(&root.module);
+        if profile.from.is_some() && !spec.roots.contains_key(instance_id) && !added {
             orphaned_overrides.push(instance_id.clone());
         }
     }
@@ -614,6 +625,27 @@ mod tests {
 
         assert_eq!(resolved.orphaned_overrides, vec!["@mesh/gone#default"]);
         assert!(resolved.spec.roots.contains_key("@mesh/gone#default"));
+    }
+
+    #[test]
+    fn an_explicitly_added_root_in_a_composition_backed_profile_is_not_orphaned() {
+        let desk = composition(
+            "@alice/desk",
+            None,
+            r#"{"roots":{"@mesh/panel#top":{"module":"@mesh/panel"}}}"#,
+        );
+        let mut profile = profile(r#"{"schemaVersion":3,"from":{"module":"@alice/desk"}}"#);
+        let clock = manifest(
+            r#"{"name":"@me/clock","version":"1.0.0","mesh":{"apiVersion":"0.1","kind":"ui",
+               "entry":"src/main.mesh","surface":{"anchor":"top"}}}"#,
+        );
+        let instance = profile.add_root(&clock).unwrap();
+
+        let resolved = resolve_composition(&profile, [&desk, &clock]).unwrap();
+        assert!(resolved.orphaned_overrides.is_empty(), "{:?}", resolved.orphaned_overrides);
+        let runtime = resolved.to_profile();
+        assert!(runtime.roots[&instance].is_active());
+        assert!(runtime.roots.contains_key("@mesh/panel#top"));
     }
 
     #[test]
