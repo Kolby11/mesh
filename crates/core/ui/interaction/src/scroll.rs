@@ -146,22 +146,30 @@ pub fn scroll_into_view_offsets(
         let node_id = container.id;
 
         let screens = path_screen_transforms(&path, &offsets);
-        let container_transform = screens[i];
+        let Some(to_container) = screens[i].inverse() else {
+            continue;
+        };
         let target_transform = screens[target_idx];
         let target = path[target_idx];
         let pad = &container.computed_style.padding;
 
-        // Container content viewport and target box, both on screen.
-        let container_rect = node_rect_with_transform(container, container_transform);
-        let target_rect = node_rect_with_transform(target, target_transform);
-        let view_left = container_rect.0 + pad.left;
-        let view_top = container_rect.1 + pad.top;
-        let view_w = (container_rect.2 - container_rect.0 - pad.horizontal()).max(0.0);
-        let view_h = (container_rect.3 - container_rect.1 - pad.vertical()).max(0.0);
-        let t_left = target_rect.0;
-        let t_top = target_rect.1;
-        let t_w = (target_rect.2 - target_rect.0).max(0.0);
-        let t_h = (target_rect.3 - target_rect.1).max(0.0);
+        // Scroll offsets are in the container's local space, so measure there:
+        // a scaled or rotated container would otherwise turn screen distances
+        // into overshoot or movement along the wrong axis.
+        let (target_w, target_h) = (target.layout.width.max(0.0), target.layout.height.max(0.0));
+        let corners = [(0.0, 0.0), (target_w, 0.0), (0.0, target_h), (target_w, target_h)]
+            .map(|(x, y)| {
+                let (screen_x, screen_y) = target_transform.transform_point(x, y);
+                to_container.transform_point(screen_x, screen_y)
+            });
+        let t_left = corners.iter().map(|corner| corner.0).fold(f32::INFINITY, f32::min);
+        let t_top = corners.iter().map(|corner| corner.1).fold(f32::INFINITY, f32::min);
+        let t_w = corners.iter().map(|corner| corner.0).fold(f32::NEG_INFINITY, f32::max) - t_left;
+        let t_h = corners.iter().map(|corner| corner.1).fold(f32::NEG_INFINITY, f32::max) - t_top;
+        let view_left = pad.left;
+        let view_top = pad.top;
+        let view_w = (container.layout.width - pad.horizontal()).max(0.0);
+        let view_h = (container.layout.height - pad.vertical()).max(0.0);
 
         // A positive delta moves children up/left, reducing the target's
         // screen position by the same amount.
@@ -639,6 +647,44 @@ mod scroll_into_view_tests {
         root.children.push(item);
         let updates = scroll_into_view_offsets(&root, "root/0", &HashMap::new());
         assert!(updates.is_empty());
+    }
+
+    #[test]
+    fn transformed_containers_scroll_by_local_distances() {
+        use mesh_core_elements::style::Transform2D;
+
+        let expected = scroll_into_view_offsets(&list_tree(), "root/0/0", &HashMap::new());
+        for transform in [
+            Transform2D {
+                scale_x: 2.0,
+                scale_y: 2.0,
+                ..Transform2D::default()
+            },
+            Transform2D {
+                scale_x: 1.0,
+                scale_y: 1.0,
+                rotation: std::f32::consts::PI,
+                ..Transform2D::default()
+            },
+            Transform2D {
+                scale_x: 1.0,
+                scale_y: 1.0,
+                rotation: std::f32::consts::FRAC_PI_2,
+                ..Transform2D::default()
+            },
+        ] {
+            let mut tree = list_tree();
+            tree.computed_style.transform = transform;
+            let updates = scroll_into_view_offsets(&tree, "root/0/0", &HashMap::new());
+            assert_eq!(updates.len(), 1, "{transform:?}");
+            assert!(
+                (updates[0].1.y - expected[0].1.y).abs() < 0.01
+                    && updates[0].1.x.abs() < 0.01,
+                "{transform:?}: {:?} vs {:?}",
+                updates[0].1,
+                expected[0].1
+            );
+        }
     }
 
     #[test]
