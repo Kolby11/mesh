@@ -156,6 +156,46 @@ fn style_background_image_url_resolves_backend_neutral_source() {
 }
 
 #[test]
+fn resolved_stylesheet_asset_paths_paint_while_authored_absolute_paths_do_not() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let base = std::env::temp_dir().join("mesh-style-assets-module");
+    let resolved = mesh_core_files::resolve_asset_url(&base, "\"assets/panel.png\"").unwrap();
+    let resolve = |url: String| {
+        let rules = vec![StyleRule {
+            selector: Selector::Class("panel".to_string()),
+            declarations: vec![mesh_core_component::style::Declaration {
+                property: "background-image".to_string(),
+                value: StyleValue::Literal(url),
+            }],
+            container_query: None,
+        }];
+        resolver
+            .resolve_node_style_with_diagnostics(
+                &rules,
+                "box",
+                &["panel".to_string()],
+                None,
+                StyleContext::default(),
+                NodeState::default(),
+            )
+            .0
+            .background_paint
+    };
+
+    assert_eq!(
+        resolve(format!("url(\"{}\")", resolved.display())),
+        BackgroundPaint::Image(StyleImageSource {
+            path: resolved.to_string_lossy().into_owned(),
+        })
+    );
+    assert_eq!(
+        resolve("url(\"/etc/mesh-forged.png\")".to_string()),
+        BackgroundPaint::None
+    );
+}
+
+#[test]
 fn style_background_image_url_keeps_reference_text_inside_a_quoted_filename() {
     let theme = mesh_core_theme::default_theme();
     let resolver = StyleResolver::new(&theme);

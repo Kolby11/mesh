@@ -2090,6 +2090,26 @@ local Child = require("./child.mesh")
             Some(format!("url({})", src.join("assets/panel.png").display()).as_str()),
             "root style url should resolve against the component file directory"
         );
+        let theme = mesh_core_theme::default_theme();
+        let (style, diagnostics) = mesh_core_elements::StyleResolver::new(&theme)
+            .resolve_node_style_with_diagnostics(
+                &compiled.component.style.as_ref().unwrap().rules,
+                "box",
+                &[],
+                None,
+                Default::default(),
+                Default::default(),
+            );
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        assert_eq!(
+            style.background_paint,
+            mesh_core_elements::style::BackgroundPaint::Image(
+                mesh_core_elements::style::StyleImageSource {
+                    path: src.join("assets/panel.png").to_string_lossy().into_owned(),
+                }
+            ),
+            "the resolved url should reach the node as an image paint"
+        );
         assert!(
             rule_value(&compiled.component, "card")
                 .unwrap()

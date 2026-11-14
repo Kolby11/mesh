@@ -790,7 +790,8 @@ fn parse_background_url(value: &str) -> Option<String> {
         .trim();
 
     if path.is_empty()
-        || path.starts_with('/')
+        || (path.starts_with('/')
+            && !mesh_core_files::is_resolved_asset_path(std::path::Path::new(path)))
         || path.contains("://")
         || path.starts_with("data:")
         || path.starts_with('#')

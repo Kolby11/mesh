@@ -185,7 +185,39 @@ pub fn resolve_asset_url(asset_base: &Path, url_path: &str) -> Option<PathBuf> {
         return None;
     }
     let joined = asset_base.join(inner);
-    joined.is_absolute().then_some(joined)
+    if !joined.is_absolute() {
+        return None;
+    }
+    register_resolved_asset(&joined);
+    Some(joined)
+}
+
+/// Most distinct stylesheet asset paths remembered as resolved.
+const MAX_RESOLVED_ASSETS: usize = 65_536;
+
+fn resolved_assets() -> &'static std::sync::Mutex<std::collections::HashSet<PathBuf>> {
+    static ASSETS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
+        std::sync::OnceLock::new();
+    ASSETS.get_or_init(Default::default)
+}
+
+fn register_resolved_asset(path: &Path) {
+    let mut assets = resolved_assets()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if assets.len() < MAX_RESOLVED_ASSETS {
+        assets.insert(path.to_path_buf());
+    }
+}
+
+/// Whether `path` is an absolute path that [`resolve_asset_url`] produced
+/// from a contained relative URL. Style lowering accepts such paths while
+/// still rejecting absolute paths an author or a runtime value wrote.
+pub fn is_resolved_asset_path(path: &Path) -> bool {
+    resolved_assets()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .contains(path)
 }
 
 #[cfg(unix)]

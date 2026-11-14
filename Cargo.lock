@@ -2240,6 +2240,7 @@ version = "0.1.0"
 dependencies = [
  "bitflags 2.11.1",
  "mesh-core-component",
+ "mesh-core-files",
  "mesh-core-theme",
  "serde",
  "serde_json",

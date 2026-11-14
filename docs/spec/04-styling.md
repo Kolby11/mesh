@@ -886,9 +886,12 @@ A relative `url(...)` asset path resolves against the directory of the
 stylesheet that declares it — the component file's directory for `.mesh`
 style blocks (local imports resolve against the imported file's own
 directory) and the theme stylesheet's directory for theme packs, following
-GTK's model. Absolute paths, URL schemes, `data:` URIs, and paths escaping
-the declaring directory pass through untouched, and `var(--token)` /
-`prop(...)` references keep their runtime resolution order.
+GTK's model, including inside a theme's `@module` blocks. Absolute paths, URL
+schemes, `data:` URIs, and paths escaping the declaring directory pass through
+untouched, and `var(--token)` / `prop(...)` references keep their runtime
+resolution order. Style resolution paints an absolute path only when this
+rewriting produced it; an authored or runtime-supplied absolute path paints
+nothing.
 
 Gradients take at least two color stops. Every stop uses the same CSS color
 parser as theme colors, including hex, named colors, transparent, and

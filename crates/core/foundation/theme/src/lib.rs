@@ -1968,13 +1968,17 @@ fn parse_theme_css_with_asset_base(
         Some(asset_base) => css::absolutize_stylesheet_urls(&stylesheet, asset_base),
         None => stylesheet,
     };
-    lower_theme_rules(&stylesheet.rules, &mut theme)?;
+    lower_theme_rules(&stylesheet.rules, &mut theme, asset_base)?;
     normalize_legacy_default_shell_animations(&mut theme, Vec::new());
     flatten_module_tokens_into(&mut theme.tokens, &theme.modules);
     Ok(theme)
 }
 
-fn lower_theme_rules(rules: &[css::Rule], theme: &mut Theme) -> Result<(), String> {
+fn lower_theme_rules(
+    rules: &[css::Rule],
+    theme: &mut Theme,
+    asset_base: Option<&Path>,
+) -> Result<(), String> {
     for rule in rules {
         match rule {
             css::Rule::Style(style_rule) => lower_theme_style_rule(style_rule, theme)?,
@@ -2011,6 +2015,12 @@ fn lower_theme_rules(rules: &[css::Rule], theme: &mut Theme) -> Result<(), Strin
                 let stylesheet =
                     css::parse_stylesheet(block, custom.block_base.unwrap_or(custom.span.start))
                         .map_err(|error| format!("{} at {:?}", error.message, error.span))?;
+                // The block is parsed from its raw text, after the outer
+                // stylesheet's URLs were rewritten, so it is rewritten here.
+                let stylesheet = match asset_base {
+                    Some(asset_base) => css::absolutize_stylesheet_urls(&stylesheet, asset_base),
+                    None => stylesheet,
+                };
                 let mut module = theme.modules.remove(&module_id).unwrap_or_default();
                 lower_theme_module_rules(&stylesheet.rules, &mut module)?;
                 theme.modules.insert(module_id, module);
@@ -3658,6 +3668,7 @@ mod tests {
                 "card { background: #fff url(\"bg.webp\") no-repeat; }",
                 "text { background-image: url(data:image/png;base64,AAA); }",
                 "esc { background-image: url(../outside.png); }",
+                "@module \"@mesh/bar\" { .edge { background-image: url(assets/edge.png); } }",
             ),
         )
         .unwrap();
@@ -3695,6 +3706,12 @@ mod tests {
         // Unresolvable forms pass through untouched.
         assert_eq!(background(&theme, "text"), "url(data:image/png;base64,AAA)");
         assert_eq!(background(&theme, "esc"), "url(../outside.png)");
+        let module_rule = &theme.modules["@mesh/bar"].rules[0];
+        assert_eq!(
+            module_rule.declarations.get("background-image").map(String::as_str),
+            Some(format!("url({})", root.join("themes/assets/edge.png").display()).as_str()),
+            "@module blocks resolve against the theme stylesheet too"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }
