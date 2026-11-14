@@ -80,34 +80,120 @@ pub fn create_fork(
                 .unwrap_or("interface")
         )));
     }
-    copy_tree(upstream_dir, destination)?;
-    copy_tree(
-        upstream_dir,
-        &destination.join(FORK_STATE_DIR).join(BASE_DIR),
-    )?;
-    let manifest = destination.join("module.json");
-    let text = std::fs::read_to_string(&manifest).map_err(|error| io_error(&manifest, error))?;
     let renamed = rename_manifest(&text, upstream_id, fork_id).ok_or_else(|| {
         invalid(format!(
             "{} does not name {upstream_id}",
-            manifest.display()
+            upstream_manifest.display()
         ))
     })?;
-    std::fs::write(&manifest, renamed).map_err(|error| io_error(&manifest, error))?;
     let record = ForkRecord {
         upstream: upstream_id.to_string(),
         upstream_version: upstream_version.to_string(),
     };
-    write_record(destination, &record)?;
+    // Build the whole fork beside its destination and publish it with one
+    // rename, so a failure part way leaves nothing that blocks a retry.
+    let staging = fork_staging_path(destination)?;
+    let built = (|| {
+        copy_tree(upstream_dir, &staging)?;
+        copy_tree(upstream_dir, &staging.join(FORK_STATE_DIR).join(BASE_DIR))?;
+        let manifest = staging.join("module.json");
+        std::fs::write(&manifest, &renamed).map_err(|error| io_error(&manifest, error))?;
+        write_record(&staging, &record)?;
+        if destination.exists() {
+            return Err(invalid(format!("{} already exists", destination.display())));
+        }
+        std::fs::rename(&staging, destination).map_err(|error| io_error(destination, error))
+    })();
+    if let Err(error) = built {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(error);
+    }
     Ok(record)
 }
 
-/// Replace the manifest's `"name"` value textually, keeping its layout.
+fn fork_staging_path(destination: &Path) -> Result<PathBuf, ModuleManifestError> {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let parent = destination
+        .parent()
+        .ok_or_else(|| invalid(format!("{} has no parent directory", destination.display())))?;
+    std::fs::create_dir_all(parent).map_err(|error| io_error(parent, error))?;
+    let name = destination
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    Ok(parent.join(format!(
+        ".{name}.fork-staging-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )))
+}
+
+/// Replace the manifest's top-level `"name"` value in place, keeping the rest
+/// of its text byte for byte. `None` when the top-level name is not `from`.
 fn rename_manifest(text: &str, from: &str, to: &str) -> Option<String> {
-    let needle = format!("\"name\": {}", serde_json::to_string(from).ok()?);
-    let replacement = format!("\"name\": {}", serde_json::to_string(to).ok()?);
-    text.contains(&needle)
-        .then(|| text.replacen(&needle, &replacement, 1))
+    let span = top_level_string_value(text, "name")?;
+    let current: String = serde_json::from_str(&text[span.clone()]).ok()?;
+    if current != from {
+        return None;
+    }
+    let mut renamed = String::with_capacity(text.len() + to.len());
+    renamed.push_str(&text[..span.start]);
+    renamed.push_str(&serde_json::to_string(to).ok()?);
+    renamed.push_str(&text[span.end..]);
+    Some(renamed)
+}
+
+/// Byte span, quotes included, of the string value of `key` in the top-level
+/// object of a JSON document.
+fn top_level_string_value(text: &str, key: &str) -> Option<std::ops::Range<usize>> {
+    let bytes = text.as_bytes();
+    let string_end = |start: usize| {
+        let mut index = start + 1;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'\\' => index += 2,
+                b'"' => return Some(index + 1),
+                _ => index += 1,
+            }
+        }
+        None
+    };
+    let skip_whitespace = |mut index: usize| {
+        while bytes.get(index).is_some_and(u8::is_ascii_whitespace) {
+            index += 1;
+        }
+        index
+    };
+    let mut depth = 0usize;
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' => {
+                let end = string_end(index)?;
+                let after = skip_whitespace(end);
+                if depth == 1
+                    && bytes.get(after) == Some(&b':')
+                    && serde_json::from_str::<String>(&text[index..end]).ok()? == key
+                {
+                    let value = skip_whitespace(after + 1);
+                    return (bytes.get(value) == Some(&b'"'))
+                        .then(|| string_end(value).map(|end| value..end))
+                        .flatten();
+                }
+                index = end;
+            }
+            b'{' | b'[' => {
+                depth += 1;
+                index += 1;
+            }
+            b'}' | b']' => {
+                depth = depth.checked_sub(1)?;
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+    None
 }
 
 fn write_record(fork_dir: &Path, record: &ForkRecord) -> Result<(), ModuleManifestError> {
@@ -702,6 +788,53 @@ mod tests {
                 &profile
             )
             .is_err()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn manifest_renaming_is_independent_of_formatting() {
+        let minified = r#"{"mesh":{"name":"@mesh/clock"},"name":"@mesh/clock","version":"1"}"#;
+        assert_eq!(
+            rename_manifest(minified, "@mesh/clock", "@me/clock").as_deref(),
+            Some(r#"{"mesh":{"name":"@mesh/clock"},"name":"@me/clock","version":"1"}"#)
+        );
+        let spaced = "{\n\t\"version\" : \"1\",\n\t\"name\"\n  :  \"@mesh/clock\"\n}\n";
+        assert_eq!(
+            rename_manifest(spaced, "@mesh/clock", "@me/clock").as_deref(),
+            Some("{\n\t\"version\" : \"1\",\n\t\"name\"\n  :  \"@me/clock\"\n}\n")
+        );
+        let escaped = r#"{"description":"say \"name\": \"@mesh/clock\"","name":"@mesh\/clock"}"#;
+        assert_eq!(
+            rename_manifest(escaped, "@mesh/clock", "@me/clock").as_deref(),
+            Some(r#"{"description":"say \"name\": \"@mesh/clock\"","name":"@me/clock"}"#)
+        );
+        assert!(rename_manifest(minified, "@mesh/other", "@me/clock").is_none());
+        assert!(rename_manifest(r#"{"mesh":{"name":"@mesh/clock"}}"#, "@mesh/clock", "@me/x").is_none());
+    }
+
+    #[test]
+    fn a_failed_fork_leaves_no_destination_or_staging() {
+        let root = temp_dir("fork-failure");
+        let upstream = root.join("upstream");
+        std::fs::create_dir_all(&upstream).unwrap();
+        std::fs::write(upstream.join("module.json"), r#"{"name":"@mesh/clock","version":"1"}"#)
+            .unwrap();
+        std::os::unix::fs::symlink(upstream.join("module.json"), upstream.join("link.json"))
+            .unwrap();
+        let modules = root.join("modules");
+        let fork = modules.join("@me").join("clock");
+
+        assert!(create_fork(&upstream, "@mesh/clock", "1", "@me/clock", &fork).is_err());
+        assert!(!fork.exists());
+        assert_eq!(std::fs::read_dir(modules.join("@me")).unwrap().count(), 0);
+
+        std::fs::remove_file(upstream.join("link.json")).unwrap();
+        create_fork(&upstream, "@mesh/clock", "1", "@me/clock", &fork).unwrap();
+        assert!(
+            std::fs::read_to_string(fork.join("module.json"))
+                .unwrap()
+                .contains(r#""name":"@me/clock""#)
         );
         std::fs::remove_dir_all(root).unwrap();
     }

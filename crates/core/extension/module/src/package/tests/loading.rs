@@ -507,3 +507,31 @@ fn contribution_indexing_reads_entrypoint_props_within_the_source_budget() {
     assert!(props_graph(0), "props should become the module's settings schema");
     assert!(!props_graph(1024 * 1024), "an oversized entrypoint is not read");
 }
+
+#[test]
+fn discovery_skips_hidden_directories() {
+    let root = temp_dir("hidden-module-dirs");
+    let config_dir = root.join("config");
+    fs::create_dir_all(&config_dir).unwrap();
+    for (path, id) in [("@me/panel", "@me/panel"), ("@me/.panel.fork-staging-1-0", "@me/panel")] {
+        let module_dir = root.join("modules").join(path);
+        fs::create_dir_all(&module_dir).unwrap();
+        fs::write(
+            module_dir.join("module.json"),
+            format!(
+                r#"{{ "name": "{id}", "version": "0.1.0", "mesh": {{ "apiVersion": "0.1", "kind": "ui", "entry": "src/main.mesh" }} }}"#
+            ),
+        )
+        .unwrap();
+    }
+    fs::write(
+        config_dir.join("module.json"),
+        r#"{ "name": "@me/config", "version": "0.1.0", "mesh": { "schemaVersion": 1, "modulesDir": "../modules" } }"#,
+    )
+    .unwrap();
+
+    let graph = load_installed_module_graph(&config_dir.join("module.json")).unwrap();
+    assert!(graph.module("@me/panel").unwrap().enabled);
+
+    fs::remove_dir_all(root).unwrap();
+}

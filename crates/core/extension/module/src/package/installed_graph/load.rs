@@ -607,6 +607,11 @@ fn discover_module_dirs_into(
                 continue;
             }
         };
+        // Hidden directories hold staging copies and tool state (`.git`, an
+        // in-progress fork), never installed modules.
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
         let path = entry.path();
         match entry.file_type() {
             Ok(file_type) if file_type.is_dir() || file_type.is_symlink() => {

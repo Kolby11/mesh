@@ -275,7 +275,9 @@ best-effort.
 **Shipped.** Editing an installed module in place loses the edits on update.
 `mesh-shell module fork <id> [--as <new-id>]` copies the module to
 `<modulesDir>/<new-id>` (default `@local/<name>`; the `@mesh` scope is
-reserved), renames it in its `module.json`, copies upstream's capability
+reserved), renames it in its `module.json` (any formatting; the rest of the
+file is kept byte for byte), builds the copy in a hidden staging directory
+published with one rename so a failure leaves nothing behind, copies upstream's capability
 approvals, and stores the upstream id, version and a snapshot of its tree in
 `.mesh-fork/` (module discovery never loads that snapshot). The active
 profile is rewired to the copy: roots, background services and providers that used upstream, and
