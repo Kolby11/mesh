@@ -94,6 +94,54 @@ fn custom_property_cycle_uses_var_fallback_and_remains_diagnostic() {
     );
 }
 
+fn var_declaration(property: &str, value: &str) -> Declaration {
+    Declaration {
+        property: property.to_string(),
+        value: StyleValue::Var(value.to_string()),
+    }
+}
+
+#[test]
+fn long_acyclic_reference_chains_stop_at_the_depth_limit_and_use_the_fallback() {
+    let chain = |length: usize, end: &str| {
+        let mut declarations = (0..length)
+            .map(|index| var_declaration(&format!("--v{index}"), &format!("--v{}", index + 1)))
+            .collect::<Vec<_>>();
+        declarations.push(Declaration {
+            property: format!("--v{length}"),
+            value: StyleValue::Literal(end.to_string()),
+        });
+        declarations.push(var_declaration("font-size", "--v0, 9px"));
+        declarations
+    };
+
+    let (style, _) = resolve_cycle_rules(chain(16, "21px"));
+    assert_eq!(style.font_size, 21.0);
+
+    let (style, _) = resolve_cycle_rules(chain(4 * 64, "21px"));
+    assert_eq!(style.font_size, 9.0);
+}
+
+#[test]
+fn exponentially_branching_references_stop_at_the_work_limit() {
+    let mut declarations = (0..40)
+        .map(|index| Declaration {
+            property: format!("--d{index}"),
+            value: StyleValue::Literal(format!("var(--d{next}) var(--d{next})", next = index + 1)),
+        })
+        .collect::<Vec<_>>();
+    declarations.push(Declaration {
+        property: "--d40".to_string(),
+        value: StyleValue::Literal("x".to_string()),
+    });
+    declarations.push(var_declaration("font-family", "--d0, Fallback Sans"));
+
+    let started = std::time::Instant::now();
+    let (style, diagnostics) = resolve_cycle_rules(declarations);
+    assert_eq!(&*style.font_family, "Fallback Sans", "{diagnostics:?}");
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+}
+
 #[test]
 fn style_diagnostics_unsupported_property_produces_style_diagnostic() {
     let theme = mesh_core_theme::default_theme();

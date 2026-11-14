@@ -9,13 +9,40 @@ use mesh_core_theme::TokenValue;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Deepest chain of nested custom-property or prop references one value may
+/// follow.
+pub(super) const MAX_REFERENCE_DEPTH: usize = 64;
+/// Total references one value may resolve, counting repeats; a chain whose
+/// values each reference the next one twice would otherwise grow exponentially.
+pub(super) const MAX_REFERENCE_STEPS: usize = 4096;
+
 #[derive(Debug, Default)]
 pub struct ResolutionContext {
     stack: Vec<String>,
     cycles: Vec<Vec<String>>,
+    steps: usize,
 }
 
 impl ResolutionContext {
+    fn charge(&mut self) -> Result<(), String> {
+        self.steps += 1;
+        if self.steps > MAX_REFERENCE_STEPS {
+            return Err(format!(
+                "CSS custom-property references exceed {MAX_REFERENCE_STEPS} resolution steps"
+            ));
+        }
+        Ok(())
+    }
+
+    fn depth_exceeded(&self) -> Option<String> {
+        (self.stack.len() >= MAX_REFERENCE_DEPTH).then(|| {
+            format!(
+                "CSS custom-property reference chain exceeds {MAX_REFERENCE_DEPTH} levels at {}",
+                self.stack.last().map(String::as_str).unwrap_or_default()
+            )
+        })
+    }
+
     fn enter(&mut self, name: &str) -> bool {
         if let Some(start) = self.stack.iter().position(|entry| entry == name) {
             let mut cycle = self.stack[start..].to_vec();
@@ -166,6 +193,15 @@ impl<'a> StyleResolver<'a> {
         context: &mut ResolutionContext,
     ) -> Result<String, String> {
         let (name, fallback) = split_reference(contents);
+        if let Err(error) = context.charge() {
+            return self.resolve_fallback_or_error(
+                fallback,
+                error,
+                variables,
+                strict_animation_tokens,
+                context,
+            );
+        }
         self.resolve_named_reference(name, fallback, variables, strict_animation_tokens, context)
     }
 
@@ -177,6 +213,15 @@ impl<'a> StyleResolver<'a> {
         context: &mut ResolutionContext,
     ) -> Result<String, String> {
         let (name, fallback) = split_reference(contents);
+        if let Err(error) = context.charge() {
+            return self.resolve_fallback_or_error(
+                fallback,
+                error,
+                variables,
+                strict_animation_tokens,
+                context,
+            );
+        }
         let name = name.trim();
         if name.is_empty() {
             return Err("empty component prop reference".to_string());
@@ -196,6 +241,15 @@ impl<'a> StyleResolver<'a> {
                 .unwrap_or_else(|| Ok(String::new()));
         };
 
+        if let Some(error) = context.depth_exceeded() {
+            return self.resolve_fallback_or_error(
+                fallback,
+                error,
+                variables,
+                strict_animation_tokens,
+                context,
+            );
+        }
         if !context.enter(&key) {
             return self.resolve_fallback_or_error(
                 fallback,
@@ -238,7 +292,9 @@ impl<'a> StyleResolver<'a> {
         }
 
         let result = if let Some(value) = self.lookup_variable(variables, name) {
-            if !context.enter(name) {
+            if let Some(error) = context.depth_exceeded() {
+                Err(error)
+            } else if !context.enter(name) {
                 Err(context.cycle_message(name))
             } else {
                 let result = self.resolve_value_with_variables_mode_context(

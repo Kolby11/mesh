@@ -41,7 +41,7 @@ Unsupported properties produce style diagnostics or parser errors instead of hid
 | selectors | implemented | Universal, tag, class, ID, compound selectors, selector lists, and the supported state pseudo-classes participate in style matching. |
 | selectors | out-of-scope | Descendant, child, sibling, attribute, structural pseudo-class, and pseudo-element selector behavior is outside MESH shell CSS. |
 | theme variables | implemented | `var(--...)` resolves through local custom properties first, then through `mesh-core-theme` for supported declaration values. |
-| custom properties | implemented | CSS custom properties beginning with `--` are local variables resolved by `StyleResolver`; theme CSS also compiles root custom properties into design tokens. |
+| custom properties | implemented | CSS custom properties beginning with `--` are local variables resolved by `StyleResolver`; theme CSS also compiles root custom properties into design tokens. A cycle, a reference chain deeper than 64 levels, or more than 4,096 references resolved for one value falls back to the reference's fallback when it has one. |
 
 ## Practical Syntax
 
