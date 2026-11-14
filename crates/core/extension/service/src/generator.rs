@@ -5,9 +5,11 @@
 //! location without giving the contract compiler filesystem authority.
 
 use crate::contract::{
-    BaseType, CompiledContract, CompiledEventSchema, CompiledMethodSchema, CompiledTypeSchema,
-    TypeExpr,
+    BUILTIN_RESULT_TYPE, BaseType, CompiledContract, CompiledEventSchema, CompiledMethodSchema,
+    CompiledStateField, CompiledTypeSchema, TypeExpr,
 };
+use serde_json::Value as JsonValue;
+use std::collections::BTreeMap;
 use std::fmt::Write;
 
 mod rust;
@@ -181,38 +183,185 @@ pub fn generate_luau_provider_stub(contract: &CompiledContract) -> String {
 }
 
 /// Generate an in-memory provider mock with state, call recording, and
-/// deterministic default values for every state field.
+/// deterministic values that satisfy the contract: declared defaults, numbers
+/// inside their declared range, empty arrays, and named records with every
+/// required field. Methods return a value of their declared return type. A
+/// value that cannot be generated (a required blob handle, or a required
+/// recursive field) is listed at the top of the mock; its state field starts
+/// nil and its method raises an error naming the reason.
 pub fn generate_luau_mock(contract: &CompiledContract) -> String {
-    let mut output = generated_header(contract, "provider mock");
-    output.push_str("local Mock = {\n    calls = {},\n    state = {\n");
+    let types = &contract.schemas.types;
+    let mut unsupported = Vec::new();
+    let mut state = String::new();
     for field in contract.schemas.state_fields.iter() {
-        writeln!(
-            output,
-            "        {} = {},",
-            field.name,
-            luau_default_value(&field.type_expr)
-        )
-        .unwrap();
+        let value = match state_mock_value(field, types) {
+            Ok(value) => luau_literal(&value),
+            Err(reason) => {
+                unsupported.push(format!("state.{}: {reason}", field.name));
+                "nil".to_string()
+            }
+        };
+        writeln!(state, "        {} = {value},", field.name).unwrap();
     }
-    output.push_str("    },\n}\n\n");
+    let mut methods = String::new();
     for method in contract.schemas.methods.iter() {
         writeln!(
-            output,
+            methods,
             "function Mock.{}({})",
             method.name,
             stub_parameters(method)
         )
         .unwrap();
         writeln!(
-            output,
+            methods,
             "    table.insert(self.calls, {{ method = \"{}\" }})",
             method.name
         )
         .unwrap();
-        output.push_str("    return { ok = true }\nend\n\n");
+        let returned = match &method.returns {
+            Some(returns) => mock_value(returns, types, None, &mut Vec::new()),
+            None => Ok(serde_json::json!({ "ok": true })),
+        };
+        match returned {
+            Ok(value) => writeln!(methods, "    return {}", luau_literal(&value)).unwrap(),
+            Err(reason) => {
+                unsupported.push(format!("{}(): {reason}", method.name));
+                writeln!(
+                    methods,
+                    "    error({})",
+                    luau_string(&format!("mock cannot produce a {} result: {reason}", method.name))
+                )
+                .unwrap();
+            }
+        }
+        methods.push_str("end\n\n");
     }
+
+    let mut output = generated_header(contract, "provider mock");
+    for entry in &unsupported {
+        writeln!(output, "-- unsupported: {entry}").unwrap();
+    }
+    if !unsupported.is_empty() {
+        output.push('\n');
+    }
+    output.push_str("local Mock = {\n    calls = {},\n    state = {\n");
+    output.push_str(&state);
+    output.push_str("    },\n}\n\n");
+    output.push_str(&methods);
     output.push_str("return Mock\n");
     output
+}
+
+fn state_mock_value(
+    field: &CompiledStateField,
+    types: &BTreeMap<String, CompiledTypeSchema>,
+) -> Result<JsonValue, String> {
+    if let Some(default) = &field.default {
+        return Ok(default.clone());
+    }
+    let range = (
+        field.minimum.as_ref().and_then(serde_json::Number::as_f64),
+        field.maximum.as_ref().and_then(serde_json::Number::as_f64),
+    );
+    mock_value(&field.type_expr, types, Some(range), &mut Vec::new())
+}
+
+/// The simplest value matching `expr`. `range` bounds a number; `visiting`
+/// holds the named types being built, to stop on required recursion.
+fn mock_value(
+    expr: &TypeExpr,
+    types: &BTreeMap<String, CompiledTypeSchema>,
+    range: Option<(Option<f64>, Option<f64>)>,
+    visiting: &mut Vec<String>,
+) -> Result<JsonValue, String> {
+    if expr.optional {
+        return Ok(JsonValue::Null);
+    }
+    if expr.array {
+        return Ok(JsonValue::Array(Vec::new()));
+    }
+    let in_range = |integral: bool| {
+        let (minimum, maximum) = range.unwrap_or((None, None));
+        let mut value = 0.0_f64;
+        if let Some(minimum) = minimum.filter(|minimum| value < *minimum) {
+            value = if integral { minimum.ceil() } else { minimum };
+        }
+        if let Some(maximum) = maximum.filter(|maximum| value > *maximum) {
+            value = if integral { maximum.floor() } else { maximum };
+        }
+        value
+    };
+    Ok(match &expr.base {
+        BaseType::String => JsonValue::String(String::new()),
+        BaseType::Boolean | BaseType::Any => JsonValue::Bool(false),
+        BaseType::Int => JsonValue::from(in_range(true) as i64),
+        BaseType::Float => serde_json::Number::from_f64(in_range(false))
+            .map_or(JsonValue::from(0), JsonValue::Number),
+        BaseType::Object => JsonValue::Object(serde_json::Map::new()),
+        BaseType::Blob => return Err("a blob handle cannot be generated".into()),
+        BaseType::Named(name) if name == BUILTIN_RESULT_TYPE => serde_json::json!({ "ok": true }),
+        BaseType::Named(name) => {
+            if visiting.contains(name) {
+                return Err(format!("required field recursion through {name}"));
+            }
+            let schema = types
+                .get(name)
+                .ok_or_else(|| format!("named type {name} is not declared"))?;
+            visiting.push(name.clone());
+            let mut record = serde_json::Map::new();
+            for field in schema.fields.iter() {
+                if field.type_expr.optional {
+                    continue;
+                }
+                let value = mock_value(&field.type_expr, types, None, visiting)
+                    .map_err(|reason| format!("{name}.{}: {reason}", field.name))?;
+                record.insert(field.name.clone(), value);
+            }
+            visiting.pop();
+            JsonValue::Object(record)
+        }
+    })
+}
+
+/// Render JSON as a Luau literal. `null` becomes `nil`.
+fn luau_literal(value: &JsonValue) -> String {
+    match value {
+        JsonValue::Null => "nil".into(),
+        JsonValue::Bool(value) => value.to_string(),
+        JsonValue::Number(number) => number.to_string(),
+        JsonValue::String(text) => luau_string(text),
+        JsonValue::Array(items) if items.is_empty() => "{}".into(),
+        JsonValue::Array(items) => {
+            let items = items.iter().map(luau_literal).collect::<Vec<_>>();
+            format!("{{ {} }}", items.join(", "))
+        }
+        JsonValue::Object(entries) if entries.is_empty() => "{}".into(),
+        JsonValue::Object(entries) => {
+            let entries = entries
+                .iter()
+                .map(|(key, value)| format!("[{}] = {}", luau_string(key), luau_literal(value)))
+                .collect::<Vec<_>>();
+            format!("{{ {} }}", entries.join(", "))
+        }
+    }
+}
+
+fn luau_string(text: &str) -> String {
+    let mut quoted = String::with_capacity(text.len() + 2);
+    quoted.push('"');
+    for ch in text.chars() {
+        match ch {
+            '"' => quoted.push_str("\\\""),
+            '\\' => quoted.push_str("\\\\"),
+            '\n' => quoted.push_str("\\n"),
+            '\r' => quoted.push_str("\\r"),
+            '\t' => quoted.push_str("\\t"),
+            ch if (ch as u32) < 0x20 => write!(quoted, "\\x{:02x}", ch as u32).unwrap(),
+            ch => quoted.push(ch),
+        }
+    }
+    quoted.push('"');
+    quoted
 }
 
 /// Generate standalone Markdown documentation from the same schema and policy
@@ -407,20 +556,6 @@ fn luau_type(expr: &TypeExpr) -> String {
     }
 }
 
-fn luau_default_value(expr: &TypeExpr) -> &'static str {
-    if expr.optional {
-        return "nil";
-    }
-    match &expr.base {
-        BaseType::String => "\"\"",
-        BaseType::Blob => "nil",
-        BaseType::Int | BaseType::Float => "0",
-        BaseType::Boolean => "false",
-        BaseType::Object | BaseType::Named(_) => "{}",
-        BaseType::Any => "nil",
-    }
-}
-
 fn write_policy_line(output: &mut String, label: &str, policy: Option<&[String]>) {
     let value = policy
         .map(|values| {
@@ -518,6 +653,80 @@ mod tests {
             "export type Service = State & Events & {\n",
         ] {
             assert!(types.contains(expected), "missing {expected:?} in\n{types}");
+        }
+    }
+
+    #[test]
+    fn mock_values_satisfy_the_compiled_contract() {
+        let contract = crate::contract::parse_compiled_contract(
+            "mesh.audio",
+            "1.0",
+            &serde_json::json!({
+                "state": {
+                    "percent": { "type": "float", "minimum": 5, "maximum": 100 },
+                    "steps": { "type": "int", "minimum": -10, "maximum": -2 },
+                    "muted": { "type": "boolean", "default": true },
+                    "sinks": "Sink[]",
+                    "route": "Route",
+                    "art": "blob",
+                    "note": "string?"
+                },
+                "methods": {
+                    "current_route": "() -> Route",
+                    "set_volume": "(percent: float) -> Result",
+                    "cover": "() -> blob"
+                },
+                "types": {
+                    "Sink": { "name": "string" },
+                    "Route": { "target": "Sink", "label": "string?", "tags": "string[]" }
+                }
+            }),
+        )
+        .unwrap();
+        let types = &contract.schemas.types;
+        for field in contract.schemas.state_fields.iter() {
+            match state_mock_value(field, types) {
+                Ok(value) => {
+                    assert!(
+                        field.type_expr.matches_compiled(&value, types),
+                        "{}: {value}",
+                        field.name
+                    );
+                    if let (Some(number), Some(minimum)) =
+                        (value.as_f64(), field.minimum.as_ref().and_then(|n| n.as_f64()))
+                    {
+                        assert!(number >= minimum, "{}: {number}", field.name);
+                    }
+                    if let (Some(number), Some(maximum)) =
+                        (value.as_f64(), field.maximum.as_ref().and_then(|n| n.as_f64()))
+                    {
+                        assert!(number <= maximum, "{}: {number}", field.name);
+                    }
+                }
+                Err(reason) => assert_eq!(field.name, "art", "{reason}"),
+            }
+        }
+        for method in contract.schemas.methods.iter() {
+            let returns = method.returns.as_ref().unwrap();
+            match mock_value(returns, types, None, &mut Vec::new()) {
+                Ok(value) => assert!(returns.matches_compiled(&value, types), "{}", method.name),
+                Err(_) => assert_eq!(method.name, "cover"),
+            }
+        }
+
+        let mock = generate_luau_mock(&contract);
+        for expected in [
+            "-- unsupported: state.art: a blob handle cannot be generated\n",
+            "-- unsupported: cover(): a blob handle cannot be generated\n",
+            "        percent = 5.0,\n",
+            "        steps = -2,\n",
+            "        muted = true,\n",
+            "        route = { [\"tags\"] = {}, [\"target\"] = { [\"name\"] = \"\" } },\n",
+            "        sinks = {},\n",
+            "    return { [\"ok\"] = true }\n",
+            "    error(\"mock cannot produce a cover result: a blob handle cannot be generated\")\n",
+        ] {
+            assert!(mock.contains(expected), "missing {expected:?} in\n{mock}");
         }
     }
 

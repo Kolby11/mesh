@@ -485,7 +485,10 @@ backend return fields and synthetic callback APIs are not inferred.
 source for every generated artifact; no generator re-reads `module.json`.
 `mesh-shell types [<interface>...] [--out <dir>] [--target <name>]` writes one
 file per contract: `luau` (default; consumer declarations, `<interface>.d.luau`),
-`luau-provider` (provider stub), `luau-mock`, `rust` (provider bindings: identity
+`luau-provider` (provider stub), `luau-mock` (state and method returns that
+satisfy the contract — defaults, in-range numbers, empty arrays, required record
+fields — with any value it cannot construct, such as a required blob, listed at
+the top and raised as an error by its method), `rust` (provider bindings: identity
 and fingerprint constants, serde types for named types, state and event
 payloads, a `Provider` trait and a `dispatch` function over the call's argument
 object), `descriptor` and `docs`. The descriptor is the language-neutral JSON
