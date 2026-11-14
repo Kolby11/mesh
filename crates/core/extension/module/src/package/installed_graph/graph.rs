@@ -1074,16 +1074,64 @@ impl InstalledModuleGraph {
         // The composition has the last word on the UI its members contribute:
         // it may replace a page, hide one, or fix the order without editing any
         // member module.
-        for ((_, point), entries) in extension_points.iter_mut() {
+        //
+        // A replacement takes over the replaced entry's position with the
+        // target module's own contribution at that point — its id, entry and
+        // validated props — and any separate entry of that same contribution
+        // is folded into it. A target with no contribution there is reported
+        // and the position is dropped.
+        let own_contributions = extension_points
+            .iter()
+            .flat_map(|((_, point), entries)| {
+                entries
+                    .iter()
+                    .map(move |entry| ((point.clone(), entry.source_module_id.clone()), entry.clone()))
+            })
+            .fold(HashMap::new(), |mut own, (key, entry)| {
+                own.entry(key).or_insert(entry);
+                own
+            });
+        for ((host_module_id, point), entries) in extension_points.iter_mut() {
             let Some(over) = composition.slots.get(point.as_str()) else {
                 continue;
             };
+            let replaced_from = std::cell::RefCell::new(Vec::new());
             apply_slot_override(
                 entries,
                 over,
                 |entry| entry.source_module_id.clone(),
-                |entry, module_id| entry.source_module_id = module_id,
+                |entry, module_id| {
+                    match own_contributions.get(&(point.clone(), module_id.clone())) {
+                        Some(target) => {
+                            entry.contribution_id = target.contribution_id.clone();
+                            entry.entry = target.entry.clone();
+                            entry.props = target.props.clone();
+                        }
+                        None => {
+                            replaced_from
+                                .borrow_mut()
+                                .push((entry.source_module_id.clone(), module_id.clone()));
+                            entry.contribution_id.clear();
+                        }
+                    }
+                    entry.source_module_id = module_id;
+                },
             );
+            for (source, target) in replaced_from.into_inner() {
+                manual_diagnostics.push(ModuleGraphDiagnostic {
+                    module_id: host_module_id.clone(),
+                    contribution_id: Some(format!("{host_module_id}:hosts:{point}")),
+                    status: "slot_replacement_missing".into(),
+                    message: format!(
+                        "the composition replaces {source} with {target} at {point}, but {target} contributes nothing there"
+                    ),
+                });
+            }
+            let mut seen = std::collections::HashSet::new();
+            entries.retain(|entry| {
+                !entry.contribution_id.is_empty()
+                    && seen.insert((entry.source_module_id.clone(), entry.contribution_id.clone()))
+            });
         }
         manual_diagnostics.extend(enforce_single_contributions(
             &contributions,

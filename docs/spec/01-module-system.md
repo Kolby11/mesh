@@ -902,6 +902,11 @@ Rules:
   switching shells keeps the user's theme. `compose.settings.shell.theme` is a
   validation error. A profile may still pin a theme in its own settings
   ([08 §1.1](08-settings.md#11-profile-scope)).
+- `slots.<point>.replace` gives the replaced module's position to the target
+  module's own contribution at that point — its id, entry and props — and folds
+  in the target's separate entry so it renders once. A target that contributes
+  nothing there is the diagnostic `slot_replacement_missing`, and the position
+  is dropped.
 - `extends` forks a family: the base composition's decisions plus the deltas you
   disagree with. Cycles are rejected.
 - `mesh.uses.sources` says where to fetch a dependency that is not installed. A

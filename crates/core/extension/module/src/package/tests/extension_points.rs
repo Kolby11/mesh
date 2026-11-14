@@ -388,13 +388,9 @@ fn a_composition_replaces_suppresses_and_orders_contributed_pages() {
     // The suppressed module is gone; the replaced one now reads as the family's.
     assert!(!sources.contains(&"@mesh/network"));
     assert!(!sources.contains(&"@mesh/audio"));
-    assert_eq!(
-        sources
-            .iter()
-            .filter(|id| **id == "@alice/audio-page")
-            .count(),
-        2
-    );
+    // The replacement takes @mesh/audio's position and folds in alice's own
+    // entry, so the page renders once.
+    assert_eq!(sources, vec!["@alice/audio-page"]);
 
     // A suppressed module has no resolved page, so the host falls back to the
     // generated rows for it rather than showing nothing.
@@ -408,6 +404,48 @@ fn a_composition_replaces_suppresses_and_orders_contributed_pages() {
             .resolved_contribution_entry("@alice/audio-page", POINT)
             .is_some()
     );
+}
+
+#[test]
+fn a_slot_replacement_uses_the_target_modules_own_contribution() {
+    let modules = vec![
+        declaring_interface(true),
+        host("@mesh/settings", None),
+        contributor("@mesh/audio", "audio", 10),
+        contributor_with_props(
+            "@alice/sound",
+            "sound-page",
+            50,
+            serde_json::Map::from_iter([("title".to_string(), serde_json::json!("Sound"))]),
+        ),
+        contributor("@mesh/network", "network", 20),
+    ];
+    let descriptors: Vec<(&str, ModuleKind)> = modules
+        .iter()
+        .map(|module| (module.manifest.name.as_str(), module.manifest.mesh.kind))
+        .collect();
+    let root = root_with_modules(&descriptors, &[], None);
+    let mut composition = CompositionContext::default();
+    composition.slots.insert(
+        POINT.to_string(),
+        SlotOverride {
+            replace: BTreeMap::from([
+                ("@mesh/audio".to_string(), "@alice/sound".to_string()),
+                ("@mesh/network".to_string(), "@alice/absent".to_string()),
+            ]),
+            ..SlotOverride::default()
+        },
+    );
+    let graph =
+        InstalledModuleGraph::from_parts_with_composition(root, modules, composition).unwrap();
+
+    let entries = graph.extension_point_contributions("@mesh/settings", POINT);
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    assert_eq!(entries[0].source_module_id, "@alice/sound");
+    assert_eq!(entries[0].contribution_id, "sound-page");
+    assert_eq!(entries[0].props["title"], "Sound");
+    assert_eq!(entries[0].order, 10, "the replacement keeps the replaced position");
+    assert_eq!(statuses(&graph, "slot_replacement_missing").len(), 1);
 }
 
 #[test]
