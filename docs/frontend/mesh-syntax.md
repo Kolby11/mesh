@@ -284,6 +284,10 @@ The runtime tracks the referenced variable and re-renders the text node when it 
 Braces inside an XML comment (`<!-- … -->`) or a CDATA section (`<![CDATA[ … ]]>`)
 are literal: a comment is discarded, and CDATA renders as text.
 
+Tags named `mesh-root`, `mesh-expr`, `mesh-if`, `mesh-ifthen`, `mesh-else` and
+`mesh-for` are reserved for the compiler's own template lowering and are
+rejected in authored markup.
+
 ### Static attributes
 
 Write static attributes as XML-style name/value pairs:

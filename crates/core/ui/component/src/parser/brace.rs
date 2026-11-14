@@ -94,6 +94,29 @@ pub(super) fn literal_section_len(rest: &str) -> Option<usize> {
     )
 }
 
+/// Element names the template lowering generates; authored markup may not
+/// use them, or they would be read back as generated control flow.
+const RESERVED_TAGS: [&str; 6] = [
+    "mesh-root",
+    "mesh-expr",
+    "mesh-if",
+    "mesh-ifthen",
+    "mesh-else",
+    "mesh-for",
+];
+
+fn reserved_tag_at(rest: &str) -> Option<&'static str> {
+    let name = rest.strip_prefix("</").or_else(|| rest.strip_prefix('<'))?;
+    RESERVED_TAGS.into_iter().find(|tag| {
+        name.strip_prefix(tag).is_some_and(|after| {
+            after
+                .chars()
+                .next()
+                .is_none_or(|ch| ch.is_whitespace() || ch == '/' || ch == '>')
+        })
+    })
+}
+
 pub(super) fn lex(source: &str) -> Result<BraceLex, ParseError> {
     let mut tokens = Vec::new();
     let mut cursor = 0;
@@ -110,6 +133,16 @@ pub(super) fn lex(source: &str) -> Result<BraceLex, ParseError> {
         {
             cursor += length;
             continue;
+        }
+        if !in_tag
+            && ch == '<'
+            && let Some(tag) = reserved_tag_at(&source[cursor..])
+        {
+            return Err(error_at(
+                source,
+                cursor,
+                format!("<{tag}> is reserved for generated template structure"),
+            ));
         }
         match (ch, quote) {
             (_, Some(open)) if ch == open => quote = None,

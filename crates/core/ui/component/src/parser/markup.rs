@@ -698,6 +698,14 @@ fn parse_xml_attributes(
                 let BraceKind::Expression { expression } = &token.kind else {
                     return None;
                 };
+                // Marker-shaped authored text is a literal: only a brace token
+                // inside this attribute's own source produced its marker.
+                if authored_span.is_some_and(|span| {
+                    source_base + token.span.start < span.start
+                        || source_base + token.span.end > span.end
+                }) {
+                    return None;
+                }
                 Some((
                     (
                         source[expression.start..expression.end].to_string(),
@@ -1561,6 +1569,43 @@ mod tests {
             "{:?}",
             text.children
         );
+    }
+
+    #[test]
+    fn marker_shaped_attribute_text_stays_static() {
+        let source = r#"<box title="__mesh_expr_0__" label="__mesh_quoted_expr_0__" tooltip="{hint}" />"#;
+        let template = parse_markup(source, &HashMap::new()).expect("template parses");
+        let TemplateNode::Element(boxed) = &template.root[0] else {
+            panic!("expected box element");
+        };
+        let value = |name: &str| {
+            &boxed
+                .attributes
+                .iter()
+                .find(|attribute| attribute.name == name)
+                .unwrap()
+                .value
+        };
+        assert!(matches!(value("title"), AttributeValue::Static(text) if text == "__mesh_expr_0__"));
+        assert!(
+            matches!(value("label"), AttributeValue::Static(text) if text == "__mesh_quoted_expr_0__")
+        );
+        assert!(matches!(value("tooltip"), AttributeValue::Binding(expression) if expression == "hint"));
+    }
+
+    #[test]
+    fn generated_template_tags_are_reserved() {
+        for source in [
+            r#"<mesh-expr data-mesh-id="0" />"#,
+            r#"<box><mesh-if data-mesh-id="0"></mesh-if></box>"#,
+            "<mesh-root/>",
+        ] {
+            let error = parse_markup(source, &HashMap::new())
+                .expect_err("reserved tag must be rejected")
+                .to_string();
+            assert!(error.contains("reserved"), "{error}");
+        }
+        parse_markup("<mesh-expression-like />", &HashMap::new()).ok();
     }
 
     #[test]
