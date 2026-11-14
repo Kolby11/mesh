@@ -469,7 +469,9 @@ type and type field) must be a Luau identifier that is not a keyword, because
 consumers read members as `service.name` and tooling generates declarations
 from them. An optional argument (`T?`) may be omitted only when no required
 argument follows it. Adding a trailing optional argument is additive; removing
-any argument, optional or not, is breaking.
+any argument, optional or not, is breaking. Adding a required field to a named
+type that a method argument reaches, directly or through other named types, is
+breaking because existing callers omit it; elsewhere a new field is additive.
 
 Object key order carries no meaning (manifests parse into sorted maps), which
 is why ordered method arguments live in the signature string. Contracts also

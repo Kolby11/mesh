@@ -451,6 +451,7 @@ fn diff_types(
     candidate: &InterfaceContract,
     changes: &mut Vec<ContractChange>,
 ) {
+    let inputs = method_input_types(candidate);
     for (name, definition) in &locked.types {
         let Some(candidate_definition) = candidate.types.get(name) else {
             changes.push(ContractChange {
@@ -464,6 +465,7 @@ fn diff_types(
             &format!("types.{name}"),
             &definition.fields,
             &candidate_definition.fields,
+            inputs.contains(name.as_str()),
             changes,
         );
     }
@@ -479,10 +481,45 @@ fn diff_types(
     }
 }
 
+/// Named types a method argument reaches, directly or through the fields of
+/// other named types. Callers construct these records, so a new required field
+/// rejects what an existing caller sends.
+fn method_input_types(contract: &InterfaceContract) -> std::collections::HashSet<&str> {
+    let named = |type_expression: &str| match crate::TypeExpr::parse(type_expression) {
+        Ok(crate::TypeExpr {
+            base: crate::BaseType::Named(name),
+            ..
+        }) => Some(name),
+        _ => None,
+    };
+    let mut pending = contract
+        .methods
+        .iter()
+        .flat_map(|method| method.args.iter())
+        .filter_map(|argument| named(&argument.arg_type))
+        .collect::<Vec<_>>();
+    let mut inputs = std::collections::HashSet::new();
+    while let Some(name) = pending.pop() {
+        let Some((key, definition)) = contract.types.get_key_value(name.as_str()) else {
+            continue;
+        };
+        if inputs.insert(key.as_str()) {
+            pending.extend(
+                definition
+                    .fields
+                    .iter()
+                    .filter_map(|field| named(&field.arg_type)),
+            );
+        }
+    }
+    inputs
+}
+
 fn diff_named_fields(
     path: &str,
     locked: &[InterfaceArgument],
     candidate: &[InterfaceArgument],
+    method_input: bool,
     changes: &mut Vec<ContractChange>,
 ) {
     for field in locked {
@@ -513,10 +550,22 @@ fn diff_named_fields(
     }
     for field in candidate {
         if !locked.iter().any(|other| other.name == field.name) {
+            let breaks_callers = method_input && !is_optional(&field.arg_type);
             changes.push(ContractChange {
-                class: CompatibilityClass::Additive,
+                class: if breaks_callers {
+                    CompatibilityClass::Breaking
+                } else {
+                    CompatibilityClass::Additive
+                },
                 path: format!("{path}.{}", field.name),
-                detail: format!("named type field '{}' was added", field.name),
+                detail: if breaks_callers {
+                    format!(
+                        "required named type field '{}' was added to a method input; existing callers omit it",
+                        field.name
+                    )
+                } else {
+                    format!("named type field '{}' was added", field.name)
+                },
             });
         }
     }
@@ -981,6 +1030,64 @@ mod tests {
         assert!(diff.breaking_changes().any(|change| {
             change.path == "types.Volume.level" && change.detail.contains("float to int")
         }));
+    }
+
+    #[test]
+    fn required_fields_added_to_method_input_records_are_breaking() {
+        let with_fields = |route: &str, sink: &str| {
+            contract(&format!(
+                r#"{{
+                    "state": {{ "sink": "Sink?" }},
+                    "methods": {{ "set_route": "(route: Route) -> Result" }},
+                    "types": {{
+                        "Route": {{ "target": "Target"{route} }},
+                        "Target": {{ "id": "string" }},
+                        "Sink": {{ "name": "string"{sink} }}
+                    }},
+                    "capabilities": {{ "required": ["service.audio.read"] }}
+                }}"#
+            ))
+        };
+        let locked = with_fields("", "");
+        let class_of = |candidate: &InterfaceContract, path: &str| {
+            diff_contracts(&locked, candidate)
+                .changes
+                .into_iter()
+                .find(|change| change.path == path)
+                .map(|change| change.class)
+        };
+
+        let required_input = with_fields(r#", "priority": "int""#, "");
+        assert_eq!(
+            class_of(&required_input, "types.Route.priority"),
+            Some(CompatibilityClass::Breaking)
+        );
+        let optional_input = with_fields(r#", "priority": "int?""#, "");
+        assert_eq!(
+            class_of(&optional_input, "types.Route.priority"),
+            Some(CompatibilityClass::Additive)
+        );
+        let required_output = with_fields("", r#", "volume": "float""#);
+        assert_eq!(
+            class_of(&required_output, "types.Sink.volume"),
+            Some(CompatibilityClass::Additive)
+        );
+
+        let mut nested = with_fields("", "");
+        nested
+            .types
+            .get_mut("Target")
+            .unwrap()
+            .fields
+            .push(InterfaceArgument {
+                name: "kind".into(),
+                arg_type: "string".into(),
+            });
+        assert_eq!(
+            class_of(&nested, "types.Target.kind"),
+            Some(CompatibilityClass::Breaking),
+            "a record reached through an input record is an input too"
+        );
     }
 
     #[test]
