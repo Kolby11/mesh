@@ -180,6 +180,22 @@ pub(crate) fn inherit_text_style(
         style.line_height = parent_style.line_height;
         inherited.line_height = true;
     }
+    if !explicit.font_style {
+        style.font_style = parent_style.font_style;
+        inherited.font_style = true;
+    }
+    if !explicit.letter_spacing {
+        style.letter_spacing = parent_style.letter_spacing;
+        inherited.letter_spacing = true;
+    }
+    if !explicit.text_align {
+        style.text_align = parent_style.text_align;
+        inherited.text_align = true;
+    }
+    if !explicit.text_direction {
+        style.text_direction = parent_style.text_direction;
+        inherited.text_direction = true;
+    }
     style.explicit_properties = explicit;
     style.inherited_properties = inherited;
 }

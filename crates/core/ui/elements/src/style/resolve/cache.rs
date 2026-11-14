@@ -99,6 +99,10 @@ pub(super) struct ParentInheritedStyle {
     pub(super) font_size: f32,
     pub(super) font_weight: u16,
     pub(super) line_height: f32,
+    pub(super) font_style: FontStyle,
+    pub(super) letter_spacing: f32,
+    pub(super) text_align: TextAlign,
+    pub(super) text_direction: TextDirection,
 }
 
 impl From<&ComputedStyle> for ParentInheritedStyle {
@@ -110,6 +114,10 @@ impl From<&ComputedStyle> for ParentInheritedStyle {
             font_size: s.font_size,
             font_weight: s.font_weight,
             line_height: s.line_height,
+            font_style: s.font_style,
+            letter_spacing: s.letter_spacing,
+            text_align: s.text_align,
+            text_direction: s.text_direction,
         }
     }
 }

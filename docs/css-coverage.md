@@ -36,7 +36,7 @@ Unsupported properties produce style diagnostics or parser errors instead of hid
 | transition | implemented | `transition` and its longhands store constrained transition metadata for supported visual properties. |
 | layout | implemented | `display`, `visibility`, flex properties, `aspect-ratio`, `gap`, `row-gap`, `column-gap`, `gap-x`, positioning, `inset`, and `z-index` feed retained layout/render state. |
 | layout | out-of-scope | CSS Grid, floats, multicolumn layout, browser box model modes, full media queries, and arbitrary layout algorithms are not MESH shell CSS. |
-| font | implemented | `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `letter-spacing`, `text-align`, `text-overflow`, and text `direction` resolve into text style fields. |
+| font | implemented | `font`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `letter-spacing`, `text-align`, `text-overflow`, and text `direction` resolve into text style fields. `color`, `font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `letter-spacing`, `text-align` and `direction` inherit from the parent unless the node sets them. |
 | font | out-of-scope | Browser text-flow controls such as `white-space`, `text-wrap`, and `word-break` are not part of the bounded profile. |
 | selectors | implemented | Universal, tag, class, ID, compound selectors, selector lists, and the supported state pseudo-classes participate in style matching. |
 | selectors | out-of-scope | Descendant, child, sibling, attribute, structural pseudo-class, and pseudo-element selector behavior is outside MESH shell CSS. |

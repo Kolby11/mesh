@@ -621,6 +621,10 @@ fn retained_restyle_preserves_explicit_transparent_and_default_inherited_values(
         initial_child.inherited_properties,
         StylePropertyMask {
             font_family: true,
+            font_style: true,
+            letter_spacing: true,
+            text_align: true,
+            text_direction: true,
             ..StylePropertyMask::default()
         }
     );
@@ -645,9 +649,73 @@ fn retained_restyle_preserves_explicit_transparent_and_default_inherited_values(
         restyled_child.inherited_properties,
         StylePropertyMask {
             font_family: true,
+            font_style: true,
+            letter_spacing: true,
+            text_align: true,
+            text_direction: true,
             ..StylePropertyMask::default()
         }
     );
+}
+
+#[test]
+fn font_style_spacing_alignment_and_direction_inherit_until_overridden() {
+    let theme = mesh_core_theme::default_theme();
+    let resolver = StyleResolver::new(&theme);
+    let declaration = |property: &str, value: &str| Declaration {
+        property: property.to_string(),
+        value: StyleValue::Literal(value.to_string()),
+    };
+    let rules = vec![
+        StyleRule {
+            selector: Selector::Class("parent".to_string()),
+            declarations: vec![
+                declaration("font-style", "italic"),
+                declaration("letter-spacing", "2px"),
+                declaration("text-align", "center"),
+                declaration("direction", "rtl"),
+            ],
+            container_query: None,
+        },
+        StyleRule {
+            selector: Selector::Class("upright".to_string()),
+            declarations: vec![declaration("font-style", "normal")],
+            container_query: None,
+        },
+    ];
+    let mut root = crate::tree::WidgetNode::new("row");
+    root.id = 1;
+    root.attributes.insert(Prop::Class, "parent".into());
+    let mut inheriting = crate::tree::WidgetNode::new("text");
+    inheriting.id = 2;
+    let mut upright = crate::tree::WidgetNode::new("text");
+    upright.id = 3;
+    upright.attributes.insert(Prop::Class, "upright".into());
+    root.children.push(inheriting);
+    root.children.push(upright);
+
+    let assert_children = |root: &crate::tree::WidgetNode| {
+        let child = &root.children[0].computed_style;
+        assert_eq!(child.font_style, FontStyle::Italic);
+        assert!((child.letter_spacing - 2.0).abs() < f32::EPSILON);
+        assert_eq!(child.text_align, TextAlign::Center);
+        assert_eq!(child.text_direction, TextDirection::Rtl);
+        let upright = &root.children[1].computed_style;
+        assert_eq!(upright.font_style, FontStyle::Normal);
+        assert_eq!(upright.text_direction, TextDirection::Rtl);
+    };
+    resolver.restyle_subtree_cached(&mut root, &rules, StyleContext::default(), &mut None);
+    assert_children(&root);
+
+    root.state.set(NodeState::HOVERED, true);
+    let root_id = root.id;
+    resolver.restyle_subtree_for_ids(
+        &mut root,
+        &rules,
+        StyleContext::default(),
+        &std::collections::HashSet::from([root_id]),
+    );
+    assert_children(&root);
 }
 
 #[test]

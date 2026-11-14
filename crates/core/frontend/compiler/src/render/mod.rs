@@ -1214,6 +1214,10 @@ fn build_element_node(
             font_size: inherited_mask.font_size || explicit.font_size,
             font_weight: inherited_mask.font_weight || explicit.font_weight,
             line_height: inherited_mask.line_height || explicit.line_height,
+            font_style: inherited_mask.font_style || explicit.font_style,
+            letter_spacing: inherited_mask.letter_spacing || explicit.letter_spacing,
+            text_align: inherited_mask.text_align || explicit.text_align,
+            text_direction: inherited_mask.text_direction || explicit.text_direction,
         };
         inherit_text_style(&mut node.computed_style, parent_style, mask);
     }

@@ -125,6 +125,22 @@ pub(super) fn inherit_retained_text_style(
         style.line_height = parent.line_height;
         inherited.line_height = true;
     }
+    if !explicit.font_style {
+        style.font_style = parent.font_style;
+        inherited.font_style = true;
+    }
+    if !explicit.letter_spacing {
+        style.letter_spacing = parent.letter_spacing;
+        inherited.letter_spacing = true;
+    }
+    if !explicit.text_align {
+        style.text_align = parent.text_align;
+        inherited.text_align = true;
+    }
+    if !explicit.text_direction {
+        style.text_direction = parent.text_direction;
+        inherited.text_direction = true;
+    }
     style.inherited_properties = inherited;
 }
 

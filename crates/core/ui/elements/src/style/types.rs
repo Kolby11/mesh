@@ -23,6 +23,10 @@ pub struct StylePropertyMask {
     pub font_size: bool,
     pub font_weight: bool,
     pub line_height: bool,
+    pub font_style: bool,
+    pub letter_spacing: bool,
+    pub text_align: bool,
+    pub text_direction: bool,
 }
 
 impl StylePropertyMask {
@@ -35,11 +39,16 @@ impl StylePropertyMask {
                 self.font_size = true;
                 self.font_weight = true;
                 self.line_height = true;
+                self.font_style = true;
             }
             "font-family" => self.font_family = true,
             "font-size" => self.font_size = true,
             "font-weight" => self.font_weight = true,
             "line-height" => self.line_height = true,
+            "font-style" => self.font_style = true,
+            "letter-spacing" => self.letter_spacing = true,
+            "text-align" => self.text_align = true,
+            "direction" => self.text_direction = true,
             _ => {}
         }
     }
@@ -51,6 +60,10 @@ impl StylePropertyMask {
             && (!self.font_size || accumulated.font_size)
             && (!self.font_weight || accumulated.font_weight)
             && (!self.line_height || accumulated.line_height)
+            && (!self.font_style || accumulated.font_style)
+            && (!self.letter_spacing || accumulated.letter_spacing)
+            && (!self.text_align || accumulated.text_align)
+            && (!self.text_direction || accumulated.text_direction)
     }
 }
 
@@ -61,6 +74,10 @@ impl std::ops::BitOrAssign for StylePropertyMask {
         self.font_size |= rhs.font_size;
         self.font_weight |= rhs.font_weight;
         self.line_height |= rhs.line_height;
+        self.font_style |= rhs.font_style;
+        self.letter_spacing |= rhs.letter_spacing;
+        self.text_align |= rhs.text_align;
+        self.text_direction |= rhs.text_direction;
     }
 }
 
