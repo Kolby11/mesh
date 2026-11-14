@@ -2212,6 +2212,46 @@ local BatteryWidget = require("./components/battery-widget.mesh")
     }
 
     #[test]
+    fn import_targets_use_the_decoded_luau_string() {
+        let source = r#"
+<template>
+  <BatteryWidget />
+  <VolumeBar />
+  <Clock />
+</template>
+<script lang="luau">
+local BatteryWidget = require("./components/battery\u{2d}widget.mesh")
+local VolumeBar = require('@mesh\x2fvolume-bar')
+local Clock = require([[
+./clock.mesh]])
+</script>
+"#;
+        let file = parse_component(source).unwrap();
+        let targets = file
+            .imports
+            .iter()
+            .map(|import| (import.alias.as_str(), import.target.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            targets,
+            vec![
+                (
+                    "BatteryWidget",
+                    ComponentImportTarget::ComponentLocal("./components/battery-widget.mesh".into())
+                ),
+                (
+                    "VolumeBar",
+                    ComponentImportTarget::ComponentModule("@mesh/volume-bar".into())
+                ),
+                (
+                    "Clock",
+                    ComponentImportTarget::ComponentLocal("./clock.mesh".into())
+                ),
+            ]
+        );
+    }
+
+    #[test]
     fn rejects_unimported_pascal_case_custom_components() {
         let source = r#"
 <template>

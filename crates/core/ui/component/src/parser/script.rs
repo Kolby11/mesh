@@ -588,11 +588,10 @@ fn expression_string_literal(expression: &Expression) -> Option<String> {
     }
 }
 
+/// The value Luau gives a string literal, with escapes and long-bracket
+/// newlines decoded; `None` for a non-string or invalid literal.
 fn string_literal(token: &TokenReference) -> Option<String> {
-    match token.token_type() {
-        TokenType::StringLiteral { literal, .. } => Some(literal.to_string()),
-        _ => None,
-    }
+    super::luau_literal::string(token).ok()
 }
 
 fn identifier(token: &TokenReference) -> Option<&str> {

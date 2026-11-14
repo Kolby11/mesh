@@ -84,7 +84,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Resolve icon overrides through MESH pack-qualified mappings; current override lookup treats targets as file or XDG assets. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Include override-only font roles in renderer alias projection; registry resolution and rendered `font-family` can disagree. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Evaluate `style:` directive expressions once without marking the binding as a function call; wrapping the value in an inline function made binding patches visit every target (`binding_patch_visits_no_target_discovery`). [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
-- [ ] Decode Luau string literals consistently during component import analysis; escaped paths can differ from runtime values. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 
 - [ ] Build interchangeable shell compositions, configurable `.mesh` components and independently switchable themes that can realize the diverse [shell references](reference/shells/); the full range is not yet available.
       Support live shell and theme switching and hot reload with a polished transition effect, respecting reduced-motion preferences.
