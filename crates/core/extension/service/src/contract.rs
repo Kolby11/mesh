@@ -1306,6 +1306,9 @@ fn compile_features(
 /// Member name a contract reserves for `service:supports(feature)`.
 pub const SUPPORTS_MEMBER: &str = "supports";
 
+/// Proxy members that hold a service's state fields and event channels.
+pub const PROXY_NAMESPACE_MEMBERS: [&str; 2] = ["state", "events"];
+
 /// Feature names are lowercase words joined by `-`, such as `per-app-volume`.
 fn valid_feature_name(name: &str) -> bool {
     !name.is_empty()
@@ -1332,6 +1335,19 @@ fn validate_features(contract: &InterfaceContract) -> Result<(), ContractError> 
     if reserved {
         return Err(invalid(format!(
             "'{SUPPORTS_MEMBER}' is reserved for feature checks and cannot name a member"
+        )));
+    }
+    // A state field with one of these names stays reachable through the
+    // proxy's `state` table; a method or event would be shadowed entirely.
+    if let Some(name) = contract
+        .methods
+        .iter()
+        .map(|method| method.name.as_str())
+        .chain(contract.events.iter().map(|event| event.name.as_str()))
+        .find(|name| PROXY_NAMESPACE_MEMBERS.contains(name))
+    {
+        return Err(invalid(format!(
+            "'{name}' is the service proxy's own namespace and cannot name a method or event"
         )));
     }
     let mut owners = HashMap::<&str, &str>::new();
@@ -2540,6 +2556,16 @@ mod tests {
             .contains("lowercase words"));
         let reserved = serde_json::json!({ "methods": { "supports": "()" } });
         assert!(parse_compiled_contract("mesh.audio", "1.0", &reserved).is_err());
+        for reserved in [
+            serde_json::json!({ "methods": { "state": "()" } }),
+            serde_json::json!({ "methods": { "events": "()" } }),
+            serde_json::json!({ "events": { "state": {} } }),
+        ] {
+            let error = parse_compiled_contract("mesh.audio", "1.0", &reserved).unwrap_err();
+            assert!(error.to_string().contains("proxy's own namespace"), "{error}");
+        }
+        let field = serde_json::json!({ "state": { "state": "string" } });
+        assert!(parse_compiled_contract("mesh.media", "1.0", &field).is_ok());
     }
 
     #[test]

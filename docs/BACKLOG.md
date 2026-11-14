@@ -74,7 +74,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Support deactivating inherited profile roots through CLI commands and distinguish resetting an override from removing a root. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Propagate interface-compatibility blocking through module dependency closure and retire no-longer-reachable dependencies. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Generate contract-valid service mocks or report unsupported schemas; current defaults and method returns can violate declared types. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
-- [ ] Resolve service member collisions with proxy `state` and `events` namespaces; accepted names can be inaccessible to Luau consumers. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Classify required named-record field additions according to input/output compatibility; existing method inputs can fail after an additive classification. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Share theme style-rule lowering between global and module scopes; duplicated token, default and selector logic can drift. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Align icon coverage advice with live alias, dash fallback and owner-scoped resolution; advice can report gaps for icons that resolve. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).

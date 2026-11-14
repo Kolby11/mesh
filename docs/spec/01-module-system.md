@@ -504,7 +504,9 @@ contract-less binding.
   "members": ["apps", "set_app_volume", "AppsChanged"] } }`. Names are
   lowercase words joined by `-`; members are declared state fields (which must
   have optional types), methods or events, each in at most one feature;
-  `supports` is reserved. A provider lists what it supplies in
+  `supports` is reserved for every member, and `state` and `events` (the proxy's
+  own namespaces) for methods and events; a state field so named stays readable
+  as `svc.state.state`. A provider lists what it supplies in
   `implements[].features`; an undeclared name is the graph diagnostic
   `unknown_provider_feature`. A missing feature never makes a provider
   ineligible. Consumers call `svc:supports(name)`, which is false without a

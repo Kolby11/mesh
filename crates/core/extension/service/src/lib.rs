@@ -41,7 +41,7 @@ pub use contract::{
     ContractCapabilities, ContractError, ContractFeature, ContractStateField,
     DeclarationProvenance, FeatureNegotiation, InterfaceArgument, InterfaceContract,
     InterfaceEvent, InterfaceMethod, InterfaceTypeDef, RUNTIME_METADATA_STATE_FIELDS, StateBinding,
-    SUPPORTS_MEMBER, TypeExpr, compile_interface_contract, contract_type_errors, json_type_name,
+    PROXY_NAMESPACE_MEMBERS, SUPPORTS_MEMBER, TypeExpr, compile_interface_contract, contract_type_errors, json_type_name,
     negotiate_features, parse_compiled_contract, parse_compiled_contract_with_provenance,
     parse_contract_version, parse_interface_contract, parse_method_signature, parse_version_req,
 };
