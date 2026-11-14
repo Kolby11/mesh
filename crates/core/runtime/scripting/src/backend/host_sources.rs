@@ -94,8 +94,7 @@ where
 pub fn spawn_socket_stream(state: &Arc<StreamState>, path: &str) -> std::io::Result<StreamHandle> {
     // Connect synchronously so a missing socket is reported to the caller
     // instead of as an asynchronous failure record.
-    let socket = StdUnixStream::connect(path)?;
-    socket.set_nonblocking(true)?;
+    let socket = connect_unix(path, Instant::now() + SOCKET_STREAM_CONNECT_TIMEOUT)?;
     let program = socket_stream_program(path);
     spawn_source(
         state,
@@ -254,7 +253,16 @@ fn socket_request_inner(
     max_bytes: usize,
 ) -> Result<String, String> {
     let deadline = Instant::now() + timeout;
-    let mut socket = StdUnixStream::connect(path).map_err(|error| error.to_string())?;
+    let mut socket = connect_unix(path, deadline).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::TimedOut {
+            format!("socket connect timed out after {timeout:?}")
+        } else {
+            error.to_string()
+        }
+    })?;
+    socket
+        .set_nonblocking(false)
+        .map_err(|error| error.to_string())?;
     socket
         .set_write_timeout(Some(timeout))
         .map_err(|error| error.to_string())?;
@@ -294,6 +302,132 @@ fn socket_request_inner(
         }
     }
     Ok(String::from_utf8_lossy(&response).into_owned())
+}
+
+/// Bound on establishing a `mesh.socket_stream` connection.
+const SOCKET_STREAM_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Connects a nonblocking Unix stream socket, giving up at `deadline`.
+///
+/// A blocking `connect` waits indefinitely while the listener's accept backlog
+/// is full. Linux reports that state to a nonblocking AF_UNIX `connect` as
+/// `EAGAIN` rather than `EINPROGRESS`, with no readiness to wait for, so the
+/// attempt is retried with a short backoff. Other errors, such as a missing
+/// path, return at once. The returned stream is nonblocking.
+fn connect_unix(path: &str, deadline: Instant) -> std::io::Result<StdUnixStream> {
+    let bytes = path.as_bytes();
+    // SAFETY: `sockaddr_un` is plain old data; all-zero is a valid value.
+    let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if bytes.is_empty() || bytes.contains(&0) || bytes.len() >= address.sun_path.len() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid Unix socket path '{path}'"),
+        ));
+    }
+    address.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    for (target, byte) in address.sun_path.iter_mut().zip(bytes) {
+        *target = *byte as libc::c_char;
+    }
+    let length = (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1)
+        as libc::socklen_t;
+
+    // SAFETY: plain socket creation; the result is checked before use.
+    let raw = unsafe {
+        libc::socket(
+            libc::AF_UNIX,
+            libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+            0,
+        )
+    };
+    if raw < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `raw` is a freshly created descriptor owned by nothing else.
+    let socket = unsafe { OwnedFd::from_raw_fd(raw) };
+    let mut backoff = Duration::from_millis(1);
+    loop {
+        // SAFETY: `address` is initialized and `length` covers its used prefix.
+        let result = unsafe {
+            libc::connect(
+                socket.as_raw_fd(),
+                std::ptr::addr_of!(address).cast(),
+                length,
+            )
+        };
+        if result == 0 {
+            return Ok(StdUnixStream::from(socket));
+        }
+        let error = std::io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::EINTR) => {}
+            Some(libc::EAGAIN) => {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        format!("connecting to {path} timed out"),
+                    ));
+                }
+                std::thread::sleep(backoff.min(remaining));
+                backoff = (backoff * 2).min(Duration::from_millis(20));
+            }
+            Some(libc::EINPROGRESS) => {
+                wait_writable(&socket, deadline, path)?;
+                return Ok(StdUnixStream::from(socket));
+            }
+            _ => return Err(error),
+        }
+    }
+}
+
+fn wait_writable(socket: &OwnedFd, deadline: Instant, path: &str) -> std::io::Result<()> {
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("connecting to {path} timed out"),
+            ));
+        }
+        let mut poll = libc::pollfd {
+            fd: socket.as_raw_fd(),
+            events: libc::POLLOUT,
+            revents: 0,
+        };
+        let millis = remaining.as_millis().clamp(1, i32::MAX as u128) as i32;
+        // SAFETY: `poll` points at one initialized pollfd.
+        let ready = unsafe { libc::poll(&mut poll, 1, millis) };
+        if ready < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(error);
+        }
+        if ready == 0 {
+            continue;
+        }
+        let mut pending: libc::c_int = 0;
+        let mut size = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+        // SAFETY: `pending` and `size` describe a valid c_int out-parameter.
+        let result = unsafe {
+            libc::getsockopt(
+                socket.as_raw_fd(),
+                libc::SOL_SOCKET,
+                libc::SO_ERROR,
+                std::ptr::addr_of_mut!(pending).cast(),
+                &mut size,
+            )
+        };
+        if result < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        return if pending == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::from_raw_os_error(pending))
+        };
+    }
 }
 
 struct DrainSummary {
@@ -541,6 +675,51 @@ mod tests {
         assert!(!reply.success);
         assert!(reply.error.contains("timed out"), "{reply:?}");
         assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// A listener whose accept backlog is full, plus the clients holding it.
+    fn saturated_listener(path: &std::path::Path) -> (UnixListener, Vec<StdUnixStream>) {
+        let listener = UnixListener::bind(path).unwrap();
+        // SAFETY: re-listening on an owned, bound socket only shrinks its backlog.
+        assert_eq!(unsafe { libc::listen(listener.as_raw_fd(), 0) }, 0);
+        let mut held = Vec::new();
+        let text = path.to_str().unwrap();
+        loop {
+            match connect_unix(text, Instant::now()) {
+                Ok(client) => held.push(client),
+                Err(error) if error.kind() == std::io::ErrorKind::TimedOut => break,
+                Err(error) => panic!("{error}"),
+            }
+            assert!(held.len() < 64, "backlog never filled");
+        }
+        (listener, held)
+    }
+
+    #[test]
+    fn socket_request_bounds_connection_to_a_full_backlog() {
+        let dir = tempdir();
+        let path = dir.join("full.sock");
+        let (_listener, _held) = saturated_listener(&path);
+
+        let started = Instant::now();
+        let reply = socket_request(path.to_str().unwrap(), b"x", Duration::from_millis(150), 64);
+        assert!(!reply.success);
+        assert!(reply.error.contains("connect timed out"), "{reply:?}");
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn socket_stream_bounds_connection_to_a_full_backlog() {
+        let dir = tempdir();
+        let path = dir.join("full-stream.sock");
+        let (_listener, _held) = saturated_listener(&path);
+        let state = StreamState::new();
+
+        let started = Instant::now();
+        let error = spawn_socket_stream(&state, path.to_str().unwrap()).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < SOCKET_STREAM_CONNECT_TIMEOUT + Duration::from_secs(1));
+        assert_eq!(state.active_stream_count(), 0);
     }
 
     fn tempdir() -> std::path::PathBuf {

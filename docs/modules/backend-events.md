@@ -16,6 +16,11 @@ registration; `failed` followed by `exited` reports a connection or source error
 | `mesh.watch_path(absolute_path)` | `fs.watch:<pattern>` matching the path | `modified` per inotify wakeup |
 | `mesh.socket_stream(absolute_path)` | `net.socket` | Newline-delimited socket records |
 
+`mesh.socket_stream` gives up connecting after two seconds, and
+`mesh.socket_request` counts connecting against its request timeout; a listener
+with a full accept backlog therefore cannot hold the callback. A missing socket
+still fails at once.
+
 These APIs observe protocols. Providers keep domain interpretation, state reads,
 commands, and fallback policy in Luau. They do not grant domain control access.
 
