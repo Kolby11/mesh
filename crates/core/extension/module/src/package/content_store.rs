@@ -186,24 +186,7 @@ impl ModuleStore {
         let generation_dir = self.activation_generation_path(snapshot.generation)?;
         let snapshot_path = generation_dir.join(SNAPSHOT_FILE);
         if snapshot_path.exists() {
-            super::validate_regular_file(&snapshot_path, "activation snapshot")?;
-            let content =
-                fs::read_to_string(&snapshot_path).map_err(|source| ModuleManifestError::Io {
-                    path: snapshot_path.clone(),
-                    source,
-                })?;
-            let existing: ActivationSnapshot =
-                serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
-                    path: snapshot_path.clone(),
-                    source,
-                })?;
-            existing.validate()?;
-            if existing != *snapshot {
-                return Err(ModuleManifestError::Validation(format!(
-                    "activation generation {} is immutable and already contains a different snapshot",
-                    snapshot.generation
-                )));
-            }
+            ensure_published_snapshot(&snapshot_path, snapshot)?;
             return Ok(snapshot_path);
         }
 
@@ -229,6 +212,9 @@ impl ModuleStore {
                     source,
                 });
             }
+            // A concurrent publisher won the rename; its snapshot must be ours.
+            ensure_published_snapshot(&snapshot_path, snapshot)?;
+            return Ok(snapshot_path);
         }
         sync_directory(generation_dir.parent()).map_err(|source| ModuleManifestError::Io {
             path: generation_dir
@@ -426,13 +412,17 @@ impl ModuleStore {
     }
 
     fn staging_path(&self, label: &str) -> Result<PathBuf, ModuleManifestError> {
+        // The sequence keeps two threads that read the same clock tick apart;
+        // sharing a staging directory let one publisher delete the other's files.
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let name = format!(
-            "{label}-{}-{}",
+            "{label}-{}-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_nanos()
+                .as_nanos(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         );
         super::contained_path(
             &self.root.join(STAGING_DIR),
@@ -610,6 +600,32 @@ fn make_immutable(path: &Path) -> Result<(), ModuleManifestError> {
         path: path.to_path_buf(),
         source,
     })
+}
+
+/// Fails unless the snapshot already published at `snapshot_path` is exactly
+/// `snapshot`: a generation's snapshot is immutable history.
+fn ensure_published_snapshot(
+    snapshot_path: &Path,
+    snapshot: &ActivationSnapshot,
+) -> Result<(), ModuleManifestError> {
+    super::validate_regular_file(snapshot_path, "activation snapshot")?;
+    let content = fs::read_to_string(snapshot_path).map_err(|source| ModuleManifestError::Io {
+        path: snapshot_path.to_path_buf(),
+        source,
+    })?;
+    let existing: ActivationSnapshot =
+        serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
+            path: snapshot_path.to_path_buf(),
+            source,
+        })?;
+    existing.validate()?;
+    if existing != *snapshot {
+        return Err(ModuleManifestError::Validation(format!(
+            "activation generation {} is immutable and already contains a different snapshot",
+            snapshot.generation
+        )));
+    }
+    Ok(())
 }
 
 fn write_new_file(path: &Path, content: &[u8]) -> Result<(), ModuleManifestError> {
@@ -922,6 +938,65 @@ mod tests {
 
         let changed = ActivationSnapshot::new(7, BTreeMap::new(), None).unwrap();
         assert!(store.publish_snapshot(&changed).is_err());
+        remove_snapshot_tree(&root);
+    }
+
+    #[test]
+    fn concurrent_publishers_of_one_generation_agree_on_its_snapshot() {
+        let root = temp_dir("snapshot-race");
+        let source = root.join("source");
+        module(&source, "<template><box/></template>");
+        let store = std::sync::Arc::new(ModuleStore::new(root.join("store")).unwrap());
+        let stored = store.publish(&source).unwrap();
+        let with_module = |generation| {
+            ActivationSnapshot::new(
+                generation,
+                BTreeMap::from([(
+                    stored.module_id.as_str().to_string(),
+                    ActivationModule {
+                        digest: stored.digest.clone(),
+                        version: "1.0.0".into(),
+                    },
+                )]),
+                None,
+            )
+            .unwrap()
+        };
+
+        for generation in 1..=24 {
+            let candidates = if generation % 2 == 0 {
+                [with_module(generation), with_module(generation)]
+            } else {
+                [
+                    with_module(generation),
+                    ActivationSnapshot::new(generation, BTreeMap::new(), None).unwrap(),
+                ]
+            };
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let results = candidates
+                .clone()
+                .map(|snapshot| {
+                    let store = std::sync::Arc::clone(&store);
+                    let barrier = std::sync::Arc::clone(&barrier);
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        store.publish_snapshot(&snapshot).is_ok()
+                    })
+                })
+                .map(|thread| thread.join().unwrap());
+            let published = store.activation_snapshot(generation).unwrap();
+            if candidates[0] == candidates[1] {
+                assert_eq!(results, [true, true], "generation {generation}");
+            } else {
+                assert_eq!(
+                    results.iter().filter(|ok| **ok).count(),
+                    1,
+                    "generation {generation}: {results:?}"
+                );
+                let winner = if results[0] { &candidates[0] } else { &candidates[1] };
+                assert_eq!(&published, winner, "generation {generation}");
+            }
+        }
         remove_snapshot_tree(&root);
     }
 
