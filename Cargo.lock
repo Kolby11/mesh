@@ -2402,6 +2402,7 @@ dependencies = [
  "mesh-core-component",
  "mesh-core-config",
  "mesh-core-elements",
+ "mesh-core-files",
  "mesh-core-icon",
  "mesh-core-locale",
  "mesh-core-service",

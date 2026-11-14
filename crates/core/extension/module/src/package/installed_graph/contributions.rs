@@ -91,12 +91,14 @@ impl ModuleContributionIndex {
                 .main
                 .as_deref()
                 .and_then(|entrypoint| {
-                    module
-                        .manifest_path
-                        .parent()
-                        .and_then(|dir| contained_path(dir, entrypoint, "frontend entrypoint").ok())
+                    let dir = module.manifest_path.parent()?;
+                    contained_path(dir, entrypoint, "frontend entrypoint").ok()?;
+                    mesh_core_files::ContainedFile::new(dir, entrypoint)
+                        .and_then(|file| {
+                            file.read_utf8_bounded(super::scan::MAX_SOURCE_FILE_BYTES as usize)
+                        })
+                        .ok()
                 })
-                .and_then(|path| std::fs::read_to_string(path).ok())
                 .and_then(|source| parse_component(&source).ok())
                 .and_then(|component| {
                     mesh_core_component::props_settings_schema(component.props.as_ref())

@@ -777,10 +777,16 @@ fn resolve_external_interface_contracts(
             continue;
         };
         let path = contained_path(module_dir, relative_path, "external interface contract")?;
-        let content = std::fs::read_to_string(&path).map_err(|source| ModuleManifestError::Io {
-            path: path.clone(),
-            source,
-        })?;
+        // Read through the descriptor-relative reader so a file swapped after
+        // the path check, or one past the source budget, is rejected.
+        let content = mesh_core_files::ContainedFile::new(module_dir, relative_path)
+            .and_then(|file| file.read_utf8_bounded(super::scan::MAX_SOURCE_FILE_BYTES as usize))
+            .map_err(|error| {
+                ModuleManifestError::Validation(format!(
+                    "external contract '{relative_path}' for interface {} in module {module_id}: {error}",
+                    declaration.name
+                ))
+            })?;
         let contract: serde_json::Value =
             serde_json::from_str(&content).map_err(|source| ModuleManifestError::Json {
                 path: path.clone(),

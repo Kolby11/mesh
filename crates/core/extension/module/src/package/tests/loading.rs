@@ -91,6 +91,29 @@ fn module_loader_resolves_keyed_external_interface_contract() {
 }
 
 #[test]
+fn module_loader_bounds_external_interface_contract_reads() {
+    let root = temp_dir("oversized-interface-contract");
+    fs::write(
+        root.join("module.json"),
+        r#"{ "name": "@me/audio-interface", "version": "0.1.0", "mesh": { "apiVersion": "0.1",
+            "kind": "interface", "interface": { "name": "me.audio", "version": "1.0", "contract": "contract.json" } } }"#,
+    )
+    .unwrap();
+    let padding = " ".repeat(1024 * 1024);
+    fs::write(root.join("contract.json"), format!("{{{padding}}}")).unwrap();
+
+    let error = load_module_manifest(&root).unwrap_err().to_string();
+    assert!(error.contains("exceeds"), "{error}");
+
+    fs::remove_file(root.join("contract.json")).unwrap();
+    fs::write(root.join("real.json"), "{}").unwrap();
+    std::os::unix::fs::symlink(root.join("real.json"), root.join("contract.json")).unwrap();
+    assert!(load_module_manifest(&root).is_err());
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn load_installed_module_graph_loads_explicit_inventory() {
     let root = temp_dir("explicit-installed-graph");
     let config_dir = root.join("config");
@@ -444,4 +467,43 @@ fn a_malformed_detached_signature_rejects_only_its_own_module() {
     );
 
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn contribution_indexing_reads_entrypoint_props_within_the_source_budget() {
+    let props_graph = |padding: usize| {
+        let root = temp_dir("entrypoint-props-budget");
+        let config_dir = root.join("config");
+        let panel = root.join("modules/panel");
+        fs::create_dir_all(&config_dir).unwrap();
+        fs::create_dir_all(panel.join("src")).unwrap();
+        fs::write(
+            panel.join("module.json"),
+            r#"{ "name": "@me/panel", "version": "0.1.0", "mesh": { "apiVersion": "0.1", "kind": "ui", "entry": "src/main.mesh", "surface": { "anchor": "top" } } }"#,
+        )
+        .unwrap();
+        fs::write(
+            panel.join("src/main.mesh"),
+            format!(
+                "<props>{{ gap = {{ type = \"number\", default = 4 }} }}</props><template><box /></template>{}",
+                " ".repeat(padding)
+            ),
+        )
+        .unwrap();
+        fs::write(
+            config_dir.join("module.json"),
+            r#"{ "name": "@me/config", "version": "0.1.0", "mesh": { "schemaVersion": 1, "modulesDir": "../modules" } }"#,
+        )
+        .unwrap();
+        let graph = load_installed_module_graph(&config_dir.join("module.json")).unwrap();
+        let derived = graph
+            .settings_schemas()
+            .iter()
+            .any(|schema| schema.namespace == "@me/panel");
+        fs::remove_dir_all(root).unwrap();
+        derived
+    };
+
+    assert!(props_graph(0), "props should become the module's settings schema");
+    assert!(!props_graph(1024 * 1024), "an oversized entrypoint is not read");
 }
