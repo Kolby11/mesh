@@ -487,10 +487,30 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
             }
             selected
         } else {
+            // A local id names the instance; when two modules contribute the
+            // same id, the source module disambiguates so they never share a
+            // runtime, memo or state. Unambiguous ids keep their stable key.
+            let shared_id = |id: &str| {
+                contributions
+                    .iter()
+                    .filter(|entry| entry.contribution_id == id)
+                    .count()
+                    > 1
+            };
             contributions
                 .iter()
                 .cloned()
-                .map(|contribution| Ok((contribution.contribution_id.clone(), contribution)))
+                .map(|contribution| {
+                    let placement_id = if shared_id(&contribution.contribution_id) {
+                        format!(
+                            "{}:{}",
+                            contribution.source_module_id, contribution.contribution_id
+                        )
+                    } else {
+                        contribution.contribution_id.clone()
+                    };
+                    Ok((placement_id, contribution))
+                })
                 .collect()
         };
 

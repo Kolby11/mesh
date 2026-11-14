@@ -545,6 +545,21 @@ items = { "first", "second" }
 }
 
 fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
+    let entries = (0..contribution_count)
+        .map(|index| {
+            (
+                "@test/memo-slot-widget".to_string(),
+                format!("status-{index}"),
+                format!("static slot {index}"),
+            )
+        })
+        .collect::<Vec<_>>();
+    slot_surface(&entries)
+}
+
+/// A host whose slot holds one contribution per `(source module, local id,
+/// label)` entry, each rendering its label.
+fn slot_surface(entries: &[(String, String, String)]) -> FrontendSurfaceComponent {
     const POINT: &str = "test.memo.slot";
     let mut parent_manifest = minimal_test_manifest(PARENT_ID);
     parent_manifest.hosted_extension_points.insert(
@@ -564,8 +579,7 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
         watched_paths: Vec::new(),
         source_bytes: Default::default(),
     };
-    let widget_id = "@test/memo-slot-widget";
-    let mut widget_manifest = minimal_test_manifest(widget_id);
+    let mut widget_manifest = minimal_test_manifest("@test/memo-slot-widget");
     widget_manifest.package.module_type = mesh_core_module::ModuleType::Widget;
     let contribution_compiled = CompiledFrontendModule {
         manifest: widget_manifest,
@@ -588,15 +602,17 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
         diagnostics: Default::default(),
         extension_point_contributions: HashMap::from([(
             extension_point_key(PARENT_ID, POINT),
-            (0..contribution_count)
-                .map(|index| {
+            entries
+                .iter()
+                .enumerate()
+                .map(|(index, (source, id, label))| {
                     let props = serde_json::Map::from_iter([(
                         "label".into(),
-                        serde_json::Value::String(format!("static slot {index}")),
+                        serde_json::Value::String(label.clone()),
                     )]);
                     ResolvedExtensionPointContribution {
-                        source_module_id: widget_id.into(),
-                        contribution_id: format!("status-{index}"),
+                        source_module_id: source.clone(),
+                        contribution_id: id.clone(),
                         order: index as i64,
                         props_fingerprint: crate::component::memo::slot_props_fingerprint(
                             &props,
@@ -606,10 +622,11 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
                 })
                 .collect(),
         )]),
-        extension_point_entries: (0..contribution_count)
-            .map(|index| {
+        extension_point_entries: entries
+            .iter()
+            .map(|(source, id, _)| {
                 (
-                    contribution_entry_key(widget_id, &format!("status-{index}")),
+                    contribution_entry_key(source, id),
                     contribution_compiled.clone().into(),
                 )
             })
@@ -633,6 +650,34 @@ fn memo_slot_surface(contribution_count: usize) -> FrontendSurfaceComponent {
         .unwrap();
     component.visible = true;
     component
+}
+
+#[test]
+fn equal_local_contribution_ids_from_different_modules_get_separate_instances() {
+    let entries = [
+        ("@alice/weather", "status", "alice status"),
+        ("@bob/battery", "status", "bob status"),
+        ("@bob/battery", "clock", "bob clock"),
+    ]
+    .map(|(source, id, label)| (source.to_string(), id.to_string(), label.to_string()));
+    let mut component = slot_surface(&entries);
+    let theme = default_theme();
+    let mut buffer = PixelBuffer::new(320, 60);
+    component
+        .paint_raster(&theme, SurfaceExtent::unpadded(320, 60), &mut buffer, 1.0)
+        .unwrap();
+    rebuild(&mut component, 320, 60);
+
+    let tree = component.last_tree.as_ref().unwrap();
+    for (_, _, label) in &entries {
+        assert!(node_with_content(tree, label).is_some(), "missing {label}");
+    }
+    let runtimes = component.runtimes.lock().unwrap();
+    let keys = runtimes.keys().filter(|key| key.contains("/slot:")).collect::<Vec<_>>();
+    assert_eq!(keys.len(), 3, "{keys:?}");
+    assert!(keys.iter().any(|key| key.ends_with("/@alice/weather:status")), "{keys:?}");
+    assert!(keys.iter().any(|key| key.ends_with("/@bob/battery:status")), "{keys:?}");
+    assert!(keys.iter().any(|key| key.ends_with("/clock")), "{keys:?}");
 }
 
 #[test]
