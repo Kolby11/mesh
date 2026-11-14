@@ -61,6 +61,8 @@ pub struct ResolutionOutcome {
     /// dependency may be installed but disabled as a direct root; it still
     /// belongs in this activation closure.
     pub required_closure: BTreeSet<String>,
+    /// Required edges after fork substitution, requester → dependencies.
+    pub required_edges: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl ResolutionOutcome {
@@ -73,23 +75,32 @@ impl ResolutionOutcome {
                 .any(|module_id| self.required_closure.contains(module_id))
     }
 
+    /// Modules to activate from `roots`: every unblocked root plus what its
+    /// required edges reach through unblocked modules. A dependency reached
+    /// only from a blocked root stays inactive.
     pub fn active_modules(
         &self,
         roots: impl IntoIterator<Item = impl AsRef<str>>,
     ) -> BTreeSet<String> {
-        let mut active = roots
+        let mut active = BTreeSet::new();
+        let mut queue = roots
             .into_iter()
             .map(|root| root.as_ref().to_string())
             .filter(|root| !self.blocked.contains_key(root))
-            .collect::<BTreeSet<_>>();
-        active.extend(
-            self.required_closure
-                .iter()
-                .filter(|module_id| {
-                    self.modules.contains_key(*module_id) && !self.blocked.contains_key(*module_id)
-                })
-                .cloned(),
-        );
+            .collect::<VecDeque<_>>();
+        while let Some(module_id) = queue.pop_front() {
+            if !active.insert(module_id.clone()) {
+                continue;
+            }
+            for dependency_id in self.required_edges.get(&module_id).into_iter().flatten() {
+                if self.modules.contains_key(dependency_id)
+                    && !self.blocked.contains_key(dependency_id)
+                    && !active.contains(dependency_id)
+                {
+                    queue.push_back(dependency_id.clone());
+                }
+            }
+        }
         active
     }
 }
@@ -144,6 +155,19 @@ pub fn resolve_closure_with_forks<'a>(
     roots: impl IntoIterator<Item = &'a str>,
     available: impl IntoIterator<Item = &'a ModuleManifest>,
     forks: &BTreeMap<String, String>,
+) -> ResolutionOutcome {
+    resolve_closure_with_ineligible(roots, available, forks, &BTreeMap::new())
+}
+
+/// Like [`resolve_closure_with_forks`], but `ineligible` names installed modules
+/// that must not activate (module id → reason), such as modules rejected by
+/// trust policy. Each is blocked with its reason, and the block propagates to
+/// every module that requires it.
+pub fn resolve_closure_with_ineligible<'a>(
+    roots: impl IntoIterator<Item = &'a str>,
+    available: impl IntoIterator<Item = &'a ModuleManifest>,
+    forks: &BTreeMap<String, String>,
+    ineligible: &BTreeMap<String, String>,
 ) -> ResolutionOutcome {
     let available: HashMap<&str, &ModuleManifest> = available
         .into_iter()
@@ -307,6 +331,16 @@ pub fn resolve_closure_with_forks<'a>(
         }
     }
 
+    for (module_id, reason) in ineligible {
+        if reached.contains(module_id) && available.contains_key(module_id.as_str()) {
+            outcome
+                .blocked
+                .entry(module_id.clone())
+                .or_default()
+                .insert(reason.clone());
+        }
+    }
+
     // Propagate required-edge failures through the reachable graph. Optional
     // edges are intentionally absent from this pass: an unavailable optional
     // service/module degrades only the requesting module's feature set.
@@ -384,6 +418,10 @@ pub fn resolve_closure_with_forks<'a>(
         }
     }
     outcome.required_closure = required_closure;
+    outcome.required_edges = required_edges
+        .into_iter()
+        .map(|(requester, dependencies)| (requester, dependencies.into_keys().collect()))
+        .collect();
     outcome
         .conflicts
         .sort_by(|left, right| left.module_id.cmp(&right.module_id));
@@ -514,6 +552,45 @@ mod tests {
             outcome.active_modules(["@me/root", "@me/independent"]),
             BTreeSet::from(["@me/independent".to_string()])
         );
+    }
+
+    #[test]
+    fn a_blocked_root_does_not_keep_its_healthy_dependency_active() {
+        let root = manifest(
+            "@me/root",
+            "1.0.0",
+            &[("@me/healthy", ">=1.0.0"), ("@me/absent", ">=1.0.0")],
+        );
+        let healthy = manifest("@me/healthy", "1.0.0", &[]);
+        let outcome = resolve_closure(["@me/root"], [&root, &healthy]);
+
+        assert!(outcome.blocked.contains_key("@me/root"));
+        assert!(outcome.active_modules(["@me/root"]).is_empty());
+
+        let other = manifest("@me/other", "1.0.0", &[("@me/healthy", ">=1.0.0")]);
+        let outcome = resolve_closure(["@me/root", "@me/other"], [&root, &healthy, &other]);
+        assert_eq!(
+            outcome.active_modules(["@me/root", "@me/other"]),
+            BTreeSet::from(["@me/healthy".to_string(), "@me/other".to_string()])
+        );
+    }
+
+    #[test]
+    fn an_ineligible_dependency_blocks_itself_and_its_requesters() {
+        let root = manifest("@me/root", "1.0.0", &[("@me/rejected", ">=1.0.0")]);
+        let rejected = manifest("@me/rejected", "1.0.0", &[]);
+        let ineligible =
+            BTreeMap::from([("@me/rejected".to_string(), "untrusted".to_string())]);
+        let outcome = resolve_closure_with_ineligible(
+            ["@me/root"],
+            [&root, &rejected],
+            &BTreeMap::new(),
+            &ineligible,
+        );
+
+        assert!(outcome.blocked["@me/rejected"].contains("untrusted"));
+        assert!(outcome.blocked.contains_key("@me/root"));
+        assert!(outcome.active_modules(["@me/root"]).is_empty());
     }
 
     #[test]

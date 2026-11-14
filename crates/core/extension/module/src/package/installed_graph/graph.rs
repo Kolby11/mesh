@@ -524,6 +524,7 @@ impl InstalledModuleGraph {
         let mut interface_declarations = HashMap::new();
         let mut contributions = ModuleContributionIndex::default();
         let mut manual_diagnostics: Vec<ModuleGraphDiagnostic> = Vec::new();
+        let mut trust_ineligible = std::collections::BTreeMap::new();
 
         for (module_id, entry) in &root.modules {
             let loaded = loaded_by_id.get(module_id).ok_or_else(|| {
@@ -545,6 +546,20 @@ impl InstalledModuleGraph {
                     TrustAssessment::accepted(TrustTier::for_unlocked_module(module_id))
                 });
             let trust_allowed = assessment.signature_valid && trust_policy.allows(assessment.tier);
+            if !assessment.signature_valid {
+                trust_ineligible.insert(
+                    module_id.clone(),
+                    format!("module {module_id} has an invalid provenance signature"),
+                );
+            } else if !trust_allowed {
+                trust_ineligible.insert(
+                    module_id.clone(),
+                    format!(
+                        "module {module_id} has {:?} provenance, below the {:?} trust minimum",
+                        assessment.tier, trust_policy.minimum
+                    ),
+                );
+            }
             if entry.enabled && !assessment.signature_valid {
                 manual_diagnostics.push(ModuleGraphDiagnostic {
                     module_id: module_id.clone(),
@@ -599,10 +614,11 @@ impl InstalledModuleGraph {
             .values()
             .map(|module| &module.manifest)
             .collect::<Vec<_>>();
-        let resolution = super::super::resolution::resolve_closure_with_forks(
+        let resolution = super::super::resolution::resolve_closure_with_ineligible(
             enabled_ids.iter().copied(),
             enabled_manifests,
             &composition.dependency_forks,
+            &trust_ineligible,
         );
         let active_module_ids = resolution.active_modules(enabled_ids.iter().copied());
         for node in graph_modules.values_mut() {

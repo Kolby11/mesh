@@ -340,7 +340,7 @@ fn merge_spec(base: &mut CompositionSpec, overlay: &CompositionSpec) {
 
     for (namespace, value) in &overlay.settings {
         match base.settings.get_mut(namespace) {
-            Some(existing) => merge_json(existing, value),
+            Some(existing) => mesh_core_config::merge_json(existing, value),
             None => {
                 base.settings.insert(namespace.clone(), value.clone());
             }
@@ -393,22 +393,6 @@ fn merge_surface(
         decorations,
     );
     base
-}
-
-fn merge_json(base: &mut serde_json::Value, overlay: &serde_json::Value) {
-    match (base, overlay) {
-        (serde_json::Value::Object(base), serde_json::Value::Object(overlay)) => {
-            for (key, value) in overlay {
-                match base.get_mut(key) {
-                    Some(existing) => merge_json(existing, value),
-                    None => {
-                        base.insert(key.clone(), value.clone());
-                    }
-                }
-            }
-        }
-        (base, overlay) => *base = overlay.clone(),
-    }
 }
 
 /// Apply a composition's extension point overrides to the graph's resolved
@@ -672,6 +656,28 @@ mod tests {
                 .unwrap()
                 .orphaned_overrides
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn profile_settings_merge_objects_and_replace_arrays_scalars_and_nulls() {
+        let desk = composition(
+            "@alice/desk",
+            None,
+            r#"{"settings":{"shell":{"a":{"keep":1,"swap":[1,2]},"b":"x","c":{"d":1}}}}"#,
+        );
+        let resolved = resolve_composition(
+            &profile(
+                r#"{"schemaVersion":3,"from":{"module":"@alice/desk"},
+                    "settings":{"shell":{"a":{"swap":[3]},"b":null,"c":5}}}"#,
+            ),
+            [&desk],
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolved.spec.settings["shell"],
+            serde_json::json!({ "a": { "keep": 1, "swap": [3] }, "b": null, "c": 5 })
         );
     }
 

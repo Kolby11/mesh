@@ -399,6 +399,10 @@ impl ShellProfile {
             .as_ref()
             .is_some_and(|from| from.module == module_id)
             || self.roots.values().any(|root| root.module == module_id)
+            || self
+                .dependency_forks
+                .iter()
+                .any(|(upstream, fork)| upstream == module_id || fork == module_id)
             || self.background_services.contains(module_id)
             || self
                 .providers
@@ -423,7 +427,6 @@ impl ShellProfile {
                 .any(|node| placement_module(&node.contribution) == Some(module_id))
     }
 
-    /// Remove all profile-owned references to a forcibly uninstalled module.
     /// Removes one entry of [`EffectiveComposition::orphaned_overrides`]:
     /// `nodeSlots.<instance>` drops that instance's slot map, and a root
     /// instance id drops the root together with its settings and slot map.
@@ -439,7 +442,21 @@ impl ShellProfile {
         self.node_slots.remove(orphan);
     }
 
+    /// Remove all profile-owned references to a forcibly uninstalled module,
+    /// including tracked-fork mappings on either side and the node-slot maps
+    /// of the roots it removes.
     pub fn remove_module_references(&mut self, module_id: &str) {
+        self.dependency_forks
+            .retain(|upstream, fork| upstream != module_id && fork != module_id);
+        let removed_roots = self
+            .roots
+            .iter()
+            .filter(|(_, root)| root.module == module_id)
+            .map(|(instance_id, _)| instance_id.clone())
+            .collect::<Vec<_>>();
+        for instance_id in removed_roots {
+            self.node_slots.remove(&instance_id);
+        }
         if self
             .from
             .as_ref()
@@ -2101,6 +2118,39 @@ mod tests {
         profile.remove_module_references("@mesh/audio");
         assert!(!profile.references_module("@mesh/audio"));
         assert!(profile.references_module("@mesh/desktop"));
+    }
+
+    #[test]
+    fn fork_mappings_and_removed_root_slots_count_as_module_references() {
+        let mut profile = ShellProfile::new();
+        profile
+            .dependency_forks
+            .insert("@mesh/clock".into(), "@me/clock".into());
+        profile.roots.insert(
+            "@mesh/panel#default".into(),
+            ProfileRootInstance {
+                module: "@mesh/panel".into(),
+                ..Default::default()
+            },
+        );
+        profile.node_slots.insert(
+            "@mesh/panel#default".into(),
+            BTreeMap::from([("bar".to_string(), Default::default())]),
+        );
+
+        assert!(profile.references_module("@mesh/clock"));
+        assert!(profile.references_module("@me/clock"));
+        let mut upstream_removed = profile.clone();
+        upstream_removed.remove_module_references("@mesh/clock");
+        assert!(upstream_removed.dependency_forks.is_empty());
+        let mut fork_removed = profile.clone();
+        fork_removed.remove_module_references("@me/clock");
+        assert!(fork_removed.dependency_forks.is_empty());
+
+        profile.remove_module_references("@mesh/panel");
+        assert!(profile.roots.is_empty());
+        assert!(profile.node_slots.is_empty());
+        profile.validate().unwrap();
     }
 }
 

@@ -1300,7 +1300,9 @@ mitigations: capability sandbox (no ambient fs/net/process in Luau),
 core-owned grant decisions, execution budgets/isolation for resource abuse,
 reserved `@mesh` scope, capability-diff re-approval on update. The root graph may set
 `trustPolicy.minimum`; graph construction blocks lower-tier modules before
-dependency, provider, or frontend contribution activation. Lock entries retain
+dependency, provider, or frontend contribution activation. A required
+dependency edge never re-enables a trust-rejected module: the module stays
+blocked and so does every module that requires it. Lock entries retain
 the tier and detached signature metadata, and `verified` entries must carry a
 signature that a configured key verifies.
 

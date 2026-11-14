@@ -106,6 +106,81 @@ fn trust_policy_blocks_untrusted_modules_before_activation() {
 }
 
 #[test]
+fn dependency_closure_does_not_reactivate_a_trust_rejected_module() {
+    let mut root = root_with_modules(
+        &[
+            ("@mesh/front", ModuleKind::Ui),
+            ("@me/local", ModuleKind::Library),
+            ("@mesh/disabled", ModuleKind::Library),
+        ],
+        &[],
+        None,
+    );
+    root.trust_policy = TrustPolicy {
+        minimum: TrustTier::Verified,
+        ..Default::default()
+    };
+    root.modules.get_mut("@mesh/disabled").unwrap().enabled = false;
+    let mut front = loaded_module(
+        "@mesh/front",
+        ModuleKind::Ui,
+        MeshDependencies::default(),
+        vec![],
+        MeshContributes::default(),
+    );
+    front.manifest.mesh.dependencies.modules.insert(
+        "@me/local".into(),
+        serde_json::from_value(serde_json::json!(">=0.1.0")).unwrap(),
+    );
+    let library = |name: &str| {
+        loaded_module(
+            name,
+            ModuleKind::Library,
+            MeshDependencies::default(),
+            vec![],
+            MeshContributes::default(),
+        )
+    };
+    let provenance = std::collections::BTreeMap::from(
+        ["@mesh/front", "@mesh/disabled"].map(|id| {
+            (
+                id.to_string(),
+                TrustAssessment::accepted(TrustTier::Verified),
+            )
+        }),
+    );
+    let graph = InstalledModuleGraph::from_parts_with_provenance(
+        root.clone(),
+        vec![front.clone(), library("@me/local"), library("@mesh/disabled")],
+        CompositionContext::default(),
+        provenance.clone(),
+    )
+    .unwrap();
+
+    assert!(!graph.module("@me/local").unwrap().enabled);
+    assert!(!graph.module("@mesh/front").unwrap().enabled);
+    assert!(graph.diagnostics().iter().any(|diagnostic| {
+        diagnostic.module_id == "@mesh/front" && diagnostic.status == "module_dependency_blocked"
+    }));
+
+    // A trusted dependency that is disabled as a root is still inferred.
+    front.manifest.mesh.dependencies.modules.clear();
+    front.manifest.mesh.dependencies.modules.insert(
+        "@mesh/disabled".into(),
+        serde_json::from_value(serde_json::json!(">=0.1.0")).unwrap(),
+    );
+    let graph = InstalledModuleGraph::from_parts_with_provenance(
+        root,
+        vec![front, library("@me/local"), library("@mesh/disabled")],
+        CompositionContext::default(),
+        provenance,
+    )
+    .unwrap();
+    assert!(graph.module("@mesh/front").unwrap().enabled);
+    assert!(graph.module("@mesh/disabled").unwrap().enabled);
+}
+
+#[test]
 fn graph_diff_reports_inventory_activation_and_provider_changes() {
     let before_root = root_with_modules(
         &[
