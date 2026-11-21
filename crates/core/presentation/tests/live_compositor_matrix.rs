@@ -26,14 +26,7 @@ fn live_engine() -> Option<PresentationEngine> {
         eprintln!("skipping live compositor matrix: WAYLAND_DISPLAY is unset in this environment");
         return None;
     }
-    // Force the Wayland backend rather than relying on layer-shell being
-    // reachable/preferred; a failed connection is a real conformance failure
-    // here, not a fallback case.
-    // SAFETY: single-threaded test setup before any other thread reads env.
-    unsafe {
-        std::env::set_var("MESH_BACKEND", "layer-shell");
-    }
-    Some(PresentationEngine::select())
+    Some(PresentationEngine::connect_wayland().expect("live matrix requires Wayland layer-shell"))
 }
 
 /// Poll the connection until the compositor has answered the first configure,
@@ -181,14 +174,7 @@ fn scene_worker_exports_and_presents_frames_on_a_live_compositor() {
         .configure(surface_id, top_layer_config("@mesh/live-matrix-scene"))
         .unwrap();
     assert!(wait_ready(&mut engine, surface_id, Duration::from_secs(5)));
-    if !engine.gpu_canvas_available() {
-        assert!(
-            std::env::var_os("MESH_REQUIRE_GPU").is_none(),
-            "live GPU scene presentation required"
-        );
-        eprintln!(
-            "skipping live GPU scene test: compositor/device cannot export importable dmabufs"
-        );
+    if !gpu_scene_available(&mut engine) {
         engine.destroy_surface(surface_id);
         return;
     }
@@ -239,7 +225,7 @@ fn scene_worker_exports_and_presents_frames_on_a_live_compositor() {
                 );
                 // A frame the compositor still holds all buffers for completes
                 // unpresented; the caller repaints once a buffer is released.
-                if wait_scene(&mut engine, surface_id, deadline) {
+                if wait_scene(&mut engine, surface_id, deadline) == Some(true) {
                     break;
                 }
                 assert!(
@@ -266,31 +252,45 @@ fn scene_worker_exports_and_presents_frames_on_a_live_compositor() {
 }
 
 /// Pump the connection until the submitted scene frame of `surface_id` is
-/// committed. False on timeout or when the frame did not reach the compositor.
+/// resolved. `None` means the worker did not resolve it before the deadline.
 #[cfg(feature = "gpu")]
-fn wait_scene(engine: &mut PresentationEngine, surface_id: &str, deadline: Instant) -> bool {
+fn wait_scene(
+    engine: &mut PresentationEngine,
+    surface_id: &str,
+    deadline: Instant,
+) -> Option<bool> {
     loop {
         engine.pump().unwrap();
         for done in engine.take_scene_completions() {
             if done.surface_id == surface_id {
-                return done.presented;
+                return Some(done.presented);
             }
         }
         if Instant::now() >= deadline {
-            return false;
+            return None;
         }
         std::thread::sleep(Duration::from_micros(200));
     }
 }
 
 #[cfg(feature = "gpu")]
+fn gpu_scene_available(engine: &mut PresentationEngine) -> bool {
+    if engine.gpu_canvas_available() {
+        return true;
+    }
+    let render_path = engine.render_path();
+    assert!(
+        std::env::var_os("MESH_REQUIRE_GPU").is_none(),
+        "live GPU scene presentation required, got {render_path}"
+    );
+    eprintln!("skipping live GPU scene test: {render_path}");
+    false
+}
+
+#[cfg(feature = "gpu")]
 fn heavy_scene(engine: &mut PresentationEngine, surface_id: &str) -> Option<SurfaceCanvas> {
     assert!(wait_ready(engine, surface_id, Duration::from_secs(5)));
-    if !engine.gpu_canvas_available() {
-        assert!(
-            std::env::var_os("MESH_REQUIRE_GPU").is_none(),
-            "live GPU scene presentation required"
-        );
+    if !gpu_scene_available(engine) {
         return None;
     }
     let (width, height) = engine.surface_size(surface_id).unwrap().unwrap();
@@ -353,54 +353,68 @@ fn record_heavy(canvas: &mut SurfaceCanvas, width: u32, height: u32, frame: usiz
 #[cfg(feature = "gpu")]
 #[test]
 fn scene_frame_in_flight_survives_hide_resize_and_destroy() {
+    use mesh_core_presentation::{ContentExtent, LayerWireSize, SurfaceExtent, SurfacePadding};
+
     let Some(mut engine) = live_engine() else {
         return;
     };
     let surface_id = "mesh-live-matrix-scene-inflight";
-    engine
-        .configure(surface_id, top_layer_config("@mesh/live-matrix-inflight"))
-        .unwrap();
+    let config = |width, height| SurfaceConfig {
+        extent: SurfaceExtent::from_content_and_padding(
+            ContentExtent::from_size((width, height)).unwrap(),
+            SurfacePadding::default(),
+        )
+        .unwrap(),
+        wire_size: LayerWireSize::fixed(width, height).unwrap(),
+        ..top_layer_config("@mesh/live-matrix-inflight")
+    };
+    engine.configure(surface_id, config(72, 24)).unwrap();
     let Some(mut canvas) = heavy_scene(&mut engine, surface_id) else {
         engine.destroy_surface(surface_id);
         return;
     };
     let (width, height) = engine.surface_size(surface_id).unwrap().unwrap();
-    let damage = DamageRect {
-        x: 0,
-        y: 0,
-        width,
-        height,
-    };
-    let present = |engine: &mut PresentationEngine, canvas: &mut SurfaceCanvas, visible| {
-        engine
-            .present_with_damage(surface_id, "inflight", visible, canvas, &[damage])
-            .unwrap()
-    };
+    let present =
+        |engine: &mut PresentationEngine, canvas: &mut SurfaceCanvas, visible, (width, height)| {
+            let damage = DamageRect {
+                x: 0,
+                y: 0,
+                width,
+                height,
+            };
+            engine
+                .present_with_damage(surface_id, "inflight", visible, canvas, &[damage])
+                .unwrap()
+        };
     // Hide while in flight: the frame is dropped and the layer role is
     // destroyed, so showing it again recreates the surface.
     record_heavy(&mut canvas, width, height, 0);
-    assert_eq!(present(&mut engine, &mut canvas, true), PresentStatus::Submitted);
+    assert_eq!(
+        present(&mut engine, &mut canvas, true, (width, height)),
+        PresentStatus::Submitted
+    );
     assert!(engine.surface_waiting_for_buffer_release(surface_id));
-    assert_eq!(present(&mut engine, &mut canvas, false), PresentStatus::Presented);
+    assert_eq!(
+        present(&mut engine, &mut canvas, false, (width, height)),
+        PresentStatus::Presented
+    );
     assert!(!engine.surface_waiting_for_buffer_release(surface_id));
     std::thread::sleep(Duration::from_millis(50));
     assert!(engine.take_scene_completions().is_empty());
     engine.finish_frame().unwrap();
     assert_eq!(
-        present(&mut engine, &mut canvas, true),
+        present(&mut engine, &mut canvas, true, (width, height)),
         PresentStatus::SurfaceMissing
     );
-    engine
-        .configure(surface_id, top_layer_config("@mesh/live-matrix-inflight"))
-        .unwrap();
+    engine.configure(surface_id, config(72, 24)).unwrap();
     // Visible again presents normally.
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         assert!(wait_ready(&mut engine, surface_id, Duration::from_secs(5)));
         record_heavy(&mut canvas, width, height, 1);
-        match present(&mut engine, &mut canvas, true) {
+        match present(&mut engine, &mut canvas, true, (width, height)) {
             PresentStatus::Submitted => {
-                assert!(wait_scene(&mut engine, surface_id, deadline));
+                assert_eq!(wait_scene(&mut engine, surface_id, deadline), Some(true));
                 break;
             }
             _ => {
@@ -411,15 +425,65 @@ fn scene_frame_in_flight_survives_hide_resize_and_destroy() {
         }
     }
     engine.finish_frame().unwrap();
-    // Replace the canvas (a resize) and destroy the surface while in flight.
-    let (w, h) = (canvas.width(), canvas.height());
-    let mut resized = engine.allocate_canvas(w, h, true).unwrap();
-    drop(canvas);
+
+    // Resize the same compositor object while an old-size raster is pending.
+    record_heavy(&mut canvas, width, height, 2);
+    assert_eq!(
+        present(&mut engine, &mut canvas, true, (width, height)),
+        PresentStatus::Submitted
+    );
+    let before = engine.surface_generation(surface_id).unwrap();
+    let new_size = (width + 32, height + 16);
+    engine
+        .configure(surface_id, config(new_size.0, new_size.1))
+        .unwrap();
+    assert!(wait_ready(&mut engine, surface_id, Duration::from_secs(5)));
+    assert_eq!(engine.surface_size_if_known(surface_id), Some(new_size));
+    assert_eq!(
+        engine.surface_generation(surface_id).unwrap().object,
+        before.object
+    );
+    assert_eq!(
+        wait_scene(
+            &mut engine,
+            surface_id,
+            Instant::now() + Duration::from_secs(5)
+        ),
+        Some(false),
+        "the old-size frame must retire without a compositor commit"
+    );
+    assert_eq!(
+        engine.surface_generation(surface_id).unwrap().frame,
+        before.frame
+    );
+    let mut resized =
+        heavy_scene(&mut engine, surface_id).expect("GPU remains available after resize");
+    assert_ne!(
+        (resized.width(), resized.height()),
+        (canvas.width(), canvas.height())
+    );
+
+    // The resized surface resumes presentation, and destruction cancels its
+    // next in-flight frame.
+    record_heavy(&mut resized, new_size.0, new_size.1, 3);
+    assert_eq!(
+        present(&mut engine, &mut resized, true, new_size),
+        PresentStatus::Submitted
+    );
+    assert_eq!(
+        wait_scene(
+            &mut engine,
+            surface_id,
+            Instant::now() + Duration::from_secs(5)
+        ),
+        Some(true)
+    );
+    engine.finish_frame().unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         assert!(wait_ready(&mut engine, surface_id, Duration::from_secs(5)));
-        record_heavy(&mut resized, width, height, 2);
-        match present(&mut engine, &mut resized, true) {
+        record_heavy(&mut resized, new_size.0, new_size.1, 4);
+        match present(&mut engine, &mut resized, true, new_size) {
             PresentStatus::Submitted => break,
             _ => {
                 assert!(Instant::now() < deadline);

@@ -59,6 +59,10 @@ retained targets and fenced dmabuf exports; Wayland receives only descriptors
 and release leases. Presentation submits the scene and commits it when the worker
 publishes, so scripts and layout overlap GPU raster; the surface is gated until then, while
 partial damage, compositor backpressure and SHM fallback remain authoritative.
+Presentation drops submitted scenes when the role, resolved logical extent, or
+scale changes before import or a buffer retry.
+Preferred-scale changes schedule a full paint and present for the affected
+visible surface as soon as it can accept a frame, even while its component is idle.
 CPU frames with several painting surfaces record their paint serially and
 rasterize the recordings in parallel before presenting.
 See [renderer ownership](../renderer-ownership.md).
@@ -178,6 +182,8 @@ The event loop includes input-repeat, temporary focus-grab and pending-frame
 escape deadlines alongside component ticks and reload maintenance. Accepted
 shutdown requests leave the current turn before rendering or waiting for another
 event; teardown runs immediately.
+Wayland dispatch and completed GPU scenes already queued in the backend wake the
+next shell turn without another socket or worker notification.
 
 Hot reload uses a managed filesystem watcher that blocks on inotify and a
 control eventfd; watch replacement and shutdown wake that wait directly. With

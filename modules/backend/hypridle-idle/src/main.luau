@@ -62,7 +62,7 @@ local function start_daemon()
         log_warn("could not write the hypridle config: " .. (wrote.stderr or "unknown error"))
         return
     end
-    source = mesh.exec_stream("sh", { "-c", RUN })
+    source = mesh.exec_stream("sh", { "-c", RUN }) or nil
     state.running = source ~= nil
 end
 
@@ -92,8 +92,8 @@ function on_poll(self)
     if state.managed and source == nil then start_daemon() end
 end
 
-function on_stream_closed(self, program, _success)
-    if program == "sh" then
+function on_stream_event(self, event)
+    if event.type == "exited" and source and event.stream.id == source.id then
         source = nil
         state.running = false
         mesh.service.set_poll_interval(state.managed and RESTART_MS or 0)

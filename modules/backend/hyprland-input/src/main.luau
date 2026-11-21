@@ -108,7 +108,7 @@ local function refresh()
     local touchpad_natural = option("input:touchpad:natural_scroll")
     state = {
         available = true,
-        pointer_speed = math.floor(sensitivity * 10 + (sensitivity >= 0 and 0.5 or -0.5)),
+        pointer_speed = math.round(sensitivity * 10),
         natural_scroll = natural == true or touchpad_natural == true,
         tap_to_click = option("input:touchpad:tap-to-click") == true,
         disable_while_typing = option("input:touchpad:disable_while_typing") == true,

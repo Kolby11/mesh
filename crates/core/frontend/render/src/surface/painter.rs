@@ -7,6 +7,7 @@ mod tree;
 mod widgets;
 
 use std::cell::{Cell, RefCell};
+use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use super::icon;
@@ -118,7 +119,7 @@ impl TooltipPaintStyle {
 
 pub struct FrontendRenderEngine {
     paint_backend: Box<dyn PaintBackend>,
-    painter_diagnostics: Mutex<Vec<PainterDiagnostic>>,
+    painter_diagnostics: Mutex<VecDeque<PainterDiagnostic>>,
     text_renderer: SharedTextMeasurer,
     tooltip_style: Cell<TooltipPaintStyle>,
     tooltip_opacity: Cell<f32>,
@@ -152,6 +153,7 @@ struct RenderScratch {
 const MAX_RETAINED_BATCH_COMMANDS: usize = 4096;
 const MAX_RETAINED_NODE_COMMANDS: usize = 16;
 const DEFAULT_NODE_COMMANDS: usize = 5;
+const MAX_PAINTER_DIAGNOSTICS: usize = 128;
 
 impl RenderScratch {
     fn prepare(&mut self, batch_capacity: usize) {
@@ -180,7 +182,7 @@ impl FrontendRenderEngine {
     pub fn new() -> Self {
         Self {
             paint_backend: Box::<SkiaPaintBackend>::default(),
-            painter_diagnostics: Mutex::new(Vec::new()),
+            painter_diagnostics: Mutex::new(VecDeque::new()),
             text_renderer: SharedTextMeasurer,
             tooltip_style: Cell::new(TooltipPaintStyle::DEFAULT_DARK),
             tooltip_opacity: Cell::new(1.0),
@@ -199,7 +201,7 @@ impl FrontendRenderEngine {
     pub(crate) fn with_paint_backend(paint_backend: Box<dyn PaintBackend>) -> Self {
         Self {
             paint_backend,
-            painter_diagnostics: Mutex::new(Vec::new()),
+            painter_diagnostics: Mutex::new(VecDeque::new()),
             text_renderer: SharedTextMeasurer,
             tooltip_style: Cell::new(TooltipPaintStyle::DEFAULT_DARK),
             tooltip_opacity: Cell::new(1.0),
@@ -304,7 +306,7 @@ impl FrontendRenderEngine {
     pub(crate) fn painter_diagnostics(&self) -> Vec<PainterDiagnostic> {
         self.painter_diagnostics
             .lock()
-            .map(|diagnostics| diagnostics.clone())
+            .map(|diagnostics| diagnostics.iter().cloned().collect())
             .unwrap_or_default()
     }
 
@@ -316,8 +318,19 @@ impl FrontendRenderEngine {
     }
 
     pub(super) fn record_painter_diagnostic(&self, diagnostic: PainterDiagnostic) {
-        if let Ok(mut diagnostics) = self.painter_diagnostics.lock() {
-            diagnostics.push(diagnostic);
+        self.record_painter_diagnostics(std::iter::once(diagnostic));
+    }
+
+    fn record_painter_diagnostics(&self, entries: impl IntoIterator<Item = PainterDiagnostic>) {
+        if let Ok(mut history) = self.painter_diagnostics.lock() {
+            for diagnostic in entries {
+                if let Some(position) = history.iter().position(|entry| entry == &diagnostic) {
+                    history.remove(position);
+                } else if history.len() == MAX_PAINTER_DIAGNOSTICS {
+                    history.pop_front();
+                }
+                history.push_back(diagnostic);
+            }
         }
     }
 
@@ -332,10 +345,8 @@ impl FrontendRenderEngine {
         let mut local = Vec::new();
         self.paint_backend
             .execute_commands(buffer, commands, &mut local);
-        if !local.is_empty()
-            && let Ok(mut diagnostics) = self.painter_diagnostics.lock()
-        {
-            diagnostics.extend(local);
+        if !local.is_empty() {
+            self.record_painter_diagnostics(local);
         }
     }
 
@@ -366,10 +377,8 @@ impl FrontendRenderEngine {
             &mut local,
         );
         drop(layers);
-        if !local.is_empty()
-            && let Ok(mut diagnostics) = self.painter_diagnostics.lock()
-        {
-            diagnostics.extend(local);
+        if !local.is_empty() {
+            self.record_painter_diagnostics(local);
         }
     }
 

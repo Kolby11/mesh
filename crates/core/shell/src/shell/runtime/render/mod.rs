@@ -173,7 +173,9 @@ impl Shell {
                     .last_paint_resource_revision
                     .is_some_and(|seen| seen != resource_revision)
             });
-            if resource_revision_changed {
+            // A scale event can arrive after reload's last paint, while the
+            // component itself has no dirty state.
+            if resource_revision_changed || self.compositor_redraw_ready(&self.components[index]) {
                 self.components[index].component.request_paint();
             }
             if !self.components[index].component.wants_render() {

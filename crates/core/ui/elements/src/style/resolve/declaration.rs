@@ -1269,18 +1269,6 @@ fn apply_declaration_with_context(
             style.inset_bottom = Some(edges.bottom);
             style.inset_left = Some(edges.left);
         }
-        "--icon-fill" => {
-            style.icon_fill = Some(resolver.resolve_number_with_variables(value, variables))
-        }
-        "--icon-weight" => {
-            style.icon_weight = Some(resolver.resolve_number_with_variables(value, variables))
-        }
-        "--icon-grade" => {
-            style.icon_grade = Some(resolver.resolve_number_with_variables(value, variables))
-        }
-        "--icon-optical-size" => {
-            style.icon_optical_size = Some(resolver.resolve_number_with_variables(value, variables))
-        }
         "tooltip-anchor" => {
             let resolved = resolver.resolve_value_with_variables_mode(value, variables, false);
             if let Some(anchor) = TooltipAnchor::from_css(&resolved) {
@@ -1318,85 +1306,6 @@ pub(super) fn selector_to_diagnostic_string(selector: &Selector) -> String {
             .collect::<Vec<_>>()
             .join(""),
     }
-}
-
-pub(super) fn theme_reference_to_token_name(name: &str) -> String {
-    let name = name.trim();
-    let Some(variable) = name.strip_prefix("--") else {
-        return name.to_string();
-    };
-    css_custom_property_to_token_name(variable)
-}
-
-pub(super) fn css_custom_property_to_token_name(variable: &str) -> String {
-    let Some((group, rest)) = variable.split_once('-') else {
-        return variable.to_string();
-    };
-
-    let rest = match group {
-        "animation" => canonicalize_prefixed(
-            rest,
-            &["curves-bezier", "default", "duration", "opacity", "scale"],
-        ),
-        "border" => canonicalize_prefixed(rest, &["style", "width"]),
-        "shadow" => canonicalize_prefixed(rest, &["colored", "umbra"]),
-        "shape" => canonicalize_prefixed(rest, &["corner"]),
-        "spacing" => canonicalize_prefixed(rest, &["inset"]),
-        "state" => canonicalize_suffixed(rest, &["opacity"]),
-        "icon" => canonicalize_prefixed(rest, &["size"]),
-        "typography" => canonicalize_prefixed(
-            rest,
-            &[
-                "family",
-                "line-height",
-                "scale-body-large",
-                "scale-body-medium",
-                "scale-body-small",
-                "scale-display-large",
-                "scale-display-medium",
-                "scale-display-small",
-                "scale-headline-large",
-                "scale-headline-medium",
-                "scale-headline-small",
-                "scale-label-large",
-                "scale-label-medium",
-                "scale-label-small",
-                "scale-title-large",
-                "scale-title-medium",
-                "scale-title-small",
-                "size",
-                "tracking",
-                "weight",
-            ],
-        ),
-        "color" | "elevation" | "radius" => rest.to_string(),
-        _ => rest.replace('-', "."),
-    };
-
-    format!("{group}.{rest}")
-}
-
-pub(super) fn canonicalize_prefixed(value: &str, prefixes: &[&str]) -> String {
-    let mut prefixes = prefixes.to_vec();
-    prefixes.sort_by_key(|prefix| std::cmp::Reverse(prefix.len()));
-    for prefix in prefixes {
-        if value == prefix {
-            return prefix.to_string();
-        }
-        if let Some(rest) = value.strip_prefix(&format!("{prefix}-")) {
-            return format!("{}.{}", prefix.replace('-', "."), rest);
-        }
-    }
-    value.to_string()
-}
-
-pub(super) fn canonicalize_suffixed(value: &str, suffixes: &[&str]) -> String {
-    for suffix in suffixes {
-        if let Some(rest) = value.strip_suffix(&format!("-{suffix}")) {
-            return format!("{rest}.{suffix}");
-        }
-    }
-    value.to_string()
 }
 
 /// One pass of a node's cascade. Custom properties are applied for every

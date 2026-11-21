@@ -378,14 +378,15 @@ removed, so each row keeps its identity and state.
 #### Long lists are windowed
 
 A `{#for}` over many items inside a scrolling container builds only the items
-near the viewport, so first paint and scroll cost stay flat however long the
-list is. Two empty spacer boxes stand in for the items that are not built, so
-the scroll extent and scrollbar match the full list.
+near the viewport. Spacer boxes stand in for the items outside the window and
+preserve the full scroll extent for uniform rows. For rows of different sizes,
+the shell estimates the extent of unseen rows and adjusts the spacers as it
+measures them. When the first visible row stays in the window, the shell
+adjusts the scroll offset to keep it in place.
 
 Lists of 100 or more items are windowed automatically when every item is a
-single root element: the shell builds the first items, measures them, and if
-they are all the same size along the scroll axis (gap included) it windows the
-list. Nothing needs to be written:
+single root element. The shell builds the first items and measures them to
+calculate the window along the scroll axis, including gaps:
 
 ```xml
 <scroll class="results">
@@ -399,7 +400,6 @@ A list is built in full instead, as it always was, when:
 
 - it is under 100 items, or its body is not exactly one root element;
 - it is not inside a container that scrolls on the list's axis;
-- its items are not all the same size, or an item's size later changes;
 - it is nested inside another `{#for}`.
 
 The first frame of a long list shows only the first items (enough to cover the

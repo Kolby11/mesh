@@ -419,6 +419,8 @@ pub(in crate::wayland_surface) struct PendingScene {
     /// Compositor object the frame was painted for; a recreated role must
     /// not receive pixels recorded for its predecessor.
     object: u64,
+    logical_size: (u32, u32),
+    scale: mesh_core_render::FractionalScale,
     damage: Vec<DamageRect>,
     submitted: Instant,
     waiting_for_release: bool,
@@ -447,9 +449,11 @@ impl WaylandSurfaceBackend {
         let Some(entry) = self.state.surfaces.get(surface_id) else {
             return PresentStatus::SurfaceMissing;
         };
-        let (scale, object) = (entry.scale, entry.surface_generation().object);
+        let scale = mesh_core_render::FractionalScale::new(entry.scale);
+        let object = entry.surface_generation().object;
+        let logical_size = entry.resolved_extent(self.output_logical_size_for_surface(surface_id));
         scene.include_damage(damage);
-        let Some(snapshot) = scene.snapshot(mesh_core_render::FractionalScale::new(scale)) else {
+        let Some(snapshot) = scene.snapshot(scale) else {
             self.gpu.disable(&PresentationError::BufferAlloc(
                 "scene recording is incomplete".into(),
             ));
@@ -462,6 +466,8 @@ impl WaylandSurfaceBackend {
                     scene: scene.surface,
                     commit,
                     object,
+                    logical_size,
+                    scale,
                     damage: damage.to_vec(),
                     submitted: Instant::now(),
                     waiting_for_release: false,
@@ -530,41 +536,27 @@ impl WaylandSurfaceBackend {
         let pending = std::mem::take(&mut self.scene_pending);
         let mut waiting: Vec<PendingScene> = Vec::new();
         for mut pending in pending {
-            let parent_waiting = match self.state.surfaces.get(&pending.surface_id) {
-                Some(SurfaceEntry {
-                    role: WaylandRole::Popup(role),
-                    ..
-                }) => waiting
-                    .iter()
-                    .any(|earlier| earlier.surface_id == role.parent_id),
-                _ => false,
-            };
-            if parent_waiting {
-                waiting.push(pending);
-                continue;
-            }
-            if !worker.is_current(pending.scene, pending.commit) {
+            let Some(entry) = self.state.surfaces.get(&pending.surface_id).filter(|entry| {
+                entry.configured
+                    && entry.surface_generation().object == pending.object
+                    && mesh_core_render::FractionalScale::new(entry.scale) == pending.scale
+                    && entry.resolved_extent(self.output_logical_size_for_surface(&pending.surface_id))
+                        == pending.logical_size
+                    && worker.is_current(pending.scene, pending.commit)
+            }) else {
                 self.scene_results.push(crate::SceneCompletion {
                     surface_id: pending.surface_id,
                     presented: false,
                 });
                 continue;
+            };
+            if let WaylandRole::Popup(role) = &entry.role
+                && waiting.iter().any(|earlier| earlier.surface_id == role.parent_id)
+            {
+                waiting.push(pending);
+                continue;
             }
             if pending.waiting_for_release {
-                let Some(entry) = self.state.surfaces.get(&pending.surface_id) else {
-                    self.scene_results.push(crate::SceneCompletion {
-                        surface_id: pending.surface_id,
-                        presented: false,
-                    });
-                    continue;
-                };
-                if !entry.configured || entry.surface_generation().object != pending.object {
-                    self.scene_results.push(crate::SceneCompletion {
-                        surface_id: pending.surface_id,
-                        presented: false,
-                    });
-                    continue;
-                }
                 if !entry.dmabuf_slot_available(&self.state.dmabuf.busy) {
                     waiting.push(pending);
                     continue;
@@ -601,13 +593,7 @@ impl WaylandSurfaceBackend {
                     Err(mesh_core_render::gpu::scene::GpuSceneError::BuffersBusy)
                 )
             {
-                let Some(entry) =
-                    self.state
-                        .surfaces
-                        .get_mut(&pending.surface_id)
-                        .filter(|entry| {
-                            entry.configured && entry.surface_generation().object == pending.object
-                        })
+                let Some(entry) = self.state.surfaces.get_mut(&pending.surface_id)
                 else {
                     self.scene_results.push(crate::SceneCompletion {
                         surface_id: pending.surface_id,
@@ -650,12 +636,16 @@ impl WaylandSurfaceBackend {
     ) -> bool {
         use mesh_core_render::gpu::scene::GpuSceneError;
         let surface_id = pending.surface_id.as_str();
+        let state = &mut self.state;
+        let Some(entry) = state.surfaces.get_mut(surface_id) else {
+            return false;
+        };
+        let (logical_w, logical_h) = pending.logical_size;
+        let scale = pending.scale.factor();
         let output = match output {
             Ok(output) => output,
             Err(GpuSceneError::BuffersBusy) => {
-                if let Some(entry) = self.state.surfaces.get_mut(surface_id) {
-                    entry.mark_buffer_backpressured();
-                }
+                entry.mark_buffer_backpressured();
                 return false;
             }
             Err(error) => {
@@ -664,17 +654,7 @@ impl WaylandSurfaceBackend {
                 return false;
             }
         };
-        let output_size = self.output_logical_size_for_surface(surface_id);
-        let qh = self.state.qh.clone();
-        let state = &mut self.state;
-        let Some(entry) = state.surfaces.get_mut(surface_id) else {
-            return false;
-        };
-        if !entry.configured || entry.surface_generation().object != pending.object {
-            return false;
-        }
-        let (logical_w, logical_h) = entry.resolved_extent(output_size);
-        let scale = entry.scale;
+        let qh = state.qh.clone();
         let (physical_w, physical_h) = (output.rendered_width, output.rendered_height);
         let mut device_damage: SmallVec<[DamageRect; MAX_PROTOCOL_DAMAGE_RECTS]> =
             mesh_core_render::DeviceDamage::from_logical(

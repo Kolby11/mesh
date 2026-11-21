@@ -166,6 +166,12 @@ step before the commit can refuse without touching the running shell:
    back. The last ten generations are kept under
    `~/.local/state/mesh/lock-history/`.
 
+Update, lock verification, rollback and store publication use the current root
+inventory's explicit module paths. A module without an inventory entry uses
+its standard installation path. Rollback preserves current path overrides.
+Older lock generations record revisions and digests, so a restored module with
+no current inventory entry uses the standard installation path.
+
 `--dry-run` prints the resolution, normalized graph diff (module additions,
 removals, updates, enable/disable changes, provider selection, and profile
 layout/slot effects), contract diff, and capability diff without changing live

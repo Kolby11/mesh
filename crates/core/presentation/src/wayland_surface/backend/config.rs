@@ -570,6 +570,11 @@ pub(super) fn clamp_surface_config_to_output(
             .with_surface_size(clamped_size)
             .expect("clamped surface remains a positive extent");
     }
+    cfg.wire_size = LayerWireSize::fixed(
+        cfg.wire_size.width.protocol_value().min(max_width),
+        cfg.wire_size.height.protocol_value().min(max_height),
+    )
+    .expect("clamped fixed axes remain positive");
     let (width, height) = cfg.surface_size();
 
     match cfg.edge {

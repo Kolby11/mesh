@@ -497,73 +497,40 @@ fn shipped_glass_material_resolves_and_paints_under_every_theme_mode() {
                 let BackgroundPaint::LinearGradient(gradient) = style.background_paint else {
                     panic!("{} {mode}: missing material gradient", declaration.id);
                 };
-                assert!(gradient.from.a > 0 && gradient.from.a < 255);
-                assert!(gradient.to.a > 0 && gradient.to.a < 255);
-                assert_eq!(style.box_shadow.blur_radius, 14.0);
-                assert!(style.box_shadow.color.a > 0 && style.box_shadow.color.a < 255);
-                let expected_backdrop = match (declaration.id.as_str(), mode.as_str()) {
-                    ("frutiger-aero", "light") => (12.0, 5.0, 4.0, 0.3),
-                    ("frutiger-aero", "dark") => (12.0, 6.0, 5.0, 0.5),
-                    ("liquid-glass", _) => (2.0, 0.0, 0.0, 0.0),
-                    ("vitrum", _) => (2.0, 0.0, 0.0, 0.0),
-                    _ => (10.0, 6.0, 5.0, 0.4),
-                };
                 let backdrop = style.backdrop_filter;
-                assert!(backdrop.refract);
-                assert_eq!(
-                    (
-                        backdrop.blur_radius,
-                        backdrop.refract_depth,
-                        backdrop.refract_edge,
-                        backdrop.dispersion,
-                    ),
-                    expected_backdrop,
-                    "{} {mode}",
-                    declaration.id
-                );
-                if declaration.id == "frutiger-aero" {
-                    let (from, to, foreground) = match mode.as_str() {
-                        "light" => ("#ffffffe0", "#d2efffa6", "#0b2e4a"),
-                        "dark" => ("#8fd8ff40", "#0a4a7a2e", "#effaff"),
-                        _ => panic!("unexpected Aero mode: {mode}"),
-                    };
-                    assert_eq!(gradient.from, Color::from_hex(from).unwrap());
-                    assert_eq!(gradient.to, Color::from_hex(to).unwrap());
-                    assert_eq!(style.color, Color::from_hex(foreground).unwrap());
-                } else if declaration.id == "liquid-glass" {
-                    assert_eq!(gradient.from, Color::from_hex("#ffffff26").unwrap());
-                    assert_eq!(gradient.to, Color::from_hex("#0000000f").unwrap());
+                if declaration.id == "liquid-glass" {
+                    assert_eq!(gradient.from, Color::from_hex("#b8c5df30").unwrap());
+                    assert_eq!(gradient.to, Color::from_hex("#09122240").unwrap());
                     assert_eq!(style.color, Color::from_hex("#ffffff").unwrap());
+                    assert!(backdrop.refract);
+                    assert_eq!(backdrop.blur_radius, 2.0);
+                    assert_eq!(style.box_shadow.blur_radius, 14.0);
                     assert_eq!(
                         style.box_shadow.color,
                         Color::from_hex("#00081f08").unwrap()
                     );
-                } else if declaration.id == "vitrum" {
-                    let (from, to, foreground) = match mode.as_str() {
-                        "dark" => ("#c4bde62e", "#0e0a2640", "#f4f2fc"),
-                        "light" => ("#ffffffcc", "#e9e5f98c", "#1b1826"),
-                        _ => panic!("unexpected Vitrum mode: {mode}"),
-                    };
-                    assert_eq!(gradient.from, Color::from_hex(from).unwrap());
-                    assert_eq!(gradient.to, Color::from_hex(to).unwrap());
-                    assert_eq!(style.color, Color::from_hex(foreground).unwrap());
                 } else {
-                    let surface = theme
-                        .resolve_token_value("--color-surface-container-high")
-                        .unwrap()
-                        .unwrap()
-                        .to_string();
                     let foreground = theme
-                        .resolve_token_value("--color-on-surface")
+                        .resolve_token_value("@mesh/glass-bar.glass.text")
                         .unwrap()
                         .unwrap()
                         .to_string();
-                    let expected = Color::from_css(&surface).unwrap();
-                    assert_eq!(
-                        (gradient.from.r, gradient.from.g, gradient.from.b),
-                        (expected.r, expected.g, expected.b)
-                    );
+                    assert_eq!(gradient.from.a, 255, "{} {mode}", declaration.id);
+                    assert_eq!(gradient.from, gradient.to, "{} {mode}", declaration.id);
+                    assert_eq!(backdrop, Default::default(), "{} {mode}", declaration.id);
                     assert_eq!(style.color, Color::from_css(&foreground).unwrap());
+                    match declaration.id.as_str() {
+                        "tapedeck" => {
+                            assert!(style.box_shadow.inset);
+                            assert_eq!(style.additional_box_shadows.len(), 3);
+                        }
+                        "bubblegum" => {
+                            assert_eq!(style.box_shadow.offset_x, 2.0);
+                            assert_eq!(style.box_shadow.offset_y, 2.0);
+                            assert_eq!(style.box_shadow.blur_radius, 0.0);
+                        }
+                        _ => assert!(style.box_shadow.is_none(), "{} {mode}", declaration.id),
+                    }
                 }
             }
         }

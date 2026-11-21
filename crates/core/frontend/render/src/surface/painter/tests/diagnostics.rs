@@ -2,6 +2,38 @@ use super::super::*;
 use super::common::*;
 
 #[test]
+fn painter_history_keeps_the_most_recent_distinct_diagnostics() {
+    let engine = FrontendRenderEngine::new();
+    let mut buffer = PixelBuffer::new(16, 16);
+    let command = PainterCommand::ApplyFilter {
+        rect: full_clip(8, 8),
+        radii: mesh_core_elements::style::Corners::zero(),
+        filter: PainterFilter::Blur(VisualFilter::blur(2.0)),
+        clip: full_clip(16, 16),
+    };
+    for _ in 0..4 {
+        engine.execute_painter_commands(&mut buffer, std::slice::from_ref(&command));
+    }
+    let repeated = engine.painter_diagnostics();
+    assert_eq!(repeated.len(), 1);
+    for index in 0..MAX_PAINTER_DIAGNOSTICS {
+        engine.record_painter_diagnostic(PainterDiagnostic {
+            message: index.to_string(),
+            ..repeated[0].clone()
+        });
+    }
+    let recent = engine.painter_diagnostics();
+    assert_eq!(recent.len(), MAX_PAINTER_DIAGNOSTICS);
+    assert_eq!(recent[0].message, "0");
+
+    engine.record_painter_diagnostic(recent[0].clone());
+    let recent = engine.painter_diagnostics();
+    assert_eq!(recent.len(), MAX_PAINTER_DIAGNOSTICS);
+    assert_eq!(recent[0].message, "1");
+    assert_eq!(recent.last().unwrap().message, "0");
+}
+
+#[test]
 fn painter_backend_capabilities_identify_skia_and_unsupported_commands_diagnose() {
     let backend = SkiaPaintBackend;
     let capabilities = backend.capabilities();

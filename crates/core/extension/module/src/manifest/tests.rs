@@ -261,16 +261,14 @@ fn volume_widget_declares_icon_pack_dependency() {
             .required
             .iter()
             .any(|id| id == "@mesh/icons-material-symbols"),
-        "navigation-bar should depend on @mesh/icons-material-symbols",
+        "volume-widget should depend on @mesh/icons-material-symbols",
     );
-    // Frontend no longer carries inline mappings — those live in the
-    // icon-pack module now.
     assert!(
         loaded
             .manifest
             .icons
             .as_ref()
-            .is_some_and(|icons| icons.overrides.is_empty() && icons.ignore_shell_default)
+            .is_none_or(|icons| icons.overrides.is_empty() && !icons.ignore_shell_default)
     );
     assert!(loaded.manifest.icon_pack.is_none());
 }

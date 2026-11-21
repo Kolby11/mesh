@@ -479,6 +479,7 @@ impl PackageTransaction {
     pub fn save_lock(
         &mut self,
         lock: &mut MeshLock,
+        root: &RootModuleGraphManifest,
         modules_dir: &Path,
     ) -> Result<(), ModuleManifestError> {
         let lock_path = self.config_dir.join("mesh.lock");
@@ -488,9 +489,9 @@ impl PackageTransaction {
         MeshLock::archive(&lock_path, &self.config_dir.join("lock-history"))?;
         lock.save_with_store_locked(
             &lock_path,
-            modules_dir,
             &self.config_dir.join(".mesh-store"),
             &self.control_plane_lock,
+            |module_id| root.installed_module_path(modules_dir, module_id),
         )
     }
 
@@ -499,6 +500,7 @@ impl PackageTransaction {
     pub fn save_exact_lock(
         &mut self,
         lock: &MeshLock,
+        root: &RootModuleGraphManifest,
         modules_dir: &Path,
     ) -> Result<(), ModuleManifestError> {
         let lock_path = self.config_dir.join("mesh.lock");
@@ -508,9 +510,9 @@ impl PackageTransaction {
         MeshLock::archive(&lock_path, &self.config_dir.join("lock-history"))?;
         lock.save_exact_with_store_locked(
             &lock_path,
-            modules_dir,
             &self.config_dir.join(".mesh-store"),
             &self.control_plane_lock,
+            |module_id| root.installed_module_path(modules_dir, module_id),
         )
     }
 
@@ -519,6 +521,7 @@ impl PackageTransaction {
         &mut self,
         manifest: &ModuleManifest,
         installed_at: &Path,
+        root: &RootModuleGraphManifest,
         modules_dir: &Path,
         source: &ModuleSource,
         revision: Option<&str>,
@@ -535,7 +538,7 @@ impl PackageTransaction {
             installed_manifests,
             activate_composition,
         )?;
-        self.save_lock(&mut lock, modules_dir)
+        self.save_lock(&mut lock, root, modules_dir)
     }
 
     pub fn stage_git_revision(
@@ -1766,9 +1769,9 @@ mod tests {
                     let mut lock = super::super::MeshLock::new();
                     lock.save_with_store_locked(
                         &root.join("mesh.lock"),
-                        &modules,
                         &root.join(".mesh-store"),
                         &transaction.control_plane_lock,
+                        |module_id| super::super::module_install_path(&modules, module_id),
                     )
                 }
                 _ => unreachable!(),

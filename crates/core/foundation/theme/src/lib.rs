@@ -1212,23 +1212,26 @@ impl Theme {
 
     /// Look up a token by dotted name, e.g. `color.primary`.
     pub fn token(&self, name: &str) -> Option<&TokenValue> {
-        self.tokens
-            .get(name)
-            .or_else(|| match split_explicit_module_token(&self.modules, name) {
-                Some((module_id, token_name)) => self
-                    .modules
-                    .get(module_id)
-                    .and_then(|module| module.tokens.get(token_name)),
-                None => None,
-            })
+        match split_explicit_module_token(&self.modules, name) {
+            Some((module_id, local_name)) if self.modules.contains_key(module_id) => {
+                self.token_in_scope(Some(module_id), local_name)
+            }
+            _ => self.token_in_scope(None, name),
+        }
+    }
+
+    fn token_in_scope(&self, module: Option<&str>, name: &str) -> Option<&TokenValue> {
+        match module {
+            Some(id) => self.modules.get(id)?.tokens.get(name),
+            None => self.tokens.get(name),
+        }
     }
 
     /// Resolve a token and any `var(--...)` references it contains.
     ///
     /// Token references are resolved against the same immutable theme
-    /// snapshot that supplied the token. This keeps aliases deterministic and
-    /// makes cycles explicit instead of relying on a depth limit in each
-    /// consumer.
+    /// snapshot that supplied the token. A scoped token looks up references
+    /// in its module before falling back to the global tokens.
     pub fn resolve_token_value(&self, name: &str) -> Result<Option<TokenValue>, ThemeTokenError> {
         let name = canonical_token_name(name);
         let Some(value) = self.token(&name) else {
@@ -1291,19 +1294,40 @@ impl Theme {
         name: &str,
         stack: &mut TokenTrail,
     ) -> Result<TokenValue, ThemeTokenError> {
-        if let Some(position) = stack.names.iter().position(|entry| entry == name) {
-            let mut cycle = stack.names[position..].to_vec();
-            cycle.push(name.to_string());
+        match split_explicit_module_token(&self.modules, name) {
+            Some((module_id, local_name)) if self.modules.contains_key(module_id) => {
+                self.resolve_token_in_scope(Some(module_id), local_name, stack)
+            }
+            _ => self.resolve_token_in_scope(None, name, stack),
+        }
+    }
+
+    fn resolve_token_in_scope(
+        &self,
+        module: Option<&str>,
+        name: &str,
+        stack: &mut TokenTrail,
+    ) -> Result<TokenValue, ThemeTokenError> {
+        let key = TokenKey {
+            module: module.map(str::to_owned),
+            name: name.to_owned(),
+        };
+        if let Some(position) = stack.keys.iter().position(|entry| entry == &key) {
+            let mut cycle = stack.keys[position..]
+                .iter()
+                .map(TokenKey::display_name)
+                .collect::<Vec<_>>();
+            cycle.push(key.display_name());
             return Err(ThemeTokenError::Cycle(cycle));
         }
 
-        let Some(value) = self.token(name).cloned() else {
-            return Err(ThemeTokenError::Missing(name.to_string()));
+        let Some(value) = self.token_in_scope(module, name).cloned() else {
+            return Err(ThemeTokenError::Missing(key.display_name()));
         };
         if stack.depth() >= MAX_TOKEN_RESOLUTION_DEPTH {
-            return Err(ThemeTokenError::TooDeep(name.to_string()));
+            return Err(ThemeTokenError::TooDeep(key.display_name()));
         }
-        stack.names.push(name.to_string());
+        stack.keys.push(key);
         let resolved = match value {
             TokenValue::String(value) => {
                 let trimmed = value.trim();
@@ -1318,7 +1342,7 @@ impl Theme {
         };
         // Popped on failure too: a caller may recover through a fallback and
         // keep resolving with this trail.
-        stack.names.pop();
+        stack.keys.pop();
         resolved
     }
 
@@ -1328,11 +1352,16 @@ impl Theme {
         stack: &mut TokenTrail,
     ) -> Result<TokenValue, ThemeTokenError> {
         let name = canonical_token_name(reference);
-        if let Some(value) = self.token(&name) {
-            let _ = value;
-            return self.resolve_named_token(&name, stack);
+        if !name.starts_with('@')
+            && let Some((module_id, module)) = stack
+                .keys
+                .last()
+                .and_then(|key| self.modules.get_key_value(key.module.as_deref()?))
+            && module.tokens.contains_key(&name)
+        {
+            return self.resolve_token_in_scope(Some(module_id), &name, stack);
         }
-        Err(ThemeTokenError::Missing(name))
+        self.resolve_named_token(&name, stack)
     }
 
     fn resolve_string_references(
@@ -1397,13 +1426,28 @@ pub const MAX_TOKEN_RESOLUTION_DEPTH: usize = 64;
 /// The tokens and fallbacks currently being resolved, outermost first.
 #[derive(Default)]
 struct TokenTrail {
-    names: Vec<String>,
+    keys: Vec<TokenKey>,
     fallbacks: usize,
 }
 
 impl TokenTrail {
     fn depth(&self) -> usize {
-        self.names.len() + self.fallbacks
+        self.keys.len() + self.fallbacks
+    }
+}
+
+#[derive(PartialEq, Eq)]
+struct TokenKey {
+    module: Option<String>,
+    name: String,
+}
+
+impl TokenKey {
+    fn display_name(&self) -> String {
+        match &self.module {
+            Some(module) => format!("{module}.{}", self.name),
+            None => self.name.clone(),
+        }
     }
 }
 
@@ -1729,9 +1773,18 @@ fn flatten_module_tokens_into(
     tokens: &mut HashMap<String, TokenValue>,
     modules: &HashMap<String, ThemeModule>,
 ) {
+    tokens.retain(|name, _| {
+        !split_explicit_module_token(modules, name)
+            .is_some_and(|(module_id, _)| modules.contains_key(module_id))
+    });
     for (module_id, module) in modules {
         for (token_name, value) in &module.tokens {
-            tokens.insert(format!("{module_id}.{token_name}"), value.clone());
+            let name = format!("{module_id}.{token_name}");
+            if !name.starts_with('@')
+                || split_explicit_module_token(modules, &name) == Some((module_id, token_name))
+            {
+                tokens.insert(name, value.clone());
+            }
         }
     }
 }
@@ -2174,6 +2227,9 @@ fn css_variable_to_token_name(property: &str) -> Option<String> {
 }
 
 fn css_custom_property_to_token_name(token: &str) -> String {
+    if token.starts_with('@') {
+        return token.to_string();
+    }
     let Some((group, rest)) = token.split_once('-') else {
         return token.to_string();
     };
@@ -2309,12 +2365,26 @@ mod tests {
         plain
             .tokens
             .insert("v2.glass.tint".into(), TokenValue::String("#040506".into()));
+        plain.tokens.insert(
+            "glass.alias".into(),
+            TokenValue::String("var(v2.glass.tint)".into()),
+        );
         theme.modules.insert("@acme/panel".into(), plain);
+        flatten_module_tokens_into(&mut theme.tokens, &theme.modules);
 
         assert_eq!(
             theme.token("@acme/panel.v2.glass.tint"),
             Some(&TokenValue::String("#010203".into()))
         );
+        assert_eq!(
+            theme.tokens().get("@acme/panel.v2.glass.tint"),
+            Some(&TokenValue::String("#010203".into()))
+        );
+        assert_eq!(
+            theme.resolve_token_value("@acme/panel.glass.alias"),
+            Ok(Some(TokenValue::String("#040506".into())))
+        );
+
         assert_eq!(
             split_explicit_module_token(&theme.modules, "@acme/other.glass.tint"),
             Some(("@acme/other", "glass.tint"))
@@ -2333,6 +2403,19 @@ mod tests {
         assert_eq!(
             theme.modules["@acme/panel"].tokens["v2.glass.tint"],
             TokenValue::String("#040506".into())
+        );
+        theme
+            .modules_mut()
+            .get_mut("@acme/panel")
+            .unwrap()
+            .tokens
+            .insert(
+                "v2.glass.tint".into(),
+                TokenValue::String("var(@acme/panel.v2.glass.tint)".into()),
+            );
+        assert_eq!(
+            theme.resolve_token_value("@acme/panel.glass.alias"),
+            Ok(Some(TokenValue::String("#ffffff".into())))
         );
     }
 
@@ -3008,10 +3091,10 @@ mod tests {
 
     #[test]
     fn resolved_module_aliases_invalidate_with_module_mutation() {
-        let mut theme = theme_with_tokens(&[("alias", "var(--@mesh/example.size)")]);
+        let mut theme = theme_with_tokens(&[("alias", "var(--@mesh/example-panel.size)")]);
         theme
             .modules_mut()
-            .entry("@mesh/example".into())
+            .entry("@mesh/example-panel".into())
             .or_default()
             .tokens
             .insert("size".into(), TokenValue::Number(8.0));
@@ -3021,7 +3104,7 @@ mod tests {
         );
         theme
             .modules_mut()
-            .get_mut("@mesh/example")
+            .get_mut("@mesh/example-panel")
             .unwrap()
             .tokens
             .insert("size".into(), TokenValue::Number(16.0));

@@ -1489,7 +1489,6 @@ fn cmd_update(args: &[String]) {
         .unwrap_or_else(|error| exit_error(error));
 
     let installed = installed_manifests(&root_path);
-    let approvals = root.capability_approvals;
     let plan = update::plan_update_from_staged_graph(
         &root_path,
         &modules_dir,
@@ -1497,7 +1496,7 @@ fn cmd_update(args: &[String]) {
         options.only.as_deref(),
         options.policy,
         &installed,
-        &approvals,
+        &root.capability_approvals,
         &mut transaction,
     )
     .unwrap_or_else(|error| exit_error(error));
@@ -1557,7 +1556,13 @@ fn cmd_update(args: &[String]) {
         return;
     }
 
-    let updated = match update::commit_update(&modules_dir, &mut lock, &plan, &mut transaction) {
+    let updated = match update::commit_update(
+        &root,
+        &modules_dir,
+        &mut lock,
+        &plan,
+        &mut transaction,
+    ) {
         Ok(updated) => updated,
         Err(error) => {
             let _ = transaction.abort();
@@ -1676,7 +1681,7 @@ fn cmd_lock(args: &[String]) {
             let lock =
                 mesh_core_module::package::MeshLock::load_or_default(&config_dir.join("mesh.lock"))
                     .unwrap_or_else(|error| exit_error(error));
-            let results = update::verify(&modules_dir, &lock);
+            let results = update::verify(&root, &modules_dir, &lock);
             let provenance = update::verify_provenance(&root, &lock);
             let provenance_failures = provenance
                 .iter()
@@ -2194,10 +2199,15 @@ mod tests {
         let mut transaction =
             PackageTransaction::begin(&config_dir, PackageOwner::Cli, PackageOperation::Install)
                 .unwrap();
+        let root = mesh_core_module::package::RootModuleGraphManifest::from_json_str(
+            r#"{"mesh":{"schemaVersion":1,"modulesDir":"modules"}}"#,
+        )
+        .unwrap();
         transaction
             .record_module_lock(
                 &manifest,
                 &installed,
+                &root,
                 &config_dir.join("modules"),
                 &source,
                 Some("abc123"),

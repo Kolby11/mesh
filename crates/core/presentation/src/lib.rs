@@ -87,7 +87,7 @@ use wayland_surface::WaylandSurfaceBackend;
 /// Why a blocking wait returned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitReason {
-    /// The Wayland connection fd became readable.
+    /// The Wayland connection is ready or dispatch has already queued work.
     WaylandEvent,
     /// The IPC/backend eventfd was signaled.
     IpcEvent,
@@ -511,32 +511,38 @@ fn clear_testing_text_input_for_surface(backend: &mut TestingBackend, surface_id
 }
 
 impl PresentationEngine {
+    /// Connect to the Wayland layer-shell backend. Return a connection or
+    /// protocol error if the compositor cannot provide it.
+    pub fn connect_wayland() -> Result<Self, PresentationError> {
+        Ok(Self {
+            backend: Backend::WaylandSurface(Box::new(WaylandSurfaceBackend::new()?)),
+        })
+    }
+
     pub fn select() -> Self {
         let forced = std::env::var("MESH_BACKEND").ok();
         let want_dev = forced.as_deref() == Some("dev-window");
         let want_wayland = forced.as_deref() == Some("layer-shell");
         let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
 
-        let backend = if !want_dev && (want_wayland || wayland) {
-            match WaylandSurfaceBackend::new() {
-                Ok(bridge) => {
+        if !want_dev && (want_wayland || wayland) {
+            match Self::connect_wayland() {
+                Ok(engine) => {
                     tracing::info!("using wayland surface bridge");
-                    Backend::WaylandSurface(Box::new(bridge))
+                    return engine;
                 }
                 Err(err) => {
                     tracing::warn!(
                         "failed to initialise wayland surface bridge, falling back to dev window: {err}"
                     );
-                    tracing::info!("using dev-window bridge");
-                    Backend::DevWindow(DevWindowBackend::new())
                 }
             }
-        } else {
-            tracing::info!("using dev-window bridge");
-            Backend::DevWindow(DevWindowBackend::new())
-        };
+        }
 
-        Self { backend }
+        tracing::info!("using dev-window bridge");
+        Self {
+            backend: Backend::DevWindow(DevWindowBackend::new()),
+        }
     }
 
     #[doc(hidden)]
@@ -1900,9 +1906,8 @@ impl PresentationEngine {
 
     /// Block on the backend until `timeout` elapses or a wakeup occurs.
     ///
-    /// `eventfd_fd` is an optional IPC/backend wakeup fd checked *after*
-    /// the Wayland connection fd (non-blocking check). For `Backend::DevWindow`
-    /// this returns `DeadlineExpired` immediately.
+    /// Wayland waits also monitor `eventfd_fd` for IPC and backend wakeups.
+    /// The developer-window backend returns `DeadlineExpired` immediately.
     pub fn wait_for_events(
         &mut self,
         timeout: std::time::Duration,

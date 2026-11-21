@@ -25,12 +25,6 @@ use mesh_core_elements::{
 };
 use mesh_core_interaction::ScrollOffsetState;
 
-#[cfg(test)]
-use mesh_core_interaction::node_is_source;
-
-#[cfg(test)]
-use mesh_core_interaction::source_element_tag;
-
 use mesh_core_render::{RenderObjectDirtySummary, RenderObjectFingerprint};
 
 use slotmap::{SecondaryMap, SlotMap, new_key_type};

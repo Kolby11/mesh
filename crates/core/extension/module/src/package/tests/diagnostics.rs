@@ -271,6 +271,17 @@ fn graph_diagnostics_report_undeclared_i18n_key() {
         i18n_diags[0].message.contains("nav.missing"),
         "diagnostic should name the missing key"
     );
+
+    let mut oversized_catalog = br#"{"nav.volume": "Volume"}"#.to_vec();
+    oversized_catalog.resize(mesh_core_locale::DEFAULT_MAX_CATALOG_SOURCE_BYTES + 1, b' ');
+    fs::write(catalog_dir.join("en.json"), oversized_catalog).unwrap();
+    assert!(
+        !graph
+            .authoring_diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.status == "undeclared_i18n_key"),
+        "key diagnostics require a catalog within the runtime size limit"
+    );
 }
 
 #[test]

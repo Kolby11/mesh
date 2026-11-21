@@ -17,6 +17,7 @@ pub struct Backend {
     registry: Arc<RwLock<ModuleRegistry>>,
     workspace_root: Arc<RwLock<Option<PathBuf>>>,
     refresh_generation: Arc<RwLock<u64>>,
+    registry_refresh_lock: Mutex<()>,
     document_versions: Arc<RwLock<HashMap<Url, i32>>>,
     document_update_lock: Arc<Mutex<()>>,
 }
@@ -31,6 +32,7 @@ impl Backend {
             registry: Arc::new(RwLock::new(ModuleRegistry::empty())),
             workspace_root: Arc::new(RwLock::new(None)),
             refresh_generation: Arc::new(RwLock::new(0)),
+            registry_refresh_lock: Mutex::new(()),
             document_versions: Arc::new(RwLock::new(HashMap::new())),
             document_update_lock: Arc::new(Mutex::new(())),
         }
@@ -100,19 +102,15 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         let source = params.text_document.text;
         let version = params.text_document.version;
-        if let Some(generation) = self.update_document(uri, source, version).await {
-            self.refresh_registry(generation).await;
-        }
+        self.update_document(uri, source, version).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
         let version = params.text_document.version;
-        // Full sync — use the first (only) change which contains the complete text.
-        if let Some(change) = params.content_changes.into_iter().next() {
-            if let Some(generation) = self.update_document(uri, change.text, version).await {
-                self.refresh_registry(generation).await;
-            }
+        // Each full-sync change supersedes the preceding document contents.
+        if let Some(change) = params.content_changes.into_iter().last() {
+            self.update_document(uri, change.text, version).await;
         }
     }
 
@@ -128,7 +126,6 @@ impl LanguageServer for Backend {
         self.manifests.write().await.remove(&uri);
         self.settings.write().await.remove(&uri);
         self.document_versions.write().await.remove(&uri);
-        drop(_update_guard);
         // Clear diagnostics on close.
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
@@ -273,28 +270,39 @@ impl Backend {
     }
 
     async fn refresh_registry(&self, generation: u64) {
+        let _refresh_guard = self.registry_refresh_lock.lock().await;
+        if *self.refresh_generation.read().await != generation {
+            return;
+        }
         let root = self.workspace_root.read().await.clone();
         let Some(root) = root else {
             return;
         };
-        match ModuleRegistry::try_discover(&root) {
-            Ok(registry) => {
+        let workspace = root.clone();
+        let next =
+            tokio::task::spawn_blocking(move || ModuleRegistry::try_discover(&workspace)).await;
+        match next {
+            Ok(Ok(registry)) => {
                 tracing::info!(
                     modules = registry.manifests.len(),
                     services = registry.interface_fields.len(),
                     revision = ?registry.snapshot_revision(),
                     "canonical authoring snapshot refreshed"
                 );
-                if !self.commit_registry(generation, registry).await {
+                let _update_guard = self.document_update_lock.lock().await;
+                if self.commit_registry(generation, registry).await {
+                    self.publish_registry_diagnostics().await;
+                } else {
                     tracing::debug!(generation, "discarding stale authoring snapshot refresh");
                 }
             }
-            Err(error) => {
+            Ok(Err(error)) => {
                 tracing::warn!(
                     workspace = %root.display(),
                     "keeping previous authoring snapshot after refresh failure: {error}"
                 );
             }
+            Err(error) => tracing::warn!(%error, "authoring snapshot worker failed"),
         }
     }
 
@@ -310,67 +318,58 @@ impl Backend {
         true
     }
 
-    async fn update_document(&self, uri: Url, source: String, version: i32) -> Option<u64> {
-        if manifest::is_manifest_uri(&uri) {
-            let doc = ManifestDocument::new(uri.clone(), source);
-            let diags = manifest::diagnostics(&doc);
-            let _update_guard = self.document_update_lock.lock().await;
-            if !self.commit_document_version(&uri, version).await {
-                return None;
-            }
-            self.manifests.write().await.insert(uri.clone(), doc);
-            drop(_update_guard);
-            let generation = self.start_refresh_generation().await;
-            self.client
-                .publish_diagnostics(uri, diags, Some(version))
-                .await;
-            return Some(generation);
+    async fn update_document(&self, uri: Url, source: String, version: i32) {
+        let _update_guard = self.document_update_lock.lock().await;
+        if !self.commit_document_version(&uri, version).await {
+            return;
         }
 
-        if settings::is_settings_uri(&uri) {
+        let diags;
+        if manifest::is_manifest_uri(&uri) {
+            let doc = ManifestDocument::new(uri.clone(), source);
+            diags = manifest::diagnostics(&doc);
+            self.manifests.write().await.insert(uri.clone(), doc);
+        } else if settings::is_settings_uri(&uri) {
             let doc = SettingsDocument::new(uri.clone(), source);
-            let diags = {
+            diags = {
                 let registry = self.registry.read().await;
                 settings::diagnostics(&doc, &registry)
             };
-            let _update_guard = self.document_update_lock.lock().await;
-            if !self.commit_document_version(&uri, version).await {
-                return None;
-            }
             self.settings.write().await.insert(uri.clone(), doc);
-            drop(_update_guard);
-            let generation = self.start_refresh_generation().await;
-            self.client
-                .publish_diagnostics(uri, diags, Some(version))
-                .await;
-            return Some(generation);
+        } else {
+            let doc = Document::new(uri.clone(), source);
+            diags = {
+                let registry = self.registry.read().await;
+                component_diagnostics(&doc, &registry)
+            };
+            self.documents.write().await.insert(uri.clone(), doc);
         }
-
-        let doc = Document::new(uri.clone(), source);
-        let (local_tokens, independent) = {
-            let registry = self.registry.read().await;
-            uri.to_file_path()
-                .ok()
-                .map(|path| {
-                    (
-                        registry.local_theme_tokens(&path),
-                        registry.theme_independent(&path),
-                    )
-                })
-                .unwrap_or_default()
-        };
-        let diags = diagnostics::from_document_with_theme_context(&doc, &local_tokens, independent);
-        let _update_guard = self.document_update_lock.lock().await;
-        if !self.commit_document_version(&uri, version).await {
-            return None;
-        }
-        self.documents.write().await.insert(uri.clone(), doc);
-        drop(_update_guard);
-        let generation = self.start_refresh_generation().await;
         self.client
             .publish_diagnostics(uri, diags, Some(version))
             .await;
-        Some(generation)
+    }
+
+    /// Called with the document update lock held so refreshed diagnostics
+    /// cannot overtake newer edits or reopen diagnostics for a closed file.
+    async fn publish_registry_diagnostics(&self) {
+        let updates = {
+            let registry = self.registry.read().await;
+            let docs = self.documents.read().await;
+            let settings = self.settings.read().await;
+            let versions = self.document_versions.read().await;
+            docs.iter()
+                .map(|(uri, doc)| (uri, component_diagnostics(doc, &registry)))
+                .chain(
+                    settings
+                        .iter()
+                        .map(|(uri, doc)| (uri, settings::diagnostics(doc, &registry))),
+                )
+                .map(|(uri, diags)| (uri.clone(), diags, versions.get(uri).copied()))
+                .collect::<Vec<_>>()
+        };
+        for (uri, diags, version) in updates {
+            self.client.publish_diagnostics(uri, diags, version).await;
+        }
     }
 
     async fn commit_document_version(&self, uri: &Url, version: i32) -> bool {
@@ -381,6 +380,21 @@ impl Backend {
         versions.insert(uri.clone(), version);
         true
     }
+}
+
+fn component_diagnostics(doc: &Document, registry: &ModuleRegistry) -> Vec<Diagnostic> {
+    let (local_tokens, independent) = doc
+        .uri
+        .to_file_path()
+        .ok()
+        .map(|path| {
+            (
+                registry.local_theme_tokens(&path),
+                registry.theme_independent(&path),
+            )
+        })
+        .unwrap_or_default();
+    diagnostics::from_document_with_theme_context(doc, &local_tokens, independent)
 }
 
 fn workspace_root_from_initialize(params: &InitializeParams) -> Option<PathBuf> {
@@ -513,6 +527,39 @@ mod tests {
             backend.registry.read().await.themes,
             vec!["current".to_string()]
         );
+    }
+
+    #[tokio::test]
+    async fn unsaved_document_updates_keep_the_authoring_snapshot() {
+        let (service, _) = LspService::new(Backend::new);
+        let backend = service.inner();
+        let uri = Url::parse("file:///workspace/main.mesh").unwrap();
+        let generation = backend.start_refresh_generation().await;
+
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "mesh".into(),
+                    version: 1,
+                    text: "<template><text>before</text></template>".into(),
+                },
+            })
+            .await;
+        let updated = "<template><text>after</text></template>";
+        backend
+            .did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier::new(uri.clone(), 2),
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: updated.into(),
+                }],
+            })
+            .await;
+
+        assert_eq!(backend.documents.read().await[&uri].source, updated);
+        assert_eq!(*backend.refresh_generation.read().await, generation);
     }
 
     #[tokio::test]

@@ -28,7 +28,7 @@
                     min="0"
                     max="100"
                     value={volume_percent}
-                    onchange={onVolumeChange}
+                    onrelease={onVolumeCommit}
                     disabled={controls_disabled}
                     aria-label={t('audio.volume')}
                 />
@@ -144,7 +144,7 @@ effect(function()
     sync_volume(audio.percent, muted)
 end)
 
-function onVolumeChange(value)
+function onVolumeCommit(value)
     if not audio or audio.available == false or type(audio.set_volume) ~= "function" then
         return
     end

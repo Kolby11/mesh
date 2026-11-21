@@ -270,15 +270,8 @@ fn parse_for_header(
         let value_end = markers
             .get(index + 1)
             .map_or(after_in.end, |(next, _)| *next);
-        let value_start = skip_ascii_whitespace(source, marker_start + name.len());
-        if source.as_bytes().get(value_start) != Some(&b'=') {
-            return Err(error_at(
-                source,
-                *marker_start,
-                &format!("expected `=` after `{name}`"),
-            ));
-        }
-        let value = trimmed_span(source, value_start + 1, value_end);
+        let value_start = skip_ascii_whitespace(source, marker_start + name.len()) + 1;
+        let value = trimmed_span(source, value_start, value_end);
         match *name {
             "key" => {
                 key = Some(if source.as_bytes().get(value.start) == Some(&b'{') {
@@ -546,10 +539,9 @@ fn scan_braced_expression(source: &str, start: usize) -> Result<usize, ParseErro
 }
 
 fn scan_short_string(source: &str, start: usize) -> Result<Option<usize>, ParseError> {
-    let quote = source.as_bytes().get(start).copied();
-    if !matches!(quote, Some(b'\'' | b'"')) {
+    let Some(quote @ (b'\'' | b'"')) = source.as_bytes().get(start).copied() else {
         return Ok(None);
-    }
+    };
     let mut cursor = start + 1;
     while cursor < source.len() {
         let ch = source[cursor..]
@@ -568,7 +560,7 @@ fn scan_short_string(source: &str, start: usize) -> Result<Option<usize>, ParseE
             continue;
         }
         cursor += ch.len_utf8();
-        if quote == Some(ch as u8) {
+        if char::from(quote) == ch {
             return Ok(Some(cursor));
         }
     }
@@ -688,7 +680,7 @@ fn find_top_level_option(source: &str, span: SourceSpan, name: &str) -> Option<u
                 .chars()
                 .next()
                 .is_some_and(|next| next.is_ascii_whitespace() || next == '=')
-            && (name == "key" || is_single_assignment(source, cursor + name.len()))
+            && is_single_assignment(source, cursor + name.len())
         {
             return Some(cursor);
         }
@@ -718,7 +710,8 @@ fn trimmed_span(source: &str, start: usize, end: usize) -> SourceSpan {
 }
 
 /// Whether the next non-space character at `cursor` is `=` but not `==`, so an
-/// iterable that merely names a variable `window` is not read as an option.
+/// iterable referencing a variable named `key`, `window` or `overscan` is not
+/// read as an option.
 fn is_single_assignment(source: &str, cursor: usize) -> bool {
     let cursor = skip_ascii_whitespace(source, cursor);
     source.as_bytes().get(cursor) == Some(&b'=') && source.as_bytes().get(cursor + 1) != Some(&b'=')
@@ -766,6 +759,21 @@ fn error_at(source: &str, offset: usize, message: impl Into<String>) -> ParseErr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unicode_characters_do_not_end_quoted_expressions() {
+        let source = r#"<text>{'ħ}'}{"Ģ}"}</text>"#;
+        let lexed = lex(source).unwrap();
+        assert_eq!(lexed.tokens.len(), 2);
+        assert_eq!(
+            &source[lexed.tokens[0].span.start..lexed.tokens[0].span.end],
+            "{'ħ}'}"
+        );
+        assert_eq!(
+            &source[lexed.tokens[1].span.start..lexed.tokens[1].span.end],
+            r#"{"Ģ}"}"#
+        );
+    }
 
     #[test]
     fn only_a_long_bracket_opener_starts_a_long_comment() {

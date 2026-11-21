@@ -441,6 +441,48 @@ fn backend_command_result_rejects_invalid_contract_output() {
 }
 
 #[test]
+fn typed_backend_command_preserves_transport_outcomes() {
+    let runtime = Runtime::new().unwrap();
+    let mut shell = Shell::new();
+    let mut contract = test_contract("mesh.audio");
+    let command = &mut contract.methods[0];
+    command.returns = Some("float".to_string());
+    let command = command.name.clone();
+    shell.interfaces.register_contract(contract);
+    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
+    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let mut pending = VecDeque::new();
+
+    for outcome in [
+        mesh_core_backend::BackendCommandOutcome::Superseded,
+        mesh_core_backend::BackendCommandOutcome::TimedOut,
+        mesh_core_backend::BackendCommandOutcome::Cancelled,
+    ] {
+        let call_id = mesh_core_backend::CallId::next();
+        shell
+            .handle_shell_message(
+                &mut pending,
+                super::types::ShellMessage::BackendCommandResult {
+                    interface: "mesh.audio".to_string(),
+                    provider_id: "@mesh/pipewire-audio".to_string(),
+                    identity: BackendIdentity::default(),
+                    generation: 0,
+                    call_id,
+                    command: command.clone(),
+                    result: serde_json::json!({ "ok": false, "status": outcome.as_str() }),
+                    outcome,
+                },
+            )
+            .unwrap();
+
+        let snapshot = shell.build_debug_snapshot();
+        assert!(snapshot.method_calls.iter().any(|entry| {
+            entry.call_id == call_id.raw() && entry.status == outcome.as_str()
+        }));
+    }
+}
+
+#[test]
 fn backend_interface_event_validates_and_delivers_to_components() {
     let runtime = Runtime::new().unwrap();
     let mut shell = Shell::new();

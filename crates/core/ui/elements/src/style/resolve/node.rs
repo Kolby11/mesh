@@ -507,6 +507,29 @@ impl<'a> StyleResolver<'a> {
             }
         });
 
+        if attrs.tag == "icon" {
+            let variables = variables_scope.variables();
+            for (name, axis) in [
+                ("--icon-fill", &mut style.icon_fill),
+                ("--icon-weight", &mut style.icon_weight),
+                ("--icon-grade", &mut style.icon_grade),
+                ("--icon-optical-size", &mut style.icon_optical_size),
+            ] {
+                let value = match variables.get(name) {
+                    Some(value) => self
+                        .resolve_value_with_variables_mode(value, variables, false)
+                        .trim()
+                        .parse::<f32>()
+                        .ok(),
+                    None => match self.cached_theme_token_value(name) {
+                        CachedThemeTokenValue::Number(value) => Some(value as f32),
+                        CachedThemeTokenValue::String(value) => value.as_ref().trim().parse().ok(),
+                        _ => None,
+                    },
+                };
+                *axis = value.filter(|value| value.is_finite());
+            }
+        }
         style.custom_properties = variables_scope.finish();
         style.explicit_properties = explicit_properties;
         style.inherited_properties = StylePropertyMask::default();

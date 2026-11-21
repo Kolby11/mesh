@@ -63,6 +63,10 @@ impl WaylandSurfaceBackend {
         if !self.surface_ready_to_present(surface_id) {
             return Ok(PresentStatus::NotReady);
         }
+        #[cfg(feature = "gpu")]
+        if let SurfaceCanvas::Scene(scene) = canvas {
+            return Ok(self.submit_scene(surface_id, scene, damage_rects));
+        }
 
         // A spanning layer surface may receive a zero configure dimension.
         // Resolve it against the output selected for this surface before any
@@ -70,10 +74,6 @@ impl WaylandSurfaceBackend {
         // exposed by `surface_size_if_known`, so shell paint and presentation
         // cannot disagree about the logical destination.
         let output_size = self.output_logical_size_for_surface(surface_id);
-        #[cfg(feature = "gpu")]
-        if let SurfaceCanvas::Scene(scene) = canvas {
-            return Ok(self.submit_scene(surface_id, scene, damage_rects));
-        }
         let (
             slot,
             copy_damage,

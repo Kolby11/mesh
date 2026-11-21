@@ -108,8 +108,17 @@ impl ModuleRegistry {
             let module_dir = module
                 .manifest_path
                 .parent()
-                .unwrap_or(workspace_root)
-                .to_path_buf();
+                .unwrap_or(workspace_root);
+            let module_dir = if module_dir
+                .components()
+                .any(|part| part == std::path::Component::ParentDir)
+            {
+                module_dir
+                    .canonicalize()
+                    .unwrap_or_else(|_| module_dir.to_path_buf())
+            } else {
+                module_dir.to_path_buf()
+            };
 
             if let Some(tag) = manifest.exported_component_tag() {
                 registry
@@ -852,6 +861,37 @@ fn root_graph_path(workspace_root: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finds_local_tokens_when_modules_dir_uses_a_parent_segment() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config");
+        let module = dir.path().join("modules/demo/widget");
+        std::fs::create_dir(&config).unwrap();
+        std::fs::create_dir_all(module.join("src")).unwrap();
+        std::fs::write(
+            config.join("module.json"),
+            r#"{"mesh":{"modulesDir":"../modules"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            module.join("module.json"),
+            r#"{
+                "name":"@demo/widget","version":"1.0.0",
+                "mesh":{"apiVersion":"0.1","kind":"ui","entry":"src/main.mesh",
+                    "theme":{"tokens":{"widget.accent":"var(--color-primary)"}}}
+            }"#,
+        )
+        .unwrap();
+        let source = module.join("src/main.mesh");
+        std::fs::write(&source, "<template><text>Hello</text></template>").unwrap();
+
+        let snapshot =
+            mesh_core_module::package::load_authoring_snapshot(&config.join("module.json"))
+                .unwrap();
+        let registry = ModuleRegistry::from_snapshot(dir.path(), &snapshot);
+        assert_eq!(registry.local_theme_tokens(&source), ["widget.accent"]);
+    }
 
     #[test]
     fn variable_completion_uses_the_owning_modules_declared_tokens_and_families() {

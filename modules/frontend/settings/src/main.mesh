@@ -325,7 +325,7 @@ end
         flex-shrink: 0;
         gap: var(--spacing-lg);
         padding: var(--spacing-lg);
-        background: var(--glass-settings-inset);
+        background: var(--glass-settings-sidebar);
         border-right-width: 1px;
         border-right-style: solid;
         border-right-color: var(--glass-settings-rim);
@@ -406,10 +406,6 @@ end
         border-color: var(--glass-control-rim-hover);
     }
 
-    .sidebar-search:focus-visible {
-        border-color: var(--glass-control-rim-focus);
-    }
-
     .sidebar-scroll {
         width: 100%;
         min-height: 0;
@@ -462,10 +458,6 @@ end
 
     .settings-nav-item:active {
         background: var(--glass-control-fill-pressed);
-    }
-
-    .settings-nav-item:focus-visible {
-        border-color: var(--glass-control-rim-focus);
     }
 
     .settings-nav-item:selected {
@@ -649,10 +641,6 @@ end
     list-item.settings-card:hover {
         background-image: linear-gradient(to bottom, var(--glass-control-fill-hover), var(--glass-control-fill-hover));
         border-color: var(--glass-control-rim-hover);
-    }
-
-    list-item.settings-card:focus-visible {
-        border-color: var(--glass-control-rim-focus);
     }
 
     .settings-card-copy {

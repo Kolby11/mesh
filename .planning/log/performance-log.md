@@ -10459,3 +10459,31 @@ with a script and N rows of `<box class visible="{…}"><text>{…}</text></box>
 Before was measured by restoring the old call in the same tree. Other
 `offset_to_position` callers convert a handful of offsets per request and are
 unchanged.
+
+## 2026-11-21 — Refresh the on-disk LSP registry after saves
+
+Area: developer tools. Initialization and saves load the canonical registry on
+a blocking worker. Opening and editing a document use the current registry.
+
+**Measured.** Debug without debug info, three interleaved pairs over stdio,
+two CPU cores and two Rayon workers. Each run initialized the shipped workspace,
+opened `volume-widget/src/main.mesh`, sent 20 full-text unsaved edits, waited for
+versioned diagnostics and shut down. Excluding initialization, wall time was
+8.321–9.117 s before and 0.127–0.160 s after. Process CPU time was
+8.856–9.524 s before and 0.136–0.149 s after. Registry refreshes after
+initialization were 21 before and zero after. The
+`unsaved_document_updates_keep_the_authoring_snapshot` test checks the work
+boundary without a timing threshold.
+
+## 2026-11-22 — Liquid Glass Settings volume drag
+
+Area: Settings Audio and Liquid Glass. The thumb uses fixed geometry and a
+tinted pressed fill. Pointer motion previews the slider position locally and
+release applies the output volume.
+
+**Measured.** Debug shell in Hyprland at 1×, one 920×700 Settings surface,
+eight alternating 185 px pointer moves per run and three runs per variant.
+Run medians for the first screencopy showing the fill move were
+288–303 ms before, 244–321 ms with the thumb change alone, and 85–88 ms
+with release-only audio updates and the fixed thumb. This includes screencopy
+latency. The measurement used a live pointer replay outside the test suite.

@@ -69,10 +69,6 @@ onclick = nil
         box-shadow: none;
     }
 
-    .glass-button:focus-visible {
-        border-color: var(--glass-control-rim-focus);
-    }
-
     /* Muted fill and colour rather than opacity: any non-opaque descendant
        stops its scroll container from shifting retained pixels. */
     .glass-button:disabled,

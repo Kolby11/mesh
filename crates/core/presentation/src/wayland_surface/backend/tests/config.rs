@@ -76,6 +76,7 @@ fn window_config_is_not_clamped_to_an_output() {
     set_requested_size(&mut layer, (3000, 2000), SurfacePadding::default());
     let clamped_layer = clamp_surface_config_to_output(layer, Some((1920, 1080)));
     assert_eq!(clamped_layer.surface_size(), (1920, 1080));
+    assert_eq!(layer_protocol_size(&clamped_layer), (1920, 1080));
 
     let window = window_cfg();
     let clamped_window = clamp_surface_config_to_output(window, Some((640, 480)));
@@ -371,6 +372,7 @@ fn clamp_skips_when_surface_output_is_unknown() {
     );
     assert_eq!(clamped.margin_left, 0);
     assert_eq!(clamped.margin_right, 0);
+    assert_eq!(layer_protocol_size(&clamped), (3840, 136));
 }
 
 #[test]

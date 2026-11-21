@@ -429,6 +429,14 @@ impl Shell {
         }))
     }
 
+    fn compositor_redraw_ready(&self, runtime: &types::ComponentRuntime) -> bool {
+        runtime.targets().any(|target| {
+            let id = target.surface_id.as_str();
+            self.presentation_engine.surface_needs_full_redraw(id)
+                && self.surface_has_present_slot(id)
+        })
+    }
+
     pub(in crate::shell) fn components_have_ready_render_work(&self) -> bool {
         let resource_revision = mesh_core_resources::resource_revision();
         self.components.iter().any(|runtime| {
@@ -438,14 +446,17 @@ impl Shell {
                         .last_paint_resource_revision
                         .is_some_and(|seen| seen != resource_revision)
             });
+            let compositor_redraw = self.compositor_redraw_ready(runtime);
             if !runtime.component.wants_render()
                 && !runtime.resource_paints.is_ready()
                 && !resource_revision_changed
+                && !compositor_redraw
             {
                 return false;
             }
             if !runtime.resource_paints.is_ready()
                 && !resource_revision_changed
+                && !compositor_redraw
                 && let Some(ready) = self.animation_children_ready(runtime)
             {
                 return ready;
@@ -951,10 +962,20 @@ impl Shell {
                     .get(&interface)
                     .is_some_and(|slot| slot.generation == generation);
                 if provider_is_active {
-                    let contract = self.interfaces.resolve(&interface, None).compiled_contract;
-                    let warnings = contract.as_ref().map_or_else(Vec::new, |contract| {
-                        contract.method_result_warnings(&command, &result)
-                    });
+                    let warnings = if matches!(
+                        outcome,
+                        mesh_core_backend::BackendCommandOutcome::Completed
+                            | mesh_core_backend::BackendCommandOutcome::Failed
+                    ) {
+                        self.interfaces
+                            .resolve(&interface, None)
+                            .compiled_contract
+                            .map_or_else(Vec::new, |contract| {
+                                contract.method_result_warnings(&command, &result)
+                            })
+                    } else {
+                        Vec::new()
+                    };
                     if warnings.is_empty() {
                         self.record_backend_method_result(
                             interface,

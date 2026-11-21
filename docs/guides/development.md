@@ -31,6 +31,11 @@ subscription tests, and Linux profiling tools.
 Prefix commands with `nix develop -c` when not already inside the development
 shell.
 
+The language server loads the workspace module registry at initialization and
+refreshes it after saves. A successful refresh also updates diagnostics for
+open documents that use the registry. Unsaved changes use the latest
+successfully loaded registry.
+
 ## Codex implementation loop
 
 `./scripts/codex-backlog-runner.sh` runs one backlog item per turn and requires

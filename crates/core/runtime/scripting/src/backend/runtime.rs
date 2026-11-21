@@ -1268,7 +1268,13 @@ impl BackendScriptContext {
         command: &str,
         returned: LuaValue,
     ) -> Result<JsonValue, BackendScriptError> {
-        let result = command_result_from_lua(self.backend_lua()?, &self.module_id, returned)?;
+        let returns = self
+            .command_registry
+            .as_ref()
+            .and_then(|registry| registry.command(command))
+            .and_then(|spec| spec.returns.as_deref());
+        let result =
+            command_result_from_lua(self.backend_lua()?, &self.module_id, returned, returns)?;
         let conversion_failed =
             |message: String| BackendScriptError::CommandResultConversionFailed {
                 module_id: self.module_id.clone(),

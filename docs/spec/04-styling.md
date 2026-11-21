@@ -229,6 +229,9 @@ defaults:
   (`var(--weather-color-sunny)`); root tokens stay unqualified. A dotted
   manifest name and its CSS property name the same token
   (`glass.rim.hover` ≡ `--glass-rim-hover`).
+- References inside a module token resolve in its module scope before checking
+  root tokens. An explicitly qualified dotted name uses the longest installed
+  module ID that prefixes it.
 - **Shipped:** a module token's namespace may not be a contract group
   (`color.rim` is rejected), so it can never shadow a contract role.
 - **Shipped:** each declared token's default must resolve through contract
@@ -251,6 +254,11 @@ The shipped `@mesh/glass-material` family exposes
 values. Glass components consume those hooks for blur, refraction and dispersion;
 the active theme can tune each tier in its family block. Liquid Glass and both
 Frutiger Aero modes provide overrides.
+
+Settings uses separate material tokens for the outer panel, sidebar, grouped
+cards, dividers, switches and stepper buttons. The Liquid Glass panel and sidebar
+let the compositor-blurred desktop show through. Reduce transparency replaces
+the panel gradient with the opaque color supplied by `--glass-settings-solid`.
 
 ### 4.2 Theme tuning and component internals
 

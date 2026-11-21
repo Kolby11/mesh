@@ -18,6 +18,10 @@ research and migration gates are retained in
 | Presentation | `crates/core/presentation/` | Owns presented buffers and normalized surface input |
 | Wayland | `crates/core/platform/wayland/` and presentation Wayland modules | Owns compositor protocol integration and surface commits |
 
+Each render engine retains its 128 most recently reported distinct painter
+diagnostics. Repeated reports refresh recency, and older entries expire as new
+ones arrive.
+
 ## Scene preparation and handoff
 
 The UI thread resolves an explicit per-frame `PaintContext` and prepares a

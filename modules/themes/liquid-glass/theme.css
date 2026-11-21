@@ -21,7 +21,7 @@
   --animation-scale-press: 0.95;
   --animation-lift-hover: -3px;
   --animation-lift-press: -1px;
-  --color-focus-ring: #8cc8ff;
+  --color-focus-ring: #2275cf;
   --effect-backdrop-blur-surface-radius: 24px;
   --effect-backdrop-blur-popup-radius: 18px;
   --effect-backdrop-blur-surface-background: rgba(255, 255, 255, 0.06);
@@ -87,16 +87,16 @@
   --color-on-warning-container: #2a1a06;
   --color-outline: #9aa6c0;
   --color-outline-variant: #37425a;
-  --color-primary: #0a84ff;
+  --color-primary: #0065cc;
   --color-primary-container: #0066d6;
-  --color-primary-fixed: #0a84ff;
+  --color-primary-fixed: #0065cc;
   --color-primary-fixed-dim: #0066d6;
   --color-scrim: #000000;
   --color-secondary: #64d2ff;
   --color-secondary-container: #32a8e0;
   --color-secondary-fixed: #64d2ff;
   --color-secondary-fixed-dim: #32a8e0;
-  --color-selection-background: #0a84ff;
+  --color-selection-background: var(--color-primary);
   --color-selection-foreground: #ffffff;
   --color-shadow: #000510;
   --color-success: #6ee7b7;
@@ -273,9 +273,6 @@ slider {
   gap: 8;
 }
 
-/* Liquid-glass slider: a thin track with a system-blue fill and a white pill
-   thumb. Pressed, the pill swells with a slight overshoot into a clear lens
-   that refracts the track beneath it, and settles back on release. */
 slider::track {
   height: 6px;
   margin-left: 10px;
@@ -296,23 +293,14 @@ slider::thumb {
   border-width: 1px;
   border-style: solid;
   border-color: #ffffffcc;
-  background-color: #fbfcfe;
-  box-shadow: 0 2px 8px #00000038;
-  transition: width 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
-              height 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
-              border-radius 260ms cubic-bezier(0.34, 1.56, 0.64, 1),
-              background-color 200ms var(--animation-curves-bezier-standard),
-              box-shadow 200ms var(--animation-curves-bezier-standard);
+  background-image: linear-gradient(to bottom, #ffffff, #edf4fc);
+  box-shadow: 0 2px 5px #00000030;
+  transition: none;
 }
 
 slider:active::thumb {
-  width: 52px;
-  height: 32px;
-  border-radius: 16px;
-  border-color: #ffffffee;
-  background-color: #ffffff1a;
-  box-shadow: 0 6px 18px #00000024;
-  backdrop-filter: refract(6px 5px) dispersion(0.4px);
+  border-color: #ffffff;
+  background-image: linear-gradient(to bottom, #eef7ff, #c4dffa);
 }
 
 slider:disabled::fill {
@@ -435,7 +423,7 @@ tooltip {
 @module "@mesh/glass-material" {
   :root {
     --glass-hover: #ffffff2e;
-    --glass-rim: #ffffff2e;
+    --glass-rim: #ffffff70;
     --glass-rim-hover: #ffffff99;
     --glass-text: #ffffff;
     --glass-text-muted: #ffffffcc;
@@ -477,15 +465,20 @@ tooltip {
     --glass-shadow-artwork: 0 8px 22px #00081f66;
     --glass-text-on-error: #ffffff;
     --glass-surface-panel: linear-gradient(to bottom, #b8c5df30, #09122240);
-    /* Settings is a light, nearly opaque sheet so it stays readable over
-       applications: white grouped cards on a pale grey panel, as in the
-       reference liquid-glass settings window. */
-    --glass-settings-surface: linear-gradient(to bottom, #f3f4f7f2, #e6e8edeb);
-    --glass-settings-text: #1d1d1f;
-    --glass-settings-text-muted: #6e6e73;
-    --glass-settings-inset: #ffffffe0;
-    --glass-settings-rim: #0000000f;
-    --glass-settings-selected: linear-gradient(to bottom, #dce9fdf2, #d0e1fbf2);
+    /* Keep enough tint for dark labels even over a black backdrop. */
+    --glass-settings-surface: linear-gradient(150deg, #f5fbffbe, #dce9f69e);
+    --glass-settings-solid: #e4eef8;
+    --glass-settings-sidebar: #e4f1ff26;
+    --glass-settings-text: #182637;
+    --glass-settings-text-muted: #1f2b39;
+    --glass-settings-inset: #f8fcff58;
+    --glass-settings-rim: #334b6426;
+    --glass-settings-divider: #334b6444;
+    --glass-settings-selected: linear-gradient(to bottom, #edf7ffa8, #a4ccfa94);
+    --glass-settings-switch-track: color-mix(in srgb, var(--glass-settings-text) 48%, transparent);
+    --glass-settings-switch-thumb: #f7fbff;
+    --glass-settings-step-fill: color-mix(in srgb, var(--glass-settings-text) 10%, transparent);
+    --glass-settings-step-hover: color-mix(in srgb, var(--glass-settings-text) 20%, transparent);
     --glass-backdrop-pill: blur(2px) refract(0px 0px);
     --glass-backdrop-card: blur(2px) refract(0px 0px);
     --glass-backdrop-dock: blur(2px) refract(0px 0px);

@@ -104,8 +104,5 @@ function onHintCorner(id) keybinds.set_option("hint_corner", id) end
         border-color: var(--glass-control-rim-hover);
     }
 
-    .settings-input:focus-visible {
-        border-color: var(--glass-control-rim-focus);
-    }
     .settings-choice-row { width: 100%; gap: 8px; flex-wrap: wrap; }
 </style>

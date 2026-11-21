@@ -178,6 +178,8 @@ fn promoted_popover_first_measurement_uses_parent_surface_bound() {
 #[test]
 fn layer_surface_config_uses_content_size_not_stale_surface_size_on_first_show() {
     let mut shell = Shell::new();
+    shell.presentation_engine =
+        mesh_core_presentation::PresentationEngine::testing_with_popup_support(false);
     shell.register_component(Box::new(MeasuredLayerGeometryComponent::new(
         "@mesh/debug-inspector",
         (480, 640),

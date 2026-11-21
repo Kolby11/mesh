@@ -1,6 +1,5 @@
 use super::StyleResolver;
 use super::cache::*;
-use super::declaration::*;
 use super::index::*;
 use crate::style::parse::*;
 use crate::style::*;
@@ -702,7 +701,7 @@ impl<'a> StyleResolver<'a> {
         if let Some(name) = self.theme_reference_cache.borrow().get(reference) {
             return Arc::clone(name);
         }
-        let name = Arc::<str>::from(theme_reference_to_token_name(reference));
+        let name = Arc::<str>::from(mesh_core_theme::canonical_token_name(reference));
         self.theme_reference_cache
             .borrow_mut()
             .insert(reference.to_owned(), Arc::clone(&name));

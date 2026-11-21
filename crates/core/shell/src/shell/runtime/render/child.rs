@@ -607,8 +607,9 @@ impl Shell {
             .child_surface_paint_generation(&node_key);
         let child_target = &self.components[index].children[child_index].target;
         let resource_revision = mesh_core_resources::resource_revision();
-        let has_pending_present =
-            !child_target.pending_present_damage.is_empty() || child_target.force_full_present;
+        let has_pending_present = !child_target.pending_present_damage.is_empty()
+            || child_target.force_full_present
+            || self.presentation_engine.surface_needs_full_redraw(&child_surface_id);
         if !has_pending_present
             && child_surface_paint_cache_matches(
                 paint_generation,

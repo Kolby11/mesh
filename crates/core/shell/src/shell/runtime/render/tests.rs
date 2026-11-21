@@ -416,6 +416,36 @@ fn a_lone_painting_surface_rasterizes_in_place() {
 }
 
 #[test]
+fn preferred_scale_repaints_an_idle_surface_without_input() {
+    let (mut shell, paints) = solid_surface_shell(&[Color::WHITE]);
+    shell.render_components().unwrap();
+
+    let surface_id = shell.components[0].surface_id.clone();
+    let baseline = paints[0].lock().unwrap().len();
+    let canvas = shell.components[0].parent.paint_buffer.as_ref().unwrap();
+    let logical_size = (canvas.width(), canvas.height());
+    assert!(!shell.components[0].component.wants_render());
+    assert!(shell.presentation_engine.testing_set_surface_scale(&surface_id, 1.25));
+    assert!(shell.components_have_ready_render_work());
+
+    shell.render_components().unwrap();
+
+    let canvas = shell.components[0].parent.paint_buffer.as_ref().unwrap();
+    let scale = mesh_core_render::FractionalScale::new(1.25);
+    assert_eq!(
+        (canvas.width(), canvas.height()),
+        (
+            scale.physical_extent(logical_size.0),
+            scale.physical_extent(logical_size.1),
+        )
+    );
+    assert_eq!(paints[0].lock().unwrap().len(), baseline + 1);
+    assert!(!shell.presentation_engine.surface_needs_full_redraw(&surface_id));
+    shell.render_components().unwrap();
+    assert_eq!(paints[0].lock().unwrap().len(), baseline + 1);
+}
+
+#[test]
 fn surface_totals_exclude_other_surfaces_preparation() {
     use mesh_core_debug::ProfilingStage;
     use std::time::Duration;

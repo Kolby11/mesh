@@ -1230,6 +1230,206 @@ end
 }
 
 #[test]
+fn bundled_system_provider_uses_elapsed_time_between_network_samples() {
+    let mut ctx = BackendScriptContext::new("@mesh/proc-system");
+    ctx.load_script(&bundled_backend_script(
+        "../../../../modules/backend/proc-system/src/main.luau",
+    ))
+    .unwrap();
+    ctx.ensure_lua()
+        .unwrap()
+        .load(
+            r#"
+uptime = 100
+received = 1000
+sent = 2000
+mesh.exec = function() return { success = false } end
+mesh.read_file = function(path)
+    if path == "/proc/uptime" and uptime then
+        return { success = true, contents = tostring(uptime) .. " 0\n" }
+    elseif path == "/proc/net/dev" and received then
+        local counters = string.format("\neth0: %d 0 0 0 0 0 0 0 %d\n", received, sent)
+        return { success = true, contents = counters }
+    end
+    return { success = false }
+end
+"#,
+        )
+        .exec()
+        .unwrap();
+    ctx.call_init().unwrap();
+    let lua = ctx.ensure_lua().unwrap().clone();
+    lua.load("uptime = 102; received = nil").exec().unwrap();
+    ctx.run_poll().unwrap();
+    lua.load("uptime = nil; received = 1400; sent = 2800")
+        .exec()
+        .unwrap();
+    ctx.run_poll().unwrap();
+    lua.load("uptime = 108; received = 1800; sent = 2400")
+        .exec()
+        .unwrap();
+    let payload = ctx.run_poll().unwrap().unwrap();
+    assert_eq!(payload["net_rx"].as_f64(), Some(100.0));
+    assert_eq!(payload["net_tx"].as_f64(), Some(50.0));
+    assert_eq!(payload["uptime"].as_f64(), Some(108.0));
+}
+
+#[test]
+fn bundled_idle_provider_preserves_replacement_stream_and_retries_failed_spawn() {
+    let mut ctx = BackendScriptContext::new("@mesh/hypridle-idle");
+    ctx.load_script(&bundled_backend_script(
+        "../../../../modules/backend/hypridle-idle/src/main.luau",
+    ))
+    .unwrap();
+    ctx.ensure_lua()
+        .unwrap()
+        .load(
+            r#"
+launches = 0
+closed_id = nil
+spawn_fails = false
+mesh.exec = function() return { success = true } end
+mesh.exec_stream = function(program)
+    launches += 1
+    return not spawn_fails and { id = launches, program = program }
+end
+mesh.close_stream = function(stream)
+    closed_id = stream.id
+    return true
+end
+"#,
+        )
+        .exec()
+        .unwrap();
+    ctx.call_init().unwrap();
+    assert!(ctx.has_stream_event_handler());
+    ctx.run_command_finished("set_managed", &serde_json::json!({ "enabled": true }))
+        .unwrap();
+    ctx.run_command_finished(
+        "set_timeout",
+        &serde_json::json!({ "kind": "dim", "minutes": 2 }),
+    )
+    .unwrap();
+
+    let lua = ctx.ensure_lua().unwrap().clone();
+    assert_eq!(lua.globals().get::<u32>("closed_id").unwrap(), 1);
+    lua.load("on_stream_event(nil, { type = 'exited', stream = { id = 1, program = 'sh' } })")
+        .exec()
+        .unwrap();
+    let current = ctx.run_poll().unwrap().unwrap();
+    assert_eq!(current["running"], true);
+    assert_eq!(lua.globals().get::<u32>("launches").unwrap(), 2);
+
+    lua.load(
+        "on_stream_event(nil, { type = 'exited', stream = { id = 2, program = 'sh' } }); \
+         spawn_fails = true",
+    )
+    .exec()
+    .unwrap();
+    let failed = ctx.run_poll().unwrap().unwrap();
+    assert_eq!(failed["running"], false);
+    lua.load("spawn_fails = false").exec().unwrap();
+    let retried = ctx.run_poll().unwrap().unwrap();
+    assert_eq!(retried["running"], true);
+    assert_eq!(lua.globals().get::<u32>("launches").unwrap(), 4);
+}
+
+#[test]
+fn bundled_hyprland_input_preserves_signed_pointer_speed_steps() {
+    let mut ctx = BackendScriptContext::new("@mesh/hyprland-input");
+    ctx.load_script(&bundled_backend_script(
+        "../../../../modules/backend/hyprland-input/src/main.luau",
+    ))
+    .unwrap();
+    ctx.ensure_lua()
+        .unwrap()
+        .load(
+            r#"
+sensitivity = -0.5
+mesh.exec = function(program, args)
+    if program == "hyprctl" and args[2] == "input:sensitivity" then
+        return { success = true, stdout = string.format('{"float":%f}', sensitivity) }
+    end
+    return { success = false }
+end
+"#,
+        )
+        .exec()
+        .unwrap();
+    let initial = ctx.call_init().unwrap().unwrap();
+    assert_eq!(initial["pointer_speed"].as_f64(), Some(-5.0));
+
+    let lua = ctx.ensure_lua().unwrap().clone();
+    for (sensitivity, expected) in [(-1.0, -10.0), (-0.04, 0.0), (0.5, 5.0)] {
+        lua.globals().set("sensitivity", sensitivity).unwrap();
+        let payload = ctx.run_poll().unwrap().unwrap();
+        assert_eq!(payload["pointer_speed"].as_f64(), Some(expected));
+    }
+}
+
+#[test]
+fn bundled_recorder_announces_only_successful_owned_recordings() {
+    let mut ctx = BackendScriptContext::new("@mesh/wf-recorder");
+    ctx.load_script(&bundled_backend_script(
+        "../../../../modules/backend/wf-recorder/src/main.luau",
+    ))
+    .unwrap();
+    ctx.ensure_lua()
+        .unwrap()
+        .load(
+            r#"
+videos = "/videos"
+launches = 0
+saved = {}
+mesh.exec = function(program)
+    return { success = program == "sh", stdout = videos }
+end
+mesh.exec_stream = function(program)
+    launches += 1
+    return { id = launches, program = program }
+end
+function deliver_exit(id, success)
+    local self = { RecordingSaved = { fire = function(_, payload) table.insert(saved, payload.path) end } }
+    on_stream_event(self, { type = "exited", stream = { id = id }, success = success })
+end
+"#,
+        )
+        .exec()
+        .unwrap();
+    ctx.call_init().unwrap();
+    assert!(ctx.has_stream_event_handler());
+    let lua = ctx.ensure_lua().unwrap().clone();
+    let exit = lua.globals().get::<Function>("deliver_exit").unwrap();
+    let saved = lua.globals().get::<Table>("saved").unwrap();
+
+    let first = ctx
+        .run_command_finished("toggle", &serde_json::json!({}))
+        .unwrap()
+        .state
+        .unwrap();
+    let saved_path = first["output"].as_str().unwrap();
+    exit.call::<()>((1, true)).unwrap();
+    assert_eq!(saved.get::<String>(1).unwrap(), saved_path);
+
+    lua.globals().set("videos", "/other-videos").unwrap();
+    let second = ctx
+        .run_command_finished("toggle", &serde_json::json!({}))
+        .unwrap()
+        .state
+        .unwrap();
+    assert_ne!(first["output"], second["output"]);
+    exit.call::<()>((1, true)).unwrap();
+    let recording = ctx.take_service_state_snapshot().unwrap().unwrap();
+    assert_eq!(recording["recording"], true);
+    assert_eq!(recording["output"], second["output"]);
+    exit.call::<()>((2, false)).unwrap();
+    let stopped = ctx.take_service_state_snapshot().unwrap().unwrap();
+    assert_eq!(stopped["recording"], false);
+    assert_eq!(stopped["output"], saved_path);
+    assert_eq!(saved.raw_len(), 1);
+}
+
+#[test]
 fn bundled_brightness_provider_reads_and_controls_the_backlight() {
     let script =
         bundled_backend_script("../../../../modules/backend/backlight-brightness/src/main.luau");
@@ -2026,6 +2226,38 @@ fn backend_command_handler_nil_defaults_to_ok_result() {
     assert_eq!(outcome.result, serde_json::json!({ "ok": true }));
     assert!(outcome.state.is_none());
     assert!(outcome.error.is_none());
+}
+
+#[test]
+fn backend_command_handler_preserves_nil_for_optional_results() {
+    let mut ctx = BackendScriptContext::new("@test/typed-results");
+    ctx.set_command_registry(BackendCommandRegistry::from_specs(
+        [("optional", "float?"), ("acknowledge", "Result")].map(|(name, returns)| {
+            BackendCommandSpec {
+                name: name.to_string(),
+                arguments: Vec::new(),
+                returns: Some(returns.to_string()),
+                coalesce: false.into(),
+            }
+        }),
+        HashMap::new(),
+    ));
+    ctx.load_script(
+        "function start() end\n\
+         function on_command_optional() return nil end\n\
+         function on_command_acknowledge() end",
+    )
+    .unwrap();
+    ctx.call_init().unwrap();
+
+    let optional = ctx
+        .run_command_finished("optional", &serde_json::json!({}))
+        .unwrap();
+    assert!(optional.result.is_null());
+    let acknowledgement = ctx
+        .run_command_finished("acknowledge", &serde_json::json!({}))
+        .unwrap();
+    assert_eq!(acknowledgement.result, serde_json::json!({ "ok": true }));
 }
 
 #[test]

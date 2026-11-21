@@ -125,6 +125,17 @@ impl ModuleStore {
         lock: &MeshLock,
         modules_dir: &Path,
     ) -> Result<ActivationSnapshot, ModuleManifestError> {
+        self.snapshot_from_installed_lock(generation, lock, |module_id| {
+            module_install_path(modules_dir, module_id)
+        })
+    }
+
+    pub(super) fn snapshot_from_installed_lock(
+        &self,
+        generation: u64,
+        lock: &MeshLock,
+        installed_path: impl Fn(&str) -> Result<PathBuf, ModuleManifestError>,
+    ) -> Result<ActivationSnapshot, ModuleManifestError> {
         if generation == 0 {
             return Err(ModuleManifestError::Validation(
                 "activation snapshot generation must be greater than zero".into(),
@@ -144,7 +155,7 @@ impl ModuleStore {
                         path: object,
                     }
                 } else {
-                    let installed = module_install_path(modules_dir, module_id)?;
+                    let installed = installed_path(module_id)?;
                     if !installed.is_dir() {
                         return Err(ModuleManifestError::Validation(format!(
                             "locked module {module_id} is missing at {}",

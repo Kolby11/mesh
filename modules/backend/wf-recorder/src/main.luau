@@ -8,7 +8,8 @@ local POLL_MS = 10000
 
 state = { available = true, recording = false, started_at = 0, output = "" }
 
-local owned = false
+local source = nil
+local last_output = ""
 
 local function videos_dir()
     local result = mesh.exec("sh", { "-c", "d=\"${XDG_VIDEOS_DIR:-$HOME/Videos}/Recordings\"; mkdir -p \"$d\" && printf '%s' \"$d\"" })
@@ -28,7 +29,7 @@ function start(self)
 end
 
 function on_poll(self)
-    if owned then
+    if source then
         return
     end
     local running = external_running()
@@ -42,15 +43,17 @@ function on_poll(self)
     end
 end
 
-function on_stream_closed(self, program, _success)
-    if program ~= "wf-recorder" then
+function on_stream_event(self, event)
+    if event.type ~= "exited" or not source or event.stream.id ~= source.id then
         return
     end
-    owned = false
-    local output = state.output
-    state = { available = true, recording = false, started_at = 0, output = output }
-    if output ~= "" then
-        self.RecordingSaved:fire({ path = output })
+    source = nil
+    if event.success then
+        last_output = state.output
+    end
+    state = { available = true, recording = false, started_at = 0, output = last_output }
+    if event.success then
+        self.RecordingSaved:fire({ path = last_output })
     end
 end
 
@@ -65,10 +68,10 @@ function on_command_toggle(self)
     end
     local stamp = tostring(os.time())
     local path = dir .. "/recording-" .. stamp .. ".mp4"
-    if not mesh.exec_stream("wf-recorder", { "-f", path }) then
+    source = mesh.exec_stream("wf-recorder", { "-f", path }) or nil
+    if not source then
         return { ok = false, error = "wf-recorder failed to start" }
     end
-    owned = true
     state = { available = true, recording = true, started_at = os.time(), output = path }
     return { ok = true, error = "" }
 end

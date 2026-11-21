@@ -36,6 +36,7 @@ pub struct WaylandSurfaceBackend {
     _conn: Connection,
     event_queue: EventQueue<State>,
     state: State,
+    dispatched_since_input_poll: bool,
     /// Appended to every layer namespace; see
     /// [`crate::PresentationEngine::set_layer_namespace_suffix`].
     namespace_suffix: String,

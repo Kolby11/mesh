@@ -102,6 +102,21 @@ impl RootModuleGraphManifest {
         Ok(())
     }
 
+    /// Resolve the editable module tree using the inventory path when present.
+    /// Modules without an inventory entry use the standard installation path.
+    pub fn installed_module_path(
+        &self,
+        modules_dir: &Path,
+        module_id: &str,
+    ) -> Result<PathBuf, ModuleManifestError> {
+        let id = super::ModuleId::parse(module_id)?;
+        let relative = self
+            .modules
+            .get(id.as_str())
+            .map_or_else(|| id.relative_path(), |entry| entry.path.as_str());
+        super::contained_path(modules_dir, relative, "installed module path")
+    }
+
     /// Add an installed module to an explicit root inventory. Auto-discovered
     /// roots intentionally remain empty; package clients use this helper so
     /// they cannot disagree about when an installed source becomes visible.

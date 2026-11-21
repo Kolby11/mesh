@@ -6,7 +6,9 @@ use crate::manifest::{
     canonical_surface_edge, canonical_surface_layer, canonical_surface_role,
     canonical_window_decorations,
 };
-use mesh_core_locale::normalize_locale_tag;
+use mesh_core_locale::{
+    CatalogSourceHandle, DEFAULT_MAX_CATALOG_SOURCE_BYTES, normalize_locale_tag,
+};
 use mesh_core_service::{ContractCapabilities, InterfaceContract};
 use rayon::prelude::*;
 use std::collections::HashMap;
@@ -658,9 +660,10 @@ fn diagnose_frontend_source_contracts(
                     .is_some_and(|locale| locale == canonical_default_locale)
             })
             .and_then(|c| {
-                let catalog_path =
-                    super::super::contained_path(module_dir, &c.path, "i18n catalog").ok()?;
-                let content = std::fs::read_to_string(&catalog_path).ok()?;
+                let source = CatalogSourceHandle::new(module_dir, &c.path).ok()?;
+                let content = source
+                    .read_utf8_bounded(DEFAULT_MAX_CATALOG_SOURCE_BYTES)
+                    .ok()?;
                 let map: serde_json::Map<String, serde_json::Value> =
                     serde_json::from_str(&content).ok()?;
                 Some(map.keys().cloned().collect())

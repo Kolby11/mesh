@@ -379,15 +379,20 @@ fn choose_variable(
     let mut visible_first = visible_first.min(visible_last);
     // Built rows have real positions; where they cover the band they decide
     // what is visible, and the estimates only cover the rest of it.
+    let viewport_start = band_start + list_start;
+    let viewport_end = band_end + list_start;
     let anchor_row = items
         .iter()
-        .position(|item| position(item) + size(item) > band_start + list_start)
-        .map(|offset| meta.first + offset)
-        .filter(|&row| row < meta.last);
-    if let Some(row) = anchor_row {
+        .position(|item| {
+            position(item) < viewport_end && position(item) + size(item) > viewport_start
+        })
+        .map(|offset| meta.first + offset);
+    if let Some(row) = anchor_row
+        && items.first().is_some_and(|item| position(item) <= viewport_start)
+    {
         let covered_to = items
             .iter()
-            .take_while(|item| position(item) < band_end + list_start)
+            .take_while(|item| position(item) < viewport_end)
             .count();
         let reached = meta.first + covered_to;
         let item = &items[row - meta.first];
@@ -435,7 +440,8 @@ fn choose_variable(
         .and_then(|row| {
             let item = items.get(row - meta.first)?;
             let before = position(item) - list_start;
-            let after = lead + (first..row).map(|i| list.pitch(i)).sum::<f32>();
+            let leading_pitch = if first > 0 { lead + gap } else { 0.0 };
+            let after = leading_pitch + (first..row).map(|i| list.pitch(i)).sum::<f32>();
             let delta = after - before;
             (delta.abs() > 0.5).then_some((scroller.id, column, delta))
         });
@@ -533,9 +539,11 @@ mod tests {
         let mut position = first as f32 * (EXTENT + gap);
         for index in first..last {
             let mut item = WidgetNode::new("text");
+            let pitch = pitches(index);
             item.layout.y = position;
+            item.layout.height = pitch - gap;
             list_parent.children.push(item);
-            position += pitches(index);
+            position += pitch;
         }
         if last < total {
             list_parent.children.push(spacer(&meta, position));
@@ -674,26 +682,33 @@ mod tests {
 
     #[test]
     fn replacing_estimates_with_measurements_keeps_the_visible_row_anchored() {
-        let mut cache = PitchCache::default();
-        choose_virtual_windows(
-            &tree_with((0, 26, 500), 0.0, uneven, 0.0, 0.0),
-            None,
-            &mut cache,
-        );
-        let estimate = 1340.0 / 26.0;
-        // Rows 200..226 are built after a jump; they measure 90px, not the
-        // estimate, and row 205 is the first one in view.
-        let mut tree = tree_with((200, 226, 500), 0.0, |_| 90.0, 0.0, estimate);
-        let list = &mut tree.children[0].children[0];
-        list.children[0].layout.height = 9_000.0;
-        for (i, item) in list.children[1..27].iter_mut().enumerate() {
-            item.layout.y = 9_000.0 + i as f32 * 90.0;
+        for gap in [0.0, 12.0] {
+            let mut cache = PitchCache::default();
+            choose_virtual_windows(
+                &tree_with((0, 26, 500), 0.0, |row| uneven(row) + gap, gap, 0.0),
+                None,
+                &mut cache,
+            );
+            let estimate = 1340.0 / 26.0 + gap;
+            // Rows 200..226 are built after a jump. They measure 90px plus the
+            // gap, and row 205 is the first one in view.
+            let pitch = 90.0 + gap;
+            let mut tree = tree_with((200, 226, 500), 0.0, |_| pitch, gap, estimate);
+            let list = &mut tree.children[0].children[0];
+            list.children[0].layout.height = 9_000.0;
+            for (i, item) in list.children[1..].iter_mut().enumerate() {
+                item.layout.y = 9_000.0 + gap + i as f32 * pitch;
+            }
+            tree.children[0].scroll_metrics.as_mut().unwrap().y = 9_000.0 + gap + 5.0 * pitch;
+            let (choices, _) = choose_virtual_windows(&tree, None, &mut cache);
+            let (_, vertical, delta) = choices[0].anchor.expect("anchored");
+            assert!(vertical);
+            let expected = 200.0 * estimate - gap - 9_000.0;
+            assert!(
+                (delta - expected).abs() < 1.0,
+                "gap {gap}: {delta}, expected {expected}"
+            );
         }
-        tree.children[0].scroll_metrics.as_mut().unwrap().y = 9_000.0 + 5.0 * 90.0;
-        let (choices, _) = choose_virtual_windows(&tree, None, &mut cache);
-        let (_, vertical, delta) = choices[0].anchor.expect("anchored");
-        assert!(vertical);
-        assert!((delta - (200.0 * estimate - 9_000.0)).abs() < 1.0, "{delta}");
     }
 
     #[test]
@@ -716,6 +731,23 @@ mod tests {
         let (lead, trail) = range.spacers.unwrap();
         assert!((lead - range.first as f32 * estimate).abs() < estimate + 1.0);
         assert!(trail > 0.0);
+
+        let mut jumped_back = tree_with(
+            (range.first, range.last, 500),
+            0.0,
+            |_| estimate,
+            0.0,
+            estimate,
+        );
+        let list = &mut jumped_back.children[0].children[0];
+        list.children[0].layout.height = lead;
+        for (index, item) in list.children[1..].iter_mut().enumerate() {
+            item.layout.y = lead + index as f32 * estimate;
+        }
+        list.children.last_mut().unwrap().layout.height = trail;
+        let (choices, _) = choose_virtual_windows(&jumped_back, None, &mut cache);
+        assert_eq!(choices[0].range.first, 0);
+        assert!(choices[0].range.last > 0);
     }
 
     #[test]

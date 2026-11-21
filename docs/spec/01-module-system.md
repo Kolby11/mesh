@@ -433,6 +433,11 @@ identities. Replaced calls settle as `superseded`. Changing a method's key is a
 breaking behavioral contract change, reflected in compiled metadata, behavior
 fingerprints, compatibility diagnostics and generated documentation.
 
+The method's return type describes provider results. Transport outcomes such as
+`superseded`, `timed_out` and `cancelled` retain their status and error payload
+for callers regardless of the method's declared return type.
+Returning Luau `nil` for a declared optional result produces a null result.
+
 The external form keeps `module.json` canonical:
 
 ```json

@@ -852,7 +852,7 @@ impl Dispatch<HyprlandFocusGrabV1, PopupFocusGrab, State> for State {
 impl Dispatch<WpFractionalScaleV1, String, State> for State {
     fn event(
         state: &mut State,
-        _: &WpFractionalScaleV1,
+        fractional_scale: &WpFractionalScaleV1,
         event: wp_fractional_scale_v1::Event,
         surface_id: &String,
         _: &Connection,
@@ -866,16 +866,17 @@ impl Dispatch<WpFractionalScaleV1, String, State> for State {
         // this range are silently ignored.
         let clamped = scale.clamp(60, 480);
         let new_scale = clamped as f32 / 120.0;
-        if let Some(entry) = state.surfaces.get_mut(surface_id) {
-            if (entry.scale - new_scale).abs() > f32::EPSILON {
-                entry.scale = new_scale;
-                entry.needs_full_redraw = true;
-                tracing::info!(
-                    scale = new_scale,
-                    surface_id = surface_id.as_str(),
-                    "wp_fractional_scale_v1: preferred_scale update triggered full redraw"
-                );
-            }
+        if let Some(entry) = state.surfaces.get_mut(surface_id)
+            && entry.fractional_scale.as_ref() == Some(fractional_scale)
+            && (entry.scale - new_scale).abs() > f32::EPSILON
+        {
+            entry.scale = new_scale;
+            entry.needs_full_redraw = true;
+            tracing::info!(
+                scale = new_scale,
+                surface_id = surface_id.as_str(),
+                "wp_fractional_scale_v1: preferred_scale update triggered full redraw"
+            );
         }
     }
 }

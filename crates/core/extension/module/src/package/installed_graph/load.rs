@@ -221,8 +221,8 @@ fn load_installed_module_graph_with(
                 .collect::<Result<Vec<_>, _>>()?
         } else {
             root.modules
-                .values()
-                .map(|entry| contained_path(&modules_dir, &entry.path, "installed module path"))
+                .keys()
+                .map(|id| root.installed_module_path(&modules_dir, id))
                 .collect::<Result<Vec<_>, _>>()?
         };
         let module_ids = root.modules.keys().cloned().collect::<Vec<_>>();

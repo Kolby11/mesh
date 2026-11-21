@@ -107,6 +107,7 @@ impl WaylandSurfaceBackend {
             _conn: conn,
             event_queue,
             state,
+            dispatched_since_input_poll: false,
             namespace_suffix: String::new(),
             #[cfg(feature = "gpu")]
             gpu: GpuPresenter::Untried,

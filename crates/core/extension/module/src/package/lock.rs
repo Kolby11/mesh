@@ -391,22 +391,24 @@ impl MeshLock {
     ) -> Result<(), ModuleManifestError> {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         let lock = super::profile::acquire_control_plane_lock(parent)?;
-        self.save_with_store_locked(path, modules_dir, store_root, &lock)
+        self.save_with_store_locked(path, store_root, &lock, |module_id| {
+            super::module_install_path(modules_dir, module_id)
+        })
     }
 
     pub(super) fn save_with_store_locked(
         &mut self,
         path: &Path,
-        modules_dir: &Path,
         store_root: &Path,
         _lock: &super::profile::ControlPlaneLock,
+        installed_path: impl Fn(&str) -> Result<PathBuf, ModuleManifestError>,
     ) -> Result<(), ModuleManifestError> {
         self.validate()?;
         let generation = self.generation.checked_add(1).ok_or_else(|| {
             ModuleManifestError::Validation("mesh.lock generation overflow".into())
         })?;
         let store = super::ModuleStore::new(store_root.to_path_buf())?;
-        let snapshot = store.snapshot_from_lock(generation, self, modules_dir)?;
+        let snapshot = store.snapshot_from_installed_lock(generation, self, installed_path)?;
         store.publish_snapshot(&snapshot)?;
         self.generation = generation;
         self.save_exact_unlocked(path)?;
@@ -449,19 +451,21 @@ impl MeshLock {
     ) -> Result<(), ModuleManifestError> {
         let parent = path.parent().unwrap_or_else(|| Path::new("."));
         let lock = super::profile::acquire_control_plane_lock(parent)?;
-        self.save_exact_with_store_locked(path, modules_dir, store_root, &lock)
+        self.save_exact_with_store_locked(path, store_root, &lock, |module_id| {
+            super::module_install_path(modules_dir, module_id)
+        })
     }
 
     pub(super) fn save_exact_with_store_locked(
         &self,
         path: &Path,
-        modules_dir: &Path,
         store_root: &Path,
         _lock: &super::profile::ControlPlaneLock,
+        installed_path: impl Fn(&str) -> Result<PathBuf, ModuleManifestError>,
     ) -> Result<(), ModuleManifestError> {
         self.validate()?;
         let store = super::ModuleStore::new(store_root.to_path_buf())?;
-        let snapshot = store.snapshot_from_lock(self.generation, self, modules_dir)?;
+        let snapshot = store.snapshot_from_installed_lock(self.generation, self, installed_path)?;
         store.publish_snapshot(&snapshot)?;
         self.save_exact_unlocked(path)?;
         store.activate_generation(self.generation)

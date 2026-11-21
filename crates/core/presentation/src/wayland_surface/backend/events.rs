@@ -11,7 +11,9 @@ impl WaylandSurfaceBackend {
     /// progress the shared Wayland connection so independent surfaces can be
     /// prepared and painted before one outbound flush.
     pub fn finish_frame(&mut self) -> Result<(), PresentationError> {
-        self.dispatch_pending()
+        self.flush_requests()?;
+        self.dispatch_queued_events()?;
+        self.release_expired_surface_focus_grab()
     }
 
     /// The next instant a held key is due to repeat, so the shell loop can
@@ -26,6 +28,7 @@ impl WaylandSurfaceBackend {
 
     pub fn poll_events(&mut self) -> Result<Vec<DevWindowEvent>, PresentationError> {
         self.dispatch_available()?;
+        self.dispatched_since_input_poll = false;
         self.release_expired_surface_focus_grab()?;
         self.state.push_due_keyboard_repeats();
         let events = std::mem::take(&mut self.state.events)
@@ -48,14 +51,12 @@ impl WaylandSurfaceBackend {
         Ok(())
     }
 
-    fn dispatch_pending(&mut self) -> Result<(), PresentationError> {
-        self.flush_requests()?;
+    fn dispatch_queued_events(&mut self) -> Result<(), PresentationError> {
         match self.event_queue.dispatch_pending(&mut self.state) {
-            Ok(_) => {}
+            Ok(count) => self.dispatched_since_input_poll |= count != 0,
             Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
         }
         self.state.refresh_buffer_backpressure();
-        self.release_expired_surface_focus_grab()?;
         Ok(())
     }
 
@@ -63,11 +64,7 @@ impl WaylandSurfaceBackend {
         self.flush_requests()?;
 
         for _ in 0..32 {
-            match self.event_queue.dispatch_pending(&mut self.state) {
-                Ok(_) => {}
-                Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
-            }
-            self.state.refresh_buffer_backpressure();
+            self.dispatch_queued_events()?;
 
             let Some(read_guard) = self.event_queue.prepare_read() else {
                 continue;
@@ -123,20 +120,15 @@ impl WaylandSurfaceBackend {
             }
         }
 
-        match self.event_queue.dispatch_pending(&mut self.state) {
-            Ok(_) => {}
-            Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
-        }
-        self.state.refresh_buffer_backpressure();
+        self.dispatch_queued_events()?;
         self.release_expired_surface_focus_grab()?;
         Ok(())
     }
 
     /// Block on the Wayland connection fd until `timeout` elapses or a wakeup occurs.
     ///
-    /// After the Wayland poll returns (or times out), checks `eventfd_fd` with a
-    /// 0ms poll to detect IPC/backend signals. Reads and consumes the eventfd
-    /// counter when signaled.
+    /// Return immediately when dispatch has already queued work for the shell.
+    /// Otherwise poll the connection alongside IPC and scene-worker wakeups.
     pub fn wait_for_events(
         &mut self,
         timeout: std::time::Duration,
@@ -145,14 +137,26 @@ impl WaylandSurfaceBackend {
         use crate::{WaitReason, WaitResult};
         use rustix::io::read as eventfd_read;
 
+        let flush_blocked = self.flush_requests()?;
+        self.dispatch_queued_events()?;
         #[cfg(feature = "gpu")]
         self.poll_scene_completions();
-        let flush_blocked = self.flush_requests()?;
-        match self.event_queue.dispatch_pending(&mut self.state) {
-            Ok(_) => {}
-            Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
+
+        if std::mem::take(&mut self.dispatched_since_input_poll)
+            || !self.state.events.is_empty()
+            || !self.state.lifecycle_events.is_empty()
+            || !self.state.close_requests.is_empty()
+        {
+            return Ok(WaitResult {
+                reason: WaitReason::WaylandEvent,
+            });
         }
-        self.state.refresh_buffer_backpressure();
+        #[cfg(feature = "gpu")]
+        if !self.scene_results.is_empty() {
+            return Ok(WaitResult {
+                reason: WaitReason::SceneComplete,
+            });
+        }
 
         // A `None` guard means events arrived between the dispatch above and
         // here; don't block, let the caller process them.
@@ -248,11 +252,7 @@ impl WaylandSurfaceBackend {
             wake_reason = WaitReason::IpcEvent;
         }
 
-        match self.event_queue.dispatch_pending(&mut self.state) {
-            Ok(_) => {}
-            Err(error) => return Err(self.map_dispatch_error("dispatch", error)),
-        }
-        self.state.refresh_buffer_backpressure();
+        self.dispatch_queued_events()?;
         // Buffer releases dispatched above may free a slot a completed frame
         // is waiting for, so commit published frames after them.
         #[cfg(feature = "gpu")]
@@ -322,6 +322,38 @@ mod flush_tests {
             _: &QueueHandle<Self>,
         ) {
         }
+    }
+
+    #[test]
+    fn queued_wayland_input_wakes_the_shell_before_polling() {
+        use crate::WaitReason;
+        use crate::wayland_surface::state::QueuedInputEvent;
+        use rustix::event::{EventfdFlags, eventfd};
+        use std::os::fd::AsFd;
+
+        if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+            eprintln!("skipping queued Wayland input test: WAYLAND_DISPLAY is unset");
+            return;
+        }
+        let mut backend = WaylandSurfaceBackend::new().expect("Wayland layer-shell is required");
+        backend.poll_events().unwrap();
+        backend.state.events.push(QueuedInputEvent {
+            seat_id: None,
+            event: DevWindowEvent::PointerMove {
+                surface_id: "queued-input".into(),
+                x: 2.0,
+                y: 3.0,
+            },
+        });
+        let wake = eventfd(1, EventfdFlags::NONBLOCK).unwrap();
+        let result = backend
+            .wait_for_events(std::time::Duration::from_secs(1), wake.as_fd())
+            .unwrap();
+        assert!(matches!(result.reason, WaitReason::WaylandEvent));
+        assert!(backend.poll_events().unwrap().iter().any(|event| matches!(
+            event,
+            DevWindowEvent::PointerMove { surface_id, .. } if surface_id.as_ref() == "queued-input"
+        )));
     }
 
     #[test]

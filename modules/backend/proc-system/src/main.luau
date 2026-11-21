@@ -132,13 +132,17 @@ local function sample()
     end
 
     local rx_rate, tx_rate = state.net_rx, state.net_tx
+    local uptime = tonumber((read("/proc/uptime") or ""):match("^([%d%.]+)"))
     local net = network_counters()
-    if net and previous_net then
-        local elapsed = POLL_MS / 1000
-        rx_rate = math.max(0, (net.rx - previous_net.rx) / elapsed)
-        tx_rate = math.max(0, (net.tx - previous_net.tx) / elapsed)
+    if net and uptime and (not previous_net or uptime ~= previous_net.uptime) then
+        if previous_net and uptime > previous_net.uptime then
+            local elapsed = uptime - previous_net.uptime
+            rx_rate = math.max(0, (net.rx - previous_net.rx) / elapsed)
+            tx_rate = math.max(0, (net.tx - previous_net.tx) / elapsed)
+        end
+        net.uptime = uptime
+        previous_net = net
     end
-    previous_net = net or previous_net
 
     if polls % DISK_EVERY == 0 then
         read_disk()
@@ -146,7 +150,6 @@ local function sample()
     polls += 1
 
     local used, total = memory()
-    local uptime = tonumber((read("/proc/uptime") or ""):match("^([%d%.]+)")) or 0
     state = {
         available = counters ~= nil,
         cpu = cpu,
@@ -158,7 +161,7 @@ local function sample()
         temperature = temperature(),
         net_rx = rx_rate,
         net_tx = tx_rate,
-        uptime = uptime,
+        uptime = uptime or 0,
     }
 end
 

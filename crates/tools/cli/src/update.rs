@@ -14,11 +14,13 @@
 use mesh_core_capability::{
     Capability, CapabilityCatalog, CapabilityPolicy, EffectiveCapabilities, PrivilegeLevel,
 };
+#[cfg(test)]
+use mesh_core_module::package::module_install_path;
 use mesh_core_module::package::{
     InstalledModuleGraph, LockedModule, MeshLock, ModuleGraphDiff, ModuleId, ModuleManifest,
     ModuleSource, PackageTransaction, ProfilePaths, RootModuleGraphManifest, TrustTier,
-    has_local_edits, load_authoring_snapshot, load_module_signature, module_install_path,
-    module_tree_digest, validate_module_tree,
+    has_local_edits, load_authoring_snapshot, load_module_signature, module_tree_digest,
+    validate_module_tree,
 };
 use mesh_core_service::{CompatibilityClass, diff_contracts, parse_interface_contract};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -441,9 +443,17 @@ pub fn plan_update_from_staged_graph(
 ) -> Result<UpdatePlan, String> {
     let installed_graph = load_authoring_snapshot(root_path)
         .map_err(|error| format!("installed graph validation failed: {error}"))?;
-    let mut plan = collect_update_candidates(modules_dir, lock, only, policy)?;
-    let candidate_root =
-        stage_candidate_graph(root_path, modules_dir, installed, &mut plan, transaction)?;
+    let root = RootModuleGraphManifest::from_path(root_path)
+        .map_err(|error| format!("failed to read root graph for update planning: {error}"))?;
+    let mut plan = collect_update_candidates(&root, modules_dir, lock, only, policy)?;
+    let candidate_root = stage_candidate_graph(
+        root_path,
+        root,
+        modules_dir,
+        installed,
+        &mut plan,
+        transaction,
+    )?;
     let candidate_graph = load_authoring_snapshot(&candidate_root)
         .map_err(|error| format!("candidate graph validation failed: {error}"))?;
     plan.graph_diff = Some(installed_graph.diff(&candidate_graph));
@@ -472,6 +482,7 @@ pub fn plan_update_from_staged_graph(
 }
 
 fn collect_update_candidates(
+    root: &RootModuleGraphManifest,
     modules_dir: &Path,
     lock: &MeshLock,
     only: Option<&str>,
@@ -483,8 +494,9 @@ fn collect_update_candidates(
         if only.is_some_and(|requested| requested != module_id) {
             continue;
         }
-        let installed_at =
-            module_install_path(modules_dir, module_id).map_err(|error| error.to_string())?;
+        let installed_at = root
+            .installed_module_path(modules_dir, module_id)
+            .map_err(|error| error.to_string())?;
         if !installed_at.exists() {
             continue;
         }
@@ -517,13 +529,12 @@ fn collect_update_candidates(
 
 fn stage_candidate_graph(
     root_path: &Path,
+    current_root: RootModuleGraphManifest,
     modules_dir: &Path,
     installed: &BTreeMap<String, ModuleManifest>,
     plan: &mut UpdatePlan,
     transaction: &PackageTransaction,
 ) -> Result<PathBuf, String> {
-    let current_root = RootModuleGraphManifest::from_path(root_path)
-        .map_err(|error| format!("failed to read root graph for update planning: {error}"))?;
     let candidate_root_dir = transaction.staging_dir().join("candidate-graph");
     let candidate_modules_dir = candidate_root_dir.join("modules");
     fs::create_dir_all(&candidate_modules_dir)
@@ -550,24 +561,17 @@ fn stage_candidate_graph(
     };
 
     for module_id in module_ids {
-        let live =
-            module_install_path(modules_dir, &module_id).map_err(|error| error.to_string())?;
+        let live = current_root
+            .installed_module_path(modules_dir, &module_id)
+            .map_err(|error| error.to_string())?;
         if !live.exists() {
             return Err(format!(
                 "candidate graph references missing installed module {module_id}"
             ));
         }
-        let relative = current_root
-            .modules
-            .get(&module_id)
-            .map(|entry| entry.path.clone())
-            .unwrap_or_else(|| module_id.trim_start_matches('@').to_string());
-        let destination = mesh_core_module::package::contained_path(
-            &candidate_modules_dir,
-            &relative,
-            "candidate module path",
-        )
-        .map_err(|error| error.to_string())?;
+        let destination = current_root
+            .installed_module_path(&candidate_modules_dir, &module_id)
+            .map_err(|error| error.to_string())?;
         if let Some((source, revision, unchanged)) = candidate_by_id.get(&module_id)
             && (!unchanged || plan.replaced.contains(&module_id))
         {
@@ -818,6 +822,7 @@ fn classify_capability_changes(
 /// switch. A lock write failure fails the transaction: the lock is the rollback
 /// record.
 pub fn commit_update(
+    root: &RootModuleGraphManifest,
     modules_dir: &Path,
     lock: &mut MeshLock,
     plan: &UpdatePlan,
@@ -825,7 +830,8 @@ pub fn commit_update(
 ) -> Result<Vec<String>, String> {
     let mut updated = Vec::new();
     for candidate in plan.changed() {
-        let installed_at = module_install_path(modules_dir, &candidate.module_id)
+        let installed_at = root
+            .installed_module_path(modules_dir, &candidate.module_id)
             .map_err(|error| error.to_string())?;
         let Some(revision) = &candidate.candidate_revision else {
             continue;
@@ -883,7 +889,7 @@ pub fn commit_update(
     let manifests = lock
         .modules
         .keys()
-        .filter_map(|module_id| module_install_path(modules_dir, module_id).ok())
+        .filter_map(|module_id| root.installed_module_path(modules_dir, module_id).ok())
         .filter(|path| path.exists())
         .map(|path| {
             ModuleManifest::from_path(&path.join("module.json")).map_err(|error| error.to_string())
@@ -892,7 +898,7 @@ pub fn commit_update(
     lock.refresh_metadata(manifests.iter());
 
     transaction
-        .save_lock(lock, modules_dir)
+        .save_lock(lock, root, modules_dir)
         .map_err(|error| error.to_string())?;
     Ok(updated)
 }
@@ -924,12 +930,15 @@ pub fn rollback(
     };
 
     let mut target = MeshLock::from_path(&path).map_err(|error| error.to_string())?;
+    let mut root = RootModuleGraphManifest::from_path(root_path)
+        .map_err(|error| format!("failed to read root graph for rollback: {error}"))?;
     let mut restored = Vec::new();
     fs::create_dir_all(modules_dir)
         .map_err(|error| format!("failed to create modules directory: {error}"))?;
     for (index, (module_id, entry)) in target.modules.iter().enumerate() {
-        let installed_at =
-            module_install_path(modules_dir, module_id).map_err(|error| error.to_string())?;
+        let installed_at = root
+            .installed_module_path(modules_dir, module_id)
+            .map_err(|error| error.to_string())?;
         let staged = transaction
             .stage_locked_module(
                 entry,
@@ -946,8 +955,9 @@ pub fn rollback(
         if target.modules.contains_key(module_id) {
             continue;
         }
-        let installed_at =
-            module_install_path(modules_dir, module_id).map_err(|error| error.to_string())?;
+        let installed_at = root
+            .installed_module_path(modules_dir, module_id)
+            .map_err(|error| error.to_string())?;
         if installed_at.exists() {
             transaction
                 .remove(&installed_at)
@@ -960,8 +970,6 @@ pub fn rollback(
     // Reconcile the explicit root inventory and every profile before the
     // target lock is published, so a rollback cannot leave references to
     // modules that it just removed.
-    let mut root = RootModuleGraphManifest::from_path(root_path)
-        .map_err(|error| format!("failed to read root graph for rollback: {error}"))?;
     let explicit_inventory = !root.modules.is_empty();
     let target_ids = target.modules.keys().cloned().collect::<BTreeSet<_>>();
     for module_id in current.modules.keys() {
@@ -973,8 +981,9 @@ pub fn rollback(
         root.modules
             .retain(|module_id, _| target_ids.contains(module_id));
         for module_id in &target_ids {
-            let installed =
-                module_install_path(modules_dir, module_id).map_err(|error| error.to_string())?;
+            let installed = root
+                .installed_module_path(modules_dir, module_id)
+                .map_err(|error| error.to_string())?;
             let manifest =
                 ModuleManifest::from_path(&installed.join("module.json")).map_err(|error| {
                     format!("failed to read rolled-back module {module_id}: {error}")
@@ -1049,8 +1058,9 @@ pub fn rollback(
         .modules
         .keys()
         .map(|module_id| {
-            let installed =
-                module_install_path(modules_dir, module_id).map_err(|error| error.to_string())?;
+            let installed = root
+                .installed_module_path(modules_dir, module_id)
+                .map_err(|error| error.to_string())?;
             ModuleManifest::from_path(&installed.join("module.json"))
                 .map_err(|error| format!("failed to read rolled-back module {module_id}: {error}"))
         })
@@ -1058,7 +1068,7 @@ pub fn rollback(
     target.refresh_metadata(manifests.iter());
 
     transaction
-        .save_exact_lock(&target, modules_dir)
+        .save_exact_lock(&target, &root, modules_dir)
         .map_err(|error| error.to_string())?;
     restored.push(format!("lock restored to generation {target_generation}"));
     Ok(restored)
@@ -1072,11 +1082,15 @@ pub enum VerificationOutcome {
 }
 
 /// Recompute every digest, retaining failures for individual modules.
-pub fn verify(modules_dir: &Path, lock: &MeshLock) -> Vec<(String, VerificationOutcome)> {
+pub fn verify(
+    root: &RootModuleGraphManifest,
+    modules_dir: &Path,
+    lock: &MeshLock,
+) -> Vec<(String, VerificationOutcome)> {
     lock.modules
         .iter()
         .map(|(module_id, entry)| {
-            let outcome = module_install_path(modules_dir, module_id)
+            let outcome = root.installed_module_path(modules_dir, module_id)
                 .and_then(|installed_at| has_local_edits(&installed_at, entry))
                 .map(|edited| {
                     if edited {
@@ -1165,7 +1179,9 @@ mod tests {
             fs::set_permissions(&file, fs::Permissions::from_mode(0)).unwrap();
             fs::read(&file).is_err()
         };
-        let results: BTreeMap<_, _> = verify(&root, &lock).into_iter().collect();
+        let inventory = RootModuleGraphManifest::from_json_str(r#"{"mesh":{"schemaVersion":1}}"#)
+            .unwrap();
+        let results: BTreeMap<_, _> = verify(&inventory, &root, &lock).into_iter().collect();
         assert_eq!(results.len(), 5);
         assert_eq!(results["@me/valid"], VerificationOutcome::Verified);
         assert_eq!(results["@me/edited"], VerificationOutcome::Edited);
@@ -1182,9 +1198,11 @@ mod tests {
             assert!(matches!(results["@me/unreadable"], VerificationOutcome::Error(_)));
         }
         lock.modules.retain(|id, _| id == "@me/missing" || id == "@me/invalid");
-        assert!(verify(&root, &lock)
-            .iter()
-            .all(|(_, result)| matches!(result, VerificationOutcome::Error(_))));
+        assert!(
+            verify(&inventory, &root, &lock)
+                .iter()
+                .all(|(_, result)| matches!(result, VerificationOutcome::Error(_)))
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1521,6 +1539,7 @@ mod tests {
 
     fn staged_graph_fixture(
         name: &str,
+        relative_path: &str,
     ) -> (
         PathBuf,
         PathBuf,
@@ -1531,7 +1550,7 @@ mod tests {
         let source = external_contract_repository(name);
         let workspace = source.parent().unwrap().to_path_buf();
         let config = workspace.join("config");
-        let installed = config.join("modules/me/audio");
+        let installed = config.join("modules").join(relative_path);
         std::fs::create_dir_all(installed.parent().unwrap()).unwrap();
         std::fs::rename(&source, &installed).unwrap();
 
@@ -1550,7 +1569,12 @@ mod tests {
         std::fs::create_dir_all(&config).unwrap();
         std::fs::write(
             &root_path,
-            r#"{"mesh":{"schemaVersion":1,"modulesDir":"modules","modules":{"@me/audio":{"kind":"backend","path":"me/audio"}}}}"#,
+            serde_json::json!({"mesh": {
+                "schemaVersion": 1,
+                "modulesDir": "modules",
+                "modules": {"@me/audio": {"kind": "backend", "path": relative_path}}
+            }})
+            .to_string(),
         )
         .unwrap();
         let digest = module_tree_digest(&installed).unwrap();
@@ -1675,7 +1699,7 @@ mod tests {
     #[test]
     fn staged_graph_reads_external_contracts_before_live_replacement() {
         let (workspace, root_path, installed, lock, installed_manifests) =
-            staged_graph_fixture("external");
+            staged_graph_fixture("external", "editable/audio");
         let config = root_path.parent().unwrap();
         let modules_dir = config.join("modules");
         let approvals = BTreeMap::from([(
@@ -1726,7 +1750,21 @@ mod tests {
 
     #[test]
     fn replace_policy_cleans_local_edits_even_when_revision_is_unchanged() {
-        let (workspace, root_path, installed, mut lock, _) = staged_graph_fixture("replace");
+        let (workspace, root_path, installed, mut lock, _) =
+            staged_graph_fixture("replace", "editable/audio");
+        let config = root_path.parent().unwrap();
+        let modules_dir = config.join("modules");
+        let root = RootModuleGraphManifest::from_path(&root_path).unwrap();
+        let mut initial =
+            PackageTransaction::begin(config, PackageOwner::Cli, PackageOperation::Install)
+                .unwrap();
+        initial.save_lock(&mut lock, &root, &modules_dir).unwrap();
+        initial.commit().unwrap();
+        assert_eq!(
+            verify(&root, &modules_dir, &lock),
+            [("@me/audio".into(), VerificationOutcome::Verified)]
+        );
+
         git(&installed, &["checkout", "--quiet", "main"]);
         let current_revision = std::process::Command::new("git")
             .arg("-C")
@@ -1750,8 +1788,6 @@ mod tests {
             .collect::<BTreeMap<_, _>>();
         std::fs::write(installed.join("local-only.txt"), "discard me").unwrap();
 
-        let config = root_path.parent().unwrap();
-        let modules_dir = config.join("modules");
         let approvals = BTreeMap::from([(
             "@me/audio".to_string(),
             vec!["service.audio.read".to_string()],
@@ -1776,7 +1812,7 @@ mod tests {
         assert_eq!(plan.replaced, BTreeSet::from(["@me/audio".to_string()]));
         assert_eq!(plan.changed().count(), 1);
         assert!(!plan.is_refused());
-        commit_update(&modules_dir, &mut lock, &plan, &mut transaction).unwrap();
+        commit_update(&root, &modules_dir, &mut lock, &plan, &mut transaction).unwrap();
         transaction.commit().unwrap();
 
         assert!(!installed.join("local-only.txt").exists());
@@ -1786,13 +1822,27 @@ mod tests {
                 .version,
             current_manifest.version
         );
+        let mut transaction =
+            PackageTransaction::begin(config, PackageOwner::Cli, PackageOperation::Rollback)
+                .unwrap();
+        rollback(&root_path, &modules_dir, config, Some(1), &mut transaction).unwrap();
+        transaction.commit().unwrap();
+        let restored_root = RootModuleGraphManifest::from_path(&root_path).unwrap();
+        assert_eq!(restored_root.modules["@me/audio"].path, "editable/audio");
+        assert_eq!(
+            ModuleManifest::from_path(&installed.join("module.json"))
+                .unwrap()
+                .version,
+            "1.0.0"
+        );
+        assert!(!modules_dir.join("me/audio").exists());
         remove_test_workspace(&workspace);
     }
 
     #[test]
     fn revision_only_planning_reads_external_candidate_contracts() {
         let (workspace, root_path, _installed, lock, installed_manifests) =
-            staged_graph_fixture("revision-only");
+            staged_graph_fixture("revision-only", "me/audio");
         let modules_dir = root_path.parent().unwrap().join("modules");
         let approvals = BTreeMap::from([(
             "@me/audio".to_string(),

@@ -2842,6 +2842,16 @@ local Thing = require("@mesh/thing")
     }
 
     #[test]
+    fn for_iterable_can_reference_a_variable_named_key() {
+        for iterable in ["key or items", "if key == nil then items else key"] {
+            let header = format!("item in {iterable} key={{item.id}}");
+            let node = parse_for(&header).unwrap();
+            assert_eq!(node.iterable, iterable);
+            assert_eq!(node.key.as_deref(), Some("item.id"));
+        }
+    }
+
+    #[test]
     fn windowed_for_requires_exactly_one_root_element() {
         for body in ["", "<text>a</text><text>b</text>"] {
             let source = format!(

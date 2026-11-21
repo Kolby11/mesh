@@ -560,9 +560,11 @@ TOKENS.reduce_transparency = { on = {
     ["effect-backdrop-blur-surface-radius"] = 0, ["effect-backdrop-blur-popup-radius"] = 0,
     ["effect-backdrop-blur-surface-background"] = "var(--color-surface)",
     ["effect-backdrop-blur-popup-background"] = "var(--color-surface-container)",
+    ["@mesh/glass-material.glass.settings.surface"] = "linear-gradient(var(--glass-settings-solid), var(--glass-settings-solid))",
 }, off = {
     ["effect-backdrop-blur-surface-radius"] = "null", ["effect-backdrop-blur-popup-radius"] = "null",
     ["effect-backdrop-blur-surface-background"] = "null", ["effect-backdrop-blur-popup-background"] = "null",
+    ["@mesh/glass-material.glass.settings.surface"] = "null",
 } }
 for _, tier in ipairs(GLASS_TIERS) do
     TOKENS.reduce_transparency.on["@mesh/glass-material.glass.backdrop." .. tier] = "none"
@@ -1502,7 +1504,7 @@ end
         border-width: 0;
         background: transparent;
     }
-    .pref-divider { width: 100%; height: 1px; flex-shrink: 0; background-color: var(--color-outline-variant); opacity: 0.6; }
+    .pref-divider { width: 100%; height: 1px; flex-shrink: 0; background-color: var(--glass-settings-divider); opacity: 0.6; }
     .pref-row-nav:hover { background: var(--glass-control-fill-hover); }
     .pref-row-nav:focus-visible { background: var(--glass-control-fill-hover); }
     .pref-copy { flex-grow: 1; min-width: 0; gap: 2px; height: auto; }
@@ -1537,12 +1539,11 @@ end
         flex-shrink: 0;
         border-radius: 999px;
         border-width: 0;
-        background: var(--glass-settings-inset);
-        background-color: var(--color-surface-container-highest);
+        background-color: var(--glass-settings-switch-track);
     }
     .pref-switch-on { background-color: var(--color-primary); }
     .pref-switch:disabled { opacity: 0.4; }
-    .pref-switch-thumb { width: 20px; height: 20px; border-radius: 999px; background-color: var(--color-on-surface-variant); }
+    .pref-switch-thumb { width: 20px; height: 20px; border-radius: 999px; background-color: var(--glass-settings-switch-thumb); }
     .pref-switch-thumb-on { background-color: var(--color-on-primary); margin-left: 18px; }
 
     .pref-stepper { align-items: center; gap: 4px; flex-shrink: 0; }
@@ -1552,12 +1553,12 @@ end
         padding: 0;
         border-radius: 999px;
         border-width: 0;
-        background-color: var(--color-surface-container-highest);
-        color: var(--color-on-surface);
+        background-color: var(--glass-settings-step-fill);
+        color: var(--glass-settings-text);
         justify-content: center;
         align-items: center;
     }
-    .pref-step:hover { background-color: var(--color-surface-bright); }
+    .pref-step:hover { background-color: var(--glass-settings-step-hover); }
     .pref-step:disabled { opacity: 0.4; }
     .pref-value { min-width: 76px; text-align: center; color: var(--glass-settings-text); font-size: var(--typography-size-sm); font-weight: 600; }
 
@@ -1573,7 +1574,6 @@ end
         background: var(--color-surface-container-lowest);
         color: var(--glass-settings-text);
     }
-    .pref-input:focus-visible { border-color: var(--color-primary); }
 
     .pref-meter-box { width: 220px; gap: 4px; flex-shrink: 0; height: auto; }
     .pref-meter { width: 100%; height: 6px; border-radius: 999px; background: var(--color-surface-container-highest); }

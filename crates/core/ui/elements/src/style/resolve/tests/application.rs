@@ -9,6 +9,38 @@ use mesh_core_theme::{Theme, TokenValue};
 use std::collections::HashMap;
 
 #[test]
+fn icon_axes_use_the_final_custom_property_cascade() {
+    let mut theme = mesh_core_theme::default_theme();
+    theme
+        .tokens_mut()
+        .insert("icon.optical-size".into(), TokenValue::Number(24.0));
+    let resolver = StyleResolver::new(&theme);
+    let mut parent = WidgetNode::new("box");
+    parent.attributes.insert(Prop::Style, "--icon-grade: -25".into());
+    let mut icon = WidgetNode::new("icon");
+    icon.attributes.insert(
+        Prop::Style,
+        "--icon-fill: var(--fill); --fill: 0.75; --icon-weight: 600; --icon-optical-size: NaN".into(),
+    );
+    parent.children.push(icon);
+    parent.children.push(WidgetNode::new("icon"));
+
+    let rules = [];
+    let index = StyleRuleIndex::new(&rules);
+    resolver.restyle_subtree_with_index(&mut parent, &rules, &index, StyleContext::default(), None);
+
+    let style = &parent.children[0].computed_style;
+    assert_eq!(style.icon_fill, Some(0.75));
+    assert_eq!(style.icon_weight, Some(600.0));
+    assert_eq!(style.icon_grade, Some(-25.0));
+    assert_eq!(style.icon_optical_size, None);
+    let defaulted = &parent.children[1].computed_style;
+    assert_eq!(defaulted.icon_fill, None);
+    assert_eq!(defaulted.icon_grade, Some(-25.0));
+    assert_eq!(defaulted.icon_optical_size, Some(24.0));
+}
+
+#[test]
 fn cached_theme_token_value_matches_theme_lookup() {
     let theme = mesh_core_theme::default_theme();
     let resolver = StyleResolver::new(&theme);

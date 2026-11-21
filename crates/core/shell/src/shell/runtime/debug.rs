@@ -171,7 +171,7 @@ impl Shell {
         let payload = if refresh {
             let snapshot = self.debug_snapshot();
             let payload = debug_service_payload(&self.debug, &snapshot);
-            self.store_debug_snapshot_payload(payload.clone());
+            self.store_debug_snapshot_payload(key, payload.clone());
             payload
         } else {
             self.debug_snapshot_cache
@@ -207,8 +207,11 @@ impl Shell {
         }
     }
 
-    fn store_debug_snapshot_payload(&mut self, payload: serde_json::Value) {
-        let key = self.debug_snapshot_cache_key();
+    fn store_debug_snapshot_payload(
+        &mut self,
+        key: DebugSnapshotCacheKey,
+        payload: serde_json::Value,
+    ) {
         let (publication_count, rebuild_count) = self
             .debug_snapshot_cache
             .as_ref()
@@ -556,6 +559,29 @@ fn serialized_debug_diagnostic_array_bytes(entries: &[DebugDiagnosticEntry]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn debug_snapshot_rebuilds_if_diagnostics_changed_during_capture() {
+        let mut shell = Shell::new();
+        let key = shell.debug_snapshot_cache_key();
+        let snapshot = shell.debug_snapshot();
+        let payload = debug_service_payload(&shell.debug, &snapshot);
+        let diagnostics = shell.diagnostics.register_instance("@test/module", "test");
+        diagnostics.record_issue(
+            "during-capture",
+            mesh_core_diagnostics::IssueSeverity::Warning,
+            "changed after the diagnostics were read",
+        );
+
+        shell.store_debug_snapshot_payload(key, payload);
+        shell.publish_debug_snapshot().unwrap();
+
+        let cache = shell.debug_snapshot_cache.as_ref().unwrap();
+        assert_eq!(cache.rebuild_count, 2);
+        assert!(cache.payload["diagnostics"].as_array().unwrap().iter().any(|issue| {
+            issue["issue_code"] == "during-capture"
+        }));
+    }
 
     #[test]
     fn debug_snapshot_identity_order_is_insertion_order_independent() {

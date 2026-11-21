@@ -802,7 +802,13 @@ fn settings_surfaces_follow_the_active_theme_material_policy() {
             else {
                 panic!("liquid-glass settings should have a translucent light panel");
             };
-            assert!(gradient.from.r > 200 && gradient.from.a > 200 && gradient.from.a < 255);
+            for stop in [gradient.from, gradient.to] {
+                assert!(stop.r > 200 && (150..=195).contains(&stop.a));
+            }
+            assert!(
+                sidebar.computed_style.background_color.a < card.computed_style.background_color.a,
+                "the sidebar tint should preserve more of the backdrop than the cards"
+            );
             let title = first_node_with_class_token(tree, "sidebar-title").unwrap();
             assert!(
                 title.computed_style.color.r < 100,

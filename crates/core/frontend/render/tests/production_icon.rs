@@ -256,17 +256,21 @@ fn wait_for_icon(consumer: &mesh_core_render::ResourcePaintConsumer) {
     }
 }
 
-fn install_theme(root: &std::path::Path, color: &str) {
+fn install_theme(root: &std::path::Path, name: &str, color: &str) {
     let theme = root.join("AsyncIconTest");
     std::fs::create_dir_all(theme.join("scalable")).unwrap();
     std::fs::write(theme.join("index.theme"), "[Icon Theme]\nName=AsyncIconTest\nDirectories=scalable\n\n[scalable]\nSize=16\nType=Scalable\nMinSize=1\nMaxSize=512\n").unwrap();
-    std::fs::write(theme.join("scalable/cold-test.svg"), format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="{color}"/></svg>"#)).unwrap();
+    std::fs::write(theme.join("scalable").join(format!("{name}.svg")), format!(r#"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="{color}"/></svg>"#)).unwrap();
     let mut registry = mesh_core_icon::IconRegistry::from_catalog(Arc::new(
         mesh_core_resources::SystemResourceCatalog::from_icon_dirs(vec![root.into()]),
     ))
     .unwrap();
     registry.set_shell_default_pack(Some("AsyncIconTest".into()));
     mesh_core_icon::replace_default_registry(Arc::new(std::sync::Mutex::new(registry)));
+}
+
+fn has_colour(buffer: &PixelBuffer, expected: [u8; 4]) -> bool {
+    buffer.data().chunks_exact(4).all(|pixel| pixel == expected)
 }
 
 #[test]
@@ -278,38 +282,34 @@ fn cold_icon_lookup_repaints_only_consumers_and_rejects_old_catalogs() {
     let other = mesh_core_render::ResourcePaintConsumer::default();
     let unrelated = mesh_core_render::ResourcePaintConsumer::default();
     let icon = named_icon("cold-test");
-    for (root, color, channel) in [(first.path(), "#ff0000", 2), (second.path(), "#0000ff", 0)] {
-        install_theme(root, color);
+    let mut previous = [0; 4];
+    for (root, color, expected) in [
+        (first.path(), "#ff0000", [0, 0, 255, 255]),
+        (second.path(), "#0000ff", [255, 0, 0, 255]),
+    ] {
+        install_theme(root, "cold-test", color);
         consumer.take_ready();
         other.take_ready();
         let initial = paint_icon(&icon, &consumer);
         assert!(
-            initial.data().iter().all(|byte| *byte == 0),
-            "pending lookup must not paint a false missing marker"
+            has_colour(&initial, previous),
+            "pending lookup must keep the last colour or stay transparent on a cold start"
         );
         let other_initial = paint_icon(&icon, &other);
-        let other_painted = other_initial
-            .data()
-            .chunks_exact(4)
-            .any(|pixel| pixel[3] != 0);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             wait_for_icon(&consumer);
             consumer.take_ready();
             let pixels = paint_icon(&icon, &consumer);
-            if pixels.data().chunks_exact(4).any(|pixel| pixel[3] > 0) {
-                assert!(
-                    pixels
-                        .data()
-                        .chunks_exact(4)
-                        .all(|pixel| pixel[channel] == 255 && pixel[3] == 255)
-                );
+            if has_colour(&pixels, expected) {
                 break;
             }
+            assert!(has_colour(&pixels, previous));
             assert!(std::time::Instant::now() < deadline);
         }
-        assert!(other_painted || other.is_ready());
+        assert!(has_colour(&other_initial, expected) || other.is_ready());
         assert!(!unrelated.is_ready());
+        previous = expected;
     }
 }
 
@@ -400,15 +400,15 @@ fn relative_file_names_resolve_on_the_worker_without_false_missing_markers() {
 fn named_and_source_icons_preserve_colour_while_symbolic_files_inherit_tint() {
     let _guard = test_guard();
     let root = tempfile::tempdir().unwrap();
-    install_theme(root.path(), "#ff0000");
-    let regular = root.path().join("AsyncIconTest/scalable/cold-test.svg");
+    install_theme(root.path(), "colour-policy-test", "#ff0000");
+    let regular = root.path().join("AsyncIconTest/scalable/colour-policy-test.svg");
     let symbolic = root
         .path()
-        .join("AsyncIconTest/scalable/cold-test-symbolic.svg");
+        .join("AsyncIconTest/scalable/colour-policy-test-symbolic.svg");
     std::fs::copy(&regular, &symbolic).unwrap();
     for (source, name, expected) in [
-        (false, "cold-test", [0, 0, 255, 255]),
-        (false, "cold-test-symbolic", [0, 255, 0, 255]),
+        (false, "colour-policy-test", [0, 0, 255, 255]),
+        (false, "colour-policy-test-symbolic", [0, 255, 0, 255]),
         (true, regular.to_str().unwrap(), [0, 0, 255, 255]),
         (true, symbolic.to_str().unwrap(), [0, 255, 0, 255]),
     ] {
@@ -431,7 +431,7 @@ fn named_and_source_icons_preserve_colour_while_symbolic_files_inherit_tint() {
             let pixels = paint_icon(&icon, &consumer);
             if pixels.data().chunks_exact(4).any(|pixel| pixel[3] != 0) {
                 assert!(
-                    pixels.data().chunks_exact(4).all(|pixel| pixel == expected),
+                    has_colour(&pixels, expected),
                     "source={source}, name={name}"
                 );
                 break;

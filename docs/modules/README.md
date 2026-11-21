@@ -18,7 +18,7 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/workspaces-widget`, `@mesh/window-title-widget`, `@mesh/clock-widget`, `@mesh/brightness-widget`, `@mesh/volume-widget`, `@mesh/theme-widget`, `@mesh/language-widget`, `@mesh/battery-widget`, `@mesh/settings-widget` | embedded | `src/main.mesh` | Independent `mesh.navigation.item` contributions any bar can host; per-instance props come from profile placements |
 | `@mesh/audio-popover` | embedded | `src/main.mesh` | Audio control surface |
 | `@mesh/quick-settings` | embedded | `src/main.mesh` | Quick settings surface |
-| `@mesh/settings` | surface | `src/main.mesh` | Settings surface using the shared glass material family and active theme palette; Appearance, Keyboard and Advanced pages, the master volume of Audio, and data-driven pages with list → detail drill-down (Wi-Fi, Bluetooth, Sound devices, Display, Power, Notifications, Language & Time, Accessibility, Apps, Privacy, Shell Layout, About, Storage, Users) in `components/prefs-page.mesh` |
+| `@mesh/settings` | surface | `src/main.mesh` | Settings surface using the shared glass material family and active theme palette; Appearance, Keyboard and Advanced pages, Audio master volume with drag-to-preview and release-to-apply, and data-driven pages with list → detail drill-down (Wi-Fi, Bluetooth, Sound devices, Display, Power, Notifications, Language & Time, Accessibility, Apps, Privacy, Shell Layout, About, Storage, Users) in `components/prefs-page.mesh` |
 | `@mesh/debug-inspector` | surface | `src/main.mesh` | Runtime inspection surface |
 | `@mesh/composition-editor` | surface | `src/main.mesh` | Replaceable visual editor for author-declared component slots |
 | `@mesh/text-selection-proof` | surface | `src/main.mesh` | Text-selection proof surface |
@@ -142,7 +142,7 @@ stale artwork requests are cancelled when the track's art URL changes.
 | `@mesh/wm-keybinds-interface` | interface | `mesh.wm-keybinds` compositor keybind contract: sections of described binds |
 | `@mesh/recorder-interface` | interface | `mesh.recorder` screen-recording contract |
 | `@mesh/session-interface` | interface | `mesh.session` suspend, power-off and reboot contract |
-| `@mesh/liquid-glass` | theme | Neutral white glass palette over a deep blue base with system-blue accents; tunes `@mesh/glass-material` |
+| `@mesh/liquid-glass` | theme | Cool translucent glass with a frosted Settings panel, layered tints and blue accents. Tunes `@mesh/glass-material`. |
 | `@mesh/frutiger-aero` | theme | Frutiger Aero palette: frosted-white glass, sky and aqua blues, grass-green accents, Noto Sans; light (default) and dark modes; tunes `@mesh/glass-material` |
 | `@mesh/vitrum` | theme | Vitrum palette, after the niri glass shell: lit-from-within glass tinted by a violet accent with a mint second hue, rounded parts, Inter; dark (default) and light modes; tunes `@mesh/glass-material` |
 | `@mesh/nocturne` | theme | Nocturne palette on Material surfaces: deep violet tonal surfaces, mint second hue, orange tertiary, generous rounding, Inter; dark only |

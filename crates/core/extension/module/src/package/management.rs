@@ -764,7 +764,7 @@ impl PackageTransaction {
             &catalog,
             approval,
         )?;
-        let destination = module_install_path(&modules_dir, &manifest.name)?;
+        let destination = root.installed_module_path(&modules_dir, &manifest.name)?;
         if destination.exists() {
             return Err(ModuleManifestError::Validation(format!(
                 "module {} is already installed at {}",
@@ -805,6 +805,7 @@ impl PackageTransaction {
         self.record_module_lock(
             &manifest,
             &destination,
+            &plan.root,
             &modules_dir,
             staged.source(),
             staged.revision(),
@@ -871,7 +872,7 @@ impl PackageTransaction {
                 .map(|node| &node.manifest),
         );
         if changed || lock_path.exists() {
-            self.save_lock(&mut lock, &modules_dir)?;
+            self.save_lock(&mut lock, &plan.root, &modules_dir)?;
         }
         let graph = load_authoring_snapshot(root_path)?;
         Ok(UninstalledPackage {

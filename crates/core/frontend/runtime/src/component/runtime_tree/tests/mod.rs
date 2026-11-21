@@ -6,7 +6,6 @@ mod tree;
 use super::*;
 use crate::component::TextPreeditState;
 use mesh_core_elements::Prop;
-use std::time::Instant;
 
 fn annotate_with_empty_context(node: &mut WidgetNode) {
     let input_values = HashMap::new();

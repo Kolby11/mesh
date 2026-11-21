@@ -208,24 +208,24 @@ fn collect_focus_traversal_with_transform(
     if node_has_layout_geometry(node) && world.inverse().is_none() {
         return;
     }
-    if node_has_layout_geometry(node) && !clips.intersects_rect(world, node_local_rect(node)) {
-        return;
-    }
     let visible_rect = if clips.is_empty() {
         Some(rect)
+    } else if node_has_layout_geometry(node) && !clips.intersects_rect(world, node_local_rect(node))
+    {
+        None
     } else {
         clips
             .bounds()
             .and_then(|clip| intersect_bounds(rect, content_bounds_from_rect(clip)))
     };
-    if visible_rect.is_none() {
+    if visible_rect.is_none() && node_clips_children(node) {
         return;
     }
 
-    if node_is_tabbable(node)
+    if let Some((left, top, _right, bottom)) = visible_rect
+        && node_is_tabbable(node)
         && let Some(key) = node.mesh_key()
     {
-        let (left, top, _right, bottom) = visible_rect.unwrap_or(rect);
         targets.push(FocusTraversalTarget {
             key: key.to_owned(),
             tabindex: parse_tabindex(node),
@@ -407,6 +407,29 @@ mod tests {
 
         let hidden = scrolled_tree(Overflow::Hidden);
         assert_eq!(collect_focus_traversal(&hidden), ["root/0/0"]);
+    }
+
+    #[test]
+    fn tab_reaches_visible_overflow_inside_an_ancestor_clip() {
+        use mesh_core_elements::style::Overflow;
+
+        let mut root = laid_out("root", "column", 0.0, 100.0);
+        root.computed_style.overflow_y = Overflow::Hidden;
+        let mut parent = laid_out("root/0", "column", 150.0, 50.0);
+        parent
+            .children
+            .push(laid_out("root/0/0", "button", 20.0, 30.0));
+        root.children.push(parent);
+
+        assert_eq!(
+            find_focusable_at(&root, 10.0, 30.0).as_deref(),
+            Some("root/0/0")
+        );
+        assert_eq!(collect_focus_traversal(&root), ["root/0/0"]);
+
+        root.children[0].computed_style.overflow_y = Overflow::Hidden;
+        assert_eq!(find_focusable_at(&root, 10.0, 30.0), None);
+        assert!(collect_focus_traversal(&root).is_empty());
     }
 
     fn target(key: &str, left: f32, top: f32, bottom: f32, index: usize) -> FocusTraversalTarget {

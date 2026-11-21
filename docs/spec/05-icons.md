@@ -251,12 +251,13 @@ Theme tokens control icon look without shipping new packs
 | `--icon-optical-size` | `opsz` | 20–48 |
 
 ```css
-icon { --icon-fill: 0; transition: --icon-fill 150ms ease-out; }
+icon { --icon-fill: 0; }
 icon:active { --icon-fill: 1; }
 ```
 
-The pack's `axes` declaration gates effect; unsupported axes are silent
-no-ops (no fake animation). Size tokens (`--icon-size-sm/md/lg`) are normal
+Icons read axis values after the custom property cascade, including inherited
+values and theme defaults. The pack's `axes` declaration gates their effect.
+Axis transitions are a target. Size tokens (`--icon-size-sm/md/lg`) are normal
 theme tokens.
 
 ## 8. Caching

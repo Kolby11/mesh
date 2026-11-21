@@ -175,8 +175,12 @@ pub(super) fn command_result_from_lua(
     lua: &Lua,
     module_id: &str,
     value: LuaValue,
+    returns: Option<&str>,
 ) -> Result<JsonValue, BackendScriptError> {
     if matches!(value, LuaValue::Nil) {
+        if returns.is_some_and(|returns| returns.trim_end().ends_with('?')) {
+            return Ok(JsonValue::Null);
+        }
         return Ok(ok_command_result());
     }
 

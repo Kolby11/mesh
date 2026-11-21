@@ -7,9 +7,7 @@ use crate::{FrontendCompositionResolver, LayeredStore};
 use mesh_core_elements::{KeyedTemplateItem, KeyedTemplateList, Prop, VirtualRange};
 use std::sync::Arc;
 
-use mesh_core_component::template::{
-    Attribute, AttributeValue, ElementNode, ForNode, TemplateNode, VirtualWindow,
-};
+use mesh_core_component::template::{Attribute, AttributeValue, ElementNode, ForNode, TemplateNode};
 use mesh_core_elements::style::{FlexDirection, StylePropertyMask};
 use mesh_core_elements::{
     ComputedStyle, NodeId, StyleContext, StyleResolver, VariableStore, WidgetNode,

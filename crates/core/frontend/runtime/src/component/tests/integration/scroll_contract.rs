@@ -269,7 +269,7 @@ fn large_plain_list_is_windowed_automatically_and_scrolls_like_a_full_one() {
 }
 
 #[test]
-fn large_plain_list_with_uneven_rows_is_windowed_and_scrolls_to_the_end() {
+fn large_plain_list_with_uneven_rows_windows_through_scroll_jumps() {
     let theme = Theme::new("empty", "Empty");
     let source = list_source(2_000, "", "row", "").replace(
         r#"<box class="row">"#,
@@ -307,6 +307,25 @@ fn large_plain_list_with_uneven_rows_is_windowed_and_scrolls_to_the_end() {
     let text = rendered_text(&component);
     assert!(text.contains(&"2000".to_string()), "{text:?}");
     assert!(!text.contains(&"1".to_string()), "{text:?}");
+    assert!(scroll_list_children(&component) < 100);
+
+    component
+        .handle_input(
+            &theme,
+            200,
+            140,
+            ComponentInput::TwoFingerScroll {
+                x,
+                y,
+                dx: 0.0,
+                dy: 100_000.0,
+            },
+        )
+        .unwrap();
+    paint_frames(&mut component, &theme, &mut pixels, 6);
+    let text = rendered_text(&component);
+    assert!(text.contains(&"1".to_string()), "{text:?}");
+    assert!(!text.contains(&"2000".to_string()), "{text:?}");
     assert!(scroll_list_children(&component) < 100);
 }
 
