@@ -7,10 +7,7 @@ use tower_lsp::lsp_types::{
     SemanticTokensServerCapabilities, WorkDoneProgressOptions,
 };
 
-use crate::{
-    document::{Document, block_content_range},
-    knowledge::tags::TAG_DEFS,
-};
+use crate::{document::Document, knowledge::tags::TAG_DEFS};
 
 const TOKEN_MESH_BUILTIN_ELEMENT: u32 = 0;
 const TOKEN_MESH_COMPONENT_ELEMENT: u32 = 1;
@@ -47,7 +44,7 @@ pub fn server_capabilities() -> SemanticTokensServerCapabilities {
 
 pub fn full(doc: &Document) -> SemanticTokensResult {
     let mut builder = TokenBuilder::new(&doc.source);
-    tokenize_top_level_block_tags(&doc.source, &mut builder);
+    tokenize_top_level_block_tags(doc, &mut builder);
     tokenize_template(doc, &mut builder);
     tokenize_props(doc, &mut builder);
 
@@ -58,19 +55,19 @@ pub fn full(doc: &Document) -> SemanticTokensResult {
     .into()
 }
 
-fn tokenize_top_level_block_tags(source: &str, builder: &mut TokenBuilder<'_>) {
-    for block in ["template", "script", "style", "props"] {
-        let mut search_start = 0;
-        while let Some(rel) = source[search_start..].find(block) {
-            let start = search_start + rel;
-            let before = source[..start].chars().next_back();
-            let after = source[start + block.len()..].chars().next();
-            if before == Some('<') || before == Some('/') && source[..start].ends_with("</") {
-                if after.is_none_or(|ch| ch.is_ascii_whitespace() || ch == '>') {
-                    builder.push(start, block.len(), TOKEN_KEYWORD, 0);
-                }
-            }
-            search_start = start + block.len();
+fn tokenize_top_level_block_tags(doc: &Document, builder: &mut TokenBuilder<'_>) {
+    let Some(component) = &doc.parsed else {
+        return;
+    };
+    for block in &component.blocks {
+        builder.push(block.open_tag.start + 1, block.name.len(), TOKEN_KEYWORD, 0);
+        if block.close_tag.len() != 0 {
+            builder.push(
+                block.close_tag.start + 2,
+                block.name.len(),
+                TOKEN_KEYWORD,
+                0,
+            );
         }
     }
 }
@@ -80,10 +77,11 @@ fn tokenize_props(doc: &Document, builder: &mut TokenBuilder<'_>) {
         LuaVersion,
         tokenizer::{Lexer, LexerResult, TokenType},
     };
-    let Some((start, end)) = block_content_range(&doc.source, "props") else {
+    let Some(span) = doc.block_content_span("props") else {
         return;
     };
-    let source = &doc.source[start..end];
+    let start = span.start;
+    let source = &doc.source[start..span.end];
     let mut lexer = Lexer::new(source, LuaVersion::new());
     while let Some(result) = lexer.consume() {
         let token = match result {
@@ -130,9 +128,10 @@ fn tokenize_props(doc: &Document, builder: &mut TokenBuilder<'_>) {
 }
 
 fn tokenize_template(doc: &Document, builder: &mut TokenBuilder<'_>) {
-    let Some((template_start, template_end)) = block_content_range(&doc.source, "template") else {
+    let Some(span) = doc.block_content_span("template") else {
         return;
     };
+    let template_start = span.start;
 
     let builtin_tags: HashSet<&'static str> = TAG_DEFS.iter().map(|tag| tag.name).collect();
     let imported_components: HashSet<&str> = doc
@@ -148,7 +147,7 @@ fn tokenize_template(doc: &Document, builder: &mut TokenBuilder<'_>) {
         .map(|import| import.alias.as_str())
         .collect();
 
-    let template = &doc.source[template_start..template_end];
+    let template = &doc.source[template_start..span.end];
     let bytes = template.as_bytes();
     let mut i = 0;
 
@@ -625,6 +624,29 @@ mod tests {
                 .iter()
                 .any(|token| token.line == position.line && token.start == position.character)
         );
+    }
+
+    #[test]
+    fn top_level_semantic_tokens_ignore_example_block_tags() {
+        let source = r#"<template>
+<!-- <style></style> -->
+<box />
+</template>
+<script>local example = "<props></props>"</script>
+<style>box { color: red }</style>"#;
+        let doc = Document::new(
+            tower_lsp::lsp_types::Url::parse("file:///test.mesh").unwrap(),
+            source.into(),
+        );
+        let SemanticTokensResult::Tokens(tokens) = full(&doc) else {
+            panic!("expected tokens")
+        };
+        let keywords: Vec<_> = absolute_tokens(&tokens.data)
+            .into_iter()
+            .filter(|token| token.token_type == TOKEN_KEYWORD)
+            .map(|token| token.line)
+            .collect();
+        assert_eq!(keywords, [0, 3, 4, 4, 5, 5]);
     }
 
     #[test]

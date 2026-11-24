@@ -380,6 +380,7 @@ pub(super) fn annotate_selected_text_node(
     selection_foreground: &str,
 ) -> bool {
     let matches_selection = node.tag == "text"
+        && mesh_core_elements::ShapePath::for_text(node).is_none()
         && node
             .attributes
             .get(Prop::Selectable)

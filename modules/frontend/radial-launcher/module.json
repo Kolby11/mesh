@@ -6,6 +6,10 @@
     "apiVersion": "0.1",
     "kind": "ui",
     "uses": {
+      "modules": {
+        "@mesh/drawing": ">=0.1.0",
+        "@mesh/drawing-canvas": ">=0.1.0"
+      },
       "interfaces": {
         "mesh.apps": ">=1.0"
       },

@@ -137,6 +137,7 @@ fn write(
     let mut old = state.projection.remove(&node.id);
     let hidden = hidden_ancestor
         || node.computed_style.display == Display::None
+        || node.is_render_target()
         || node.is_closed_container();
     let (raw, cumulative) = if hidden {
         (LayoutRect::default(), parent_cumulative)
@@ -196,7 +197,8 @@ fn write(
             complete, path,
         );
         path.pop();
-        (!child.is_promoted_popover() && !fixed).then_some((0.0, 0.0, extents.0, extents.1))
+        (!child.is_promoted_popover() && !child.is_render_target() && !fixed)
+            .then_some((0.0, 0.0, extents.0, extents.1))
     };
     if rebuild_children {
         let mut bounds = Vec::with_capacity(child_count);

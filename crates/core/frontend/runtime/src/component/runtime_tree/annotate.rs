@@ -334,9 +334,11 @@ pub(super) fn annotate_runtime_tree_inner(
         key.truncate(previous_len);
     }
 
-    let bounds = annotate_overflow.then(|| {
+    let bounds = if annotate_overflow {
         mesh_core_interaction::annotate_overflow_node(node, context.scroll_offsets, children_bounds)
-    });
+    } else {
+        None
+    };
     if context.retained && previous_scroll != node.scroll_metrics {
         context.changed.insert(node.id);
     }

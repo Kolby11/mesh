@@ -1,8 +1,8 @@
 use mesh_core_component::{
     ComponentFile, ComponentImport, ScriptAliasTarget,
     ScriptMemberAccess as ComponentScriptMemberAccess,
-    ScriptSymbolKind as ComponentScriptSymbolKind,
-    parser::{ParseError, parse_component, parse_luau_script},
+    ScriptSymbolKind as ComponentScriptSymbolKind, SourceSpan,
+    parser::{ParseError, parse_component, parse_component_for_tooling},
     template::{AttributeValue, TemplateNode},
 };
 use mesh_core_elements::element_type_for_tag;
@@ -105,10 +105,7 @@ impl Document {
     pub fn new(uri: Url, source: String) -> Self {
         let (parsed, parse_error) = match parse_component(&source) {
             Ok(file) => (Some(file), None),
-            Err(err) => (
-                mesh_core_component::parser::parse_component_for_tooling(&source).ok(),
-                Some(err),
-            ),
+            Err(err) => (parse_component_for_tooling(&source).ok(), Some(err)),
         };
 
         let (
@@ -119,7 +116,7 @@ impl Document {
             script_member_accesses,
             interface_proxies,
             element_ref_aliases,
-        ) = extract_script_info(&source, parsed.as_ref());
+        ) = extract_script_info(parsed.as_ref());
 
         let element_refs = parsed
             .as_ref()
@@ -163,6 +160,15 @@ impl Document {
             interface_proxies,
             component_instances,
         }
+    }
+
+    pub fn block_content_span(&self, name: &str) -> Option<SourceSpan> {
+        self.parsed
+            .as_ref()?
+            .blocks
+            .iter()
+            .find(|block| block.name == name)
+            .map(|block| block.content)
     }
 }
 
@@ -291,21 +297,18 @@ fn component_instance_binding(
 /// privates and lifecycle hooks are excluded, mirroring the runtime rule in
 /// `ScriptContext::public_function_names` / `install_live_binding`. Returns
 /// `(variables, functions)`.
-pub fn public_component_members(source: &str) -> (Vec<String>, Vec<String>) {
-    let Some((script_start, script_end)) = block_content_range(source, "script") else {
-        return (Vec::new(), Vec::new());
-    };
-
-    let Some(script) = parse_luau_script(&source[script_start..script_end]).ok() else {
+pub fn public_component_members(component: &ComponentFile) -> (Vec<String>, Vec<String>) {
+    let Some(script) = component.script.as_ref() else {
         return (Vec::new(), Vec::new());
     };
     (
-        script.metadata.state_vars,
+        script.metadata.state_vars.clone(),
         script
             .metadata
             .public_functions
-            .into_iter()
+            .iter()
             .filter(|name| !is_reserved_component_hook(name))
+            .cloned()
             .collect(),
     )
 }
@@ -362,7 +365,6 @@ fn push_element_ref(refs: &mut Vec<ElementRef>, name: String, tag: &str, source:
 /// Extract state vars, service bindings, function names, and interface proxy
 /// bindings from parser-owned Luau metadata.
 fn extract_script_info(
-    source: &str,
     parsed: Option<&ComponentFile>,
 ) -> (
     Vec<String>,
@@ -373,15 +375,7 @@ fn extract_script_info(
     HashMap<String, String>,
     Vec<ElementRefAlias>,
 ) {
-    let script_range = parsed
-        .and_then(|file| {
-            file.blocks
-                .iter()
-                .find(|block| block.name == "script")
-                .map(|block| (block.content.start, block.content.end))
-        })
-        .or_else(|| block_content_range(source, "script"));
-    let Some((script_start, script_end)) = script_range else {
+    let Some(script) = parsed.and_then(|file| file.script.as_ref()) else {
         return (
             Vec::new(),
             Vec::new(),
@@ -392,22 +386,8 @@ fn extract_script_info(
             Vec::new(),
         );
     };
-    let script = parsed
-        .and_then(|file| file.script.as_ref())
-        .cloned()
-        .or_else(|| parse_luau_script(&source[script_start..script_end]).ok());
-    let Some(script) = script else {
-        return (
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            HashMap::new(),
-            Vec::new(),
-        );
-    };
-    let metadata = script.metadata;
+    let script_start = script.span.start;
+    let metadata = script.metadata.clone();
 
     let symbols = metadata
         .symbols
@@ -460,28 +440,6 @@ fn extract_script_info(
         metadata.interface_proxies,
         aliases,
     )
-}
-
-/// Extract the raw text content inside `<block_name>...</block_name>`.
-pub fn extract_block_text<'a>(source: &'a str, block_name: &str) -> &'a str {
-    block_content_range(source, block_name)
-        .map(|(start, end)| &source[start..end])
-        .unwrap_or_default()
-}
-
-/// Extract the byte range `[start, end)` of a block's content in `source`.
-pub fn block_content_range(source: &str, block_name: &str) -> Option<(usize, usize)> {
-    let open = format!("<{}", block_name);
-    let close = format!("</{}>", block_name);
-
-    let tag_start = source.find(&open)?;
-    let after_open = &source[tag_start..];
-    let close_angle = after_open.find('>')?;
-    let content_start = tag_start + close_angle + 1;
-    let close_pos = source[content_start..]
-        .find(&close)
-        .unwrap_or_else(|| source.len().saturating_sub(content_start));
-    Some((content_start, content_start + close_pos))
 }
 
 #[cfg(test)]

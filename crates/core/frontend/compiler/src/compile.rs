@@ -1111,6 +1111,20 @@ pub fn validate_component_import_props(
         if attribute.name == "bind:this" {
             continue;
         }
+        if attribute.name == "render-import" {
+            if !matches!(&attribute.value, AttributeValue::Static(value)
+                if mesh_core_elements::RenderImport::parse(value).is_some())
+            {
+                return Err(component_prop_error(
+                    parent_path,
+                    &reference.name,
+                    &attribute.name,
+                    attribute.span.unwrap_or(reference.span),
+                    "expected a literal list of texture exports or export=alias pairs".into(),
+                ));
+            }
+            continue;
+        }
 
         let Some(_definition) = declarations.get(attribute.name.as_str()) else {
             if public_fields.contains(&attribute.name) {
@@ -1642,6 +1656,40 @@ theme_icon = "weather-clear"
             &HashMap::from([("Child".to_string(), child)]),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn child_texture_imports_are_literal_composition_attributes() {
+        let child = component(r#"<template><box /></template>"#);
+        let children = HashMap::from([("Child".to_owned(), child)]);
+        for (value, valid) in [
+            (r#""thumbnail=preview second""#, true),
+            ("{imports}", false),
+        ] {
+            let root = component(&format!(
+                r#"<template><Child render-import={value} /></template>
+<script lang="luau">
+local Child = require("./child.mesh")
+imports = "thumbnail"
+</script>"#,
+            ));
+            let result = validate_standalone_imports(
+                &root,
+                &path("main.mesh"),
+                Path::new("/tmp"),
+                &children,
+            );
+            if valid {
+                result.unwrap();
+            } else {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("literal list of texture exports")
+                );
+            }
+        }
     }
 
     #[test]

@@ -93,11 +93,11 @@ fn theme_write_target(
 /// Most user token overrides one `set_tokens` call may write.
 const MAX_TOKEN_PATCH_ENTRIES: usize = 64;
 
-/// Apply a token patch to a `shell` settings object: a value sets the
-/// override, `null` removes it, and an emptied `theme.tokens` is dropped so
-/// the document stays sparse.
+/// Apply a token patch to one sparse override layer. A value sets the
+/// override and `null` removes it.
 fn patch_theme_tokens(
     shell: &mut serde_json::Value,
+    layer: &str,
     patch: &serde_json::Map<String, serde_json::Value>,
 ) {
     if !shell.is_object() {
@@ -112,7 +112,7 @@ fn patch_theme_tokens(
     }
     let theme = theme.as_object_mut().expect("theme settings are an object");
     let tokens = theme
-        .entry("tokens")
+        .entry(layer)
         .or_insert_with(|| serde_json::json!({}));
     if !tokens.is_object() {
         *tokens = serde_json::json!({});
@@ -128,7 +128,7 @@ fn patch_theme_tokens(
         }
     }
     if tokens.is_empty() {
-        theme.remove("tokens");
+        theme.remove(layer);
     }
     if theme.is_empty() {
         shell.remove("theme");
@@ -919,13 +919,13 @@ impl Shell {
         self.prepare_theme_selection(settings_candidate, graph)
     }
 
-    /// Write user theme token overrides (`shell.theme.tokens`, spec 04 §5)
-    /// where the active theme selection lives. Each value is a string, number
-    /// or boolean; `null` removes that override. An invalid patch is ignored
-    /// whole.
+    /// Patch the selected token override layer where the active theme lives.
+    /// Values are scalars, and `null` removes an override. An invalid entry
+    /// rejects the entire patch.
     pub(in crate::shell) fn apply_set_theme_tokens(
         &mut self,
         tokens: serde_json::Map<String, serde_json::Value>,
+        accessibility: bool,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         if tokens.is_empty() || tokens.len() > MAX_TOKEN_PATCH_ENTRIES {
             tracing::warn!(
@@ -951,6 +951,7 @@ impl Shell {
             tracing::warn!("cannot set theme tokens without an installed module graph");
             return Ok(VecDeque::new());
         };
+        let layer = if accessibility { "accessibility_tokens" } else { "tokens" };
         let settings_candidate = self.prepare_control_plane_settings(|shared, profile| {
             match theme_write_target(profile, None) {
                 Some(profile) => {
@@ -958,11 +959,11 @@ impl Shell {
                         .settings
                         .entry(mesh_core_config::SHELL_NAMESPACE.to_string())
                         .or_insert_with(|| serde_json::json!({}));
-                    patch_theme_tokens(shell, &tokens);
+                    patch_theme_tokens(shell, layer, &tokens);
                 }
                 None => {
                     let mut shell = shared.to_value()[mesh_core_config::SHELL_NAMESPACE].clone();
-                    patch_theme_tokens(&mut shell, &tokens);
+                    patch_theme_tokens(&mut shell, layer, &tokens);
                     shared.set_namespace(mesh_core_config::SHELL_NAMESPACE, shell);
                 }
             }

@@ -102,6 +102,21 @@ const MESH_ELEMENT_ATTRS: &[AttrDef] = &[
         values: &[],
     },
     AttrDef {
+        name: "material",
+        description: "Fragment shader body applied to the element and its descendants",
+        values: &[],
+    },
+    AttrDef {
+        name: "material-time",
+        description: "Explicit time uniform for a fragment material",
+        values: &[],
+    },
+    AttrDef {
+        name: "material-values",
+        description: "Four numeric material uniform values separated by spaces",
+        values: &[],
+    },
+    AttrDef {
         name: "aria-label",
         description: "Accessible label",
         values: &[],
@@ -300,11 +315,23 @@ pub static EVENT_ATTRS: &[AttrDef] = INTERACTIVE_ELEMENT_ATTRS;
 
 static NO_ATTRS: &[AttrDef] = &[];
 
-static TEXT_ATTRS: &[AttrDef] = &[AttrDef {
-    name: "selectable",
-    description: "Whether text can be selected by the user",
-    values: &[],
-}];
+static TEXT_ATTRS: &[AttrDef] = &[
+    AttrDef {
+        name: "selectable",
+        description: "Whether text can be selected by the user",
+        values: &[],
+    },
+    AttrDef {
+        name: "text-path",
+        description: "SVG path that guides the baseline of one shaped line",
+        values: &[],
+    },
+    AttrDef {
+        name: "view-box",
+        description: "Path viewport: minimum x, minimum y, width, height",
+        values: &[],
+    },
+];
 
 static LABEL_ATTRS: &[AttrDef] = &[AttrDef {
     name: "for",
@@ -476,8 +503,8 @@ static PROGRESS_ATTRS: &[AttrDef] = &[
 static SHAPE_ATTRS: &[AttrDef] = &[
     AttrDef {
         name: "type",
-        description: "Shape kind: sector (filled wedge or ring segment) | arc (stroked) | polygon | polyline",
-        values: &["sector", "arc", "polygon", "polyline"],
+        description: "Shape kind: sector (filled wedge or ring segment) | arc (stroked) | polygon | polyline | path",
+        values: &["sector", "arc", "polygon", "polyline", "path"],
     },
     AttrDef {
         name: "start",
@@ -498,6 +525,31 @@ static SHAPE_ATTRS: &[AttrDef] = &[
         name: "points",
         description: "Polygon or polyline vertices as 'x,y x,y' percentages of the box",
         values: &[],
+    },
+    AttrDef {
+        name: "d",
+        description: "SVG path data with absolute and relative commands",
+        values: &[],
+    },
+    AttrDef {
+        name: "view-box",
+        description: "Path viewport: minimum x, minimum y, width, height. Defaults to 0 0 100 100.",
+        values: &[],
+    },
+    AttrDef {
+        name: "fill-rule",
+        description: "How overlapping path contours produce fills and holes. Defaults to nonzero.",
+        values: &["nonzero", "evenodd"],
+    },
+    AttrDef {
+        name: "path-fill",
+        description: "Use the background fill or paint a stroke-only path",
+        values: &["auto", "none"],
+    },
+    AttrDef {
+        name: "clip-children",
+        description: "Clip descendant paint and pointer targets to the filled shape",
+        values: BOOL_VALUES,
     },
 ];
 
@@ -1013,7 +1065,7 @@ pub static TAG_DEFS: &[TagDef] = &[
         name: "shape",
         category: TagCategory::Content,
         self_closing: false,
-        description: "Vector shape (sector, arc, polygon, polyline). Fill is background-color, stroke is border-color; pointer hits follow the painted shape.",
+        description: "Vector shape with solid, gradient, or image fills. Pointer hits follow the geometry.",
         bases: BASE_MESH,
         attributes: SHAPE_ATTRS,
     },

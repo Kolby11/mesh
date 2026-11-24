@@ -10,6 +10,8 @@ bitflags = { workspace = true }
 mesh-core-component = { workspace = true }
 mesh-core-files = { workspace = true }
 mesh-core-theme = { workspace = true }
+kurbo = "0.11.3"
+svgtypes = "0.15.3"
 
 serde = { workspace = true }
 serde_json = { workspace = true }

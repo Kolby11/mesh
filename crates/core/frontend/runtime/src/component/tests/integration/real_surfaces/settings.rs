@@ -579,6 +579,76 @@ fn settings_preference_pages_render_without_script_errors() {
 }
 
 #[test]
+fn reduce_transparency_switch_uses_a_separate_token_layer_and_recovers_legacy_strength() {
+    use serde_json::{Value, json};
+
+    const PANEL: &str = "@mesh/glass-material.glass.backdrop.panel";
+    const LENS: &str = "@mesh/glass-material.glass.backdrop.lens";
+    let theme = default_theme();
+    let mut settings =
+        real_frontend_module_component("@mesh/settings", super::super::debug::settings_catalog());
+    let mut buffer = PixelBuffer::new(920, 900);
+    let extent = SurfaceExtent::unpadded(920, 900);
+    settings
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAccessibility", &[])
+        .unwrap();
+    settings
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+
+    let mut toggle = |namespaces: Value| {
+        settings
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.settings".into(),
+                source_module: "@mesh/shell".into(),
+                payload: json!({"namespaces": namespaces}),
+            })
+            .unwrap();
+        settings.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+        let widget = first_node_with_attr(
+            settings.last_tree.as_ref().unwrap(),
+            "aria-label",
+            "Reduce transparency",
+        )
+        .expect("Reduce transparency switch");
+        let click = widget.event_handlers.get("click").unwrap().clone();
+        let requests = settings.call_handler_target(&click, &[]).unwrap();
+        let [CoreRequest::ServiceCall { interface, command, payload, .. }] = requests.as_slice()
+        else {
+            panic!("expected a single theme transaction, got {requests:?}");
+        };
+        assert_eq!(interface, "mesh.theme");
+        assert_eq!(command, "set_tokens");
+        payload.clone()
+    };
+
+    let on = toggle(json!({"shell": {"theme": {"tokens": {
+        PANEL: "blur(19px)", LENS: "none"
+    }}}}));
+    assert_eq!(on["layer"], "accessibility");
+    assert_eq!(on["tokens"][PANEL], "none");
+    let off = toggle(json!({"shell": {"theme": {
+        "tokens": {PANEL: "blur(21px)", LENS: "none"},
+        "accessibility_tokens": on["tokens"],
+    }}}));
+    assert_eq!(off["layer"], "accessibility");
+    assert_eq!(off["tokens"][PANEL], Value::Null);
+    assert_eq!(off["tokens"][LENS], Value::Null);
+
+    let mut legacy_tokens = on["tokens"].clone();
+    legacy_tokens["glass.strength.blur"] = json!(50);
+    legacy_tokens["glass.strength.liquid"] = json!(25);
+    legacy_tokens[LENS] = json!("refract(3px 2px)");
+    let migrated = toggle(json!({
+        "shell": {"theme": {"tokens": legacy_tokens}},
+        "@mesh/settings": {"props": {"global": {"reduce_transparency": true}}},
+    }));
+    assert!(migrated.get("layer").is_none_or(Value::is_null));
+    assert_eq!(migrated["tokens"][PANEL], "blur(16px) refract(3px 2.3px) dispersion(0.2px)");
+    assert!(!migrated["tokens"].as_object().unwrap().contains_key(LENS));
+}
+
+#[test]
 fn appearance_theme_cards_stack_their_preview_above_the_label() {
     // Shipped themes lay buttons out as rows; the card must still give its
     // preview the full card width rather than squeezing it beside the label.

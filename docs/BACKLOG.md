@@ -20,7 +20,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 - [ ] Settings pages and shell surfaces: add the controls that have no backend yet (Wi-Fi static IP/DNS and metered connections, Bluetooth per-device rename, per-app sound routing, keyboard layouts, screen reader, sticky keys, banner position, notification grouping, lock-screen content, privacy indicators, default apps, startup apps, device rename); build the lock screen, OSD and window switcher. [Design](../.planning/todos/pending/2026-11-08-settings-and-shell-surfaces.md).
 - [ ] Verify the Nocturne, Paper, Tapedeck and Bubblegum packs in a running shell, reconcile the rest of Liquid Glass with its canvas board, and add the bevel/offset-shadow part tokens Tapedeck and Bubblegum need beyond `--glass-shadow-pill`. [Design](../.planning/todos/pending/2026-11-08-settings-and-shell-surfaces.md).
-- [ ] Preserve custom glass strength when toggling Reduce transparency. Disabling it currently clears the existing per-tier backdrop overrides.
 - [ ] Measure consumer-scoped scene-cache overhead on unchanged frames and scope cache admission to relevant pending resources; admission still waits for unrelated jobs.
 - [ ] Validate independent text size and shell scale in a running shell, including controls, profile switching, popup geometry and accessibility. [Design](../.planning/todos/pending/2026-11-06-shell-scaling.md).
 - [ ] Measure end-to-end theme, font-family and size changes across visible surfaces and resource readiness, including compositor presentation feedback; preserve valid retained work and final-value correctness.
@@ -36,11 +35,8 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Avoid rebuilding service-observation and diagnostic snapshots on unchanged frontend frames; scroll and animation frames still scan all embedded runtimes. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Remove the production-only cost of the test-only forward service-dependency map and unused Settings audio label writes; preserve reverse lookups and locale behavior. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Bound retained runtime work for removed keyed children; unique-key churn currently retains contexts, timers and memo state after their rendered instances disappear. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/10-frontend-compiler-and-host.md).
-- [ ] Align fixed-descendant transforms in subtree preclipping and compositor blur-region collection with actual painting. Preserve viewport-fixed descendants when the owner's visual clip is empty. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/12-rendering-and-paint.md).
 - [ ] Retain bounded ready SVG rasters with linked-resource freshness; external-resource SVG results are consumed once and rerasterize on later independent paints. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/12-rendering-and-paint.md).
 - [ ] Invalidate wallpaper preview caches by source freshness and retry repaired failures; path-only entries currently keep stale thumbnails, colors and panoramas. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/11-luau-runtime-and-sandbox.md).
-- [ ] Use parsed block spans and declared component props in authoring queries; raw tag searches and public-script-member lookup currently misidentify blocks and input completions. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/16-developer-and-authoring-tools.md).
-- [ ] Preserve supervised failure/quarantine history through backend readiness and continue bounded recovery after replacement initialization fails; completion currently resets history and pending failures stop retries. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/15-shell-core-and-orchestration.md).
 - [ ] Keep backend blob leases attached to the last accepted state until a replacement commits; constructing an aborted or rejected candidate can release blobs still referenced by consumers.
 - [ ] Serialize managed hypridle configuration writes and launches; a poll and a setting change can overlap while the host write is suspended.
 - [ ] Give recorder attempts unique output paths; the current seconds-only timestamp allows two attempts in the same second to reuse a file.
@@ -71,7 +67,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Animate appearance switches: crossfade theme/mode changes, icon-theme changes and font-family changes instead of snapping, honouring reduced motion.
       Today each switch swaps tokens, icon resolutions or glyph metrics in one frame. Design: [appearance transitions](../.planning/todos/pending/2026-10-28-appearance-transitions.md).
 - [ ] Patch changed props through retained child bindings; parent-preserving child-subtree refresh is shipped, but the child template and conservative surface finalization still run.
-- [ ] Extend `<shape>` beyond sectors, arcs and polylines (curves, gradient or image fill, focus outline along the shape) for the ring gauges, graphs and sky arc in the reference shells.
 - [ ] Extend `mesh.weather` (sun times, high/low, humidity, wind, UV) and `mesh.system` (GPU, battery, CPU frequency, swap, network history) and their providers; reference-shell widgets need these fields.
 - [ ] Finish the keybind system: a settings page for `key_priority`, hint mode and corner; inline remap and "reassign all" in the help window; `mesh-shell keys help|hints` for compositor binds; ordinal keys for repeated items; verify key hints on a live GPU surface and in promoted popups. Design and status: [keybind system](../.planning/todos/pending/2026-10-28-keybind-system.md).
 - [ ] Add one shell-switch keybind that works in any profile, and require the profile switcher in every new composition; today switching relies on each shell's own bar button.
@@ -192,8 +187,8 @@ experiences, adds out-of-process native providers, and adds typed bulk channels.
 - [ ] Out-of-process native provider protocol and `mesh-provider` Rust SDK,
       proven on `backlight-brightness`; contract-generated Rust bindings exist, but no
       wire protocol, SDK runtime or native tier does.
-- [ ] Frame streams (dmabuf + fences, shared-memory fallback) and a live-texture element,
-      starting with window previews; needs a compositor-portable capture source and core-owned consent.
+- [ ] Connect live frame textures to compositor-portable window capture with
+      core-owned consent, DMA-BUF buffers and fences, and a shared-memory fallback. [Design](../.planning/todos/pending/2026-11-25-native-window-capture.md)
 
 
 ## 2026-09-01 whole-codebase audit — new open tasks

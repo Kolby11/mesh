@@ -278,6 +278,7 @@ impl FramePaintPlan {
                 backdrop_regions: Vec::new().into(),
                 blur_regions: Vec::new().into(),
                 filter_layer_regions: Vec::new().into(),
+                render_sources: Arc::default(),
             },
             FramePaintReplay {
                 spans: Arc::new(PaintSpanSequence::default()),
@@ -335,6 +336,7 @@ pub struct FramePaintEffects {
     pub backdrop_regions: Arc<[BackdropRegion]>,
     pub blur_regions: Arc<[DamageRect]>,
     pub filter_layer_regions: Arc<[DamageRect]>,
+    pub(crate) render_sources: Arc<[NamedRenderSource]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -468,6 +470,8 @@ pub struct RetainedDisplayList {
     pub(super) paint_origin: (u32, u32),
     pub(super) entries: HashMap<DisplayListKey, DisplayListEntry>,
     pub(super) subtrees: HashMap<NodeId, Arc<RetainedPaintSubtree>>,
+    pub(super) render_sources: Arc<[NamedRenderSource]>,
+    pub(super) render_source_inputs: super::render_sources::RenderSourceInputs,
     /// Ordered material metadata retained so release metrics describe the
     /// same batch/barrier stream as debug diagnostics without retaining full
     /// display entries or keys.
@@ -523,6 +527,8 @@ impl Default for RetainedDisplayList {
             paint_origin: (0.0_f32.to_bits(), 0.0_f32.to_bits()),
             entries: HashMap::new(),
             subtrees: HashMap::new(),
+            render_sources: Arc::default(),
+            render_source_inputs: Default::default(),
             batch_index: super::batch_index::BatchIndex::default(),
             sparse_paint_index: super::sparse::SparsePaintIndex::default(),
             next_entries_scratch: HashMap::new(),
@@ -560,6 +566,8 @@ pub struct DisplayPaintNode {
     /// such as icons must resolve against the node owner rather than the
     /// surface root.
     pub module_id: Option<Arc<str>>,
+    pub(crate) render_source: Option<RenderSourceKey>,
+    pub(crate) render_export: bool,
     /// The cumulative transform from this node's local border-box into the
     /// surface. `layout` remains its transformed AABB for damage/culling.
     pub transform: AffineTransform,
@@ -595,7 +603,8 @@ impl DisplayPaintNode {
             || (self.transform.m11 - 1.0).abs() > EPSILON
             || (self.transform.m22 - 1.0).abs() > EPSILON
             || self.ancestor_clips.iter().any(|clip| {
-                clip.transform.m12.abs() > EPSILON
+                clip.mask.is_some()
+                    || clip.transform.m12.abs() > EPSILON
                     || clip.transform.m21.abs() > EPSILON
                     || (clip.radii != mesh_core_elements::style::Corners::zero()
                         && self.reaches_rounded_corner(clip))
@@ -706,12 +715,40 @@ pub struct DisplayPaintStyle {
     pub additional_box_shadows: Vec<BoxShadow>,
     pub outline: Outline,
     pub filter: VisualFilter,
+    pub material: Option<DisplayMaterial>,
     pub backdrop_filter: VisualFilter,
     pub mix_blend_mode: BlendMode,
     pub icon_fill: Option<f32>,
     pub icon_weight: Option<f32>,
     pub icon_grade: Option<f32>,
     pub icon_optical_size: Option<f32>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DisplayMaterial {
+    pub source: Arc<str>,
+    pub time: f32,
+    pub values: [f32; 4],
+    pub(crate) input_source: Option<RenderSourceKey>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct RenderSourceKey {
+    pub(crate) scope: Arc<str>,
+    pub(crate) name: Arc<str>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum NamedRenderSource {
+    Capture {
+        node: Arc<DisplayPaintNode>,
+        commands: Arc<PaintSequence<DisplayPaintCommand>>,
+        viewport: Option<DisplayListClip>,
+    },
+    Alias {
+        key: RenderSourceKey,
+        exported: RenderSourceKey,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -723,7 +760,25 @@ pub enum DisplayPaintContent {
     Checkmark(DisplayCheckmarkPaint),
     /// A vector `<shape>`, filled with the background colour and stroked with
     /// the border colour; its box paints nothing of its own.
-    Shape(mesh_core_elements::ShapeGeometry),
+    Shape {
+        geometry: Option<mesh_core_elements::ShapeGeometry>,
+        clip_children: bool,
+    },
+}
+
+impl DisplayPaintContent {
+    pub(super) fn geometry_changes_child_clip(&self, previous: Option<&Self>) -> bool {
+        match (self, previous) {
+            (
+                Self::Shape { clip_children: true, .. },
+                _,
+            ) | (
+                _,
+                Some(Self::Shape { clip_children: true, .. }),
+            ) => previous != Some(self),
+            _ => false,
+        }
+    }
 }
 
 /// The selected-state glyph for a `checkbox`/`radio` element, painted as a
@@ -745,11 +800,14 @@ pub enum CheckmarkKind {
 pub struct DisplayTextPaint {
     pub text: Arc<str>,
     pub selection: Option<DisplayTextSelectionPaint>,
+    pub path: Option<mesh_core_elements::ShapePath>,
 }
 
 impl PartialEq for DisplayTextPaint {
     fn eq(&self, other: &Self) -> bool {
-        shared_str_eq(&self.text, &other.text) && self.selection == other.selection
+        shared_str_eq(&self.text, &other.text)
+            && self.selection == other.selection
+            && self.path == other.path
     }
 }
 
@@ -945,6 +1003,7 @@ pub struct SelectedDisplayListPaint<'a> {
     pub(super) selection: SelectedDisplayListSelection,
     pub(super) metrics: DisplayListMetrics,
     pub(super) backdrop_regions: &'a [BackdropRegion],
+    pub(crate) render_sources: &'a [NamedRenderSource],
 }
 
 #[derive(Debug, Clone)]

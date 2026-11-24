@@ -123,12 +123,36 @@ fn hash_material(style: &ComputedStyle) -> u64 {
 fn hash_primitive(node: &WidgetNode) -> u64 {
     let mut hasher = PaintInputHasher::default();
     node.tag.hash(&mut hasher);
+    if let Some(material) = node.attributes.get(Prop::Material) {
+        material.hash(&mut hasher);
+        hash_attributes(
+            node,
+            &[Prop::MaterialTime, Prop::MaterialValues, Prop::MaterialSource],
+            &mut hasher,
+        );
+        hash_color(node.computed_style.color, &mut hasher);
+    }
+    if let Some(name) = node.attributes.get(Prop::RenderSource) {
+        name.hash(&mut hasher);
+        node.attributes.flag(Prop::RenderExport).hash(&mut hasher);
+    }
+    node.attributes.get(Prop::RenderTarget).hash(&mut hasher);
+    node.render_imports().hash(&mut hasher);
+    if node.attributes.get(Prop::RenderSource).is_some()
+        || node.attributes.get(Prop::MaterialSource).is_some()
+    {
+        node.render_source_scope().hash(&mut hasher);
+    }
     match node.tag.as_str() {
         "shape" => hash_attributes(
             node,
-            &[Prop::Type, Prop::Start, Prop::End, Prop::Inner, Prop::Points],
+            &[
+                Prop::Type, Prop::Start, Prop::End, Prop::Inner, Prop::Points,
+                Prop::D, Prop::FillRule, Prop::PathFill, Prop::ViewBox, Prop::ClipChildren,
+            ],
             &mut hasher,
         ),
+        "text" => hash_attributes(node, &[Prop::TextPath, Prop::ViewBox], &mut hasher),
         "input" => {
             hash_attributes(
                 node,

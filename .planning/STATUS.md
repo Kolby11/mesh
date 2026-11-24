@@ -1,10 +1,24 @@
 # Status
 
-**Updated:** 2026-11-21
+**Updated:** 2026-11-25
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and measurements live in [`log/`](log/README.md).
 
 ## Now
+
+- Named render sources support independent offscreen layout and explicit
+  imports from children mounted on the same surface. The integration test
+  covers pixels, prop and layout updates, and export removal.
+
+- Authored components can use SVG paths and child masks, keyed interactive
+  drawings, programmable materials, named same-instance render sources, and
+  live provider textures. The compiler, renderer, shell, and new frontend
+  integration tests passed.
+
+- Completed the correctness wave for Reduce transparency, viewport-fixed
+  rendering, backend supervision, and authoring queries. The shell, renderer,
+  component, language-server, config, module and theme suites passed. The
+  Settings glass-strength regression passed in the shipped component.
 
 - Scoped theme token identity, icon axis style projection and bounded painter diagnostics passed the theme, element, module and renderer library suites and production icon integration tests.
 
@@ -15,6 +29,10 @@ Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and measurem
 - 2026-11-14 audit correctness sweep landed (see the November log): module graph trust/closure, extension points, profiles and forks, store races, bounded reads, style inheritance and reference bounds, stylesheet images, focus traversal and scroll-into-view, template parsing, service contracts and mocks, socket connects, ticket-owned call results, LSP semantic tokens.
 
 ## Next
+
+- Implement consent-managed window capture through the portal and PipeWire.
+  A synthetic EGL DMA-BUF import with an acquire fence passed locally.
+  [Design](todos/pending/2026-11-25-native-window-capture.md).
 
 - Continue scoped backlog correctness work after subprocess startup ordering, masked-input selection mapping and completed backend task retirement and Advanced Settings optimistic reconciliation; fixes and focused regressions are complete.
 
@@ -27,3 +45,7 @@ Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and measurem
 - D1 compound-table write tracking remains deferred pending supported runtime observation.
 - GPU panel recorded-scene parity exceeds its pixel budget on the baseline; NVIDIA and other compositor imports remain unchecked live.
 - Default-parallel shell checks have intermittent fractional-layout and debug Surfaces assertions; isolated reruns and the complete two-thread run have passed.
+- The Settings material-policy test fails its Liquid Glass panel gradient
+  assertion on clean `e399e827` and the correctness wave.
+- The Settings debug integration test fails its expected audio volume request
+  on clean `e399e827` and the programmable rendering changes.

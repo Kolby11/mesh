@@ -310,6 +310,10 @@ pub struct PixelCanvasSession<'a> {
     pub(crate) scene_cache:
         Option<std::rc::Rc<std::cell::RefCell<crate::prepared_scene::SceneNodeCache>>>,
     pub(crate) scroll_replay: Option<(Option<usize>, f32, f32)>,
+    pub(crate) render_sources: std::collections::HashMap<
+        crate::display_list::RenderSourceKey,
+        Option<super::painter::NamedRenderPicture>,
+    >,
 }
 
 enum SessionTarget<'a> {
@@ -370,6 +374,7 @@ impl<'a> PixelCanvasSession<'a> {
             },
             scene_cache: None,
             scroll_replay: None,
+            render_sources: Default::default(),
         }
     }
 
@@ -381,6 +386,7 @@ impl<'a> PixelCanvasSession<'a> {
             target: SessionTarget::Surface(surface),
             scene_cache: None,
             scroll_replay: None,
+            render_sources: Default::default(),
         }
     }
 
@@ -390,6 +396,7 @@ impl<'a> PixelCanvasSession<'a> {
             target: SessionTarget::Deferred { raster, recorder },
             scene_cache: None,
             scroll_replay: None,
+            render_sources: Default::default(),
         }
     }
 
@@ -408,6 +415,7 @@ impl<'a> PixelCanvasSession<'a> {
             },
             scene_cache: None,
             scroll_replay: None,
+            render_sources: Default::default(),
         }
     }
 

@@ -209,6 +209,26 @@ impl Shell {
         );
     }
 
+    pub(super) fn record_supervised_backend_status(
+        &mut self,
+        interface: String,
+        provider_id: String,
+        identity: mesh_core_backend::BackendIdentity,
+        status: BackendRuntimeStatus,
+        message: String,
+    ) {
+        self.record_backend_runtime_status_with_identity_and_lifecycle(
+            interface,
+            provider_id,
+            identity,
+            status,
+            message,
+            true,
+            true,
+            true,
+        );
+    }
+
     fn record_backend_runtime_status_with_identity_and_lifecycle(
         &mut self,
         interface: String,
@@ -791,15 +811,7 @@ impl Shell {
         interface: String,
         slot: BackendRuntimeSlot,
     ) {
-        self.stage_pending_backend_runtime(
-            interface,
-            PendingBackendRuntime {
-                slot,
-                graph_path: None,
-                started: false,
-                initial_state: None,
-            },
-        );
+        self.stage_pending_backend_runtime(interface, slot, PendingBackendPurpose::Startup);
     }
 
     pub(in crate::shell) fn stage_backend_runtime_switch(
@@ -810,16 +822,17 @@ impl Shell {
     ) {
         self.stage_pending_backend_runtime(
             interface,
-            PendingBackendRuntime {
-                slot,
-                graph_path: Some(graph_path),
-                started: false,
-                initial_state: None,
-            },
+            slot,
+            PendingBackendPurpose::ProviderSelection(graph_path),
         );
     }
 
-    fn stage_pending_backend_runtime(&mut self, interface: String, pending: PendingBackendRuntime) {
+    pub(super) fn stage_pending_backend_runtime(
+        &mut self,
+        interface: String,
+        slot: BackendRuntimeSlot,
+        purpose: PendingBackendPurpose,
+    ) {
         if let Some(previous) = self.pending_backend_runtimes.remove(&interface) {
             let identity = *previous
                 .slot
@@ -828,6 +841,10 @@ impl Shell {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             let previous_interface = previous.slot.interface.clone();
             let previous_provider = previous.slot.provider_id.clone();
+            if matches!(previous.purpose, PendingBackendPurpose::SupervisedRestart) {
+                // A failed explicit selection must leave the pending recovery attempt available.
+                self.defer_backend_restart(&interface, &previous_provider, identity);
+            }
             self.retire_backend_runtime_slot(previous.slot);
             self.record_backend_runtime_status_with_identity_and_lifecycle(
                 previous_interface,
@@ -840,7 +857,15 @@ impl Shell {
                 false,
             );
         }
-        self.pending_backend_runtimes.insert(interface, pending);
+        self.pending_backend_runtimes.insert(
+            interface,
+            PendingBackendRuntime {
+                slot,
+                purpose,
+                started: false,
+                initial_state: None,
+            },
+        );
     }
 
     fn complete_backend_runtime_switch(&mut self, interface: &str, provider_id: &str) {
@@ -851,7 +876,7 @@ impl Shell {
             return;
         }
 
-        let Some(graph_path) = pending.graph_path.clone() else {
+        let PendingBackendPurpose::ProviderSelection(graph_path) = pending.purpose.clone() else {
             let pending = self
                 .pending_backend_runtimes
                 .remove(interface)
@@ -925,7 +950,9 @@ impl Shell {
             );
             return;
         };
-        if pending.slot.provider_id != provider_id {
+        if pending.slot.provider_id != provider_id
+            || !matches!(pending.purpose, PendingBackendPurpose::ProviderSelection(_))
+        {
             self.pending_backend_runtimes
                 .insert(interface.to_string(), pending);
             return;
@@ -965,7 +992,9 @@ impl Shell {
         provider_id: &str,
         pending: PendingBackendRuntime,
     ) {
-        self.backend_supervision.remove(interface);
+        if !matches!(pending.purpose, PendingBackendPurpose::SupervisedRestart) {
+            self.backend_supervision.remove(interface);
+        }
         let identity = *pending
             .slot
             .identity
@@ -1034,7 +1063,9 @@ impl Shell {
         let Some(pending) = self.pending_backend_runtimes.remove(interface) else {
             return;
         };
-        if pending.slot.provider_id != provider_id {
+        if pending.slot.provider_id != provider_id
+            || !matches!(pending.purpose, PendingBackendPurpose::ProviderSelection(_))
+        {
             self.pending_backend_runtimes
                 .insert(interface.to_string(), pending);
             return;
@@ -1156,17 +1187,12 @@ impl Shell {
                     | BackendRuntimeStatus::Stopped
             ) && let Some(pending) = self.pending_backend_runtimes.remove(&interface)
             {
-                let has_current_runtime = self.backend_runtimes.contains_key(&interface);
-                let module_id = pending.slot.provider_id.clone();
-                self.retire_backend_runtime_slot(pending.slot);
-                if !has_current_runtime {
-                    self.update_module_runtime_lifecycle(&module_id, runtime_status, &message);
-                }
+                self.retire_failed_backend_candidate(pending, identity, runtime_status, &message);
                 tracing::warn!(
                     interface,
                     provider_id,
                     stage,
-                    "provider switch failed; keeping the current runtime active"
+                    "backend candidate failed before readiness: {message}"
                 );
             }
             return;
@@ -1260,14 +1286,11 @@ impl Shell {
         let Some(pending) = self.pending_backend_runtimes.remove(interface) else {
             return;
         };
-        let has_current_runtime = self.backend_runtimes.contains_key(interface);
-        let module_id = pending.slot.provider_id.clone();
         let identity = *pending
             .slot
             .identity
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        self.retire_backend_runtime_slot(pending.slot);
         self.record_backend_runtime_status_with_identity_and_lifecycle(
             interface.to_string(),
             provider_id.to_string(),
@@ -1278,10 +1301,32 @@ impl Shell {
             false,
             false,
         );
-        if !has_current_runtime {
-            self.update_module_runtime_lifecycle(&module_id, BackendRuntimeStatus::Failed, message);
-        }
+        self.retire_failed_backend_candidate(
+            pending,
+            identity,
+            BackendRuntimeStatus::Failed,
+            message,
+        );
         tracing::warn!(interface, provider_id, "{message}");
+    }
+
+    fn retire_failed_backend_candidate(
+        &mut self,
+        pending: PendingBackendRuntime,
+        identity: mesh_core_backend::BackendIdentity,
+        status: BackendRuntimeStatus,
+        message: &str,
+    ) {
+        let interface = pending.slot.interface.clone();
+        let provider_id = pending.slot.provider_id.clone();
+        self.retire_backend_runtime_slot(pending.slot);
+        if self.backend_runtimes.contains_key(&interface) {
+            return;
+        }
+        self.update_module_runtime_lifecycle(&provider_id, status, message);
+        if matches!(pending.purpose, PendingBackendPurpose::SupervisedRestart) {
+            self.supervise_backend_failure_at_identity(&interface, &provider_id, identity);
+        }
     }
 
     fn publish_prepared_backend_state(

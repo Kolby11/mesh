@@ -204,6 +204,9 @@ impl ChildSurfaceCache {
         candidate
             .dependencies
             .extend(nodes.iter().map(|node| node.id));
+        if nodes.iter().any(|node| node.is_render_target()) {
+            return;
+        }
         fn descendants(node: &WidgetNode, ids: &mut HashSet<NodeId>) {
             visit();
             ids.insert(node.id);

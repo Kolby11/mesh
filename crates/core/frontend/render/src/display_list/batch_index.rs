@@ -243,7 +243,8 @@ impl BatchIndex {
         });
         for (index, child) in node.children.iter().enumerate() {
             path.push(index);
-            self.record(child, child_transform, path, visible, viewport);
+            let (space, viewport) = child_paint_space(child, child_transform, viewport, None);
+            self.record(child, space, path, visible, viewport);
             path.pop();
         }
     }
@@ -283,18 +284,13 @@ impl BatchIndex {
                 let child = parent.children.get(index)?;
                 let scroll = parent.resolved_scroll_metrics();
                 let retained = self.nodes.get(&parent.id)?.retains_content;
-                let space = if child.computed_style.position
-                    == mesh_core_elements::style::Position::Fixed
-                {
-                    root_transform(0.0, 0.0)
-                } else {
-                    child_transform(
-                        node_transform(parent_space, parent),
-                        parent,
-                        if retained { 0.0 } else { scroll.x },
-                        if retained { 0.0 } else { scroll.y },
-                    )
-                };
+                let content_transform = child_transform(
+                    node_transform(parent_space, parent),
+                    parent,
+                    if retained { 0.0 } else { scroll.x },
+                    if retained { 0.0 } else { scroll.y },
+                );
+                let (space, ()) = child_paint_space(child, content_transform, (), ());
                 stack.push((child, space));
             }
             for (node, _) in &stack[shared..path.len()] {

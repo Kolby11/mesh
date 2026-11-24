@@ -14,6 +14,7 @@ use crate::{
     BlockAttribute, ComponentBlock, ComponentFile, ComponentImportTarget, ParseDiagnosticCategory,
     SourceSpan,
 };
+pub use markup::is_event_attribute;
 use props::parse_props_at;
 use script::parse_script;
 pub use script::referenced_identifiers;
@@ -331,7 +332,8 @@ fn parse_component_impl(
                 Err(error) => Err(error),
             }
         })
-        .transpose()?;
+        .transpose()
+        .or_else(|error| if recover { Ok(None) } else { Err(error) })?;
 
     let style = blocks
         .iter()

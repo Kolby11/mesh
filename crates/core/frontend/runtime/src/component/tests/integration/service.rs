@@ -2,6 +2,130 @@ use super::*;
 use crate::service::script_events_to_requests;
 
 #[test]
+fn live_frame_updates_repaint_a_mesh_image_without_a_second_service_update() {
+    use mesh_core_render::ResourcePaintConsumer;
+    use mesh_core_resources::frame::FrameOwner;
+    use mesh_core_scripting::backend::BackendScriptContext;
+    use mesh_core_service::{
+        ContractCapabilities, InterfaceContract, InterfaceProvider, contract::ContractStateField,
+        parse_contract_version,
+    };
+
+    const FRAME_READ: &str = "service.frame-test.read";
+    let mut provider = BackendScriptContext::new_with_settings_and_capabilities(
+        "@test/frame-provider",
+        serde_json::json!({}),
+        CapabilitySet::default(),
+    );
+    provider
+        .load_script(r#"
+function start()
+    state = { source = mesh.frame.publish("preview", { 255, 0, 0, 255 }, 1, 1) }
+end
+local counter = 0
+function on_poll()
+    counter += 1
+    local bytes = if counter == 1 then { 0, 255, 0, 255 } else { 0, 0, 255, 255 }
+    assert(mesh.frame.publish("preview", bytes, 1, 1) == state.source)
+end
+function on_command_replace()
+    state = { source = mesh.service.payload().source }
+end
+"#)
+        .unwrap();
+    let first = provider.call_init().unwrap().unwrap();
+
+    let mut catalog = InterfaceCatalog::default();
+    catalog.register_contract(InterfaceContract {
+        interface: "mesh.frame-test".into(),
+        version: parse_contract_version("1.0").unwrap(),
+        state_fields: vec![ContractStateField {
+            name: "source".into(),
+            field_type: "frame".into(),
+            ..Default::default()
+        }],
+        methods: vec![],
+        events: vec![],
+        types: HashMap::new(),
+        capabilities: ContractCapabilities {
+            read: vec![FRAME_READ.into()],
+            permissions: [(FRAME_READ.into(), "standard".into())].into(),
+            ..Default::default()
+        },
+    });
+    catalog.register_provider(InterfaceProvider {
+        interface: "mesh.frame-test".into(),
+        version: Some("1.0".into()),
+        base_module: None,
+        provider_module: "@test/frame-provider".into(),
+        backend_name: "Frame test".into(),
+        priority: 100,
+    });
+    let mut component = test_frontend_component_with_catalog(
+        r#"
+<template><image alt="Preview of a live source" src={preview.source} style="width: 8px; height: 8px" /></template>
+<script lang="luau">
+local preview = require("mesh.frame-test@>=1.0")
+</script>
+"#,
+        catalog,
+        &[FRAME_READ],
+    );
+    component
+        .handle_service_event(&ServiceEvent::Updated {
+            service: "mesh.frame-test".into(),
+            source_module: "@test/frame-provider".into(),
+            payload: first.clone().into_payload(),
+        })
+        .unwrap();
+
+    let consumer = ResourcePaintConsumer::default();
+    let unrelated = ResourcePaintConsumer::default();
+    let theme = default_theme();
+    let paint = |component: &mut FrontendSurfaceComponent| {
+        let _scope = consumer.enter();
+        let mut buffer = PixelBuffer::new(8, 8);
+        component
+            .paint_raster(&theme, SurfaceExtent::unpadded(8, 8), &mut buffer, 1.0)
+            .unwrap();
+        buffer.get_pixel(4, 4)
+    };
+    let first_pixel = paint(&mut component);
+    let image = first_node_by_tag(component.last_tree.as_ref().unwrap(), "image")
+        .expect("the frontend should compile to an image");
+    assert_eq!(
+        image.attributes.get(Prop::Src).map(String::as_str),
+        first["source"].as_str(),
+    );
+    assert_eq!(
+        first_pixel.r, 255,
+        "pixel {first_pixel:?} in image bounds {:?}",
+        image.layout
+    );
+    for _ in 0..2 {
+        let next = provider.run_poll().unwrap().unwrap();
+        assert_eq!(next.fingerprint(), first.fingerprint());
+    }
+    assert!(consumer.take_ready());
+    assert!(!unrelated.is_ready());
+    component.request_paint();
+    assert_eq!(paint(&mut component).b, 255);
+
+    let foreign = FrameOwner::default();
+    let foreign_handle = foreign.publish("other", 1, 1, vec![0, 0, 0, 255]).unwrap();
+    let error = provider
+        .run_command_with_result("replace", &serde_json::json!({ "source": foreign_handle.as_ref() }))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("this provider does not own"), "{error}");
+
+    drop(provider);
+    assert!(consumer.take_ready());
+    component.request_paint();
+    assert_eq!(paint(&mut component).a, 0);
+}
+
+#[test]
 fn frontend_component_observes_only_subscribed_interface_events() {
     let component = test_frontend_component_with_catalog(
         r#"

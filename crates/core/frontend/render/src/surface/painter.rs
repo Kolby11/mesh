@@ -1,5 +1,7 @@
 mod backend;
 mod geometry;
+mod material;
+pub(crate) use material::NamedRenderPicture;
 mod rounded;
 mod text;
 pub use text::{KeyHint, KeyHintCorner};

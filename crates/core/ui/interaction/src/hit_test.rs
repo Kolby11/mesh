@@ -1067,6 +1067,29 @@ mod tests {
     }
 
     #[test]
+    fn svg_child_clip_excludes_pointer_targets_in_its_hole() {
+        let size = LayoutRect { x: 0.0, y: 0.0, width: 100.0, height: 100.0 };
+        let mut root = WidgetNode::new("surface");
+        root.set_mesh_key("root");
+        root.layout = size;
+        let mut shape = WidgetNode::new("shape");
+        shape.set_mesh_key("shape");
+        shape.layout = size;
+        shape.attributes.insert(Prop::Type, "path".into());
+        shape.attributes.insert(Prop::ClipChildren, "true".into());
+        shape.attributes.insert(Prop::FillRule, "evenodd".into());
+        shape.attributes.insert(Prop::D, "M0 0 H100 V100 H0 Z M40 40 H60 V60 H40 Z".into());
+        let mut button = WidgetNode::new("button");
+        button.set_mesh_key("child");
+        button.layout = size;
+        shape.children.push(button);
+        root.children.push(shape);
+        let at = |x, y| pointer_hit_test(&root, x, y).unwrap().path;
+        assert_eq!(at(20.0, 20.0), ["root", "shape", "child"]);
+        assert_eq!(at(50.0, 50.0), ["root"]);
+    }
+
+    #[test]
     fn hover_survives_its_own_transform_but_not_another_hit() {
         let mut root = WidgetNode::new("surface");
         root.set_mesh_key("root");

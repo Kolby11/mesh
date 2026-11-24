@@ -4,7 +4,7 @@ use full_moon::{
 };
 use tower_lsp::lsp_types::Position;
 
-use crate::document::block_content_range;
+use crate::document::Document;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Block {
@@ -16,8 +16,9 @@ pub enum Block {
 }
 
 #[derive(Debug, Clone)]
-pub struct BlockLocation {
+pub struct BlockLocation<'a> {
     pub block: Block,
+    pub content: &'a str,
     /// Byte offset of the cursor within the block's content.
     pub offset_in_block: usize,
 }
@@ -281,7 +282,7 @@ mod tests {
 }
 
 /// Determine which top-level block the cursor byte offset falls in.
-pub fn block_at_offset(source: &str, offset: usize) -> BlockLocation {
+pub fn block_at_offset(doc: &Document, offset: usize) -> BlockLocation<'_> {
     const BLOCKS: &[(&str, Block)] = &[
         ("template", Block::Template),
         ("script", Block::Script),
@@ -290,32 +291,22 @@ pub fn block_at_offset(source: &str, offset: usize) -> BlockLocation {
     ];
 
     for (name, kind) in BLOCKS {
-        if let Some((start, end)) = block_content_range(source, name) {
-            if offset >= start && offset <= end {
-                return BlockLocation {
-                    block: kind.clone(),
-                    offset_in_block: offset - start,
-                };
-            }
+        if let Some(span) = doc.block_content_span(name)
+            && (span.start..=span.end).contains(&offset)
+        {
+            return BlockLocation {
+                block: kind.clone(),
+                content: &doc.source[span.start..span.end],
+                offset_in_block: offset - span.start,
+            };
         }
     }
 
     BlockLocation {
         block: Block::TopLevel,
+        content: &doc.source,
         offset_in_block: offset,
     }
-}
-
-/// Extract the content of a named block for context analysis.
-pub fn block_content<'a>(source: &'a str, block: &Block) -> &'a str {
-    let name = match block {
-        Block::Template => "template",
-        Block::Script => "script",
-        Block::Style => "style",
-        Block::I18n => "i18n",
-        Block::TopLevel => return source,
-    };
-    crate::document::extract_block_text(source, name)
 }
 
 /// Classify the cursor position within a template block.

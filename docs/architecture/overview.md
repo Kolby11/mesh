@@ -280,6 +280,12 @@ When exactly one compatible provider exists, the current graph may select it
 automatically. Missing optional services degrade locally; missing required
 services are graph diagnostics.
 
+An active backend that terminates enters bounded recovery. The shell stages each
+restart privately until it starts and, for a stateful service, yields a valid
+snapshot. Failed candidates consume retry attempts. Readiness starts the healthy
+uptime window, and automatic failover preserves the session's quarantine
+exclusions.
+
 ## Shell profiles
 
 Named shell profiles replace a single root layout decision. **Shipped:**

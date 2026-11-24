@@ -666,7 +666,7 @@ pub enum ContractError {
 /// A parsed type expression from the contract type grammar.
 ///
 /// Grammar: `base`, `base[]`, `base?`, `base[]?` where `base` is a primitive
-/// (`string`, `int`, `float`, `boolean`, `blob`, `object`, `any`) or a named type
+/// (`string`, `int`, `float`, `boolean`, `blob`, `frame`, `object`, `any`) or a named type
 /// declared in the contract's `types` map (plus the builtin `Result`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeExpr {
@@ -683,6 +683,8 @@ pub enum BaseType {
     Boolean,
     /// A `mesh-blob:sha256-…` handle to bytes the provider registered.
     Blob,
+    /// A stable handle to the current image of a provider-owned frame channel.
+    Frame,
     Object,
     Any,
     Named(String),
@@ -696,6 +698,7 @@ impl std::fmt::Display for TypeExpr {
             BaseType::Float => f.write_str("float")?,
             BaseType::Boolean => f.write_str("boolean")?,
             BaseType::Blob => f.write_str("blob")?,
+            BaseType::Frame => f.write_str("frame")?,
             BaseType::Object => f.write_str("object")?,
             BaseType::Any => f.write_str("any")?,
             BaseType::Named(name) => f.write_str(name)?,
@@ -738,6 +741,7 @@ impl TypeExpr {
             "float" => BaseType::Float,
             "boolean" => BaseType::Boolean,
             "blob" => BaseType::Blob,
+            "frame" => BaseType::Frame,
             "object" => BaseType::Object,
             "any" => BaseType::Any,
             named => {
@@ -748,7 +752,7 @@ impl TypeExpr {
                     || !named.chars().all(|ch| ch.is_ascii_alphanumeric())
                 {
                     return Err(format!(
-                        "invalid type '{expr}': expected a primitive (string, int, float, boolean, blob, object, any) or a PascalCase named type"
+                        "invalid type '{expr}': expected a primitive (string, int, float, boolean, blob, frame, object, any) or a PascalCase named type"
                     ));
                 }
                 BaseType::Named(named.to_string())
@@ -778,6 +782,9 @@ impl TypeExpr {
             BaseType::Blob => value
                 .as_str()
                 .is_some_and(mesh_core_resources::blob::is_blob_handle),
+            BaseType::Frame => value
+                .as_str()
+                .is_some_and(mesh_core_resources::frame::is_frame_handle),
             BaseType::Object => value.is_object(),
             BaseType::Any => true,
             BaseType::Named(_) => value.is_object(),
@@ -914,6 +921,9 @@ fn value_matches(
         BaseType::Blob => value
             .as_str()
             .is_some_and(mesh_core_resources::blob::is_blob_handle),
+        BaseType::Frame => value
+            .as_str()
+            .is_some_and(mesh_core_resources::frame::is_frame_handle),
         BaseType::Object => value.is_object(),
         BaseType::Any => true,
         BaseType::Named(name) if name == BUILTIN_RESULT_TYPE => {
@@ -1448,6 +1458,7 @@ impl FingerprintBuilder {
                 self.string(name);
             }
             BaseType::Blob => self.bytes.push(8),
+            BaseType::Frame => self.bytes.push(9),
         }
         self.bool(value.array);
         self.bool(value.optional);

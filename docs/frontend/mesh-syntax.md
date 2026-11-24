@@ -430,6 +430,77 @@ column, width in a row), excluding the parent's `gap`. `overscan` (default 3) is
 how many items to keep built beyond each edge. The body must be exactly one root
 element of that size, margins included.
 
+### Retained vector drawing
+
+`@mesh/drawing-canvas` displays a keyed list of drawing commands supplied by
+ordinary Luau state. Declare it in `mesh.uses.modules` and import its default
+component. Add `@mesh/drawing` as a dependency to use the optional
+`@mesh/drawing/path` helpers for circular arcs and annular sectors.
+
+```xml
+<template>
+  <column>
+    <DrawingCanvas width="160px" height="160px"
+      commands={commands} onactivate={onRegion} />
+    <text>{selected}</text>
+  </column>
+</template>
+
+<script lang="luau">
+local DrawingCanvas = require("@mesh/drawing-canvas")
+local path = require("@mesh/drawing/path")
+local t = import("mesh.i18n", "t")
+selected = ""
+commands = {
+    {
+        id = "launch",
+        kind = "path",
+        width = 160, height = 160,
+        d = path.annular_sector(50, 50, 49, 25, 20, 160),
+        label = t("launcher.open"),
+        style = "border: 2px solid var(--color-primary)",
+    },
+}
+
+function onRegion(id, event)
+    selected = id
+end
+</script>
+```
+
+Each command has a stable string `id`, a `kind`, a positive `width` and
+`height`, and optional `x` and `y` offsets in logical pixels. Commands paint
+in array order under the same stacking rules as other elements. `rect` draws
+a rectangle. `path` accepts SVG path data in `d`, with an optional
+`view_box` (defaults to `0 0 100 100`), `fill_rule` (`nonzero` or
+`evenodd`), and `path_fill = "none"` for a stroke-only path. The other
+kinds take `text`, `src` and `alt`, or `name` for text, images, and
+semantic icons, respectively. Set `text_path` and optionally `view_box` to
+lay out a line of shaped text along a path. An image command can also consume
+a [live frame handle](../modules/backend-events.md#live-frames) through `src`.
+
+Rectangles and paths with a nonempty `label` expose a named button to
+assistive technology. Click, Enter, Space, and accessible activation call
+`onactivate(id, event)`; pointer entry and exit call `onregionenter` and
+`onregionleave` with the same arguments. Set `disabled = true` to disable
+an action. A shape's optional `art` list paints decorative commands in the
+shape's local coordinate space. Those commands move with the shape and share
+its action target. Standalone text and image commands can carry content and
+alternative text independently.
+
+`style` accepts an ordinary inline stylesheet declaration list, including
+references to theme tokens. Canvas regions use `--drawing-hover-fill` and
+`--drawing-hover-transform` for hover and keyboard focus. The canvas clips to
+its own box by default. Set `clip="false"` when effects should extend beyond
+it. The component accepts up to 256 commands including nested decoration.
+Each list requires unique IDs. Changes to the list use the usual retained
+element identity and pixel damage tracking.
+
+Wrap a canvas in an element with a `material` attribute to apply a fragment
+effect to its rendered output. A material receives the wrapped subtree's
+pixels and explicit input values. See
+[programmable materials](../spec/04-styling.md#122-programmable-materials).
+
 ### Two-way binding
 
 Use `bind:attr="variable"` to sync an element's attribute back to script
@@ -1132,6 +1203,35 @@ Each percentage stop may also declare `animation-timing-function`; the
 validated timing function is used for interpolation until the next stop.
 
 ---
+
+### Programmable materials
+
+Bind `material` to a SkSL fragment body to process a box and its children as
+one offscreen layer. Use `source.eval(p)` to read its pixels at position `p`.
+Nest material boxes to apply multiple passes. Use `material-time` and
+`material-values` for changing uniform inputs without rebuilding the shader.
+The computed text color supplies `tint`, so class rules can theme the effect.
+See [programmable materials](../spec/04-styling.md#122-programmable-materials)
+for the fragment inputs and limits.
+
+Give an element a `render-source` name so another material in the same component
+can sample it. Use `render-target` for a source that needs its own viewport and
+should appear only inside the material. A child component can make that texture
+available to its parent with `render-export`.
+
+```xml
+<!-- In Preview.mesh -->
+<box render-source="thumbnail" render-target="320 180" render-export="true">
+  <text>Playback</text>
+</box>
+
+<!-- In the embedding component -->
+<Preview render-import="thumbnail=preview" />
+<box class="reflection" material={reflection} material-source="preview" />
+```
+
+The material scales the texture into its own box. The parent chooses the alias
+on each mount, so two instances of `<Preview>` can supply different textures.
 
 ## Complete example
 

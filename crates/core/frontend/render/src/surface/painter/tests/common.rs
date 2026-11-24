@@ -164,6 +164,7 @@ pub(super) fn painter_command_classes(commands: &[PainterCommand]) -> Vec<&'stat
         .iter()
         .map(|command| match command {
             PainterCommand::PushClip(_) => "push_clip",
+            PainterCommand::PushPathClip { .. } => "push_path_clip",
             PainterCommand::PopClip => "pop_clip",
             PainterCommand::PushLayer(_) => "push_layer",
             PainterCommand::PopLayer => "pop_layer",
@@ -171,6 +172,7 @@ pub(super) fn painter_command_classes(commands: &[PainterCommand]) -> Vec<&'stat
             PainterCommand::DrawRoundedRect { .. } => "draw_rounded_rect",
             PainterCommand::DrawBorder { .. } => "draw_border",
             PainterCommand::DrawPath { .. } => "draw_path",
+            PainterCommand::DrawPathOutline { .. } => "draw_path_outline",
             PainterCommand::DrawImage { .. } => "draw_image",
             PainterCommand::DrawLinearGradient { .. } => "draw_linear_gradient",
             PainterCommand::DrawGradient { .. } => "draw_gradient",

@@ -353,6 +353,8 @@ pub struct WidgetNodeAuthored {
     /// pass, or removed ARIA attributes can leave stale values behind.
     accessibility_baseline: Option<AccessibilityInfo>,
     module_id: Option<Arc<str>>,
+    render_source_scope: Option<Arc<str>>,
+    render_imports: Option<Arc<crate::RenderImportScope>>,
     pub service_field_reads: Vec<(String, String)>,
     /// Where this node's bound properties come from, so a script write can
     /// re-evaluate exactly them instead of rebuilding the tree.
@@ -669,6 +671,8 @@ impl WidgetNode {
                 event_handler_calls: BTreeMap::new(),
                 accessibility_baseline: None,
                 module_id: None,
+                render_source_scope: None,
+                render_imports: None,
                 service_field_reads: Vec::new(),
                 template_bindings: None,
                 composition: WidgetCompositionMetadata::default(),
@@ -695,6 +699,31 @@ impl WidgetNode {
     #[doc(hidden)]
     pub fn set_memo_instance(&mut self, instance: Arc<str>) {
         self.memo_instance = Some(instance);
+    }
+
+    #[doc(hidden)]
+    pub fn set_render_source_scope(&mut self, instance: Arc<str>) {
+        self.render_source_scope = Some(instance);
+    }
+
+    #[doc(hidden)]
+    pub fn render_source_scope(&self) -> Option<&Arc<str>> {
+        self.render_source_scope.as_ref()
+    }
+
+    #[doc(hidden)]
+    pub fn render_imports(&self) -> Option<&crate::RenderImportScope> {
+        self.render_imports.as_deref()
+    }
+
+    #[doc(hidden)]
+    pub fn set_render_imports(&mut self, scope: crate::RenderImportScope) {
+        self.render_imports = Some(Arc::new(scope));
+    }
+
+    /// Whether this subtree is reserved for offscreen painting.
+    pub fn is_render_target(&self) -> bool {
+        self.attributes.contains_key(Prop::RenderTarget)
     }
 
     #[doc(hidden)]

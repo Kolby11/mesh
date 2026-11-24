@@ -227,7 +227,7 @@ impl PaintSubtreeBuilder {
     ) -> RetainedPaintSubtree {
         let command_count = self.local_command_count;
         let subtree_end = self.commands.len() + self.child_command_count;
-        let command_span = if command_count == 0 {
+        let command_span = if subtree_end == 0 {
             None
         } else {
             Some(RetainedSubtreeSpan {
@@ -247,7 +247,7 @@ impl PaintSubtreeBuilder {
                 command_count: subtree_end,
                 includes_scrollbars: span.includes_scrollbars,
             }],
-            Some(span) => {
+            Some(span) if command_count > 0 => {
                 let has_children = subtree_end > command_count;
                 let leading =
                     command_count.saturating_sub(usize::from(span.local_includes_scrollbars));
@@ -284,7 +284,7 @@ impl PaintSubtreeBuilder {
                 }
                 spans
             }
-            None => Vec::new(),
+            _ => Vec::new(),
         };
         let children = if layer_scope {
             Vec::new()

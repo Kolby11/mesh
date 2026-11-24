@@ -717,6 +717,15 @@ fn normalized_info(
         .or_else(|| finite(attributes.max))
         .or(info.state.value_max);
 
+    if !hidden
+        && !info.state.disabled
+        && node
+            .attributes
+            .get(Prop::Tabindex)
+            .is_some_and(|value| value.parse::<i32>().is_ok())
+    {
+        info.focusable = true;
+    }
     info.focused = live_accessibility_focus(node);
     info.hidden = hidden;
     info.visible = !hidden;

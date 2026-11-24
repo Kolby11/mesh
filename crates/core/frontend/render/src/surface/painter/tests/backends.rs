@@ -43,6 +43,7 @@ fn painter_command_contract_constructs_required_command_set() {
                     PainterPathElement::CubicTo(1.0, 1.0, 2.0, 2.0, 3.0, 3.0),
                     PainterPathElement::Close,
                 ],
+                ..PainterPath::default()
             },
             paint,
             clip,

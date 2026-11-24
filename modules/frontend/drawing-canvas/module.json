@@ -1,0 +1,11 @@
+{
+  "name": "@mesh/drawing-canvas",
+  "version": "0.1.0",
+  "description": "Retained two-dimensional drawing commands and named interactive regions.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "uses": { "modules": { "@mesh/drawing": ">=0.1.0" } },
+    "entry": "src/main.mesh"
+  }
+}

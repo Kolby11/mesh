@@ -11,6 +11,109 @@ use mesh_core_theme::default_theme;
 
 const PARENT_ID: &str = "@test/memo-surface";
 
+#[test]
+fn offscreen_texture_imports_have_independent_layout_and_follow_child_updates() {
+    let mut component = memo_surface(
+        r##"
+<template>
+    <row class="stage">
+        {#if shown}<Preview fill={fill} split={split} render-import="thumbnail=preview" />{/if}
+        <box class="sample" material="return source.eval(p);" material-source="preview" />
+        <box class="fallback" material="return source.eval(p);" material-source="unavailable" />
+        <Private render-import="private=unavailable" />
+    </row>
+</template>
+<script lang="luau">
+local Preview = require("./components/preview.mesh")
+local Private = require("./components/private.mesh")
+fill = "#ff0000"
+split = "50%"
+shown = true
+function change() fill = "#0000ff" end
+function widen() split = "75%" end
+function remove() shown = false end
+</script>
+<style>
+    .stage { width: 48px; height: 24px; padding: 0px; gap: 0px; }
+    .sample, .fallback { position: absolute; top: 0px; width: 16px; height: 16px; }
+    .sample { left: 0px; }
+    .fallback { left: 16px; background-color: #00ff00; }
+</style>
+"##,
+        &[
+            (
+                "Preview",
+                r##"
+<template>
+    <box class="texture" render-source="thumbnail" render-target="128 32" render-export="true">
+        <button aria-label="Offscreen button" class="half" style:background-color={fill} style:width={split} />
+    </box>
+</template>
+<script lang="luau">
+fill = "#ff0000"
+split = "50%"
+</script>
+<style>
+    .texture { flex-direction: row; justify-content: end; background-color: #ffffff; }
+    .half { height: 100%; }
+</style>
+"##,
+            ),
+            (
+                "Private",
+                r#"<template><box render-source="private" render-target="8 8" style="background-color: black" /></template>"#,
+            ),
+        ],
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(48, 24);
+    let mut pixels = PixelBuffer::new(48, 24);
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    let tree = component.last_tree.as_ref().unwrap();
+    let texture = first_node_by_class(tree, "texture").unwrap();
+    let sample = first_node_by_class(tree, "sample").unwrap();
+    assert_eq!(texture.layout.width, 0.0);
+    assert_eq!(sample.layout.width, 16.0);
+    let button = first_node_by_class(texture, "half").unwrap();
+    for target in [
+        mesh_core_elements::InteractionTarget::Semantics,
+        mesh_core_elements::InteractionTarget::Pointer,
+    ] {
+        assert!(!mesh_core_elements::node_can_receive_target(
+            tree, button.id, target,
+        ));
+    }
+    let left = pixels.get_pixel(2, 8);
+    assert_eq!((left.r, left.g, left.b, left.a), (255, 255, 255, 255));
+    let right = pixels.get_pixel(12, 8);
+    assert_eq!((right.r, right.g, right.b, right.a), (255, 0, 0, 255));
+    assert_eq!(pixels.get_pixel(24, 8).g, 255);
+    assert_eq!(pixels.get_pixel(38, 8).a, 0);
+
+    component.call_namespaced_handler("change", &[]).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    let right = pixels.get_pixel(12, 8);
+    assert_eq!((right.r, right.g, right.b, right.a), (0, 0, 255, 255));
+
+    component.call_namespaced_handler("widen", &[]).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    let middle = pixels.get_pixel(6, 8);
+    assert_eq!((middle.r, middle.g, middle.b, middle.a), (0, 0, 255, 255));
+
+    component.call_namespaced_handler("remove", &[]).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    assert_eq!(pixels.get_pixel(12, 8).a, 0);
+    assert_eq!(pixels.get_pixel(24, 8).g, 255);
+}
+
 /// Build a one-surface frontend whose catalog points back at the surface
 /// itself so local PascalCase components resolve during render.
 fn memo_surface(parent_src: &str, locals: &[(&str, &str)]) -> FrontendSurfaceComponent {

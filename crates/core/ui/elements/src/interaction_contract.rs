@@ -5,6 +5,7 @@
 //! quietly growing different interpretations of the same node.
 
 use crate::layout::LayoutRect;
+use crate::ShapeGeometry;
 use crate::style::{CornerShape, CornerShapes, Corners, Display, Transform2D, Visibility};
 use crate::tree::{NodeState, WidgetNode};
 
@@ -153,20 +154,27 @@ impl Default for AffineTransform {
 /// One transformed overflow clip. Bounds are used by paint culling while
 /// point membership uses the inverse matrix, so rotated clips do not become
 /// larger hit regions merely because their AABB is larger.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AffineClip {
     pub transform: AffineTransform,
     pub rect: LayoutRect,
     pub radii: Corners,
     pub shapes: CornerShapes,
+    pub mask: Option<AffineClipMask>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AffineClipMask {
+    Empty,
+    Shape(ShapeGeometry),
 }
 
 impl AffineClip {
-    pub fn bounds(self) -> LayoutRect {
+    pub fn bounds(&self) -> LayoutRect {
         self.transform.transform_rect(self.rect)
     }
 
-    pub fn contains(self, x: f32, y: f32) -> bool {
+    pub fn contains(&self, x: f32, y: f32) -> bool {
         self.transform
             .inverse()
             .map(|inverse| {
@@ -177,6 +185,13 @@ impl AffineClip {
                     && local_y < self.rect.y + self.rect.height;
                 if !inside {
                     return false;
+                }
+                match &self.mask {
+                    Some(AffineClipMask::Empty) => return false,
+                    Some(AffineClipMask::Shape(shape)) if !shape.contains_fill(local_x, local_y) => {
+                        return false;
+                    }
+                    _ => {}
                 }
                 let r = self.radii;
                 let scale = [
@@ -222,7 +237,10 @@ impl AffineClip {
             .unwrap_or(false)
     }
 
-    pub fn intersects_rect(self, transform: AffineTransform, rect: LayoutRect) -> bool {
+    pub fn intersects_rect(&self, transform: AffineTransform, rect: LayoutRect) -> bool {
+        if matches!(self.mask, Some(AffineClipMask::Empty)) {
+            return false;
+        }
         convex_polygons_intersect(
             &self.transform.transform_rect_corners(self.rect),
             &transform.transform_rect_corners(rect),
@@ -380,6 +398,7 @@ impl NodeEligibility {
         let visual_visible = node.computed_style.display != Display::None
             && matches!(node.computed_style.visibility, Visibility::Visible)
             && !attributes.hidden
+            && !node.is_render_target()
             && !node.is_closed_container();
         Self {
             visual_visible,
@@ -471,6 +490,7 @@ impl NodeEligibility {
         let attributes = LocalStateAttributes::read(node);
         let visual_visible = parent.visual_visible
             && node.computed_style.display != Display::None
+            && !node.is_render_target()
             && matches!(node.computed_style.visibility, Visibility::Visible);
         Self {
             visual_visible,
@@ -616,6 +636,11 @@ pub fn node_clip(node: &WidgetNode, transform: AffineTransform) -> AffineClip {
         transform,
         radii: node.computed_style.border_radius,
         shapes: node.computed_style.corner_shape,
+        mask: ShapeGeometry::clips_children(node).then(|| {
+            ShapeGeometry::from_node(node)
+                .filter(ShapeGeometry::is_filled)
+                .map_or(AffineClipMask::Empty, AffineClipMask::Shape)
+        }),
         rect: LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -881,6 +906,7 @@ mod tests {
             .then(AffineTransform::rotation(std::f32::consts::FRAC_PI_4));
         let clip = AffineClip {
             transform,
+            mask: None,
             radii: Corners::zero(),
             shapes: CornerShapes::default(),
             rect: LayoutRect {
@@ -899,6 +925,7 @@ mod tests {
     fn rounded_overflow_clip_membership_uses_normalized_local_radii() {
         let clip = AffineClip {
             transform: AffineTransform::translation(20.0, 30.0),
+            mask: None,
             rect: LayoutRect {
                 x: 0.0,
                 y: 0.0,
@@ -918,6 +945,7 @@ mod tests {
     fn scooped_overflow_clip_excludes_the_quarter_disc_at_the_corner() {
         let clip = AffineClip {
             transform: AffineTransform::IDENTITY,
+            mask: None,
             rect: LayoutRect {
                 x: 0.0,
                 y: 0.0,
@@ -936,6 +964,7 @@ mod tests {
     #[test]
     fn affine_clip_intersection_does_not_use_conservative_aabb_overlap() {
         let clip = AffineClip {
+            mask: None,
             radii: Corners::zero(),
             shapes: CornerShapes::default(),
             transform: AffineTransform::translation(50.0, 50.0)

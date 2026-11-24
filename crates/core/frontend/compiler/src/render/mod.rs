@@ -1194,6 +1194,11 @@ fn build_element_node(
 
     let mut node = WidgetNode::new(tag);
     attach_module_id(&mut node, &manifest.package.id);
+    if element.attributes.iter().any(|attribute| {
+        matches!(attribute.name.as_str(), "render-source" | "material-source")
+    }) {
+        node.set_render_source_scope(instance_key.into());
+    }
     node.attributes = attributes;
     if let Some(bind_this) = bind_this {
         node.set_bind_this(bind_this);

@@ -6,6 +6,7 @@
     low_battery_percent = { type = "int", default = 15, min = 5, max = 50 },
     reduce_motion = { type = "bool", default = false },
     high_contrast = { type = "bool", default = false },
+    -- Legacy flag for profiles saved before the transparency mask had its own layer.
     reduce_transparency = { type = "bool", default = false },
 }
 </props>

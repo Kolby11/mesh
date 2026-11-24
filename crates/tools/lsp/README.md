@@ -20,6 +20,9 @@ members come from validated interface contracts. Services without a contract
 have no member suggestions; backend return values and synthetic callbacks are
 not service API declarations.
 
+Imported component tags offer declared public `<props>` and callback attributes.
+Live references created with `bind:this` offer the child's public script members.
+
 ## `module.json` manifests
 
 Two manifest flavors are recognized automatically:

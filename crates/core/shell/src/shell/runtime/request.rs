@@ -1991,7 +1991,9 @@ impl Shell {
             CoreRequest::SetFontSize { size } => self.apply_set_font_size(size),
             CoreRequest::SetShellScale { scale } => self.apply_set_shell_scale(scale),
             CoreRequest::SetFontFamily { family } => self.apply_set_font_family(&family),
-            CoreRequest::SetThemeTokens { tokens } => self.apply_set_theme_tokens(tokens),
+            CoreRequest::SetThemeTokens { tokens, accessibility } => {
+                self.apply_set_theme_tokens(tokens, accessibility)
+            }
             CoreRequest::SetKeyboardSetting { field, value } => {
                 self.apply_set_keyboard_setting(&field, value)
             }
@@ -3795,8 +3797,8 @@ fn durable_write_key(request: &CoreRequest) -> Option<String> {
         CoreRequest::SetFontFamily { .. } => "font_family".into(),
         // Patches to different tokens are independent; only a later patch of
         // exactly the same tokens supersedes an earlier one.
-        CoreRequest::SetThemeTokens { tokens } => format!(
-            "theme_tokens:{}",
+        CoreRequest::SetThemeTokens { tokens, accessibility } => format!(
+            "theme_tokens:{accessibility}:{}",
             tokens.keys().cloned().collect::<Vec<_>>().join(",")
         ),
         CoreRequest::SetKeyboardSetting { field, .. } => format!("keyboard:{field}"),

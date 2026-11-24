@@ -1,0 +1,14 @@
+{
+  "name": "@mesh/drawing",
+  "version": "0.1.0",
+  "description": "Geometry and retained drawing command helpers for MESH components.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "library",
+    "provides": {
+      "libraries": [
+        { "namespace": "@mesh/drawing", "path": "lib" }
+      ]
+    }
+  }
+}

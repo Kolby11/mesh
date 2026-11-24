@@ -31,7 +31,8 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/glass-widgets` | surface | `src/main.mesh` | Responsive desktop media and weather cards with colour artwork and a three-point forecast |
 | `@mesh/keybind-help` | surface | `src/main.mesh` | Keyboard shortcuts window opened by `F1`, listing every binding by surface |
 | `@mesh/cheatsheet` | surface | `src/main.mesh` | Dark compositor-shortcut cheatsheet: the window manager's described keybinds in sections and columns of keycaps; reads `mesh.wm-keybinds`; open it with `mesh-shell` IPC `shell:toggle_surface:@mesh/cheatsheet` |
-| `@mesh/radial-launcher` | surface | `src/main.mesh` | Radial overlay: a ring of app wedges, a clock hub and media wedges, built from `<shape>` sectors |
+| `@mesh/radial-launcher` | surface | `src/main.mesh` | Radial overlay with a retained app ring, a clock hub and media wedges |
+| `@mesh/drawing-canvas` | embedded | `src/main.mesh` | Retained drawing commands with path-shaped interactive regions |
 | `@mesh/glass-power` | surface | `src/main.mesh` | Hidden right-edge power panel: hovering the middle of the edge slides out sleep, restart and power off; restart and power off need a second click |
 | `@mesh/halo-orb` | surface | `src/main.mesh` | Always-visible orb that toggles the radial launcher, with the shell switcher beside it |
 | `@mesh/glass-dock` | surface | `src/main.mesh` | Glass shelf with neighboring-icon magnification and a searchable launcher with grid and list views of installed applications |
@@ -156,6 +157,7 @@ stale artwork requests are cancelled when the track's art URL changes.
 | `@mesh/network-details-interface`, `@mesh/hardware-interface`, `@mesh/audio-devices-interface` | interface | `module.json` | `mesh.network-details` (connection details, scan results, saved networks, VPN, hotspot), `mesh.hardware` (model, processor, memory, graphics, disks), `mesh.audio-devices` (outputs, inputs and per-application streams) |
 | `@mesh/nmcli-network-details`, `@mesh/sysfs-hardware`, `@mesh/wpctl-audio-devices` | backend | `src/main.luau` | `nmcli`, `/sys` + `/proc` + `df` + `lspci`, and `wpctl` providers |
 | `@mesh/volume-presentation` | library | Luau `require("@mesh/volume-presentation/volume")`: level normalization, scroll steps and the semantic volume icon shared by every audio frontend |
+| `@mesh/drawing` | library | Luau path helpers and drawing command validation for `@mesh/drawing-canvas` |
 | `@mesh/glass-material` | library | Shared surface gradients, translucent fills, text, accents, rims, hovers, shadows and `--glass-backdrop-{pill,card,dock,panel,flare,lens}` blur/refraction materials; defaults derive from any theme, with Liquid Glass and Frutiger Aero tuning them |
 | `@mesh/shell-ui-interface` | interface | Named UI extension-point contracts a host surface renders foreign module UI into |
 | `@mesh/icons-default` | icon-pack | Default semantic icon mappings |

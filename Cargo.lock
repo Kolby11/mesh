@@ -2239,12 +2239,14 @@ name = "mesh-core-elements"
 version = "0.1.0"
 dependencies = [
  "bitflags 2.11.1",
+ "kurbo 0.11.3",
  "mesh-core-component",
  "mesh-core-files",
  "mesh-core-theme",
  "serde",
  "serde_json",
  "slotmap",
+ "svgtypes",
  "taffy",
  "thiserror 2.0.18",
  "tracing",
@@ -2475,6 +2477,7 @@ name = "mesh-core-resources"
 version = "0.1.0"
 dependencies = [
  "fontdb 0.23.0",
+ "getrandom 0.4.2",
  "libc",
  "mesh-core-files",
  "serde",

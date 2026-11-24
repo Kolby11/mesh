@@ -286,8 +286,15 @@ const THEME_COMMANDS: [CoreServiceCommand; 8] = [
     CoreServiceCommand {
         name: "set_tokens",
         translate: |payload| {
+            let accessibility = match payload.get("layer") {
+                None | Some(Value::Null) => false,
+                Some(Value::String(layer)) if layer == "user" => false,
+                Some(Value::String(layer)) if layer == "accessibility" => true,
+                Some(_) => return None,
+            };
             Some(CoreRequest::SetThemeTokens {
                 tokens: payload.get("tokens")?.as_object()?.clone(),
+                accessibility,
             })
         },
     },
@@ -419,5 +426,25 @@ mod tests {
                 .request("mesh.locale", "set_locale", &serde_json::json!({}))
                 .is_none()
         );
+    }
+
+    #[test]
+    fn theme_token_command_accepts_only_known_override_layers() {
+        let registry = CoreServiceRegistry::builtin();
+        let request = |payload| registry.request("mesh.theme", "set_tokens", &payload);
+        assert!(matches!(
+            request(serde_json::json!({"tokens": {"glass.example": null}})),
+            Some(CoreRequest::SetThemeTokens { accessibility: false, .. })
+        ));
+        assert!(matches!(
+            request(serde_json::json!({
+                "tokens": {"glass.example": "none"},
+                "layer": "accessibility",
+            })),
+            Some(CoreRequest::SetThemeTokens { accessibility: true, .. })
+        ));
+        for invalid in [serde_json::json!("unknown"), serde_json::json!(true)] {
+            assert!(request(serde_json::json!({"tokens": {}, "layer": invalid})).is_none());
+        }
     }
 }

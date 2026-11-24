@@ -258,7 +258,9 @@ Frutiger Aero modes provide overrides.
 Settings uses separate material tokens for the outer panel, sidebar, grouped
 cards, dividers, switches and stepper buttons. The Liquid Glass panel and sidebar
 let the compositor-blurred desktop show through. Reduce transparency replaces
-the panel gradient with the opaque color supplied by `--glass-settings-solid`.
+the panel gradient with the opaque color supplied by `--glass-settings-solid`
+and masks the glass tier backdrop filters. Turning it off reveals the current
+glass strength, including any changes made while the mask was active.
 
 ### 4.2 Theme tuning and component internals
 
@@ -356,8 +358,12 @@ token family entry (`@mesh/glass-material.glass.backdrop.panel`) reaches every
 module that uses the family. `mesh.theme.set_tokens({ name: value | null })`
 patches this layer where the active theme selection lives (`null` removes an
 entry; at most 64 entries per call) and recomposes the theme in the same
-transaction. Per-component
-overrides stay in component styles (`.my-widget { --color-primary:
+transaction. The optional `"accessibility"` layer argument patches the separate
+`shell.theme.accessibility_tokens` map. That map supplies effective values above
+the ordinary overrides and follows the active theme selection's scope. A pinned
+profile uses its own accessibility token map. An accessibility token map authored
+directly in a profile counts as a local theme override. Per-component overrides
+stay in component styles (`.my-widget { --color-primary:
 var(--color-tertiary); }`) and cascade like CSS variables; the registry-level
 token read still returns the theme value.
 
@@ -703,8 +709,11 @@ blurred-backdrop cache are targets.**
 
 Background ("frosted glass") blur behind a shell surface is a **compositor**
 effect: a Wayland client never sees the pixels behind its own surface. MESH
-computes blur regions from each element's `backdrop-filter` — rectangles, with
-rounded corners approximated as bands — and hands them to the compositor:
+computes blur regions from each element's `backdrop-filter` and hands them to
+the compositor. These rectangles approximate rounded corners with bands and
+use the accumulated transforms and overflow clip bounds from painting. Fixed
+descendants start in surface viewport coordinates with the viewport clip, even
+inside a scrolled or offscreen ancestor.
 
 1. **`ext-background-effect-v1`** — preferred while the compositor advertises
    the protocol's `blur` capability (Hyprland, KWin, niri). The capability can
@@ -985,6 +994,96 @@ and compositor blur regions leave it out.
 
 Radii follow CSS overlap scaling: only adjacent radii that together exceed
 their side scale down, so one corner may span the whole side.
+
+## 12.2 Programmable materials
+
+**Shipped:** the `material` attribute evaluates a SkSL fragment body over an
+element's offscreen rendering. It samples the element and its descendants with
+`source.eval(p)`. Material layers can nest for successive passes. Layout,
+keyboard focus, hit testing, and accessibility continue to use the element tree.
+
+The shader receives `p` as a paint-target pixel coordinate, `bounds` as the
+element's device-pixel `(x, y, width, height)`, and `tint` as the normalized RGBA
+value of the computed CSS `color`. Bind `material-time` and `material-values`
+from Luau to supply a float `time` and up to four whitespace-separated floats in
+`values`. Omitted or invalid numbers become zero. The shader returns
+premultiplied RGBA. A material never starts a clock on its own.
+
+```html
+<box class="accent" material={scanlines} material-time={phase}>
+  <text>Playback</text>
+</box>
+```
+
+```lua
+scanlines = [[
+    half4 pixel = source.eval(p);
+    float line = step(0.5, fract((p.y - bounds.y) / 4.0 + time));
+    return half4(mix(pixel.rgb, half3(tint.rgb) * pixel.a, half(line * 0.15)), pixel.a);
+]]
+phase = 0
+```
+
+Fragment bodies are limited to 2 KiB and loop-free SkSL with scalar/vector
+expressions, local assignments, conditionals, and returns. Layer depth and
+output size are bounded. Invalid or over-budget
+materials paint their subtree normally and report a painter diagnostic.
+The default input is the node's own layer. Sampling uses transparent pixels beyond
+that layer, and output is clipped to its painted bounds. Foreign surface
+pixels are only available through a separate, authorized source.
+
+**Shipped:** a painted element with `render-source="name"` supplies its
+subtree to a material on the same component instance and surface.
+`material-source="name"` selects that source instead of the material node's
+own output. The source is scaled into the consumer's full box before applying
+damage clips. Sources and consumers can appear in either paint order.
+
+```xml
+<box render-source="preview"><text>Playback</text></box>
+<box class="preview-reflection" material={reflection} material-source="preview" />
+```
+
+The producer still paints at its authored location. Its snapshot is limited
+to the producer's box and uses transparent pixels outside its visible
+content. Capture is bounded to 16 names per surface, with aggregate per-pass
+pixel and command limits. Source names must be unique within the owning
+component instance. A source cannot sample another named source or read a
+backdrop. Missing, ambiguous or unsupported sources emit a diagnostic and
+leave the consuming subtree unfiltered.
+
+**Shipped:** add `render-target="width height"` to a named producer to lay it
+out in a dedicated viewport at `(0, 0)`. Both dimensions are integers from 1
+through 2048 in logical pixels. The target occupies no space in the surface
+layout and participates in paint only through sampling. It contributes no
+pointer, focus, accessibility, or child-surface targets. Its viewport sets the
+root's dimensions and clips its output. Descendants use normal layout and text
+measurement within that viewport. A target under a hidden ancestor is unavailable.
+
+Named producers are private to their component instance by default. Setting
+`render-export="true"` makes the name available to the embedding component on
+the same presentation surface. The embedding tag must declare a literal
+`render-import="export=alias"` before its component can sample that alias via
+`material-source`. A bare name imports it under the same name. List multiple
+imports with spaces. Names in import declarations consist of up to 64 ASCII
+letters, digits, underscores or dashes. An alias resolves only against an
+explicit export of that mounted child. Removed, private, ambiguous, and
+unavailable exports use the usual missing-source fallback. Targets and aliases
+share the surface's capture and command budgets. The renderer also limits
+imports to 16 and standalone layout to 16,384 authored nodes per pass.
+
+## 12.3 Authored vector geometry and masks
+
+**Shipped:** a path shape uses SVG path data and an optional view box. Its
+fill rule applies to rendering and hit testing, including cutouts. Focus
+outlines follow the path. Shape fills use the normal background color,
+gradient, or image. A path shape can clip its descendants' painting and
+pointer targets with `clip-children`. Viewport-fixed descendants keep their
+own coordinate space. Backdrop effects inside a path mask sample in-surface
+content so a rectangular compositor blur region cannot fill a cutout.
+
+Text with a baseline path uses the first contour and keeps the existing
+single-line shaping and text semantics. See [vector elements and path
+attributes](../frontend/elements.md#vector-paths).
 
 ## 13. Tooltips
 

@@ -25,6 +25,12 @@ fn plain_content(node: &WidgetNode) -> bool {
         && style.opacity == 1.0
         && style.mix_blend_mode == BlendMode::Normal
         && style.filter.blur_radius == 0.0
+        && !mesh_core_elements::ShapeGeometry::clips_children(node)
+        && !node
+            .attributes
+            .get(mesh_core_elements::Prop::Material)
+            .is_some_and(|source| !source.trim().is_empty())
+        && !node.attributes.contains_key(mesh_core_elements::Prop::RenderSource)
         && style.backdrop_filter.blur_radius == 0.0
         && node.children.iter().all(plain_content)
 }

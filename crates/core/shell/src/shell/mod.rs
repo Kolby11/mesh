@@ -1009,9 +1009,16 @@ impl Drop for BackendRuntimeTasks {
 }
 
 #[derive(Debug, Clone)]
+enum PendingBackendPurpose {
+    Startup,
+    ProviderSelection(PathBuf),
+    SupervisedRestart,
+}
+
+#[derive(Debug, Clone)]
 struct PendingBackendRuntime {
     slot: BackendRuntimeSlot,
-    graph_path: Option<PathBuf>,
+    purpose: PendingBackendPurpose,
     started: bool,
     initial_state: Option<serde_json::Value>,
 }

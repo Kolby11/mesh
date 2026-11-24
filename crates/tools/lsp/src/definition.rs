@@ -1,10 +1,13 @@
 use std::path::{Path, PathBuf};
 
-use mesh_core_component::ComponentImportTarget;
+use mesh_core_component::{
+    ComponentFile, ComponentImportTarget,
+    parser::{parse_component, parse_component_for_tooling},
+};
 use tower_lsp::lsp_types::{GotoDefinitionResponse, Location, Position, Range, Url};
 
 use crate::{
-    document::{ByteSpan, Document, ScriptSymbolKind, block_content_range},
+    document::{ByteSpan, Document, ScriptSymbolKind},
     module_registry::ModuleRegistry,
     util::{Block, block_at_offset, position_to_offset},
 };
@@ -15,7 +18,7 @@ pub fn definition(
     registry: &ModuleRegistry,
 ) -> Option<GotoDefinitionResponse> {
     let offset = position_to_offset(&doc.source, position);
-    let loc = block_at_offset(&doc.source, offset);
+    let loc = block_at_offset(doc, offset);
 
     let location = match loc.block {
         Block::Template => template_definition(doc, offset, registry),
@@ -33,7 +36,7 @@ fn template_definition(
 ) -> Option<Location> {
     let token = identifier_at(&doc.source, offset, true)?;
 
-    if cursor_is_component_tag(&doc.source, token.start) {
+    if cursor_is_component_tag(doc, token.start) {
         if let Some(location) = resolve_component_target(doc, &token.text, registry) {
             return Some(location);
         }
@@ -99,6 +102,19 @@ pub(crate) fn resolve_import_target(
     }
 }
 
+pub(crate) fn load_imported_component(
+    doc: &Document,
+    tag: &str,
+    registry: &ModuleRegistry,
+) -> Option<ComponentFile> {
+    let import = doc.imports.iter().find(|import| import.alias == tag)?;
+    let path = resolve_import_target(doc, &import.target, registry)?;
+    let source = std::fs::read_to_string(path).ok()?;
+    parse_component(&source)
+        .or_else(|_| parse_component_for_tooling(&source))
+        .ok()
+}
+
 fn resolve_module_entrypoint(registry: &ModuleRegistry, module_id: &str) -> Option<PathBuf> {
     let module_root = registry.module_dirs.get(module_id)?;
     let entrypoint = registry.module_entrypoint(module_id)?;
@@ -141,15 +157,15 @@ fn find_module_root(path: &Path) -> Option<PathBuf> {
     }
 }
 
-fn cursor_is_component_tag(source: &str, token_start: usize) -> bool {
-    let Some((template_start, template_end)) = block_content_range(source, "template") else {
+fn cursor_is_component_tag(doc: &Document, token_start: usize) -> bool {
+    let Some(span) = doc.block_content_span("template") else {
         return false;
     };
-    if token_start < template_start || token_start > template_end {
+    if !(span.start..=span.end).contains(&token_start) {
         return false;
     }
 
-    let before = &source[template_start..token_start];
+    let before = &doc.source[span.start..token_start];
     let last_lt = before.rfind('<');
     let last_gt = before.rfind('>');
     matches!(last_lt, Some(lt) if last_gt.is_none_or(|gt| gt < lt))

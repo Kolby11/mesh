@@ -42,6 +42,14 @@ pub fn effective_profile_settings(
     let root = document
         .as_object_mut()
         .expect("SettingsStore always serializes an object");
+    if profile_pins_theme(profile)
+        && let Some(theme) = root
+            .get_mut(mesh_core_config::SHELL_NAMESPACE)
+            .and_then(|shell| shell.get_mut("theme"))
+            .and_then(serde_json::Value::as_object_mut)
+    {
+        theme.remove("accessibility_tokens");
+    }
     if let Some(theme) = profile
         .resources
         .theme
@@ -370,6 +378,29 @@ mod tests {
         );
         assert!(profile_pins_theme(&profile));
         assert_eq!(theme(&chosen, &profile), "pinned");
+    }
+
+    #[test]
+    fn a_pinned_theme_owns_its_own_accessibility_token_layer() {
+        let shared = SettingsStore::from_value(
+            PathBuf::from("/settings.json"),
+            serde_json::json!({"shell":{"theme":{
+                "active":"shared",
+                "tokens":{"glass.example":"blur(12px)"},
+                "accessibility_tokens":{"glass.example":"none"},
+            }}}),
+        ).unwrap();
+        let mut profile = ShellProfile::new();
+        let unpinned = effective_profile_settings(shared.clone(), Some(&profile)).unwrap();
+        assert_eq!(unpinned.shell().theme.accessibility_tokens["glass.example"], "none");
+
+        profile.settings.insert(
+            "shell".into(),
+            serde_json::json!({"theme":{"active":"pinned"}}),
+        );
+        let pinned = effective_profile_settings(shared, Some(&profile)).unwrap();
+        assert_eq!(pinned.shell().theme.tokens["glass.example"], "blur(12px)");
+        assert!(pinned.shell().theme.accessibility_tokens.is_empty());
     }
 
     #[test]

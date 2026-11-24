@@ -1119,6 +1119,7 @@ fn skia_path_fill_triangle_paints_expected_pixels() {
                     PainterPathElement::LineTo(16.0, 11.0),
                     PainterPathElement::Close,
                 ],
+                ..PainterPath::default()
             },
             paint: PainterPaint::fill(Color::from_hex("#00ff00").unwrap()),
             clip: full_clip(18, 14),
@@ -1144,6 +1145,7 @@ fn skia_path_stroke_line_paints_expected_pixels() {
                     PainterPathElement::MoveTo(2.0, 4.0),
                     PainterPathElement::LineTo(16.0, 4.0),
                 ],
+                ..PainterPath::default()
             },
             paint: PainterPaint::stroke(Color::from_hex("#0000ff").unwrap(), 2.0),
             clip: full_clip(18, 8),

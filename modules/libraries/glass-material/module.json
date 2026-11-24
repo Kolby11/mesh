@@ -5,6 +5,14 @@
   "mesh": {
     "apiVersion": "0.1",
     "kind": "library",
+    "provides": {
+      "libraries": [
+        {
+          "namespace": "@mesh/glass-material",
+          "path": "lib"
+        }
+      ]
+    },
     "theme": {
       "tokens": {
         "glass.rim": "color-mix(in srgb, var(--color-outline-variant) 25%, transparent)",

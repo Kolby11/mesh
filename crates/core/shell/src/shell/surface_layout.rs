@@ -105,38 +105,32 @@ pub(super) fn prepare_theme_for_graph(
             })
         });
     let mut skipped_overrides = Vec::new();
-    let mut user_overrides = HashMap::new();
-    for (name, value) in &settings.theme.tokens {
-        let token = match value {
-            serde_json::Value::String(value) => TokenValue::String(value.clone()),
-            serde_json::Value::Bool(value) => TokenValue::Bool(*value),
-            serde_json::Value::Number(value) => {
-                match value.as_f64().filter(|value| value.is_finite()) {
-                    Some(value) => TokenValue::Number(value),
-                    None => {
-                        skipped_overrides.push(format!(
-                            "user theme token '{name}' must contain a finite number"
-                        ));
-                        continue;
-                    }
-                }
-            }
-            _ => {
+    let mut token_overrides = |values: &HashMap<String, serde_json::Value>| {
+        values.iter().filter_map(|(name, value)| {
+            let token = match value {
+                serde_json::Value::String(value) => Some(TokenValue::String(value.clone())),
+                serde_json::Value::Bool(value) => Some(TokenValue::Bool(*value)),
+                serde_json::Value::Number(value) => value.as_f64().filter(|value| value.is_finite()).map(TokenValue::Number),
+                _ => None,
+            };
+            if token.is_none() {
                 skipped_overrides.push(format!(
-                    "user theme token '{name}' must be a string, number, or boolean"
+                    "user theme token '{name}' must be a string, finite number, or boolean"
                 ));
-                continue;
             }
-        };
-        user_overrides.insert(name.clone(), token);
-    }
-    let mut theme = Theme::compose_layers(
+            token.map(|token| (name.clone(), token))
+        }).collect()
+    };
+    let user_overrides = token_overrides(&settings.theme.tokens);
+    let accessibility_overrides = token_overrides(&settings.theme.accessibility_tokens);
+    let mut theme = Theme::compose_layers_with_accessibility(
         &base,
         &pack,
         descriptor.id.clone(),
         mode.clone(),
         module_layers,
         &user_overrides,
+        &accessibility_overrides,
     )?;
     theme
         .set_user_stylesheet(&settings.theme.stylesheet)

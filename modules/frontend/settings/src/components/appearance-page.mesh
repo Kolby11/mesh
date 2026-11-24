@@ -140,6 +140,7 @@
 
 <script lang="luau">
 local GlassButton = require("@mesh/glass-controls")
+local glass_backdrops = require("@mesh/glass-material/strength")
 hidden = false
 
 local theme = require("mesh.theme")
@@ -464,36 +465,11 @@ end
 -- Glass material. Strength 100% is each tier's strongest glass; the saved
 -- `glass.strength.*` overrides record the choice, and the backdrop overrides
 -- apply it to every module that uses @mesh/glass-material.
-local GLASS_TIERS = {
-    pill = { blur = 16, depth = 6, edge = 5, dispersion = 0.4 },
-    card = { blur = 24, depth = 10, edge = 8, dispersion = 0.6 },
-    dock = { blur = 20, depth = 9, edge = 7, dispersion = 0.6 },
-    panel = { blur = 32, depth = 12, edge = 9, dispersion = 0.6 },
-    flare = { blur = 10, depth = 0, edge = 0, dispersion = 0 },
-    lens = { blur = 0, depth = 8, edge = 8, dispersion = 0 },
-}
 local GLASS_PRESETS = {
     liquid = { blur = 10, liquid = 100 },
     soft = { blur = 45, liquid = 45 },
     frosted = { blur = 100, liquid = 0 },
 }
-
-local function length(value)
-    return string.format("%gpx", math.floor(value * 10 + 0.5) / 10)
-end
-
-local function backdrop_filter(tier, blur, liquid)
-    local parts = {}
-    if tier.blur > 0 then
-        parts[#parts + 1] = "blur(" .. length(tier.blur * blur / 100) .. ")"
-    end
-    parts[#parts + 1] = "refract(" .. length(tier.depth * liquid / 100) .. " "
-        .. length(tier.edge * liquid / 100) .. ")"
-    if tier.dispersion > 0 and liquid > 0 then
-        parts[#parts + 1] = "dispersion(" .. length(tier.dispersion * liquid / 100) .. ")"
-    end
-    return table.concat(parts, " ")
-end
 
 local function stored_tokens()
     local namespaces = settings_service and settings_service.namespaces or {}
@@ -523,14 +499,10 @@ end
 
 local function apply_glass(style, blur, liquid)
     show_glass(style, blur, liquid)
-    local tokens = {
-        ["glass.strength.style"] = style,
-        ["glass.strength.blur"] = blur,
-        ["glass.strength.liquid"] = liquid,
-    }
-    for name, tier in pairs(GLASS_TIERS) do
-        tokens["@mesh/glass-material.glass.backdrop." .. name] = backdrop_filter(tier, blur, liquid)
-    end
+    local tokens = glass_backdrops(blur, liquid)
+    tokens["glass.strength.style"] = style
+    tokens["glass.strength.blur"] = blur
+    tokens["glass.strength.liquid"] = liquid
     theme.set_tokens(tokens)
 end
 
@@ -541,14 +513,10 @@ end
 
 function onGlassPresetTheme()
     show_glass("theme", glass_blur, glass_liquid)
-    local tokens = {
-        ["glass.strength.style"] = mesh.json.null,
-        ["glass.strength.blur"] = mesh.json.null,
-        ["glass.strength.liquid"] = mesh.json.null,
-    }
-    for name in pairs(GLASS_TIERS) do
-        tokens["@mesh/glass-material.glass.backdrop." .. name] = mesh.json.null
-    end
+    local tokens = glass_backdrops(nil, nil, mesh.json.null)
+    tokens["glass.strength.style"] = mesh.json.null
+    tokens["glass.strength.blur"] = mesh.json.null
+    tokens["glass.strength.liquid"] = mesh.json.null
     theme.set_tokens(tokens)
 end
 

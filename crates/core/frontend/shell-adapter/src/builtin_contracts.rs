@@ -115,7 +115,7 @@ pub fn builtin_interface_catalog() -> mesh_core_service::InterfaceCatalog {
             ("set_font_family", &[("family", "string")]),
             ("set_font_size", &[("size", "int")]),
             ("set_shell_scale", &[("scale", "int")]),
-            ("set_tokens", &[("tokens", "object")]),
+            ("set_tokens", &[("tokens", "object"), ("layer", "string?")]),
             ("set_backdrop_image", &[("path", "string")]),
             (
                 "list_font_families",

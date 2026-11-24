@@ -14,6 +14,7 @@ mod build;
 mod coverage;
 mod paint_node;
 pub(crate) use paint_node::indicator_mark;
+mod render_sources;
 mod scroll;
 mod scroll_shift;
 mod sequence;
@@ -342,6 +343,19 @@ impl RetainedDisplayList {
         let dirty_summary = dirty_summary.unwrap_or_default();
         let empty_dirty_nodes = HashSet::new();
         let dirty_node_ids = dirty_node_ids.unwrap_or(&empty_dirty_nodes);
+        self.render_source_inputs.update(
+            root,
+            &self.batch_index,
+            dirty_node_ids,
+            !has_authoritative_dirty_summary
+                || caller_lineage_changed
+                || generations_skipped
+                || self.root_id != Some(root.id)
+                || dirty_summary.inserted > 0
+                || dirty_summary.removed > 0
+                || dirty_summary.reordered > 0
+                || (dirty_summary.any() && dirty_node_ids.is_empty()),
+        );
         let scroll_only = dirty_summary.scroll > 0
             && !resource_revision_changed
             && !caller_lineage_changed
@@ -414,6 +428,8 @@ impl RetainedDisplayList {
             && !policy_changed
             && !resource_revision_changed
             && !dirty_summary.any()
+            && self.render_source_inputs.is_empty()
+            && !self.render_sources.iter().any(render_sources::is_extended_source)
         {
             next.clear();
             self.next_entries_scratch = next;
@@ -628,9 +644,35 @@ impl RetainedDisplayList {
             )
         });
 
+        let had_render_sources = !self.render_sources.is_empty();
+        let mut render_sources_changed = false;
+        if !patched_commands
+            || had_render_sources
+            || !self.render_source_inputs.is_empty()
+            || subtrees.iter().any(|(owner, subtree)| {
+                subtree.commands.first().is_some_and(|command| {
+                    command.node.id == *owner && command.node.render_source.is_some()
+                })
+            })
+        {
+            let next_sources = self.render_source_inputs.collect(
+                root,
+                &paint_commands,
+                &subtrees,
+                &self.render_sources,
+            );
+            render_sources_changed =
+                !render_sources::same_sources(&self.render_sources, &next_sources);
+            self.render_sources = next_sources;
+        }
+        // A changed source can influence disjoint consumers and arbitrary
+        // samples within those consumers' boxes.
+        let named_source_damage = (had_render_sources || !self.render_sources.is_empty())
+            && (damage.is_some() || scroll_only || render_sources_changed);
         let full_surface_damage = resource_revision_changed
             || policy_changed
             || force_full_damage
+            || named_source_damage
             || damage.is_none() && self.entries.is_empty();
         let damage_rect = if full_surface_damage {
             surface
@@ -686,7 +728,7 @@ impl RetainedDisplayList {
             self.next_entries_scratch = previous_entries;
         }
         let shift_candidates: SmallVec<[(NodeId, DamageRect, (f32, f32)); 2]> =
-            if scroll_only && painted_base {
+            if scroll_only && painted_base && !named_source_damage {
                 dirty_node_ids
                     .iter()
                     .filter_map(|id| {
@@ -1043,6 +1085,7 @@ impl RetainedDisplayList {
                 backdrop_regions: self.backdrop_regions.clone().into(),
                 blur_regions: self.blur_regions.clone().into(),
                 filter_layer_regions: self.filter_layer_regions.clone().into(),
+                render_sources: Arc::clone(&self.render_sources),
             },
             FramePaintReplay {
                 spans,
@@ -1211,6 +1254,7 @@ impl RetainedDisplayList {
                 selection: SelectedDisplayListSelection::None,
                 metrics,
                 backdrop_regions: plan.effects.backdrop_regions.as_ref(),
+                render_sources: plan.effects.render_sources.as_ref(),
             };
         }
 
@@ -1223,6 +1267,7 @@ impl RetainedDisplayList {
                 selection: SelectedDisplayListSelection::None,
                 metrics,
                 backdrop_regions: plan.effects.backdrop_regions.as_ref(),
+                render_sources: plan.effects.render_sources.as_ref(),
             };
         };
 
@@ -1236,6 +1281,7 @@ impl RetainedDisplayList {
                 selection: self.select_all(),
                 metrics,
                 backdrop_regions: plan.effects.backdrop_regions.as_ref(),
+                render_sources: plan.effects.render_sources.as_ref(),
             };
         }
 
@@ -1255,6 +1301,7 @@ impl RetainedDisplayList {
                 selection: self.select_all(),
                 metrics,
                 backdrop_regions: plan.effects.backdrop_regions.as_ref(),
+                render_sources: plan.effects.render_sources.as_ref(),
             };
         }
 
@@ -1275,6 +1322,7 @@ impl RetainedDisplayList {
             },
             metrics,
             backdrop_regions: plan.effects.backdrop_regions.as_ref(),
+            render_sources: plan.effects.render_sources.as_ref(),
         }
     }
 
@@ -1309,6 +1357,7 @@ impl RetainedDisplayList {
                 selection: SelectedDisplayListSelection::None,
                 metrics,
                 backdrop_regions: plan.effects.backdrop_regions.as_ref(),
+                render_sources: plan.effects.render_sources.as_ref(),
             };
         }
 
@@ -1321,6 +1370,7 @@ impl RetainedDisplayList {
                 selection: SelectedDisplayListSelection::None,
                 metrics,
                 backdrop_regions: plan.effects.backdrop_regions.as_ref(),
+                render_sources: plan.effects.render_sources.as_ref(),
             };
         };
 
@@ -1334,6 +1384,7 @@ impl RetainedDisplayList {
                 selection: self.select_all(),
                 metrics,
                 backdrop_regions: plan.effects.backdrop_regions.as_ref(),
+                render_sources: plan.effects.render_sources.as_ref(),
             };
         }
 
@@ -1354,6 +1405,7 @@ impl RetainedDisplayList {
             },
             metrics,
             backdrop_regions: plan.effects.backdrop_regions.as_ref(),
+            render_sources: plan.effects.render_sources.as_ref(),
         }
     }
 

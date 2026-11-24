@@ -131,7 +131,7 @@ pub(super) fn taffy_style_for_node(
     }
 
     let mut taffy = taffy_style::Style {
-        display: match if node.is_closed_container() {
+        display: match if node.is_closed_container() || node.is_render_target() {
             Display::None
         } else {
             style.display
@@ -476,8 +476,11 @@ fn resolve_fit_extents(node: &mut WidgetNode) -> (f32, f32) {
     let mut max_bottom = node.layout.y + node.layout.height;
     for child in &mut node.children {
         let (right, bottom) = resolve_fit_extents(child);
-        // Fixed and promoted subtrees own a different coordinate/layout boundary.
-        if !child.is_promoted_popover() && child.computed_style.position != Position::Fixed {
+        // Fixed, promoted and offscreen subtrees own different layout boundaries.
+        if !child.is_promoted_popover()
+            && !child.is_render_target()
+            && child.computed_style.position != Position::Fixed
+        {
             max_right = max_right.max(right);
             max_bottom = max_bottom.max(bottom);
         }
@@ -513,7 +516,10 @@ pub(super) fn write_taffy_layout_with_parent(
     viewport_h: f32,
 ) {
     crate::frame_work::visit(crate::frame_work::Pass::LayoutWrite);
-    if node.computed_style.display == Display::None || node.is_closed_container() {
+    if node.computed_style.display == Display::None
+        || node.is_closed_container()
+        || node.is_render_target()
+    {
         zero_layout_subtree(node);
         return;
     }

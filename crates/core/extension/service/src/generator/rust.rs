@@ -72,8 +72,11 @@ pub fn generate_rust_bindings(contract: &CompiledContract) -> Result<String, Str
     writeln!(output, "pub const FEATURES: &[&str] = &[{features}];\n").unwrap();
 
     output.push_str(RUNTIME_PRELUDE);
-    if uses_blob(contract) {
+    if uses_type(contract, BaseType::Blob) {
         output.push_str(BLOB_HANDLE_PRELUDE);
+    }
+    if uses_type(contract, BaseType::Frame) {
+        output.push_str(FRAME_HANDLE_PRELUDE);
     }
 
     let mut type_names = Names::default();
@@ -305,16 +308,24 @@ pub struct BlobHandle(pub String);
 
 ";
 
-fn uses_blob(contract: &CompiledContract) -> bool {
+const FRAME_HANDLE_PRELUDE: &str = "\
+/// A provider-owned live frame channel handle.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct FrameHandle(pub String);
+
+";
+
+fn uses_type(contract: &CompiledContract, kind: BaseType) -> bool {
     let schemas = &contract.schemas;
-    let is_blob = |expr: &TypeExpr| expr.base == BaseType::Blob;
-    let fields_use_blob = |fields: &[CompiledField]| fields.iter().any(|f| is_blob(&f.type_expr));
-    schemas.state_fields.iter().any(|f| is_blob(&f.type_expr))
+    let matches = |expr: &TypeExpr| expr.base == kind;
+    let fields_use_type = |fields: &[CompiledField]| fields.iter().any(|f| matches(&f.type_expr));
+    schemas.state_fields.iter().any(|f| matches(&f.type_expr))
         || schemas.methods.iter().any(|method| {
-            fields_use_blob(&method.args) || method.returns.as_ref().is_some_and(is_blob)
+            fields_use_type(&method.args) || method.returns.as_ref().is_some_and(matches)
         })
-        || schemas.events.iter().any(|event| fields_use_blob(&event.payload))
-        || schemas.types.values().any(|ty| fields_use_blob(&ty.fields))
+        || schemas.events.iter().any(|event| fields_use_type(&event.payload))
+        || schemas.types.values().any(|ty| fields_use_type(&ty.fields))
 }
 
 /// A struct inside a generated submodule, whose path to the root is `super::`.
@@ -388,6 +399,7 @@ fn rust_type(expr: &TypeExpr, root: &str) -> String {
         BaseType::Float => "f64".to_string(),
         BaseType::Boolean => "bool".to_string(),
         BaseType::Blob => format!("{root}BlobHandle"),
+        BaseType::Frame => format!("{root}FrameHandle"),
         BaseType::Object => "serde_json::Map<String, serde_json::Value>".to_string(),
         BaseType::Any => "serde_json::Value".to_string(),
         BaseType::Named(name) if name == BUILTIN_RESULT_TYPE => format!("{root}CallResult"),

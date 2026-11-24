@@ -33,6 +33,11 @@ Lowercase tags are built-in MESH elements. PascalCase tags are imported componen
 
 Common attributes include `id`, `class`, `part`, `style`, `ref`, `label`, `aria-label`, `role`, `aria-role`, `title`, `disabled`, `readonly`, `required`, `value`, `checked`, `selected`, `expanded`, and `invalid`. Element-specific phases may add narrower attributes, but shared attributes keep diagnostics and Luau state handling consistent across families.
 
+Any painted subtree can serve as a named `render-source` for a material. Give
+it a `render-target` viewport to keep the subtree out of surface layout and
+input. Use `render-export="true"` to let the embedding component import it.
+See [programmable materials](mesh-syntax.md#programmable-materials).
+
 ## Layout And Display Elements
 
 Phase 87 makes the layout, structure, and display subset usable for shell composition. These layout and display elements are the first behavior slice built on the native taxonomy.
@@ -60,10 +65,10 @@ Display primitives:
 |-----|----------|
 | `text` | Text content. |
 | `icon` | Icon theme or source-backed icon. |
-| `image` | Image source with accessible alternate text. `src` is a file path or a service `blob` handle (`mesh-blob:sha256-…`); see [blobs](../modules/backend-events.md#blobs). |
+| `image` | Image source with accessible alternate text. `src` accepts a file path, a service `blob` handle, or a service `frame` handle. A live frame fits the image box while preserving its aspect ratio. See [blobs](../modules/backend-events.md#blobs) and [live frames](../modules/backend-events.md#live-frames). |
 | `badge` | Compact status text. |
 | `progress` | Progress bar with `value`, `min`, `max`, and `indeterminate`; styled through `::track` and `::fill` parts. |
-| `shape` | Vector shape. `type` is `sector` (default), `arc`, `polygon` or `polyline`. Sectors and arcs are centred in the box with the shorter half-side as outer radius; `start`/`end` are degrees clockwise from the top and a sector's `inner` is a 0–1 fraction of the outer radius. Polygons and polylines take `points="x,y x,y"` as percentages of the box. `background-color` fills sectors and polygons, `border-color` and `border-width` stroke the outline, and the box paints no background or border of its own. Pointer hits land only on the painted shape, so overlapping boxes stay independently clickable; add `tabindex`, `role` and `onclick` to make one an activatable control. Children lay out in the shape's box. |
+| `shape` | Vector geometry with fills, strokes, outlines, and shape-aware pointer targeting. Supports `sector`, `arc`, `polygon`, `polyline`, and SVG `path`. See [Vector paths](#vector-paths). |
 | `tooltip` | Tooltip content or ownership metadata tied into the existing title/tooltip lookup path. |
 | `avatar` | Image/icon-backed avatar metadata. |
 | `shortcut` | Keyboard shortcut label metadata. |
@@ -92,6 +97,41 @@ Example:
 .panel-scroll { height: 220px; }
 </style>
 ```
+
+### Vector paths
+
+Sectors and arcs are centered in the box with the shorter half-side as the
+outer radius. Their `start` and `end` angles run clockwise from the top.
+A sector's `inner` is a fraction between 0 and 1. Polygons and polylines take
+`points="x,y x,y"` as percentages of the box.
+
+`type="path"` takes SVG path data in `d`, including relative commands,
+quadratic and cubic Béziers, and elliptical arcs. The four numbers in `view-box`
+set the minimum x, minimum y, width, and height. The default `0 0 100 100`
+maps to the element's full layout box. Each axis scales independently.
+`fill-rule="evenodd"` makes nested contours into holes. The default
+`nonzero` uses their winding direction. `path-fill="none"` draws a stroke only.
+
+Filled shapes clip their background color, gradient, or image to the geometry.
+`border-color` and the top `border-width` style the stroke. CSS `outline`
+follows the contour, including focus outlines. The shape's box still controls
+layout. Add `tabindex`, `role`, `aria-label`, and `onclick` to make a
+shape keyboard-activatable. Invalid or oversized path data yields empty
+geometry. Paths accept at most 16 KiB of authored data and 2,048 normalized
+segments.
+
+`clip-children="true"` clips descendant pixels and pointer hits to the filled
+contours, including holes. An empty or stroke-only shape clips all ordinary
+descendants. Viewport-fixed descendants follow the normal viewport rules.
+Backdrop blur inside a path mask uses the in-surface filter. The compositor
+receives no rectangular blur region for that descendant.
+
+A `text` element can use the same path syntax in `text-path` and `view-box`.
+The first shaped line follows the first contour, with glyph clusters rotated
+along its tangent. Text that extends beyond the contour is clipped by whole
+clusters. Ordinary text layout still determines the box. Set the width and
+height for labels drawn in a fixed coordinate system. The text keeps its
+accessibility label. Path text currently has no selection geometry.
 
 ## Action And Text Input Controls
 

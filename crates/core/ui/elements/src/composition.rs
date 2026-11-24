@@ -183,6 +183,47 @@ pub struct ComponentCompositionProps {
     pub bindings: AttributeMap,
     /// Optional parent field receiving the child component instance.
     pub bind_this: Option<String>,
+    /// Static texture imports on this embedding, from child export to parent name.
+    pub render_imports: std::sync::Arc<[RenderImport]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RenderImport {
+    pub exported: std::sync::Arc<str>,
+    pub local: std::sync::Arc<str>,
+}
+
+impl RenderImport {
+    /// Parse up to 16 whitespace-separated `export` or `export=alias` names.
+    pub fn parse(value: &str) -> Option<std::sync::Arc<[Self]>> {
+        fn valid(name: &str) -> bool {
+            !name.is_empty()
+                && name.len() <= 64
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"-_".contains(&byte))
+        }
+
+        let mut names = Vec::new();
+        for item in value.split_ascii_whitespace() {
+            let (exported, local) = item.split_once('=').unwrap_or((item, item));
+            if names.len() == 16 || !valid(exported) || !valid(local) {
+                return None;
+            }
+            names.push(Self {
+                exported: exported.into(),
+                local: local.into(),
+            });
+        }
+        (!names.is_empty()).then(|| names.into())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct RenderImportScope {
+    pub child: std::sync::Arc<str>,
+    pub parent: std::sync::Arc<str>,
+    pub names: std::sync::Arc<[RenderImport]>,
 }
 
 #[cfg(test)]

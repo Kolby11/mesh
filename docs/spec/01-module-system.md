@@ -492,7 +492,7 @@ source for every generated artifact; no generator re-reads `module.json`.
 file per contract: `luau` (default; consumer declarations, `<interface>.d.luau`),
 `luau-provider` (provider stub), `luau-mock` (state and method returns that
 satisfy the contract — defaults, in-range numbers, empty arrays, required record
-fields — with any value it cannot construct, such as a required blob, listed at
+fields — with any value it cannot construct, such as a required blob or frame, listed at
 the top and raised as an error by its method), `rust` (provider bindings: identity
 and fingerprint constants, serde types for named types, state and event
 payloads, a `Provider` trait and a `dispatch` function over the call's argument
@@ -532,7 +532,7 @@ contract-less binding.
   An omitted offered version adopts the declared version. Matching a consumer
   range alone does not make a different contract version eligible.
 - **Type grammar.** Every `type`/`returns` expression is validated at graph
-  build: primitives (`string`, `int`, `float`, `boolean`, `blob`, `object`,
+  build: primitives (`string`, `int`, `float`, `boolean`, `blob`, `frame`, `object`,
   `any`), PascalCase named types declared under `contract.types` (plus the
   builtin `Result`), with `[]` (array) and `?` (optional) suffixes. Invalid
   expressions or references to undeclared types produce
@@ -584,6 +584,17 @@ contract-less binding.
   accepts handles; decoding is asynchronous and repaints only consumers. Rust
   bindings type the field `BlobHandle`, Luau as `string`, and the descriptor
   as kind `blob`. See [backend host APIs](../modules/backend-events.md#blobs).
+- **Shipped — provider-owned CPU frames.** A `frame` value is an opaque
+  handle to the latest pixels in one backend generation's channel. A
+  provider publishes tightly packed RGBA8 pixels with `mesh.frame.publish`
+  and advertises the handle through service state. Only that generation can
+  publish into or advertise its channel. The handle stays stable across
+  updates and `<image src>` repaints its consuming component independently
+  of state changes. Closing the channel or stopping its owner retires the
+  handle. Rust bindings use `FrameHandle`, Luau uses `string`, and the
+  descriptor uses kind `frame`. See [live frames](../modules/backend-events.md#live-frames).
+  **Target:** compositor and PipeWire capture with core-owned consent and
+  shared-buffer transport.
 - Do not put provider identity (`source_module`) in contract state — that is
   runtime metadata.
 
@@ -1350,6 +1361,15 @@ Discovered → Resolved → Loaded → Initialized → Running ⇄ Suspended →
   notified; repeated crashing disables the module until re-enabled.
 - UI modules are compiled at startup; dev hot-reload watches sources and
   settings.
+- **Backend recovery:** an active provider that fails receives up to three
+  supervised restart attempts with exponential backoff. Failed replacement
+  initialization consumes an attempt. Readiness starts the healthy-uptime
+  window, and a run of at least 60 seconds resets the failure count for the
+  next failure. After exhausting the attempts, the shell quarantines the
+  provider and tries the next eligible provider with a fresh retry budget.
+  Automatic provider readiness preserves quarantine exclusions. An explicit
+  provider switch can reset supervision on successful activation, and a failed
+  candidate leaves any current provider serving.
 - **Shell shutdown:** an accepted shutdown request exits the event-loop turn
   before rendering or idle waiting, then runs component, provider, presentation,
   and worker teardown.

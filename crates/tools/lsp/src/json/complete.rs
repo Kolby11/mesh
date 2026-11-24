@@ -105,6 +105,7 @@ const PRIMITIVE_TYPES: &[(&str, &str)] = &[
         "blob",
         "A `mesh-blob:sha256-…` handle to image bytes registered with `mesh.blob.put`.",
     ),
+    ("frame", "A `mesh-frame:…` handle to a provider's live image channel."),
     ("object", "Any JSON object."),
     ("any", "Any JSON value."),
 ];

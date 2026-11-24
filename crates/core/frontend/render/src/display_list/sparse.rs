@@ -8,7 +8,9 @@ use mesh_core_elements::{
 };
 
 use super::blur::command_has_effect_overflow;
-use super::build::{command_bounds, node_clip_for, visual_clip_for};
+use super::build::{
+    command_bounds, layer_clip_for_children, node_clip_for, node_clips_contents, visual_clip_for,
+};
 use super::paint_node::{
     build_paint_node_with_previous_transform_and_clips, intersect_display_clip,
 };
@@ -80,9 +82,7 @@ impl<'t> PathFrame<'t> {
         );
         let child_clip = if retained {
             super::scroll::CONTENT_CLIP
-        } else if node.computed_style.overflow_x.clips_contents()
-            || node.computed_style.overflow_y.clips_contents()
-        {
+        } else if node_clips_contents(node) {
             intersect_display_clip(clip, node_clip_for(paint))
         } else {
             clip
@@ -211,6 +211,12 @@ impl RetainedDisplayList {
             );
             node.ancestor_clips = Arc::clone(&command.node.ancestor_clips);
             node.in_scroll_content = command.node.in_scroll_content;
+            if node.style.material.is_some() != command.node.style.material.is_some() {
+                return None;
+            }
+            if node.content.geometry_changes_child_clip(Some(&command.node.content)) {
+                return None;
+            }
             let node_clip = intersect_display_clip(clip, visual_clip_for(&node));
             if node_clip.width <= 0 || node_clip.height <= 0 {
                 return None;
@@ -222,8 +228,7 @@ impl RetainedDisplayList {
             // while this node's box does not define them.
             if box_changed
                 && !live.children.is_empty()
-                && (live.computed_style.overflow_x.clips_contents()
-                    || live.computed_style.overflow_y.clips_contents()
+                && (node_clips_contents(live)
                     || !super::batch_index::size_independent_transform(
                         live.computed_style.transform,
                     ))
@@ -316,7 +321,7 @@ impl RetainedDisplayList {
             }
         }
         if !moved.is_empty() {
-            self.update_moved_coverage(&moved, &incoming_clips, &mut updated)?;
+            self.update_moved_coverage(&moved, &incoming_clips, surface_clip, &mut updated)?;
         }
         let metrics = LocalReuseMetrics {
             rebuilt_commands: dirty
@@ -371,6 +376,7 @@ impl RetainedDisplayList {
         &self,
         moved: &[MovedCommand],
         incoming_clips: &HashMap<NodeId, DisplayListClip>,
+        viewport: DisplayListClip,
         updated: &mut HashMap<NodeId, RetainedPaintSubtree>,
     ) -> Option<()> {
         let mut depth_of: HashMap<NodeId, (usize, Option<NodeId>)> = HashMap::new();
@@ -424,12 +430,13 @@ impl RetainedDisplayList {
                 }
                 builder.child_bounds = child_bounds;
                 builder.bounds = builder.local_bounds.union(child_bounds);
+                let layer_clip = layer_clip_for_children(incoming, viewport, child_bounds);
                 if filter {
                     let radius = local_commands.first()?.1.node.style.filter.blur_radius;
-                    builder.grow_filter_layer_bounds(incoming, radius * 3.0);
+                    builder.grow_filter_layer_bounds(layer_clip, radius * 3.0);
                 }
                 if compositing {
-                    builder.grow_compositing_layer_bounds(incoming);
+                    builder.grow_compositing_layer_bounds(layer_clip);
                 }
                 bounds = builder.bounds;
                 local_bounds = builder.local_bounds;

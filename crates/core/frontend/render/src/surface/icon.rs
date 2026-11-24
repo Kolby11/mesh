@@ -5,7 +5,9 @@ use super::PixelCanvasSession;
 use super::glyph::draw_font_glyph;
 use super::glyph::{GlyphAxes, draw_font_glyph_on_canvas};
 use super::profiling;
-use super::resource_broker::{PendingResourceConsumers, ResourceBroker, ResourceBrokerContext};
+use super::resource_broker::{
+    PendingResourceConsumers, ResourceBroker, ResourceBrokerContext, frame_for_paint,
+};
 use super::{checked_pixel_bytes, resource_generation_is_current};
 use image::imageops::FilterType;
 use mesh_core_elements::lru::ByteLruCache;
@@ -18,6 +20,7 @@ use mesh_core_icon::{IconResolution, ResolvedTarget};
 use mesh_core_resources::blob::{
     BLOB_SCHEME, Blob, BlobFormat, EncodedImageFormat, RawPixelLayout, lookup_blob,
 };
+use mesh_core_resources::frame::{FRAME_SCHEME, LiveFrame};
 use mesh_core_resources::{
     ResourceByteReservation, ResourceFingerprint, resource_fingerprint, resource_revision,
 };
@@ -33,7 +36,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 static IMAGE_CACHE: OnceLock<Mutex<ByteLruCache<Arc<Path>, CachedImage>>> = OnceLock::new();
 static RASTER_CACHE: OnceLock<Mutex<ByteLruCache<RasterCacheKey, RasterVariant>>> = OnceLock::new();
@@ -1218,6 +1221,12 @@ struct CachedIconImage {
     image: skia_safe::Image,
 }
 
+struct CachedFrameImage {
+    // Keep the allocation identity reserved without pinning an obsolete source frame.
+    _identity: Weak<LiveFrame>,
+    image: skia_safe::Image,
+}
+
 thread_local! {
     /// Skia images derived from cached `RasterVariant::pixels`. Keyed by
     /// the raw pointer of the `Arc<[u8]>` so distinct cache misses on the
@@ -1226,6 +1235,8 @@ thread_local! {
     /// underlying allocation cannot be freed while the Image is live.
     static ICON_SKIA_CACHE: RefCell<ByteLruCache<usize, CachedIconImage>> =
         RefCell::new(ByteLruCache::new(ICON_SKIA_CACHE_CAPACITY, ICON_SKIA_CACHE_MAX_BYTES));
+    static FRAME_SKIA_CACHE: RefCell<ByteLruCache<usize, CachedFrameImage>> =
+        RefCell::new(ByteLruCache::new(32, 32 * 1024 * 1024));
 }
 
 fn cached_skia_image_for_variant(variant: &RasterVariant) -> Option<skia_safe::Image> {
@@ -1698,6 +1709,9 @@ fn draw_file_icon_on_canvas(
     tint: Color,
     multicolor: bool,
 ) -> bool {
+    if let Some(handle) = path.to_str().filter(|src| src.starts_with(FRAME_SCHEME)) {
+        return draw_live_frame(canvas, handle, dest_x, dest_y, dest_w, dest_h);
+    }
     // A monochrome raster is the tint over the source alpha, so it is cached
     // once under a neutral colour and recoloured as it is drawn.
     let (raster_tint, draw_tint) = if multicolor {
@@ -1742,6 +1756,65 @@ fn draw_file_icon_on_canvas(
     };
     blit_variant_into_rect(canvas, &variant, dest, sampling, draw_tint);
     true
+}
+
+fn draw_live_frame(canvas: &Canvas, handle: &str, x: i32, y: i32, w: i32, h: i32) -> bool {
+    if w <= 0 || h <= 0 {
+        return false;
+    }
+    let Some(frame) = frame_for_paint(handle) else {
+        return false;
+    };
+    let (width, height) = frame.size();
+    let Some(image) = frame_image(&frame) else {
+        return false;
+    };
+    let scale = (w as f32 / width as f32).min(h as f32 / height as f32);
+    let content_width = width as f32 * scale;
+    let content_height = height as f32 * scale;
+    let dest = Rect::from_xywh(
+        x as f32 + (w as f32 - content_width) * 0.5,
+        y as f32 + (h as f32 - content_height) * 0.5,
+        content_width,
+        content_height,
+    );
+    crate::prepared_scene::retain_image(&image);
+    canvas.draw_image_rect_with_sampling_options(
+        &image,
+        None,
+        dest,
+        resampled_sampling(),
+        &Paint::default(),
+    );
+    true
+}
+
+fn frame_image(frame: &Arc<LiveFrame>) -> Option<skia_safe::Image> {
+    let key = Arc::as_ptr(frame) as usize;
+    FRAME_SKIA_CACHE.with(|cell| {
+        let mut cache = cell.borrow_mut();
+        if let Some(entry) = cache.get(&key) {
+            return Some(entry.image.clone());
+        }
+        let (width, height) = frame.size();
+        let info = ImageInfo::new(
+            (width as i32, height as i32),
+            ColorType::RGBA8888,
+            AlphaType::Unpremul,
+            None,
+        );
+        let image =
+            images::raster_from_data(&info, Data::new_copy(frame.rgba()), width as usize * 4)?;
+        cache.insert(
+            key,
+            CachedFrameImage {
+                _identity: Arc::downgrade(frame),
+                image: image.clone(),
+            },
+            frame.rgba().len(),
+        );
+        Some(image)
+    })
 }
 
 enum FileVariant {
@@ -2939,6 +3012,38 @@ mod tests {
         assert_eq!(pixel(&buffer, 0, 0).g, 0);
         assert_eq!(pixel(&buffer, 1, 0).r, 0);
         assert_eq!(pixel(&buffer, 1, 0).g, 255);
+    }
+
+    #[test]
+    fn live_frame_paint_uses_latest_pixels_and_invalidates_only_its_consumer() {
+        use crate::ResourcePaintConsumer;
+        use mesh_core_resources::frame::FrameOwner;
+        let owner = FrameOwner::default();
+        let handle = owner.publish("demo", 1, 1, vec![255, 0, 0, 255]).unwrap();
+        let path = Path::new(handle.as_ref());
+        let subscriber = ResourcePaintConsumer::with_pending_tracking();
+        let unrelated = ResourcePaintConsumer::default();
+        let paint = || {
+            let mut buffer = PixelBuffer::new(4, 2);
+            {
+                let _scope = subscriber.enter();
+                let mut session = PixelCanvasSession::new(&mut buffer);
+                draw_icon_from_path_in_session(&mut session, path, 0, 0, 4, 2, tint(), true);
+            }
+            assert_eq!(pixel(&buffer, 0, 0).a, 0, "aspect ratio is preserved");
+            pixel(&buffer, 1, 0)
+        };
+        assert_eq!(paint().r, 255);
+        assert_eq!(subscriber.pending_requests(), Some(0));
+        assert_eq!(owner.publish("demo", 1, 1, vec![0, 255, 0, 255]).unwrap(), handle);
+        assert!(subscriber.take_ready());
+        assert!(!unrelated.is_ready());
+        owner.publish("demo", 1, 1, vec![0, 0, 255, 255]).unwrap();
+        assert!(!subscriber.is_ready(), "updates coalesce until the next paint");
+        assert_eq!(paint().b, 255);
+        assert!(owner.close("demo"));
+        assert!(subscriber.take_ready());
+        assert_eq!(paint().a, 0);
     }
 
     #[test]

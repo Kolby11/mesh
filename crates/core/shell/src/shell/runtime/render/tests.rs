@@ -1,104 +1,37 @@
 use super::*;
 use mesh_core_elements::{
-    BoxShadow, LayoutRect, VisualFilter,
-    style::{
-        BackgroundPaint, Color, Corners, Edges, FontStyle, Overflow, TextAlign, TextDirection,
-        TextOverflow,
-    },
+    LayoutRect, VisualFilter, WidgetNode,
+    style::{Color, Corners},
 };
 use mesh_core_render::{
-    DamageRect, DisplayListClip, DisplayPaintCommand, DisplayPaintCommandKind,
-    display_list::DisplayPaintNode,
+    DamageRect, DisplayListClip, DisplayPaintCommand, DisplayPaintCommandKind, RetainedDisplayList,
 };
 use std::sync::Arc;
 
 fn make_cmd(x: f32, y: f32, width: f32, height: f32, blur_radius: f32) -> DisplayPaintCommand {
-    use mesh_core_render::display_list::{
-        DisplayPaintContent, DisplayPaintStyle, DisplayScrollbars,
+    let mut node = WidgetNode::new("box");
+    node.id = 1;
+    node.layout = LayoutRect {
+        x,
+        y,
+        width,
+        height,
     };
-    DisplayPaintCommand {
-        node: Arc::new(DisplayPaintNode {
-            in_scroll_content: false,
-            id: 1,
-            module_id: None,
-            transform: mesh_core_elements::AffineTransform::translation(x, y),
-            local_layout: LayoutRect {
-                x: 0.0,
-                y: 0.0,
-                width,
-                height,
-            },
-            layout: LayoutRect {
-                x,
-                y,
-                width,
-                height,
-            },
-            ancestor_clips: Vec::new().into(),
-            style: DisplayPaintStyle {
-            ui_scale: 1.0,
-                paint_parts: Default::default(),
-                resource_revision: mesh_core_resources::resource_revision(),
-                background_color: Color {
-                    r: 0,
-                    g: 0,
-                    b: 0,
-                    a: 0,
-                },
-                background_paint: BackgroundPaint::None,
-                border_color: Color {
-                    r: 0,
-                    g: 0,
-                    b: 0,
-                    a: 0,
-                },
-                border_width: Edges::zero(),
-                border_radius: Corners::zero(),
-                corner_shape: Default::default(),
-                color: Color {
-                    r: 0,
-                    g: 0,
-                    b: 0,
-                    a: 255,
-                },
-                padding: Edges::zero(),
-                overflow_x: Overflow::Visible,
-                overflow_y: Overflow::Visible,
-                font_family: Arc::from(""),
-                font_size: 16.0,
-                font_weight: 400,
-                font_style: FontStyle::Normal,
-                letter_spacing: 0.0,
-                line_height: 1.0,
-                text_align: TextAlign::Left,
-                text_overflow: TextOverflow::Clip,
-                text_direction: TextDirection::default(),
-                white_space: mesh_core_elements::style::WhiteSpace::default(),
-                language: Arc::from(""),
-                shaping_features: Arc::from(""),
-                opacity: 1.0,
-                box_shadow: BoxShadow::default(),
-                additional_box_shadows: Default::default(),
-                outline: Default::default(),
-                filter: VisualFilter::NONE,
-                backdrop_filter: VisualFilter::blur(blur_radius),
-                mix_blend_mode: mesh_core_elements::BlendMode::Normal,
-                icon_fill: None,
-                icon_weight: None,
-                icon_grade: None,
-                icon_optical_size: None,
-            },
-            content: DisplayPaintContent::None,
-            scrollbars: DisplayScrollbars::default(),
-        }),
-        clip: DisplayListClip {
-            x: 0,
-            y: 0,
-            width: (x.max(0.0) + width).ceil() as i32,
-            height: (y.max(0.0) + height).ceil() as i32,
-        },
-        kind: DisplayPaintCommandKind::Node,
-    }
+    node.computed_style.backdrop_filter = VisualFilter::blur(blur_radius);
+
+    let mut list = RetainedDisplayList::default();
+    list.update(
+        &node,
+        (x.max(0.0) + width).ceil() as u32,
+        (y.max(0.0) + height).ceil() as u32,
+        false,
+        true,
+    );
+    list.paint_commands()
+        .iter()
+        .find(|command| command.kind == DisplayPaintCommandKind::Node)
+        .cloned()
+        .expect("fixture paints a visible node")
 }
 
 #[test]

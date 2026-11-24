@@ -137,6 +137,7 @@ impl DescriptorTypeRef {
             BaseType::Float => ("float", None),
             BaseType::Boolean => ("boolean", None),
             BaseType::Blob => ("blob", None),
+            BaseType::Frame => ("frame", None),
             BaseType::Object => ("object", None),
             BaseType::Any => ("any", None),
             BaseType::Named(name) if name == BUILTIN_RESULT_TYPE => ("result", None),

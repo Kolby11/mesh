@@ -267,11 +267,7 @@ pub fn annotate_overflow_tree(
         }
     }
 
-    Some(annotate_overflow_node(
-        node,
-        scroll_offsets,
-        children_bounds,
-    ))
+    annotate_overflow_node(node, scroll_offsets, children_bounds)
 }
 
 /// Annotates one node after its children and returns its propagated bounds, so
@@ -280,7 +276,11 @@ pub fn annotate_overflow_node(
     node: &mut WidgetNode,
     scroll_offsets: &mut HashMap<NodeId, ScrollOffsetState>,
     children_bounds: Option<ContentBounds>,
-) -> ContentBounds {
+) -> Option<ContentBounds> {
+    if node.is_render_target() {
+        node.scroll_metrics = None;
+        return None;
+    }
     let content_origin_x = node.layout.x + node.computed_style.padding.left;
     let content_origin_y = node.layout.y + node.computed_style.padding.top;
     let viewport_width = (node.layout.width - node.computed_style.padding.horizontal()).max(0.0);
@@ -333,9 +333,9 @@ pub fn annotate_overflow_node(
         node.layout.y + node.layout.height.max(0.0),
     );
     if node_clips_children(node) {
-        own_bounds
+        Some(own_bounds)
     } else {
-        union_bounds(Some(own_bounds), children_bounds.unwrap_or(own_bounds))
+        Some(union_bounds(Some(own_bounds), children_bounds.unwrap_or(own_bounds)))
     }
 }
 

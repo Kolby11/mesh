@@ -127,6 +127,7 @@ local idle = optional("mesh.idle@>=1.0")
 local packages = optional("mesh.packages")
 local debug_service = optional("mesh.debug")
 local theme = optional("mesh.theme")
+local glass_backdrops = require("@mesh/glass-material/strength")
 local net = optional("mesh.network@>=1.0")
 local nd = optional("mesh.network-details@>=1.0")
 local bt = optional("mesh.bluetooth@>=1.0")
@@ -555,20 +556,62 @@ TOKENS.high_contrast = {
     },
     off = { ["color-outline"] = "null", ["color-outline-variant"] = "null", ["color-on-surface-variant"] = "null" },
 }
-local GLASS_TIERS = { "pill", "card", "dock", "panel", "flare", "lens" }
-TOKENS.reduce_transparency = { on = {
-    ["effect-backdrop-blur-surface-radius"] = 0, ["effect-backdrop-blur-popup-radius"] = 0,
+local SETTINGS_SURFACE = "@mesh/glass-material.glass.settings.surface"
+local SOLID_SETTINGS_SURFACE = "linear-gradient(var(--glass-settings-solid), var(--glass-settings-solid))"
+local REDUCED_SURFACES = {
+    ["effect-backdrop-blur-surface-radius"] = 0,
+    ["effect-backdrop-blur-popup-radius"] = 0,
     ["effect-backdrop-blur-surface-background"] = "var(--color-surface)",
     ["effect-backdrop-blur-popup-background"] = "var(--color-surface-container)",
-    ["@mesh/glass-material.glass.settings.surface"] = "linear-gradient(var(--glass-settings-solid), var(--glass-settings-solid))",
-}, off = {
-    ["effect-backdrop-blur-surface-radius"] = "null", ["effect-backdrop-blur-popup-radius"] = "null",
-    ["effect-backdrop-blur-surface-background"] = "null", ["effect-backdrop-blur-popup-background"] = "null",
-    ["@mesh/glass-material.glass.settings.surface"] = "null",
-} }
-for _, tier in ipairs(GLASS_TIERS) do
-    TOKENS.reduce_transparency.on["@mesh/glass-material.glass.backdrop." .. tier] = "none"
-    TOKENS.reduce_transparency.off["@mesh/glass-material.glass.backdrop." .. tier] = "null"
+    [SETTINGS_SURFACE] = SOLID_SETTINGS_SURFACE,
+}
+local REDUCED_TRANSPARENCY = glass_backdrops(nil, nil, "none")
+for name, value in pairs(REDUCED_SURFACES) do
+    REDUCED_TRANSPARENCY[name] = value
+end
+
+local function transparency_layer()
+    local shell = settings and settings.namespaces and settings.namespaces.shell or {}
+    return shell.theme or {}
+end
+
+local function legacy_transparency_enabled(tokens)
+    if stored("reduce_transparency") ~= true then return false end
+    for name, value in pairs(REDUCED_SURFACES) do
+        if tokens[name] ~= value then return false end
+    end
+    return true
+end
+
+local function accessibility_transparency_enabled(layer)
+    return (layer.accessibility_tokens or {})[SETTINGS_SURFACE] == SOLID_SETTINGS_SURFACE
+end
+
+local function transparency_reduced()
+    local layer = transparency_layer()
+    return accessibility_transparency_enabled(layer)
+        or legacy_transparency_enabled(layer.tokens or {})
+end
+
+local function set_reduced_transparency(enabled)
+    local layer = transparency_layer()
+    local patch = {}
+    local tokens = layer.tokens or {}
+    -- Older Settings wrote the reduction directly into the user's token layer.
+    if not enabled and not accessibility_transparency_enabled(layer) and legacy_transparency_enabled(tokens) then
+        local restored = glass_backdrops(tonumber(tokens["glass.strength.blur"]), tonumber(tokens["glass.strength.liquid"]))
+        for name, value in pairs(REDUCED_TRANSPARENCY) do
+            if tokens[name] == value then
+                patch[name] = restored[name] or mesh.json.null
+            end
+        end
+        theme.set_tokens(patch)
+    else
+        for name, value in pairs(REDUCED_TRANSPARENCY) do
+            patch[name] = enabled and value or mesh.json.null
+        end
+        theme.set_tokens(patch, "accessibility")
+    end
 end
 
 local function apply_tokens(id, enabled)
@@ -608,7 +651,11 @@ PAGES.accessibility = {
     { id = "vision", title = "pref.section.vision", copy = "", rows = {
         token_switch("high_contrast"),
         token_switch("reduce_motion"),
-        token_switch("reduce_transparency"),
+        sw("reduce_transparency", {
+            get = transparency_reduced,
+            set = set_reduced_transparency,
+            disabled = function() return theme == nil end,
+        }),
     } },
 }
 

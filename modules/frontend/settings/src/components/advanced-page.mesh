@@ -467,6 +467,8 @@ effect(function()
             end
         end
         for name, definition in pairs(properties) do
+            -- Existing profiles can carry this flag. The Accessibility page edits the theme mask.
+            if module_id == "@mesh/settings" and name == "reduce_transparency" then continue end
             local prop_type = tostring(definition.type or "string")
             local inherited_value = overrides[name]
             if inherited_value == nil then inherited_value = definition.default end

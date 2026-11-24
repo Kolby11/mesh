@@ -95,6 +95,38 @@ fn service_update_marks_component_dirty_only_when_tracked_fields_change() {
 }
 
 #[test]
+fn material_binding_updates_retained_subtree_pixels() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <box style="width: 48px; height: 36px" material={shader} material-time={phase}>
+    <box style="width: 48px; height: 36px; background-color: #ff0000" />
+  </box>
+</template>
+<script lang="luau">
+shader = [[
+    half4 pixel = source.eval(p);
+    return half4(pixel.r * half(time), pixel.r * half(1.0 - time), 0, pixel.a);
+]]
+phase = 1.0
+function turnGreen() phase = 0.0 end
+</script>
+"#,
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(48, 36);
+    let mut buffer = PixelBuffer::new(48, 36);
+    component.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+    let center = (12 * 48 + 12) * 4;
+    assert_eq!(&buffer.data()[center..center + 4], &[0, 0, 255, 255]);
+
+    component.call_namespaced_handler("turnGreen", &[]).unwrap();
+    assert!(component.wants_render());
+    component.paint_raster(&theme, extent, &mut buffer, 1.0).unwrap();
+    assert_eq!(&buffer.data()[center..center + 4], &[0, 255, 0, 255]);
+}
+
+#[test]
 fn handler_write_to_unbound_public_member_skips_component_rebuild() {
     let mut component = test_frontend_component(
         r#"

@@ -1818,12 +1818,53 @@ fn theme_mode_and_token_requests_use_worker_transaction() {
     shell.handle_shell_message(&mut VecDeque::new(), rx.blocking_recv().unwrap()).unwrap();
     assert_eq!(shell.settings.theme.mode.as_deref(), Some("default"));
     let tokens = serde_json::json!({"color.surface": "#abcdef"}).as_object().unwrap().clone();
-    shell.apply_set_theme_tokens(tokens).unwrap();
+    shell.apply_set_theme_tokens(tokens, false).unwrap();
     let prepared = rx.blocking_recv().unwrap();
     assert!(matches!(prepared, crate::shell::ShellMessage::ThemePreparationFinished { .. }));
     shell.handle_shell_message(&mut VecDeque::new(), prepared).unwrap();
     shell.handle_shell_message(&mut VecDeque::new(), rx.blocking_recv().unwrap()).unwrap();
     assert_eq!(shell.theme.active().token("color.surface").map(ToString::to_string), Some("#abcdef".into()));
+}
+
+#[test]
+fn accessibility_tokens_reveal_current_user_glass_overrides_when_cleared() {
+    const PANEL: &str = "@mesh/glass-material.glass.backdrop.panel";
+    const LENS: &str = "@mesh/glass-material.glass.backdrop.lens";
+    let dir = tempfile::tempdir().unwrap();
+    let _settings = isolated_settings_file(dir.path());
+    let mut shell = Shell::new();
+    shell.installed_module_graph = Some(
+        mesh_core_module::package::load_installed_module_graph(
+            crate::shell::discovery::test_module_graph_path(),
+        )
+        .unwrap(),
+    );
+    shell
+        .apply_set_theme("@mesh/liquid-glass:liquid-glass", None)
+        .unwrap();
+
+    let patch = |shell: &mut Shell, tokens: serde_json::Value, accessibility| {
+        shell
+            .apply_set_theme_tokens(tokens.as_object().unwrap().clone(), accessibility)
+            .unwrap();
+    };
+    let token = |shell: &Shell, name| shell.theme.active().token(name).map(ToString::to_string);
+
+    patch(&mut shell, serde_json::json!({PANEL: "blur(16px)", LENS: "none"}), false);
+    patch(&mut shell, serde_json::json!({PANEL: "none", LENS: "none"}), true);
+    assert_eq!(token(&shell, PANEL).as_deref(), Some("none"));
+    patch(&mut shell, serde_json::json!({PANEL: "blur(21px)"}), false);
+    assert_eq!(token(&shell, PANEL).as_deref(), Some("none"));
+    assert_eq!(shell.settings.theme.tokens[PANEL], "blur(21px)");
+    patch(&mut shell, serde_json::json!({PANEL: null, LENS: null}), true);
+    assert_eq!(token(&shell, PANEL).as_deref(), Some("blur(21px)"));
+    assert_eq!(token(&shell, LENS).as_deref(), Some("none"));
+
+    let persisted = mesh_core_config::SettingsStore::load_from(&dir.path().join("settings.json"))
+        .unwrap();
+    assert_eq!(persisted.shell().theme.tokens[PANEL], "blur(21px)");
+    assert_eq!(persisted.shell().theme.tokens[LENS], "none");
+    assert!(persisted.shell().theme.accessibility_tokens.is_empty());
 }
 
 #[test]

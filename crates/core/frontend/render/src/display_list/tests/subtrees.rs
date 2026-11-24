@@ -889,6 +889,164 @@ fn subtree_visual_bounds_keep_fixed_descendants_outside_scroll_clip() {
 }
 
 #[test]
+fn fixed_descendants_paint_and_repaint_outside_clipped_owners() {
+    use mesh_core_elements::style::Position;
+
+    let mut viewport = node(2, "scroll-area", 10.0, 5.0, 20.0, 20.0);
+    viewport.computed_style.overflow_y = Overflow::Hidden;
+    viewport.computed_style.transform.translate_x = -100.0;
+    viewport.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+        y: 20.0,
+        max_y: 40.0,
+        ..Default::default()
+    });
+    let mut owner = node(3, "box", 10.0, 5.0, 5.0, 5.0);
+    owner.computed_style.transform.scale_x = 2.0;
+    let mut fixed = node(4, "box", 30.0, 15.0, 10.0, 10.0);
+    fixed.computed_style.position = Position::Fixed;
+    fixed.computed_style.transform.translate_x = 2.0;
+    fixed.computed_style.background_color = Color::from_hex("#e94528").unwrap();
+    owner.children.push(fixed.clone());
+    viewport.children.push(owner);
+
+    let mut root = node(1, "box", 0.0, 0.0, 80.0, 50.0);
+    root.children.push(viewport);
+    let mut reference = root.clone();
+    reference.children = vec![fixed].into();
+
+    let rect = DamageRect {
+        x: 32,
+        y: 15,
+        width: 10,
+        height: 10,
+    };
+    let engine = crate::FrontendRenderEngine::new();
+    let render_reference = |root: &WidgetNode| {
+        let mut fresh = RetainedDisplayList::default();
+        fresh.update_at(root, 7.0, 8.0, 80, 50, false, true);
+        let mut pixels = crate::PixelBuffer::new(80, 50);
+        engine.render_display_list_for_module(
+            fresh.paint_commands(),
+            &mut pixels,
+            1.0,
+            None,
+            None,
+            None,
+        );
+        pixels
+    };
+    let mut list = RetainedDisplayList::default();
+    let mut pixels = crate::PixelBuffer::new(80, 50);
+    list.update_at_for_retained_generation(&root, 1, 7.0, 8.0, 80, 50, false, true);
+    engine.render_display_list_for_module(
+        list.paint_commands(),
+        &mut pixels,
+        1.0,
+        None,
+        None,
+        None,
+    );
+    assert_eq!(list.painted_subtree_bounds(2), Some(rect));
+    assert_eq!(list.painted_subtree_bounds(3), Some(rect));
+    assert_eq!(pixels.data(), render_reference(&reference).data());
+    list.mark_painted();
+
+    root.children[0].children[0].children[0]
+        .computed_style
+        .background_color = Color::WHITE;
+    reference.children[0].computed_style.background_color = Color::WHITE;
+    list.update_at_for_retained_generation_with_dirty_nodes(
+        &root,
+        2,
+        RenderObjectDirtySummary {
+            material: 1,
+            ..Default::default()
+        },
+        &HashSet::from([4]),
+        7.0,
+        8.0,
+        80,
+        50,
+        false,
+        true,
+    );
+    assert_eq!(list.damage_rects(), &[rect]);
+    let selected =
+        list.select_paint_commands_for_rects(&[rect], DisplayListRepaintPolicy::MinimalDamage);
+    pixels.clear_rect(rect.x, rect.y, rect.width, rect.height, Color::TRANSPARENT);
+    engine.render_selected_display_list_for_module(
+        &selected,
+        &mut pixels,
+        1.0,
+        Some((rect.x, rect.y, rect.width, rect.height)),
+        None,
+        None,
+    );
+    assert_eq!(pixels.data(), render_reference(&reference).data());
+}
+
+#[test]
+fn fixed_descendant_keeps_effects_of_clipped_owners() {
+    use mesh_core_elements::style::Position;
+
+    let mut fixed = node(4, "box", 30.0, 15.0, 10.0, 10.0);
+    fixed.computed_style.position = Position::Fixed;
+    fixed.computed_style.background_color = Color::WHITE;
+    let mut owner = node(3, "box", 90.0, 0.0, 10.0, 10.0);
+    owner.computed_style.opacity = 0.5;
+    owner.computed_style.filter.blur_radius = 2.0;
+    owner.computed_style.background_color = Color::TRANSPARENT;
+    owner.children.push(fixed);
+    let mut scroller = node(2, "scroll-area", 90.0, 0.0, 20.0, 20.0);
+    scroller.computed_style.overflow_y = Overflow::Hidden;
+    scroller.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+        y: 10.0,
+        max_y: 40.0,
+        ..Default::default()
+    });
+    scroller.children.push(owner.clone());
+    let mut clipped = node(1, "box", 0.0, 0.0, 80.0, 50.0);
+    clipped.computed_style.background_color = Color::TRANSPARENT;
+    let mut reference = clipped.clone();
+    clipped.children.push(scroller);
+    owner.layout.x = 30.0;
+    owner.layout.y = 15.0;
+    reference.children.push(owner);
+
+    let render = |root: &WidgetNode| {
+        let mut list = RetainedDisplayList::default();
+        list.update(root, 80, 50, false, true);
+        assert!(
+            list.paint_commands()
+                .iter()
+                .all(|command| { command.kind != DisplayPaintCommandKind::PushScrollContent })
+        );
+        let selected = list.select_paint_commands_for_rects(
+            &[DamageRect {
+                x: 25,
+                y: 10,
+                width: 20,
+                height: 20,
+            }],
+            DisplayListRepaintPolicy::MinimalDamage,
+        );
+        let mut pixels = crate::PixelBuffer::new(80, 50);
+        crate::FrontendRenderEngine::new().render_selected_display_list_for_module(
+            &selected,
+            &mut pixels,
+            1.0,
+            None,
+            None,
+            None,
+        );
+        pixels
+    };
+    let expected = render(&reference);
+    assert!(expected.data().iter().any(|&byte| byte != 0));
+    assert_eq!(render(&clipped).data(), expected.data());
+}
+
+#[test]
 fn text_command_patches_skip_siblings_and_preserve_effect_coverage() {
     for count in [16, 1024] {
         for effect in ["plain", "clip", "opacity", "filter"] {

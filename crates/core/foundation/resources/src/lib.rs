@@ -4,6 +4,7 @@
 //! modules remain semantic mapping and composition units layered above it.
 
 pub mod blob;
+pub mod frame;
 mod coverage;
 mod font;
 mod frozen_font;

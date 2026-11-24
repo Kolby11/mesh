@@ -38,6 +38,7 @@ fn painter_primitive_command_classes_record_helper_backed_rects() {
         PainterCommand::DrawPath {
             path: PainterPath {
                 elements: vec![PainterPathElement::MoveTo(0.0, 0.0)],
+                ..PainterPath::default()
             },
             paint,
             clip,

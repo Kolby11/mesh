@@ -360,6 +360,13 @@ macro_rules! attribute_profile {
             attr("class", ElementAttributeType::String, "Style class list"),
             attr("part", ElementAttributeType::String, "Static public style part names"),
             attr("style", ElementAttributeType::String, "Inline style rules"),
+            attr("material", ElementAttributeType::String, "Fragment shader body applied to the element and its descendants"),
+            attr("material-source", ElementAttributeType::String, "Local render source or imported texture alias to sample"),
+            attr("material-time", ElementAttributeType::Number, "Explicit time uniform for a fragment material"),
+            attr("material-values", ElementAttributeType::String, "Four numeric material uniform values separated by spaces"),
+            attr("render-source", ElementAttributeType::String, "Name this painted subtree as a local material input"),
+            attr("render-export", ElementAttributeType::Boolean, "Expose this named render source to the embedding component"),
+            attr("render-target", ElementAttributeType::String, "Lay out this named source offscreen at the given logical width and height"),
             attr("ref", ElementAttributeType::String, "Template ref attribute"),
             attr("data-mesh-element", ElementAttributeType::String, "Original source element tag before runtime lowering"),
             attr("label", ElementAttributeType::String, "Accessible label"),
@@ -417,11 +424,17 @@ macro_rules! schema_attributes {
             attr("tooltip", ElementAttributeType::String, "Tooltip text"),
             attr("tooltip-for", ElementAttributeType::String, "Tooltip owner element id"),
             attr("indeterminate", ElementAttributeType::Boolean, "Progress has no determinate value"),
-            attr("type", ElementAttributeType::String, "Shape kind: sector, arc, polygon or polyline"),
+            attr("type", ElementAttributeType::String, "Shape kind: sector, arc, polygon, polyline or path"),
             attr("start", ElementAttributeType::Number, "Shape start angle in degrees clockwise from the top"),
             attr("end", ElementAttributeType::Number, "Shape end angle in degrees clockwise from the top"),
             attr("inner", ElementAttributeType::Number, "Inner radius of a sector as a fraction of the outer radius"),
-            attr("points", ElementAttributeType::String, "Polygon or polyline vertices as percentages of the box")
+            attr("points", ElementAttributeType::String, "Polygon or polyline vertices as percentages of the box"),
+            attr("d", ElementAttributeType::String, "SVG path data"),
+            attr("view-box", ElementAttributeType::String, "Path viewport: minimum x, minimum y, width and height"),
+            attr("fill-rule", ElementAttributeType::Token, "Path fill rule: nonzero or evenodd"),
+            attr("path-fill", ElementAttributeType::Token, "Path fill mode: auto or none"),
+            attr("clip-children", ElementAttributeType::Boolean, "Clip descendants to the shape's filled geometry"),
+            attr("text-path", ElementAttributeType::String, "Baseline path for a single shaped line of text")
         )
     };
     (Action) => {

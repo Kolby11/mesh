@@ -160,6 +160,7 @@ pub(crate) fn push_node_clip(
 pub(crate) fn node_clips_children(node: &WidgetNode) -> bool {
     node.computed_style.overflow_x.clips_contents()
         || node.computed_style.overflow_y.clips_contents()
+        || mesh_core_elements::ShapeGeometry::clips_children(node)
 }
 
 pub(crate) fn node_allows(node: &WidgetNode, target: InteractionTarget) -> bool {

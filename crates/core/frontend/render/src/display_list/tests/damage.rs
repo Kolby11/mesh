@@ -883,6 +883,51 @@ fn transformed_backdrop_regions_follow_cumulative_geometry() {
 }
 
 #[test]
+fn fixed_backdrop_regions_use_viewport_coordinates_and_clip() {
+    use mesh_core_elements::style::Position;
+
+    let mut root = node(1, "box", 0.0, 0.0, 100.0, 100.0);
+    let mut viewport = node(2, "scroll-area", 10.0, 10.0, 40.0, 25.0);
+    viewport.computed_style.overflow_y = Overflow::Hidden;
+    viewport.computed_style.transform.translate_x = 5.0;
+    viewport.scroll_metrics = Some(mesh_core_elements::WidgetScrollMetrics {
+        y: 25.0,
+        max_y: 50.0,
+        ..Default::default()
+    });
+    viewport
+        .children
+        .push(frosted_node(3, 30.0, 34.0, 30.0, 20.0));
+    let mut fixed = frosted_node(4, 88.0, 70.0, 25.0, 20.0);
+    fixed.computed_style.position = Position::Fixed;
+    viewport.children.push(fixed);
+    root.children.push(viewport);
+
+    let mut list = RetainedDisplayList::default();
+    list.update_at(&root, 7.0, 3.0, 100, 100, true, true);
+    let expected = [
+        DamageRect {
+            x: 42,
+            y: 13,
+            width: 20,
+            height: 19,
+        },
+        DamageRect {
+            x: 88,
+            y: 70,
+            width: 12,
+            height: 20,
+        },
+    ];
+    assert_eq!(list.blur_regions(), &expected);
+    assert_eq!(backdrop_blur_regions(list.paint_commands()), expected);
+
+    root.children[0].computed_style.visibility = Visibility::Hidden;
+    list.update_at(&root, 7.0, 3.0, 100, 100, false, true);
+    assert!(list.blur_regions().is_empty());
+}
+
+#[test]
 fn blur_regions_come_from_full_tree_not_scoped_paint_commands() {
     // Popup-shaped case: transparent root with an opaque sibling beneath a
     // frosted node. The frosted node's compositor blur region must be the

@@ -305,6 +305,46 @@ Rendered images stay in the raster cache after release, so a surface keeps
 showing pixels it already painted until its state changes. Event payloads and
 command results do not pin blobs.
 
+## Live frames
+
+A backend can publish pixels it already has using
+`mesh.frame.publish(name, rgba, width, height)`. Publish the returned
+`mesh-frame:…` handle in a service state field of type `frame` or `frame?`
+and bind it to `<image src>`. Subsequent writes to that channel keep the same
+handle. A component that drew the stream wakes for the next change and draws
+the newest frame available when it can present.
+
+```lua
+function start(self)
+    local rgba = buffer.fromstring("\255\0\0\255")
+    state = { preview = mesh.frame.publish("preview", rgba, 1, 1) }
+end
+
+function on_poll(self)
+    mesh.frame.publish("preview", { 0, 0, 255, 255 }, 1, 1)
+end
+```
+
+```mesh
+<template><image src={source.preview} alt="Live preview" /></template>
+<script lang="luau">
+local source = require("mesh.preview")
+</script>
+```
+
+Pixels are tightly packed RGBA8 with straight alpha. The byte count must equal
+width × height × 4. The API accepts a buffer, string, or byte array. Channel
+names are 1 to 64 ASCII letters, digits, dashes, or underscores. Each frame is
+at most 8 MiB with dimensions up to 4096 × 4096. A provider owns at most eight
+channels and 32 MiB of frame storage. The process-wide frame storage limit is
+128 MiB. Publishing a rejected frame leaves the last accepted image available.
+
+Only the owning provider generation can advertise a channel in service
+state. `mesh.frame.close(name)` retires a channel and wakes current viewers,
+which show no frame until they receive a new handle. Stopping the provider
+retires all its channels. This API accepts owned CPU pixels. Capturing windows,
+camera streams, or compositor textures requires a separately authorized source.
+
 ## Other protocol records
 
 PipeWire records have `event` and the registry object's `id`: `added`, `removed`,

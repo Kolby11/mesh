@@ -36,7 +36,9 @@ pub use accessibility::{
     normalize_accessibility_with_validated_structure, try_normalize_accessibility,
 };
 pub use attributes::{AttrKey, AttributeMap};
-pub use composition::{CallbackHandle, ComponentCompositionProps, HandlerTarget};
+pub use composition::{
+    CallbackHandle, ComponentCompositionProps, HandlerTarget, RenderImport, RenderImportScope,
+};
 pub use control_parts::{ControlPart, control_part_names, control_part_nodes};
 pub use element::{
     BASE_ELEMENT_FIELDS, ELEMENT_CONTRACT_DEFS, ELEMENT_TYPE_DEFS, ElementAttributeDef,
@@ -55,7 +57,7 @@ pub use frame::{
 };
 pub use frame_dirty::FrameDirty;
 pub use interaction_contract::{
-    AffineClip, AffineClipStack, AffineTransform, HOVER_INTENT_CLOSE_DELAY, InteractionTarget,
+    AffineClip, AffineClipMask, AffineClipStack, AffineTransform, HOVER_INTENT_CLOSE_DELAY, InteractionTarget,
     NodeEligibility, child_eligibility, child_transform, local_transform, node_can_receive_target,
     node_clip, node_eligibility, node_layout_bounds, node_transform, root_transform,
     transformed_layout_at, transformed_layout_for, transformed_offset,
@@ -70,7 +72,7 @@ pub use popover::{
     PopoverPlacementField,
 };
 pub use prop::{ChangeClass, Prop, PropType};
-pub use shape::{ShapeGeometry, ShapeKind, ShapeOp};
+pub use shape::{ShapeFillRule, ShapeGeometry, ShapeKind, ShapeOp, ShapePath};
 pub use pseudo_state::{
     PSEUDO_STATE_TABLE, PseudoState, PseudoStateKind, PseudoStateSpec, authored_element_state,
     pseudo_state_mask, pseudo_state_specs,

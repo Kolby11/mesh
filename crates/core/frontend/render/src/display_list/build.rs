@@ -133,7 +133,9 @@ impl FloatBounds {
         let clip_top = clip.y as f32;
         let clip_right = (clip.x + clip.width) as f32;
         let clip_bottom = (clip.y + clip.height) as f32;
-        self.right > clip_left
+        clip.width > 0
+            && clip.height > 0
+            && self.right > clip_left
             && self.bottom > clip_top
             && self.left < clip_right
             && self.top < clip_bottom
@@ -311,6 +313,7 @@ fn collect_display_entries_with_transform(
     });
 
     for child in &node.children {
+        let (child_transform, viewport) = child_paint_space(child, child_transform, viewport, None);
         collect_display_entries_with_transform(
             child,
             child_transform,
@@ -492,7 +495,7 @@ fn build_paint_subtree_with_transform(
             .ancestor_clips
             .iter()
             .zip(ancestor_clips.as_slice())
-            .all(|(a, b)| a.transform == b.transform && a.rect == b.rect && a.radii == b.radii)
+            .all(|(a, b)| a == b)
         && previous.in_scroll_content == in_scroll_content
         && previous.style.resource_revision == mesh_core_resources::resource_revision()
     {
@@ -510,17 +513,10 @@ fn build_paint_subtree_with_transform(
     let bounds = node_clip_for(&paint_node);
     let visual_bounds = visual_clip_for(&paint_node);
     let node_clip = intersect_display_clip(clip, visual_bounds);
-    if node_clip.width <= 0 || node_clip.height <= 0 {
-        let mut subtree = RetainedPaintSubtree::default();
-        subtree.generation = generation;
-        subtree.pruning.record_omitted_subtree(
-            count_pruned_subtree_with_transform(node, parent_transform, false),
-            true,
-        );
-        let subtree = Arc::new(subtree);
-        next_subtrees.insert(node.id, Arc::clone(&subtree));
-        return subtree;
-    }
+    let paint_self = node_clip.width > 0 && node_clip.height > 0;
+    let child_mask_changed = paint_node.content.geometry_changes_child_clip(
+        previous_paint_node.map(|previous| &previous.content),
+    );
 
     let mut subtree = PaintSubtreeBuilder::default();
     // Opacity and blend mode apply to the element as a single compositing
@@ -529,7 +525,8 @@ fn build_paint_subtree_with_transform(
     // the compositing group when both are present.
     let compositing_layer =
         paint_node.style.opacity < 1.0 || paint_node.style.mix_blend_mode != BlendMode::Normal;
-    let filter_layer = paint_node.style.filter.blur_radius > 0.0;
+    let filter_layer = paint_node.style.filter.blur_radius > 0.0
+        || paint_node.style.material.is_some();
     if compositing_layer {
         subtree.push_command(DisplayPaintCommand {
             node: Arc::clone(&paint_node),
@@ -546,56 +543,67 @@ fn build_paint_subtree_with_transform(
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
-    let backdrop = paint_node.style.backdrop_filter;
-    // Refraction samples the shell backdrop source only where that source is
-    // what lies beneath the surface. Elsewhere its blur takes the ordinary
-    // backdrop route so the compositor blurs the real backdrop (04 §11).
-    let samples_source = backdrop.has_refraction() && refraction_source;
-    if samples_source {
+    if paint_self {
+        let backdrop = paint_node.style.backdrop_filter;
+        // Refraction samples the shell backdrop source only where that source is
+        // what lies beneath the surface. Elsewhere its blur takes the ordinary
+        // backdrop route so the compositor blurs the real backdrop (04 §11).
+        let samples_source = backdrop.has_refraction() && refraction_source;
+        if samples_source {
+            subtree.push_command(DisplayPaintCommand {
+                node: Arc::clone(&paint_node),
+                clip: node_clip,
+                kind: DisplayPaintCommandKind::ApplyBackdropRefraction,
+            });
+            metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+        } else if backdrop.blur_radius > 0.0 {
+            let kind = match backdrop_blur_policy {
+                BackdropBlurPolicy::CompositorRegion
+                    if paint_node.ancestor_clips.iter().all(|clip| clip.mask.is_none()) =>
+                {
+                    DisplayPaintCommandKind::ApplyBackdropFilterCompositor
+                }
+                BackdropBlurPolicy::CompositorRegion | BackdropBlurPolicy::InSurfaceFilter => {
+                    DisplayPaintCommandKind::ApplyBackdropFilterInSurface
+                }
+                BackdropBlurPolicy::Rejected => {
+                    DisplayPaintCommandKind::ApplyBackdropFilterRejected
+                }
+            };
+            subtree.push_command(DisplayPaintCommand {
+                node: Arc::clone(&paint_node),
+                clip: node_clip,
+                kind,
+            });
+            metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+        }
+        if !samples_source
+            && (backdrop.grain > 0.0 || (backdrop.has_refraction() && backdrop.refract_edge > 0.0))
+        {
+            subtree.push_command(DisplayPaintCommand {
+                node: Arc::clone(&paint_node),
+                clip: node_clip,
+                kind: DisplayPaintCommandKind::ApplyBackdropRim,
+            });
+            metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+        }
         subtree.push_command(DisplayPaintCommand {
             node: Arc::clone(&paint_node),
             clip: node_clip,
-            kind: DisplayPaintCommandKind::ApplyBackdropRefraction,
+            kind: DisplayPaintCommandKind::Node,
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
-    } else if backdrop.blur_radius > 0.0 {
-        let kind = match backdrop_blur_policy {
-            BackdropBlurPolicy::CompositorRegion => {
-                DisplayPaintCommandKind::ApplyBackdropFilterCompositor
-            }
-            BackdropBlurPolicy::InSurfaceFilter => {
-                DisplayPaintCommandKind::ApplyBackdropFilterInSurface
-            }
-            BackdropBlurPolicy::Rejected => DisplayPaintCommandKind::ApplyBackdropFilterRejected,
-        };
-        subtree.push_command(DisplayPaintCommand {
-            node: Arc::clone(&paint_node),
-            clip: node_clip,
-            kind,
-        });
-        metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
+    } else {
+        subtree
+            .pruning
+            .record_omitted_subtree(count_pruned_node(node), true);
     }
-    if !samples_source
-        && (backdrop.grain > 0.0 || (backdrop.has_refraction() && backdrop.refract_edge > 0.0))
-    {
-        subtree.push_command(DisplayPaintCommand {
-            node: Arc::clone(&paint_node),
-            clip: node_clip,
-            kind: DisplayPaintCommandKind::ApplyBackdropRim,
-        });
-        metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
-    }
-    subtree.push_command(DisplayPaintCommand {
-        node: Arc::clone(&paint_node),
-        clip: node_clip,
-        kind: DisplayPaintCommandKind::Node,
-    });
-    metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
 
     let scroll = node.resolved_scroll_metrics();
     let scroll_x = scroll.x;
     let scroll_y = scroll.y;
-    let retain_content = !in_scroll_content
+    let retain_content = paint_self
+        && !in_scroll_content
         && if scroll_only {
             previous_subtrees
                 .get(&node.id)
@@ -609,20 +617,17 @@ fn build_paint_subtree_with_transform(
         if retain_content { 0.0 } else { scroll_x },
         if retain_content { 0.0 } else { scroll_y },
     );
+    let clips_contents = node_clips_contents(node);
     let child_clip = if retain_content {
         CONTENT_CLIP
-    } else if node.computed_style.overflow_x.clips_contents()
-        || node.computed_style.overflow_y.clips_contents()
-    {
+    } else if clips_contents {
         intersect_display_clip(clip, bounds)
     } else {
         clip
     };
     let child_ancestor_clips = if retain_content {
         AffineClipStack::default()
-    } else if node.computed_style.overflow_x.clips_contents()
-        || node.computed_style.overflow_y.clips_contents()
-    {
+    } else if clips_contents {
         ancestor_clips.push(mesh_core_elements::node_clip(node, world_transform))
     } else {
         ancestor_clips.clone()
@@ -645,25 +650,23 @@ fn build_paint_subtree_with_transform(
         });
         metrics.rebuilt_commands += 1;
     }
+    let viewport_clips = AffineClipStack::default();
     for_children_in_order(node, child_order.as_deref(), |child| {
-        let (child_parent_transform, cc) = if child.computed_style.position == Position::Fixed {
-            (root_transform(0.0, 0.0), viewport_clip)
-        } else {
-            (child_transform, child_clip)
-        };
-        let child_clips = if child.computed_style.position == Position::Fixed {
-            AffineClipStack::default()
-        } else {
-            child_ancestor_clips.clone()
-        };
+        let (child_parent_transform, (child_clip, child_clips)) = child_paint_space(
+            child,
+            child_transform,
+            (child_clip, &child_ancestor_clips),
+            (viewport_clip, &viewport_clips),
+        );
         append_child_paint_subtree(
             &mut subtree,
             child,
             child_parent_transform,
-            &child_clips,
-            cc,
+            child_clips,
+            child_clip,
             viewport_clip,
             force_rebuild
+                || child_mask_changed
                 || previous_subtrees
                     .get(&node.id)
                     .is_some_and(|previous| previous.scroll_viewport.is_some() != retain_content)
@@ -705,7 +708,7 @@ fn build_paint_subtree_with_transform(
         subtree.child_bounds = viewport;
     }
 
-    if display_node_may_show_scrollbars(&paint_node) {
+    if paint_self && display_node_may_show_scrollbars(&paint_node) {
         subtree.push_command(DisplayPaintCommand {
             node: Arc::clone(&paint_node),
             clip: node_clip,
@@ -713,9 +716,14 @@ fn build_paint_subtree_with_transform(
         });
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
+    let layer_clip = if compositing_layer || filter_layer {
+        layer_clip_for_children(clip, viewport_clip, subtree.child_bounds)
+    } else {
+        clip
+    };
     if filter_layer {
         let blur_pad = paint_node.style.filter.blur_radius * 3.0;
-        subtree.grow_filter_layer_bounds(clip, blur_pad);
+        subtree.grow_filter_layer_bounds(layer_clip, blur_pad);
         subtree.push_command(DisplayPaintCommand {
             node: Arc::clone(&paint_node),
             clip: node_clip,
@@ -724,7 +732,7 @@ fn build_paint_subtree_with_transform(
         metrics.rebuilt_commands = metrics.rebuilt_commands.saturating_add(1);
     }
     if compositing_layer {
-        subtree.grow_compositing_layer_bounds(clip);
+        subtree.grow_compositing_layer_bounds(layer_clip);
         subtree.push_command(DisplayPaintCommand {
             node: paint_node,
             clip: node_clip,
@@ -834,7 +842,12 @@ pub(super) fn append_child_paint_subtree(
     in_scroll_content: bool,
     scroll_only: bool,
 ) {
-    if should_preclip_child_subtree_with_transform(child, child_parent_transform, child_clip) {
+    if should_preclip_child_subtree_with_transform(
+        child,
+        child_parent_transform,
+        child_clip,
+        viewport_clip,
+    ) {
         subtree.pruning.record_omitted_subtree(
             count_pruned_subtree_with_transform(child, child_parent_transform, false),
             true,
@@ -884,6 +897,26 @@ pub(super) fn compute_child_order(node: &WidgetNode) -> Option<Arc<[usize]>> {
     mesh_core_elements::paint_order_child_indices(node).map(Arc::from)
 }
 
+/// Fixed descendants in a surface begin a new viewport-relative paint space.
+pub(super) fn child_paint_space<C>(
+    child: &WidgetNode,
+    parent_transform: AffineTransform,
+    inherited_clip: C,
+    viewport_clip: C,
+) -> (AffineTransform, C) {
+    if child.computed_style.position == Position::Fixed {
+        (root_transform(0.0, 0.0), viewport_clip)
+    } else {
+        (parent_transform, inherited_clip)
+    }
+}
+
+pub(super) fn node_clips_contents(node: &WidgetNode) -> bool {
+    node.computed_style.overflow_x.clips_contents()
+        || node.computed_style.overflow_y.clips_contents()
+        || mesh_core_elements::ShapeGeometry::clips_children(node)
+}
+
 pub(super) fn node_is_explicitly_hidden(node: &WidgetNode) -> bool {
     !node_eligibility(node).allows(InteractionTarget::Paint)
 }
@@ -895,11 +928,16 @@ pub(super) fn should_preclip_child_subtree(
     offset_y: f32,
     clip: DisplayListClip,
 ) -> bool {
-    should_preclip_child_subtree_with_transform(child, root_transform(offset_x, offset_y), clip)
+    should_preclip_child_subtree_with_transform(
+        child,
+        root_transform(offset_x, offset_y),
+        clip,
+        clip,
+    )
 }
 
-/// Whether `child`'s whole subtree paints outside `clip`: the union of its
-/// visible nodes' visual bounds exists and misses the clip.
+/// Whether `child`'s whole subtree misses its paint clips. Ordinary descendants
+/// extend the inherited union and fixed descendants walk a new viewport union.
 ///
 /// Called for every child at every depth of a build, so a full subtree walk
 /// here made the build O(nodes × depth). The walk stops as soon as the growing
@@ -909,9 +947,11 @@ pub(super) fn should_preclip_child_subtree_with_transform(
     child: &WidgetNode,
     parent_transform: AffineTransform,
     clip: DisplayListClip,
+    viewport_clip: DisplayListClip,
 ) -> bool {
     let mut bounds = None;
-    !subtree_bounds_reach_clip(child, parent_transform, clip, &mut bounds) && bounds.is_some()
+    !subtree_bounds_reach_clip(child, parent_transform, clip, viewport_clip, &mut bounds)
+        && bounds.is_some()
 }
 
 /// Union `node`'s subtree visual bounds into `bounds`, returning `true` as soon
@@ -920,6 +960,7 @@ fn subtree_bounds_reach_clip(
     node: &WidgetNode,
     parent_transform: AffineTransform,
     clip: DisplayListClip,
+    viewport_clip: DisplayListClip,
     bounds: &mut Option<FloatBounds>,
 ) -> bool {
     if node_is_explicitly_hidden(node) {
@@ -935,9 +976,16 @@ fn subtree_bounds_reach_clip(
     }
     let scroll = node.resolved_scroll_metrics();
     let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);
-    node.children
-        .iter()
-        .any(|child| subtree_bounds_reach_clip(child, child_transform, clip, bounds))
+    node.children.iter().any(|child| {
+        let mut fixed_bounds = None;
+        let (transform, (child_clip, child_bounds)) = child_paint_space(
+            child,
+            child_transform,
+            (clip, &mut *bounds),
+            (viewport_clip, &mut fixed_bounds),
+        );
+        subtree_bounds_reach_clip(child, transform, child_clip, viewport_clip, child_bounds)
+    })
 }
 
 #[cfg(test)]
@@ -973,9 +1021,7 @@ fn subtree_bounds_at_with_transform(
     let mut bounds = node_visual_bounds_at_with_transform(node, world_transform)
         .map(|bounds| ancestor_clip.map_or(bounds, |clip| bounds.intersection(clip)))
         .filter(|bounds| bounds.right > bounds.left && bounds.bottom > bounds.top);
-    let child_clip = if node.computed_style.overflow_x.clips_contents()
-        || node.computed_style.overflow_y.clips_contents()
-    {
+    let child_clip = if node_clips_contents(node) {
         let rect = world_transform.transform_rect(LayoutRect {
             x: 0.0,
             y: 0.0,
@@ -995,11 +1041,7 @@ fn subtree_bounds_at_with_transform(
     let scroll = node.resolved_scroll_metrics();
     let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);
     for child in &node.children {
-        let (transform, clip) = if child.computed_style.position == Position::Fixed {
-            (root_transform(0.0, 0.0), None)
-        } else {
-            (child_transform, child_clip)
-        };
+        let (transform, clip) = child_paint_space(child, child_transform, child_clip, None);
         if let Some(child_bounds) = subtree_bounds_at_with_transform(child, transform, clip, visit)
         {
             bounds = Some(match bounds {
@@ -1063,11 +1105,7 @@ fn count_pruned_subtree_with_transform(
         return PrunedSubtreeCounts::default();
     }
 
-    let mut counts = PrunedSubtreeCounts::default();
-    if node.layout.width > 0.0 && node.layout.height > 0.0 {
-        counts.nodes = 1;
-        counts.commands = 2;
-    }
+    let mut counts = count_pruned_node(node);
     let scroll = node.resolved_scroll_metrics();
     let world_transform = node_transform(parent_transform, node);
     let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);
@@ -1079,12 +1117,40 @@ fn count_pruned_subtree_with_transform(
     counts
 }
 
+fn count_pruned_node(node: &WidgetNode) -> PrunedSubtreeCounts {
+    if node.layout.width > 0.0 && node.layout.height > 0.0 {
+        PrunedSubtreeCounts {
+            nodes: 1,
+            commands: 2,
+        }
+    } else {
+        PrunedSubtreeCounts::default()
+    }
+}
+
 pub(super) fn surface_clip(surface: DamageRect) -> DisplayListClip {
     DisplayListClip {
         x: surface.x as i32,
         y: surface.y as i32,
         width: surface.width as i32,
         height: surface.height as i32,
+    }
+}
+
+pub(super) fn layer_clip_for_children(
+    clip: DisplayListClip,
+    viewport: DisplayListClip,
+    child_bounds: DamageRect,
+) -> DisplayListClip {
+    // Only viewport-fixed descendants can paint beyond the group's inherited clip.
+    let coverage = surface_clip(child_bounds);
+    if coverage.width > 0
+        && coverage.height > 0
+        && intersect_display_clip(clip, coverage) != coverage
+    {
+        viewport
+    } else {
+        clip
     }
 }
 
@@ -1165,7 +1231,7 @@ pub(super) fn visual_layout_from_parts(
     layout
 }
 
-fn layout_to_display_clip(layout: LayoutRect) -> DisplayListClip {
+pub(super) fn layout_to_display_clip(layout: LayoutRect) -> DisplayListClip {
     let device = FractionalScale::identity().device_layout_rect(layout);
     DisplayListClip {
         x: device.x,

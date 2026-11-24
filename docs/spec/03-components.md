@@ -310,6 +310,10 @@ instance attributes), authoring time (LSP completes type-scoped values,
 (typed settings controls; script writes coerced/validated before reaching
 CSS).
 
+For an imported component tag, attribute completion offers public prop
+declarations and callable callback attributes. Member completion through
+`bind:this` uses the child's public script API.
+
 ## 4. Precedence — one specificity ladder
 
 Every prop resolves to **one value** before `prop()`/`props.name` reads it.

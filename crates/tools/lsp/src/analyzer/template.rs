@@ -1,11 +1,13 @@
-use mesh_core_component::ComponentImportTarget;
+use mesh_core_component::{
+    ComponentImportTarget, PropType, normalized_public_prop_schema, parser::is_event_attribute,
+};
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, Documentation, InsertTextFormat, MarkupContent, MarkupKind,
 };
 
 use crate::{
-    analyzer::script::resolve_component_public_members,
-    document::Document,
+    definition::load_imported_component,
+    document::{Document, public_component_members},
     knowledge::tags::{EVENT_ATTRS, TAG_DEFS, TagDef, UNIVERSAL_ATTRS},
     module_registry::ModuleRegistry,
     util::TemplateContext,
@@ -77,19 +79,37 @@ fn complete_attrs(tag: &str, doc: &Document, registry: &ModuleRegistry) -> Vec<C
         for attr in tag_def.all_attributes() {
             items.push(attr_completion_item(attr.name, attr.description, false));
         }
-    } else if let Some((variables, _functions)) =
-        resolve_component_public_members(doc, tag, registry)
-    {
-        // Custom PascalCase component tag: offer the imported component's own
-        // public script members as its props, mirroring what `bind:this`
-        // exposes at runtime.
-        for variable in variables {
-            let is_handler = variable.starts_with("on");
+    } else if let Some(component) = load_imported_component(doc, tag, registry) {
+        items.push(attr_completion_item(
+            "render-import",
+            "Import child texture exports as local material sources with export=alias",
+            false,
+        ));
+        for prop in normalized_public_prop_schema(component.props.as_ref()) {
             items.push(attr_completion_item(
-                &variable,
-                &format!("public member of <{tag}>"),
-                is_handler,
+                &prop.name,
+                &format!("{} prop of <{tag}>", prop.ty.as_str()),
+                false,
             ));
+        }
+        let (variables, functions) = public_component_members(&component);
+        for name in variables.into_iter().chain(functions) {
+            if is_event_attribute(&name)
+                && !items.iter().any(|item| item.label == name)
+                && !component
+                    .props
+                    .as_ref()
+                    .is_some_and(|block| block.props.iter().any(|prop| prop.name == name))
+            {
+                items.push(CompletionItem {
+                    label: name.clone(),
+                    kind: Some(CompletionItemKind::EVENT),
+                    detail: Some(format!("callback of <{tag}>")),
+                    insert_text: Some(format!("{name}={{$1}}")),
+                    insert_text_format: Some(InsertTextFormat::SNIPPET),
+                    ..Default::default()
+                });
+            }
         }
     } else {
         for attr in UNIVERSAL_ATTRS {
@@ -167,11 +187,8 @@ fn complete_attr_value(
     doc: &Document,
     registry: &ModuleRegistry,
 ) -> Vec<CompletionItem> {
-    // Event handler attrs: complete with function names. Applies both to core
-    // element handlers (onclick, ...) and to a mounted component's own
-    // handler-shaped public members (onfirst, onselect, ...).
-    if attr.starts_with("on") {
-        let mut items: Vec<CompletionItem> = doc
+    if is_event_attribute(attr) {
+        return doc
             .script_functions
             .iter()
             .map(|name| CompletionItem {
@@ -181,20 +198,6 @@ fn complete_attr_value(
                 ..Default::default()
             })
             .collect();
-        if let Some((_variables, functions)) = resolve_component_public_members(doc, tag, registry)
-        {
-            for name in functions {
-                if !items.iter().any(|item| item.label == name) {
-                    items.push(CompletionItem {
-                        label: name,
-                        kind: Some(CompletionItemKind::FUNCTION),
-                        detail: Some("script function".to_string()),
-                        ..Default::default()
-                    });
-                }
-            }
-        }
-        return items;
     }
 
     // class attr: complete with class names from the style block
@@ -216,21 +219,40 @@ fn complete_attr_value(
             .find(|a| a.name == attr)
         {
             if !attr_def.values.is_empty() {
-                return attr_def
-                    .values
-                    .iter()
-                    .map(|value| CompletionItem {
-                        label: value.to_string(),
-                        kind: Some(CompletionItemKind::ENUM_MEMBER),
-                        detail: Some(format!("{attr} value")),
-                        ..Default::default()
-                    })
-                    .collect();
+                return attribute_values(attr, attr_def.values.iter().copied());
             }
         }
+    } else if let Some(component) = load_imported_component(doc, tag, registry)
+        && let Some(prop) = component.props.as_ref().and_then(|block| {
+            block
+                .props
+                .iter()
+                .find(|prop| prop.expose && prop.name == attr)
+        })
+    {
+        return match prop.ty {
+            PropType::Enum => attribute_values(attr, prop.options.iter().map(String::as_str)),
+            PropType::Bool => attribute_values(attr, ["true", "false"]),
+            _ => vec![],
+        };
     }
 
     vec![]
+}
+
+fn attribute_values<'a>(
+    attr: &str,
+    values: impl IntoIterator<Item = &'a str>,
+) -> Vec<CompletionItem> {
+    values
+        .into_iter()
+        .map(|value| CompletionItem {
+            label: value.to_string(),
+            kind: Some(CompletionItemKind::ENUM_MEMBER),
+            detail: Some(format!("{attr} value")),
+            ..Default::default()
+        })
+        .collect()
 }
 
 fn complete_expr(doc: &Document) -> Vec<CompletionItem> {

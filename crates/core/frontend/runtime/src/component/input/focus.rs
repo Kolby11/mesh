@@ -435,6 +435,7 @@ pub(super) fn selectable_text_target_key(tree: &WidgetNode, x: f32, y: f32) -> O
     path.into_iter().rev().find(|key| {
         nodes.get(key.as_str()).is_some_and(|(node, _)| {
             node.tag == "text"
+                && mesh_core_elements::ShapePath::for_text(node).is_none()
                 && node
                     .attributes
                     .get(Prop::Selectable)

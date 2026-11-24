@@ -3,7 +3,7 @@ use tower_lsp::lsp_types::{CompletionItem, Position};
 use crate::{
     document::Document,
     module_registry::ModuleRegistry,
-    util::{Block, ScriptContext, block_at_offset, block_content, position_to_offset},
+    util::{Block, ScriptContext, block_at_offset, position_to_offset},
 };
 
 pub(crate) mod script;
@@ -96,8 +96,8 @@ pub fn complete(
     registry: &ModuleRegistry,
 ) -> Vec<CompletionItem> {
     let offset = position_to_offset(&doc.source, position);
-    let loc = block_at_offset(&doc.source, offset);
-    let content = block_content(&doc.source, &loc.block);
+    let loc = block_at_offset(doc, offset);
+    let content = loc.content;
 
     match &loc.block {
         Block::Template => {
@@ -582,18 +582,20 @@ audio.$0
     }
 
     #[test]
-    fn template_attr_completion_offers_custom_component_public_members() {
-        // Attribute-name completion on a custom PascalCase component tag
-        // should offer the imported component's own public script members
-        // (its props), the same members `bind:this` exposes at runtime —
-        // not just the generic universal/event attrs.
-        let dir =
-            std::env::temp_dir().join(format!("mesh-lsp-component-attrs-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+    fn template_attr_completion_offers_declared_props_and_callbacks() {
+        let directory = tempfile::tempdir().unwrap();
+        let dir = directory.path();
         std::fs::write(dir.join("module.json"), "{}").unwrap();
         std::fs::write(
             dir.join("item-row.mesh"),
-            r#"<template>
+            r#"<props>
+{
+    label = { type = "string", default = "Row" },
+    mode = { type = "enum", default = "compact", options = { "compact", "wide" } },
+    internal = { type = "bool", default = false, expose = false },
+}
+</props>
+<template>
   <row />
 </template>
 
@@ -604,32 +606,121 @@ local private_state = 1
 
 onselect = nil
 
-function render(self)
+function child_function(self)
 end
 </script>
 "#,
         )
         .unwrap();
 
-        let (source, position) = fixture_with_cursor(
-            r#"<template>
-  <ItemRow $0 />
+        let mut registry = ModuleRegistry::empty();
+        registry.module_dirs.insert("@mesh/item".into(), dir.into());
+        registry
+            .module_entrypoints
+            .insert("@mesh/item".into(), dir.join("item-row.mesh"));
+        for target in ["./item-row.mesh", "@mesh/item"] {
+            let (source, position) = fixture_with_cursor(&format!(
+                r#"<template>
+  <ItemRow $0 bind:this={{item}} />
 </template>
 
 <script lang="luau">
-local ItemRow = require("./item-row.mesh")
+local ItemRow = require("{target}")
+local function select_row() end
 </script>
 "#,
+            ));
+            let uri = Url::from_file_path(dir.join("main.mesh")).unwrap();
+            let doc = Document::new(uri, source);
+            let items = complete(&doc, position, &registry);
+            assert!(items.iter().any(|item| item.label == "label"));
+            assert!(items.iter().any(|item| item.label == "mode"));
+            assert!(items.iter().any(|item| {
+                item.label == "onselect"
+                    && item.kind == Some(CompletionItemKind::EVENT)
+                    && item.insert_text.as_deref() == Some("onselect={$1}")
+            }));
+            for name in ["internal", "label_text", "private_state", "child_function"] {
+                assert!(!items.iter().any(|item| item.label == name), "{name}");
+            }
+
+            for (attr, expected) in [
+                ("mode", &["compact", "wide"][..]),
+                ("onselect", &["select_row"][..]),
+            ] {
+                let (source, position) = fixture_with_cursor(
+                    &doc.source
+                        .replace("<ItemRow ", &format!("<ItemRow {attr}=\"$0\" ")),
+                );
+                let request = Document::new(doc.uri.clone(), source);
+                let labels: Vec<_> = complete(&request, position, &registry)
+                    .into_iter()
+                    .map(|item| item.label)
+                    .collect();
+                assert_eq!(labels, expected, "{attr}");
+            }
+        }
+    }
+
+    #[test]
+    fn queries_use_parsed_block_spans_through_comments_quotes_and_unclosed_blocks() {
+        let cases = [
+            (
+                r#"<script lang="luau">local example = "<template></template>"</script>
+<template><text>🙂</text><$0</template>"#,
+                "button",
+            ),
+            (
+                r#"<template><!-- <script></script> --><button ref="test" /></template>
+<script lang="luau">
+local example = "</script>"
+local displayed = "🙂"; local item = refs.$0"#,
+                "test",
+            ),
+            (
+                r#"<template><!-- <style></style> --><box /></template>
+<style>
+/* </style> */
+box { $0 }
+</style>"#,
+                "background",
+            ),
+        ];
+        for (source, expected) in cases {
+            let (source, position) = fixture_with_cursor(source);
+            let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+            assert!(
+                completion_labels(&doc, position)
+                    .iter()
+                    .any(|s| s == expected)
+            );
+        }
+
+        let (source, position) = fixture_with_cursor(
+            r#"<template><!-- <script></script> --><box /></template>
+<script lang="luau">
+local example = "</script>"
+local message = "🙂"; local value = mesh.ui.req$0uest_redraw
+</script>"#,
         );
-        let uri = Url::from_file_path(dir.join("main.mesh")).unwrap();
-        let doc = Document::new(uri, source);
-        let labels = completion_labels(&doc, position);
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        assert!(crate::hover::hover(&doc, position, &ModuleRegistry::empty()).is_some());
 
-        std::fs::remove_dir_all(&dir).ok();
-
-        assert!(labels.contains(&"label_text".to_string()));
-        assert!(labels.contains(&"onselect".to_string()));
-        assert!(!labels.contains(&"private_state".to_string()));
+        let (source, position) = fixture_with_cursor(
+            r#"<template><!-- <script></script> --><box /></template>
+<script lang="luau">
+local example = "</script>"
+local function select_item() end
+local value = "🙂"; sel$0ect_item()
+</script>"#,
+        );
+        let doc = Document::new(Url::parse("file:///test.mesh").unwrap(), source);
+        let Some(tower_lsp::lsp_types::GotoDefinitionResponse::Scalar(location)) =
+            crate::definition::definition(&doc, position, &ModuleRegistry::empty())
+        else {
+            panic!("expected a script function definition");
+        };
+        assert_eq!(location.range.start, Position::new(3, 15));
     }
 
     #[test]

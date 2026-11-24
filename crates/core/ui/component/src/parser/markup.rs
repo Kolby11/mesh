@@ -732,7 +732,7 @@ fn parse_xml_attributes(
                 var.to_string(),
                 AttributeValue::TwoWayBinding(binding.unwrap_or(value.as_str()).to_string()),
             )
-        } else if is_event_attr(&name) {
+        } else if is_event_attribute(&name) {
             let handler = binding.unwrap_or(value.as_str()).to_string();
             let span = expression
                 .as_ref()
@@ -889,8 +889,8 @@ fn luau_string_literal(value: &str) -> String {
     literal
 }
 
-/// Returns true if the attribute name is an `on...` event handler (`onclick`, `oninput`, etc.).
-fn is_event_attr(name: &str) -> bool {
+/// Whether an attribute name uses component and element event syntax.
+pub fn is_event_attribute(name: &str) -> bool {
     name.len() > 2 && name.starts_with("on") && name[2..].chars().all(|c| c.is_ascii_alphabetic())
 }
 

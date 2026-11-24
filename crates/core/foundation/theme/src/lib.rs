@@ -226,6 +226,7 @@ pub enum ThemeProvenance {
         module_id: String,
     },
     UserOverride,
+    AccessibilityOverride,
 }
 
 /// Rendering metadata selected together with a theme mode.
@@ -1096,6 +1097,21 @@ impl Theme {
         module_layers: impl IntoIterator<Item = ThemeModuleLayer>,
         user_overrides: &HashMap<String, TokenValue>,
     ) -> Result<Self, ThemeError> {
+        Self::compose_layers_with_accessibility(
+            base, pack, pack_id, mode, module_layers, user_overrides, &HashMap::new(),
+        )
+    }
+
+    /// Apply accessibility overrides above the underlying user token layer.
+    pub fn compose_layers_with_accessibility(
+        base: &Theme,
+        pack: &Theme,
+        pack_id: impl Into<String>,
+        mode: impl Into<String>,
+        module_layers: impl IntoIterator<Item = ThemeModuleLayer>,
+        user_overrides: &HashMap<String, TokenValue>,
+        accessibility_overrides: &HashMap<String, TokenValue>,
+    ) -> Result<Self, ThemeError> {
         let pack_id = pack_id.into();
         let mode = mode.into();
         if pack_id.trim().is_empty() || mode.trim().is_empty() {
@@ -1186,11 +1202,16 @@ impl Theme {
         // Overrides land before families are shared, so overriding a family
         // token (`@mesh/glass-material.glass.rim`) reaches every module that
         // uses the family, not only the family's own entry.
-        let mut overrides = user_overrides.iter().collect::<Vec<_>>();
-        overrides.sort_by(|left, right| left.0.cmp(right.0));
-        for (token, value) in overrides {
-            if let Err(error) = apply_user_token_override(&mut composed, token, value.clone()) {
-                composed.user_override_diagnostics.push(error.to_string());
+        for (layer, source) in [
+            (user_overrides, ThemeProvenance::UserOverride),
+            (accessibility_overrides, ThemeProvenance::AccessibilityOverride),
+        ] {
+            let mut overrides = layer.iter().collect::<Vec<_>>();
+            overrides.sort_by(|left, right| left.0.cmp(right.0));
+            for (token, value) in overrides {
+                if let Err(error) = apply_user_token_override(&mut composed, token, value.clone(), &source) {
+                    composed.user_override_diagnostics.push(error.to_string());
+                }
             }
         }
         share_token_families(&mut composed, &module_layers);
@@ -1724,6 +1745,7 @@ fn apply_user_token_override(
     composed: &mut Theme,
     token: &str,
     value: TokenValue,
+    provenance: &ThemeProvenance,
 ) -> Result<(), ThemeError> {
     let token = user_override_token_name(token);
     let token = token.as_str();
@@ -1751,7 +1773,7 @@ fn apply_user_token_override(
     }
     composed
         .provenance
-        .insert(token.to_string(), ThemeProvenance::UserOverride);
+        .insert(token.to_string(), provenance.clone());
     Ok(())
 }
 
@@ -2394,6 +2416,7 @@ mod tests {
             &mut theme,
             "@acme/panel.v2.glass.tint",
             TokenValue::String("#ffffff".into()),
+            &ThemeProvenance::UserOverride,
         )
         .unwrap();
         assert_eq!(

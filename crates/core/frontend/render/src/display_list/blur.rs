@@ -6,6 +6,7 @@ use mesh_core_elements::{
 };
 
 use super::build::*;
+use super::paint_node::intersect_display_clip;
 use super::signature::*;
 use super::types::*;
 use crate::{FractionalScale, RenderObjectDirtySummary};
@@ -25,11 +26,14 @@ pub fn backdrop_blur_regions_from_tree(
     refraction_source: bool,
 ) -> Vec<DamageRect> {
     let mut regions = Vec::new();
+    let viewport = surface_clip(surface);
     collect_backdrop_blur_regions_with_transform(
         root,
         root_transform(offset_x, offset_y),
-        surface,
+        viewport,
+        viewport,
         refraction_source,
+        false,
         &mut regions,
     );
     regions
@@ -38,44 +42,64 @@ pub fn backdrop_blur_regions_from_tree(
 fn collect_backdrop_blur_regions_with_transform(
     node: &WidgetNode,
     parent_transform: AffineTransform,
-    surface: DamageRect,
+    clip: DisplayListClip,
+    viewport: DisplayListClip,
     refraction_source: bool,
+    masked: bool,
     regions: &mut Vec<DamageRect>,
 ) {
     if node_is_explicitly_hidden(node) {
         return;
     }
     let world_transform = node_transform(parent_transform, node);
+    let layout = node_layout_bounds(node, world_transform);
 
     let backdrop = node.computed_style.backdrop_filter;
-    if backdrop.blur_radius > 0.0
+    if !masked
+        && backdrop.blur_radius > 0.0
         && !(backdrop.has_refraction() && refraction_source)
         && node.layout.width > 0.0
         && node.layout.height > 0.0
+        && clip.width > 0
+        && clip.height > 0
+        && let Some(bounds) = blur_bounds_from_layout(layout)
     {
-        let layout = node_layout_bounds(node, world_transform);
-        if let Some(bounds) = blur_bounds_from_layout(layout) {
-            for rect in rounded_region_bands(
-                bounds,
-                node.computed_style.border_radius,
-                node.computed_style.corner_shape,
-                surface,
-            ) {
-                if !regions.contains(&rect) {
-                    regions.push(rect);
-                }
+        for rect in rounded_region_bands(
+            bounds,
+            node.computed_style.border_radius,
+            node.computed_style.corner_shape,
+            DamageRect {
+                x: clip.x as u32,
+                y: clip.y as u32,
+                width: clip.width as u32,
+                height: clip.height as u32,
+            },
+        ) {
+            if !regions.contains(&rect) {
+                regions.push(rect);
             }
         }
     }
 
+    let child_clip = if node_clips_contents(node) {
+        intersect_display_clip(clip, layout_to_display_clip(layout))
+    } else {
+        clip
+    };
     let scroll = node.resolved_scroll_metrics();
     let child_transform = child_transform(world_transform, node, scroll.x, scroll.y);
+    let masks_children = masked || mesh_core_elements::ShapeGeometry::clips_children(node);
     for child in &node.children {
+        let (transform, (clip, masked)) = child_paint_space(
+            child, child_transform, (child_clip, masks_children), (viewport, false),
+        );
         collect_backdrop_blur_regions_with_transform(
             child,
-            child_transform,
-            surface,
+            transform,
+            clip,
+            viewport,
             refraction_source,
+            masked,
             regions,
         );
     }
@@ -95,6 +119,7 @@ pub fn backdrop_blur_regions(commands: &[DisplayPaintCommand]) -> Vec<DamageRect
     for cmd in commands {
         if cmd.node.style.backdrop_filter.blur_radius <= 0.0
             || samples_source.contains(&cmd.node.id)
+            || cmd.node.ancestor_clips.iter().any(|clip| clip.mask.is_some())
         {
             continue;
         }

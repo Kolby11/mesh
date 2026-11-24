@@ -26,6 +26,7 @@ use crate::storage::{
 use crate::util::{default_runtime_storage_root, is_named_event_channel};
 use mesh_core_capability::CapabilitySet;
 use mesh_core_resources::blob::{BlobFormat, BlobMeta, BlobOwner, MAX_BLOB_BYTES};
+use mesh_core_resources::frame::FrameOwner;
 use mlua::{Function, Lua, LuaSerdeExt, Table, Value as LuaValue};
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet};
@@ -49,6 +50,8 @@ use std::sync::{
 /// - `mesh.service.emit(table)` — emit service state
 /// - `mesh.blob.put(bytes, mime, meta?)` — register image bytes and return the
 ///   `mesh-blob:` handle state carries in their place
+/// - `mesh.frame.publish(name, rgba, width, height)` — replace a live frame
+///   and return the stable handle for the channel
 /// - `mesh.service.emit_json(value?)` — parse JSON text or emit a Lua table directly
 /// - `mesh.service.emit_unavailable()` — emit unavailable state
 /// - `self.EventName:fire(payload)` — publish a declared provider event
@@ -84,6 +87,7 @@ pub struct BackendScriptContext {
     suspended: HashMap<u64, SuspendedCallback>,
     suspended_publications: HashMap<u64, CallbackPublications>,
     blobs: Arc<BlobOwner>,
+    frames: Arc<FrameOwner>,
 }
 
 #[derive(Default)]
@@ -330,6 +334,7 @@ impl BackendScriptContext {
             suspended: HashMap::new(),
             suspended_publications: HashMap::new(),
             blobs: Arc::new(BlobOwner::new()),
+            frames: Arc::default(),
         }
     }
 
@@ -1325,7 +1330,7 @@ impl BackendScriptContext {
                 module_id: self.module_id.clone(),
                 message: format!("failed to convert state to JSON: {err}"),
             })?;
-        let payload = BackendState::new(payload, &self.policy.budget(), &self.blobs).map_err(|error| {
+        let payload = BackendState::new(payload, &self.policy.budget(), &self.blobs, &self.frames).map_err(|error| {
             BackendScriptError::SnapshotFailed {
                 module_id: self.module_id.clone(),
                 message: error.to_string(),
@@ -1393,6 +1398,7 @@ impl BackendScriptContext {
         self.install_config_api(&mesh)?;
         self.install_log_api(&mesh)?;
         self.install_blob_api(&mesh)?;
+        self.install_frame_api(&mesh)?;
         let task = crate::context::tasks::create_task_library(self.lua_ref()?, &self.tasks)?;
         for name in ["spawn", "delay"] {
             let callback: Function = task.get(name)?;
@@ -1467,6 +1473,7 @@ impl BackendScriptContext {
         let runtime = Arc::clone(&self.runtime);
         let resources_for_emit = resources.clone();
         let blobs = Arc::clone(&self.blobs);
+        let frames = Arc::clone(&self.frames);
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         service.set(
             "emit",
@@ -1474,7 +1481,7 @@ impl BackendScriptContext {
                 .create_function(move |lua, value: LuaValue| {
                     require_started(&host_side_effects_enabled)?;
                     let payload = lua.from_value::<JsonValue>(value)?;
-                    let payload = BackendState::new(payload, &resources_for_emit, &blobs)
+                    let payload = BackendState::new(payload, &resources_for_emit, &blobs, &frames)
                         .map_err(|error| mlua::Error::external(error.to_string()))?;
                     runtime.lock().unwrap().pending_emit = Some(payload);
                     Ok(())
@@ -1484,6 +1491,7 @@ impl BackendScriptContext {
         let runtime = Arc::clone(&self.runtime);
         let resources_for_json = resources.clone();
         let blobs = Arc::clone(&self.blobs);
+        let frames = Arc::clone(&self.frames);
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         service.set(
             "emit_json",
@@ -1500,7 +1508,7 @@ impl BackendScriptContext {
                         }
                         Some(other) => lua.from_value::<JsonValue>(other)?,
                     };
-                    let payload = BackendState::new(payload, &resources_for_json, &blobs)
+                    let payload = BackendState::new(payload, &resources_for_json, &blobs, &frames)
                         .map_err(|error| mlua::Error::external(error.to_string()))?;
                     runtime.lock().unwrap().pending_emit = Some(payload);
                     Ok(())
@@ -1510,6 +1518,7 @@ impl BackendScriptContext {
         let runtime = Arc::clone(&self.runtime);
         let resources_for_unavailable = resources.clone();
         let blobs = Arc::clone(&self.blobs);
+        let frames = Arc::clone(&self.frames);
         let host_side_effects_enabled = Arc::clone(&self.host_side_effects_enabled);
         service.set(
             "emit_unavailable",
@@ -1522,6 +1531,7 @@ impl BackendScriptContext {
                     }),
                     &resources_for_unavailable,
                     &blobs,
+                    &frames,
                 )
                 .map_err(|error| mlua::Error::external(error.to_string()))?;
                 runtime.lock().unwrap().pending_emit = Some(payload);
@@ -2319,6 +2329,35 @@ impl BackendScriptContext {
         mesh.set("blob", blob)
     }
 
+    fn install_frame_api(&self, mesh: &Table) -> mlua::Result<()> {
+        let lua = self.lua_ref()?;
+        let frame = lua.create_table()?;
+        let frames = Arc::clone(&self.frames);
+        let enabled = Arc::clone(&self.host_side_effects_enabled);
+        frame.set(
+            "publish",
+            lua.create_function(
+                move |_, (name, rgba, width, height): (String, LuaValue, u32, u32)| {
+                    require_started(&enabled)?;
+                    frames
+                        .publish(&name, width, height, blob_bytes(rgba)?)
+                        .map(|handle| handle.to_string())
+                        .map_err(mlua::Error::external)
+                },
+            )?,
+        )?;
+        let frames = Arc::clone(&self.frames);
+        let enabled = Arc::clone(&self.host_side_effects_enabled);
+        frame.set(
+            "close",
+            lua.create_function(move |_, name: String| {
+                require_started(&enabled)?;
+                Ok(frames.close(&name))
+            })?,
+        )?;
+        mesh.set("frame", frame)
+    }
+
     fn install_log_api(&mut self, mesh: &Table) -> mlua::Result<()> {
         let log = self.lua_ref()?.create_table()?;
         let module_id = self.module_id.clone();
@@ -2475,6 +2514,7 @@ impl Drop for BackendScriptContext {
         // normal lifecycle guard calls call_stop() first; both operations are
         // intentionally idempotent.
         self.task_io.close();
+        self.frames.clear();
         self.clear_tasks();
         self.kill_streams();
         self.shutdown_exec();
@@ -2497,8 +2537,11 @@ fn host_blob_record(value: &LuaValue) -> mlua::Result<Option<String>> {
 fn blob_bytes(value: LuaValue) -> mlua::Result<Vec<u8>> {
     let too_large = || mlua::Error::runtime(format!("blob exceeds {MAX_BLOB_BYTES} bytes"));
     match value {
-        LuaValue::String(text) => Ok(text.as_bytes().to_vec()),
-        LuaValue::Buffer(buffer) => Ok(buffer.to_vec()),
+        LuaValue::String(text) if text.as_bytes().len() <= MAX_BLOB_BYTES => {
+            Ok(text.as_bytes().to_vec())
+        }
+        LuaValue::Buffer(buffer) if buffer.len() <= MAX_BLOB_BYTES => Ok(buffer.to_vec()),
+        LuaValue::String(_) | LuaValue::Buffer(_) => Err(too_large()),
         LuaValue::Table(table) => {
             let len = table.raw_len();
             if len > MAX_BLOB_BYTES {

@@ -3,7 +3,9 @@ use crate::surface::icon;
 use mesh_core_elements::style::{
     Color, CornerShapes, Corners, Edges, GradientGeometry, RadialExtent, RadialShape,
 };
-use mesh_core_elements::{AffineClip, AffineTransform, BoxShadow, VisualFilter};
+use mesh_core_elements::{
+    AffineClip, AffineClipMask, AffineTransform, BoxShadow, ShapeFillRule, VisualFilter,
+};
 use skia_safe::{
     BlurStyle, Canvas, Color4f, Data, ImageInfo, MaskFilter, Matrix, PaintStyle, Path as SkiaPath,
     PathBuilder, Point, RRect, Rect, TileMode, Vector, canvas::SaveLayerRec,
@@ -490,6 +492,7 @@ pub(crate) trait PaintBackend: Send + Sync {
 #[allow(dead_code)]
 pub(crate) enum PainterCommand {
     PushClip(PainterClip),
+    PushPathClip { path: PainterPath, clip: ClipRect },
     PopClip,
     PushLayer(PainterLayer),
     PopLayer,
@@ -514,6 +517,13 @@ pub(crate) enum PainterCommand {
     DrawPath {
         path: PainterPath,
         paint: PainterPaint,
+        clip: ClipRect,
+    },
+    DrawPathOutline {
+        path: PainterPath,
+        color: Color,
+        width: f32,
+        gap: f32,
         clip: ClipRect,
     },
     DrawImage {
@@ -591,13 +601,15 @@ impl PainterClip {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PainterLayer {
     pub bounds: ClipRect,
     pub opacity: f32,
     pub blend_mode: PainterBlendMode,
     pub filter: PainterFilter,
     pub blur_quality: BlurQuality,
+    pub material: Option<super::material::PainterMaterial>,
+    pub clip_masks: Option<(Arc<[AffineClip]>, f32)>,
 }
 
 impl PainterLayer {
@@ -609,6 +621,8 @@ impl PainterLayer {
             blend_mode,
             filter: PainterFilter::None,
             blur_quality: BlurQuality::default(),
+            material: None,
+            clip_masks: None,
         }
     }
 
@@ -624,6 +638,8 @@ impl PainterLayer {
             blend_mode: PainterBlendMode::SrcOver,
             filter: PainterFilter::Blur(filter),
             blur_quality,
+            material: None,
+            clip_masks: None,
         }
     }
 }
@@ -726,9 +742,11 @@ pub(crate) struct PainterStroke {
     pub width: f32,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct PainterPath {
     pub elements: Vec<PainterPathElement>,
+    pub fill_rule: ShapeFillRule,
+    pub round_stroke: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -887,9 +905,10 @@ impl PaintBackend for SkiaPaintBackend {
                     );
                     canvas.set_matrix(&matrix);
                 } else {
-                    let path = affine_clip_path(*clip, scale);
+                    let path = affine_clip_path(clip, scale);
                     canvas.clip_path(&path, None, true);
                 }
+                apply_vector_mask(canvas, clip, scale);
             }
             canvas.concat(&skia_matrix(transform, scale));
             save_count
@@ -996,6 +1015,13 @@ impl SkiaPaintBackend {
                         );
                     }
                 }
+                PainterCommand::PushPathClip { path, clip } => {
+                    clip_stack.push(effective_clip(*clip, &clip_stack));
+                    clip_saves.push(canvas.save());
+                    if let Some(path) = skia_path(path) {
+                        canvas.clip_path(&path, None, true);
+                    }
+                }
                 PainterCommand::PopClip => {
                     clip_stack.pop();
                     if let Some(save) = clip_saves.pop() {
@@ -1028,15 +1054,17 @@ impl SkiaPaintBackend {
                     let layer = if over_budget || too_deep {
                         PainterLayer {
                             filter: PainterFilter::None,
-                            ..*layer
+                            ..layer.clone()
                         }
                     } else {
-                        *layer
+                        layer.clone()
                     };
                     layer_stack.push(self.push_layer_command(
                         canvas,
-                        layer,
+                        &layer,
                         clip_stack.last().copied(),
+                        layer_stack.depth() < MAX_BLUR_LAYER_DEPTH,
+                        diagnostics,
                     ));
                 }
                 PainterCommand::PopLayer => {
@@ -1089,6 +1117,11 @@ impl SkiaPaintBackend {
                 PainterCommand::DrawPath { path, paint, clip } => {
                     let paint = *paint;
                     self.draw_path_command(canvas, path, paint, effective_clip(*clip, &clip_stack));
+                }
+                PainterCommand::DrawPathOutline { path, color, width, gap, clip } => {
+                    self.draw_path_outline_command(
+                        canvas, path, *color, *width, *gap, effective_clip(*clip, &clip_stack),
+                    );
                 }
                 PainterCommand::DrawImage {
                     image,
@@ -1264,8 +1297,10 @@ impl SkiaPaintBackend {
     fn push_layer_command(
         &self,
         canvas: &Canvas,
-        layer: PainterLayer,
+        layer: &PainterLayer,
         current_clip: Option<ClipRect>,
+        material_within_budget: bool,
+        diagnostics: &mut Vec<PainterDiagnostic>,
     ) -> ActivePainterLayer {
         let bounds = current_clip
             .map(|clip| intersect_clip(layer.bounds, clip))
@@ -1277,6 +1312,7 @@ impl SkiaPaintBackend {
         if layer.opacity <= 0.0
             && layer.blend_mode == PainterBlendMode::SrcOver
             && matches!(layer.filter, PainterFilter::None)
+            && layer.material.is_none()
         {
             // Nothing in a fully transparent layer is visible; an empty clip
             // lets Skia reject the subtree without rasterizing an offscreen.
@@ -1291,21 +1327,49 @@ impl SkiaPaintBackend {
         paint.set_alpha_f(layer.opacity.clamp(0.0, 1.0));
         paint.set_blend_mode(blend_mode_to_skia(layer.blend_mode));
 
-        if let PainterFilter::Blur(filter) = layer.filter
-            && let Some(image_filter) = blur_image_filter(filter.blur_radius, layer.blur_quality)
-        {
-            paint.set_image_filter(image_filter);
-        }
-
+        let blur = match layer.filter {
+            PainterFilter::Blur(filter) => blur_image_filter(filter.blur_radius, layer.blur_quality),
+            _ => None,
+        };
         let bounds = Rect::from_xywh(
             bounds.x as f32,
             bounds.y as f32,
             bounds.width as f32,
             bounds.height as f32,
         );
+        let filter = if let Some(material) = &layer.material {
+            match material.image_filter(&bounds, blur.clone(), material_within_budget) {
+                Ok(filter) => Some(filter),
+                Err(message) => {
+                    diagnostics.push(PainterDiagnostic {
+                        backend_id: self.id(),
+                        feature: UnsupportedPainterFeature::Filter,
+                        message,
+                        source: Some(PainterDiagnosticSource {
+                            node_id: Some(material.node_id),
+                            property: Some("material".into()),
+                        }),
+                    });
+                    blur
+                }
+            }
+        } else {
+            blur
+        };
+        if let Some(filter) = filter {
+            paint.set_image_filter(filter);
+        }
+        let mask_save = layer.clip_masks.as_ref().map(|(clips, scale)| {
+            let save = canvas.save();
+            for clip in clips.iter().filter(|clip| clip.mask.is_some()) {
+                canvas.clip_path(&affine_clip_path(clip, *scale), None, true);
+                apply_vector_mask(canvas, clip, *scale);
+            }
+            save
+        });
         let save_count = canvas.save_layer(&SaveLayerRec::default().bounds(&bounds).paint(&paint));
         ActivePainterLayer {
-            save_count: Some(save_count),
+            save_count: Some(mask_save.unwrap_or(save_count)),
         }
     }
 
@@ -1939,6 +2003,7 @@ impl SkiaPaintBackend {
         paint: PainterPaint,
         clip: ClipRect,
     ) {
+        let round_stroke = path.round_stroke;
         let Some(path) = skia_path(path) else {
             return;
         };
@@ -1965,9 +2030,51 @@ impl SkiaPaintBackend {
             PainterPaintStyle::Stroke(stroke) => {
                 skia_paint.set_style(PaintStyle::Stroke);
                 skia_paint.set_stroke_width(stroke.width.max(0.0));
+                if round_stroke {
+                    skia_paint
+                        .set_stroke_cap(skia_safe::paint::Cap::Round)
+                        .set_stroke_join(skia_safe::paint::Join::Round);
+                }
             }
         }
         canvas.draw_path(&path, &skia_paint);
+        canvas.restore_to_count(save_count);
+    }
+
+    fn draw_path_outline_command(
+        &self,
+        canvas: &Canvas,
+        path: &PainterPath,
+        color: Color,
+        width: f32,
+        gap: f32,
+        clip: ClipRect,
+    ) {
+        let Some(path) = skia_path(path) else {
+            return;
+        };
+        if width <= 0.0 || clip.width <= 0 || clip.height <= 0 {
+            return;
+        }
+        let save_count = canvas.save();
+        canvas.clip_irect(
+            skia_safe::IRect::from_xywh(clip.x, clip.y, clip.width, clip.height),
+            None,
+        );
+        let mut paint = skia_paint(color, true);
+        paint
+            .set_style(PaintStyle::Stroke)
+            .set_stroke_width(2.0 * gap)
+            .set_stroke_cap(skia_safe::paint::Cap::Round)
+            .set_stroke_join(skia_safe::paint::Join::Round);
+        if gap > 0.0 {
+            let mut inner = PathBuilder::new();
+            if skia_safe::path_utils::fill_path_with_paint(&path, &paint, &mut inner, None, None) {
+                canvas.clip_path(&inner.detach(), skia_safe::ClipOp::Difference, true);
+            }
+        }
+        paint.set_stroke_width(2.0 * (gap + width));
+        canvas.draw_path(&path, &paint);
         canvas.restore_to_count(save_count);
     }
 
@@ -2629,7 +2736,7 @@ fn skia_matrix(transform: AffineTransform, scale: f32) -> Matrix {
     )
 }
 
-fn affine_clip_path(clip: AffineClip, scale: f32) -> SkiaPath {
+fn affine_clip_path(clip: &AffineClip, scale: f32) -> SkiaPath {
     let transform = AffineTransform::scale(scale, scale).then(clip.transform);
     let left = clip.rect.x;
     let top = clip.rect.y;
@@ -2650,8 +2757,32 @@ fn affine_clip_path(clip: AffineClip, scale: f32) -> SkiaPath {
     builder.detach()
 }
 
-fn skia_path(path: &PainterPath) -> Option<SkiaPath> {
+fn apply_vector_mask(canvas: &Canvas, clip: &AffineClip, scale: f32) {
+    match &clip.mask {
+        Some(AffineClipMask::Shape(shape)) => {
+            let matrix = canvas.local_to_device();
+            canvas.concat(&skia_matrix(clip.transform, scale));
+            if let Some(path) = skia_path(&PainterPath {
+                elements: super::tree::shape_path_elements(shape.outline(), 0, 0, 1.0),
+                fill_rule: shape.fill_rule(),
+                ..PainterPath::default()
+            }) {
+                canvas.clip_path(&path, None, true);
+            }
+            canvas.set_matrix(&matrix);
+        }
+        Some(AffineClipMask::Empty) => {
+            canvas.clip_irect(skia_safe::IRect::default(), None);
+        }
+        None => {}
+    }
+}
+
+pub(super) fn skia_path(path: &PainterPath) -> Option<SkiaPath> {
     let mut builder = PathBuilder::new();
+    if path.fill_rule == ShapeFillRule::EvenOdd {
+        builder.set_fill_type(skia_safe::PathFillType::EvenOdd);
+    }
     for element in &path.elements {
         match *element {
             PainterPathElement::MoveTo(x, y) => {

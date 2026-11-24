@@ -5,13 +5,13 @@ use crate::{
     document::Document,
     knowledge::{css::CSS_PROPERTIES, mesh_api::MESH_API_ENTRIES, tags::TAG_DEFS},
     module_registry::ModuleRegistry,
-    util::{Block, block_at_offset, block_content, position_to_offset},
+    util::{Block, block_at_offset, position_to_offset},
 };
 
 pub fn hover(doc: &Document, position: Position, registry: &ModuleRegistry) -> Option<Hover> {
     let offset = position_to_offset(&doc.source, position);
-    let loc = block_at_offset(&doc.source, offset);
-    let content = block_content(&doc.source, &loc.block);
+    let loc = block_at_offset(doc, offset);
+    let content = loc.content;
 
     let markdown = match &loc.block {
         Block::Template => hover_template(content, loc.offset_in_block)?,

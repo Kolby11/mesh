@@ -1,0 +1,100 @@
+<props>
+{
+    width = { type = "size", default = "320px" },
+    height = { type = "size", default = "240px" },
+    clip = { type = "bool", default = true },
+}
+</props>
+
+<template>
+    <box
+        class="drawing-canvas"
+        class:drawing-clipped={props.clip}
+        style:width={props.width}
+        style:height={props.height}
+    >
+        {#for command in prepared_commands() key={command.id}}
+            {#if command.shape}
+                <shape
+                    class={"drawing-item drawing-path " .. command.class}
+                    class:drawing-region={command.label ~= ""}
+                    class:drawing-disabled={command.disabled}
+                    type="path"
+                    style={command.style}
+                    d={command.d}
+                    view-box={command.view_box}
+                    fill-rule={command.fill_rule}
+                    path-fill={command.path_fill}
+                    role={command.label ~= "" and "button" or "presentation"}
+                    aria-label={command.label}
+                    title={command.label}
+                    aria-hidden={command.label == ""}
+                    aria-disabled={command.disabled}
+                    tabindex={command.label ~= "" and not command.disabled and 0 or -1}
+                    inert={command.label == ""}
+                    onclick={activate(command.id)}
+                    onpointerenter={enter(command.id)}
+                    onpointerleave={leave(command.id)}
+                >
+                    {#for art in command.art key={art.id}}
+                        {#if art.shape}
+                            <shape class={"drawing-item drawing-path " .. art.class} type="path" style={art.style} d={art.d} view-box={art.view_box} fill-rule={art.fill_rule} path-fill={art.path_fill} aria-hidden="true" inert="true" />
+                        {:else if art.kind == "text"}
+                            <text class={"drawing-item " .. art.class} style={art.style} text-path={art.text_path} view-box={art.view_box} aria-hidden="true" inert="true">{art.text}</text>
+                        {:else if art.kind == "image"}
+                            <image class={"drawing-item " .. art.class} style={art.style} src={art.src} alt="" aria-hidden="true" inert="true" />
+                        {:else if art.kind == "icon"}
+                            <icon class={"drawing-item " .. art.class} style={art.style} name={art.name} size={art.icon_size} aria-hidden="true" inert="true" />
+                        {/if}
+                    {/for}
+                </shape>
+            {:else if command.kind == "text"}
+                <text class={"drawing-item " .. command.class} style={command.style} text-path={command.text_path} view-box={command.view_box}>{command.text}</text>
+            {:else if command.kind == "image"}
+                <image class={"drawing-item " .. command.class} style={command.style} src={command.src} alt={command.alt} />
+            {:else if command.kind == "icon"}
+                <icon class={"drawing-item " .. command.class} style={command.style} name={command.name} size={command.icon_size} aria-hidden="true" inert="true" />
+            {/if}
+        {/for}
+    </box>
+</template>
+
+<script lang="luau">
+local drawing = require("@mesh/drawing/commands")
+
+commands = {}
+onactivate = nil
+onregionenter = nil
+onregionleave = nil
+function prepared_commands()
+    return drawing.prepare(commands)
+end
+
+local function activate(id, event)
+    if onactivate then onactivate(id, event) end
+end
+
+local function enter(id, event)
+    if onregionenter then onregionenter(id, event) end
+end
+
+local function leave(id, event)
+    if onregionleave then onregionleave(id, event) end
+end
+</script>
+
+<style>
+    .drawing-canvas {
+        position: relative;
+        --drawing-hover-fill: var(--color-surface-variant);
+        --drawing-hover-transform: none;
+    }
+    .drawing-clipped { overflow: hidden; }
+    .drawing-item { position: absolute; }
+    .drawing-path { background-color: var(--color-surface); }
+    .drawing-region:hover, .drawing-region:focus-visible {
+        background-color: var(--drawing-hover-fill);
+        transform: var(--drawing-hover-transform);
+    }
+    .drawing-disabled { opacity: 0.45; }
+</style>

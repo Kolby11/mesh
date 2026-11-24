@@ -3,27 +3,15 @@
         <button class="scrim" onclick={onClose} keybind="close" onkeybind={onEscape} aria-label={t("launcher.close")} tabindex="-1" />
         <button class="key-sink" keybind="search" onkeybind={onSearch} aria-label={t("launcher.search")} tabindex="-1" />
         <box class="stage" aria-label={t("launcher.title")}>
-            {#for app in ring key={app.id}}
-                <shape
-                    class="wedge"
-                    class:wedge-focused={app.focused}
-                    type="sector"
-                    start={app.start}
-                    end={app.sweep_end}
-                    inner="0.45"
-                    role="button"
-                    tabindex="0"
-                    onclick={onLaunch(app.id)}
-                    onpointerenter={onHint(app.name)}
-                    onpointerleave={onHint("")}
-                    title={app.name}
-                    aria-label={app.name}
-                >
-                    <shape class="rim" class:rim-running={app.running} type="arc" start={app.start} end={app.sweep_end} />
-                    <image class="wedge-art" style={app.art_style} src={app.icon} alt="" hidden={not app.has_file} />
-                    <icon class="wedge-art" style={app.art_style} name="application-x-executable" size="44" hidden={app.has_file} />
-                </shape>
-            {/for}
+            <DrawingCanvas
+                width="520px"
+                height="520px"
+                clip="false"
+                commands={ring}
+                onactivate={onLaunch}
+                onregionenter={onWedgeEnter}
+                onregionleave={onWedgeLeave}
+            />
                 <shape class="wedge media-wedge" type="sector" start="197" end="231" inner="0.52" role="button" tabindex="0" onclick={previous} aria-label={t("launcher.previous")} title={t("launcher.previous")}>
                     <icon class="media-art" style="left: 116px; top: 347px;" name="media-skip-backward" size="22" />
                 </shape>
@@ -44,6 +32,8 @@
 </template>
 
 <script lang="luau">
+local DrawingCanvas = require("@mesh/drawing-canvas")
+local path = require("@mesh/drawing/path")
 local t = import("mesh.i18n", "t")
 local apps_service = require("mesh.apps")
 local media = require("mesh.media")
@@ -66,13 +56,6 @@ clock_date = ""
 media_ready = false
 playing = false
 
-local function artStyle(degrees)
-    local radians = math.rad(degrees)
-    local x = CENTRE + ART_RADIUS * math.sin(radians) - ART_SIZE / 2
-    local y = CENTRE - ART_RADIUS * math.cos(radians) - ART_SIZE / 2
-    return string.format("left: %dpx; top: %dpx;", math.floor(x + 0.5), math.floor(y + 0.5))
-end
-
 local function sourceApps()
     if query == "" then
         return apps_service.apps or {}
@@ -94,16 +77,62 @@ effect(function()
         for index, app in sourceApps() do
             if index > SLOTS then break end
             local from = ARC_START + (index - 1) * width
+            local start = from + WEDGE_GAP / 2
+            local finish = from + width - WEDGE_GAP / 2
+            local icon = app.icon or ""
+            local middle = from + width / 2
+            local x, y = path.point(CENTRE, CENTRE, ART_RADIUS, middle)
+            local label_start, label_end = start + 2, finish - 2
+            if math.cos(math.rad(middle)) < 0 then
+                label_start, label_end = label_end, label_start
+            end
+            local art = {
+                {
+                    id = "app-icon",
+                    kind = if string.sub(icon, 1, 1) == "/" then "image" else "icon",
+                    x = math.floor(x - ART_SIZE / 2 + 0.5),
+                    y = math.floor(y - ART_SIZE / 2 + 0.5),
+                    width = ART_SIZE,
+                    height = ART_SIZE,
+                    src = icon,
+                    name = "application-x-executable",
+                },
+                {
+                    id = "app-label",
+                    kind = "text",
+                    width = CENTRE * 2,
+                    height = CENTRE * 2,
+                    text = app.name,
+                    text_path = path.circle_arc(CENTRE, CENTRE, 227, label_start, label_end),
+                    view_box = "0 0 520 520",
+                    style = "font-size: 12px; color: var(--color-on-surface)",
+                },
+            }
+            if app.running then
+                table.insert(art, 1, {
+                    id = "running",
+                    kind = "path",
+                    width = CENTRE * 2,
+                    height = CENTRE * 2,
+                    d = path.circle_arc(CENTRE, CENTRE, CENTRE, start, finish),
+                    view_box = "0 0 520 520",
+                    path_fill = "none",
+                    style = "border: 3px solid var(--color-primary)",
+                })
+            end
+            local outline = if app.focused then "var(--color-primary)" else "var(--color-outline-variant)"
             list[index] = {
                 id = app.id,
-                name = app.name,
-                icon = app.icon or "",
-                has_file = string.sub(app.icon or "", 1, 1) == "/",
-                running = app.running,
-                focused = app.focused,
-                start = from + WEDGE_GAP / 2,
-                sweep_end = from + width - WEDGE_GAP / 2,
-                art_style = artStyle(from + width / 2),
+                kind = "path",
+                label = app.name,
+                class = "wedge",
+                width = CENTRE * 2,
+                height = CENTRE * 2,
+                d = path.annular_sector(CENTRE, CENTRE, CENTRE, CENTRE * 0.45, start, finish),
+                view_box = "0 0 520 520",
+                style = "border: 1px solid " .. outline .. "; --drawing-hover-transform: scale(1.06);"
+                    .. " transition: transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate), background-color var(--animation-duration-short) var(--animation-curves-bezier-standard)",
+                art = art,
             }
         end
     end
@@ -156,7 +185,15 @@ function onSearchKey(event)
         onLaunch(ring[1].id)
     end
 end
-function onHint(name) hint = name end
+function onWedgeEnter(id)
+    for _, command in ring do
+        if command.id == id then
+            hint = command.label
+            return
+        end
+    end
+end
+function onWedgeLeave() hint = "" end
 function onLaunch(id)
     apps_service.activate(id)
     onClose()
@@ -182,12 +219,6 @@ function nextTrack() if media_ready then media.next() end end
     /* Every wedge box is centred on the ring, so scaling about the box centre
     pushes the hovered sector straight outwards without covering its neighbours. */
     .wedge:hover, .wedge:focus-visible { background-color: var(--color-surface-variant); transform: scale(1.06); }
-    .wedge-focused { border-color: var(--color-primary); }
-    .wedge-art { position: absolute; width: 44px; height: 44px; }
-
-    .rim { position: absolute; left: 0; top: 0; width: 520px; height: 520px; background: transparent; border: 0 solid var(--color-primary); }
-    .rim-running { border-width: 3px; }
-
     .media-wedge { left: 40px; top: 40px; width: 440px; height: 440px; }
     .media-art { position: absolute; width: 22px; height: 22px; }
 

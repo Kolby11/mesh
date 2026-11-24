@@ -1150,6 +1150,27 @@ impl FrontendRenderEngine {
         let tx = (x + (style.padding.left * scale) as i32).max(0) as u32;
         let inner_width = ((node.paint_width() - style.padding.horizontal()) * scale).max(0.0);
         let text_style = display_text_style(style, scale);
+        let effective_align =
+            if style.text_direction == TextDirection::Rtl && style.text_align == TextAlign::Left {
+                TextAlign::Right
+            } else {
+                style.text_align
+            };
+        if let Some(path) = &text.path {
+            let path = super::backend::skia_path(&PainterPath {
+                elements: super::tree::shape_path_elements(path.outline(), x, y, scale),
+                ..PainterPath::default()
+            });
+            if let Some(path) = path {
+                session.with_canvas(|canvas| {
+                    self.text_renderer.render_on_path(
+                        &text.text, text_style, effective_align, style.color, canvas, &path,
+                        clip_to_tuple(clip),
+                    );
+                });
+            }
+            return;
+        }
 
         let display_text: std::borrow::Cow<'_, str> =
             if style.text_overflow == TextOverflow::Ellipsis && inner_width > 0.0 {
@@ -1170,12 +1191,6 @@ impl FrontendRenderEngine {
                 std::borrow::Cow::Borrowed(text.text.as_ref())
             };
 
-        let effective_align =
-            if style.text_direction == TextDirection::Rtl && style.text_align == TextAlign::Left {
-                TextAlign::Right
-            } else {
-                style.text_align
-            };
         let render_max_width = Some(inner_width);
         let ty = centered_text_origin_y_with_text_style(
             &self.text_renderer,

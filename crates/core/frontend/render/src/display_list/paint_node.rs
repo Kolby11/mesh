@@ -46,6 +46,8 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
         id: node.id,
         in_scroll_content: false,
         module_id: node.shared_module_id().cloned(),
+        render_source: source_key(node, Prop::RenderSource),
+        render_export: node.attributes.flag(Prop::RenderExport),
         transform: world_transform,
         local_layout: LayoutRect {
             x: 0.0,
@@ -97,6 +99,10 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
             additional_box_shadows: node.computed_style.additional_box_shadows.clone(),
             outline: node.computed_style.outline,
             filter: node.computed_style.filter,
+            material: build_material(
+                node,
+                previous.and_then(|previous| previous.style.material.as_ref()),
+            ),
             backdrop_filter: node.computed_style.backdrop_filter,
             mix_blend_mode: node.computed_style.mix_blend_mode,
             icon_fill: node.computed_style.icon_fill,
@@ -117,6 +123,58 @@ pub(super) fn build_paint_node_with_previous_transform_and_clips(
             }
         },
     }
+}
+
+fn build_material(node: &WidgetNode, previous: Option<&DisplayMaterial>) -> Option<DisplayMaterial> {
+    let source = node.attributes.get(Prop::Material)?.trim();
+    if source.is_empty() {
+        return None;
+    }
+    let time = node
+        .attributes
+        .get(Prop::MaterialTime)
+        .and_then(|value| value.parse::<f32>().ok())
+        .filter(|value| value.is_finite())
+        .unwrap_or_default();
+    let mut values = [0.0; 4];
+    if let Some(raw) = node
+        .attributes
+        .get(Prop::MaterialValues)
+        .filter(|raw| raw.len() <= 128)
+    {
+        let mut components = raw.split_ascii_whitespace();
+        for value in &mut values {
+            *value = components
+                .next()
+                .and_then(|value| value.parse::<f32>().ok())
+                .filter(|value| value.is_finite())
+                .unwrap_or_default();
+        }
+    }
+    Some(DisplayMaterial {
+        source: retained_display_str(source, previous.map(|previous| &previous.source)),
+        time,
+        values,
+        input_source: source_key(node, Prop::MaterialSource),
+    })
+}
+
+fn source_key(node: &WidgetNode, prop: Prop) -> Option<RenderSourceKey> {
+    let name = node.attributes.get(prop)?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let scope = node.render_source_scope();
+    if name.len() > 64 || scope.is_none() {
+        return (prop == Prop::MaterialSource).then(|| RenderSourceKey {
+            scope: "".into(),
+            name: "".into(),
+        });
+    }
+    Some(RenderSourceKey {
+        scope: scope.cloned()?,
+        name: name.into(),
+    })
 }
 
 #[cfg(test)]
@@ -141,6 +199,7 @@ pub(super) fn build_paint_content_with_previous(
                 },
             ),
             selection: build_text_selection(node),
+            path: mesh_core_elements::ShapePath::for_text(node),
         }),
         "input" => {
             let value = retained_display_str(
@@ -213,8 +272,10 @@ pub(super) fn build_paint_content_with_previous(
             size: None,
             multicolor: true,
         }),
-        "shape" => mesh_core_elements::ShapeGeometry::from_node(node)
-            .map_or(DisplayPaintContent::None, DisplayPaintContent::Shape),
+        "shape" => DisplayPaintContent::Shape {
+            geometry: mesh_core_elements::ShapeGeometry::from_node(node),
+            clip_children: mesh_core_elements::ShapeGeometry::clips_children(node),
+        },
         _ => indicator_mark(node).map_or(DisplayPaintContent::None, |kind| {
             DisplayPaintContent::Checkmark(DisplayCheckmarkPaint { kind })
         }),

@@ -86,19 +86,30 @@ pub(super) fn build_component_ref(
     host_instance_key: &str,
     composition: Option<&dyn FrontendCompositionResolver>,
 ) -> WidgetNode {
-    let (_, _, props, _, parsed_handler_calls) = parse_attributes_runtime(
+    let (_, _, mut props, _, parsed_handler_calls) = parse_attributes_runtime(
         &component.props,
         state,
         host_instance_key,
         composition,
         false,
     );
+    props.remove_by_name("render-import");
+    let render_imports = component.props.iter().find_map(|attr| match &attr.value {
+        AttributeValue::Static(value) if attr.name == "render-import" => {
+            mesh_core_elements::RenderImport::parse(value)
+        }
+        _ => None,
+    });
     let mut composition_props = ComponentCompositionProps {
         values: props,
+        render_imports: render_imports.unwrap_or_default(),
         ..ComponentCompositionProps::default()
     };
     let mut prop_handler_calls = BTreeMap::new();
     for attr in &component.props {
+        if attr.name == "render-import" {
+            continue;
+        }
         if let AttributeValue::EventHandlerExpression { .. } = &attr.value {
             if let Some(call) = parsed_handler_calls.get(&normalize_event_handler_name(&attr.name))
             {

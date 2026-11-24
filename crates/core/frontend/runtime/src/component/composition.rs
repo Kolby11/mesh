@@ -162,6 +162,13 @@ impl FrontendCompositionResolver for FrontendSurfaceComponent {
                 container: (container_width, container_height),
             });
         let record_recipe = |node: &mut WidgetNode, instance: &std::sync::Arc<str>| {
+            if !props.render_imports.is_empty() {
+                node.set_render_imports(mesh_core_elements::RenderImportScope {
+                    child: instance.clone(),
+                    parent: host_instance_key.into(),
+                    names: props.render_imports.clone(),
+                });
+            }
             if let Some(recipe) = &recipe {
                 self.component_prop_recipes
                     .borrow_mut()
@@ -925,7 +932,7 @@ mod tests {
             values: AttributeMap::from([("label".into(), "Volume".into())]),
             bindings: AttributeMap::from([("hidden".into(), "isHidden".into())]),
             bind_this: Some("child".into()),
-            callbacks: Default::default(),
+            ..Default::default()
         };
 
         let props_json = runtime_props_json(&props.values);

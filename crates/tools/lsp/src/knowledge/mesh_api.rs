@@ -83,6 +83,18 @@ pub static MESH_API_ENTRIES: &[MeshApiEntry] = &[
         backend_only: true,
     },
     MeshApiEntry {
+        path: "frame.publish",
+        signature: "mesh.frame.publish(name: string, rgba: string | buffer | { number }, width: number, height: number) -> string",
+        description: "Publish tightly packed RGBA8 pixels and get the stable frame handle for the channel.",
+        backend_only: true,
+    },
+    MeshApiEntry {
+        path: "frame.close",
+        signature: "mesh.frame.close(name: string) -> boolean",
+        description: "Retire the named frame channel and notify its current viewers.",
+        backend_only: true,
+    },
+    MeshApiEntry {
         path: "service.set_poll_interval",
         signature: "mesh.service.set_poll_interval(ms: number)",
         description: "Set how often the backend module's poll cycle runs (in milliseconds).",

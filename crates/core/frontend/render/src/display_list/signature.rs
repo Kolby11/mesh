@@ -169,6 +169,8 @@ pub(super) fn hash_paint_content_attributes(
         "text" => {
             hash_attribute(node, Prop::Content, hasher);
             hash_attribute(node, Prop::Text, hasher);
+            hash_attribute(node, Prop::TextPath, hasher);
+            hash_attribute(node, Prop::ViewBox, hasher);
             node.text_selection.hash(hasher);
         }
         "input" => {
@@ -191,6 +193,11 @@ pub(super) fn hash_paint_content_attributes(
             hash_attribute(node, Prop::End, hasher);
             hash_attribute(node, Prop::Inner, hasher);
             hash_attribute(node, Prop::Points, hasher);
+            hash_attribute(node, Prop::D, hasher);
+            hash_attribute(node, Prop::FillRule, hasher);
+            hash_attribute(node, Prop::PathFill, hasher);
+            hash_attribute(node, Prop::ViewBox, hasher);
+            hash_attribute(node, Prop::ClipChildren, hasher);
             node.computed_style.border_width.top.to_bits().hash(hasher);
         }
         _ => super::paint_node::indicator_mark(node).hash(hasher),

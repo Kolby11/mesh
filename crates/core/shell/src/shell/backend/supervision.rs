@@ -90,7 +90,7 @@ impl Shell {
                 "backend provider {provider_id} for {interface} failed {MAX_RESTART_CYCLES} supervised restarts; quarantined for this session, failing over"
             );
             tracing::warn!(interface, provider_id, "{message}");
-            self.record_backend_runtime_status_at_identity(
+            self.record_supervised_backend_status(
                 interface.to_string(),
                 provider_id.to_string(),
                 identity,
@@ -163,6 +163,20 @@ impl Shell {
         self.backend_restart_tasks.push(task);
     }
 
+    pub(super) fn defer_backend_restart(
+        &mut self,
+        interface: &str,
+        provider_id: &str,
+        identity: mesh_core_backend::BackendIdentity,
+    ) {
+        self.schedule_backend_restart_at_identity(
+            interface,
+            provider_id,
+            identity,
+            RESTART_BASE_DELAY,
+        );
+    }
+
     /// A supervised restart came due: pick the best non-quarantined provider
     /// for the interface (config-selected first, then priority order) and
     /// respawn it. With every provider quarantined, the interface stays down
@@ -212,6 +226,12 @@ impl Shell {
         state.restart_pending = false;
         state.pending_provider_id = None;
         state.pending_identity = mesh_core_backend::BackendIdentity::default();
+        if self.pending_backend_runtimes.contains_key(interface)
+            || self.pending_profile_switch.is_some()
+        {
+            self.defer_backend_restart(interface, provider_id, identity);
+            return;
+        }
         let Some(ctx) = self.backend_respawn.clone() else {
             return;
         };
@@ -269,20 +289,19 @@ impl Shell {
                     "supervised backend restart"
                 );
                 self.apply_shell_runtime_settings(&mut candidate);
-                self.spawn_backend_candidate(
-                    &ctx.handle,
-                    ctx.tx.clone(),
-                    candidate,
-                    ctx.wake.clone(),
+                let slot = self.start_backend_candidate(&ctx.handle, ctx.tx, candidate, ctx.wake);
+                self.stage_pending_backend_runtime(
+                    interface.to_string(),
+                    slot,
+                    PendingBackendPurpose::SupervisedRestart,
                 );
             }
             Err(status) => {
-                self.record_backend_runtime_status(
+                let identity = self.next_backend_identity(interface, self.activation_generation);
+                self.record_supervised_backend_status(
                     status.interface.clone(),
-                    status
-                        .provider_id
-                        .clone()
-                        .unwrap_or_else(|| "<none>".to_string()),
+                    provider.module_id.clone(),
+                    identity,
                     BackendRuntimeStatus::from_str(status.status),
                     status.message.clone(),
                 );
@@ -292,6 +311,11 @@ impl Shell {
                     status = status.status,
                     "supervised restart failed: {}",
                     status.message
+                );
+                self.supervise_backend_failure_at_identity(
+                    interface,
+                    &provider.module_id,
+                    identity,
                 );
             }
         }

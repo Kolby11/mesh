@@ -299,6 +299,7 @@ fn mock_value(
             .map_or(JsonValue::from(0), JsonValue::Number),
         BaseType::Object => JsonValue::Object(serde_json::Map::new()),
         BaseType::Blob => return Err("a blob handle cannot be generated".into()),
+        BaseType::Frame => return Err("a live frame handle cannot be generated".into()),
         BaseType::Named(name) if name == BUILTIN_RESULT_TYPE => serde_json::json!({ "ok": true }),
         BaseType::Named(name) => {
             if visiting.contains(name) {
@@ -536,7 +537,7 @@ pub fn luau_type_of(contract_type: &str) -> String {
 
 fn luau_type(expr: &TypeExpr) -> String {
     let base = match &expr.base {
-        BaseType::String | BaseType::Blob => "string".to_string(),
+        BaseType::String | BaseType::Blob | BaseType::Frame => "string".to_string(),
         BaseType::Int | BaseType::Float => "number".to_string(),
         BaseType::Boolean => "boolean".to_string(),
         BaseType::Object => "{ [string]: unknown }".to_string(),

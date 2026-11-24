@@ -27,6 +27,19 @@ fn mount_launcher() -> FrontendSurfaceComponent {
             compiled: compiled.clone().into(),
         },
     );
+    let canvas_dir = root.join("modules/frontend/drawing-canvas");
+    let canvas_manifest = mesh_core_module::manifest::load_canonical_manifest(&canvas_dir)
+        .unwrap()
+        .manifest;
+    entries.insert(
+        "@mesh/drawing-canvas".into(),
+        FrontendCatalogEntry {
+            compiled: compile_frontend_module(&canvas_manifest, &canvas_dir)
+                .unwrap()
+                .into(),
+            module_dir: canvas_dir,
+        },
+    );
     let mut interfaces = InterfaceCatalog::default();
     for interface in ["apps", "media"] {
         let path = root
@@ -172,7 +185,7 @@ fn app_wedges_highlight_under_the_pointer() {
     let theme = default_theme();
     let mut component = mount_launcher();
     set_apps(&mut component, &[("a", "Alpha"), ("b", "Beta"), ("c", "Gamma")], &[]);
-    let mut paint_pixels = |component: &mut FrontendSurfaceComponent| {
+    let paint_pixels = |component: &mut FrontendSurfaceComponent| {
         let mut pixels = PixelBuffer::new(width, height);
         component
             .paint_raster(&theme, SurfaceExtent::unpadded(width, height), &mut pixels, 1.0)
@@ -184,7 +197,8 @@ fn app_wedges_highlight_under_the_pointer() {
     assert_eq!(wedges.len(), 3);
     let key = wedges[0].mesh_key().unwrap().to_owned();
     let tree = component.last_tree.as_ref().unwrap();
-    let (left, top, right, bottom) = find_node_bounds_by_key(tree, &key, 0.0, 0.0).unwrap();
+    let (left, top, right, bottom) =
+        find_node_bounds_by_key(tree, &key, 0.0, 0.0).expect("app wedge target bounds");
     let (cx, cy) = ((left + right) / 2.0, (top + bottom) / 2.0);
     // Off the icon, inside the first wedge: 237 + 246/8/2 degrees clockwise from the top.
     let radians = (237.0f32 + 15.375).to_radians();
@@ -237,4 +251,83 @@ fn search_filters_the_ring_to_matching_installed_apps() {
         .filter_map(|wedge| wedge.attributes.get(Prop::AriaLabel).cloned())
         .collect();
     assert_eq!(names, ["Firefox", "Files"]);
+}
+
+#[test]
+fn draw_region_keeps_its_identity_and_keyboard_action_when_apps_reorder() {
+    let (width, height) = (900, 700);
+    let mut component = mount_launcher();
+    set_apps(&mut component, &[("a", "Alpha"), ("b", "Beta")], &[]);
+    paint_launcher(&mut component, width, height);
+    let alpha = app_wedges(&component)[0];
+    let key = alpha.mesh_key().unwrap().to_owned();
+    assert_eq!(alpha.accessibility.label.as_deref(), Some("Alpha"));
+    assert_eq!(
+        alpha.accessibility.role,
+        mesh_core_elements::AccessibilityRole::Button
+    );
+    assert!(alpha.accessibility.focusable);
+
+    set_apps(&mut component, &[("b", "Beta"), ("a", "Alpha")], &[]);
+    paint_launcher(&mut component, width, height);
+    let alpha = app_wedges(&component)[1];
+    assert_eq!(alpha.mesh_key(), Some(key.as_str()));
+    component.focused_key = Some(key);
+    let requests = component
+        .handle_input(
+            &default_theme(),
+            width,
+            height,
+            ComponentInput::KeyPressed {
+                key: "Enter".into(),
+                modifiers: Default::default(),
+            },
+        )
+        .unwrap();
+    assert!(
+        requests.iter().any(|request| matches!(
+            request,
+            CoreRequest::ServiceCall { interface, command, payload, .. }
+                if interface == "mesh.apps" && command == "activate" && payload["id"] == "a"
+        )),
+        "keyboard activation should reach the caller's callback: {requests:?}"
+    );
+}
+
+#[test]
+fn compiled_material_uses_a_named_source_from_its_own_component() {
+    let mut component = test_frontend_component(
+        r##"
+<template>
+    <box class="stage">
+        <box class="consumer" material="return source.eval(p);" material-source="preview" />
+        <box class="producer" render-source="preview" style:background-color={fill} />
+    </box>
+</template>
+<script lang="luau">
+fill = "#ff0000"
+function change()
+    fill = "#0000ff"
+end
+</script>
+<style>
+    .stage { width: 64px; height: 28px; }
+    .consumer { position: absolute; left: 30px; top: 4px; width: 20px; height: 12px; }
+    .producer { position: absolute; left: 2px; top: 4px; width: 10px; height: 8px; }
+</style>
+"##,
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(64, 28);
+    let mut pixels = PixelBuffer::new(64, 28);
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    assert_eq!(pixels.get_pixel(45, 10).r, 255);
+
+    component.call_namespaced_handler("change", &[]).unwrap();
+    component
+        .paint_raster(&theme, extent, &mut pixels, 1.0)
+        .unwrap();
+    assert_eq!(pixels.get_pixel(45, 10).b, 255);
 }

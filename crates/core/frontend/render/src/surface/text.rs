@@ -13,7 +13,7 @@ use mesh_core_elements::style::{FontStyle, TextAlign, TextDirection, WhiteSpace}
 use mesh_core_elements::{TextMeasureContext, TextMeasureRevisions};
 use mesh_core_resources::resource_revision;
 use skia_safe::{
-    AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Rect, SamplingOptions,
+    AlphaType, Canvas, ColorType, Data, ImageInfo, Paint, Path, PathMeasure, Rect, SamplingOptions,
     canvas::SrcRectConstraint, images,
 };
 use std::cell::RefCell;
@@ -683,6 +683,23 @@ impl TextRenderer {
         clip: (u32, u32, u32, u32),
         max_width: Option<f32>,
     ) {
+        self.render_on_canvas(text, style, align, color, canvas, x, y, clip, max_width, None);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_on_canvas(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
+        x: u32,
+        y: u32,
+        clip: (u32, u32, u32, u32),
+        max_width: Option<f32>,
+        path: Option<(&Path, TextAlign)>,
+    ) {
         let context = style.context(text, max_width);
         let mut engine = self.engine.borrow_mut();
         engine.ensure_font_system();
@@ -735,7 +752,12 @@ impl TextRenderer {
                         resource_revision,
                         batch: None,
                     };
-                    cosmic.render(&mut renderer, cosmic_color(color));
+                    let color = cosmic_color(color);
+                    if let Some((path, align)) = path {
+                        render_shaped_text_on_path(&cosmic, &mut renderer, path, align, color);
+                    } else {
+                        cosmic.render(&mut renderer, color);
+                    }
                     renderer.flush();
                 })
             });
@@ -1082,6 +1104,51 @@ impl TextRenderer {
 
         engine.store_layout(&params, cosmic);
         result
+    }
+}
+
+fn render_shaped_text_on_path(
+    buffer: &Buffer,
+    renderer: &mut SkiaGlyphRenderer<'_>,
+    path: &Path,
+    align: TextAlign,
+    color: cosmic_text::Color,
+) {
+    let Some(run) = buffer.layout_runs().next() else {
+        return;
+    };
+    let mut measure = PathMeasure::new(path, false, None);
+    let length = measure.length();
+    let blank = (length - run.line_w).max(0.0);
+    let offset = match align {
+        TextAlign::Center => blank / 2.0,
+        TextAlign::Right => blank,
+        _ => 0.0,
+    };
+    // Marks and ligatures from a shaped cluster share its tangent. Their
+    // positions within the cluster are those produced by Cosmic Text.
+    for cluster in run.glyphs.chunk_by(|a, b| a.start == b.start && a.end == b.end) {
+        let (min, max) = cluster.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), glyph| {
+            (min.min(glyph.x), max.max(glyph.x + glyph.w))
+        });
+        if offset + max > length {
+            continue;
+        }
+        let center = (min + max) / 2.0;
+        let Some((position, tangent)) = measure.pos_tan(offset + center) else {
+            continue;
+        };
+        let save = renderer.canvas.save();
+        renderer.canvas.concat(&skia_safe::Matrix::new_all(
+            tangent.x, -tangent.y, position.x - tangent.x * center + tangent.y * run.line_y,
+            tangent.y, tangent.x, position.y - tangent.y * center - tangent.x * run.line_y,
+            0.0, 0.0, 1.0,
+        ));
+        for glyph in cluster {
+            renderer.glyph(glyph.physical((0.0, run.line_y), 1.0), glyph.color_opt.unwrap_or(color));
+        }
+        renderer.flush();
+        renderer.canvas.restore_to_count(save);
     }
 }
 
@@ -1529,6 +1596,24 @@ impl mesh_core_elements::TextMeasurer for SharedTextMeasurer {
 }
 
 impl SharedTextMeasurer {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_on_path(
+        &self,
+        text: &str,
+        style: TextPaintStyle<'_>,
+        align: TextAlign,
+        color: Color,
+        canvas: &Canvas,
+        path: &Path,
+        clip: (u32, u32, u32, u32),
+    ) {
+        RENDERER.with(|renderer| {
+            renderer.borrow().render_on_canvas(
+                text, style, TextAlign::Left, color, canvas, 0, 0, clip, None, Some((path, align)),
+            );
+        });
+    }
+
     pub fn measure_text_context(&self, context: &TextMeasureContext<'_>) -> (f32, f32) {
         RENDERER.with(|renderer| renderer.borrow().measure_text_context(context))
     }

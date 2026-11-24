@@ -4,63 +4,250 @@ use crate::shell::backend::BackendSupervisionState;
 use mesh_core_backend::BackendIdentity;
 use mesh_core_module::{ModuleHealthState, ModuleState};
 
-#[test]
-fn backend_supervision_quarantines_provider_after_exhausted_restart_cycles() {
-    let runtime = Runtime::new().unwrap();
+const AUDIO_INTERFACE: &str = "mesh.audio";
+const AUDIO_PRIMARY: &str = "@mesh/pipewire-audio";
+const AUDIO_FALLBACK: &str = "@mesh/pulseaudio-audio";
+const AUDIO_SCRIPT: &str = "function start(self)
+    state = { available = true, percent = 65, muted = false }
+end";
+
+fn supervised_audio_shell(
+    runtime: &Runtime,
+) -> (
+    Shell,
+    mpsc::UnboundedReceiver<types::ShellMessage>,
+    tempfile::TempDir,
+    tempfile::TempDir,
+) {
+    let graph = mesh_core_module::package::load_installed_module_graph(
+        crate::shell::discovery::test_module_graph_path(),
+    )
+    .unwrap();
     let mut shell = Shell::new();
-    let (_dir, module) = module_instance("@mesh/pipewire-audio", Some("src/main.luau"));
+    shell.installed_module_graph = Some(graph);
     shell
-        .modules
-        .insert("@mesh/pipewire-audio".to_string(), module);
-
-    // Each terminal failure of the current provider schedules a supervised
-    // restart; after the restart budget is exhausted the provider is
-    // quarantined for the session.
-    for cycle in 0..3u32 {
-        let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
-        *slot.identity.write().unwrap() = BackendIdentity::new(0, u64::from(cycle) + 1);
-        shell.replace_backend_runtime("mesh.audio".to_string(), slot);
-        shell.handle_backend_lifecycle(
-            "mesh.audio".to_string(),
-            "@mesh/pipewire-audio".to_string(),
-            "poll".to_string(),
-            "failed".to_string(),
-            format!("boom {cycle}"),
+        .interfaces
+        .register_contract(test_contract(AUDIO_INTERFACE));
+    let (primary_dir, primary) = module_instance(AUDIO_PRIMARY, Some("src/main.luau"));
+    let (fallback_dir, fallback) = module_instance(AUDIO_FALLBACK, Some("src/main.luau"));
+    let policy = mesh_core_capability::CapabilityPolicy::default();
+    for module in [primary, fallback] {
+        let provider_id = module.manifest.package.id.clone();
+        fs::write(module.path.join("src/main.luau"), AUDIO_SCRIPT).unwrap();
+        shell.interfaces.register(InterfaceProvider {
+            interface: AUDIO_INTERFACE.into(),
+            version: Some("1.0".into()),
+            base_module: None,
+            provider_module: provider_id.clone(),
+            backend_name: provider_id.clone(),
+            priority: 100,
+        });
+        Arc::make_mut(&mut shell.effective_capabilities).insert(
+            provider_id.clone(),
+            policy.resolve(&provider_id, &[], &[]).unwrap(),
         );
-        let state = shell.backend_supervision.get("mesh.audio").unwrap();
-        assert_eq!(state.restart_count, cycle + 1);
-        assert!(state.quarantined_providers.is_empty());
+        shell.modules.insert(provider_id, module);
     }
+    let (tx, rx) = mpsc::unbounded_channel();
+    let eventfd = rustix::event::eventfd(0, rustix::event::EventfdFlags::NONBLOCK).unwrap();
+    shell.backend_respawn = Some(crate::shell::backend::BackendRespawnContext {
+        handle: runtime.handle().clone(),
+        tx,
+        wake: crate::shell::WakeHandle::from_fd(&eventfd).unwrap(),
+    });
 
-    // Fourth consecutive failure exceeds the restart budget: quarantine.
-    let (slot, _rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/pipewire-audio");
-    *slot.identity.write().unwrap() = BackendIdentity::new(0, 4);
-    shell.replace_backend_runtime("mesh.audio".to_string(), slot);
+    let (slot, _rx) = backend_runtime_slot(runtime, AUDIO_INTERFACE, AUDIO_PRIMARY);
+    let identity = shell.next_backend_identity(AUDIO_INTERFACE, shell.activation_generation);
+    *slot.identity.write().unwrap() = identity;
+    shell.replace_backend_runtime(AUDIO_INTERFACE.into(), slot);
+    shell.note_backend_running(AUDIO_INTERFACE);
+    (shell, rx, primary_dir, fallback_dir)
+}
+
+fn fail_active_audio(shell: &mut Shell, provider_id: &str) {
     shell.handle_backend_lifecycle(
-        "mesh.audio".to_string(),
-        "@mesh/pipewire-audio".to_string(),
-        "poll".to_string(),
-        "failed".to_string(),
-        "boom final".to_string(),
+        AUDIO_INTERFACE.into(),
+        provider_id.into(),
+        "poll".into(),
+        "failed".into(),
+        "test runtime failure".into(),
     );
-    let state = shell.backend_supervision.get("mesh.audio").unwrap();
-    assert!(
-        state.quarantined_providers.contains("@mesh/pipewire-audio"),
-        "provider should be quarantined after exhausting restart cycles"
-    );
+    assert!(!shell.backend_runtimes.contains_key(AUDIO_INTERFACE));
+}
+
+fn run_supervised_audio_restart(
+    shell: &mut Shell,
+    runtime: &Runtime,
+    rx: &mut mpsc::UnboundedReceiver<types::ShellMessage>,
+) {
+    let state = &shell.backend_supervision[AUDIO_INTERFACE];
+    assert!(state.restart_pending);
+    let message = types::ShellMessage::BackendRestartDue {
+        interface: AUDIO_INTERFACE.into(),
+        provider_id: state.pending_provider_id.clone().unwrap(),
+        identity: state.pending_identity,
+        restart_generation: state.restart_generation,
+    };
+    let mut effects = VecDeque::new();
+    shell.handle_shell_message(&mut effects, message).unwrap();
+    runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while shell.pending_backend_runtimes.contains_key(AUDIO_INTERFACE) {
+                let message = rx.recv().await.expect("backend lifecycle message");
+                if !matches!(message, types::ShellMessage::BackendRestartDue { .. }) {
+                    shell.handle_shell_message(&mut effects, message).unwrap();
+                }
+            }
+        })
+        .await
+        .expect("backend candidate did not finish initialization");
+    });
+}
+
+#[test]
+fn backend_supervision_preserves_history_through_readiness_and_failover() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (mut shell, mut rx, _primary_dir, _fallback_dir) = supervised_audio_shell(&runtime);
+    for cycle in 1..=3 {
+        fail_active_audio(&mut shell, AUDIO_PRIMARY);
+        assert_eq!(
+            shell.backend_supervision[AUDIO_INTERFACE].restart_count,
+            cycle
+        );
+        run_supervised_audio_restart(&mut shell, &runtime, &mut rx);
+        assert_eq!(
+            shell.backend_runtimes[AUDIO_INTERFACE].provider_id,
+            AUDIO_PRIMARY
+        );
+        assert_eq!(
+            shell.backend_supervision[AUDIO_INTERFACE].restart_count,
+            cycle
+        );
+        assert!(
+            shell.backend_supervision[AUDIO_INTERFACE]
+                .quarantined_providers
+                .is_empty()
+        );
+    }
+    fail_active_audio(&mut shell, AUDIO_PRIMARY);
+    run_supervised_audio_restart(&mut shell, &runtime, &mut rx);
     assert_eq!(
-        state.restart_count, 0,
-        "failover restarts with a fresh budget"
+        shell.backend_runtimes[AUDIO_INTERFACE].provider_id,
+        AUDIO_FALLBACK
     );
-    assert_eq!(
-        shell
-            .backend_runtime_status("mesh.audio", "@mesh/pipewire-audio")
-            .map(|entry| entry.status),
-        Some(BackendRuntimeStatus::Quarantined)
-    );
-    let module = shell.module("@mesh/pipewire-audio").unwrap();
+    let state = &shell.backend_supervision[AUDIO_INTERFACE];
+    assert_eq!(state.restart_count, 0);
+    assert!(state.quarantined_providers.contains(AUDIO_PRIMARY));
+    let module = shell.module(AUDIO_PRIMARY).unwrap();
     assert_eq!(module.state, ModuleState::Quarantined);
     assert_eq!(module.health().state, ModuleHealthState::Unavailable);
+
+    fail_active_audio(&mut shell, AUDIO_FALLBACK);
+    run_supervised_audio_restart(&mut shell, &runtime, &mut rx);
+    assert_eq!(
+        shell.backend_runtimes[AUDIO_INTERFACE].provider_id,
+        AUDIO_FALLBACK
+    );
+    assert!(
+        shell.backend_supervision[AUDIO_INTERFACE]
+            .quarantined_providers
+            .contains(AUDIO_PRIMARY)
+    );
+
+    shell
+        .backend_supervision
+        .get_mut(AUDIO_INTERFACE)
+        .unwrap()
+        .running_since = Some(Instant::now() - Duration::from_secs(60));
+    fail_active_audio(&mut shell, AUDIO_FALLBACK);
+    assert_eq!(shell.backend_supervision[AUDIO_INTERFACE].restart_count, 1);
+    assert!(
+        shell.backend_supervision[AUDIO_INTERFACE]
+            .quarantined_providers
+            .contains(AUDIO_PRIMARY)
+    );
+}
+
+#[test]
+fn backend_supervision_retries_replacement_initialization_failures() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let (mut shell, mut rx, primary_dir, _fallback_dir) = supervised_audio_shell(&runtime);
+    let source = primary_dir.path().join("src/main.luau");
+    fs::write(&source, "function start(self) error('init failed') end").unwrap();
+    fail_active_audio(&mut shell, AUDIO_PRIMARY);
+
+    run_supervised_audio_restart(&mut shell, &runtime, &mut rx);
+    let state = &shell.backend_supervision[AUDIO_INTERFACE];
+    assert_eq!(state.restart_count, 2);
+    let failed_identity = state.pending_identity;
+    let restart_generation = state.restart_generation;
+    assert_eq!(
+        shell
+            .backend_runtime_status(AUDIO_INTERFACE, AUDIO_PRIMARY)
+            .unwrap()
+            .status,
+        BackendRuntimeStatus::InitFailed
+    );
+    shell.handle_backend_restart_due_at_identity(
+        AUDIO_INTERFACE,
+        AUDIO_PRIMARY,
+        BackendIdentity::default(),
+        restart_generation,
+    );
+    assert_eq!(
+        shell.backend_supervision[AUDIO_INTERFACE].pending_identity,
+        failed_identity
+    );
+    assert!(!shell.pending_backend_runtimes.contains_key(AUDIO_INTERFACE));
+
+    fs::remove_file(&source).unwrap();
+    run_supervised_audio_restart(&mut shell, &runtime, &mut rx);
+    assert_eq!(shell.backend_supervision[AUDIO_INTERFACE].restart_count, 3);
+    assert_eq!(
+        shell
+            .backend_runtime_status(AUDIO_INTERFACE, AUDIO_PRIMARY)
+            .unwrap()
+            .status,
+        BackendRuntimeStatus::MissingEntrypoint
+    );
+
+    fs::write(
+        &source,
+        "function start(self) state = { percent = 'wrong type' } end",
+    )
+    .unwrap();
+    run_supervised_audio_restart(&mut shell, &runtime, &mut rx);
+    assert!(!shell.backend_runtimes.contains_key(AUDIO_INTERFACE));
+    assert!(
+        shell.backend_supervision[AUDIO_INTERFACE]
+            .quarantined_providers
+            .contains(AUDIO_PRIMARY)
+    );
+    let module = shell.module(AUDIO_PRIMARY).unwrap();
+    assert_eq!(module.state, ModuleState::Quarantined);
+    assert_eq!(
+        shell
+            .backend_runtime_status(AUDIO_INTERFACE, AUDIO_PRIMARY)
+            .unwrap()
+            .status,
+        BackendRuntimeStatus::Quarantined
+    );
+
+    run_supervised_audio_restart(&mut shell, &runtime, &mut rx);
+    assert_eq!(
+        shell.backend_runtimes[AUDIO_INTERFACE].provider_id,
+        AUDIO_FALLBACK
+    );
+    assert_eq!(
+        shell.latest_service_state[AUDIO_INTERFACE].state["percent"],
+        65
+    );
 }
 
 #[test]
@@ -299,6 +486,7 @@ fn uncommitted_provider_failure_does_not_publish_availability() {
     assert!(seen_events.lock().unwrap().is_empty());
     assert!(!shell.latest_service_state.contains_key("mesh.audio"));
     assert!(!shell.latest_service_health.contains_key("mesh.audio"));
+    assert!(!shell.backend_supervision.contains_key("mesh.audio"));
 }
 
 #[test]
@@ -1093,6 +1281,14 @@ fn ready_provider_is_persisted_before_live_runtime_handoff() {
     let mut shell = Shell::new();
     let (old_slot, _old_rx) = backend_runtime_slot(&runtime, "mesh.audio", "@mesh/old-audio");
     shell.replace_backend_runtime("mesh.audio".to_string(), old_slot);
+    shell.backend_supervision.insert(
+        "mesh.audio".into(),
+        BackendSupervisionState {
+            restart_count: 2,
+            quarantined_providers: ["@mesh/new-audio".to_string()].into(),
+            ..Default::default()
+        },
+    );
     let (candidate, _candidate_rx) =
         backend_runtime_slot(&runtime, "mesh.audio", "@mesh/new-audio");
     shell.stage_backend_runtime_switch("mesh.audio".to_string(), candidate, graph_path.clone());
@@ -1116,6 +1312,9 @@ fn ready_provider_is_persisted_before_live_runtime_handoff() {
         Some("@mesh/new-audio")
     );
     assert!(!shell.pending_backend_runtimes.contains_key("mesh.audio"));
+    let supervision = &shell.backend_supervision["mesh.audio"];
+    assert_eq!(supervision.restart_count, 0);
+    assert!(supervision.quarantined_providers.is_empty());
 }
 
 #[test]

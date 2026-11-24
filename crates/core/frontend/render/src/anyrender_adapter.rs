@@ -181,7 +181,7 @@ pub fn encode_command_to_scene(
         }
         DisplayPaintContent::Input(_)
         | DisplayPaintContent::Checkmark(_)
-        | DisplayPaintContent::Shape(_) => {
+        | DisplayPaintContent::Shape { .. } => {
             // DEFERRED per Phase 49 D-10: controls stay on the software painter
             // until their full lossless command subset is specified.
         }
@@ -239,6 +239,7 @@ mod tests {
             additional_box_shadows: Vec::new(),
             outline: mesh_core_elements::Outline::NONE,
             filter: VisualFilter::NONE,
+            material: None,
             backdrop_filter: VisualFilter::NONE,
             mix_blend_mode: BlendMode::Normal,
             icon_fill: None,
@@ -254,6 +255,8 @@ mod tests {
                 in_scroll_content: false,
                 id: 1,
                 module_id: None,
+                render_source: None,
+                render_export: false,
                 transform: mesh_core_elements::AffineTransform::IDENTITY,
                 local_layout: LayoutRect {
                     x: 0.0,
@@ -361,6 +364,7 @@ mod tests {
         let text = DisplayTextPaint {
             text: "Hello".into(),
             selection: None,
+            path: None,
         };
         let c = cmd(
             DisplayPaintContent::Text(text),

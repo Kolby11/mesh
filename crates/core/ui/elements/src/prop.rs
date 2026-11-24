@@ -124,6 +124,7 @@ props! {
     Busy = "busy": Bool, STYLE | A11Y;
     Checked = "checked": Bool, STYLE | PAINT | A11Y;
     Class = "class": Text, STYLE;
+    ClipChildren = "clip-children": Bool, PAINT | HIT;
     Column = "column": Number, LAYOUT;
     ColumnSpan = "column-span": Number, LAYOUT;
     Columns = "columns": Text, LAYOUT;
@@ -135,6 +136,7 @@ props! {
     DataMeshElement = "data-mesh-element": Text, STYLE | A11Y | STRUCTURE;
     DataMeshVirtualList = "data-mesh-virtual-list": Text, STRUCTURE;
     DataTooltipDisabled = "data-tooltip-disabled": Bool, STRUCTURE;
+    D = "d": Text, PAINT | HIT;
     Constrain = "constrain": Token, STRUCTURE;
     Default = "default": Bool, STYLE | A11Y;
     Description = "description": Text, A11Y;
@@ -142,6 +144,7 @@ props! {
     End = "end": Number, PAINT | HIT;
     Disabled = "disabled": Bool, STYLE | PAINT | A11Y | HIT;
     Expanded = "expanded": Bool, STYLE | A11Y;
+    FillRule = "fill-rule": Token, PAINT | HIT;
     FocusScope = "focus-scope": Bool, HIT;
     FontFeatures = "font-features": Text, LAYOUT | PAINT;
     For = "for": Text, A11Y;
@@ -163,6 +166,10 @@ props! {
     Lang = "lang": Text, LAYOUT | PAINT | A11Y;
     Layer = "layer": Number, PAINT;
     Masked = "masked": Bool, PAINT;
+    Material = "material": Text, PAINT;
+    MaterialSource = "material-source": Text, PAINT;
+    MaterialTime = "material-time": Number, PAINT;
+    MaterialValues = "material-values": Text, PAINT;
     Max = "max": Number, PAINT | A11Y;
     MaxHeight = "max-height": Text, LAYOUT;
     MaxWidth = "max-width": Text, LAYOUT;
@@ -182,11 +189,15 @@ props! {
     OverflowY = "overflow-y": Text, LAYOUT | PAINT;
     Part = "part": Text, STYLE;
     Points = "points": Text, PAINT | HIT;
+    PathFill = "path-fill": Token, PAINT | HIT;
     Placeholder = "placeholder": Text, PAINT | A11Y;
     Pressed = "pressed": Bool, STYLE | A11Y;
     Readonly = "readonly": Bool, STYLE | A11Y;
     Ref = "ref": Text, A11Y | STRUCTURE;
     Required = "required": Bool, STYLE | A11Y;
+    RenderExport = "render-export": Bool, PAINT;
+    RenderSource = "render-source": Text, PAINT;
+    RenderTarget = "render-target": Text, LAYOUT | PAINT | A11Y | HIT;
     Role = "role": Text, A11Y;
     Row = "row": Number, LAYOUT;
     RowSpan = "row-span": Number, LAYOUT;
@@ -204,7 +215,7 @@ props! {
     State = "state": Token, STYLE;
     Step = "step": Number, PAINT | A11Y;
     Style = "style": Text, STYLE;
-    Tabindex = "tabindex": Number, HIT;
+    Tabindex = "tabindex": Number, A11Y | HIT;
     Target = "target": Text, A11Y | STRUCTURE;
     Text = "text": Text, LAYOUT | PAINT | A11Y;
     Title = "title": Text, A11Y;
@@ -215,6 +226,8 @@ props! {
     Value = "value": Text, STYLE | LAYOUT | PAINT | A11Y;
     Variant = "variant": Token, STYLE;
     Width = "width": Text, LAYOUT;
+    ViewBox = "view-box": Text, PAINT | HIT;
+    TextPath = "text-path": Text, PAINT | HIT;
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::display_list::{
     BackdropRegion, CheckmarkKind, DisplayCheckmarkPaint, DisplayListClip, DisplayPaintCommand,
     DisplayPaintCommandKind, DisplayPaintContent, DisplayPaintNode, DisplayPaintStyle,
-    RetainedDisplayList, SelectedDisplayListPaint,
+    NamedRenderSource, RetainedDisplayList, SelectedDisplayListPaint,
 };
 use mesh_core_elements::AffineTransform;
 use mesh_core_elements::style::{Corners, Edges, Outline};
@@ -14,6 +14,154 @@ use crate::surface::{PaintCommandAttribution, PaintCommandClass};
 use crate::{DeviceRect, FractionalScale};
 
 impl FrontendRenderEngine {
+    fn prepare_named_render_sources(
+        &self,
+        commands: &SelectedDisplayListPaint<'_>,
+        session: &mut PixelCanvasSession<'_>,
+        scale: f32,
+        module_id: Option<&str>,
+    ) {
+        session.render_sources.clear();
+        if commands.is_empty() {
+            return;
+        }
+        let surface_width = session.width();
+        let surface_height = session.height();
+        let mut pixel_budget = 8 * 1024 * 1024;
+        let mut command_budget: usize = 16_384;
+        let mut exports = HashSet::new();
+        for source in commands.render_sources {
+            let NamedRenderSource::Capture {
+                node,
+                commands,
+                viewport,
+            } = source
+            else {
+                continue;
+            };
+            use std::collections::hash_map::Entry;
+            let key = node.render_source.as_ref().expect("named producer");
+            if node.render_export {
+                exports.insert(key);
+            }
+            match session.render_sources.entry(key.clone()) {
+                Entry::Occupied(mut repeated) => {
+                    repeated.insert(None);
+                }
+                Entry::Vacant(slot) => {
+                    let bounds = viewport.map_or_else(
+                        || scaled_display_node_bounds(node, scale),
+                        |viewport| scaled_display_clip(viewport, scale),
+                    );
+                    let pixels = i64::from(bounds.width) * i64::from(bounds.height);
+                    // A producer cannot sample a named source. This keeps the
+                    // capture independent of paint order and excludes cycles.
+                    let supported = !node.in_scroll_content
+                        && bounds.width > 0
+                        && bounds.height > 0
+                        && pixels <= pixel_budget
+                        && !commands.is_empty()
+                        && commands.len() <= command_budget
+                        && commands.iter().all(|command| {
+                            !command
+                                .node
+                                .style
+                                .material
+                                .as_ref()
+                                .is_some_and(|material| material.input_source.is_some())
+                                && !matches!(
+                                    command.kind,
+                                    DisplayPaintCommandKind::ApplyBackdropRefraction
+                                        | DisplayPaintCommandKind::ApplyBackdropFilterCompositor
+                                        | DisplayPaintCommandKind::ApplyBackdropFilterInSurface
+                                )
+                        });
+                    if !supported {
+                        slot.insert(None);
+                        continue;
+                    }
+                    pixel_budget -= pixels;
+                    command_budget -= commands.len();
+                    let rect = skia_safe::Rect::from_xywh(
+                        bounds.x as f32,
+                        bounds.y as f32,
+                        bounds.width as f32,
+                        bounds.height as f32,
+                    );
+                    let mut recorder = skia_safe::PictureRecorder::new();
+                    let canvas = recorder.begin_recording(rect, false);
+                    let size = if viewport.is_some() {
+                        (bounds.width as u32, bounds.height as u32)
+                    } else {
+                        (surface_width, surface_height)
+                    };
+                    let mut capture = PixelCanvasSession::on_recording(
+                        canvas,
+                        size.0,
+                        size.1,
+                        Default::default(),
+                    );
+                    let mut node_commands = Vec::new();
+                    for command in commands.iter() {
+                        self.render_display_command(
+                            command,
+                            command.kind,
+                            &mut capture,
+                            scale,
+                            bounds,
+                            None,
+                            module_id,
+                            &mut node_commands,
+                            Some(&[]),
+                        );
+                    }
+                    self.close_painter_layers(&mut capture);
+                    drop(capture);
+                    slot.insert(recorder.finish_recording_as_picture(None).map(|picture| {
+                        super::material::NamedRenderPicture {
+                            picture,
+                            bounds: rect,
+                        }
+                    }));
+                }
+            }
+        }
+        // Resolve against actual captures before adding aliases. An imported
+        // name cannot become an export from a different component instance.
+        let alias_keys: HashSet<_> = commands
+            .render_sources
+            .iter()
+            .filter_map(|source| match source {
+                NamedRenderSource::Alias { key, .. } => Some(key),
+                _ => None,
+            })
+            .collect();
+        let aliases: Vec<_> = commands
+            .render_sources
+            .iter()
+            .filter_map(|source| {
+                let NamedRenderSource::Alias { key, exported } = source else {
+                    return None;
+                };
+                let picture = (exports.contains(exported) && !alias_keys.contains(exported))
+                    .then(|| session.render_sources.get(exported).cloned().flatten())
+                    .flatten();
+                Some((key.clone(), picture))
+            })
+            .collect();
+        for (key, picture) in aliases {
+            use std::collections::hash_map::Entry;
+            match session.render_sources.entry(key) {
+                Entry::Occupied(mut duplicate) => {
+                    duplicate.insert(None);
+                }
+                Entry::Vacant(slot) => {
+                    slot.insert(picture);
+                }
+            }
+        }
+    }
+
     pub fn render_tree(&self, root: &WidgetNode, buffer: &mut PixelBuffer, scale: f32) {
         self.render_tree_at(root, buffer, scale, 0.0, 0.0);
     }
@@ -269,6 +417,7 @@ impl FrontendRenderEngine {
             })
             .unwrap_or(surface_clip);
 
+        self.prepare_named_render_sources(commands, session, scale, module_id);
         let mut scratch = self.render_scratch.borrow_mut();
         scratch.prepare(commands.len());
         for (command, kind) in commands.iter_with_kinds() {
@@ -349,6 +498,7 @@ impl FrontendRenderEngine {
             return;
         }
 
+        self.prepare_named_render_sources(commands, session, scale, module_id);
         let mut scratch = self.render_scratch.borrow_mut();
         scratch.prepare(
             commands
@@ -495,6 +645,7 @@ impl FrontendRenderEngine {
             .unwrap_or(surface_clip);
 
         let mut attribution = PaintCommandAttribution::default();
+        self.prepare_named_render_sources(commands, session, scale, module_id);
         let mut scratch = self.render_scratch.borrow_mut();
         scratch.prepare(commands.len());
         let mut batched_command_count = 0_u64;
@@ -595,6 +746,7 @@ impl FrontendRenderEngine {
         }
 
         let mut attribution = PaintCommandAttribution::default();
+        self.prepare_named_render_sources(commands, session, scale, module_id);
         let mut scratch = self.render_scratch.borrow_mut();
         scratch.prepare(
             commands
@@ -804,7 +956,7 @@ impl FrontendRenderEngine {
                     .iter()
                     .map(|clip| mesh_core_elements::AffineClip {
                         transform: AffineTransform::scale(scale, scale).then(clip.transform),
-                        ..*clip
+                        ..clip.clone()
                     })
                     .collect();
                 let save = self.paint_backend.begin_affine_node(
@@ -848,7 +1000,7 @@ impl FrontendRenderEngine {
                         clip,
                     }
                 });
-                self.execute_painter_commands_in_session(session, &commands);
+                self.execute_masked_backdrop_commands(session, command, scale, clip, &commands);
                 return;
             }
             DisplayPaintCommandKind::ApplyBackdropFilterInSurface => {
@@ -886,7 +1038,7 @@ impl FrontendRenderEngine {
                         clip,
                     }
                 });
-                self.execute_painter_commands_in_session(session, &commands);
+                self.execute_masked_backdrop_commands(session, command, scale, clip, &commands);
                 return;
             }
             DisplayPaintCommandKind::ApplyBackdropRefraction => {
@@ -906,7 +1058,7 @@ impl FrontendRenderEngine {
                         clip,
                     }
                 });
-                self.execute_painter_commands_in_session(session, &commands);
+                self.execute_masked_backdrop_commands(session, command, scale, clip, &commands);
                 return;
             }
             DisplayPaintCommandKind::ApplyBackdropRim => {
@@ -920,7 +1072,7 @@ impl FrontendRenderEngine {
                         clip,
                     }
                 });
-                self.execute_painter_commands_in_session(session, &commands);
+                self.execute_masked_backdrop_commands(session, command, scale, clip, &commands);
                 return;
             }
             DisplayPaintCommandKind::ApplyBackdropFilterRejected => {
@@ -954,13 +1106,28 @@ impl FrontendRenderEngine {
             }
             DisplayPaintCommandKind::PushFilterLayer => {
                 let bounds = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
+                let mut layer = PainterLayer::blurred(
+                    bounds,
+                    scaled_visual_filter(command.node.style.filter, scale),
+                    self.blur_quality(),
+                );
+                if command.node.ancestor_clips.iter().any(|clip| clip.mask.is_some()) {
+                    layer.clip_masks = Some((std::sync::Arc::clone(&command.node.ancestor_clips), scale));
+                }
+                if let Some(material) = &command.node.style.material {
+                    layer.material = Some(super::material::PainterMaterial {
+                        shader: material.clone(),
+                        node_id: command.node.id,
+                        bounds: scaled_display_node_bounds(&command.node, scale),
+                        tint: command.node.style.color,
+                        named_source: material.input_source.as_ref().and_then(|key| {
+                            session.render_sources.get(key).cloned().flatten()
+                        }),
+                    });
+                }
                 self.execute_painter_commands_in_session(
                     session,
-                    &[PainterCommand::PushLayer(PainterLayer::blurred(
-                        bounds,
-                        scaled_visual_filter(command.node.style.filter, scale),
-                        self.blur_quality(),
-                    ))],
+                    &[PainterCommand::PushLayer(layer)],
                 );
                 return;
             }
@@ -1146,6 +1313,30 @@ impl FrontendRenderEngine {
         );
     }
 
+    fn execute_masked_backdrop_commands(
+        &self,
+        session: &mut PixelCanvasSession<'_>,
+        command: &DisplayPaintCommand,
+        scale: f32,
+        clip: ClipRect,
+        commands: &[PainterCommand],
+    ) {
+        let save = if command.node.ancestor_clips.iter().any(|ancestor| ancestor.mask.is_some()) {
+            // Backdrop commands already use device coordinates.
+            self.paint_backend.begin_affine_node(
+                session,
+                AffineTransform::scale(1.0 / scale, 1.0 / scale),
+                &command.node.ancestor_clips,
+                scale,
+                clip,
+            )
+        } else {
+            None
+        };
+        self.execute_painter_commands_in_session(session, commands);
+        self.paint_backend.end_affine_node(session, save);
+    }
+
     fn render_display_node_self_in_space(
         &self,
         node: &DisplayPaintNode,
@@ -1168,7 +1359,7 @@ impl FrontendRenderEngine {
         let h = bounds.height;
 
         node_commands.clear();
-        if !matches!(node.content, DisplayPaintContent::Shape(_)) {
+        if !matches!(node.content, DisplayPaintContent::Shape { .. }) {
             push_box_commands(node_commands, style, scale, bounds, clip, node_clip);
         }
         self.execute_painter_commands_in_session(session, node_commands);
@@ -1197,19 +1388,11 @@ impl FrontendRenderEngine {
             DisplayPaintContent::Checkmark(mark) => {
                 self.render_display_checkmark_node(node, *mark, session, bounds, node_clip);
             }
-            DisplayPaintContent::Shape(shape) => {
-                let commands = shape_commands(
-                    shape,
-                    node.style.background_color,
-                    node.style.border_color,
-                    node.style.border_width.top,
-                    scale,
-                    bounds,
-                    node_clip,
-                );
-                self.execute_painter_commands_in_session(session, &commands);
+            DisplayPaintContent::Shape { geometry: Some(shape), .. } => {
+                shape_commands(node_commands, shape, style, scale, bounds, clip);
+                self.execute_painter_commands_in_session(session, node_commands);
             }
-            DisplayPaintContent::None => {}
+            DisplayPaintContent::Shape { geometry: None, .. } | DisplayPaintContent::None => {}
         }
     }
 
@@ -1281,7 +1464,7 @@ fn paint_command_class(
         DisplayPaintContent::Icon(_) => PaintCommandClass::Icon,
         DisplayPaintContent::Input(_)
         | DisplayPaintContent::Checkmark(_)
-        | DisplayPaintContent::Shape(_) => PaintCommandClass::Control,
+        | DisplayPaintContent::Shape { .. } => PaintCommandClass::Control,
     }
 }
 
@@ -1540,54 +1723,89 @@ fn push_box_shadow_command(
     });
 }
 
-/// Builds the vector-path draw command for a `checkbox` tick or `radio` dot
-/// within `bounds`, tinted `color`. Returns `None` for an empty box or fully
-/// transparent color.
-/// Fill and stroke commands for a `<shape>`: the background colour fills a
-/// filled outline and the border colour strokes it with the border width.
-pub(super) fn shape_commands(
+fn shape_commands(
+    commands: &mut Vec<PainterCommand>,
     shape: &mesh_core_elements::ShapeGeometry,
-    fill: Color,
-    stroke: Color,
-    stroke_width: f32,
+    style: &DisplayPaintStyle,
     scale: f32,
     bounds: ClipRect,
     clip: ClipRect,
-) -> Vec<PainterCommand> {
-    use mesh_core_elements::ShapeOp;
-    let elements = shape
-        .outline()
-        .into_iter()
-        .map(|op| match op {
-            ShapeOp::Move(x, y) => {
-                PainterPathElement::MoveTo(bounds.x as f32 + x * scale, bounds.y as f32 + y * scale)
-            }
-            ShapeOp::Line(x, y) => {
-                PainterPathElement::LineTo(bounds.x as f32 + x * scale, bounds.y as f32 + y * scale)
-            }
-            ShapeOp::Close => PainterPathElement::Close,
-        })
-        .collect::<Vec<_>>();
-    let path = PainterPath { elements };
-    let mut commands = Vec::with_capacity(2);
-    if shape.is_filled() && fill.a > 0 {
+) {
+    use mesh_core_elements::ShapeKind;
+    let path = PainterPath {
+        elements: shape_path_elements(shape.outline(), bounds.x, bounds.y, scale),
+        fill_rule: shape.fill_rule(),
+        round_stroke: matches!(shape.kind(), ShapeKind::Path(_)),
+    };
+    let node_clip = intersect_clip(clip, bounds);
+    if shape.is_filled() {
+        if style.background_color.a > 0 {
+            commands.push(PainterCommand::DrawPath {
+                path: path.clone(),
+                paint: PainterPaint::fill(style.background_color),
+                clip: node_clip,
+            });
+        }
+        if style.background_paint != BackgroundPaint::None {
+            commands.push(PainterCommand::PushPathClip { path: path.clone(), clip: node_clip });
+            push_background_paint_command(
+                commands, &style.background_paint, bounds, Corners::zero(), node_clip,
+            );
+            commands.push(PainterCommand::PopClip);
+        }
+    }
+    let stroke_width = style.border_width.top * scale;
+    if stroke_width > 0.0 && style.border_color.a > 0 {
         commands.push(PainterCommand::DrawPath {
             path: path.clone(),
-            paint: PainterPaint::fill(fill),
-            clip,
+            paint: PainterPaint::stroke(style.border_color, stroke_width),
+            clip: node_clip,
         });
     }
-    let stroke_width = stroke_width * scale;
-    if stroke_width > 0.0 && stroke.a > 0 {
-        commands.push(PainterCommand::DrawPath {
+    if !style.outline.is_none() {
+        let reach = (style.outline.extent() * scale).floor() as i32;
+        let clip = intersect_clip(clip, ClipRect {
+            x: bounds.x.saturating_sub(reach),
+            y: bounds.y.saturating_sub(reach),
+            width: bounds.width.saturating_add(reach.saturating_mul(2)),
+            height: bounds.height.saturating_add(reach.saturating_mul(2)),
+        });
+        commands.push(PainterCommand::DrawPathOutline {
             path,
-            paint: PainterPaint::stroke(stroke, stroke_width),
+            color: style.outline.color,
+            width: style.outline.width * scale,
+            gap: style.outline.offset.max(0.0) * scale,
             clip,
         });
     }
-    commands
 }
 
+pub(super) fn shape_path_elements(
+    outline: Vec<mesh_core_elements::ShapeOp>,
+    x: i32,
+    y: i32,
+    scale: f32,
+) -> Vec<PainterPathElement> {
+    use mesh_core_elements::ShapeOp;
+    let project_x = |value| x as f32 + value * scale;
+    let project_y = |value| y as f32 + value * scale;
+    outline
+        .into_iter()
+        .map(|op| match op {
+            ShapeOp::Move(x, y) => PainterPathElement::MoveTo(project_x(x), project_y(y)),
+            ShapeOp::Line(x, y) => PainterPathElement::LineTo(project_x(x), project_y(y)),
+            ShapeOp::Quad(x1, y1, x, y) => PainterPathElement::QuadTo(
+                project_x(x1), project_y(y1), project_x(x), project_y(y),
+            ),
+            ShapeOp::Cubic(x1, y1, x2, y2, x, y) => PainterPathElement::CubicTo(
+                project_x(x1), project_y(y1), project_x(x2), project_y(y2), project_x(x), project_y(y),
+            ),
+            ShapeOp::Close => PainterPathElement::Close,
+        })
+        .collect()
+}
+
+/// Builds the vector-path draw command for a checkbox tick or radio dot.
 fn checkmark_command(
     kind: CheckmarkKind,
     bounds: ClipRect,
@@ -1610,6 +1828,7 @@ fn checkmark_command(
                     PainterPathElement::LineTo(x + w * 0.42, y + h * 0.72),
                     PainterPathElement::LineTo(x + w * 0.78, y + h * 0.28),
                 ],
+                ..PainterPath::default()
             },
             paint: PainterPaint::stroke(color, (min * 0.14).max(1.5)),
             clip,
@@ -1635,6 +1854,7 @@ fn circle_path(cx: f32, cy: f32, r: f32) -> PainterPath {
             PainterPathElement::CubicTo(cx - r, cy - k, cx - k, cy - r, cx, cy - r),
             PainterPathElement::Close,
         ],
+        ..PainterPath::default()
     }
 }
 

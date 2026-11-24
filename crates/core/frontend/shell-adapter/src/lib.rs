@@ -625,6 +625,7 @@ pub enum CoreRequest {
     /// Patch user theme token overrides; a `null` value removes one.
     SetThemeTokens {
         tokens: serde_json::Map<String, serde_json::Value>,
+        accessibility: bool,
     },
     SetBackdropImage {
         path: String,

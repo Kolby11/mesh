@@ -403,9 +403,10 @@ fn complete_component_instance_members(
     }
 
     // Tier 2: the child component's exported variables and functions.
-    if let Some((variables, functions)) =
-        resolve_component_public_members(doc, &instance.component_tag, registry)
+    if let Some(component) =
+        crate::definition::load_imported_component(doc, &instance.component_tag, registry)
     {
+        let (variables, functions) = crate::document::public_component_members(&component);
         for variable in variables {
             if variable.starts_with(prefix) && !items.iter().any(|item| item.label == variable) {
                 items.push(component_member_variable_item(
@@ -425,22 +426,6 @@ fn complete_component_instance_members(
     }
 
     items
-}
-
-/// Resolve a mounted component tag to the public members exported by its source
-/// file. Returns `(variables, functions)`.
-pub(crate) fn resolve_component_public_members(
-    doc: &Document,
-    component_tag: &str,
-    registry: &ModuleRegistry,
-) -> Option<(Vec<String>, Vec<String>)> {
-    let import = doc
-        .imports
-        .iter()
-        .find(|import| import.alias == component_tag)?;
-    let path = crate::definition::resolve_import_target(doc, &import.target, registry)?;
-    let source = std::fs::read_to_string(path).ok()?;
-    Some(crate::document::public_component_members(&source))
 }
 
 fn component_member_variable_item(name: &str, component_tag: &str) -> CompletionItem {

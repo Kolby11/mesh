@@ -1,6 +1,7 @@
 use mesh_core_resources::{
     ResourceByteBudget, ResourceByteReservation, ResourcePreparationToken, resource_revision,
 };
+use mesh_core_resources::frame::{FrameObserver, LiveFrame, latest_frame};
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
@@ -24,6 +25,27 @@ struct ResourceConsumerState {
 }
 
 static COMPLETION_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+impl FrameObserver for ResourceConsumerState {
+    fn frame_changed(&self) {
+        COMPLETION_GENERATION.fetch_add(1, Ordering::AcqRel);
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        if !self.ready.swap(true, Ordering::AcqRel) {
+            wake_after_completion();
+        }
+    }
+}
+
+/// Subscribe the painting component to one live frame replacement.
+pub(crate) fn frame_for_paint(handle: &str) -> Option<Arc<LiveFrame>> {
+    let observer = PAINT_CONSUMER.with(|active| {
+        active
+            .borrow()
+            .clone()
+            .map(|consumer| -> Weak<dyn FrameObserver> { consumer })
+    });
+    latest_frame(handle, observer)
+}
 
 #[derive(Clone)]
 pub(crate) struct ResourceCompletionSnapshot {

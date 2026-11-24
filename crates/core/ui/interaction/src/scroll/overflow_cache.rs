@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 struct Entry {
     children: ChildBoundsIndex,
-    bounds: ContentBounds,
+    bounds: Option<ContentBounds>,
 }
 
 /// Exact propagated child bounds for one structurally stable widget tree.
@@ -41,12 +41,12 @@ impl RetainedOverflow {
         node: &mut WidgetNode,
         offsets: &mut HashMap<NodeId, ScrollOffsetState>,
         changed: &mut Vec<NodeId>,
-    ) -> ContentBounds {
+    ) -> Option<ContentBounds> {
         mesh_core_elements::frame_work::visit(mesh_core_elements::frame_work::Pass::Annotation);
         let children = node
             .children
             .iter_mut()
-            .map(|child| Some(self.annotate(child, offsets, changed)))
+            .map(|child| self.annotate(child, offsets, changed))
             .collect();
         let children = ChildBoundsIndex::new(children);
         let previous = node.scroll_metrics;
@@ -113,7 +113,7 @@ impl RetainedOverflow {
                     .get_mut(&parent.id)
                     .expect("validated parent history")
                     .children
-                    .set(index, Some(bounds));
+                    .set(index, bounds);
             }
         }
         Some(changed)
