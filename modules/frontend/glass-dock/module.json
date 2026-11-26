@@ -10,6 +10,7 @@
         "mesh.apps": ">=1.0"
       },
       "modules": {
+        "@mesh/app-launcher": ">=0.1.0",
         "@mesh/glass-material": ">=0.1.0",
         "@mesh/radial-launcher": ">=0.1.0"
       },

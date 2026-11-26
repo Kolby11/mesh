@@ -1,5 +1,12 @@
+<props>
+{
+    right_aligned = { type = "bool", default = false },
+    right_inset = { type = "size", default = "34px" },
+}
+</props>
+
 <template>
-    <column class="toasts" aria-label={t("toasts.label")}>
+    <column class="toasts" class:toasts-right={props.right_aligned} aria-label={t("toasts.label")}>
         {#for toast in toasts key={toast.id}}
             <column class="toast" class:toast-critical={toast.critical}>
                 <row class="toast-head">
@@ -115,12 +122,14 @@ end
         background: transparent;
     }
 
+    .toasts-right { margin: 12px prop(right_inset) 0 0; }
+
     .toast {
         width: 380px;
         padding: 14px;
         gap: 10px;
-        border-radius: 22px;
-        border: 1px solid var(--glass-rim);
+        border-radius: var(--glass-radius-card);
+        border: var(--glass-border-width) solid var(--glass-rim);
         background-image: var(--glass-surface-panel);
         box-shadow: var(--glass-shadow-card);
         backdrop-filter: var(--glass-backdrop-card);
@@ -152,7 +161,7 @@ end
         flex-shrink: 0;
         justify-content: center;
         align-items: center;
-        border-radius: 14px;
+        border-radius: var(--glass-radius-control);
         border: 1px solid var(--glass-rim-inset);
         background: var(--glass-fill-artwork);
         overflow: hidden;
@@ -161,7 +170,7 @@ end
     .toast-image {
         width: 42px;
         height: 42px;
-        border-radius: 14px;
+        border-radius: var(--glass-radius-control);
     }
 
     .toast-glyph {

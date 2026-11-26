@@ -1,6 +1,6 @@
 {
   "schemaVersion": 3,
-  "revision": 287,
+  "revision": 301,
   "from": {
     "module": "@mesh/glass"
   },
@@ -20,7 +20,7 @@
     },
     "shell": {
       "fonts": {
-        "base_size": 14,
+        "base_size": 16,
         "shell_scale": 100,
         "ui_family": "Noto Sans"
       },
@@ -46,7 +46,7 @@
         }
       },
       "theme": {
-        "active": "@mesh/bubblegum:bubblegum",
+        "active": "@mesh/tapedeck:tapedeck",
         "tokens": {
           "@mesh/glass-material.glass.backdrop.card": "blur(10.8px) refract(4.5px 3.6px) dispersion(0.3px)",
           "@mesh/glass-material.glass.backdrop.dock": "blur(9px) refract(4.1px 3.2px) dispersion(0.3px)",
@@ -54,6 +54,8 @@
           "@mesh/glass-material.glass.backdrop.lens": "refract(3.6px 3.6px)",
           "@mesh/glass-material.glass.backdrop.panel": "blur(14.4px) refract(5.4px 4.1px) dispersion(0.3px)",
           "@mesh/glass-material.glass.backdrop.pill": "blur(7.2px) refract(2.7px 2.3px) dispersion(0.2px)",
+          "color-on-primary": "#181127",
+          "color-primary": "#a78bfa",
           "glass.strength.blur": 45,
           "glass.strength.liquid": 45,
           "glass.strength.style": "soft"

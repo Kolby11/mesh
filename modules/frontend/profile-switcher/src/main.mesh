@@ -1,5 +1,7 @@
 <props>
 {
+    side = { type = "enum", options = { "bottom", "right" }, default = "bottom" },
+    trigger_color = { type = "color", default = "var(--color-on-surface)", label = "Trigger foreground" },
     trigger_hover = { type = "color", default = "var(--color-surface-container-high)", label = "Trigger hover background" },
 }
 </props>
@@ -15,7 +17,7 @@
         >
             <icon class="trigger-glyph" name="view-dual" size="18" />
         </button>
-        <ProfileMenu />
+        <ProfileMenu side={props.side} />
     </stack>
 </template>
 
@@ -50,7 +52,7 @@ end)
         border-style: solid;
         border-color: transparent;
         background: transparent;
-        color: var(--color-on-surface);
+        color: prop(trigger_color);
         transform: scale(1);
         transition-property: transform, background-color, border-color;
         transition-duration: var(--animation-duration-short);

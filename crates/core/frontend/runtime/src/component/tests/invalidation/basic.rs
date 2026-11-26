@@ -2693,16 +2693,38 @@ function onHover(index) hovered = index end
 function pick(label) picked = label end
 </script>
 <template><row style="width: 300px; height: 100px">
-{#for item in items key={item.id}}<button style="width: 100px; height: 100px" class:hot={item.hot} onpointerenter={onHover(item.index)} onclick={pick(item.label)} />{/for}
+{#for item in items key={item.id}}<button style="width: 100px; height: 100px" class:hot={item.hot} onpointerenter={onHover(item.index)} onclick={pick(item.label)}><text>{item.label}</text></button>{/for}
 </row></template>
 "#;
     let theme = default_theme();
     let extent = SurfaceExtent::unpadded(300, 100);
     let mut pixels = PixelBuffer::new(300, 100);
     let mut component = test_frontend_component(source);
+    let assert_shared_locals = |component: &FrontendSurfaceComponent| {
+        let buttons = &first_node_by_tag(component.last_tree.as_ref().unwrap(), "row")
+            .unwrap()
+            .children;
+        assert_eq!(buttons.len(), 3);
+        let mut previous = None;
+        for button in buttons.iter() {
+            let button_locals = button.template_bindings().unwrap().locals.as_ref().unwrap();
+            let label_locals = button.children[0]
+                .template_bindings()
+                .unwrap()
+                .locals
+                .as_ref()
+                .unwrap();
+            assert!(std::sync::Arc::ptr_eq(button_locals, label_locals));
+            if let Some(previous) = previous {
+                assert!(!std::sync::Arc::ptr_eq(previous, button_locals));
+            }
+            previous = Some(button_locals);
+        }
+    };
     component
         .paint_raster(&theme, extent, &mut pixels, 1.0)
         .unwrap();
+    assert_shared_locals(&component);
     let _ = component.take_invalidation_snapshot();
     let (x, y) = (150.0, 50.0);
     component
@@ -2716,6 +2738,7 @@ function pick(label) picked = label end
     assert!(snapshot.patched_node_count >= 1, "{snapshot:?}");
     assert_eq!(snapshot.component.script_narrow, 0, "{snapshot:?}");
     assert!(!snapshot.full_rebuild, "{snapshot:?}");
+    assert_shared_locals(&component);
     let tree = component.last_tree.clone().unwrap();
     assert!(!component.retained_tree.update(&tree).any());
     for pressed in [true, false] {

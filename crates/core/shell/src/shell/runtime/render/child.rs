@@ -648,9 +648,9 @@ impl Shell {
         let paint_started = self.profiling_enabled().then(std::time::Instant::now);
         let painted = {
             let runtime = &mut self.components[index];
-            let buffer = runtime.children[child_index]
-                .target
-                .paint_buffer
+            let target = &mut runtime.children[child_index].target;
+            let _resource_scope = target.resource_paints.enter();
+            let buffer = target.paint_buffer
                 .as_mut()
                 .expect("child paint buffer initialised");
             runtime

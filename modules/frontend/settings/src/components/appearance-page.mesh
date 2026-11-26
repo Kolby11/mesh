@@ -1,39 +1,129 @@
 <template>
     <column class="settings-page" hidden={hidden}>
-        <column class="settings-section">
-            <text class="settings-section-title">{t('appearance.theme')}</text>
-            <text class="settings-section-copy">{t('appearance.theme.copy')}</text>
-            <text class="settings-card-meta">{theme_scope_label}</text>
-            <GlassButton label={theme_pin_label} onclick={onThemePin} hidden={theme_pin_hidden} />
-            <GlassButton label={shell_offer_label} onclick={onShellSwitch} hidden={shell_offer_hidden} />
-            <row class="theme-grid settings-group">
-                {#for row in theme_rows}
-                    <button class="theme-option" class:theme-option-active={row.active} onclick={onThemeSelect(row.id)}>
-                        <box class="theme-preview" style:background={row.palette.surface}>
-                            <column class="theme-preview-sidebar" style:background={row.palette.surface_container_low}>
-                                <box class="theme-preview-dot" style:background={row.palette.primary} />
-                                <box class="theme-preview-line" style:background={row.palette.outline_variant} />
-                                <box class="theme-preview-line theme-preview-line-short" style:background={row.palette.outline_variant} />
-                            </column>
-                            <column class="theme-preview-body">
-                                <box class="theme-preview-heading" style:background={row.palette.on_surface} />
-                                <box class="theme-preview-panel" style:background={row.palette.surface_container_high} />
-                            </column>
-                        </box>
-                        <column class="theme-option-copy">
-                            <text class="theme-kicker">{row.kicker}</text>
-                            <row class="theme-title-row">
-                                <text class="theme-title">{row.label}</text>
-                                <text class="theme-now" hidden={not row.active}>{t('appearance.theme.now')}</text>
-                            </row>
-                            <text class="settings-card-meta">{row.recommends}</text>
-                            <text class="settings-card-meta">{row.coverage}</text>
+        <row class="theme-grid">
+            {#for row in theme_rows key={row.id}}
+                <button class="theme-option" class:theme-option-active={row.active} hidden={hideTheme(row)} aria-pressed={row.active} onclick={onThemeSelect(row.id)}>
+                    <box class="theme-preview" style:background={row.palette.surface}>
+                        <column class="theme-preview-sidebar" style:background={row.palette.surface_container_low}>
+                            <box class="theme-preview-dot" style:background={row.palette.primary} />
+                            <box class="theme-preview-line" style:background={row.palette.outline_variant} />
+                            <box class="theme-preview-line theme-preview-line-short" style:background={row.palette.outline_variant} />
                         </column>
+                        <column class="theme-preview-body">
+                            <box class="theme-preview-heading" style:background={row.palette.on_surface} />
+                            <box class="theme-preview-panel" style:background={row.palette.surface_container_high} />
+                        </column>
+                    </box>
+                    <column class="theme-option-copy">
+                        <row class="theme-title-row">
+                            <text class="theme-title">{row.label}</text>
+                        </row>
+                    </column>
+                </button>
+            {/for}
+        </row>
+
+        <row class="appearance-columns">
+            <column class="settings-group appearance-card">
+                <row class="settings-group-row">
+                    <text class="settings-group-label">{t('appearance.mode')}</text>
+                    <row class="glass-style-options" aria-label={t('appearance.mode')}>
+                        {#for mode in available_modes key={mode.name}}
+                            <button class="glass-style-option" class:glass-style-option-active={mode.active} aria-pressed={mode.active} onclick={onMode(mode.name)}><text>{mode.label}</text></button>
+                        {/for}
+                    </row>
+                </row>
+                <box class="settings-group-divider" />
+                <row class="settings-group-row">
+                    <text class="settings-group-label">{t('appearance.accent')}</text>
+                    <row class="accent-options">
+                        {#for accent in accents key={accent.name}}
+                            <button class="accent-swatch" style:background={accent.color} aria-label={t('appearance.accent.' .. accent.name)} aria-pressed={accent_value == accent.color} class:accent-swatch-active={accent_value == accent.color} onclick={onAccent(accent.name)} />
+                        {/for}
+                        <GlassButton variant="ghost" label={t('appearance.reset')} onclick={onAccentReset} />
+                    </row>
+                </row>
+                <PrefsPage page="appearance" />
+            </column>
+            <column class="settings-group appearance-card">
+                <row class="settings-group-row">
+                    <text class="settings-group-label">{t('appearance.icons')}</text>
+                    <button class="appearance-icon-picker" aria-expanded={icons_open} onclick={onToggleIcons}><text>{icon_theme_name ~= '' and icon_theme_name or t('appearance.system_default')}</text></button>
+                </row>
+                <box class="settings-group-divider" />
+                <row class="settings-group-row">
+                    <text class="settings-group-label">{t('appearance.fonts')}</text>
+                    <GlassButton label={font_value ~= '' and font_value or t('appearance.system_default')} active={fonts_open} onclick={onToggleFonts} />
+                </row>
+                <box class="settings-group-divider" />
+                <row class="settings-group-row">
+                    <text class="settings-group-label">{t('appearance.base_size')}</text>
+                    <slider class="appearance-size" min="10" max="32" step="1" value={base_size} onchange={onBaseSize} onrelease={onBaseSizeCommit} aria-label={t('appearance.base_size')} />
+                    <text class="settings-value">{tostring(base_size) .. " px"}</text>
+                </row>
+            </column>
+        </row>
+        <column class="settings-group" hidden={not icons_open}>
+            <scroll class="settings-list resource-list">
+                {#for row in icon_theme_rows key={row.id}}
+                    <button class="resource-option language-option" class:language-option-active={row.id == icon_theme_value} onclick={onIconThemeSelect(row.id)}>
+                        <column class="settings-card-copy">
+                            <text class="settings-card-title">{row.name}</text>
+                            <text class="settings-card-meta">{row.detail}</text>
+                        </column>
+                        <text class="language-check" hidden={row.id ~= icon_theme_value}>{t('common.selected')}</text>
+                    </button>
+                {/for}
+            </scroll>
+            <GlassButton label={t('appearance.show_more')} onclick={onShowMoreIcons} hidden={icon_more_hidden} />
+        </column>
+        <column class="settings-group" hidden={not fonts_open}>
+            <scroll class="settings-list resource-list">
+                {#for row in font_rows key={row.name}}
+                    <button class="resource-option language-option" class:language-option-active={row.name == font_value} style:font-family={row.family} onclick={onFontSelect(row.name)}>
+                        <column class="settings-card-copy">
+                            <text class="settings-card-title">{row.name}</text>
+                            <text class="settings-card-meta">{row.detail}</text>
+                        </column>
+                        <text class="language-check" hidden={row.name ~= font_value}>{t('common.selected')}</text>
+                    </button>
+                {/for}
+            </scroll>
+            <GlassButton label={t('appearance.show_more')} onclick={onShowMoreFonts} hidden={font_more_hidden} />
+        </column>
+
+        <column class="settings-group" hidden={not has_wallpapers}>
+            <text class="settings-section-title">{t('appearance.wallpaper')}</text>
+            <row class="wallpaper-grid">
+                {#for item in wallpaper_rows key={item.path}}
+                    <button class="wallpaper-choice" class:wallpaper-choice-active={item.active} aria-pressed={item.active} aria-label={item.name} title={item.name} onclick={onWallpaper(item.path)}>
+                        <image class="wallpaper-image" src={item.thumbnail} alt="" />
                     </button>
                 {/for}
             </row>
         </column>
 
+        <PrefsPage page="appearance_motion" />
+
+        <column class="settings-group">
+            <row class="settings-group-row">
+                <text class="settings-group-label">{t('appearance.shell_scale')}</text>
+                <slider class="appearance-size" min="70" max="200" step="5" value={shell_scale} onchange={onShellScale} onrelease={onShellScaleCommit} aria-label={t('appearance.shell_scale')} />
+                <text class="settings-value">{tostring(shell_scale) .. "%"}</text>
+                <GlassButton variant="ghost" label={t('appearance.reset')} onclick={onShellScaleReset} />
+            </row>
+            <row class="settings-group-row">
+                <column class="settings-card-copy">
+                    <text class="settings-group-label">{theme_scope_label}</text>
+                    <text class="settings-section-copy" hidden={theme_coverage == ""}>{theme_coverage}</text>
+                </column>
+                <GlassButton variant="ghost" label={t('appearance.other_themes')} active={other_themes_open} onclick={onToggleThemes} hidden={not has_other_themes} />
+
+                <GlassButton label={theme_pin_label} onclick={onThemePin} hidden={theme_pin_hidden} />
+                <GlassButton label={shell_offer_label} onclick={onShellSwitch} hidden={shell_offer_hidden} />
+                <GlassButton variant="ghost" label={t('appearance.base_size_reset')} onclick={onBaseSizeReset} />
+            </row>
+        </column>
         <column class="settings-section" hidden={glass_hidden}>
             <text class="settings-section-title">{t('appearance.glass')}</text>
             <text class="settings-section-copy">{t('appearance.glass.copy')}</text>
@@ -64,82 +154,12 @@
                 </row>
             </column>
         </column>
-
-        <column class="settings-section">
-            <text class="settings-section-title">{t('appearance.icons')}</text>
-            <text class="settings-section-copy">{t('appearance.icons.copy')}</text>
-            <scroll class="settings-list resource-list">
-                {#for row in icon_theme_rows key={row.id}}
-                    <button class="resource-option language-option" class:language-option-active={row.id == icon_theme_value} onclick={onIconThemeSelect(row.id)}>
-                        <column class="settings-card-copy">
-                            <text class="settings-card-title">{row.name}</text>
-                            <text class="settings-card-meta">{row.detail}</text>
-                        </column>
-                        <text class="language-check" hidden={row.id ~= icon_theme_value}>{t('common.selected')}</text>
-                    </button>
-                {/for}
-            </scroll>
-            <GlassButton label={t('appearance.show_more')} onclick={onShowMoreIcons} hidden={icon_more_hidden} />
-        </column>
-
-        <column class="settings-section">
-            <text class="settings-section-title">{t('appearance.fonts')}</text>
-            <text class="settings-section-copy">{t('appearance.fonts.copy')}</text>
-            <row class="settings-info-row"><text>{t('appearance.base_size')}</text><text>{tostring(base_size) .. " px"}</text></row>
-            <slider min="10" max="32" step="1" value={base_size} onchange={onBaseSize} onrelease={onBaseSizeCommit} aria-label={t('appearance.base_size')} />
-            <GlassButton label={t('appearance.base_size_reset')} onclick={onBaseSizeReset} />
-            <row class="settings-info-row"><text>{t('appearance.shell_scale')}</text><text>{tostring(shell_scale) .. "%"}</text></row>
-            <slider min="70" max="200" step="5" value={shell_scale} onchange={onShellScale} onrelease={onShellScaleCommit} aria-label={t('appearance.shell_scale')} />
-            <GlassButton label={t('appearance.shell_scale_reset')} onclick={onShellScaleReset} />
-            <scroll class="settings-list resource-list">
-                {#for row in font_rows key={row.name}}
-                    <button class="resource-option language-option" class:language-option-active={row.name == font_value} style:font-family={row.family} onclick={onFontSelect(row.name)}>
-                        <column class="settings-card-copy">
-                            <text class="settings-card-title">{row.name}</text>
-                            <text class="settings-card-meta">{row.detail}</text>
-                        </column>
-                        <text class="language-check" hidden={row.name ~= font_value}>{t('common.selected')}</text>
-                    </button>
-                {/for}
-            </scroll>
-            <GlassButton label={t('appearance.show_more')} onclick={onShowMoreFonts} hidden={font_more_hidden} />
-        </column>
-
-        <column class="settings-section">
-            <text class="settings-section-title">{t('appearance.language')}</text>
-            <text class="settings-section-copy">{t('appearance.language.copy')}</text>
-            <row class="settings-segmented" aria-label={t('appearance.language')}>
-                <GlassButton variant="ghost" active={not locale_slovak} label={t('language.english.native')} onclick={onLocaleEnglish} />
-                <GlassButton variant="ghost" active={locale_slovak} label={t('language.slovak.native')} onclick={onLocaleSlovak} />
-            </row>
-        </column>
-
-        <column class="settings-section">
-            <text class="settings-section-title">{t('appearance.current')}</text>
-            <column class="settings-card">
-                <row class="settings-info-row">
-                    <text class="settings-info-label">{t('common.theme')}</text>
-                    <text class="settings-info-value">{theme_value}</text>
-                </row>
-                <row class="settings-info-row">
-                    <text class="settings-info-label">{t('common.locale')}</text>
-                    <text class="settings-info-value">{locale_value}</text>
-                </row>
-                <row class="settings-info-row">
-                    <text class="settings-info-label">{t('appearance.icons')}</text>
-                    <text class="settings-info-value">{icon_theme_value}</text>
-                </row>
-                <row class="settings-info-row">
-                    <text class="settings-info-label">{t('appearance.fonts')}</text>
-                    <text class="settings-info-value">{font_value}</text>
-                </row>
-            </column>
-        </column>
     </column>
 </template>
 
 <script lang="luau">
 local GlassButton = require("@mesh/glass-controls")
+local PrefsPage = require("./prefs-page.mesh")
 local glass_backdrops = require("@mesh/glass-material/strength")
 hidden = false
 
@@ -157,10 +177,71 @@ local function t(key, ...)
     return raw_t(key, ...)
 end
 
+local wallpapers_ok, wallpapers = pcall(require, "mesh.wallpapers")
+if not wallpapers_ok then wallpapers = nil end
+
+local CANVAS_ORDER = { nocturne = 1, paper = 2, tapedeck = 3, bubblegum = 4, ["liquid-glass"] = 5 }
+
+local function canvas_order(id)
+    return CANVAS_ORDER[string.match(id, ":([^:]+)$") or id] or 6
+end
+
+other_themes_open = false
+has_other_themes = false
+icons_open = false
+fonts_open = false
+icon_theme_name = ""
+accent_value = ""
+available_modes = {}
+wallpaper_rows = {}
+has_wallpapers = false
+accents = {
+    { name = "violet", color = "#a78bfa", foreground = "#181127" },
+    { name = "blue", color = "#0a6fe0", foreground = "#ffffff" },
+    { name = "green", color = "#8fe3c4", foreground = "#11271e" },
+    { name = "pink", color = "#ff8dbd", foreground = "#34173f" },
+    { name = "orange", color = "#f4a572", foreground = "#2a1a11" },
+}
+
+function hideTheme(row) return not row.canvas and not row.active and not other_themes_open end
+function onToggleThemes() other_themes_open = not other_themes_open end
+function onToggleIcons() icons_open = not icons_open end
+function onToggleFonts() fonts_open = not fonts_open end
+function onMode(mode) theme.set_mode(mode) end
+function onWallpaper(path) theme.set_backdrop_image(path) end
+
+function onAccent(name)
+    for _, accent in ipairs(accents) do
+        if accent.name == name then
+            accent_value = accent.color
+            theme.set_tokens({ ["color-primary"] = accent.color, ["color-on-primary"] = accent.foreground })
+            return
+        end
+    end
+end
+
+function onAccentReset()
+    accent_value = ""
+    theme.set_tokens({ ["color-primary"] = mesh.json.null, ["color-on-primary"] = mesh.json.null })
+end
+
+effect(function()
+    local rows = {}
+    local current = theme.backdrop_image
+    for _, item in ipairs(wallpapers and wallpapers.wallpapers or {}) do
+        if item.thumbnail ~= "" then
+            rows[#rows + 1] = { path = item.path, name = item.name, thumbnail = item.thumbnail, active = item.path == current }
+            if #rows == 6 then break end
+        end
+    end
+    wallpaper_rows = rows
+    has_wallpapers = #rows > 0
+end)
+
 theme_value = "material"
-locale_value = "en"
 theme_rows = {}
 theme_scope_label = ""
+theme_coverage = ""
 theme_pin_label = ""
 theme_pin_hidden = true
 shell_offer_label = ""
@@ -175,7 +256,6 @@ base_size = 14
 shell_scale = 100
 icon_more_hidden = true
 font_more_hidden = true
-locale_slovak = false
 glass_style = "theme"
 glass_blur = 0
 glass_liquid = 0
@@ -316,35 +396,6 @@ local function installed_themes()
     return rows, seen
 end
 
--- The mode names a theme offers, as the small caption above its name.
-local function theme_kicker(option)
-    local names = {}
-    for _, mode in ipairs(type(option.modes) == "table" and option.modes or {}) do
-        local name = type(mode) == "table" and mode.name or mode
-        if name ~= nil then names[#names + 1] = string.upper(tostring(name)) end
-    end
-    return table.concat(names, " · ")
-end
-
--- What selecting the theme adopts: its first installed font and icon theme,
--- or its first choice when the installed catalog has not loaded that far.
-local function theme_recommendation(option, fonts_present, icons_present)
-    local recommends = type(option.recommends) == "table" and option.recommends or {}
-    local function first(candidates, present)
-        for _, candidate in ipairs(candidates or {}) do
-            if present[candidate] then return candidate end
-        end
-        return (candidates or {})[1]
-    end
-    local font = first(recommends.fonts, fonts_present)
-    local icons = first(recommends.icons, icons_present)
-    if font == nil and icons == nil then return "" end
-    local parts = {}
-    if font ~= nil then parts[#parts + 1] = font end
-    if icons ~= nil then parts[#parts + 1] = icons end
-    return t('appearance.theme.recommends') .. " " .. table.concat(parts, " · ")
-end
-
 -- A theme names the composition it is designed for (`recommends.composition`,
 -- e.g. `@mesh/glass`); the profile of the same short name is offered, never
 -- switched to silently. Glass strength only applies to glass compositions.
@@ -376,45 +427,49 @@ local function sync_theme(theme_id)
         installed[#installed + 1] = { id = theme_value, label = theme_value }
     end
 
-    local fonts_present, icons_present = {}, {}
-    for _, entry in ipairs(font_catalog) do fonts_present[tostring(entry.name or "")] = true end
-    local resources = theme and theme.system_resources or {}
-    for _, entry in ipairs(resources.icon_themes or {}) do icons_present[tostring(entry.id or "")] = true end
-    local rows = {}
+    table.sort(installed, function(left, right)
+        local a, b = canvas_order(left.id), canvas_order(right.id)
+        if a == b then return left.label < right.label end
+        return a < b
+    end)
+    local rows, modes = {}, {}
+    theme_coverage = ""
+    local more = false
     for index, option in ipairs(installed) do
         local active = option.id == theme_value
-        local palette = preview_palette(option)
-        rows[index] = {
-            id = option.id,
-            label = option.label,
-            palette = palette,
-            active = active,
-            kicker = theme_kicker(option),
-            recommends = theme_recommendation(option, fonts_present, icons_present),
-            coverage = type(option.coverage) == "table"
-                and (tostring(option.coverage.tuned or 0) .. " " .. t('appearance.coverage.tuned')
+        local canvas = canvas_order(option.id) < 6
+        more = more or (not canvas and not active)
+        rows[index] = { id = option.id, label = option.label, palette = preview_palette(option), active = active, canvas = canvas }
+        if active then
+            sync_shell(option)
+            if type(option.coverage) == "table" then
+                theme_coverage = tostring(option.coverage.tuned or 0) .. " " .. t('appearance.coverage.tuned')
                     .. " · " .. tostring(option.coverage.defaults or 0) .. " " .. t('appearance.coverage.defaults')
                     .. " · " .. tostring(option.coverage.independent or 0) .. " " .. t('appearance.coverage.independent')
-                    .. " · " .. tostring((option.coverage.internal_selectors or 0) + (option.coverage.absent_targets or 0)) .. " " .. t('appearance.coverage.warnings'))
-                or t('appearance.coverage.unavailable'),
-        }
+                    .. " · " .. tostring((option.coverage.internal_selectors or 0) + (option.coverage.absent_targets or 0)) .. " " .. t('appearance.coverage.warnings')
+            end
+            for _, mode in ipairs(type(option.modes) == "table" and option.modes or {}) do
+                local name = type(mode) == "table" and mode.name or mode
+                if type(name) == "string" then
+                    local label = name
+                    if name == "light" or name == "dark" then label = t("appearance.mode." .. name) end
+                    modes[#modes + 1] = { name = name, label = label, active = theme.mode == name }
+                end
+            end
+        end
     end
     theme_rows = rows
-    for _, option in ipairs(installed) do
-        if option.id == theme_value then sync_shell(option) end
-    end
+    available_modes = modes
+    has_other_themes = more
 end
 
-local function sync_locale(locale)
-    locale_value = tostring(locale or "en")
-    local slovak = locale_value == "sk" or string.find(locale_value, "sk-", 1, true) == 1
-    locale_slovak = slovak
-end
+
 
 local function sync_system_resources()
     local resources = theme and theme.system_resources or {}
-    icon_theme_value = tostring(resources.active_icon_theme or "hicolor")
-    font_value = tostring(resources.active_font_family or "system-ui")
+    icon_theme_value = type(resources.active_icon_theme) == "string" and resources.active_icon_theme or ""
+    icon_theme_name = icon_theme_value
+    font_value = type(resources.active_font_family) == "string" and resources.active_font_family or ""
 
     local icons = {}
     icon_more_hidden = true
@@ -434,6 +489,7 @@ local function sync_system_resources()
         end
     end
     icon_theme_rows = icons
+    for _, row in ipairs(icons) do if row.id == icon_theme_value then icon_theme_name = row.name end end
 
     if resources.font_revision ~= font_revision or font_revision == nil then
         font_catalog = resources.font_families or {}
@@ -539,7 +595,6 @@ effect(function()
             current_theme = theme.state.current or theme.state.theme_id or current_theme
         end
     end
-    -- Resources first: theme cards name the recommended fonts that are installed.
     sync_system_resources()
     local namespaces = settings_service and settings_service.namespaces or {}
     local shell = namespaces.shell or {}
@@ -550,8 +605,8 @@ effect(function()
     theme_scope_label = pinned and t('appearance.theme.pinned') or t('appearance.theme.shared')
     theme_pin_label = pinned and t('appearance.theme.unpin') or t('appearance.theme.pin')
     theme_pin_hidden = not (pinned or (theme and theme.can_pin))
-    sync_locale(mesh.locale.current() or "en")
     sync_glass()
+    accent_value = stored_tokens()["color-primary"] or ""
 end)
 
 function onThemeSelect(theme_id)
@@ -625,38 +680,41 @@ function onShowMoreFonts()
     sync_system_resources()
 end
 
-function onLocaleEnglish()
-    sync_locale("en")
-    mesh.locale.set("en")
-end
-
-function onLocaleSlovak()
-    sync_locale("sk")
-    mesh.locale.set("sk")
-end
 </script>
 
 <style>
+    .appearance-columns { width: 100%; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+    .settings-group.appearance-card { width: auto; min-width: 0; max-width: 100%; flex-basis: 290px; flex-grow: 1; }
+    .appearance-icon-picker { min-width: 0; padding: 6px 10px; border-radius: var(--glass-radius-control); }
+    .appearance-size { min-width: 65px; flex-grow: 1; }
+    .accent-options { gap: 6px; align-items: center; flex-wrap: wrap; }
+    .accent-swatch { width: 20px; height: 20px; padding: 0; flex-shrink: 0; border-radius: var(--radius-full); }
+    .accent-swatch-active { border: 2px solid var(--glass-settings-text); }
+    .wallpaper-grid { width: 100%; gap: 10px; flex-wrap: wrap; }
+    .wallpaper-choice { min-width: 80px; flex-basis: 14%; flex-grow: 1; height: 74px; padding: 0; overflow: hidden; border-radius: var(--glass-radius-control); }
+    .wallpaper-choice-active { border: 2px solid var(--color-primary); }
+    .wallpaper-image { width: 100%; height: 100%; object-fit: cover; }
+
     .theme-grid {
         width: 100%;
-        gap: var(--spacing-md);
+        gap: 14px;
         flex-wrap: wrap;
-        padding: var(--spacing-md);
     }
 
     .theme-option {
         flex-direction: column;
         align-items: stretch;
-        min-width: 0;
-        flex-basis: 220px;
+        min-width: 112px;
+        flex-basis: 18%;
         flex-grow: 1;
         gap: var(--spacing-sm);
         padding: var(--spacing-sm);
-        border-radius: var(--radius-md);
-        border-width: 1px;
+        border-radius: var(--glass-radius-card);
+        border-width: var(--glass-border-width);
         border-style: solid;
         border-color: var(--glass-settings-rim);
         background: var(--glass-settings-inset);
+        box-shadow: var(--glass-shadow-group);
         color: var(--glass-settings-text);
     }
 
@@ -678,7 +736,7 @@ end
 
     .theme-preview {
         width: 100%;
-        height: 132px;
+        height: 78px;
         overflow: hidden;
         border-radius: var(--radius-sm);
     }
@@ -687,18 +745,18 @@ end
         width: 30%;
         height: 100%;
         gap: 8px;
-        padding: 12px;
+        padding: 6px;
     }
 
     .theme-preview-body {
         flex-grow: 1;
-        gap: 12px;
-        padding: 16px;
+        gap: 6px;
+        padding: 8px;
     }
 
     .theme-preview-dot {
-        width: 18px;
-        height: 18px;
+        width: 10px;
+        height: 10px;
         border-radius: var(--radius-full);
     }
 
@@ -724,7 +782,7 @@ end
 
     .theme-preview-panel {
         width: 100%;
-        height: 58px;
+        height: 32px;
         border-radius: var(--radius-sm);
     }
 
@@ -735,14 +793,6 @@ end
         padding-bottom: var(--spacing-xs);
     }
 
-    .theme-kicker {
-        height: auto;
-        color: var(--color-primary);
-        font-size: 10px;
-        font-weight: 700;
-        letter-spacing: 1px;
-        line-height: 1.6;
-    }
 
     .theme-title-row {
         width: 100%;
@@ -753,30 +803,21 @@ end
     .theme-title {
         height: auto;
         color: var(--glass-settings-text);
-        font-size: 18px;
+        font-size: 13px;
         font-weight: 750;
     }
 
-    .theme-now {
-        height: auto;
-        padding-inline: 8px;
-        padding-block: 2px;
-        border-radius: var(--radius-full);
-        background: color-mix(in srgb, var(--color-primary) 16%, transparent);
-        color: var(--color-primary);
-        font-size: 11px;
-        font-weight: 700;
-    }
 
     /* A grouped card of rows, as in the reference system settings. */
     .settings-group {
         width: 100%;
         padding: var(--spacing-sm);
-        border-radius: var(--radius-lg);
-        border-width: 1px;
+        border-radius: var(--glass-radius-card);
+        border-width: var(--glass-border-width);
         border-style: solid;
         border-color: var(--glass-settings-rim);
         background: var(--glass-settings-inset);
+        box-shadow: var(--glass-shadow-group);
     }
 
     .settings-group-row {

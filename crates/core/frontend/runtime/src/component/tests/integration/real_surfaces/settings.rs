@@ -222,7 +222,7 @@ fn settings_tab_switch_resets_scroll_and_replaces_the_visible_page() {
         })
         .collect::<Vec<_>>();
     assert!(
-        command_text.contains(&"Color theme"),
+        command_text.contains(&"Mode"),
         "Appearance paint commands should be present after the switch"
     );
     assert!(
@@ -348,6 +348,17 @@ fn settings_appearance_resource_scroll_keeps_the_existing_tree() {
         .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
 
+    let trigger = first_node_with_class_token(
+        settings.last_tree.as_ref().unwrap(),
+        "appearance-icon-picker",
+    )
+    .expect("icon theme picker");
+    let click = trigger.event_handlers["click"].clone();
+    settings.call_handler_target(&click, &[]).unwrap();
+    settings
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
+        .unwrap();
+
     let tree = settings
         .last_tree
         .as_ref()
@@ -420,6 +431,33 @@ fn settings_nav_item_answers_with_one_tooltip_for_the_whole_row() {
 }
 
 #[test]
+fn settings_pointer_cards_follow_the_board_and_stack_on_narrow_outputs() {
+    let theme = settings_material_theme(&default_theme());
+    for width in [1280, 695] {
+        let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
+        settings
+            .call_namespaced_handler("__mesh_embed__::@mesh/settings::showPointer", &[])
+            .unwrap();
+        let mut buffer = PixelBuffer::new(width, 880);
+        settings
+            .paint_raster(&theme, SurfaceExtent::unpadded(width, 880), &mut buffer, 1.0)
+            .unwrap();
+        let tree = settings.last_tree.as_ref().unwrap();
+        let band = first_node_with_class_token(tree, "pref-band").expect("pointer settings band");
+        let [mouse, touchpad] = band.children.as_slice() else {
+            panic!("expected mouse and touchpad cards");
+        };
+        if width == 1280 {
+            assert_eq!(mouse.layout.y, touchpad.layout.y);
+            assert!(touchpad.layout.x >= mouse.layout.x + mouse.layout.width);
+        } else {
+            assert_eq!(mouse.layout.x, touchpad.layout.x);
+            assert!(touchpad.layout.y >= mouse.layout.y + mouse.layout.height);
+        }
+    }
+}
+
+#[test]
 fn settings_fits_a_narrower_configure_and_keeps_requesting_its_size() {
     let theme = default_theme();
     let mut settings = real_frontend_module_component("@mesh/settings", audio_network_catalog());
@@ -439,12 +477,12 @@ fn settings_fits_a_narrower_configure_and_keeps_requesting_its_size() {
     let pop_out = first_node_with_class_token(tree, "pop-out-button").expect("pop-out button");
     assert!(
         pop_out.layout.x + pop_out.layout.width <= width as f32,
-        "the header actions must stay inside a configure narrower than 920px: {:?}",
+        "the header actions must stay inside a configure narrower than 1280px: {:?}",
         pop_out.layout
     );
     assert_eq!(
         settings.requested_layout_size(),
-        (920, 700),
+        (1280, 880),
         "the surface keeps requesting its declared size so a wider output gets it back"
     );
 }
@@ -477,18 +515,18 @@ fn settings_navigation_classes_and_language_options_derive_from_template_state()
         .unwrap();
     assert!(active_handler(&settings).contains("showAudio"));
 
-    // The language options live on the Appearance page, which is only built
-    // while it is showing.
     settings
-        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showAppearance", &[])
+        .call_namespaced_handler("__mesh_embed__::@mesh/settings::showLanguage", &[])
         .unwrap();
     settings
         .paint_raster(&theme, SurfaceExtent::unpadded(920, 900), &mut buffer, 1.0)
         .unwrap();
-    assert!(active_handler(&settings).contains("showAppearance"));
+    assert!(active_handler(&settings).contains("showLanguage"));
     let tree = settings.last_tree.as_ref().expect("settings tree");
+    let locale = first_node_with_attr(tree, "class", "pref-row pref-row-first")
+        .expect("display language row");
     assert_eq!(
-        count_class_token(tree, "glass-button-active"),
+        count_class_token(locale, "pref-choice-active"),
         1,
         "exactly one of the English/Slovak options is marked active"
     );
@@ -778,10 +816,11 @@ fn clicking_a_theme_card_repaints_settings_in_the_new_theme_in_one_frame() {
         assert_eq!((color.r, color.g, color.b), (0xc0, 0, 0));
         assert_eq!(color.a, 255);
     }
-    // BGRA, at a point of the shell's right edge that no child covers.
+    let toolbar = first_node_with_class_token(tree, "settings-toolbar").unwrap();
+    // The workspace padding just below the toolbar exposes the panel gradient.
     let (px, py) = (
-        (shell.layout.x + shell.layout.width - 4.0) as u32,
-        (shell.layout.y + shell.layout.height / 2.0) as u32,
+        (shell.layout.x + shell.layout.width - 40.0) as u32,
+        (toolbar.layout.y + toolbar.layout.height + 6.0) as u32,
     );
     let offset = ((py * buffer.width() + px) * 4) as usize;
     let pixel = &buffer.data()[offset..offset + 4];
@@ -843,11 +882,15 @@ fn settings_surfaces_follow_the_active_theme_material_policy() {
         .canonicalize()
         .unwrap();
     let mut surfaces = Vec::new();
-    for (name, stylesheet, blur) in [
-        ("catppuccin-mocha", "theme.css", 0.0),
-        ("liquid-glass", "theme.css", 4.0),
-        ("frutiger-aero", "light.css", 0.0),
-        ("frutiger-aero", "dark.css", 0.0),
+    for (name, stylesheet, blur, window_radius) in [
+        ("catppuccin-mocha", "theme.css", 0.0, None),
+        ("liquid-glass", "theme.css", 4.0, Some(24.0)),
+        ("nocturne", "theme.css", 0.0, Some(20.0)),
+        ("paper", "theme.css", 0.0, Some(10.0)),
+        ("tapedeck", "theme.css", 0.0, Some(0.0)),
+        ("bubblegum", "theme.css", 0.0, Some(30.0)),
+        ("frutiger-aero", "light.css", 0.0, None),
+        ("frutiger-aero", "dark.css", 0.0, None),
     ] {
         let pack = mesh_core_theme::load_theme_from_source(
             &ThemeSourceHandle::new(root.join("modules/themes").join(name), stylesheet).unwrap(),
@@ -866,14 +909,25 @@ fn settings_surfaces_follow_the_active_theme_material_policy() {
         let shell = first_node_with_class_token(tree, "settings-shell").unwrap();
         let sidebar = first_node_with_class_token(tree, "settings-sidebar").unwrap();
         let card = first_node_with_class_token(tree, "settings-empty-state").unwrap();
+        if let Some(radius) = window_radius {
+            assert_eq!(shell.computed_style.border_radius.top_left, radius, "{name}");
+            let toolbar = first_node_with_class_token(tree, "settings-toolbar").unwrap();
+            let search = first_node_with_class_token(tree, "sidebar-search").unwrap();
+            assert!(
+                search.layout.y < sidebar.layout.y,
+                "{name}: search belongs above navigation"
+            );
+            let toolbar_height = if name == "tapedeck" { 30.0 } else { 48.0 };
+            assert!(toolbar.layout.height >= toolbar_height, "{name}");
+        }
         if name == "liquid-glass" {
             let mesh_core_elements::style::BackgroundPaint::LinearGradient(gradient) =
                 &shell.computed_style.background_paint
             else {
-                panic!("liquid-glass settings should have a translucent light panel");
+                panic!("liquid-glass settings should have a translucent dark panel");
             };
             for stop in [gradient.from, gradient.to] {
-                assert!(stop.r > 200 && (150..=195).contains(&stop.a));
+                assert!(stop.r < 40 && (175..=210).contains(&stop.a));
             }
             assert!(
                 sidebar.computed_style.background_color.a < card.computed_style.background_color.a,
@@ -881,8 +935,8 @@ fn settings_surfaces_follow_the_active_theme_material_policy() {
             );
             let title = first_node_with_class_token(tree, "sidebar-title").unwrap();
             assert!(
-                title.computed_style.color.r < 100,
-                "settings text must be dark"
+                title.computed_style.color.r > 230,
+                "settings text must be light against the dark glass"
             );
         }
         assert_eq!(shell.computed_style.background_color.a, 0);
@@ -1006,9 +1060,9 @@ fn settings_navigation_is_one_tab_stop_with_arrow_keys_inside() {
     settings.focused_key = Some(wifi);
     key(&mut settings, "ArrowDown", false);
     paint(&mut settings);
-    assert!(active_page(&settings).contains("showAudio"));
+    assert!(active_page(&settings).contains("showBluetooth"));
     assert!(focused_class(&settings).0.contains("settings-nav-item"));
-    let audio_tab = settings.focused_key.clone();
+    let bluetooth_tab = settings.focused_key.clone();
 
     key(&mut settings, "Tab", false);
     paint(&mut settings);
@@ -1021,13 +1075,13 @@ fn settings_navigation_is_one_tab_stop_with_arrow_keys_inside() {
     key(&mut settings, "Tab", true);
     paint(&mut settings);
     assert_eq!(
-        settings.focused_key, audio_tab,
+        settings.focused_key, bluetooth_tab,
         "Shift+Tab returns to the shown page's tab"
     );
 
     key(&mut settings, "End", false);
     paint(&mut settings);
-    assert!(active_page(&settings).contains("showUsers"));
+    assert!(active_page(&settings).contains("showDevice"));
     key(&mut settings, "ArrowDown", false);
     paint(&mut settings);
     assert!(active_page(&settings).contains("showWifi"), "arrows wrap");

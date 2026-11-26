@@ -120,6 +120,7 @@ if ! "$workloads_only"; then
   cargo test -p mesh-core-render --release --lib offset_span_branches_preserve_snapshots_and_bound_repairs
   cargo test -p mesh-core-render --release --test production_icon
   cargo test -p mesh-core-render --release --lib display_list_rebuilds_descendants_only_when_a_moved_parent_defines_their_space
+  cargo test -p mesh-core-render --release --lib plain_wallpaper_reuses_source_pixels_and_preserves_cover_fit
   cargo test -p mesh-core-elements --release --lib write_back_rounding_matches_taffy_rounding
   cargo test -p mesh-core-elements --release --lib live_paths_step_through_shared_prefixes_once
   cargo test -p mesh-core-elements --release --lib retained_layout_validates_only_structure_changes
@@ -127,6 +128,7 @@ if ! "$workloads_only"; then
   cargo test -p mesh-core-elements --release --lib semantic_reindex_reuses_validated_structure
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-frontend-runtime --release --lib hover_frame_visits_scale_with_the_hovered_item_not_the_tree
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-frontend-runtime --release --lib keyed_list_hover_restyle_visits_scale_with_affected_items
+  MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-frontend-runtime --release --lib keyed_list_handler_write_during_input_patches_and_rebinds_item_handlers
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-frontend-runtime --release --lib patched_frame_restyle_visits_scale_with_the_patch_not_the_tree
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-frontend-runtime --release --lib patched_frame_layout_visits_scale_with_the_patch
   MESH_VERIFY_RETAINED=1 cargo test -p mesh-core-frontend-runtime --release --lib equal_size_service_text_patches_skip_layout_and_match_full_paint
@@ -155,6 +157,7 @@ if ! "$workloads_only"; then
   run_benchmark mesh-core-shell watcher_idle_wait_profile
   run_benchmark mesh-core-scripting native_subscription_idle_profile
   run_benchmark mesh-core-scripting validated_state_publication_profile
+  run_benchmark mesh-core-scripting settings_translation_hit_workload
   run_benchmark mesh-core-render resource_completion_fanout_profile
   run_benchmark mesh-core-frontend-runtime glass_dock_cpu_raster_timing_profile
   run_benchmark mesh-core-render glass_raster_profile

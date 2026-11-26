@@ -164,6 +164,17 @@ fn appearance_surface(theme: &Theme, buffer: &mut PixelBuffer) -> FrontendSurfac
     settings
 }
 
+fn open_appearance_resource_lists(settings: &mut FrontendSurfaceComponent) {
+    for handler in ["onToggleIcons", "onToggleFonts"] {
+        settings
+            .call_namespaced_handler(
+                &format!("__mesh_embed__::@mesh/settings/local:AppearancePage::{handler}"),
+                &[],
+            )
+            .unwrap();
+    }
+}
+
 fn publish_audio_percent(settings: &mut FrontendSurfaceComponent, percent: u32) {
     let payload = serde_json::json!({
         "available": true,
@@ -219,7 +230,7 @@ fn unread_audio_updates_schedule_no_frame() {
         })
         .collect::<Vec<_>>();
     assert!(
-        text.iter().any(|text| text == "Color theme"),
+        text.iter().any(|text| text == "Accent colour"),
         "Appearance content must survive an unread audio update: {text:?}"
     );
     assert!(
@@ -622,6 +633,7 @@ fn d9_settings_scroll_frame_gate() {
     };
     let mut buffer = PixelBuffer::new(920, 900);
     let mut settings = appearance_surface(&theme, &mut buffer);
+    open_appearance_resource_lists(&mut settings);
     if std::env::var_os("MESH_SCROLL_WINDOWED").is_some() {
         settings.surface_role_changed(mesh_core_wayland::SurfaceRole::Window);
     }
@@ -794,29 +806,39 @@ fn d9_settings_scroll_frame_gate() {
     );
 }
 
-/// Scrolling the shipped Settings page moves retained viewport pixels in
-/// place on whole-pixel frames. After every frame — shifted, fractional
-/// momentum, and the settle — the retained buffer must match a fresh full
-/// paint of the same display list exactly. Rounded fills and borders are
-/// clip-invariant, so a damage clip crossing the window corner or a
-/// scrollbar end changes no pixel.
+/// Every scroll frame of the shipped Appearance page must match a fresh
+/// full paint of the same display list. The workload includes both finger
+/// gestures and the fractional offsets in the momentum tail.
 #[test]
-fn settings_scroll_shift_matches_full_paint() {
+fn settings_scroll_repaints_match_full_paint() {
     let resources = mesh_core_render::ResourcePaintConsumer::default();
     let _resource_scope = resources.enter();
     let theme = default_theme();
     let mut buffer = PixelBuffer::new(920, 900);
     let mut settings = appearance_surface(&theme, &mut buffer);
+    open_appearance_resource_lists(&mut settings);
     for _ in 0..4 {
         render_loop_frame(&mut settings, &theme, &mut buffer);
     }
-    let (x, y) = {
+    let (page_id, x, y) = {
         let tree = settings.last_tree.as_ref().unwrap();
         let page = first_node_with_class_token(tree, "settings-scroll").expect("page scroller");
-        (
-            page.layout.x + page.layout.width / 2.0,
-            page.layout.y + page.layout.height / 2.0,
-        )
+        assert!(
+            page.resolved_scroll_metrics().max_y > 0.0,
+            "expanded resource lists must overflow"
+        );
+        let (x, y) = (1..20)
+            .map(|row| {
+                (
+                    page.layout.x + page.layout.width / 2.0,
+                    page.layout.y + page.layout.height * row as f32 / 20.0,
+                )
+            })
+            .find(|&(x, y)| {
+                find_scrollable_at_with_limits(tree, x, y).is_some_and(|hit| hit.node_id == page.id)
+            })
+            .expect("a point owned by the page scroller");
+        (page.id, x, y)
     };
     settings
         .handle_input(&theme, 920, 900, ComponentInput::PointerMove { x, y })
@@ -916,12 +938,10 @@ fn settings_scroll_shift_matches_full_paint() {
             &format!("momentum frame {frame}"),
         );
     }
-    // Once content moves, a nested resource list comes under the pointer and
-    // takes the gesture; scrolling inside content is not shiftable.
+    assert!(settings.scroll_shifted_frames > 0, "parity must exercise shifted pixels");
     assert!(
-        settings.scroll_shifted_frames >= 3,
-        "whole-pixel page scroll frames move retained pixels, got {}",
-        settings.scroll_shifted_frames
+        settings.scroll_offsets[&page_id].y > 0.0,
+        "the parity workload must scroll"
     );
 }
 

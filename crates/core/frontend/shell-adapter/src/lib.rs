@@ -1592,6 +1592,22 @@ pub enum ServiceEvent {
     },
 }
 
+/// One immutable payload and fingerprint shared by the frontend recipients
+/// of an admitted service update.
+pub struct SharedServicePayload {
+    pub value: Arc<serde_json::Value>,
+    pub fingerprint: u64,
+}
+
+impl SharedServicePayload {
+    pub fn new(payload: &serde_json::Value) -> Self {
+        Self {
+            value: Arc::new(payload.clone()),
+            fingerprint: mesh_core_scripting::ScriptContext::service_payload_fingerprint(payload),
+        }
+    }
+}
+
 pub trait ShellComponent: Send {
     fn set_paint_context(&mut self, _context: mesh_core_render::PaintContext) {}
     fn id(&self) -> &str;
@@ -1637,6 +1653,14 @@ pub trait ShellComponent: Send {
     ) -> Result<Vec<CoreRequest>, ComponentError> {
         self.handle_service_event(event)
     }
+    fn handle_shared_service_update(
+        &mut self,
+        event: &ServiceEvent,
+        generation: u64,
+        _payload: &SharedServicePayload,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        self.handle_service_event_with_generation(event, generation)
+    }
     /// Deliver a terminal correlated service result to the matching frontend
     /// instance. Returns true when this component owns the instance.
     fn deliver_service_call_result(
@@ -1671,6 +1695,14 @@ pub trait ShellComponent: Send {
     fn cache_service_payload_with_generation(&mut self, event: &ServiceEvent, _generation: u64) {
         self.cache_service_payload(event);
     }
+    fn cache_shared_service_update(
+        &mut self,
+        event: &ServiceEvent,
+        generation: u64,
+        _payload: &SharedServicePayload,
+    ) {
+        self.cache_service_payload_with_generation(event, generation);
+    }
     fn service_observation_summary(&self) -> Option<ServiceObservationSummary> {
         None
     }
@@ -1704,6 +1736,11 @@ pub trait ShellComponent: Send {
     fn discard_child_surface_paint(&mut self, _node_key: &str) {}
     /// A paint-only frame, implying no script, layout, or style change.
     fn request_paint(&mut self) {}
+    /// Refresh the target whose asynchronously requested paint resource changed.
+    fn request_resource_paint(&mut self, _child_key: Option<&str>) {
+        self.request_paint();
+    }
+
     /// The shell drew pixels the component did not paint (debug overlays)
     /// into its paint buffer, so retained pixels must not be moved in place
     /// until the next full repaint replaces them.

@@ -74,6 +74,42 @@ fn pixels(surface: &mut skia_safe::Surface) -> Vec<u8> {
 }
 
 #[test]
+fn plain_wallpaper_reuses_source_pixels_and_preserves_cover_fit() {
+    let rect = Rect::from_wh(96.0, 48.0);
+    for output in [(114, 59), (160, 90)] {
+        let mut source = source();
+        source.image = source.image.with_default_mipmaps().unwrap();
+        let origin = (12.0, 8.0);
+        let mut direct = surfaces::raster_n32_premul((96, 48)).unwrap();
+        direct.canvas().clear(skia_safe::Color::TRANSPARENT);
+        assert!(source.draw_plain(direct.canvas(), rect, output, origin));
+        assert!(source.prepared.lock().unwrap().is_empty());
+
+        let prepared = source.prepared(output.0, output.1, 0.0).unwrap();
+        let mut reference = surfaces::raster_n32_premul((96, 48)).unwrap();
+        reference.canvas().clear(skia_safe::Color::TRANSPARENT);
+        draw_shader(
+            reference.canvas(),
+            rect,
+            Corners::zero(),
+            backdrop(&prepared, origin),
+        );
+        let max_error = pixels(&mut direct)
+            .into_iter()
+            .zip(pixels(&mut reference))
+            .map(|(direct, prepared)| direct.abs_diff(prepared))
+            .max()
+            .unwrap();
+        assert!(max_error <= 1, "{output:?}: {max_error}");
+
+        assert!(!source.draw_plain(direct.canvas(), rect, (100, 50), (0.0, 0.0)));
+        assert!(!source.draw_plain(direct.canvas(), rect, output, (0.5, 0.0)));
+        direct.canvas().scale((1.3, 1.3));
+        assert!(!source.draw_plain(direct.canvas(), rect, output, origin));
+    }
+}
+
+#[test]
 fn unrefracted_backdrop_matches_lens_pixels() {
     let source = source();
     for blur in [0.0, 6.0] {

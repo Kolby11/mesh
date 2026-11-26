@@ -654,7 +654,10 @@ impl FrontendSurfaceComponent {
         x: f32,
         y: f32,
     ) -> serde_json::Value {
+        let (dx, dy) = self.child_input_offset.unwrap_or_default();
         let (left, top, right, bottom) = bounds;
+        let (left, top, right, bottom) = (left - dx, top - dy, right - dx, bottom - dy);
+        let (x, y) = (x - dx, y - dy);
         let width = (right - left).max(0.0);
         let height = (bottom - top).max(0.0);
         let bounds = serde_json::json!({
@@ -732,7 +735,14 @@ impl FrontendSurfaceComponent {
         node: &WidgetNode,
         bounds: (f32, f32, f32, f32),
     ) -> PressedTargetSnapshot {
-        PressedTargetSnapshot::from_node(key, node, bounds)
+        let (dx, dy) = self.child_input_offset.unwrap_or_default();
+        let (left, top, right, bottom) = bounds;
+        let mut snapshot = PressedTargetSnapshot::from_node(
+            key, node, (left - dx, top - dy, right - dx, bottom - dy),
+        );
+        // Capture geometry stays in the coordinates used by hit testing.
+        snapshot.bounds = bounds;
+        snapshot
     }
 
     pub(in crate::component) fn build_click_event_for_pressed_target(
@@ -742,23 +752,10 @@ impl FrontendSurfaceComponent {
         x: f32,
         y: f32,
     ) -> serde_json::Value {
-        let (left, top, right, bottom) = target.bounds;
-        let width = (right - left).max(0.0);
-        let height = (bottom - top).max(0.0);
-        let bounds = serde_json::json!({
-            "left": left,
-            "top": top,
-            "right": right,
-            "bottom": bottom,
-            "width": width,
-            "height": height,
-        });
-        let position = serde_json::json!({
-            "margin_left": left.round() as i32,
-            "margin_bottom": bottom.round() as i32,
-            "width": width.round() as i32,
-            "height": height.round() as i32,
-        });
+        let (dx, dy) = self.child_input_offset.unwrap_or_default();
+        let (x, y) = (x - dx, y - dy);
+        let bounds = &target.current_target["bounds"];
+        let position = &target.current_target["position"];
 
         serde_json::json!({
             "type": "click",

@@ -94,13 +94,15 @@ impl TemplateBindingIndex {
                         list_index
                     });
                     let list = &mut index.lists[list_index];
+                    if list.items[item.index].is_empty() {
+                        list.values[item.index] = bindings
+                            .locals
+                            .as_ref()
+                            .and_then(|locals| locals.get(&item.list.item_name))
+                            .cloned()
+                            .unwrap_or_default();
+                    }
                     list.items[item.index].push(path.clone());
-                    list.values[item.index] = bindings
-                        .locals
-                        .as_ref()
-                        .and_then(|locals| locals.get(&item.list.item_name))
-                        .cloned()
-                        .unwrap_or_default();
                 }
             }
             for (child_index, child) in node.children.iter().enumerate() {
@@ -376,6 +378,12 @@ impl FrontendSurfaceComponent {
                 if list.values[index] == value {
                     continue;
                 }
+                // Only top-level, fixed-shape loops enter the keyed patch path.
+                let locals = Arc::new(
+                    [(list.list.item_name.clone(), value.clone())]
+                        .into_iter()
+                        .collect(),
+                );
                 for path in &list.items[index] {
                     let Some(bindings) =
                         node_at_path(tree, path).and_then(WidgetNode::template_bindings)
@@ -383,9 +391,7 @@ impl FrontendSurfaceComponent {
                         return false;
                     };
                     let mut next = (**bindings).clone();
-                    let mut locals = next.locals.as_deref().cloned().unwrap_or_default();
-                    locals.insert(list.list.item_name.clone(), value.clone());
-                    next.locals = Some(Arc::new(locals));
+                    next.locals = Some(Arc::clone(&locals));
                     refreshed_bindings.insert(path.clone(), Arc::new(next));
                     targets.push(path.clone());
                 }

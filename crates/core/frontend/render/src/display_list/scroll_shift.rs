@@ -109,9 +109,12 @@ pub(super) fn plan_scroll_shift(
                     break;
                 }
             }
-            DisplayPaintCommandKind::Node | DisplayPaintCommandKind::Scrollbars => {}
-            // Layers and backdrops inside the content are clipped or sampled
-            // at the viewport edge, so their pixels are not shift-invariant.
+            // Isolated source-over groups move with their contents. Filters and
+            // backdrops can sample at the viewport edge and need ordinary replay.
+            DisplayPaintCommandKind::Node
+            | DisplayPaintCommandKind::Scrollbars
+            | DisplayPaintCommandKind::PushCompositingLayer
+            | DisplayPaintCommandKind::PopCompositingLayer => {}
             _ => return None,
         }
     }
@@ -254,6 +257,20 @@ fn rim_bands(
     Some(parts)
 }
 
+fn has_uniform_background(paint: &BackgroundPaint) -> bool {
+    match paint {
+        BackgroundPaint::None => true,
+        BackgroundPaint::LinearGradient(gradient) => gradient.from == gradient.to,
+        BackgroundPaint::MultiStopLinearGradient(stops) => {
+            stops.first().is_none_or(|first| stops.iter().all(|stop| stop == first))
+        }
+        BackgroundPaint::Gradient(gradient) => gradient.stops.first().is_none_or(|first| {
+            gradient.stops.iter().all(|stop| stop.color == first.color)
+        }),
+        BackgroundPaint::Image(_) => false,
+    }
+}
+
 fn beneath_varying_parts(
     command: &DisplayPaintCommand,
     owner: NodeId,
@@ -272,7 +289,7 @@ fn beneath_varying_parts(
     let layout = command.node.layout;
     if !style.additional_box_shadows.is_empty()
         || !style.outline.is_none()
-        || !matches!(style.background_paint, BackgroundPaint::None)
+        || !has_uniform_background(&style.background_paint)
         || layout.x > viewport.x as f32
         || layout.y > viewport.y as f32
         || layout.x + layout.width < viewport.right() as f32

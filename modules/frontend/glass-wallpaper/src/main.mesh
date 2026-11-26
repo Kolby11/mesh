@@ -1,16 +1,41 @@
 <template>
-    <box class="wallpaper" aria-hidden="true" />
+    <box class="wallpaper" class:wallpaper-image={has_image} aria-hidden="true">
+        <box class="wallpaper-glow wallpaper-glow-secondary" hidden={has_image} />
+        <box class="wallpaper-glow wallpaper-glow-primary" hidden={has_image} />
+    </box>
 </template>
 
+<script lang="luau">
+local theme = require("mesh.theme")
+
+has_image = false
+effect(function()
+    local image = theme.backdrop_image
+    has_image = type(image) == "string" and image ~= ""
+end)
+</script>
+
 <style>
-    /* The shell backdrop image (`shell.render.backdrop.image`), cover-fit and
-    unrefracted. The refraction paints under the element's own background, so
-    the background stays transparent. */
     .wallpaper {
         width: 100%;
         height: 100%;
         exclusive-zone: ignore;
-        background: transparent;
+        background-image: var(--wallpaper-base);
+    }
+
+    .wallpaper-image {
+        background-image: none;
         backdrop-filter: refract(0px 0px);
     }
+
+    .wallpaper-glow {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+    }
+
+    .wallpaper-glow-primary { background-image: var(--wallpaper-glow-primary); }
+    .wallpaper-glow-secondary { background-image: var(--wallpaper-glow-secondary); }
 </style>

@@ -10,8 +10,8 @@ ships no fonts; fontconfig is the authority for what is installed.
 **Status: partially shipped** — MESH enumerates every system font through
 fontdb/fontconfig, exposes the catalog to settings, and applies the selected
 exact family live through the shell typography tokens. Font-pack role mapping,
-pack-qualified references, and per-module chains remain target work. Fallback
-chains per script are deferred.
+pack-qualified references, per-module chains, and direct `font-family` aliases
+for module overrides are shipped. Fallback chains per script are deferred.
 
 **Shipped catalog transport:** `mesh.theme.system_resources` includes the first
 24 `font_families`, `font_total`, and an opaque `font_revision`. Read-authorized
@@ -63,7 +63,7 @@ same way they consume every other design value:
 - A `font-family` value containing `/` is a pack-qualified reference
   (`<pack-id>/<role>`), bypassing the chain — use sparingly.
 - A value matching an installed family name verbatim (`font-family: Inter`)
-  bypasses the binding system entirely (historical CSS behavior, kept).
+  selects that family ahead of role lookup in the pack chain.
 
 ## 4. Font-pack module shape
 
@@ -71,19 +71,22 @@ same way they consume every other design value:
 {
   "name": "@mesh/fonts-default",
   "version": "1.0.0",
-  "mesh": { "apiVersion": "0.1", "kind": "font-pack" },
-  "font_pack": {
-    "id": "default",
-    "requires": {
-      "fonts": [
-        { "family": "Inter", "version": ">=4.0" },
-        { "family": "JetBrains Mono", "version": ">=2.0" }
-      ]
-    },
-    "mappings": {
-      "display": "Inter", "headline": "Inter", "title": "Inter",
-      "body": "Inter", "label": "Inter", "caption": "Inter",
-      "mono": "JetBrains Mono"
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "font-pack",
+    "font_pack": {
+      "id": "default",
+      "requires": {
+        "fonts": [
+          { "family": "Inter", "version": ">=4.0" },
+          { "family": "JetBrains Mono", "version": ">=2.0" }
+        ]
+      },
+      "mappings": {
+        "display": "Inter", "headline": "Inter", "title": "Inter",
+        "body": "Inter", "label": "Inter", "caption": "Inter",
+        "mono": "JetBrains Mono"
+      }
     }
   }
 }
@@ -118,16 +121,16 @@ Via the settings store ([08](08-settings.md)):
 
 `shell.fonts.packs` prepends to every consumer's chain; `use_packs` replaces
 per module; `overrides` is the per-role user knob. `ui_family` is the shipped
-v1 "default UI font" setting and names an exact installed family; role-based
-values begin once font-pack mapping ships. Selecting a theme sets `ui_family` to the first installed
-family the theme recommends ([04 §2.2](04-styling.md#22-recommended-fonts-and-icons)).
+v1 "default UI font" setting and names an exact installed family. Selecting a
+theme sets `ui_family` to the first installed family the theme recommends
+([04 §2.2](04-styling.md#22-recommended-fonts-and-icons)).
 
 ## 6. Resolution order
 
 For a `font-family` value `X` in module `<id>`:
 
 1. User per-module override (`<id>.fonts.overrides.X`)
-2. Author override (manifest `fonts.overrides.X`)
+2. Author override (manifest `mesh.fonts.overrides.X`)
 3. Pack-qualified (`pack/role`)
 4. Verbatim installed family name
 5. Effective chain (user shell packs + declared chain / `use_packs`)
@@ -135,11 +138,12 @@ For a `font-family` value `X` in module `<id>`:
 
 ## 7. Rendering & caching
 
-The binding layer resolves role → family name and hands it to the existing
-text path; cosmic-text + swash keep owning loading, shaping, rasterization,
-and per-script glyph fallback. Resolution results cache per
-`(module, role, chain)` and flush on pack changes, font settings changes, and
-theme changes.
+The binding layer hands the text renderer the surface module's alias map for
+direct `font-family` values. For example, `font-family: editorial` resolves
+through the user and author overrides even when `editorial` appears solely in
+those overrides. Alias maps are cached per module and rebuilt on font
+registry revisions. Cosmic-text and swash load, shape and rasterize the
+resolved fonts and handle glyph fallback.
 
 ## 8. Deferred
 

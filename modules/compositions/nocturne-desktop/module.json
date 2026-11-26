@@ -1,0 +1,61 @@
+{
+  "name": "@mesh/nocturne-desktop",
+  "version": "0.1.0",
+  "description": "Floating top panel and bottom application shelf.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "composition",
+    "extends": "@mesh/glass",
+    "uses": {
+      "modules": {
+        "@mesh/nocturne": ">=0.1.0",
+        "@mesh/level-osd": ">=0.1.0"
+      }
+    },
+    "compose": {
+      "resources": {
+        "theme": "@mesh/nocturne"
+      },
+      "settings": {
+        "@mesh/glass-bar": {
+          "props": {
+            "global": {
+              "desktop_layout": "floating"
+            }
+          }
+        },
+        "@mesh/glass-dock": {
+          "props": {
+            "global": {
+              "desktop_layout": "floating"
+            }
+          }
+        },
+        "@mesh/glass-widgets": {
+          "props": {
+            "global": {
+              "desktop_layout": "floating"
+            }
+          }
+        },
+        "@mesh/glass-notifications#default": {
+          "surface": {
+            "anchor": "right"
+          }
+        },
+        "@mesh/glass-notifications": {
+          "props": {
+            "global": {
+              "right_aligned": true
+            }
+          }
+        }
+      },
+      "roots": {
+        "@mesh/level-osd#default": {
+          "module": "@mesh/level-osd"
+        }
+      }
+    }
+  }
+}

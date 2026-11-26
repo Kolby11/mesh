@@ -109,6 +109,7 @@
         "service.audio.control",
         "service.audio.read"
       ],
+      "@mesh/app-launcher": ["locale.read", "service.apps.launch", "service.apps.read"],
       "@mesh/backlight-brightness": [
         "exec.argv:brightnessctl:[\"-m\"]",
         "exec.argv:brightnessctl:[\"set\",\"*\"]",
@@ -156,6 +157,8 @@
       ],
       "@mesh/glass-bar": [
         "locale.read",
+        "service.apps.launch",
+        "service.apps.read",
         "service.audio.control",
         "service.audio.read",
         "service.brightness.control",
@@ -163,6 +166,8 @@
         "service.media.control",
         "service.media.read",
         "service.network.read",
+        "service.notifications.control",
+        "service.notifications.read",
         "service.power.read",
         "service.recorder.control",
         "service.recorder.read",
@@ -254,6 +259,7 @@
       "@mesh/language-widget": [
         "locale.read"
       ],
+      "@mesh/level-osd": ["locale.read", "service.audio.read", "service.brightness.read", "shell.surface"],
       "@mesh/mpris-media": [
         "exec.argv:playerctl:[\"--player\",\"*\",\"metadata\",\"--format\",\"*\"]",
         "exec.argv:playerctl:[\"--player\",\"*\",\"play-pause\"]",
@@ -398,6 +404,7 @@
         "service.theme.control",
         "service.time.control",
         "service.time.read",
+        "service.wallpapers.read",
         "shell.surface",
         "theme.read"
       ],
@@ -448,7 +455,7 @@
       "@mesh/wf-recorder": [
         "exec.argv:pgrep:[\"-x\",\"wf-recorder\"]",
         "exec.argv:pkill:[\"-INT\",\"-x\",\"wf-recorder\"]",
-        "exec.argv:sh:[\"-c\",\"d=\\\"${XDG_VIDEOS_DIR:-$HOME/Videos}/Recordings\\\"; mkdir -p \\\"$d\\\" && printf '%s' \\\"$d\\\"\"]",
+        "exec.argv:sh:[\"-c\",\"d=\\\"${XDG_VIDEOS_DIR:-$HOME/Videos}/Recordings\\\"; mkdir -p -- \\\"$d\\\" && out=$(mktemp -d -- \\\"$d/recording-XXXXXXXX\\\") && printf '%s/recording.mp4' \\\"$out\\\"\"]",
         "exec.argv:wf-recorder:[\"-f\",\"*\"]"
       ],
       "@mesh/window-title-widget": [

@@ -142,13 +142,29 @@ pub fn apply_service_update_with_name_and_fingerprint(
         state.set_unobserved_value_with_fingerprint(service_name, payload, fingerprint);
         return false;
     }
-    let metadata_fingerprint = service_update_metadata_fingerprint(service_name, source_module);
-    let metadata_changed =
-        state.set_with_fingerprint_lazy("last_service_update", metadata_fingerprint, || {
-            service_update_metadata(service_name, source_module)
-        });
+    let metadata_changed = set_service_update_metadata(state, service_name, source_module);
     state.set_with_fingerprint(service_name, payload, fingerprint);
     metadata_changed
+}
+
+pub(crate) fn apply_shared_service_update(
+    state: &mut ScriptState,
+    observed: bool,
+    service: &str,
+    source_module: &str,
+    payload: &Arc<serde_json::Value>,
+    fingerprint: u64,
+) -> bool {
+    let metadata_changed = observed && set_service_update_metadata(state, service, source_module);
+    state.set_shared_value_with_fingerprint(service, payload, fingerprint, observed);
+    metadata_changed
+}
+
+fn set_service_update_metadata(state: &mut ScriptState, service: &str, source: &str) -> bool {
+    let fingerprint = service_update_metadata_fingerprint(service, source);
+    state.set_with_fingerprint_lazy("last_service_update", fingerprint, || {
+        service_update_metadata(service, source)
+    })
 }
 
 fn service_update_metadata_fingerprint(service_name: &str, source_module: &str) -> u64 {
@@ -399,6 +415,21 @@ mod tests {
     use super::*;
     use mesh_core_elements::VariableStore;
     use mesh_core_frontend_abi::{SurfaceEffect, SurfaceRole};
+
+    #[test]
+    fn shared_service_payload_reaches_observed_and_unobserved_state_by_reference() {
+        use mesh_core_elements::VariableStore;
+        let payload = Arc::new(serde_json::json!({"items": [1, 2, 3]}));
+        let fingerprint = mesh_core_scripting::ScriptContext::service_payload_fingerprint(&payload);
+        let mut observed = ScriptState::new();
+        let mut unobserved = ScriptState::new();
+        apply_shared_service_update(&mut observed, true, "test", "@test/provider", &payload, fingerprint);
+        apply_shared_service_update(&mut unobserved, false, "test", "@test/provider", &payload, fingerprint);
+        for state in [&observed, &unobserved] {
+            assert!(std::ptr::eq(state.get_ref("test").unwrap(), payload.as_ref()));
+        }
+        assert!(!unobserved.is_dirty());
+    }
 
     #[test]
     fn apply_service_update_does_not_leak_metadata_without_read_capability() {

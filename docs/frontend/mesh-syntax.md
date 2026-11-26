@@ -1150,8 +1150,10 @@ Container queries are supported:
 
 Transitions currently interpolate `background-color`, `border-color`,
 `border-radius`, `border-width`, `color`, `opacity`, `width`, `height`,
-`padding`, `margin`, and `transform`. `transition-timing-function` accepts the
-standard easing keywords plus `cubic-bezier(...)`. `transform` parses
+`padding`, `margin`, and `transform`. On an `icon`, numeric axis values such
+as `--icon-fill` can also transition. See [icon axes](../spec/05-icons.md#7-variable-axes--style-tokens).
+`transition-timing-function` accepts the standard easing keywords plus
+`cubic-bezier(...)`. `transform` parses
 `translate(...)`, `scale(...)`, `rotate(...)`, `skew(...)`, `skewX(...)` and
 `skewY(...)`; paint, clipping and hit-testing share one affine matrix. The
 functions compose in a fixed order regardless of how they are written:

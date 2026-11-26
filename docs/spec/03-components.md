@@ -71,9 +71,10 @@ free-form attributes); setters report their change classes. A binding index
 retains target paths between template rebuilds, so patches do not rediscover
 targets by walking the tree.
 Keyed native loops with fixed-shape bodies retain their ordered unique string
-or numeric keys and captured item locals. Replacing a collection or mutating an
-item in place patches only changed items when those keys stay unchanged. Key,
-order or length changes reconcile the template. Event handlers in the body are
+or numeric keys. Bindings for the same iteration share an immutable snapshot
+of its locals. Replacing a collection or mutating an item in place patches
+only changed items when those keys stay unchanged. Key, order or length
+changes reconcile the template. Event handlers in the body are
 re-bound to the patched item's locals; nested control flow, component instances
 and two-way bindings keep the rebuild path. Writes made by handlers during input
 dispatch patch once the dispatch returns.
@@ -150,6 +151,12 @@ entrypoint and active theme. Local/imported component source ownership is preser
 through composition, and animation source caches include that ownership so matching
 names in separate components do not share rules. Animation durations use explicit
 CSS time units (`240ms`, `0.24s`); bare integers are iteration counts.
+
+A keyed loop preserves the runtime of a child whose key remains rendered,
+including when the items reorder. Removing a keyed child from the rendered
+tree unmounts its runtime and its embedded descendants. Pending tasks and
+reactive effects are cleaned up. Rendering the key again mounts a new instance
+and reads any persisted settings or storage through the usual APIs.
 
 ### 1.1 Popovers and escape-bounds UI
 

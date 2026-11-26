@@ -41,9 +41,10 @@ node drawings instead of allowing Skia to inline them into the parent recording.
 The cache admits at most 4,096 nodes and 16 MiB of picture storage plus uniquely
 counted raster images (charged at four bytes per pixel); insertion evicts oldest
 entries. Scale, clip and owner changes miss the cache. Resource revisions,
-completed async assets, newly published asset pages and font database/alias
-changes invalidate its entries. Recordings made with pending resource jobs are
-not admitted.
+newly published asset pages and font database/alias changes invalidate its
+entries. Each parent or promoted surface tracks the asynchronous requests made
+while it paints. Its cache admits recordings when those requests have settled,
+and completion invalidates that target's recordings.
 
 Promoted buffer bounds clip descendant visual extents at overflow viewports,
 keeping scroll offsets from changing the popup reserve. Outer shadows remain
@@ -62,6 +63,12 @@ cached target metadata rather than charging shared font data once per glyph.
 
 Icon content applies its resolved node clip to file, glyph and fallback drawing,
 including when hovered transforms move a scroll subtree onto the affine path.
+
+Scroll scopes retain source-over opacity groups with their content and
+select each group as a complete replay span. CPU pixel shifting also requires a
+stationary backdrop that is uniform along the displacement. The full viewport
+stays in presentation damage while replay can cover only exposed strips and
+anchored edges.
 
 Layer scopes, backdrop reads/refraction, scroll scopes and scroll-content nodes
 are prepared live. Tooltip paint remains outside the node cache. Complete-scene

@@ -1,69 +1,28 @@
 <template>
-    <column class="settings-page" hidden={hidden}>
-        <row class="settings-control-row">
+    <column class="settings-card audio-output" hidden={hidden}>
+        <text class="settings-section-title">{t('pref.section.output_devices')}</text>
+        <row class="settings-section-head">
             <column class="settings-card-copy">
-                <text class="settings-control-title">{t('audio.service')}</text>
+                <text class="settings-control-title">{t('audio.volume')}</text>
+                <text class="settings-section-copy">{t('audio.volume.copy')}</text>
                 <text class="settings-card-meta">{t(audio_status)}</text>
+            </column>
+            <box hidden={muted_state}><GlassButton label={t('audio.mute')} onclick={onToggleMute} /></box>
+            <box hidden={not muted_state}><GlassButton label={t('audio.unmute')} variant="primary" onclick={onToggleMute} /></box>
+        </row>
+        <row class="settings-control-row audio-meter">
+            <icon name={volume_icon} size="22" />
+            <slider class="settings-slider" min="0" max="100" value={volume_percent}
+                onrelease={onVolumeCommit} disabled={controls_disabled} aria-label={t('audio.volume')} />
+            <text class="settings-value">{volume_label}</text>
+        </row>
+        <row class="settings-info-row">
+            <column class="settings-card-copy">
+                <text class="settings-card-title">{output_name}</text>
+                <text class="settings-card-meta">{output_description}</text>
             </column>
             <text class="settings-status-pill" class:settings-status-pill-active={service_active}>{t(service_pill)}</text>
         </row>
-
-        <column class="settings-section">
-            <row class="settings-section-head">
-                <column class="settings-card-copy">
-                    <text class="settings-section-title">{t('audio.volume')}</text>
-                    <text class="settings-section-copy">{t('audio.volume.copy')}</text>
-                </column>
-                <box hidden={muted_state}>
-                    <GlassButton label={t('audio.mute')} onclick={onToggleMute} />
-                </box>
-                <box hidden={not muted_state}>
-                    <GlassButton label={t('audio.unmute')} variant="primary" onclick={onToggleMute} />
-                </box>
-            </row>
-            <row class="settings-card">
-                <icon name={volume_icon} size="22" />
-                <slider
-                    class="settings-slider"
-                    min="0"
-                    max="100"
-                    value={volume_percent}
-                    onrelease={onVolumeCommit}
-                    disabled={controls_disabled}
-                    aria-label={t('audio.volume')}
-                />
-                <text class="settings-value">{volume_label}</text>
-            </row>
-        </column>
-
-        <column class="settings-section">
-            <text class="settings-section-title">{t('audio.output_device')}</text>
-            <row class="settings-card">
-                <column class="settings-card-copy">
-                    <text class="settings-card-title">{output_name}</text>
-                    <text class="settings-card-meta">{output_description}</text>
-                </column>
-                <text class="settings-status-pill settings-status-pill-active">{t('common.default')}</text>
-            </row>
-        </column>
-
-        <column class="settings-section">
-            <text class="settings-section-title">{t('common.backend_details')}</text>
-            <column class="settings-card">
-                <row class="settings-info-row">
-                    <text class="settings-info-label">{t('common.provider')}</text>
-                    <text class="settings-info-value">{t(provider_label)}</text>
-                </row>
-                <row class="settings-info-row">
-                    <text class="settings-info-label">{t('common.interface')}</text>
-                    <text class="settings-info-value">mesh.audio@1.x</text>
-                </row>
-                <row class="settings-info-row">
-                    <text class="settings-info-label">{t('audio.control_path')}</text>
-                    <text class="settings-info-value">{t(control_path)}</text>
-                </row>
-            </column>
-        </column>
     </column>
 </template>
 
@@ -91,8 +50,6 @@ muted_state = false
 controls_disabled = true
 output_name = t("audio.default_output")
 output_description = t("audio.discovery_unavailable")
-provider_label = "common.no_provider"
-control_path = "common.unavailable"
 
 local function clamp_percent(value)
     local numeric = tonumber(value) or 0
@@ -122,8 +79,7 @@ effect(function()
         service_pill = "common.unavailable"
         service_active = false
         controls_disabled = true
-        provider_label = "common.no_active_provider"
-        control_path = "common.unavailable"
+
         output_name = t("audio.default_output")
         output_description = t("audio.discovery_unavailable")
         sync_volume(0, false)
@@ -135,8 +91,7 @@ effect(function()
     audio_status = muted and "audio.output_muted" or "audio.output_active"
     service_pill = muted and "audio.muted" or "common.active"
     service_active = true
-    provider_label = tostring(audio.source_module or "audio.active_provider")
-    control_path = type(audio.set_volume) == "function" and "audio.read_control" or "audio.read_only"
+
     local raw_output = audio.output_name or audio.device_name
     output_name = (raw_output and tostring(raw_output) ~= "") and tostring(raw_output) or t("audio.default_system_output")
     local raw_desc = audio.output_description
@@ -164,3 +119,9 @@ function onToggleMute()
     end
 end
 </script>
+
+<style>
+    .audio-output { align-items: stretch; gap: 12px; }
+    .audio-meter { padding: 0; background: transparent; border-width: 0; box-shadow: none; }
+    .settings-slider { min-width: 0; }
+</style>

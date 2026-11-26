@@ -1,0 +1,138 @@
+<props>
+{ rail = { type = "bool", default = false } }
+</props>
+
+<template>
+    <popover class="notification-shell" open={open} anchor-ref="notificationsTrigger" anchor={props.rail and "right" or "bottom"} gravity={props.rail and "right" or "bottom"} offset-x={props.rail and 12 or 0} offset-y={props.rail and 0 or 12} open-on="click" grab="click" aria-label={t("notifications.title")}>
+        <column class="notification-panel">
+            <row class="notification-header">
+                <text class="notification-title">{t("notifications.title")}</text>
+                <button class="notification-button" onclick={clear} disabled={not available or not has_items}>
+                    <text>{t("notifications.clear")}</text>
+                </button>
+            </row>
+            <row class="notification-header">
+                <text>{t("notifications.dnd")}</text>
+                <switch class="notification-switch" checked={dnd} disabled={not available} onchange={setDnd} aria-label={t("notifications.dnd")} />
+            </row>
+            <text class="notification-muted" hidden={has_items}>{available and t("notifications.empty") or t("controls.unavailable")}</text>
+            <scroll class="notification-scroll" hidden={not has_items}>
+                <column class="notification-list">
+                    {#for item in items key={item.id}}
+                        <column class="notification-card">
+                            <row class="notification-header">
+                                <column class="notification-copy">
+                                    <text class="notification-muted" hidden={item.app_name == ""}>{item.app_name}</text>
+                                    <text class="notification-summary">{item.summary}</text>
+                                    <text hidden={item.body == ""}>{item.body}</text>
+                                </column>
+                                <button class="notification-dismiss notification-button" onclick={dismiss(item.id)} aria-label={t("notifications.dismiss")}>
+                                    <icon name="window-close" size="16" />
+                                </button>
+                            </row>
+                            <row class="notification-actions" hidden={item.actions[1] == nil}>
+                                {#for action in item.actions key={action.key}}
+                                    <button class="notification-button" onclick={invoke(item.id, action.key)}>
+                                        <text>{action.label}</text>
+                                    </button>
+                                {/for}
+                            </row>
+                        </column>
+                    {/for}
+                </column>
+            </scroll>
+        </column>
+    </popover>
+</template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local ok, notifications = pcall(require, "mesh.notifications")
+open = false
+available = false
+dnd = false
+items = {}
+has_items = false
+
+if ok then
+    effect(function()
+        available = notifications.available == true
+        dnd = notifications.dnd == true
+        items = notifications.notifications or {}
+        has_items = items[1] ~= nil
+    end)
+end
+
+function setDnd(value)
+    if available then notifications.set_dnd(value) end
+end
+
+function clear()
+    if available then notifications.clear() end
+end
+
+function dismiss(id)
+    if available then notifications.dismiss(id) end
+end
+
+function invoke(id, action)
+    if available then notifications.invoke(id, action) end
+end
+</script>
+
+<style>
+    .notification-shell { width: fit; height: fit; padding: 16px; background: transparent; }
+    .notification-panel {
+        width: 392px;
+        padding: 16px;
+        gap: 14px;
+        color: var(--glass-text);
+        border-radius: var(--glass-radius-window);
+        border-width: var(--glass-border-width);
+        border-style: solid;
+        border-color: var(--glass-rim);
+        background-image: var(--glass-surface-panel);
+        box-shadow: var(--glass-shadow-card);
+        backdrop-filter: var(--glass-backdrop-panel);
+    }
+    .notification-header { width: 100%; align-items: center; justify-content: space-between; gap: 12px; }
+    .notification-title { font-size: 20px; font-weight: 700; font-family: var(--typography-family-brand); }
+    .notification-scroll { width: 100%; height: fit; max-height: 430px; overflow-y: auto; overflow-x: hidden; }
+    .notification-list { width: 100%; gap: 8px; padding: 1px 5px 5px 1px; }
+    .notification-card {
+        width: 100%;
+        flex-shrink: 0;
+        padding: 12px;
+        gap: 8px;
+        background: var(--glass-fill-inset);
+        border-radius: var(--glass-radius-card);
+        border-width: var(--glass-border-width);
+        border-style: solid;
+        border-color: var(--glass-rim-inset);
+        box-shadow: var(--glass-shadow-group);
+    }
+    .notification-copy { flex-grow: 1; min-width: 0; gap: 4px; }
+    .notification-summary { font-weight: 700; }
+    .notification-muted { color: var(--glass-text-muted); }
+    .notification-actions { width: 100%; flex-wrap: wrap; gap: 6px; }
+    .notification-button {
+        min-height: 32px;
+        align-items: center;
+        justify-content: center;
+        padding: 4px 10px;
+        color: var(--glass-control-text);
+        border-radius: var(--glass-radius-control);
+        border-width: var(--glass-border-width);
+        border-style: solid;
+        border-color: var(--glass-control-rim);
+        background-image: var(--glass-surface-control);
+        box-shadow: var(--glass-control-shadow);
+    }
+    .notification-button:hover { border-color: var(--glass-control-rim-hover); }
+    .notification-button:disabled { opacity: 0.55; }
+    .notification-switch::track,
+    .notification-switch::thumb {
+        border-radius: var(--glass-radius-switch);
+    }
+    .notification-dismiss { width: 32px; padding: 0; flex-shrink: 0; }
+</style>

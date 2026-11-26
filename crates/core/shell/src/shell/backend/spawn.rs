@@ -184,6 +184,7 @@ impl Shell {
         let (cmd_tx, cmd_rx) = mpsc::channel(mesh_core_backend::BACKEND_COMMAND_QUEUE_CAPACITY);
 
         let shell_tx = tx.clone();
+        let ingress = self.backend_ingress.clone();
         let interface = candidate.interface.clone();
         let provider_id = candidate.module_id.clone();
         let event_provider_id = Arc::new(std::sync::RwLock::new(initial_event_provider_id));
@@ -201,24 +202,18 @@ impl Shell {
                     .read()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .clone();
-                match event {
+                let message = match event {
                     BackendServiceEvent::Update(update) => {
-                        if shell_tx
-                            .send(ShellMessage::BackendServiceUpdate {
-                                interface: bridge_interface.clone(),
-                                provider_id: current_event_provider_id.clone(),
-                                identity: update.identity,
-                                event: ServiceEvent::Updated {
-                                    service: update.service.to_string(),
-                                    source_module: update.source_module.to_string(),
-                                    payload: update.payload,
-                                },
-                            })
-                            .is_err()
-                        {
-                            break;
+                        ShellMessage::BackendServiceUpdate {
+                            interface: bridge_interface.clone(),
+                            provider_id: current_event_provider_id,
+                            identity: update.identity,
+                            event: ServiceEvent::Updated {
+                                service: update.service.to_string(),
+                                source_module: update.source_module.to_string(),
+                                payload: update.payload,
+                            },
                         }
-                        bridge_wake.wake();
                     }
                     BackendServiceEvent::CommandResult(result) => {
                         let call_id = result.call_id;
@@ -234,7 +229,7 @@ impl Shell {
                             result = %payload,
                             "backend command result"
                         );
-                        let _ = shell_tx.send(ShellMessage::BackendCommandResult {
+                        ShellMessage::BackendCommandResult {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
                             identity,
@@ -243,8 +238,7 @@ impl Shell {
                             command,
                             result: payload,
                             outcome,
-                        });
-                        bridge_wake.wake();
+                        }
                     }
                     BackendServiceEvent::InterfaceEvent(event) => {
                         let name = event.name;
@@ -258,49 +252,46 @@ impl Shell {
                             payload = %payload,
                             "backend interface event"
                         );
-                        let _ = shell_tx.send(ShellMessage::BackendInterfaceEvent {
+                        ShellMessage::BackendInterfaceEvent {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
                             identity,
                             name,
                             payload,
                             generation,
-                        });
-                        bridge_wake.wake();
+                        }
                     }
                     BackendServiceEvent::Started { identity, .. } => {
-                        let _ = shell_tx.send(ShellMessage::BackendLifecycle {
+                        tracing::info!(
+                            interface = bridge_interface.as_str(),
+                            provider_id = bridge_provider_id.as_str(),
+                            "backend runtime started"
+                        );
+                        ShellMessage::BackendLifecycle {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
                             identity,
                             stage: "runtime".to_string(),
                             status: "running".to_string(),
                             message: "backend runtime started".to_string(),
-                        });
-                        bridge_wake.wake();
-                        tracing::info!(
-                            interface = bridge_interface.as_str(),
-                            provider_id = bridge_provider_id.as_str(),
-                            "backend runtime started"
-                        );
+                        }
                     }
                     BackendServiceEvent::InitFailed {
                         message, identity, ..
                     } => {
-                        let _ = shell_tx.send(ShellMessage::BackendLifecycle {
+                        tracing::warn!(
+                            interface = bridge_interface.as_str(),
+                            provider_id = bridge_provider_id.as_str(),
+                            "{message}"
+                        );
+                        ShellMessage::BackendLifecycle {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
                             identity,
                             stage: "init".to_string(),
                             status: "init_failed".to_string(),
                             message: message.clone(),
-                        });
-                        bridge_wake.wake();
-                        tracing::warn!(
-                            interface = bridge_interface.as_str(),
-                            provider_id = bridge_provider_id.as_str(),
-                            "{message}"
-                        );
+                        }
                     }
                     BackendServiceEvent::CallbackFailed {
                         stage,
@@ -308,20 +299,19 @@ impl Shell {
                         identity,
                         ..
                     } => {
-                        let _ = shell_tx.send(ShellMessage::BackendLifecycle {
+                        tracing::warn!(
+                            interface = bridge_interface.as_str(),
+                            provider_id = bridge_provider_id.as_str(),
+                            "{message}"
+                        );
+                        ShellMessage::BackendLifecycle {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
                             identity,
                             stage,
                             status: "callback_failed".to_string(),
                             message: message.clone(),
-                        });
-                        bridge_wake.wake();
-                        tracing::warn!(
-                            interface = bridge_interface.as_str(),
-                            provider_id = bridge_provider_id.as_str(),
-                            "{message}"
-                        );
+                        }
                     }
                     BackendServiceEvent::Failed {
                         stage,
@@ -329,37 +319,38 @@ impl Shell {
                         identity,
                         ..
                     } => {
-                        let _ = shell_tx.send(ShellMessage::BackendLifecycle {
+                        tracing::warn!(
+                            interface = bridge_interface.as_str(),
+                            provider_id = bridge_provider_id.as_str(),
+                            "{message}"
+                        );
+                        ShellMessage::BackendLifecycle {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
                             identity,
                             stage,
                             status: "failed".to_string(),
                             message: message.clone(),
-                        });
-                        bridge_wake.wake();
-                        tracing::warn!(
-                            interface = bridge_interface.as_str(),
-                            provider_id = bridge_provider_id.as_str(),
-                            "{message}"
-                        );
+                        }
                     }
                     BackendServiceEvent::Stopped { identity, .. } => {
-                        let _ = shell_tx.send(ShellMessage::BackendLifecycle {
+                        tracing::info!(
+                            interface = bridge_interface.as_str(),
+                            provider_id = bridge_provider_id.as_str(),
+                            "backend runtime stopped"
+                        );
+                        ShellMessage::BackendLifecycle {
                             interface: bridge_interface.clone(),
                             provider_id: current_event_provider_id.clone(),
                             identity,
                             stage: "runtime".to_string(),
                             status: "stopped".to_string(),
                             message: "backend runtime stopped".to_string(),
-                        });
-                        bridge_wake.wake();
-                        tracing::info!(
-                            interface = bridge_interface.as_str(),
-                            provider_id = bridge_provider_id.as_str(),
-                            "backend runtime stopped"
-                        );
+                        }
                     }
+                };
+                if !ingress.send(&shell_tx, &bridge_wake, message).await {
+                    break;
                 }
             }
         });

@@ -44,8 +44,8 @@ onclick = nil
         justify-content: center;
         gap: var(--spacing-xs);
         padding-inline: var(--spacing-md);
-        border-radius: var(--radius-full);
-        border-width: 1px;
+        border-radius: var(--glass-radius-control);
+        border-width: var(--glass-border-width);
         border-style: solid;
         border-color: var(--glass-control-rim);
         background: transparent;

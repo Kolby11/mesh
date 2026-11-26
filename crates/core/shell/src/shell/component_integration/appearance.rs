@@ -18,6 +18,16 @@ fn settings_scroll_frames_through_the_shell_stay_paint_only() {
         .unwrap();
     seed_large_resource_catalog(&mut settings, 240);
     invoke_handler(&mut settings, "__mesh_embed__::@mesh/settings::showAppearance", &[]).unwrap();
+    settings
+        .paint_raster(&theme, SurfaceExtent::unpadded(920, 700), &mut buffer, 1.0)
+        .unwrap();
+    for handler in ["onToggleIcons", "onToggleFonts"] {
+        invoke_handler(
+            &mut settings,
+            &format!("__mesh_embed__::@mesh/settings/local:AppearancePage::{handler}"),
+            &[],
+        ).unwrap();
+    }
     let id = settings.surface_id().to_owned();
     let mut shell = crate::shell::Shell::new();
     shell.presentation_engine =
@@ -41,6 +51,19 @@ fn settings_scroll_frames_through_the_shell_stay_paint_only() {
         .iter()
         .position(|runtime| runtime.surface_id == id)
         .unwrap();
+    let tree = shell.components[index].component.last_widget_tree().unwrap();
+    let scroller = first_node_with_class_token(tree, "settings-scroll").expect("page scroller");
+    let rect = scroller.layout;
+    let (x, y) = (1..20)
+        .flat_map(|row| (1..8).map(move |column| (
+            rect.x + rect.width * column as f32 / 8.0,
+            rect.y + rect.height * row as f32 / 20.0,
+        )))
+        .find(|&(x, y)| {
+            mesh_core_interaction::find_scrollable_at_with_limits(tree, x, y)
+                .is_some_and(|hit| hit.node_id == scroller.id)
+        })
+        .expect("point owned by the page scroller");
     const FRAMES: usize = 6;
     for _ in 0..FRAMES {
         shell.components[index]
@@ -50,8 +73,8 @@ fn settings_scroll_frames_through_the_shell_stay_paint_only() {
                 920,
                 700,
                 ComponentInput::TwoFingerScroll {
-                    x: 600.0,
-                    y: 400.0,
+                    x,
+                    y,
                     dx: 0.0,
                     dy: -10.0,
                 },

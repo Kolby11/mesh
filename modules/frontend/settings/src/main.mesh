@@ -12,118 +12,124 @@
 </props>
 
 <template>
-    <dialog class="settings-shell" aria-label={t('settings.title')}>
+    <dialog class="settings-shell" aria-label={t('settings.title')}
+        style:--settings-output-width={layer_width} style:--settings-output-height={layer_height}>
+        <row class="settings-toolbar">
+            <text class="sidebar-title">{t('settings.title')}</text>
+            <input class="sidebar-search" value={search_query} oninput={onSearch} placeholder={t('settings.search')} aria-label={t('settings.search')} />
+            <box class="settings-toolbar-spacer" aria-hidden="true" />
+            <row class="settings-header-actions">
+                <button class="header-button pop-out-button" onclick={onPopOut} aria-label={t('settings.pop_out')}>
+                    <icon class="header-glyph" name="window-new" size="16" />
+                </button>
+                <button class="header-button dock-back-button" onclick={onDockBack} aria-label={t('settings.dock_back')}>
+                    <icon class="header-glyph" name="window-restore" size="16" />
+                </button>
+                <button class="header-button close-button" onclick={onClose} aria-label={t('settings.close')}>
+                    <icon class="header-glyph" name="window-close" size="16" />
+                </button>
+            </row>
+        </row>
         <row class="settings-layout">
             <column class="settings-sidebar">
-                <text class="sidebar-title">{t('settings.title')}</text>
-                <input class="sidebar-search" value={search_query} oninput={onSearch} placeholder={t('settings.search')} aria-label={t('settings.search')} />
-
                 <scroll class="sidebar-scroll">
                     <tabs class="sidebar-groups" aria-label={t('settings.categories')} aria-orientation="vertical">
-                        <column class="settings-navigation" hidden={not (nav_visible("wifi") or nav_visible("audio") or nav_visible("bluetooth"))}>
-                        <tab class="settings-nav-item" selected={active_page == "wifi"} hidden={not nav_visible("wifi")} onactivate={showWifi} title={t('nav.wifi.tooltip')}>
-                            <box class="nav-tile nav-tile-blue"><icon class="nav-icon" name="wifi" size="16" /></box>
-                            <text class="nav-title">{t('nav.wifi')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "audio"} hidden={not nav_visible("audio")} onactivate={showAudio} title={t('nav.audio.tooltip')}>
-                            <box class="nav-tile nav-tile-red"><icon class="nav-icon" name="audio-volume-high" size="16" /></box>
-                            <text class="nav-title">{t('nav.audio')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "bluetooth"} hidden={not nav_visible("bluetooth")} onactivate={showBluetooth} title={t('nav.bluetooth.tooltip')}>
-                            <box class="nav-tile nav-tile-indigo"><icon class="nav-icon" name="bluetooth" size="16" /></box>
-                            <text class="nav-title">{t('nav.bluetooth')}</text>
-                        </tab>
+                        <column class="settings-navigation" hidden={not (nav_visible("wifi") or nav_visible("bluetooth"))}>
+                            <text class="nav-group-heading">{t('nav.group.connectivity')}</text>
+                            <tab class="settings-nav-item" selected={active_page == "wifi"} hidden={not nav_visible("wifi")} onactivate={showWifi} title={t('nav.wifi.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="wifi" size="16" /></box>
+                                <text class="nav-title">{t('nav.wifi')}</text>
+                            </tab>
+                            <tab class="settings-nav-item" selected={active_page == "bluetooth"} hidden={not nav_visible("bluetooth")} onactivate={showBluetooth} title={t('nav.bluetooth.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="bluetooth" size="16" /></box>
+                                <text class="nav-title">{t('nav.bluetooth')}</text>
+                            </tab>
                         </column>
-                        <column class="settings-navigation" hidden={not (nav_visible("appearance") or nav_visible("device") or nav_visible("keyboard") or nav_visible("advanced"))}>
-                        <tab class="settings-nav-item" selected={active_page == "appearance"} hidden={not nav_visible("appearance")} onactivate={showAppearance} title={t('nav.appearance.tooltip')}>
-                            <box class="nav-tile nav-tile-purple"><icon class="nav-icon" name="applications-graphics" size="16" /></box>
-                            <text class="nav-title">{t('nav.appearance')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "device"} hidden={not nav_visible("device")} onactivate={showDevice} title={t('nav.device.tooltip')}>
-                            <box class="nav-tile nav-tile-green"><icon class="nav-icon" name="computer" size="16" /></box>
-                            <text class="nav-title">{t('nav.device')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "keyboard"} hidden={not nav_visible("keyboard")} onactivate={showKeyboard} title={t('nav.keyboard.tooltip')}>
-                            <box class="nav-tile nav-tile-orange"><icon class="nav-icon" name="input-keyboard" size="16" /></box>
-                            <text class="nav-title">{t('nav.keyboard')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "advanced"} hidden={not nav_visible("advanced")} onactivate={showAdvanced} title={t('nav.advanced.tooltip')}>
-                            <box class="nav-tile nav-tile-grey"><icon class="nav-icon" name="settings" size="16" /></box>
-                            <text class="nav-title">{t('nav.advanced')}</text>
-                        </tab>
+                        <column class="settings-navigation" hidden={not (nav_visible("audio") or nav_visible("display") or nav_visible("keyboard") or nav_visible("pointer") or nav_visible("power"))}>
+                            <text class="nav-group-heading">{t('nav.group.devices')}</text>
+                            <tab class="settings-nav-item" selected={active_page == "audio"} hidden={not nav_visible("audio")} onactivate={showAudio} title={t('nav.audio.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="audio-volume-high" size="16" /></box>
+                                <text class="nav-title">{t('nav.audio')}</text>
+                            </tab>
+                            <tab class="settings-nav-item" selected={active_page == "display"} hidden={not nav_visible("display")} onactivate={showDisplay} title={t('nav.display.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="video-display" size="16" /></box>
+                                <text class="nav-title">{t('nav.display')}</text>
+                            </tab>
+                            <tab class="settings-nav-item" selected={active_page == "keyboard"} hidden={not nav_visible("keyboard")} onactivate={showKeyboard} title={t('nav.keyboard.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="input-keyboard" size="16" /></box>
+                                <text class="nav-title">{t('nav.keyboard')}</text>
+                            </tab>
+                            <tab class="settings-nav-item" selected={active_page == "pointer"} hidden={not nav_visible("pointer")} onactivate={showPointer} title={t('nav.pointer.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="input-mouse" size="16" /></box>
+                                <text class="nav-title">{t('nav.pointer')}</text>
+                            </tab>
+                            <tab class="settings-nav-item" selected={active_page == "power"} hidden={not nav_visible("power")} onactivate={showPower} title={t('nav.power.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="battery-good" size="16" /></box>
+                                <text class="nav-title">{t('nav.power')}</text>
+                            </tab>
                         </column>
-                        <column class="settings-navigation" hidden={not (nav_visible("display") or nav_visible("pointer") or nav_visible("power") or nav_visible("notifications") or nav_visible("language") or nav_visible("accessibility") or nav_visible("apps") or nav_visible("privacy") or nav_visible("shell") or nav_visible("users"))}>
-                        <tab class="settings-nav-item" selected={active_page == "display"} hidden={not nav_visible("display")} onactivate={showDisplay} title={t('nav.display.tooltip')}>
-                            <box class="nav-tile nav-tile-blue"><icon class="nav-icon" name="video-display" size="16" /></box>
-                            <text class="nav-title">{t('nav.display')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "pointer"} hidden={not nav_visible("pointer")} onactivate={showPointer} title={t('nav.pointer.tooltip')}>
-                            <box class="nav-tile nav-tile-grey"><icon class="nav-icon" name="input-mouse" size="16" /></box>
-                            <text class="nav-title">{t('nav.pointer')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "power"} hidden={not nav_visible("power")} onactivate={showPower} title={t('nav.power.tooltip')}>
-                            <box class="nav-tile nav-tile-green"><icon class="nav-icon" name="battery-good" size="16" /></box>
-                            <text class="nav-title">{t('nav.power')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "notifications"} hidden={not nav_visible("notifications")} onactivate={showNotifications} title={t('nav.notifications.tooltip')}>
-                            <box class="nav-tile nav-tile-red"><icon class="nav-icon" name="notifications" size="16" /></box>
-                            <text class="nav-title">{t('nav.notifications')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "language"} hidden={not nav_visible("language")} onactivate={showLanguage} title={t('nav.language.tooltip')}>
-                            <box class="nav-tile nav-tile-indigo"><icon class="nav-icon" name="preferences-desktop-locale" size="16" /></box>
-                            <text class="nav-title">{t('nav.language')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "accessibility"} hidden={not nav_visible("accessibility")} onactivate={showAccessibility} title={t('nav.accessibility.tooltip')}>
-                            <box class="nav-tile nav-tile-purple"><icon class="nav-icon" name="preferences-desktop-accessibility" size="16" /></box>
-                            <text class="nav-title">{t('nav.accessibility')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "apps"} hidden={not nav_visible("apps")} onactivate={showApps} title={t('nav.apps.tooltip')}>
-                            <box class="nav-tile nav-tile-orange"><icon class="nav-icon" name="applications-all" size="16" /></box>
-                            <text class="nav-title">{t('nav.apps')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "privacy"} hidden={not nav_visible("privacy")} onactivate={showPrivacy} title={t('nav.privacy.tooltip')}>
-                            <box class="nav-tile nav-tile-green"><icon class="nav-icon" name="security-high" size="16" /></box>
-                            <text class="nav-title">{t('nav.privacy')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "shell"} hidden={not nav_visible("shell")} onactivate={showShell} title={t('nav.shell.tooltip')}>
-                            <box class="nav-tile nav-tile-indigo"><icon class="nav-icon" name="view-grid" size="16" /></box>
-                            <text class="nav-title">{t('nav.shell')}</text>
-                        </tab>
-                        <tab class="settings-nav-item" selected={active_page == "users"} hidden={not nav_visible("users")} onactivate={showUsers} title={t('nav.users.tooltip')}>
-                            <box class="nav-tile nav-tile-blue"><icon class="nav-icon" name="system-users" size="16" /></box>
-                            <text class="nav-title">{t('nav.users')}</text>
-                        </tab>
+                        <column class="settings-navigation" hidden={not (nav_visible("appearance") or nav_visible("notifications") or nav_visible("language") or nav_visible("accessibility"))}>
+                            <text class="nav-group-heading">{t('nav.group.personal')}</text>
+                            <tab class="settings-nav-item" selected={active_page == "appearance"} hidden={not nav_visible("appearance")} onactivate={showAppearance} title={t('nav.appearance.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="applications-graphics" size="16" /></box>
+                                <text class="nav-title">{t('nav.appearance')}</text>
+                            </tab>
+                            <tab class="settings-nav-item" selected={active_page == "notifications"} hidden={not nav_visible("notifications")} onactivate={showNotifications} title={t('nav.notifications.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="notifications" size="16" /></box>
+                                <text class="nav-title">{t('nav.notifications')}</text>
+                            </tab>
+                            <tab class="settings-nav-item" selected={active_page == "language"} hidden={not nav_visible("language")} onactivate={showLanguage} title={t('nav.language.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="preferences-desktop-locale" size="16" /></box>
+                                <text class="nav-title">{t('nav.language')}</text>
+                            </tab>
+                            <tab class="settings-nav-item" selected={active_page == "accessibility"} hidden={not nav_visible("accessibility")} onactivate={showAccessibility} title={t('nav.accessibility.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="preferences-desktop-accessibility" size="16" /></box>
+                                <text class="nav-title">{t('nav.accessibility')}</text>
+                            </tab>
+                        </column>
+                        <column class="settings-navigation" hidden={not (nav_visible("apps") or nav_visible("privacy") or nav_visible("shell") or nav_visible("advanced") or nav_visible("users") or nav_visible("device"))}>
+                            <text class="nav-group-heading">{t('nav.group.system')}</text>
+                            <tab class="settings-nav-item" selected={active_page == "apps"} hidden={not nav_visible("apps")} onactivate={showApps} title={t('nav.apps.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="applications-all" size="16" /></box>
+                                <text class="nav-title">{t('nav.apps')}</text>
+                            </tab>
+                            <tab class="settings-nav-item" selected={active_page == "privacy"} hidden={not nav_visible("privacy")} onactivate={showPrivacy} title={t('nav.privacy.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="security-high" size="16" /></box>
+                                <text class="nav-title">{t('nav.privacy')}</text>
+                            </tab>
+                            <tab class="settings-nav-item" selected={active_page == "shell"} hidden={not nav_visible("shell")} onactivate={showShell} title={t('nav.shell.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="view-grid" size="16" /></box>
+                                <text class="nav-title">{t('nav.shell')}</text>
+                            </tab>
+                            <tab class="settings-nav-item" selected={active_page == "advanced"} hidden={not nav_visible("advanced")} onactivate={showAdvanced} title={t('nav.advanced.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="settings" size="16" /></box>
+                                <text class="nav-title">{t('nav.advanced')}</text>
+                            </tab>
+                            <tab class="settings-nav-item" selected={active_page == "users"} hidden={not nav_visible("users")} onactivate={showUsers} title={t('nav.users.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="system-users" size="16" /></box>
+                                <text class="nav-title">{t('nav.users')}</text>
+                            </tab>
+                            <tab class="settings-nav-item" selected={active_page == "device"} hidden={not nav_visible("device")} onactivate={showDevice} title={t('nav.device.tooltip')}>
+                                <box class="nav-tile"><icon class="nav-icon" name="computer" size="16" /></box>
+                                <text class="nav-title">{t('nav.device')}</text>
+                            </tab>
                         </column>
                     </tabs>
                 </scroll>
             </column>
 
             <column class="settings-workspace">
-                <row class="settings-header">
-                    <column class="header-copy">
-                        <text class="page-title">{t('page.' .. active_page .. '.title')}</text>
-                        <text class="page-subtitle">{t('page.' .. active_page .. '.subtitle')}</text>
-                    </column>
-                    <row class="settings-header-actions">
-                        <button class="header-button pop-out-button" onclick={onPopOut} aria-label={t('settings.pop_out')}>
-                            <icon class="header-glyph" name="window-new" size="10" />
-                        </button>
-                        <button class="header-button dock-back-button" onclick={onDockBack} aria-label={t('settings.dock_back')}>
-                            <icon class="header-glyph" name="window-restore" size="10" />
-                        </button>
-                        <button class="header-button close-button" onclick={onClose} aria-label={t('settings.close')}>
-                            <icon class="header-glyph" name="window-close" size="10" />
-                        </button>
-                    </row>
-                </row>
-
                 <scroll ref="settings_scroll" class="settings-scroll">
                     <column class="settings-page-stack">
+                        <column class="header-copy">
+                            <text class="page-title">{t('page.' .. active_page .. '.title')}</text>
+                            <text class="page-subtitle">{t('page.' .. active_page .. '.subtitle')}</text>
+                        </column>
                         <column class="settings-page-slot" hidden={active_page ~= "wifi"}>
                             {#if active_page == "wifi"}<PrefsPage page="wifi" />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "audio"}>
-                            {#if active_page == "audio"}<AudioPage /><PrefsPage page="audio" />{/if}
+                            {#if active_page == "audio"}<PrefsPage page="audio" />{/if}
                         </column>
                         <column class="settings-page-slot" hidden={active_page ~= "bluetooth"}>
                             {#if active_page == "bluetooth"}<PrefsPage page="bluetooth" />{/if}
@@ -180,7 +186,6 @@
 <script lang="luau">
 local AdvancedPage = require("./components/advanced-page.mesh")
 local AppearancePage = require("./components/appearance-page.mesh")
-local AudioPage = require("./components/audio-page.mesh")
 local KeyboardPage = require("./components/keyboard-page.mesh")
 local PrefsPage = require("./components/prefs-page.mesh")
 local raw_t = import("mesh.i18n", "t")
@@ -196,6 +201,26 @@ end
 -- {#if} would share child positions, and so node identities, and the engine
 -- would animate the previous page's geometry into the next page.
 active_page = "wifi"
+
+local display_ok, display = pcall(require, "mesh.display")
+if not display_ok then display = nil end
+layer_width = nil
+layer_height = nil
+
+effect(function()
+    local outputs = display and display.available and display.outputs or {}
+    -- A layer surface is assigned to an output by the compositor. Only use
+    -- the provider's dimensions when the choice is unambiguous.
+    local output = #outputs == 1 and outputs[1] or nil
+    if output and output.width > 0 and output.height > 0 and output.scale > 0 then
+        layer_width = tostring(math.max(1, math.min(1280, math.floor(output.width / output.scale) - 24))) .. "px"
+        -- Leave space for an edge panel in addition to the window margins.
+        layer_height = tostring(math.max(1, math.min(880, math.floor(output.height / output.scale) - 88))) .. "px"
+    else
+        layer_width = nil
+        layer_height = nil
+    end
+end)
 
 search_query = ""
 
@@ -259,13 +284,14 @@ end
        tiling, interactive resize). The state rules further down handle the
        cases where it does. */
     .settings-shell {
+        --settings-output-width: 1280px;
+        --settings-output-height: 880px;
         margin: 12px;
         exclusive-zone: none;
-        width: 920px;
-        height: 700px;
+        width: var(--settings-output-width);
+        height: var(--settings-output-height);
         /* The size above is a request. A compositor that configures less (an
-           output narrower than 920px) gets a layout that fits, not one the
-           surface clips. */
+           output narrower than 1280px) gets a layout that fits the configured extent. */
         max-width: 100%;
         max-height: 100%;
         background: transparent;
@@ -273,10 +299,11 @@ end
         backdrop-filter: var(--glass-backdrop-panel);
         box-shadow: var(--glass-shadow-card);
         color: var(--glass-settings-text);
-        border-width: 1px;
+        border-width: var(--glass-border-width);
         border-style: solid;
         border-color: var(--glass-rim);
-        border-radius: var(--radius-lg);
+        border-radius: var(--glass-radius-window);
+        flex-direction: column;
     }
 
     /* Popped out into a window: fill the size the compositor configured and
@@ -316,28 +343,44 @@ end
 
     .settings-layout {
         width: 100%;
-        height: 100%;
+        min-height: 0;
+        flex-grow: 1;
         min-width: 0;
     }
 
-    .settings-sidebar {
-        width: 250px;
-        height: 100%;
+    .settings-toolbar {
+        width: 100%;
+        min-height: var(--glass-settings-toolbar-height, 48px);
         flex-shrink: 0;
-        gap: var(--spacing-lg);
-        padding: var(--spacing-lg);
+        align-items: center;
+        gap: 16px;
+        padding: 4px 14px 4px 18px;
+        background: var(--glass-settings-toolbar);
+        background-image: var(--glass-settings-toolbar-image);
+        border-bottom-width: var(--glass-border-width);
+        border-color: var(--glass-settings-rim);
+        border-style: solid;
+        border-top-left-radius: var(--glass-radius-window);
+        border-top-right-radius: var(--glass-radius-window);
+    }
+
+    .settings-toolbar:windowed,
+    .settings-sidebar:windowed {
+        border-radius: 0;
+    }
+
+    .settings-sidebar {
+        width: 264px;
+        flex-shrink: 1;
+        max-width: 38%;
+        padding: 12px;
         background: var(--glass-settings-sidebar);
         border-right-width: 1px;
         border-right-style: solid;
         border-right-color: var(--glass-settings-rim);
         /* The shell does not clip its children, so the sidebar fill follows
            the shell's left corners itself. */
-        border-top-left-radius: var(--radius-lg);
-        border-bottom-left-radius: var(--radius-lg);
-    }
-
-    .settings-sidebar:windowed {
-        border-radius: 0;
+        border-bottom-left-radius: var(--glass-radius-window);
     }
 
     .brand-copy,
@@ -355,47 +398,40 @@ end
         font-size: var(--typography-size-xs);
     }
 
-    /* Each page has a coloured tile, as in the system settings the glass
-       shell follows. The longest subtitle ("Blízke a spárované zariadenia")
-       otherwise squeezes the tile to nothing. */
     .nav-tile {
-        width: 26px;
-        height: 26px;
+        width: 18px;
+        height: 18px;
         flex-shrink: 0;
         align-items: center;
         justify-content: center;
         border-radius: 7px;
-        background: var(--color-primary);
     }
 
-    .nav-tile-red { background: var(--color-error-container); }
-    .nav-tile-indigo { background: var(--color-info-container); }
-    .nav-tile-purple { background: var(--color-tertiary-container); }
-    .nav-tile-green { background: var(--color-success-container); }
-    .nav-tile-orange { background: var(--color-warning-container); }
-    .nav-tile-grey { background: var(--color-outline); }
 
     .nav-icon {
         flex-shrink: 0;
         background: transparent;
-        color: var(--color-on-primary);
+        color: inherit;
     }
 
     .sidebar-title {
         height: auto;
         flex-shrink: 0;
-        color: var(--glass-settings-text);
-        font-size: 26px;
-        font-weight: 750;
+        color: var(--glass-settings-toolbar-text);
+        font-size: 16px;
+        font-weight: 700;
+        font-family: var(--typography-family-brand);
     }
 
     .sidebar-search {
-        width: 100%;
-        height: 36px;
-        flex-shrink: 0;
+        width: 340px;
+        min-width: 72px;
+        max-width: 55%;
+        height: var(--glass-settings-toolbar-control-size, 34px);
+        flex-shrink: 1;
         padding-inline: var(--spacing-md);
-        border-radius: var(--radius-full);
-        border-width: 1px;
+        border-radius: var(--glass-radius-control);
+        border-width: var(--glass-border-width);
         border-style: solid;
         border-color: var(--glass-settings-rim);
         background: var(--glass-settings-inset);
@@ -418,32 +454,38 @@ end
     .sidebar-groups {
         width: 100%;
         flex-direction: column;
-        gap: var(--spacing-md);
+        gap: 4px;
     }
 
     .settings-navigation {
         width: 100%;
         flex-direction: column;
-        gap: var(--spacing-xs);
-        padding: var(--spacing-xs);
-        border-radius: var(--radius-lg);
-        border-width: 1px;
-        border-style: solid;
-        border-color: var(--glass-settings-rim);
-        background: var(--glass-settings-inset);
+        gap: 2px;
+        padding: 0 4px 4px 0;
+    }
+
+    .nav-group-heading {
+        height: auto;
+        flex-shrink: 0;
+        padding: 8px 10px 2px;
+        color: var(--glass-settings-text-muted);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.2;
+        text-transform: uppercase;
     }
 
     .settings-nav-item {
         flex-direction: row;
         width: 100%;
-        min-height: 44px;
+        min-height: 34px;
         align-items: center;
         justify-content: flex-start;
         gap: var(--spacing-sm);
         padding-inline: var(--spacing-sm);
         padding-block: var(--spacing-xs);
-        border-radius: var(--radius-md);
-        border-width: 1px;
+        border-radius: var(--glass-radius-control);
+        border-width: var(--glass-border-width);
         border-style: solid;
         border-color: transparent;
         background: transparent;
@@ -463,17 +505,18 @@ end
 
     .settings-nav-item:selected {
         background: transparent;
-        background-image: var(--glass-settings-selected);
-        border-color: var(--glass-control-rim);
-        color: var(--glass-settings-text);
+        background-image: var(--glass-settings-navigation-selected);
+        border-color: var(--glass-settings-selected-rim);
+        color: var(--glass-settings-selected-text);
+        box-shadow: var(--glass-settings-selected-shadow);
     }
 
     .nav-title {
         height: auto;
-        flex-shrink: 0;
+        flex-shrink: 1;
         color: inherit;
-        font-size: var(--typography-size-sm);
-        font-weight: 700;
+        font-size: var(--typography-size-md);
+        font-weight: 600;
     }
 
     .sidebar-foot {
@@ -489,38 +532,36 @@ end
         flex-grow: 1;
     }
 
-    .settings-header {
-        width: 100%;
-        min-height: 96px;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--spacing-lg);
-        padding-inline: 28px;
-        padding-block: var(--spacing-lg);
+    .header-copy {
+        gap: 4px;
+    }
+
+    .page-subtitle {
+        font-size: 13px;
     }
 
     .page-title {
         height: auto;
         flex-shrink: 0;
         color: var(--glass-settings-text);
-        font-size: 26px;
-        font-weight: 750;
+        font-size: var(--glass-settings-heading-size);
+        font-weight: var(--glass-settings-heading-weight);
+        font-family: var(--typography-family-brand);
     }
 
-    /* Window controls are small coloured dots; the glyph only hints at the
-       action, the accessible label carries it. */
     .header-button {
-        width: 14px;
-        height: 14px;
+        width: 32px;
+        height: var(--glass-settings-toolbar-control-size, 32px);
         flex-shrink: 0;
         align-items: center;
         justify-content: center;
-        border-radius: var(--radius-full);
-        border-width: 1px;
+        border-radius: var(--glass-radius-control);
+        border-width: var(--glass-border-width);
         border-style: solid;
-        border-color: #00000014;
-        background: var(--color-success);
+        border-color: var(--glass-control-rim);
+        background: var(--glass-settings-inset);
         transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+        box-shadow: var(--glass-control-shadow);
     }
 
     .header-button:hover {
@@ -532,21 +573,18 @@ end
     }
 
     .header-glyph {
-        color: #00000080;
+        color: var(--glass-settings-text);
     }
 
-    .dock-back-button {
-        background: var(--color-warning);
+    .settings-toolbar-spacer {
+        flex-grow: 1;
+        min-width: 0;
     }
 
     .settings-header-actions {
-        align-self: flex-start;
+        flex-shrink: 0;
         align-items: center;
         gap: 8px;
-    }
-
-    .close-button {
-        background: var(--color-error);
     }
 
     /* The role controls which of the two is present. `display: none` takes the
@@ -574,7 +612,8 @@ end
 
     .settings-page-stack {
         width: 100%;
-        padding: 28px;
+        padding: 22px 30px 28px;
+        gap: 14px;
     }
 
     .settings-page-slot {
@@ -583,7 +622,7 @@ end
 
     .settings-page {
         width: 100%;
-        gap: var(--spacing-lg);
+        gap: 14px;
     }
 
     .settings-section {
@@ -630,11 +669,12 @@ end
     .settings-empty-state {
         width: 100%;
         padding: var(--spacing-md);
-        border-radius: var(--radius-md);
-        border-width: 1px;
+        border-radius: var(--glass-radius-card);
+        border-width: var(--glass-border-width);
         border-style: solid;
         border-color: var(--glass-settings-rim);
         background: var(--glass-settings-inset);
+        box-shadow: var(--glass-shadow-group);
         transition: background-color var(--animation-duration-short) var(--animation-curves-bezier-standard),
                     border-color var(--animation-duration-short) var(--animation-curves-bezier-standard);
     }

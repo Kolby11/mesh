@@ -406,6 +406,44 @@ fn child_surface_input_is_translated_from_popup_local_coordinates() {
 }
 
 #[test]
+#[ignore = "release comparison of popup pointer preparation"]
+fn popup_input_preparation_profile() {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    let mut popup = WidgetNode::new("popover");
+    for _ in 0..64 {
+        let mut row = WidgetNode::new("row");
+        for _ in 0..32 {
+            row.children.push(WidgetNode::new("button"));
+        }
+        popup.children.push(row);
+    }
+    for _ in 0..6 {
+        let started = Instant::now();
+        for _ in 0..500 {
+            let mut root = black_box(&popup).clone();
+            root.attributes.remove(Prop::Hidden);
+            offset_widget_tree_layout(&mut root, -48.0, -72.0);
+            black_box(root);
+        }
+        let offset_tree = started.elapsed();
+        let started = Instant::now();
+        for _ in 0..500 {
+            let mut root = black_box(&popup).clone();
+            root.attributes.remove(Prop::Hidden);
+            let input = translate_child_surface_input(
+                ComponentInput::PointerMove { x: 8.0, y: 12.0 },
+                48.0,
+                72.0,
+            );
+            black_box((root, input));
+        }
+        eprintln!("500 popup pointer preparations: offset tree {offset_tree:?}, translate input {:?}", started.elapsed());
+    }
+}
+
+#[test]
 fn child_surface_debug_tree_offsets_layout_to_local_origin() {
     let mut root = WidgetNode::new("popover");
     root.layout.x = 48.0;
@@ -614,6 +652,7 @@ fn policy_keeps_distant_extra_damage_as_multiple_rects() {
         metrics,
         &[],
         surface(100, 100),
+        false,
         false,
         &[left, right],
         &[],

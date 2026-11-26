@@ -5,6 +5,7 @@ use crate::interaction_contract::{InteractionTarget, NodeEligibility};
 use crate::layout::LayoutRect;
 use crate::tree::{NodeId, NodeState, WidgetNode, WidgetTreeValidationError, validate_widget_tree};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Accessibility roles for semantic tree construction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,14 +193,15 @@ impl AccessibilityTree {
     /// definitions before any semantic node is projected.
     pub fn try_from_widget_tree(root: &WidgetNode) -> Result<Self, WidgetTreeValidationError> {
         validate_widget_tree(root)?;
-        Ok(Self::from_validated_widget_tree(root))
+        Ok(Self::from_validated_widget_tree(root).0)
     }
 
-    /// Build a projection after the caller has validated the tree at the
-    /// frame boundary. This avoids repeating the full validation traversal.
-    pub(crate) fn from_validated_widget_tree(root: &WidgetNode) -> Self {
-        let Some(mut root) = build_snapshot_node(root, NodeEligibility::ROOT) else {
-            return Self { nodes: Vec::new() };
+    /// Project a validated tree and return the resolved (popover, trigger)
+    /// dependencies, including popovers omitted from the semantic tree.
+    pub(crate) fn from_validated_widget_tree(root: &WidgetNode) -> (Self, Vec<(NodeId, NodeId)>) {
+        let mut popovers = Vec::new();
+        let Some(mut root) = build_snapshot_node(root, NodeEligibility::ROOT, &mut popovers) else {
+            return (Self { nodes: Vec::new() }, Vec::new());
         };
         let mut index = std::collections::HashMap::new();
         collect_reference_index(&root, &mut index);
@@ -208,8 +210,22 @@ impl AccessibilityTree {
         apply_reference_text(&mut root, &index, &reference_text);
         let mut nodes = Vec::new();
         flatten_snapshot_node(&root, None, &index, &mut nodes);
-        project_popover_expansion(&mut nodes);
-        Self { nodes }
+        let mut expanded = HashMap::<NodeId, bool>::new();
+        let mut anchors = Vec::new();
+        for (popover, reference, open) in popovers {
+            if let Some(&trigger) = index.get(reference) {
+                anchors.push((popover, trigger));
+                *expanded.entry(trigger).or_default() |= open;
+            }
+        }
+        if !expanded.is_empty() {
+            for node in &mut nodes {
+                if let Some(&open) = expanded.get(&node.id) {
+                    node.info.state.expanded = Some(open);
+                }
+            }
+        }
+        (Self { nodes }, anchors)
     }
 
     /// Publish the current semantic projection under an explicit name at
@@ -415,16 +431,25 @@ fn normalize_node(
     name_text
 }
 
-fn build_snapshot_node(node: &WidgetNode, parent_policy: NodeEligibility) -> Option<SnapshotNode> {
+fn build_snapshot_node<'a>(
+    node: &'a WidgetNode,
+    parent_policy: NodeEligibility,
+    popovers: &mut Vec<(NodeId, &'a str, bool)>,
+) -> Option<SnapshotNode> {
     crate::frame_work::visit(crate::frame_work::Pass::AccessibilityProject);
     let policy = parent_policy.child(node);
     if !policy.allows(InteractionTarget::Semantics) {
+        collect_hidden_popovers(node, popovers);
         return None;
+    }
+    let anchor = node.popover_anchor_reference();
+    if let Some(anchor) = anchor {
+        popovers.push((node.id, anchor, node.is_popover_open()));
     }
     let children: Vec<_> = node
         .children
         .iter()
-        .filter_map(|child| build_snapshot_node(child, policy))
+        .filter_map(|child| build_snapshot_node(child, policy, popovers))
         .collect();
     let child_text = children
         .iter()
@@ -443,11 +468,23 @@ fn build_snapshot_node(node: &WidgetNode, parent_policy: NodeEligibility) -> Opt
         id: node.id,
         info,
         bounds: node.layout,
-        relations: raw_relationships(node),
+        relations: raw_relationships(node, anchor),
         reference_names: authored_reference_names(node),
         children,
         visible_text,
     })
+}
+
+fn collect_hidden_popovers<'a>(node: &'a WidgetNode, popovers: &mut Vec<(NodeId, &'a str, bool)>) {
+    if node.is_render_target() {
+        return;
+    }
+    if let Some(anchor) = node.popover_anchor_reference() {
+        popovers.push((node.id, anchor, node.is_popover_open()));
+    }
+    for child in &node.children {
+        collect_hidden_popovers(child, popovers);
+    }
 }
 
 /// Local semantic projection used by the immutable frame's dependency cache.
@@ -764,7 +801,7 @@ fn non_empty(value: String) -> Option<String> {
     (!value.trim().is_empty()).then_some(value)
 }
 
-fn raw_relationships(node: &WidgetNode) -> RawRelationships {
+fn raw_relationships(node: &WidgetNode, popover_anchor: Option<&str>) -> RawRelationships {
     let list = |name: Prop| {
         node.attributes
             .get(name)
@@ -772,12 +809,6 @@ fn raw_relationships(node: &WidgetNode) -> RawRelationships {
             .flat_map(|value| value.split_whitespace().map(str::to_owned))
             .collect()
     };
-    let source_tag = node
-        .attributes
-        .get(Prop::DataMeshElement)
-        .map(String::as_str)
-        .unwrap_or(node.tag.as_str());
-    let popover = source_tag == "popover";
     RawRelationships {
         labelled_by: list(Prop::AriaLabelledby),
         described_by: list(Prop::AriaDescribedby),
@@ -786,18 +817,7 @@ fn raw_relationships(node: &WidgetNode) -> RawRelationships {
         details: list(Prop::AriaDetails),
         error_message: list(Prop::AriaErrormessage),
         tooltip_for: node.attributes.get(Prop::TooltipFor).cloned(),
-        popover_trigger: popover
-            .then(|| {
-                [
-                    Prop::AnchorRef,
-                    Prop::AnchorTarget,
-                    Prop::AnchorElement,
-                    Prop::Target,
-                ]
-                .iter()
-                .find_map(|name| node.attributes.get(*name).cloned())
-            })
-            .flatten(),
+        popover_trigger: popover_anchor.map(str::to_owned),
     }
 }
 
@@ -909,25 +929,6 @@ fn flatten_snapshot_node(
     });
     for child in &node.children {
         flatten_snapshot_node(child, Some(node.id), index, out);
-    }
-}
-
-/// A popover trigger is expanded exactly while a popover anchored to it is
-/// open, so triggers never restate (or desynchronize) `aria-expanded`.
-fn project_popover_expansion(nodes: &mut [AccessibilityTreeNode]) {
-    let mut expanded = std::collections::HashMap::<NodeId, bool>::new();
-    for node in nodes.iter() {
-        if let Some(trigger) = node.relationships.popover_trigger {
-            *expanded.entry(trigger).or_default() |= node.info.state.expanded.unwrap_or(false);
-        }
-    }
-    if expanded.is_empty() {
-        return;
-    }
-    for node in nodes.iter_mut() {
-        if let Some(open) = expanded.get(&node.id) {
-            node.info.state.expanded = Some(*open);
-        }
     }
 }
 

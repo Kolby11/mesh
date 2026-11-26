@@ -3,6 +3,7 @@ use crate::component::catalog::FrontendCatalog;
 use mesh_core_frontend_shell_adapter::ComponentContext;
 mod cpu_timing;
 use mesh_core_diagnostics::Diagnostics;
+use mesh_core_elements::popover::PopoverAnchor;
 use mesh_core_frontend::compile_frontend_module;
 use mesh_core_theme::{Theme, ThemeModule, ThemeModuleLayer, ThemeSourceHandle};
 
@@ -32,12 +33,14 @@ fn theme() -> Theme {
         families: Vec::new(),
     }];
     for module in [
+        "app-launcher",
         "glass-bar",
         "glass-widgets",
         "glass-dock",
         "glass-dashboard",
         "glass-notifications",
         "glass-wallpapers",
+        "level-osd",
     ] {
         layers.push(ThemeModuleLayer {
             module_id: format!("@mesh/{module}"),
@@ -56,10 +59,12 @@ fn theme() -> Theme {
     .unwrap()
 }
 
-const GLASS_MODULES: [&str; 10] = [
+const GLASS_MODULES: [&str; 12] = [
+    "app-launcher",
     "glass-bar",
     "glass-widgets",
     "glass-dock",
+    "level-osd",
     "glass-dashboard",
     "glass-wallpapers",
     "wallpaper-carousel",
@@ -160,9 +165,11 @@ impl GlassCatalog {
         );
         let mut locale = mesh_core_locale::LocaleEngine::new("en");
         for module in [
+            "app-launcher",
             "glass-bar",
             "glass-widgets",
             "glass-dock",
+            "level-osd",
             "glass-dashboard",
             "glass-wallpapers",
             "wallpaper-carousel",
@@ -278,6 +285,53 @@ fn update(component: &mut FrontendSurfaceComponent, service: &str, payload: serd
 }
 
 #[test]
+fn desktop_rail_launchers_open_inward() {
+    let catalog = GlassCatalog::new();
+    for (module, direction) in [
+        ("glass-bar", PopoverAnchor::Right),
+        ("glass-dock", PopoverAnchor::Left),
+    ] {
+        let mut component = catalog.mount(module);
+        let mut settings = component.settings.clone();
+        Arc::make_mut(&mut settings).set_namespace(
+            &format!("@mesh/{module}"),
+            serde_json::json!({"props":{"global":{"desktop_layout":"rail"}}}),
+        );
+        component.apply_settings(&settings).unwrap();
+        paint(&mut component, 74, 868);
+        press(&mut component, "glassLauncher", 74, 868);
+        let requests = component.child_surface_requests();
+        assert_eq!(requests.len(), 1, "{module}");
+        assert_eq!(requests[0].placement.anchor, direction);
+    }
+}
+
+#[test]
+fn level_osd_ignores_initial_samples_then_reports_changes() {
+    let mut component = host("level-osd");
+    component.visible = false;
+    let send_level = |component: &mut FrontendSurfaceComponent, level| {
+        let mut requests = component
+            .handle_service_event(&ServiceEvent::Updated {
+                service: "mesh.brightness".into(),
+                source_module: "@test/glass-services".into(),
+                payload: serde_json::json!({"available":true,"level":level}),
+            })
+            .unwrap();
+        requests.extend(component.settle_effects_offscreen().unwrap());
+        requests
+    };
+    assert!(send_level(&mut component, 30.0).is_empty());
+    assert!(matches!(
+        send_level(&mut component, 68.0).as_slice(),
+        [CoreRequest::ShowSurface { surface_id }] if surface_id == "@mesh/level-osd"
+    ));
+    component.visible = true;
+    paint(&mut component, 320, 54);
+    assert!(rendered_text(&component).iter().any(|value| value == "68%"));
+}
+
+#[test]
 fn liquid_glass_popup_anchor_geometry_stays_near_triggers() {
     let catalog = GlassCatalog::new();
     for (name, trigger, height) in [
@@ -335,6 +389,21 @@ fn liquid_glass_popup_anchor_geometry_stays_near_triggers() {
 #[test]
 fn liquid_glass_calendar_and_controls_are_promoted_local_popovers() {
     let mut component = host("glass-bar");
+    paint(&mut component, 1920, 100);
+    assert!(component.child_surface_requests().is_empty());
+    press(&mut component, "notificationsTrigger", 1920, 100);
+    assert_eq!(component.child_surface_requests().len(), 1);
+    component
+        .handle_input(
+            &theme(),
+            1920,
+            100,
+            ComponentInput::KeyPressed {
+                key: "Escape".into(),
+                modifiers: Default::default(),
+            },
+        )
+        .unwrap();
     paint(&mut component, 1920, 100);
     assert!(component.child_surface_requests().is_empty());
     press(&mut component, "glassCalendar", 1920, 100);
@@ -2295,6 +2364,89 @@ fn d9_glass_dock_animation() {
         samples.len()
     );
     d9_report("d9_glass_dock_frame_p90_ms", samples);
+}
+
+#[test]
+#[ignore = "release scene recording profile against pending Settings wallpaper decodes"]
+fn dock_scene_cache_while_settings_loads_wallpaper_previews() {
+    use mesh_core_render::{ResourcePaintConsumer, SurfaceCanvas, prepared_scene::SceneCanvas};
+
+    let extent = SurfaceExtent::unpadded(1920, 180);
+    let theme = theme();
+    let catalog = GlassCatalog::new();
+    let mut dock = catalog.mount("glass-dock");
+    update(&mut dock, "mesh.apps", glass_apps_payload(10, 150));
+    let mut raster = PixelBuffer::new(1920, 180);
+    dock.paint_raster(&theme, extent, &mut raster, 1.0).unwrap();
+    let tiles = settled_dock_tiles(&mut dock, &theme, extent, &mut raster);
+    mesh_core_render::set_resource_completion_waker(Some(Arc::new(|| {})));
+
+    let mut interfaces = super::super::debug::settings_catalog();
+    let glass_interfaces = catalog.interfaces.build();
+    for contract in glass_interfaces.contracts_for("mesh.wallpapers") {
+        interfaces.register_contract(contract);
+    }
+    for provider in glass_interfaces.providers_for("mesh.wallpapers") {
+        interfaces.register_provider(provider);
+    }
+    let mut settings = real_frontend_module_component("@mesh/settings", interfaces);
+    let settings_extent = SurfaceExtent::unpadded(920, 900);
+    let mut pixels = PixelBuffer::new(920, 900);
+    settings.paint_raster(&default_theme(), settings_extent, &mut pixels, 1.0).unwrap();
+    settings.call_namespaced_handler(
+        "__mesh_embed__::@mesh/settings::showAppearance", &[],
+    ).unwrap();
+
+    for (scoped, files) in [
+        (false, ["08-material-desktop.png", "05-retro-desktop.png", "07-dark-dashboard.png"]),
+        (true, ["liquid-glass-settings.png", "02-pink-dashboard.png", "06-aero-desktop.png"]),
+    ] {
+        leave_dock(&mut dock, &theme, extent, &mut raster);
+        let wallpapers = files.into_iter().map(|file| {
+            let path = root().join("docs/reference/shells").join(file);
+            serde_json::json!({"path": path, "name": file, "thumbnail": path})
+        }).collect::<Vec<_>>();
+        update(&mut settings, "mesh.wallpapers", serde_json::json!({"wallpapers": wallpapers}));
+        let previews = ResourcePaintConsumer::with_pending_tracking();
+        {
+            let _scope = previews.enter();
+            settings.paint_raster(&default_theme(), settings_extent, &mut pixels, 1.0).unwrap();
+        }
+        assert!(mesh_core_render::icon_raster_jobs_pending(), "Settings must queue wallpaper preview rasters");
+        let consumer = if scoped {
+            ResourcePaintConsumer::with_pending_tracking()
+        } else {
+            ResourcePaintConsumer::default()
+        };
+        let _scope = consumer.enter();
+        let mut canvas = SurfaceCanvas::Scene(SceneCanvas::new(1920, 180).unwrap());
+        let mut metrics = mesh_core_render::prepared_scene::ScenePreparationMetrics::default();
+        let mut overlap_frames = 0;
+        let started = std::time::Instant::now();
+        for &(left, top, right, bottom) in tiles.iter().cycle().take(30) {
+            dock.handle_input(&theme, 1920, 180, ComponentInput::PointerMove {
+                x: (left + right) / 2.0,
+                y: (top + bottom) / 2.0,
+            }).unwrap();
+            dock.request_resource_paint(None);
+            dock.paint(&theme, extent, &mut canvas, 1.0).unwrap();
+            if previews.pending_requests().is_some_and(|count| count > 0) {
+                let SurfaceCanvas::Scene(scene) = &mut canvas else { unreachable!() };
+                let frame = scene.preparation_metrics();
+                metrics.recorded_nodes += frame.recorded_nodes;
+                metrics.reused_nodes += frame.reused_nodes;
+                overlap_frames += 1;
+            }
+        }
+        eprintln!("dock hover (scoped={scoped}, 30 frames, {overlap_frames} with previews pending): {:?}, {metrics:?}", started.elapsed());
+        assert!(overlap_frames > 1);
+        if scoped {
+            assert!(metrics.reused_nodes > 0);
+        } else {
+            assert_eq!(metrics.reused_nodes, 0);
+        }
+    }
+    mesh_core_render::set_resource_completion_waker(None);
 }
 
 #[test]

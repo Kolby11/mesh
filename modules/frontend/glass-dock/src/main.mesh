@@ -1,31 +1,34 @@
 <props>
 {
+    desktop_layout = { type = "enum", options = { "shelf", "floating", "paper", "tapedeck", "rail" }, default = "shelf" },
     icon_size = { type = "number", default = 48, min = 32, max = 96, step = 2, label = "Icon size" },
 }
 </props>
 
 <template>
-    <row class="dock-shell">
-        <box class="flare flare-left" aria-hidden="true" />
-        <row class="dock" onpointerleave={onLeave}>
-            <column class="slot launcher-slot">
-                <button class="tile launcher-tile" ref="glassLauncher" aria-label={t("launcher.title")} title={t("launcher.title")}>
-                    <icon class="launcher-glyph" name="system-search" size="30" />
-                    <Launcher />
+    <row class="dock-shell" class:compact-shelf={props.desktop_layout ~= "shelf"}
+        class:floating-shelf={props.desktop_layout == "floating"} class:paper-shelf={props.desktop_layout == "paper"}
+        class:app-rail={props.desktop_layout == "rail"}>
+        <box class="flare flare-left" class:compact-flare={props.desktop_layout ~= "shelf"} aria-hidden="true" />
+        <row class="dock" class:compact-dock={props.desktop_layout ~= "shelf"} class:app-rail-dock={props.desktop_layout == "rail"} class:floating-dock={props.desktop_layout == "floating"} class:paper-dock={props.desktop_layout == "paper"} class:retro-dock={props.desktop_layout == "tapedeck"} onpointerleave={onLeave}>
+            <column class="slot launcher-slot" class:compact-slot={props.desktop_layout ~= "shelf"}>
+                <button class="tile launcher-tile" class:compact-tile={props.desktop_layout ~= "shelf"} class:rail-tile={props.desktop_layout == "rail"} class:floating-tile={props.desktop_layout == "floating"} class:paper-tile={props.desktop_layout == "paper"} ref="glassLauncher" aria-label={t("launcher.title")} title={t("launcher.title")}>
+                    <icon class="launcher-glyph" class:rail-glyph={props.desktop_layout == "rail"} class:compact-glyph={props.desktop_layout ~= "shelf"} name="system-search" size="30" />
+                    <Launcher side={props.desktop_layout == "rail" and "left" or "top"} />
                 </button>
-                <box class="dot" />
+                <box class="dot" class:rail-dot={props.desktop_layout == "rail"} />
             </column>
-            <column class="slot">
-                <button class="tile" aria-label={t("launcher.radial")} title={t("launcher.radial")} onclick={onRadial} keybind="radial" onkeybind={onRadial}>
-                    <icon class="launcher-glyph" name="view-grid" size="30" />
+            <column class="slot" class:compact-slot={props.desktop_layout ~= "shelf"}>
+                <button class="tile" class:compact-tile={props.desktop_layout ~= "shelf"} class:rail-tile={props.desktop_layout == "rail"} class:floating-tile={props.desktop_layout == "floating"} class:paper-tile={props.desktop_layout == "paper"} aria-label={t("launcher.radial")} title={t("launcher.radial")} onclick={onRadial} keybind="radial" onkeybind={onRadial}>
+                    <icon class="launcher-glyph" class:rail-glyph={props.desktop_layout == "rail"} class:compact-glyph={props.desktop_layout ~= "shelf"} name="view-grid" size="30" />
                 </button>
-                <box class="dot" />
+                <box class="dot" class:rail-dot={props.desktop_layout == "rail"} />
             </column>
-            <box class="dock-divider" />
+            <box class="dock-divider" class:compact-divider={props.desktop_layout ~= "shelf"} class:rail-divider={props.desktop_layout == "rail"} />
             {#for app in apps key={app.id}}
-                <column class="slot">
+                <column class="slot" class:compact-slot={props.desktop_layout ~= "shelf"}>
                     <button
-                        class="tile"
+                        class="tile" class:compact-tile={props.desktop_layout ~= "shelf"} class:rail-tile={props.desktop_layout == "rail"} class:floating-tile={props.desktop_layout == "floating"} class:paper-tile={props.desktop_layout == "paper"}
                         ref={app.id}
                         class:tile-focused={app.focused}
                         class:tile-hovered={app.hovered}
@@ -35,21 +38,21 @@
                         title={app.name}
                         aria-label={app.name}
                     >
-                        <image class="app-icon" src={app.icon} alt="" hidden={not app.has_file} />
-                        <icon class="app-icon app-glyph" name="application-x-executable" size="64" hidden={app.has_file} />
+                        <image class="app-icon" class:compact-icon={props.desktop_layout ~= "shelf"} src={app.icon} alt="" hidden={not app.has_file} />
+                        <icon class="app-icon app-glyph" class:rail-glyph={props.desktop_layout == "rail"} class:compact-icon={props.desktop_layout ~= "shelf"} name="application-x-executable" size="64" hidden={app.has_file} />
                     </button>
-                    <box class="dot" class:dot-running={app.running} class:dot-focused={app.focused} />
+                    <box class="dot" class:rail-dot={props.desktop_layout == "rail"} class:dot-running={app.running} class:dot-focused={app.focused} />
                 </column>
             {/for}
         </row>
-        <box class="flare flare-right" aria-hidden="true" />
+        <box class="flare flare-right" class:compact-flare={props.desktop_layout ~= "shelf"} aria-hidden="true" />
     </row>
 </template>
 
 <script lang="luau">
 local t = import("mesh.i18n", "t")
 local apps_service = require("mesh.apps")
-local Launcher = require("./components/launcher.mesh")
+local Launcher = require("@mesh/app-launcher")
 hovered_index = 0
 
 apps = {}
@@ -103,8 +106,8 @@ end
         padding: 10px 14px 6px;
         gap: 8px;
         align-items: flex-start;
-        border-radius: 30px 30px 0 0;
-        border-width: 1px 1px 0 1px;
+        border-radius: var(--glass-radius-window) var(--glass-radius-window) 0 0;
+        border-width: var(--glass-border-width) var(--glass-border-width) 0 var(--glass-border-width);
         border-color: var(--glass-rim);
         background-image: var(--glass-surface-dock);
         box-shadow: var(--glass-shadow-dock);
@@ -123,11 +126,11 @@ end
     }
 
     .flare-left {
-        border-top-left-radius: 30px;
+        border-top-left-radius: var(--glass-radius-window);
     }
 
     .flare-right {
-        border-top-right-radius: 30px;
+        border-top-right-radius: var(--glass-radius-window);
     }
 
     .slot {
@@ -143,7 +146,7 @@ end
         padding: 0;
         justify-content: center;
         align-items: center;
-        border-radius: 17px;
+        border-radius: var(--glass-radius-card);
         border: 1px solid transparent;
         /* A colour with any alpha counts as authored; alpha 0 would let the
         theme's opaque `button` fill paint over the glass. */
@@ -236,8 +239,75 @@ end
     .launcher-tile { background-image: var(--glass-surface-control); }
     .dock-divider { width: 1px; height: 44px; margin: 10px 6px; background: var(--glass-rim); }
     @container (max-width: 900px) {
-        .tile { width: 50px; height: 54px; border-radius: 14px; }
+        .tile { width: 50px; height: 54px; border-radius: var(--glass-radius-card); }
         .app-icon { width: 38px; height: 38px; }
         .dock { height: 78px; gap: 5px; padding-inline: 10px; }
     }
+
+    .compact-shelf {
+        padding-top: 0;
+        margin-bottom: 14px;
+        animation: none;
+    }
+
+    .compact-dock {
+        height: fit;
+        padding: 6px;
+        gap: 6px;
+        align-items: center;
+        border: var(--glass-border-width) solid var(--glass-rim);
+        border-radius: var(--glass-radius-window);
+    }
+
+    .compact-flare { display: none; }
+    .compact-tile { width: 44px; height: 44px; border-radius: var(--glass-radius-control); }
+    .compact-icon { width: 30px; height: 30px; }
+    .compact-glyph { width: 22px; height: 22px; }
+    .compact-divider { height: 28px; margin: 0 2px; }
+    .compact-slot { gap: 2px; }
+    .compact-tile:hover, .compact-tile:focus-visible { transform: scale(1.06); }
+    .compact-tile.tile-neighbor { transform: none; }
+
+    .floating-shelf { margin-bottom: 16px; }
+    .floating-dock { padding: 10px 14px; gap: 10px; }
+    .floating-tile { width: 52px; height: 52px; border-radius: var(--glass-radius-card); }
+    .paper-shelf { margin-bottom: 20px; }
+    .paper-dock { gap: 2px; box-shadow: none; background: var(--color-surface); }
+    .paper-tile { box-shadow: none; }
+    .retro-dock { background: var(--color-surface-container); }
+
+    .app-rail {
+        width: fit;
+        height: fit;
+        margin: 0 16px 0 0;
+        align-items: flex-start;
+        exclusive-zone: none;
+    }
+
+    .app-rail-dock {
+        width: 74px;
+        flex-direction: column;
+        padding: 14px 0;
+        gap: 8px;
+        border: 0;
+        border-radius: 37px;
+        background: var(--color-inverse-surface);
+        box-shadow: none;
+        backdrop-filter: none;
+    }
+
+    .rail-divider { width: 32px; height: 1px; }
+    .rail-tile {
+        width: 46px;
+        height: 46px;
+        border-radius: var(--glass-radius-card);
+        background-color: var(--color-on-surface-variant);
+        background-image: none;
+        box-shadow: none;
+        backdrop-filter: none;
+    }
+    .rail-tile.tile-focused, .rail-tile.launcher-tile { background-color: var(--color-primary); }
+    .rail-glyph { color: var(--rail-foreground, var(--color-inverse-on-surface)); }
+    .rail-dot.dot-running { background: var(--color-inverse-on-surface); }
+    .rail-tile.tile-focused, .rail-tile.launcher-tile { --rail-foreground: var(--color-on-primary); }
 </style>

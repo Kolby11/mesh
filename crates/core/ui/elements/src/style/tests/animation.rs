@@ -162,6 +162,34 @@ fn transition_shorthand_selects_the_same_properties_as_the_longhand() {
 }
 
 #[test]
+fn transition_lists_keep_icon_axes_independent_and_paint_only() {
+    let axes = [
+        "--icon-fill",
+        "--icon-weight",
+        "--icon-grade",
+        "--icon-optical-size",
+    ];
+    let mut seen = TransitionProperties::none();
+    let longhand = resolve_single_decl("transition-property", &axes.join(", "));
+    assert_eq!(longhand.transitions.len(), axes.len());
+    for (index, axis) in axes.into_iter().enumerate() {
+        let shorthand = resolve_single_decl("transition", &format!("{axis} 120ms linear"));
+        let properties = shorthand.transitions[0].properties;
+        assert_eq!(properties, longhand.transitions[index].properties);
+        assert_eq!(
+            properties.animation_bucket(),
+            AnimationPropertyBucket::PaintOnly
+        );
+        assert!(seen.intersection(properties).is_empty());
+        assert_eq!(
+            TransitionProperties::all().intersection(properties),
+            properties
+        );
+        seen = seen.union(properties);
+    }
+}
+
+#[test]
 fn animation_shorthand_parses_steps_with_inner_space() {
     let style = resolve_single_decl("animation", "pulse 1s steps(3, jump-none) infinite");
     assert_eq!(

@@ -60,6 +60,7 @@
         ]
       },
       "backgroundServices": [
+        "@mesh/wallpaper-directory",
         "@mesh/hyprland-display",
         "@mesh/hyprland-input",
         "@mesh/power-profiles-daemon",

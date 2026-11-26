@@ -1,4 +1,10 @@
 {
+  "desktop.apps": "Aplikácie",
+  "notifications.title": "Oznámenia",
+  "notifications.clear": "Vymazať všetko",
+  "notifications.dnd": "Nerušiť",
+  "notifications.empty": "Žiadne oznámenia",
+  "notifications.dismiss": "Zrušiť oznámenie",
   "controls.title": "Rýchle ovládanie",
   "controls.eyebrow": "OVLÁDACIE CENTRUM",
   "controls.welcome": "Všetko pod kontrolou",

@@ -77,7 +77,8 @@ reused geometry project only the nodes whose annotation inputs changed and
 restyle their state-changed nodes through the same paths; with no selector
 combinators, only inherited values reach other nodes. The exact restyled set
 drives semantics and retained updates. Fixed-shape keyed native lists validate ordered keys and refresh only changed
-items' captured binding locals and handlers. A list read directly from a script member
+items' captured binding locals and handlers. Each iteration shares its immutable
+locals across its bindings. A list read directly from a script member
 takes its changed items from the state sync, which records which array items differ
 when it stores the member, so only those items are compared and key-checked. Their property writes feed the same frame dirty
 set and restyle targets, including writes made by hover handlers. Inherited-value
@@ -88,7 +89,8 @@ refreshes conservatively rebuild finalized indexes. Binding writes stage only th
 after all expressions succeed; failure leaves the live tree untouched without
 sharing its whole child vectors for rollback. Style diagnostics reuse that exact
 set across intervening animation frames. Structural list changes retain the rebuild
-path. Retained layout uses Taffy's public low-level traits over a generational
+path. Finalization unmounts keyed children absent from the new tree and
+drops their runtime, memo and interned identity. Retained layout uses Taffy's public low-level traits over a generational
 arena. Layout writes record exact before/after changes, including clean siblings
 moved by flex distribution, wrapping or alignment. Sparse projection follows
 those producer deltas and dirty input paths; it does not scan a changed parent's
@@ -134,6 +136,8 @@ including trailing scrollbar spans. Repairs find owner ranges through retained
 command positions and copy only touched leaves. Ancestor rebuilds offset and
 share clean child branches, and immutable frame plans share the repaired span
 storage directly.
+Promoted popup input translates points into the retained subtree while
+authored events keep popup-local coordinates.
 Pointer hit tests skip a subtree whose painted extent, taken from the retained display list, excludes the point, but only while no change is pending; nodes without a recorded extent are always visited.
 Text-only binding patches also retain focus scopes, disclosures and interaction
 targets when all dirty paths preserve styles, state, geometry and non-text
@@ -157,6 +161,8 @@ lock. Painting uses nonblocking prepared lookups, respecting unresolved
 higher-priority candidates and showing no false missing marker while pending.
 Asynchronous icon, glyph and image jobs track their requesting component instances,
 including promoted child targets, and repaint only those consumers on completion.
+Scene recordings wait for the resources requested by their own presentation
+target.
 A file icon or image whose pixels are not ready paints nothing until its job
 publishes; it is rasterized on the frame only when no worker can run it. GPU
 scenes draw box shadows and rounded gradients natively; the cached CPU images
@@ -172,6 +178,9 @@ surfaces open straight into their resting styles, while promoted popups play
 their entering frame. Once startup is idle, each never-shown hidden layer
 surface is painted once into an unpresented canvas so its first show takes the
 same path and its resources are already prepared.
+On glibc, startup, hidden-surface prewarm and surface visibility changes
+schedule a worker to return free heap pages to the OS. Memory reclamation
+waits until those changes have settled and the event loop has an idle turn.
 A hiding surface stays mapped while its `mesh-surface-exiting` styles animate
 and unmaps once it has painted them with no transition or keyframe animation
 still running; its root's opacity transition duration bounds the wait.
@@ -184,6 +193,12 @@ shutdown requests leave the current turn before rendering or waiting for another
 event; teardown runs immediately.
 Wayland dispatch and completed GPU scenes already queued in the backend wake the
 next shell turn without another socket or worker notification.
+
+Backend bridges replace adjacent queued state snapshots from the same provider
+incarnation before they reach the shell. A shared bound applies to backend
+messages through the final inbox. Ordered results and events apply backpressure
+and keep their position between state publications. Frontend delivery shares
+the admitted payload and its fingerprint across surfaces and Luau runtimes.
 
 Hot reload uses a managed filesystem watcher that blocks on inotify and a
 control eventfd; watch replacement and shutdown wake that wait directly. With

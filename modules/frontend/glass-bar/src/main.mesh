@@ -1,4 +1,11 @@
+<props>
+{
+    desktop_layout = { type = "enum", options = { "islands", "floating", "paper", "tapedeck", "rail" }, default = "islands" },
+}
+</props>
+
 <template>
+    {#if props.desktop_layout == "islands"}
     <row class="bar">
         <row class="cluster cluster-start">
             <row class="pill pill-tight">
@@ -24,18 +31,88 @@
         </row>
 
         <row class="cluster cluster-end">
+            <row class="pill">
+                <button class="glyph-btn" ref="notificationsTrigger" aria-haspopup="true" aria-label={t("notifications.title")} title={t("notifications.title")}>
+                    <icon class="glyph" name="notifications" size="16" />
+                    <NotificationCenter />
+                </button>
+            </row>
             <Status />
         </row>
     </row>
+    {:else}
+        <row class="desktop-bar" class:floating={props.desktop_layout == "floating"} class:paper={props.desktop_layout == "paper"} class:taskbar={props.desktop_layout == "tapedeck"} class:rail={props.desktop_layout == "rail"}>
+            <row class="start" class:rail-group={props.desktop_layout == "rail"}>
+                <button class="bar-button app-menu" class:rail-button={props.desktop_layout == "rail"} class:rail-menu={props.desktop_layout == "rail"} class:task-chrome={props.desktop_layout == "tapedeck"} ref="glassLauncher" title={t("desktop.apps")} aria-label={t("desktop.apps")} aria-haspopup="true">
+                    {#if props.desktop_layout == "paper"}
+                        <text class="brand">Mesh</text>
+                    {:else}
+                        <icon name="view-grid" size="18" />
+                        <text hidden={props.desktop_layout ~= "tapedeck"}>{t("desktop.apps")}</text>
+                    {/if}
+                    <Launcher side={props.desktop_layout == "rail" and "right" or "bottom"} />
+                </button>
+                {#if props.desktop_layout == "paper"}
+                    <button class="bar-button menu-action" onclick={onSettings}><text>{t("controls.settings")}</text></button>
+                    <button class="bar-button menu-action" onclick={onDashboard}><text>{t("bar.dashboard")}</text></button>
+                    <button class="bar-button menu-action" onclick={onWallpapers}><text>{t("bar.wallpapers")}</text></button>
+                {/if}
+                <box class="switcher-slot">
+                    <ProfileSwitcher trigger_hover="var(--glass-hover)" trigger_color={props.desktop_layout == "rail" and "var(--color-inverse-on-surface)" or "var(--color-on-surface)"} side={props.desktop_layout == "rail" and "right" or "bottom"} />
+                </box>
+            </row>
+
+            {#if props.desktop_layout == "tapedeck"}
+                <row class="task-list" hidden={tasks[1] == nil}>
+                    {#for app in tasks key={app.id}}
+                        <button class="bar-button task task-chrome" class:task-active={app.focused} onclick={onActivate(app.id)} title={app.name} aria-label={app.name} aria-pressed={app.focused}>
+                            {#if app.icon ~= ""}
+                                <image class="task-icon" src={app.icon} alt="" />
+                            {:else}
+                                <icon name="application-x-executable" size="16" />
+                            {/if}
+                            <text class="task-name">{app.name}</text>
+                        </button>
+                    {/for}
+                </row>
+            {:else}
+                <Workspaces layout={props.desktop_layout} />
+            {/if}
+
+            {#if props.desktop_layout == "floating"}
+                <text class="window-title">{window_title}</text>
+            {/if}
+            <box class="spacer" />
+
+            {#if props.desktop_layout == "floating"}
+                <Clock compact={true} />
+                <box class="spacer" />
+            {/if}
+
+            <row class="end" class:rail-group={props.desktop_layout == "rail"}>
+                <button class="bar-button" class:rail-button={props.desktop_layout == "rail"} ref="notificationsTrigger" title={t("notifications.title")} aria-label={t("notifications.title")} aria-haspopup="true">
+                    <icon name="notifications" size="17" />
+                    <NotificationCenter rail={props.desktop_layout == "rail"} />
+                </button>
+                <Status compact={true} rail={props.desktop_layout == "rail"} />
+                {#if props.desktop_layout ~= "floating"}
+                    <Clock compact={true} rail={props.desktop_layout == "rail"} lcd={props.desktop_layout == "tapedeck"} />
+                {/if}
+            </row>
+        </row>
+    {/if}
 </template>
 
 <script lang="luau">
+local Launcher = require("@mesh/app-launcher")
+local apps = require("mesh.apps")
 local Clock = require("./components/clock.mesh")
 local Workspaces = require("./components/workspaces.mesh")
 local NowPlaying = require("./components/now-playing.mesh")
 local Recorder = require("./components/recorder.mesh")
 local Weather = require("./components/weather.mesh")
 local Status = require("./components/status.mesh")
+local NotificationCenter = require("./components/notification-center.mesh")
 local ProfileSwitcher = require("@mesh/profile-switcher")
 local t = import("mesh.i18n", "t")
 local theme = require("mesh.theme")
@@ -91,9 +168,34 @@ function onWallpapers()
     mesh.shell.toggle_surface("@mesh/wallpaper-parallax")
 end
 
+window_title = ""
+tasks = {}
+
+effect(function()
+    if props.desktop_layout == "floating" then
+        local window = wm.active_window
+        window_title = window and window.title or ""
+    elseif props.desktop_layout == "tapedeck" then
+        local running = {}
+        for _, app in apps.apps or {} do
+            if app.running then
+                running[#running + 1] = {
+                    id = app.id,
+                    name = app.name,
+                    focused = app.focused,
+                    icon = string.sub(app.icon or "", 1, 1) == "/" and app.icon or "",
+                }
+            end
+        end
+        tasks = running
+    end
+end)
+
+function onActivate(id) apps.activate(id) end
 </script>
 
 <style>
+
     /* The bar itself is clear: only the pills are glass, so the wallpaper
     shows between clusters as in a floating island layout. The root margin
     becomes the layer-shell margin and the surface ends at the border box, so
@@ -139,8 +241,8 @@ end
         align-items: center;
         gap: 2px;
         padding-inline: 6px;
-        border-radius: 999px;
-        border: 1px solid var(--glass-rim);
+        border-radius: var(--glass-radius-bar);
+        border: var(--glass-border-width) solid var(--glass-rim);
         background-image: var(--glass-surface-pill);
         box-shadow: var(--glass-shadow-pill);
         backdrop-filter: var(--glass-backdrop-pill);
@@ -217,5 +319,117 @@ end
     }
     @container (max-width: 1100px) {
         .cluster-center { display: none; }
+    }
+
+    .desktop-bar {
+        width: 100%;
+        height: 46px;
+        align-items: center;
+        gap: 10px;
+        padding-inline: 12px;
+        color: var(--glass-text);
+    }
+
+    .floating {
+        margin: 12px 14px 0;
+        border-radius: var(--glass-radius-bar);
+        border: var(--glass-border-width) solid var(--glass-rim);
+        background-image: var(--glass-surface-pill);
+        backdrop-filter: var(--glass-backdrop-pill);
+    }
+
+    .paper {
+        height: 34px;
+        padding-inline: 18px;
+        background: var(--color-surface);
+        border-bottom: 1px solid var(--color-outline);
+    }
+
+    .taskbar {
+        height: 36px;
+        padding-inline: 6px;
+        gap: 6px;
+        background: var(--color-surface-container);
+        box-shadow: var(--glass-shadow-pill);
+    }
+
+    .rail {
+        width: 74px;
+        height: 100%;
+        margin: 16px 0 16px 16px;
+        padding: 14px 0;
+        flex-direction: column;
+        gap: 12px;
+        border-radius: 37px;
+        background: var(--color-inverse-surface);
+        color: var(--color-inverse-on-surface);
+    }
+
+    .start, .end {
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+    }
+
+    .rail-group {
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .switcher-slot { width: 28px; height: 28px; flex-shrink: 0; }
+
+    .bar-button {
+        min-width: 28px;
+        height: 26px;
+        padding: 0 8px;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        border-radius: var(--glass-radius-control);
+        background: transparent;
+        color: inherit;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    .bar-button:hover { background: var(--glass-hover); }
+    .brand { font-family: var(--typography-family-brand); font-size: 15px; }
+    .rail-button { width: 40px; height: 36px; border-radius: 999px; }
+    .rail-menu {
+        width: 44px;
+        height: 44px;
+        background: var(--color-primary);
+        color: var(--color-on-primary);
+    }
+
+    .task-list {
+        min-width: 0;
+        align-items: center;
+        gap: 6px;
+        border-left: 1px solid var(--color-outline);
+        padding-left: 6px;
+        overflow: hidden;
+    }
+
+    .task-chrome {
+        background-image: var(--glass-surface-pill);
+        box-shadow: var(--glass-shadow-pill);
+    }
+
+    .task-active {
+        background-image: none;
+        background-color: var(--color-surface-container-highest);
+        box-shadow: inset 1px 1px 0 var(--glass-rim-inset);
+    }
+
+    .task { width: 180px; min-width: 38px; justify-content: flex-start; }
+    .task-icon { width: 16px; height: 16px; flex-shrink: 0; }
+    .task-name, .window-title { min-width: 0; max-width: 240px; text-overflow: ellipsis; }
+    .window-title { color: var(--glass-text-muted); font-size: 13px; }
+    .spacer { flex-grow: 1; }
+
+    @container (max-width: 760px) {
+        .desktop-bar { gap: 5px; }
+        .window-title, .menu-action { display: none; }
     }
 </style>

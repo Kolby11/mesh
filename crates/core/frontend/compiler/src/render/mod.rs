@@ -524,9 +524,7 @@ fn build_widget_node_inner(
                     mesh_core_elements::TemplateBindings {
                         instance_key: instance_key.into(),
                         keyed_item: state.keyed_template_item(),
-                        locals: state
-                            .in_loop()
-                            .then(|| std::sync::Arc::new(state.template_locals())),
+                        locals: state.template_locals().cloned(),
                         attributes: Vec::new(),
                         inline_content: Some(vec![TemplateNode::Expr(expr.clone())].into()),
                         handlers: Vec::new(),
@@ -815,6 +813,7 @@ where
                 base: store,
                 item_name: &for_node.item_name,
                 item_value: item,
+                locals: Default::default(),
                 loop_identity: None,
                 keyed_item: None,
             };
@@ -848,23 +847,22 @@ where
                 }),
         })
     });
-    for (item_ordinal, item_val) in items
-        .into_iter()
-        .enumerate()
-        .skip(first)
-        .take(last - first)
-    {
-        let loop_identity = for_node
+    for (item_ordinal, item_val) in items.into_iter().enumerate().skip(first).take(last - first) {
+        let mut item_store = LayeredStore {
+            base: store,
+            item_name: &for_node.item_name,
+            item_value: item_val,
+            locals: Default::default(),
+            loop_identity: store.loop_identity().map(str::to_owned),
+            keyed_item: keyed_list.as_ref().map(|list| KeyedTemplateItem {
+                list: Arc::clone(list),
+                index: item_ordinal,
+            }),
+        };
+        item_store.loop_identity = for_node
             .key
             .as_ref()
             .map(|key| {
-                let item_store = LayeredStore {
-                    base: store,
-                    item_name: &for_node.item_name,
-                    item_value: item_val,
-                    loop_identity: store.loop_identity().map(str::to_owned),
-                    keyed_item: None,
-                };
                 let key_value = keys.get(item_ordinal).cloned().unwrap_or_else(|| {
                     evaluate_template_expression(key, Some(&item_store), instance_key, composition)
                 });
@@ -879,16 +877,6 @@ where
             // rather than by its position among the built siblings.
             .or_else(|| windowing.map(|_| format!("@{item_ordinal}")))
             .or_else(|| store.loop_identity().map(str::to_owned));
-        let item_store = LayeredStore {
-            base: store,
-            item_name: &for_node.item_name,
-            item_value: item_val,
-            loop_identity,
-            keyed_item: keyed_list.as_ref().map(|list| KeyedTemplateItem {
-                list: Arc::clone(list),
-                index: item_ordinal,
-            }),
-        };
         for (child_index, child) in for_node.children.iter().enumerate() {
             let mut built = build_widget_nodes(
                 child,
@@ -1353,8 +1341,18 @@ fn record_template_bindings(
             _ => None,
         })
         .collect();
-    let handlers: Vec<mesh_core_elements::TemplateHandlerBinding> = if state.in_loop() {
-        let locals = state.template_locals();
+    let keyed_item = state.keyed_template_item();
+    let inline_content = (inline_text
+        && element
+            .children
+            .iter()
+            .any(|child| matches!(child, TemplateNode::Expr(_))))
+    .then(|| element.children.clone().into());
+    if attributes.is_empty() && inline_content.is_none() && keyed_item.is_none() {
+        return;
+    }
+    let locals = state.template_locals();
+    let handlers = if let Some(locals) = locals {
         element
             .attributes
             .iter()
@@ -1382,21 +1380,10 @@ fn record_template_bindings(
     } else {
         Vec::new()
     };
-    let inline_content = (inline_text
-        && element
-            .children
-            .iter()
-            .any(|child| matches!(child, TemplateNode::Expr(_))))
-    .then(|| element.children.clone().into());
-    if attributes.is_empty() && inline_content.is_none() && state.keyed_template_item().is_none() {
-        return;
-    }
     node.set_template_bindings(std::sync::Arc::new(mesh_core_elements::TemplateBindings {
         instance_key: instance_key.into(),
-        keyed_item: state.keyed_template_item(),
-        locals: state
-            .in_loop()
-            .then(|| std::sync::Arc::new(state.template_locals())),
+        keyed_item,
+        locals: locals.cloned(),
         attributes,
         inline_content,
         handlers,
@@ -1411,8 +1398,7 @@ fn rebind_template_handlers(
     composition: &dyn FrontendCompositionResolver,
 ) {
     for handler in &bindings.handlers {
-        let mut locals = bindings.locals.as_deref().cloned().unwrap_or_default();
-        locals.retain(|name, _| handler.expression.referenced_identifiers().contains(name));
+        let locals = expr_eval::handler_locals(bindings.locals.as_deref(), &handler.expression);
         let Some(mut target) = composition.bind_handler_expression(
             &bindings.instance_key,
             &handler.expression,
@@ -1557,6 +1543,7 @@ fn keyed_item_keeps_key(
         base: state,
         item_name: &list.item_name,
         item_value: item,
+        locals: Default::default(),
         loop_identity: None,
         keyed_item: None,
     };
@@ -1591,7 +1578,7 @@ pub fn patch_template_bindings(
     };
     let bound_state = BoundTemplateStore {
         base: state,
-        locals: bindings.locals.as_deref(),
+        locals: bindings.locals.as_ref(),
     };
     let tracking_state = TrackingVariableStore::new(&bound_state);
     let state = &tracking_state as &dyn VariableStore;

@@ -414,7 +414,8 @@ impl FontRegistry {
 
     /// Return aliases accepted by the renderer for direct `font-family`
     /// values. CSS custom-property tokens are resolved by the style engine;
-    /// this map covers the pack-qualified escape hatch and bare role values.
+    /// this map covers pack-qualified references and bare roles, including
+    /// roles defined only in the module's overrides.
     pub fn reference_aliases_for_module(&self, module_id: &str) -> BTreeMap<String, String> {
         let mut aliases = self
             .packs
@@ -488,6 +489,8 @@ impl FontRegistry {
         let Some(frontend) = self.frontends.get(module_id) else {
             return roles;
         };
+        roles.extend(frontend.author_overrides.keys().cloned());
+        roles.extend(frontend.user_overrides.keys().cloned());
         let chain = frontend.effective_chain(&self.shell_chain, &self.base_chain);
         roles.extend(
             chain
@@ -958,12 +961,37 @@ mod tests {
             .set_frontend_bindings(vec![(
                 "@mesh/frontend".into(),
                 FontFrontendBindings {
-                    author_overrides: BTreeMap::from([("body".into(), "JetBrains Mono".into())]),
+                    author_overrides: BTreeMap::from([
+                        ("body".into(), "JetBrains Mono".into()),
+                        ("brand".into(), "JetBrains Mono".into()),
+                        ("editorial".into(), "default/mono".into()),
+                    ]),
+                    user_overrides: BTreeMap::from([
+                        ("brand".into(), "Inter".into()),
+                        ("user-label".into(), "default/mono".into()),
+                    ]),
                     ..Default::default()
                 },
             )])
             .unwrap();
         let updated = registry.shared_reference_aliases_for_module("@mesh/frontend");
+        for (role, family) in [
+            ("brand", "Inter"),
+            ("editorial", "JetBrains Mono"),
+            ("user-label", "JetBrains Mono"),
+        ] {
+            assert!(!first.contains_key(role));
+            assert_eq!(
+                registry.resolve_for_module("@mesh/frontend", role).family,
+                family
+            );
+            assert_eq!(updated.get(role).map(String::as_str), Some(family));
+            assert!(
+                !registry
+                    .shared_reference_aliases_for_module("@mesh/other")
+                    .contains_key(role)
+            );
+        }
         assert_eq!(
             *updated,
             registry
@@ -977,6 +1005,12 @@ mod tests {
                 .clone()
                 .shared_reference_aliases_for_module("@mesh/frontend")
                 .eq(&updated)
+        );
+
+        registry.set_frontend_bindings(Vec::new()).unwrap();
+        assert_eq!(
+            *registry.shared_reference_aliases_for_module("@mesh/frontend"),
+            *first
         );
     }
 

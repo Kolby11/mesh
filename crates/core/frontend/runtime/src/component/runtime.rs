@@ -328,6 +328,62 @@ impl FrontendSurfaceComponent {
         }
     }
 
+    pub(super) fn retire_unrendered_keyed_instances(&mut self, live: &HashSet<&str>) {
+        let interner = self.instance_keys.get_mut();
+        let mut retired_keys = interner.keyed.iter()
+            .filter(|key| !live.contains(key.as_ref()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if retired_keys.is_empty() {
+            return;
+        }
+        retired_keys.sort_unstable_by(|left, right| {
+            right.len().cmp(&left.len()).then_with(|| left.cmp(right))
+        });
+        let mut retired = {
+            let mut runtimes = self.runtimes.lock().unwrap();
+            retired_keys.iter().filter_map(|key| runtimes.remove_entry(key)).collect::<Vec<_>>()
+        };
+        let mut retired_generations = HashMap::new();
+        for (key, runtime) in &mut retired {
+            retired_generations.insert(key.clone(), runtime.script_ctx.generation);
+            let _ = Self::dispatch_runtime_hook(&self.diagnostics, runtime, "unmount");
+        }
+        drop(retired);
+
+        let keep = |key: &str| !interner.keyed.contains(key) || live.contains(key);
+        let runtimes = self.runtimes.lock().unwrap();
+        self.bound_children.get_mut().retain(|parent, links| {
+            if !keep(parent) {
+                return false;
+            }
+            links.retain(|(binding, child)| {
+                if let Some(generation) = retired_generations.get(child)
+                    && let Some(runtime) = runtimes.get(parent)
+                {
+                    let _ = runtime.script_ctx.remove_live_binding(binding, *generation);
+                    if runtime.script_ctx.reactive_effects_need_run() {
+                        self.reactive_binding_pending.set(true);
+                    }
+                }
+                keep(child)
+            });
+            !links.is_empty()
+        });
+        drop(runtimes);
+        self.portal_hidden_bindings.get_mut().retain(|_, (key, _)| keep(key));
+        for key in retired_keys {
+            self.component_memo.get_mut().remove(&key);
+            self.component_callbacks.get_mut().remove(&key);
+            self.failed_runtime_creations.get_mut().remove(&key);
+            interner.keys.remove(&key);
+            interner.keyed.remove(&key);
+        }
+        if !retired_generations.is_empty() {
+            self.rebuild_runtime_generation_index();
+        }
+    }
+
     pub(super) fn deliver_service_call_result_to_instance(
         &mut self,
         instance_id: &str,
@@ -875,15 +931,14 @@ impl FrontendSurfaceComponent {
                     Some(&payload.source_module),
                     payload.generation,
                 );
-                apply_service_update_with_name_and_fingerprint(
+                apply_shared_service_update(
                     script_ctx.state_mut(),
-                    true,
                     // A runtime being seeded has evaluated nothing yet, so
                     // nothing is known about what it reads.
                     true,
                     service_name,
                     "<cached>",
-                    payload.value.as_ref(),
+                    &payload.value,
                     payload.fingerprint,
                 );
             }

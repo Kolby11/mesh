@@ -123,6 +123,62 @@ fn animation_transition_dirty_uses_visual_repaint_for_paint_only_changes() {
 }
 
 #[test]
+fn hover_transitions_an_inherited_icon_axis_in_the_retained_frame() {
+    let mut component = test_frontend_component(
+        r#"
+<template>
+  <row><button class="target" aria-label="Volume"><icon name="audio-volume-high" /></button></row>
+</template>
+<style>
+row { width: 120px; height: 80px; }
+.target { width: 60px; height: 40px; background: #48a; --icon-fill: 0; }
+.target:hover { --icon-fill: 1; }
+icon { width: 20px; height: 20px; transition: --icon-fill 2s linear; }
+</style>
+"#,
+    );
+    let theme = default_theme();
+    let extent = SurfaceExtent::unpadded(120, 80);
+    let mut buffer = PixelBuffer::new(120, 80);
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+    let icon = first_node_by_tag(component.last_tree.as_ref().unwrap(), "icon").unwrap();
+    assert_eq!(icon.computed_style.icon_fill, Some(0.0));
+    assert!(icon.computed_style.transitions[0].properties.animates_icon_fill());
+
+    let button = first_node_by_class(component.last_tree.as_ref().unwrap(), "target").unwrap();
+    let x = button.layout.x + button.layout.width / 2.0;
+    let y = button.layout.y + button.layout.height / 2.0;
+    component
+        .handle_input(&theme, 120, 80, ComponentInput::PointerMove { x, y })
+        .unwrap();
+    component
+        .paint_raster(&theme, extent, &mut buffer, 1.0)
+        .unwrap();
+
+    let tree = component.last_tree.as_ref().unwrap();
+    let button = first_node_by_class(tree, "target").unwrap();
+    assert!(button.state.contains(mesh_core_elements::NodeState::HOVERED));
+    let icon = first_node_by_tag(tree, "icon").unwrap();
+    assert!(component.transitions.contains_key(icon.id));
+    let frame = component.last_frame_snapshot.as_ref().unwrap();
+    let sampled = frame
+        .node_by_id(icon.id)
+        .unwrap()
+        .style()
+        .icon_fill
+        .unwrap();
+    assert!((0.0..1.0).contains(&sampled));
+    assert_eq!(icon.computed_style.icon_fill, Some(sampled));
+    let (rebuild, retained, flags, _) = component.take_dirty_for_paint();
+    assert!(!rebuild);
+    assert!(retained);
+    assert!(flags.contains(ComponentDirtyFlags::PAINT));
+    assert!(!flags.contains(ComponentDirtyFlags::LAYOUT));
+}
+
+#[test]
 fn animation_transition_dirty_uses_relayout_for_geometry_changes() {
     let mut component = test_frontend_component("<template><box /></template>");
     let mut previous = transition_test_tree(mesh_core_elements::TransitionProperties {

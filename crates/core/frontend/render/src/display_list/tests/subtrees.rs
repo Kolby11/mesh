@@ -87,14 +87,18 @@ fn full_surface_replay_skips_content_outside_the_scrolled_viewport() {
         ..Default::default()
     });
     for index in 0..40 {
-        root.children.push(node(
+        let mut row = node(
             2 + index,
             "text",
             8.0,
             8.0 + index as f32 * 20.0,
             80.0,
             18.0,
-        ));
+        );
+        if index % 3 == 0 {
+            row.computed_style.opacity = 0.6;
+        }
+        root.children.push(row);
     }
     let mut list = RetainedDisplayList::default();
     list.update(&root, 160, 100, true, true);
@@ -140,6 +144,16 @@ fn full_surface_replay_skips_content_outside_the_scrolled_viewport() {
                 "{kind:?} at {offset}"
             );
         }
+        let mut depth = 0;
+        for &(_, kind) in &kinds {
+            match kind {
+                DisplayPaintCommandKind::PushCompositingLayer => depth += 1,
+                DisplayPaintCommandKind::PopCompositingLayer => depth -= 1,
+                _ => {}
+            }
+            assert!(depth >= 0, "compositing replay at {offset}");
+        }
+        assert_eq!(depth, 0, "compositing replay at {offset}");
         for index in 0..40_u64 {
             let top = 8.0 + index as f32 * 20.0 - offset;
             let visible = top + 18.0 > 6.0 && top < 86.0;
@@ -782,10 +796,22 @@ fn scroll_shift_plans_only_scopes_over_a_uniform_backdrop() {
     // A vertical move replays horizontal edge bands only.
     assert!(shifts[0].anchored.iter().all(|band| band.width == 120));
 
+    let mut constant = scene(Some(mesh_core_elements::style::BackgroundPaint::LinearGradient(
+        mesh_core_elements::style::StyleLinearGradient { from: Color::WHITE, to: Color::WHITE },
+    )));
+    constant.children[0].children[0].computed_style.opacity = 0.6;
+    let mut objects = crate::RenderObjectTree::default();
+    objects.update(&constant);
+    let mut list = RetainedDisplayList::default();
+    list.update(&constant, 200, 160, true, true);
+    list.mark_painted();
+    scroll(&mut constant, &mut list, &mut objects, 8.0);
+    assert_eq!(list.scroll_shifts().len(), 1);
+
     // A gradient beneath varies across the viewport.
-    let mut root = scene(Some(
-        mesh_core_elements::style::BackgroundPaint::LinearGradient(Default::default()),
-    ));
+    let mut root = scene(Some(mesh_core_elements::style::BackgroundPaint::LinearGradient(
+        mesh_core_elements::style::StyleLinearGradient { from: Color::WHITE, to: Color::TRANSPARENT },
+    )));
     let mut objects = crate::RenderObjectTree::default();
     objects.update(&root);
     let mut list = RetainedDisplayList::default();

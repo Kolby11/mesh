@@ -69,6 +69,9 @@ Shorthands are practical shell shorthands rather than full browser-compatible sh
 
 Every entry of a comma-separated `transition` runs on its own timeline, with its own duration, delay, and easing. The `transition-*` longhands also accept comma-separated lists: the property list determines the entry count, shorter timing lists repeat, and longer timing lists are truncated. Where two entries name the same property, the later one wins it.
 
+Icon transitions also accept `--icon-fill`, `--icon-weight`, `--icon-grade`, and
+`--icon-optical-size`. See [icon axes](spec/05-icons.md#7-variable-axes--style-tokens).
+
 The current shell animator interpolates this practical visual set:
 
 - `background` / `background-color`
@@ -83,7 +86,7 @@ The current shell animator interpolates this practical visual set:
 - `margin`
 - `transform`
 
-`@keyframes` supports numeric percentage stops over the same transition-safe visual set. `from` and `to` aliases are rejected. Unsupported keyframe properties reject the keyframes rule. Keyframe stop values do not support `var(...)` in this release. A stop may also declare `animation-timing-function`; its validated easing applies to the segment starting at that stop.
+`@keyframes` supports numeric percentage stops over its validated visual property set. `from` and `to` aliases are rejected. Unsupported keyframe properties reject the keyframes rule. Keyframe stop values do not support `var(...)` in this release. A stop may also declare `animation-timing-function`; its validated easing applies to the segment starting at that stop.
 
 ## Tokens And Custom Properties
 

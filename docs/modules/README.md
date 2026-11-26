@@ -18,7 +18,7 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/workspaces-widget`, `@mesh/window-title-widget`, `@mesh/clock-widget`, `@mesh/brightness-widget`, `@mesh/volume-widget`, `@mesh/theme-widget`, `@mesh/language-widget`, `@mesh/battery-widget`, `@mesh/settings-widget` | embedded | `src/main.mesh` | Independent `mesh.navigation.item` contributions any bar can host; per-instance props come from profile placements |
 | `@mesh/audio-popover` | embedded | `src/main.mesh` | Audio control surface |
 | `@mesh/quick-settings` | embedded | `src/main.mesh` | Quick settings surface |
-| `@mesh/settings` | surface | `src/main.mesh` | Settings surface using the shared glass material family and active theme palette; Appearance, Keyboard and Advanced pages, Audio master volume with drag-to-preview and release-to-apply, and data-driven pages with list → detail drill-down (Wi-Fi, Bluetooth, Sound devices, Display, Power, Notifications, Language & Time, Accessibility, Apps, Privacy, Shell Layout, About, Storage, Users) in `components/prefs-page.mesh` |
+| `@mesh/settings` | surface | `src/main.mesh` | Settings window with toolbar search, four sidebar groups, responsive page cards and an output diagram driven by the display provider; Appearance, Keyboard and Advanced pages, Audio master volume with drag-to-preview and release-to-apply, and data-driven pages with list → detail drill-down (Wi-Fi, Bluetooth, Sound devices, Display, Power, Notifications, Language & Time, Accessibility, Apps, Privacy, Shell Layout, About, Storage, Users) in `components/prefs-page.mesh` |
 | `@mesh/debug-inspector` | surface | `src/main.mesh` | Runtime inspection surface |
 | `@mesh/composition-editor` | surface | `src/main.mesh` | Replaceable visual editor for author-declared component slots |
 | `@mesh/text-selection-proof` | surface | `src/main.mesh` | Text-selection proof surface |
@@ -27,27 +27,46 @@ All are `ui` modules. Placement is `surface` when the module declares default
 | `@mesh/opacity-test` | surface | `src/main.mesh` | Opacity control surface without compositor blur (disabled by default) |
 | `@mesh/language-popover` | embedded | `src/main.mesh` | Embeddable language chooser |
 | `@mesh/theme-selector` | embedded | `src/main.mesh` | Embeddable theme chooser |
-| `@mesh/glass-bar` | surface | `src/main.mesh` | Floating glass islands with clock/calendar, workspaces, media, recording, weather and a live audio/brightness control center |
-| `@mesh/glass-widgets` | surface | `src/main.mesh` | Responsive desktop media and weather cards with colour artwork and a three-point forecast |
+| `@mesh/glass-bar` | surface | `src/main.mesh` | Floating panels, menu strip, taskbar or workspace rail. Hosts the calendar, notification center and live audio/brightness controls |
+| `@mesh/glass-widgets` | surface | `src/main.mesh` | Desktop clock, media and weather cards arranged by the composition |
 | `@mesh/keybind-help` | surface | `src/main.mesh` | Keyboard shortcuts window opened by `F1`, listing every binding by surface |
 | `@mesh/cheatsheet` | surface | `src/main.mesh` | Dark compositor-shortcut cheatsheet: the window manager's described keybinds in sections and columns of keycaps; reads `mesh.wm-keybinds`; open it with `mesh-shell` IPC `shell:toggle_surface:@mesh/cheatsheet` |
 | `@mesh/radial-launcher` | surface | `src/main.mesh` | Radial overlay with a retained app ring, a clock hub and media wedges |
 | `@mesh/drawing-canvas` | embedded | `src/main.mesh` | Retained drawing commands with path-shaped interactive regions |
 | `@mesh/glass-power` | surface | `src/main.mesh` | Hidden right-edge power panel: hovering the middle of the edge slides out sleep, restart and power off; restart and power off need a second click |
 | `@mesh/halo-orb` | surface | `src/main.mesh` | Always-visible orb that toggles the radial launcher, with the shell switcher beside it |
-| `@mesh/glass-dock` | surface | `src/main.mesh` | Glass shelf with neighboring-icon magnification and a searchable launcher with grid and list views of installed applications |
+| `@mesh/glass-dock` | surface | `src/main.mesh` | Glass shelf with neighboring-icon magnification, compact shelf or vertical application rail |
+| `@mesh/app-launcher` | embedded | `src/main.mesh` | Searchable application launcher with grid and list views. The host chooses which side of its trigger it opens on |
+| `@mesh/level-osd` | surface | `src/main.mesh` | Brief volume and brightness indicator driven by live service changes |
 | `@mesh/glass-notifications` | surface | `src/main.mesh` | Glass notification toasts under the bar; shows itself while a notification is popped up |
 | `@mesh/glass-dashboard` | surface | `src/main.mesh` | Overlay with system meters and history, the current track with a live spectrum, notifications and weather |
 | `@mesh/glass-wallpapers` | surface | `src/main.mesh` | Overlay wallpaper picker: tilted carousel and colour strip; applies through `mesh.theme.set_backdrop_image`; not in the glass composition |
 | `@mesh/wallpaper-carousel` | surface | `src/main.mesh` | Wallpaper selector widget under the bar: endless strip of tall cards that slide, shrink with distance and pan across `mesh.wallpapers` panoramas |
 | `@mesh/wallpaper-parallax` | surface | `src/main.mesh` | Wallpaper picker under the bar: endless strip of five slanted cards that slide while their upright `mesh.wallpapers` panoramas pan in parallax; the glass composition's wallpaper selector |
 | `@mesh/profile-switcher` | embedded | `src/main.mesh` | Shell switcher trigger; also a `mesh.navigation.item` contribution |
-| `@mesh/profile-menu` | embedded | `src/main.mesh` | Popover listing profiles; selecting one switches live via `mesh.packages` |
+| `@mesh/profile-menu` | embedded | `src/main.mesh` | Popover listing profiles. Selecting one switches live via `mesh.packages` |
+
+The Shell switcher lists five profiles for the Settings & Shell designs.
+They share the Settings window, quick controls, launcher, notification center,
+and volume and brightness indicator.
+
+| Profile | Desktop |
+| --- | --- |
+| `nocturne`, `liquid-glass` | Floating top panel, date and weather clock, media card and centered application shelf |
+| `paper` | Thin menu strip, numbered workspaces, large desktop clock and compact application shelf |
+| `tapedeck` | Bevelled taskbar with running application buttons, LCD-style clock and bottom application shelf |
+| `bubblegum` | Left workspace and system rail, right application rail, weather and media cards |
+
+Each bundled profile starts with its matching theme selected in profile
+settings. Appearance can change the theme for that profile. The underlying
+composition recommends the matching theme when used by a custom profile.
 
 The glass composition follows the liquid-glass showcase's floating islands,
 light rims, refracted translucent cards and raised dock lenses. The clock opens
 a month calendar; the rightmost status button opens quick
-controls; the dock's search button opens the application launcher. The bar's
+controls. The bell opens the notification center with Do not disturb, clear,
+dismiss and notification actions. The dock's search button opens the application
+launcher. The bar's
 dashboard and wallpaper buttons toggle those overlays. The dashboard closes with
 Escape, its close button or a click outside the panel. The wallpaper carousel
 is a widget under the bar, centred horizontally, driven by arrows,
@@ -102,7 +121,7 @@ clears pending display state, and failures show a localized notice.
 | `@mesh/open-meteo-weather` | backend | `src/main.luau` | `mesh.weather` from Open-Meteo, located by settings or IP |
 | `@mesh/networkmanager-network` | backend | `src/main.luau` | `mesh.network` through `nmcli` |
 | `@mesh/hyprland-apps` | backend | `src/main.luau` | `mesh.apps`: desktop entries joined with Hyprland clients |
-| `@mesh/wf-recorder` | backend | `src/main.luau` | `mesh.recorder` through `wf-recorder` |
+| `@mesh/wf-recorder` | backend | `src/main.luau` | `mesh.recorder` through `wf-recorder`. Each attempt reserves a unique `Recordings/recording-XXXXXXXX/` folder in the videos directory and writes `recording.mp4` there. |
 | `@mesh/systemd-session` | backend | `src/main.luau` | `mesh.session` suspend, power off and reboot through `systemctl` |
 | `@mesh/status-notifier-tray` | backend | `src/main.luau` | `mesh.tray`: StatusNotifier watcher/host, item state and controls |
 | `@mesh/freedesktop-notifications` | backend | `src/main.luau` | `mesh.notifications`: owns `org.freedesktop.Notifications` through `mesh.dbus_serve` |

@@ -223,7 +223,7 @@ impl ChildSurfaceCache {
         let explicit_blocked = ancestors.iter().any(|ancestor| {
             ancestor.is_promoted_window()
                 || (source_element_tag(ancestor) == "popover"
-                    && !popover_is_open(ancestor)
+                    && !ancestor.is_popover_open()
                     && ancestor.id != tree.id)
         });
         let overflow_blocked = tree.is_promoted_window()
@@ -235,7 +235,7 @@ impl ChildSurfaceCache {
         let popup_extents = !explicit_blocked
             && !node.is_promoted_window()
             && source_element_tag(node) == "popover"
-            && (popover_is_open(node) || node.id == tree.id);
+            && (node.is_popover_open() || node.id == tree.id);
         let overflow_extents = !candidate.path.is_empty()
             && !overflow_blocked
             && source_element_tag(node) != "popover"
@@ -260,7 +260,7 @@ impl ChildSurfaceCache {
                     popover_trigger: None,
                 });
             } else if source_element_tag(node) == "popover"
-                && (popover_is_open(node) || node.id == tree.id)
+                && (node.is_popover_open() || node.id == tree.id)
             {
                 self.popover_request(tree, node, candidate, bounds);
             }
@@ -318,9 +318,11 @@ impl ChildSurfaceCache {
                 return;
             }
         };
-        let trigger = popover_anchor_reference(node).map(|reference| PopoverTriggerReference {
-            reference: reference.to_owned(),
-        });
+        let trigger = node
+            .popover_anchor_reference()
+            .map(|reference| PopoverTriggerReference {
+                reference: reference.to_owned(),
+            });
         if trigger.is_none()
             && let Some(reference) = popover_anchor_attribute_value(node)
         {

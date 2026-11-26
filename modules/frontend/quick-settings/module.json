@@ -7,6 +7,7 @@
     "kind": "ui",
     "uses": {
       "modules": {
+        "@mesh/glass-material": ">=0.1.0",
         "@mesh/settings": ">=0.1.0",
         "@mesh/volume-presentation": ">=0.1.0"
       },

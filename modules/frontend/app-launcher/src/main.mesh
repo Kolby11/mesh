@@ -1,5 +1,11 @@
+<props>
+{
+    side = { type = "enum", options = { "top", "bottom", "left", "right" }, default = "top" },
+}
+</props>
+
 <template>
-    <popover class="launcher-shell" open={open} anchor-ref="glassLauncher" anchor="top" gravity="top" offset-y="-12" open-on="click" grab="click" aria-label={t("launcher.title")}>
+    <popover class="launcher-shell" open={open} anchor-ref="glassLauncher" anchor={props.side} gravity={props.side} offset-x={props.side == "left" and -12 or props.side == "right" and 12 or 0} offset-y={props.side == "top" and -12 or props.side == "bottom" and 12 or 0} open-on="click" grab="click" aria-label={t("launcher.title")}>
         <column class="launcher" class:launcher-grid={grid}>
             <row class="heading">
                 <text class="title">{t("launcher.title")}</text>
@@ -94,7 +100,7 @@ end
     .launcher-shell { width: fit; height: fit; padding: 18px; background: transparent; opacity: 1; transform: translateY(0px) scale(1); transition: transform var(--animation-duration-long) var(--animation-curves-bezier-emphasized-decelerate), opacity var(--animation-duration-short) var(--animation-curves-bezier-standard); }
     .launcher-shell.mesh-surface-entering { opacity: 0; transform: translateY(20px) scale(0.92); }
     .launcher-shell.mesh-surface-exiting { opacity: 0; transform: translateY(12px) scale(0.96); transition-duration: var(--animation-duration-fast); }
-    .launcher { width: 380px; padding: 22px; gap: 18px; border-radius: 28px; border: 1px solid var(--glass-rim); background-image: var(--glass-surface-panel); box-shadow: var(--glass-shadow-card); backdrop-filter: var(--glass-backdrop-panel); }
+    .launcher { width: 380px; padding: 22px; gap: 18px; border-radius: var(--glass-radius-window); border: var(--glass-border-width) solid var(--glass-rim); background-image: var(--glass-surface-panel); box-shadow: var(--glass-shadow-card); backdrop-filter: var(--glass-backdrop-panel); }
     .heading { width: 100%; align-items: center; gap: 8px; }
     .heading-spacer { flex-grow: 1; }
     .view { width: 30px; height: 30px; padding: 0; justify-content: center; align-items: center; border-radius: 999px; border: 1px solid var(--glass-rim-inset); background: transparent; }
@@ -106,7 +112,7 @@ end
     and focus outline, which the viewport would otherwise clip at its edges. */
     .result-body { width: 100%; padding: 6px; }
     .app-grid { width: 100%; flex-wrap: wrap; gap: 6px; }
-    .cell { flex-direction: column; width: 95px; height: 104px; padding: 10px 4px 6px; gap: 6px; align-items: center; border-radius: 18px; background: transparent; transform: scale(1); transition: transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate); }
+    .cell { flex-direction: column; width: 95px; height: 104px; padding: 10px 4px 6px; gap: 6px; align-items: center; border-radius: var(--glass-radius-card); background: transparent; transform: scale(1); transition: transform var(--animation-duration-short) var(--animation-curves-bezier-emphasized-decelerate); }
     .cell:hover, .cell:focus-visible { background: var(--glass-hover); transform: scale(var(--animation-scale-hover)); }
     .cell:active { transform: scale(var(--animation-scale-press)); }
     .cell-art { width: 44px; height: 44px; flex-shrink: 0; }
@@ -115,10 +121,10 @@ end
     .cell-dot-on { background: var(--glass-indicator); }
     .title { height: 28px; font-size: 20px; font-weight: 600; color: var(--glass-text-heading); }
     .count { height: 22px; font-size: 12px; color: var(--glass-text-muted); }
-    .search { width: 100%; height: 44px; padding: 12px; border-radius: 16px; border: 1px solid var(--glass-rim-inset); background: var(--glass-fill-inset); color: var(--glass-text); }
+    .search { width: 100%; height: 44px; padding: 12px; border-radius: var(--glass-radius-control); border: 1px solid var(--glass-rim-inset); background: var(--glass-fill-inset); color: var(--glass-text); }
     .results { width: 100%; height: 320px; overflow-y: auto; }
     .app-list { width: 100%; gap: 6px; }
-    .app { width: 100%; height: 60px; padding: 10px 12px; gap: 12px; align-items: center; border-radius: 16px; background: transparent; }
+    .app { width: 100%; height: 60px; padding: 10px 12px; gap: 12px; align-items: center; border-radius: var(--glass-radius-control); background: transparent; }
     .app:hover, .app:focus-visible { background: var(--glass-hover); }
     .app:active { transform: scale(0.98); }
     .app-art { width: 34px; height: 34px; flex-shrink: 0; }

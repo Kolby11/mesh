@@ -8,6 +8,7 @@ use icu_decimal::DecimalFormatter;
 use icu_locale_core::Locale as IcuLocale;
 use icu_plurals::{PluralCategory, PluralRules};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{self, Write};
 use std::path::{Path, PathBuf};
@@ -167,7 +168,7 @@ pub enum CatalogEntry {
 impl CatalogEntry {
     pub fn render(&self, locale: &str, args: &HashMap<String, String>) -> Option<String> {
         let template = self.resolve(args, locale)?;
-        interpolate(template, args)
+        Some(interpolate(template, args))
     }
 
     fn default_text(&self) -> Option<&str> {
@@ -1436,7 +1437,7 @@ impl ModuleTranslator<'_> {
         let template = self
             .snapshot
             .resolve_in_module(key, &self.module_id, args)?;
-        interpolate(template, args)
+        Some(interpolate(template, args))
     }
 
     /// Resolve a localized value with one shared fallback and miss policy.
@@ -1592,18 +1593,39 @@ impl OwnedModuleTranslator {
         self.snapshot_revision
     }
 
+    /// Render a catalog hit without constructing an owned provenance record.
+    /// Unmodified text borrows from the catalog. An unsatisfied variant
+    /// renders the ordinary marker; only an absent key returns `None`.
+    pub fn translate_with(
+        &self,
+        key: &str,
+        args: &HashMap<String, String>,
+    ) -> Option<Cow<'_, str>> {
+        let entry = self.entries.get(key)?;
+        let template = if args.is_empty() {
+            entry.default_text()
+        } else {
+            entry.resolve(args, self.entry_locale(key))
+        };
+        Some(match template {
+            Some(template) if args.is_empty() || !template.contains('{') => Cow::Borrowed(template),
+            Some(template) => Cow::Owned(interpolate(template, args)),
+            None => Cow::Owned(LocalizedTextResolution::missing_marker(key)),
+        })
+    }
+
+    fn entry_locale(&self, key: &str) -> &str {
+        self.entry_locales
+            .get(key)
+            .map(String::as_str)
+            .unwrap_or(&self.locale)
+    }
+
     pub fn resolve(&self, key: &str, fallback: Option<&str>) -> LocalizedTextResolution {
         let source = self.sources.get(key).cloned();
         let entry = self.entries.get(key);
-        let translated = entry.and_then(|entry| {
-            entry.render(
-                self.entry_locales
-                    .get(key)
-                    .map(String::as_str)
-                    .unwrap_or(&self.locale),
-                &HashMap::new(),
-            )
-        });
+        let translated =
+            entry.and_then(|entry| entry.render(self.entry_locale(key), &HashMap::new()));
         let text = translated
             .or_else(|| fallback.map(str::to_owned))
             .unwrap_or_else(|| LocalizedTextResolution::missing_marker(key));
@@ -1628,15 +1650,7 @@ impl OwnedModuleTranslator {
         let source = self.sources.get(key).cloned();
         let entry = self.entries.get(key);
         let translated = entry
-            .and_then(|entry| {
-                entry.render(
-                    self.entry_locales
-                        .get(key)
-                        .map(String::as_str)
-                        .unwrap_or(&self.locale),
-                    args,
-                )
-            })
+            .and_then(|entry| entry.render(self.entry_locale(key), args))
             .or_else(|| fallback.map(str::to_owned));
         let text = translated.unwrap_or_else(|| LocalizedTextResolution::missing_marker(key));
         LocalizedTextResolution {
@@ -1733,7 +1747,7 @@ impl CoreTranslator<'_> {
 
     pub fn translate_with(&self, key: &str, args: &HashMap<String, String>) -> Option<String> {
         let template = self.snapshot.resolve_in_core(key, args)?;
-        interpolate(template, args)
+        Some(interpolate(template, args))
     }
 
     pub fn translations(&self) -> HashMap<String, String> {
@@ -2233,7 +2247,7 @@ fn direction_for(locale: &str) -> LocaleDirection {
 
 /// Interpolates `{name}` placeholders in one walk, so cost is O(template_len)
 /// regardless of how many args are supplied.
-fn interpolate(template: &str, args: &HashMap<String, String>) -> Option<String> {
+fn interpolate(template: &str, args: &HashMap<String, String>) -> String {
     let mut result = String::with_capacity(template.len());
     let mut remaining = template;
     while let Some(open) = remaining.find('{') {
@@ -2252,11 +2266,11 @@ fn interpolate(template: &str, args: &HashMap<String, String>) -> Option<String>
             remaining = &after_open[close + 1..];
         } else {
             result.push_str(&remaining[open..]);
-            return Some(result);
+            return result;
         }
     }
     result.push_str(remaining);
-    Some(result)
+    result
 }
 
 #[cfg(test)]
@@ -2269,6 +2283,48 @@ mod tests {
         assert!(super::validate_message("Hello {name}, {place}!").is_ok());
     }
     use super::*;
+
+    #[test]
+    fn owned_translation_hits_borrow_plain_text_and_preserve_variant_resolution() {
+        let translator = OwnedModuleTranslator::new(
+            "@test/i18n",
+            "en",
+            HashMap::from([
+                ("plain".into(), CatalogEntry::Text("Ready".into())),
+                ("template".into(), CatalogEntry::Text("Hello {name}".into())),
+                (
+                    "select".into(),
+                    CatalogEntry::Select(BTreeMap::from([("active".into(), "On".into())])),
+                ),
+            ]),
+            1,
+        );
+        let empty = HashMap::new();
+        assert!(matches!(
+            translator.translate_with("plain", &empty),
+            Some(Cow::Borrowed("Ready"))
+        ));
+        assert!(matches!(
+            translator.translate_with("template", &empty),
+            Some(Cow::Borrowed("Hello {name}"))
+        ));
+        for (key, args) in [
+            ("template", HashMap::from([("name".into(), "Mira".into())])),
+            (
+                "select",
+                HashMap::from([("select".into(), "active".into())]),
+            ),
+            ("select", empty.clone()),
+        ] {
+            let full = translator.resolve_with(key, &args, None);
+            assert!(!full.missing);
+            assert_eq!(
+                translator.translate_with(key, &args).as_deref(),
+                Some(full.text.as_str())
+            );
+        }
+        assert_eq!(translator.translate_with("absent", &empty), None);
+    }
 
     // cargo test -p mesh-core-locale --release --lib -- cached_icu_formatter_profile --ignored --nocapture
     #[test]

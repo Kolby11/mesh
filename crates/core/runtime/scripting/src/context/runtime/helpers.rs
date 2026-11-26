@@ -188,28 +188,46 @@ pub(super) fn create_i18n_library(
     localized_misses: Arc<Mutex<Vec<LocalizedTextResolution>>>,
 ) -> mlua::Result<Table> {
     let exports = lua.create_table()?;
+    let empty_args = HashMap::new();
     exports.set(
         "t",
-        lua.create_function(move |_lua, (key, values): (LuaValue, Option<Table>)| {
+        lua.create_function(move |lua, (key, values): (LuaValue, Option<Table>)| {
+            let string_key;
+            let converted_key;
             let key = match key {
-                LuaValue::String(value) => value.to_str()?.to_string(),
-                other => lua_value_to_string(other),
+                LuaValue::String(ref value) => {
+                    string_key = value.to_str()?;
+                    string_key.as_ref()
+                }
+                other => {
+                    converted_key = lua_value_to_string(other);
+                    converted_key.as_str()
+                }
             };
-            let mut args = HashMap::new();
-            if let Some(values) = values {
+            let mut call_args;
+            let args = if let Some(values) = values {
+                call_args = HashMap::new();
                 for pair in values.pairs::<String, LuaValue>() {
                     let (name, value) = pair?;
-                    args.insert(name, lua_value_to_string(value));
+                    call_args.insert(name, lua_value_to_string(value));
                 }
-            }
-            let resolution = {
-                let cell = locale_cell.lock().unwrap();
-                cell.resolver.resolve_with(&key, &args, None)
+                &call_args
+            } else {
+                &empty_args
             };
-            if resolution.missing {
-                localized_misses.lock().unwrap().push(resolution.clone());
+            let resolver = Arc::clone(&locale_cell.lock().unwrap().resolver);
+            if let Some(text) = resolver.translate_with(key, args) {
+                return lua.create_string(text.as_bytes());
             }
-            Ok(resolution.text)
+            let miss = LocalizedTextResolution::missing(
+                resolver.module_id(),
+                key,
+                None,
+                resolver.snapshot_revision(),
+            );
+            let text = lua.create_string(&miss.text);
+            localized_misses.lock().unwrap().push(miss);
+            text
         })?,
     )?;
     Ok(exports)
@@ -233,4 +251,127 @@ pub(super) fn is_component_definition_specifier(module: &str) -> bool {
         || module.starts_with("./")
         || module.starts_with("../")
         || (module.starts_with("@") && !module[1..].contains('@'))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{LocaleBoundState, ScriptState};
+    use mesh_core_elements::VariableStore;
+    use mesh_core_locale::{LocaleEngine, compile_catalog};
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    #[test]
+    #[ignore = "release-only Luau translation workload"]
+    fn settings_translation_hit_workload() {
+        const MODULE: &str = "@mesh/settings";
+        const LABELS: usize = 160;
+        const BATCHES: usize = 1_500;
+        let catalog: Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../../modules/frontend/settings/config/i18n/sk.json"
+        )))
+        .unwrap();
+        let mut locale = LocaleEngine::new("sk");
+        locale.load_module_catalog(MODULE, compile_catalog("sk", &catalog));
+        let translator = locale.module_translator(MODULE);
+        let cell = Arc::new(Mutex::new(LocaleCell {
+            resolver: Arc::new(translator.owned()),
+        }));
+        let lua = Lua::new();
+        let keys: Vec<_> = catalog
+            .as_object()
+            .unwrap()
+            .keys()
+            .take(LABELS)
+            .map(String::as_str)
+            .collect();
+        let labels = lua.create_sequence_from(keys.iter().copied()).unwrap();
+        assert_eq!(labels.raw_len(), LABELS);
+        let misses = Arc::new(Mutex::new(Vec::new()));
+        let current: Function = create_i18n_library(&lua, cell.clone(), misses.clone())
+            .unwrap()
+            .get("t")
+            .unwrap();
+        let previous = lua
+            .create_function(move |_, (key, _): (LuaValue, Option<Table>)| {
+                let key = match key {
+                    LuaValue::String(value) => value.to_str()?.to_string(),
+                    other => lua_value_to_string(other),
+                };
+                let resolution =
+                    cell.lock()
+                        .unwrap()
+                        .resolver
+                        .resolve_with(&key, &HashMap::new(), None);
+                assert!(!resolution.missing);
+                Ok(resolution.text)
+            })
+            .unwrap();
+        let run = lua
+            .load(
+                "local t, labels, batches = ...\n\
+                 local checksum = 0\n\
+                 for _ = 1, batches do\n\
+                     for _, key in ipairs(labels) do checksum += #t(key) end\n\
+                 end\n\
+                 return checksum",
+            )
+            .into_function()
+            .unwrap();
+        let luau = |translate: &Function| {
+            run.call::<usize>((translate.clone(), labels.clone(), BATCHES))
+                .unwrap()
+        };
+        eprintln!("{BATCHES} batches of {LABELS} Settings labels");
+        compare_translation_paths(
+            "luau_translation_hit_speedup",
+            [&|| luau(&previous), &|| luau(&current)],
+        );
+        assert!(misses.lock().unwrap().is_empty());
+
+        let state = ScriptState::new();
+        let bound = LocaleBoundState::new(&state, translator.clone());
+        let template = |translate: &dyn Fn(&str) -> String| {
+            let mut checksum = 0;
+            for _ in 0..BATCHES {
+                for key in &keys {
+                    checksum += translate(black_box(*key)).len();
+                }
+            }
+            checksum
+        };
+        compare_translation_paths(
+            "template_translation_hit_speedup",
+            [
+                &|| template(&|key| translator.resolve(key, None).text),
+                &|| template(&|key| bound.translate(key).unwrap()),
+            ],
+        );
+    }
+
+    fn compare_translation_paths(metric: &str, lanes: [&dyn Fn() -> usize; 2]) {
+        let mut samples = [Vec::new(), Vec::new()];
+        let mut expected = None;
+        for pair in 0..6 {
+            for lane in [pair % 2, 1 - pair % 2] {
+                let started = Instant::now();
+                let checksum = lanes[lane]();
+                let elapsed = started.elapsed();
+                assert_eq!(checksum, *expected.get_or_insert(checksum));
+                if pair > 0 {
+                    samples[lane].push(elapsed);
+                }
+            }
+        }
+        for sample in &mut samples {
+            sample.sort_unstable();
+        }
+        let [previous, current] = samples;
+        let speedup = previous[2].as_secs_f64() / current[2].as_secs_f64();
+        eprintln!("{metric}: prior {previous:?}; current {current:?}");
+        println!("MESH_PERF metric={metric} value={speedup:.6}");
+        assert!(speedup >= 1.25, "{metric} was {speedup:.2}x");
+    }
 }

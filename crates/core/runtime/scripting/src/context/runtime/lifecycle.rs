@@ -122,6 +122,17 @@ impl ScriptContext {
         Ok(())
     }
 
+    /// Clear a live binding if it still points to the retiring runtime.
+    pub fn remove_live_binding(&self, binding: &str, generation: u64) -> Result<(), ScriptError> {
+        let mut generations = self.live_binding_generations.borrow_mut();
+        if generations.get(binding) == Some(&generation) {
+            self.env().set(binding, LuaValue::Nil).map_err(map_lua_error)?;
+            generations.remove(binding);
+            self.invalidate_reactive_effects();
+        }
+        Ok(())
+    }
+
     /// Re-sync reactive state after a live `bind:this` cross-call mutated this
     /// child's `_ENV` directly (bypassing the shell's normal post-handler sync).
     ///

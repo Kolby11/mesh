@@ -3,7 +3,7 @@
     blur_enabled = { type = "bool", default = true, label = "Backdrop blur" },
     blur_radius = { type = "size", default = "var(--effect-backdrop-blur-surface-radius)", label = "Blur radius" },
     blur_background = { type = "color", default = "var(--effect-backdrop-blur-surface-background)", label = "Frosted background" },
-    corner_radius = { type = "size", default = "var(--radius-lg)", label = "Corner radius" },
+    corner_radius = { type = "size", default = "var(--navigation-frame-radius, var(--radius-lg))", label = "Corner radius" },
 }
 </props>
 
@@ -31,8 +31,8 @@
 <style>
     .nav-shell {
         width: 100%;
-        height: 40px;
-        margin: 8px 8px 0;
+        height: var(--navigation-frame-height, 40px);
+        margin: var(--navigation-frame-margin, 8px 8px 0);
         container-type: inline-size;
         justify-content: space-between;
         align-items: center;
@@ -45,6 +45,7 @@
         overflow-y: hidden;
         background-color: prop(blur_background);
         border-radius: prop(corner_radius);
+        box-shadow: var(--navigation-frame-shadow, none);
         color: var(--color-on-surface);
         transition-property: background-color, color, gap;
         transition-duration: var(--animation-duration-medium);

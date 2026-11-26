@@ -3,6 +3,7 @@ use super::*;
 
 mod candidates;
 mod lifecycle;
+pub(super) mod ingress;
 mod spawn;
 mod supervision;
 

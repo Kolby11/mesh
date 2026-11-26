@@ -398,17 +398,25 @@ impl ShellComponent for FrontendSurfaceComponent {
         event: &ServiceEvent,
         generation: u64,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
-        self.service_revision
-            .set(self.service_revision.get().wrapping_add(1));
-        let ServiceEvent::Updated {
-            service,
-            source_module,
-            payload,
-        } = event
-        else {
+        let ServiceEvent::Updated { payload, .. } = event else {
+            self.service_revision.set(self.service_revision.get().wrapping_add(1));
             let requests = self.handle_interface_event(event)?;
             return Ok(self.record_frontend_host_effects(requests));
         };
+        self.handle_shared_service_update(event, generation, &mesh_core_frontend_shell_adapter::SharedServicePayload::new(payload))
+    }
+
+    fn handle_shared_service_update(
+        &mut self,
+        event: &ServiceEvent,
+        generation: u64,
+        shared: &mesh_core_frontend_shell_adapter::SharedServicePayload,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        let ServiceEvent::Updated { service, source_module, .. } = event else {
+            return self.handle_service_event_with_generation(event, generation);
+        };
+        self.service_revision.set(self.service_revision.get().wrapping_add(1));
+        let payload = &shared.value;
         update_last_service_trace(
             &mut self.last_service_update,
             service,
@@ -417,7 +425,7 @@ impl ShellComponent for FrontendSurfaceComponent {
         );
         let caps = cached_service_capabilities(&mut self.cached_service_capabilities, service);
         let service_name = &caps.service_name;
-        let payload_fingerprint = ScriptContext::service_payload_fingerprint(payload);
+        let payload_fingerprint = shared.fingerprint;
         let previous_payload = update_cached_service_payload_with_generation(
             &mut self.cached_service_payloads,
             service_name,
@@ -426,13 +434,6 @@ impl ShellComponent for FrontendSurfaceComponent {
             source_module,
             generation,
         );
-        // The cache keeps an older snapshot when this one is stale, so only a
-        // matching entry may stand in for the event's payload.
-        let shared_payload = self
-            .cached_service_payloads
-            .get(service_name.as_str())
-            .filter(|cached| cached.fingerprint == payload_fingerprint)
-            .map(|cached| Arc::clone(&cached.value));
         let mut needs_rebuild = false;
         // Whether every runtime this update dirties has a complete record of
         // the template expressions reading the changed fields.
@@ -462,24 +463,13 @@ impl ShellComponent for FrontendSurfaceComponent {
                 );
                 continue;
             }
-            let applied = match &shared_payload {
-                Some(shared) => runtime
-                    .script_ctx
-                    .apply_shared_service_payload_with_generation(
-                        service_name,
-                        shared,
-                        payload_fingerprint,
-                        Some(source_module),
-                        generation,
-                    ),
-                None => runtime.script_ctx.apply_service_payload_with_generation(
-                    service_name,
-                    payload,
-                    payload_fingerprint,
-                    Some(source_module),
-                    generation,
-                ),
-            };
+            let applied = runtime.script_ctx.apply_shared_service_payload_with_generation(
+                service_name,
+                payload,
+                payload_fingerprint,
+                Some(source_module),
+                generation,
+            );
             if !applied {
                 self.sync_runtime_generation(
                     instance_key,
@@ -517,9 +507,8 @@ impl ShellComponent for FrontendSurfaceComponent {
                 || runtime
                     .script_ctx
                     .observes_state_member("last_service_update");
-            if apply_service_update_with_name_and_fingerprint(
+            if apply_shared_service_update(
                 runtime.script_ctx.state_mut(),
-                true,
                 observed,
                 service_name,
                 source_module,
@@ -536,10 +525,13 @@ impl ShellComponent for FrontendSurfaceComponent {
             }
             let state_changed = runtime.script_ctx.state().is_dirty();
             if state_changed || {
-                let previous = runtime.script_ctx.state().get(service_name);
+                let state = runtime.script_ctx.state();
+                let previous = state.get_ref(service_name)
+                    .map(std::borrow::Cow::Borrowed)
+                    .or_else(|| state.get(service_name).map(std::borrow::Cow::Owned));
                 runtime.script_ctx.tracked_service_fields_changed(
                     service_name,
-                    previous.as_ref(),
+                    previous.as_deref(),
                     payload,
                 )
             } {
@@ -605,21 +597,28 @@ impl ShellComponent for FrontendSurfaceComponent {
     }
 
     fn cache_service_payload_with_generation(&mut self, event: &ServiceEvent, generation: u64) {
-        let ServiceEvent::Updated {
-            service,
-            source_module,
-            payload,
-        } = event
-        else {
+        if let ServiceEvent::Updated { payload, .. } = event {
+            self.cache_shared_service_update(event, generation, &mesh_core_frontend_shell_adapter::SharedServicePayload::new(payload));
+        }
+    }
+
+    fn cache_shared_service_update(
+        &mut self,
+        event: &ServiceEvent,
+        generation: u64,
+        shared: &mesh_core_frontend_shell_adapter::SharedServicePayload,
+    ) {
+        let ServiceEvent::Updated { service, source_module, .. } = event else {
             return;
         };
+        let payload = &shared.value;
         let service_name = crate::service::service_name_from_interface_cow(service);
         if !self.declared_service_names.contains(service_name.as_ref()) {
             return;
         }
         self.service_revision
             .set(self.service_revision.get().wrapping_add(1));
-        let fingerprint = ScriptContext::service_payload_fingerprint(payload);
+        let fingerprint = shared.fingerprint;
         update_cached_service_payload_with_generation(
             &mut self.cached_service_payloads,
             service_name.as_ref(),
@@ -639,16 +638,15 @@ impl ShellComponent for FrontendSurfaceComponent {
             if !runtime.script_ctx.can_read_service_interface(service) {
                 continue;
             }
-            seeded |= runtime.script_ctx.apply_service_payload_with_generation(
+            seeded |= runtime.script_ctx.apply_shared_service_payload_with_generation(
                 service_name.as_ref(),
                 payload,
                 fingerprint,
                 Some(source_module),
                 generation,
             );
-            apply_service_update_with_name_and_fingerprint(
+            apply_shared_service_update(
                 runtime.script_ctx.state_mut(),
-                true,
                 true,
                 service_name.as_ref(),
                 source_module,
@@ -965,6 +963,19 @@ impl ShellComponent for FrontendSurfaceComponent {
         // even when another node gives the child list nonempty partial damage.
         self.child_display_lists.get_mut().clear();
         self.surface_pixels_invalid = true;
+        self.invalidate_paint();
+    }
+
+    fn request_resource_paint(&mut self, child_key: Option<&str>) {
+        match child_key {
+            None => self.surface_pixels_invalid = true,
+            Some(tooltip::TOOLTIP_CHILD_KEY) => self.tooltip_popup_handled_generation.set(None),
+            Some(key) => {
+                if let Some(node) = self.last_tree.as_ref().and_then(|tree| find_node_by_key(tree, key)) {
+                    self.child_display_lists.get_mut().entries.remove(&node.id);
+                }
+            }
+        }
         self.invalidate_paint();
     }
 
@@ -1545,9 +1556,9 @@ impl ShellComponent for FrontendSurfaceComponent {
     fn handle_child_surface_input(
         &mut self,
         node_key: &str,
-        theme: &Theme,
-        width: u32,
-        height: u32,
+        _theme: &Theme,
+        _width: u32,
+        _height: u32,
         content_offset: (f32, f32),
         input: ComponentInput,
     ) -> Result<Vec<CoreRequest>, ComponentError> {
@@ -1565,45 +1576,21 @@ impl ShellComponent for FrontendSurfaceComponent {
         {
             return Ok(Vec::new());
         }
-        let bounds = promoted_child_origin(node);
-        // The promoted popover is laid out in-flow under its trigger (often extending
-        // off the parent surface), but presented as a separate popup. Hit-testing the
-        // parent tree would clip the off-surface content and is blocked by the popover's
-        // `hidden` wrapper, so instead run input against the popover subtree in isolation
-        // — offset to local origin exactly like `paint_child_surface` — using the
-        // popup-local coordinates directly. Node `_mesh_key`s are identical to the real
-        // tree, so the hover state and dispatched handlers (`onpointerenter` /
-        // `onpointerleave`, option clicks) stay consistent after the real tree is
-        // restored.
-        //
-        // The child buffer is padded so descendant shadow/transform overshoot
-        // has pixels to paint into, and `paint_child_surface` places the
-        // subtree at `content_offset` inside it. Pointer coordinates arrive in
-        // that same padded buffer space, so the identical offset has to be
-        // baked in here — otherwise every hit test is skewed by the padding,
-        // and because the bubble float animation makes the padding oscillate,
-        // a stationary cursor over an option drifts in and out of the subtree
-        // and spuriously fires `pointerleave` on the popover.
-        let mut subtree = node.clone();
-        // `hidden` is the parent-surface paint/input exclusion marker. The
-        // same retained node is painted again as the child window, where that
-        // marker must not prune the subtree.
-        subtree.attributes.remove(Prop::Hidden);
-        offset_widget_tree_layout(
-            &mut subtree,
-            -bounds.0 + content_offset.0,
-            -bounds.1 + content_offset.1,
-        );
-        // Handler writes must patch the real tree, not this offset copy.
-        let held = self.begin_held_tree_dispatch();
-        let saved_tree = self.last_tree.replace(subtree);
-        let result = self.handle_component_input(theme, width, height, input);
-        self.last_tree = saved_tree;
-        self.end_held_tree_dispatch(held);
-        result.map(|requests| self.record_frontend_host_effects(requests))
+        let origin = promoted_child_origin(node);
+        let offset = (origin.0 - content_offset.0, origin.1 - content_offset.1);
+        // Only the root carries the parent-surface exclusion marker. Its
+        // children share the retained storage and keep their original geometry.
+        let mut root = node.clone();
+        root.attributes.remove(Prop::Hidden);
+        let input = translate_child_surface_input(input, offset.0, offset.1);
+        self.dispatch_child_surface_input(&root, offset, input)
+            .map(|requests| self.record_frontend_host_effects(requests))
     }
 
     fn hovered_target_is_interactive(&self) -> bool {
+        if let Some(interactive) = self.child_hover_interactive {
+            return interactive;
+        }
         let Some(tree) = self.last_tree.as_ref() else {
             return false;
         };
@@ -2642,6 +2629,9 @@ impl FrontendSurfaceComponent {
             self.retained_display_list.damage_rects(),
             surface_damage,
             requires_tree_rebuild,
+            !canvas.is_scene()
+                && !self.buffer_overlaid
+                && !self.retained_display_list.scroll_shifts().is_empty(),
             &visual_damage_rects,
             &tooltip_damage_rects,
             effective_damage_rects,
@@ -2977,9 +2967,9 @@ impl FrontendSurfaceComponent {
             }
         }
         if structure_rebuilt {
-            fn live_instances(node: &WidgetNode, ids: &mut HashSet<String>) {
+            fn live_instances<'a>(node: &'a WidgetNode, ids: &mut HashSet<&'a str>) {
                 if let Some(instance) = node.memo_instance() {
-                    ids.insert(instance.to_owned());
+                    ids.insert(instance);
                 }
                 for child in &node.children {
                     live_instances(child, ids);
@@ -2987,6 +2977,7 @@ impl FrontendSurfaceComponent {
             }
             let mut ids = HashSet::new();
             live_instances(&tree, &mut ids);
+            self.retire_unrendered_keyed_instances(&ids);
             self.component_prop_recipes
                 .borrow_mut()
                 .retain(|id, _| ids.contains(id.as_ref()));

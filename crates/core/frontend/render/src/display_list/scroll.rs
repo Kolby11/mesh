@@ -2,7 +2,7 @@ use mesh_core_elements::style::{BlendMode, Position};
 use mesh_core_elements::{AffineTransform, WidgetNode};
 
 /// Content-space retention currently admits translation-only subtrees without
-/// fixed descendants or compositing/readback dependencies. Nested scrollers
+/// fixed descendants or backdrop readback dependencies. Nested scrollers
 /// retain their existing geometry inside the outer content coordinate space.
 /// Everything else keeps the established cumulative-affine rebuild path.
 pub(super) fn can_retain_scroll_content(node: &WidgetNode, world: AffineTransform) -> bool {
@@ -19,10 +19,12 @@ fn is_translation(transform: AffineTransform) -> bool {
 }
 
 fn plain_content(node: &WidgetNode) -> bool {
+    if super::build::node_is_explicitly_hidden(node) {
+        return true;
+    }
     let style = &node.computed_style;
     style.position != Position::Fixed
         && style.transform.is_translation_only()
-        && style.opacity == 1.0
         && style.mix_blend_mode == BlendMode::Normal
         && style.filter.blur_radius == 0.0
         && !mesh_core_elements::ShapeGeometry::clips_children(node)
@@ -32,6 +34,8 @@ fn plain_content(node: &WidgetNode) -> bool {
             .is_some_and(|source| !source.trim().is_empty())
         && !node.attributes.contains_key(mesh_core_elements::Prop::RenderSource)
         && style.backdrop_filter.blur_radius == 0.0
+        && !style.backdrop_filter.has_refraction()
+        && style.backdrop_filter.grain == 0.0
         && node.children.iter().all(plain_content)
 }
 

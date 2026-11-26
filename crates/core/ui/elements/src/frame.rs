@@ -14,7 +14,9 @@ use crate::interaction_contract::NodeEligibility;
 use crate::layout::LayoutRect;
 use crate::prop::Prop;
 use crate::style::ComputedStyle;
-use crate::tree::{NodeId, NodeState, WidgetNode, WidgetTreeValidationError, validate_widget_tree};
+use crate::tree::{
+    NodeId, NodeState, WidgetNode, WidgetTreeValidationError, popover_open, validate_widget_tree,
+};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
@@ -610,7 +612,7 @@ impl FrameSnapshot {
             &mut node_ids,
             &mut identities,
         )?;
-        let accessibility = AccessibilityTree::from_validated_widget_tree(root);
+        let (accessibility, popover_anchors) = AccessibilityTree::from_validated_widget_tree(root);
 
         let mut index = HashMap::with_capacity(nodes.len());
         let mut node_index = HashMap::with_capacity(nodes.len());
@@ -651,15 +653,11 @@ impl FrameSnapshot {
             }
         }
         let mut popover_triggers: HashMap<usize, Vec<usize>> = HashMap::new();
-        for (popover, node) in nodes.iter().enumerate() {
-            if let Some(trigger) = node
-                .semantic()
-                .and_then(|semantic| semantic.relationships.popover_trigger.as_ref())
-            {
-                let trigger = index[trigger];
-                dependents.entry(popover).or_default().push(trigger);
-                popover_triggers.entry(trigger).or_default().push(popover);
-            }
+        for (popover, trigger) in popover_anchors {
+            let popover = node_index[&popover];
+            let trigger = node_index[&trigger];
+            dependents.entry(popover).or_default().push(trigger);
+            popover_triggers.entry(trigger).or_default().push(popover);
         }
         let mut snapshot = Self(Arc::new(FrameSnapshotData {
             revision,
@@ -1080,6 +1078,7 @@ fn same_structure_and_references(live: &WidgetNode, old: &FrameNode) -> bool {
             Prop::AnchorTarget,
             Prop::AnchorElement,
             Prop::Target,
+            Prop::RenderTarget,
         ]
         .iter()
         .all(|name| live.attributes.get(*name) == old.attributes.get(*name))
@@ -1121,7 +1120,6 @@ fn apply_frame_reference_text(
     }
 }
 
-/// Mirrors `project_popover_expansion` in the full projection.
 fn apply_frame_popover_expansion(
     semantic: &mut FrameSemanticNode,
     index: usize,
@@ -1129,14 +1127,11 @@ fn apply_frame_popover_expansion(
     popover_triggers: &HashMap<usize, Vec<usize>>,
 ) {
     if let Some(popovers) = popover_triggers.get(&index) {
-        semantic.info.state.expanded = Some(popovers.iter().any(|&popover| {
-            nodes
-                .get(popover)
-                .local_info
-                .state
-                .expanded
-                .unwrap_or(false)
-        }));
+        semantic.info.state.expanded = Some(
+            popovers
+                .iter()
+                .any(|&popover| popover_open(&nodes.get(popover).attributes)),
+        );
     }
 }
 
@@ -1686,6 +1681,75 @@ mod tests {
             Err(FrameSnapshotError::UnknownElementTag { ref tag, .. })
                 if tag == "not-an-element"
         ));
+    }
+
+    #[test]
+    fn hidden_popovers_update_trigger_expansion_in_full_and_dirty_frames() {
+        let mut root = WidgetNode::new("box");
+        let mut trigger = WidgetNode::new("button");
+        trigger.attributes.insert(Prop::Ref, "trigger".into());
+        trigger.attributes.insert(Prop::AriaExpanded, "true".into());
+        let trigger_id = trigger.id;
+        root.children.push(trigger);
+
+        let mut wrapper = WidgetNode::new("box");
+        wrapper.mark_promoted_popover();
+        wrapper.attributes.insert(Prop::Hidden, "true".into());
+        for _ in 0..2 {
+            let mut popover = WidgetNode::new("box");
+            popover
+                .attributes
+                .insert(Prop::DataMeshElement, "popover".into());
+            popover.attributes.insert(Prop::AnchorRef, "trigger".into());
+            popover.attributes.insert(Prop::Open, "false".into());
+            wrapper.children.push(popover);
+        }
+        root.children.push(wrapper);
+
+        let expanded = |frame: &FrameSnapshot| {
+            frame
+                .node_by_id(trigger_id)
+                .unwrap()
+                .semantic()
+                .unwrap()
+                .info
+                .state
+                .expanded
+        };
+        let mut previous = FrameSnapshot::complete(&root, 1, None).unwrap();
+        assert_eq!(expanded(&previous), Some(false));
+
+        for (step, (popup, open, expected)) in [
+            (0, true, true),
+            (1, true, true),
+            (0, false, true),
+            (1, false, false),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let popover = &mut root.children[1].children[popup];
+            popover.attributes.insert(Prop::Open, open.to_string());
+            let popover_id = popover.id;
+            let revision = step as u64 + 2;
+            let dirty = FrameSnapshot::capture_dirty(
+                &root,
+                revision,
+                FramePhaseStamps::complete(revision),
+                &previous,
+                &HashSet::from([popover_id]),
+            )
+            .unwrap();
+            let full = FrameSnapshot::complete(&root, revision, Some(&previous)).unwrap();
+            assert!(dirty.node_by_id(popover_id).unwrap().semantic().is_none());
+            assert_eq!(expanded(&dirty), Some(expected));
+            assert_eq!(expanded(&dirty), expanded(&full));
+            assert_eq!(
+                dirty.semantic_diff().changes(),
+                full.semantic_diff().changes()
+            );
+            previous = dirty;
+        }
     }
 
     /// `capture_dirty` shares clean records and reprojects only the dirty ones,

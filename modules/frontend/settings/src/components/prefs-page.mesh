@@ -17,87 +17,129 @@
             <text class="settings-card-title">{empty_title}</text>
             <text class="settings-card-meta">{empty_copy}</text>
         </column>
-        {#for section in view key={section.id}}
-            <column class="pref-section">
-                <text class="pref-section-title" hidden={section.title_text == "" and section.title == ""}>{section.title_text ~= "" and section.title_text or t(section.title)}</text>
-                <text class="pref-section-copy" hidden={section.copy_text == ""}>{section.copy_text}</text>
-                <column class="pref-group">
-                    {#for row in section.rows key={row.id}}
-                        <box class="pref-divider" hidden={row.first} />
-                        {#if row.kind == "nav"}
-                            <button class="pref-row pref-row-nav" class:pref-row-first={row.first} aria-label={row.label_text ~= "" and row.label_text or t(row.label)} onclick={onNav(row.id)}>
-                                <text class="pref-title">{row.label_text ~= "" and row.label_text or t(row.label)}</text>
-                                <row class="pref-nav-end">
-                                    <text class="pref-nav-value">{row.value_text}</text>
-                                    <text class="pref-nav-chevron">›</text>
-                                </row>
-                            </button>
-                        {/if}
-                        {#if row.kind == "action" and row.label_text == ""}
-                            <button class="pref-row pref-row-nav" class:pref-row-first={row.first} disabled={row.disabled} aria-label={t(row.label)} onclick={onAction(row.id)}>
-                                <column class="pref-copy">
-                                    <text class="pref-title" class:pref-title-danger={row.danger} class:pref-title-disabled={row.disabled}>{t(row.label)}</text>
-                                    <text class="pref-hint" hidden={row.copy_text == ""}>{row.copy_text}</text>
-                                </column>
-                            </button>
-                        {/if}
-                        {#if row.kind ~= "nav" and not (row.kind == "action" and row.label_text == "")}
-                            <row class="pref-row" class:pref-row-first={row.first}>
-                                <column class="pref-copy">
-                                    <text class="pref-title">{row.label_text ~= "" and row.label_text or t(row.label)}</text>
-                                    <text class="pref-hint" hidden={row.copy_text == ""}>{row.copy_text}</text>
-                                    {#if row.kind == "choice"}
-                                        <row class="pref-choices">
-                                            {#for opt in row.options key={opt.id}}
-                                                <button class="pref-choice" class:pref-choice-active={opt.active} aria-pressed={opt.active} disabled={row.disabled} onclick={onChoice(row.id, opt.id)}>
-                                                    <text>{t(opt.label)}</text>
-                                                </button>
-                                            {/for}
-                                        </row>
-                                    {/if}
-                                </column>
-                                {#if row.kind == "switch"}
-                                    <button class="pref-switch" class:pref-switch-on={row.on} role="switch" aria-checked={row.on} aria-label={row.label_text ~= "" and row.label_text or t(row.label)} disabled={row.disabled} onclick={onToggle(row.id)}>
-                                        <box class="pref-switch-thumb" class:pref-switch-thumb-on={row.on} />
-                                    </button>
-                                {/if}
-                                {#if row.kind == "stepper"}
-                                    <row class="pref-stepper">
-                                        <button class="pref-step" aria-label={t('pref.decrease')} disabled={row.disabled} onclick={onStep(row.id, -1)}><text>−</text></button>
-                                        <text class="pref-value">{row.value_text}</text>
-                                        <button class="pref-step" aria-label={t('pref.increase')} disabled={row.disabled} onclick={onStep(row.id, 1)}><text>+</text></button>
+        <row class="pref-group battery-summary" hidden={battery_level == ""}>
+            <text class="battery-summary-value">{battery_level}</text>
+            <column class="pref-copy">
+                <text class="pref-title">{battery_status}</text>
+                <text class="pref-hint" hidden={battery_remaining == ""}>{battery_remaining}</text>
+            </column>
+        </row>
+        <column class="pref-group monitor-card" hidden={not show_monitors}>
+            <text class="pref-section-title">{t('pref.section.outputs')}</text>
+            <box class="monitor-map">
+                {#for monitor in monitors key={monitor.id}}
+                    <button class="monitor-output" class:monitor-output-active={monitor.focused}
+                        style:left={monitor.left} style:top={monitor.top} style:width={monitor.width} style:height={monitor.height}
+                        aria-label={monitor.name} title={monitor.name} onclick={onNav(monitor.id)}>
+                        <text class="monitor-name">{monitor.name}</text>
+                        <text class="monitor-resolution">{monitor.resolution}</text>
+                    </button>
+                {/for}
+            </box>
+        </column>
+        {#for band in view key={band.id}}
+            <row class="pref-band">
+                {#for lane in band.lanes key={lane.id}}
+                    <column class="pref-lane">
+                        {#for section in lane.sections key={section.id}}
+                            <column class="pref-section">
+                                {#if section.id == "master"}<AudioPage />{/if}
+                                {#if section.id == "profiles" and has_profiles}
+                                    <row class="profile-grid">
+                                        {#for row in section.rows key={row.id}}
+                                            <button class="profile-choice" class:profile-choice-active={row.disabled} disabled={row.disabled} onclick={onAction(row.id)}>
+                                                <text class="pref-title">{row.label_text}</text>
+                                                <text class="pref-hint" hidden={not row.disabled}>{t('common.active')}</text>
+                                            </button>
+                                        {/for}
                                     </row>
                                 {/if}
-                                {#if row.kind == "text"}
-                                    <input class="pref-input" value={row.query} oninput={onFieldInput} placeholder={row.placeholder} aria-label={t(row.label)} />
-                                {/if}
-                                {#if row.kind == "secret"}
-                                    <password class="pref-input" value={row.query} oninput={onSecretInput} placeholder={row.placeholder} aria-label={t(row.label)} />
-                                {/if}
-                                {#if row.kind == "meter"}
-                                    <column class="pref-meter-box">
-                                        <progress class="pref-meter" value={row.fraction} min="0" max="1" />
-                                        <text class="pref-hint pref-meter-text">{row.value_text}</text>
+                                {#if section.id ~= "master" and not (section.id == "profiles" and has_profiles)}
+                                    <column class="pref-group">
+                                        <text class="pref-section-title" hidden={section.title_text == "" and section.title == ""}>{section.title_text ~= "" and section.title_text or t(section.title)}</text>
+                                        <text class="pref-section-copy" hidden={section.copy_text == ""}>{section.copy_text}</text>
+                                        {#for row in section.rows key={row.id}}
+                                            <box class="pref-divider" hidden={row.first} />
+                                            {#if row.kind == "nav"}
+                                                <button class="pref-row pref-row-nav" class:pref-row-first={row.first} aria-label={row.label_text ~= "" and row.label_text or t(row.label)} onclick={onNav(row.id)}>
+                                                    <text class="pref-title">{row.label_text ~= "" and row.label_text or t(row.label)}</text>
+                                                    <row class="pref-nav-end">
+                                                        <text class="pref-nav-value">{row.value_text}</text>
+                                                        <text class="pref-nav-chevron">›</text>
+                                                    </row>
+                                                </button>
+                                            {/if}
+                                            {#if row.kind == "action" and row.label_text == ""}
+                                                <button class="pref-row pref-row-nav" class:pref-row-first={row.first} disabled={row.disabled} aria-label={t(row.label)} onclick={onAction(row.id)}>
+                                                    <column class="pref-copy">
+                                                        <text class="pref-title" class:pref-title-danger={row.danger} class:pref-title-disabled={row.disabled}>{t(row.label)}</text>
+                                                        <text class="pref-hint" hidden={row.copy_text == ""}>{row.copy_text}</text>
+                                                    </column>
+                                                </button>
+                                            {/if}
+                                            {#if row.kind ~= "nav" and not (row.kind == "action" and row.label_text == "")}
+                                                <row class="pref-row" class:pref-row-first={row.first}>
+                                                    <column class="pref-copy">
+                                                        <text class="pref-title">{row.label_text ~= "" and row.label_text or t(row.label)}</text>
+                                                        <text class="pref-hint" hidden={row.copy_text == ""}>{row.copy_text}</text>
+                                                        {#if row.kind == "choice"}
+                                                            <row class="pref-choices">
+                                                                {#for opt in row.options key={opt.id}}
+                                                                    <button class="pref-choice" class:pref-choice-active={opt.active} aria-pressed={opt.active} disabled={row.disabled} onclick={onChoice(row.id, opt.id)}>
+                                                                        <text>{t(opt.label)}</text>
+                                                                    </button>
+                                                                {/for}
+                                                            </row>
+                                                        {/if}
+                                                    </column>
+                                                    {#if row.kind == "switch"}
+                                                        <button class="pref-switch" class:pref-switch-on={row.on} role="switch" aria-checked={row.on} aria-label={row.label_text ~= "" and row.label_text or t(row.label)} disabled={row.disabled} onclick={onToggle(row.id)}>
+                                                            <box class="pref-switch-thumb" class:pref-switch-thumb-on={row.on} />
+                                                        </button>
+                                                    {/if}
+                                                    {#if row.kind == "stepper"}
+                                                        <row class="pref-stepper">
+                                                            <button class="pref-step" aria-label={t('pref.decrease')} disabled={row.disabled} onclick={onStep(row.id, -1)}><text>−</text></button>
+                                                            <text class="pref-value">{row.value_text}</text>
+                                                            <button class="pref-step" aria-label={t('pref.increase')} disabled={row.disabled} onclick={onStep(row.id, 1)}><text>+</text></button>
+                                                        </row>
+                                                    {/if}
+                                                    {#if row.kind == "text"}
+                                                        <input class="pref-input" value={row.query} oninput={onFieldInput} placeholder={row.placeholder} aria-label={t(row.label)} />
+                                                    {/if}
+                                                    {#if row.kind == "secret"}
+                                                        <password class="pref-input" value={row.query} oninput={onSecretInput} placeholder={row.placeholder} aria-label={t(row.label)} />
+                                                    {/if}
+                                                    {#if row.kind == "meter"}
+                                                        <column class="pref-meter-box">
+                                                            <progress class="pref-meter" value={row.fraction} min="0" max="1" />
+                                                            <text class="pref-hint pref-meter-text">{row.value_text}</text>
+                                                        </column>
+                                                    {/if}
+                                                    {#if row.kind == "info"}
+                                                        <text class="pref-info">{row.value_text}</text>
+                                                    {/if}
+                                                    {#if row.kind == "action"}
+                                                        <button class="pref-action" class:pref-action-danger={row.danger} disabled={row.disabled} onclick={onAction(row.id)}>
+                                                            <text>{t(row.action_label)}</text>
+                                                        </button>
+                                                    {/if}
+                                                </row>
+                                            {/if}
+                                        {/for}
                                     </column>
                                 {/if}
-                                {#if row.kind == "info"}
-                                    <text class="pref-info">{row.value_text}</text>
-                                {/if}
-                                {#if row.kind == "action"}
-                                    <button class="pref-action" class:pref-action-danger={row.danger} disabled={row.disabled} onclick={onAction(row.id)}>
-                                        <text>{t(row.action_label)}</text>
-                                    </button>
-                                {/if}
-                            </row>
-                        {/if}
-                    {/for}
-                </column>
-            </column>
+                            </column>
+                        {/for}
+                    </column>
+                {/for}
+            </row>
         {/for}
     </column>
 </template>
 
 <script lang="luau">
+local AudioPage = require("./audio-page.mesh")
 hidden = false
 
 local raw_t = import("mesh.i18n", "t")
@@ -328,6 +370,8 @@ PAGES.notifications = {
             set = function(value) if usable(notifications) then notifications.set_dnd(value) end end,
             disabled = needs(notifications),
         }),
+    } },
+    { id = "banners", title = "pref.section.banners", copy = "", rows = {
         stepper("banner_duration_s", 1, 2, 30, {
             fmt = suffix(" s"),
             get = function() return number(module_prop(NOTIFICATIONS_MODULE, "timeout_seconds", 6), 6) end,
@@ -337,6 +381,8 @@ PAGES.notifications = {
             get = function() return number(module_prop(NOTIFICATIONS_MODULE, "max_popups", 3), 3) end,
             set = function(value) write_prop(NOTIFICATIONS_MODULE, "max_popups", value) end,
         }),
+    } },
+    { id = "centre", title = "pref.section.centre", copy = "", rows = {
         stepper("history", 10, 10, 200, {
             get = function() return number(module_prop(NOTIFICATIONS_MODULE, "history", 50), 50) end,
             set = function(value) write_prop(NOTIFICATIONS_MODULE, "history", value) end,
@@ -358,15 +404,6 @@ end
 
 PAGES.power = {
     { id = "battery", title = "pref.section.battery", copy = "pref.section.battery.copy", rows = {
-        info("power_state", function()
-            if not usable(power) then return t("pref.unavailable") end
-            return (power.charging and t("pref.charging") or t("pref.on_battery")) .. " · " .. percent(power.level)
-        end),
-        info("power_remaining", function()
-            if not usable(power) then return t("pref.unavailable") end
-            if power.charging then return duration_text(power.time_to_full_minutes) end
-            return duration_text(power.time_remaining_minutes)
-        end),
         info("power_health", function()
             if not usable(power) or (tonumber(power.health_percent) or 0) <= 0 then return t("pref.unavailable") end
             return percent(power.health_percent)
@@ -465,6 +502,8 @@ PAGES.display = {
             set = function(value) if usable(display) then display.set_night_light(display.night_light == true, value) end end,
             disabled = needs(display),
         }),
+    } },
+    { id = "refresh_policy", title = "", copy = "", rows = {
         sw("adaptive_sync", {
             get = function() return usable(display) and display.adaptive_sync == true end,
             set = function(value) if usable(display) then display.set_adaptive_sync(value) end end,
@@ -513,12 +552,10 @@ PAGES.pointer = {
 
 PAGES.language = {
     { id = "language", title = "pref.section.language", copy = "", rows = {
-        info("locale", function()
-            local current = tostring(mesh.locale.current() or "en")
-            if string.sub(current, 1, 2) == "sk" then return t("language.slovak.native") end
-            if string.sub(current, 1, 2) == "en" then return t("language.english.native") end
-            return current
-        end),
+        choice("locale", { "en", "sk" }, {
+            get = function() return string.sub(tostring(mesh.locale.current() or "en"), 1, 2) end,
+            set = function(locale) mesh.locale.set(locale) end,
+        }),
     } },
     { id = "time", title = "pref.section.time", copy = "pref.section.time.copy", rows = {
         sw("auto_time", {
@@ -634,6 +671,13 @@ local function token_switch(id)
     })
 end
 
+local reduce_motion_row = token_switch("reduce_motion")
+local reduce_transparency_row = sw("reduce_transparency", {
+    get = transparency_reduced,
+    set = set_reduced_transparency,
+    disabled = function() return theme == nil end,
+})
+
 PAGES.accessibility = {
     { id = "assist", title = "pref.section.assist", copy = "pref.section.assist.copy", rows = {
         stepper("base_size", 1, 10, 32, {
@@ -650,13 +694,17 @@ PAGES.accessibility = {
     } },
     { id = "vision", title = "pref.section.vision", copy = "", rows = {
         token_switch("high_contrast"),
-        token_switch("reduce_motion"),
-        sw("reduce_transparency", {
-            get = transparency_reduced,
-            set = set_reduced_transparency,
-            disabled = function() return theme == nil end,
-        }),
+        reduce_motion_row,
+        reduce_transparency_row,
     } },
+}
+
+PAGES.appearance = {
+    { id = "transparency", title = "", copy = "", rows = { reduce_transparency_row } },
+}
+
+PAGES.appearance_motion = {
+    { id = "motion", title = "", copy = "", rows = { reduce_motion_row } },
 }
 
 PAGES.privacy = {
@@ -816,7 +864,7 @@ LISTS.wifi = function()
     else
         current[#current + 1] = info("net_offline", function() return t("common.not_connected") end)
     end
-    sections[#sections + 1] = { id = "current", title = "pref.section.current_network", copy = "", rows = current }
+    for _, row in ipairs(current) do table.insert(sections[1].rows, row) end
 
     local saved = {}
     for _, s in ipairs(nd.saved or {}) do
@@ -1381,6 +1429,93 @@ local MISSING = {
     end,
 }
 
+battery_level = ""
+battery_status = ""
+battery_remaining = ""
+
+local function sync_battery(page)
+    battery_level = ""
+    if page ~= "power" or not usable(power) then return end
+    battery_level = percent(power.level)
+    battery_status = t(power.charging and "pref.charging" or "pref.on_battery")
+    local remaining = power.charging and power.time_to_full_minutes or power.time_remaining_minutes
+    battery_remaining = duration_text(remaining)
+end
+
+monitors = {}
+show_monitors = false
+has_profiles = false
+
+local function sync_monitors(page)
+    monitors = {}
+    show_monitors = false
+    if page ~= "display" or detail ~= "" or not usable(display) then return end
+    local outputs = display.outputs or {}
+    if #outputs == 0 then return end
+    local left, top, right, bottom = math.huge, math.huge, -math.huge, -math.huge
+    for _, output in ipairs(outputs) do
+        local scale = math.max(0.5, output.scale)
+        left, top = math.min(left, output.x), math.min(top, output.y)
+        right = math.max(right, output.x + output.width / scale)
+        bottom = math.max(bottom, output.y + output.height / scale)
+    end
+    local width, height = math.max(1, right - left), math.max(1, bottom - top)
+    local function percent_length(value) return string.format("%.2f%%", value * 100) end
+    local rows = {}
+    for _, output in ipairs(outputs) do
+        local scale = math.max(0.5, output.scale)
+        rows[#rows + 1] = {
+            id = "out:" .. output.name, name = output.name, focused = output.focused,
+            resolution = string.format("%d×%d", output.width, output.height),
+            left = percent_length(0.05 + 0.9 * (output.x - left) / width),
+            top = percent_length(0.05 + 0.9 * (output.y - top) / height),
+            width = percent_length(0.87 * output.width / (scale * width)),
+            height = percent_length(0.87 * output.height / (scale * height)),
+        }
+    end
+    monitors = rows
+    show_monitors = #rows > 0
+end
+
+local PAGE_LAYOUT = {
+    wifi = { { { "radio" } }, { { "available" }, { "vpn", "sharing", "saved" } } },
+    display = { { { "outputs" } }, { { "screen" }, { "comfort" } }, { { "refresh_policy" } } },
+    pointer = { { { "pointer" }, { "scroll" } } },
+    power = { { { "battery" } }, { { "profile" } }, { { "idle" }, { "session" } } },
+    audio = { { { "master", "sinks" }, { "sources", "none" } }, { { "streams" } } },
+    language = { { { "language" }, { "time", "zone" } }, { { "formats" } } },
+    accessibility = { { { "vision" }, { "assist" } } },
+    notifications = { { { "delivery" } }, { { "banners" }, { "centre" } }, { { "notify_apps" } } },
+    privacy = { { { "capabilities" } }, { { "lock" } } },
+    device = { { { "identity", "software", "hardware" }, { "memory", "storage", "battery", "runtime", "network", "displays" } } },
+}
+
+local function arrange_sections(page, sections)
+    local bands, remaining = {}, {}
+    for _, section in ipairs(sections) do remaining[section.id] = section end
+    for index, band in ipairs(PAGE_LAYOUT[page] or {}) do
+        local lanes = {}
+        for lane_index, ids in ipairs(band) do
+            local cards = {}
+            for _, id in ipairs(ids) do
+                local card = remaining[id]
+                if card then
+                    cards[#cards + 1] = card
+                    remaining[id] = nil
+                end
+            end
+            if #cards > 0 then lanes[#lanes + 1] = { id = lane_index, sections = cards } end
+        end
+        if #lanes > 0 then bands[#bands + 1] = { id = "band:" .. index, lanes = lanes } end
+    end
+    for _, section in ipairs(sections) do
+        if remaining[section.id] then
+            bands[#bands + 1] = { id = section.id, lanes = { { id = 1, sections = { section } } } }
+        end
+    end
+    return bands
+end
+
 local function build_view(page)
     row_index = {}
     detail_title = ""
@@ -1431,14 +1566,23 @@ local function build_view(page)
         end
         if #rows > 0 then sections[#sections + 1] = { id = section.id, title = section.title, title_text = section.title_text or "", copy_text = tc(section.copy), rows = rows } end
     end
-    view = sections
+    sync_monitors(page)
+    sync_battery(page)
+    has_profiles = page == "shell" and packages ~= nil and #(packages.profiles or {}) > 0
+    if show_monitors then
+        for index, section in ipairs(sections) do
+            if section.id == "outputs" then table.remove(sections, index); break end
+        end
+    end
+    if page == "audio" and detail == "" then sections[#sections + 1] = { id = "master" } end
+    view = arrange_sections(detail == "" and page or "", sections)
 end
 
 effect(function()
     local page = props.page
     -- Subscribe to every source a row can read.
     local _ = {
-        notifications and notifications.dnd, power and power.level, power and power.charging, brightness and brightness.level,
+        notifications and notifications.dnd, power and power.level, power and power.charging, power and power.time_to_full_minutes, power and power.time_remaining_minutes, brightness and brightness.level,
         apps and apps.installed, packages and packages.active_profile, settings and settings.namespaces,
         display and display.outputs, display and display.night_light, display and display.night_light_kelvin, display and display.adaptive_sync,
         input and input.pointer_speed, input and input.natural_scroll, input and input.tap_to_click, input and input.disable_while_typing,
@@ -1519,32 +1663,81 @@ end
 </script>
 
 <style>
+    .pref-group.battery-summary { padding: 14px 18px; gap: 22px; align-items: center; }
+    .battery-summary-value {
+        height: auto;
+        flex-shrink: 0;
+        font-family: var(--typography-family-brand);
+        font-size: 42px;
+        font-weight: 800;
+        color: var(--glass-settings-text);
+    }
+    .monitor-card { background: var(--glass-settings-sidebar); }
+    .monitor-map { width: 100%; height: 148px; margin: 6px 0 12px; }
+    .monitor-output {
+        position: absolute;
+        min-width: 30px;
+        min-height: 28px;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        padding: 4px;
+        overflow: hidden;
+        background: var(--glass-settings-inset);
+        border: 1px solid var(--glass-settings-rim);
+        border-radius: var(--glass-radius-card);
+        color: var(--glass-settings-text);
+    }
+    .monitor-output-active { border-color: var(--color-primary); background-image: var(--glass-settings-selected); }
+    .monitor-name { font-weight: 700; }
+    .monitor-resolution { font-size: var(--typography-size-xs); color: var(--glass-settings-text-muted); }
+    .profile-grid { width: 100%; gap: 14px; flex-wrap: wrap; }
+    .profile-choice {
+        min-width: 124px;
+        flex-basis: 20%;
+        flex-grow: 1;
+        flex-direction: column;
+        min-height: 76px;
+        gap: 6px;
+        padding: 12px;
+        border: 1px solid var(--glass-settings-rim);
+        border-radius: var(--glass-radius-card);
+        background: var(--glass-settings-inset);
+        box-shadow: var(--glass-shadow-group);
+    }
+    .profile-choice-active { border-color: var(--color-primary); }
+    .pref-band { width: 100%; gap: 14px; flex-wrap: wrap; align-items: flex-start; }
+    .pref-lane { flex-basis: 270px; flex-grow: 1; min-width: 0; max-width: 100%; gap: 14px; }
     .pref-section { width: 100%; gap: 8px; height: auto; flex-shrink: 0; }
     .pref-section-title {
-        padding-left: 4px;
+        height: auto;
+        flex-shrink: 0;
+        padding: 12px 18px 3px;
         color: var(--glass-settings-text-muted);
         font-size: var(--typography-size-xs);
         font-weight: 700;
         letter-spacing: 1px;
         text-transform: uppercase;
     }
-    .pref-section-copy { padding-left: 4px; color: var(--glass-settings-text-muted); font-size: var(--typography-size-xs); line-height: 1.45; }
+    .pref-section-copy { height: auto; flex-shrink: 0; padding: 0 18px 6px; color: var(--glass-settings-text-muted); font-size: var(--typography-size-xs); line-height: 1.45; }
     .pref-group {
         width: 100%;
         height: auto;
         flex-shrink: 0;
         gap: 0;
-        border-radius: var(--radius-md);
-        border-width: 1px;
+        border-radius: var(--glass-radius-card);
+        border-width: var(--glass-border-width);
         border-style: solid;
         border-color: var(--glass-settings-rim);
         background: var(--glass-settings-inset);
+        box-shadow: var(--glass-shadow-group);
     }
     .pref-row {
         width: 100%;
-        min-height: 52px;
-        padding: 10px 16px;
-        gap: 16px;
+        min-height: 44px;
+        padding: var(--glass-settings-row-padding) 18px;
+        gap: 12px;
         align-items: center;
         justify-content: space-between;
         border-radius: 0;
@@ -1584,13 +1777,13 @@ end
         height: 26px;
         padding: 3px;
         flex-shrink: 0;
-        border-radius: 999px;
+        border-radius: var(--glass-radius-switch);
         border-width: 0;
         background-color: var(--glass-settings-switch-track);
     }
     .pref-switch-on { background-color: var(--color-primary); }
     .pref-switch:disabled { opacity: 0.4; }
-    .pref-switch-thumb { width: 20px; height: 20px; border-radius: 999px; background-color: var(--glass-settings-switch-thumb); }
+    .pref-switch-thumb { width: 20px; height: 20px; border-radius: var(--glass-radius-switch); background-color: var(--glass-settings-switch-thumb); }
     .pref-switch-thumb-on { background-color: var(--color-on-primary); margin-left: 18px; }
 
     .pref-stepper { align-items: center; gap: 4px; flex-shrink: 0; }
@@ -1598,12 +1791,13 @@ end
         width: 32px;
         height: 32px;
         padding: 0;
-        border-radius: 999px;
+        border-radius: var(--glass-radius-control);
         border-width: 0;
         background-color: var(--glass-settings-step-fill);
         color: var(--glass-settings-text);
         justify-content: center;
         align-items: center;
+        box-shadow: var(--glass-control-shadow);
     }
     .pref-step:hover { background-color: var(--glass-settings-step-hover); }
     .pref-step:disabled { opacity: 0.4; }

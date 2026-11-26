@@ -1,0 +1,12 @@
+{
+  "launcher.title": "Applications",
+  "launcher.search": "Find an application",
+  "launcher.placeholder": "Find an application…",
+  "launcher.running": "Running",
+  "launcher.pinned": "Pinned application",
+  "launcher.empty": "No applications found",
+  "launcher.no_match": "No matching applications",
+  "launcher.list": "List view",
+  "launcher.grid": "Grid view",
+  "launcher.installed": "Installed"
+}

@@ -1,16 +1,30 @@
+<props>
+{
+    layout = { type = "enum", options = { "islands", "floating", "paper", "rail" }, default = "islands" },
+}
+</props>
+
 <template>
-    <row class="pill" onpointerleave={onLeave}>
+    <row class="pill" class:compact={props.layout ~= "islands"} class:rail={props.layout == "rail"} onpointerleave={onLeave}>
         {#for workspace in items key={workspace.id}}
             <button
                 class="ws"
+                class:ws-compact={props.layout ~= "islands"}
+                class:ws-numbered={props.layout == "paper"}
+                class:ws-rail={props.layout == "rail"}
                 class:ws-active={workspace.active}
-                class:ws-active-right={workspace.active and direction == "right"}
-                class:ws-active-left={workspace.active and direction == "left"}
+                class:ws-active-right={props.layout == "islands" and workspace.active and direction == "right"}
+                class:ws-active-left={props.layout == "islands" and workspace.active and direction == "left"}
                 class:ws-occupied={workspace.occupied}
                 onclick={onSwitch(workspace.id)}
                 title={workspace.label}
                 aria-label={workspace.label}
-            />
+                aria-pressed={workspace.active}
+            >
+                {#if props.layout == "paper"}
+                    <text>{workspace.id}</text>
+                {/if}
+            </button>
         {/for}
     </row>
 </template>
@@ -21,7 +35,11 @@ local t = import("mesh.i18n", "t")
 
 -- A fixed strip of slots, like the reference rice: empty workspaces still
 -- show as dim dots so the active pill visibly travels between positions.
-local SLOTS = 6
+local function default_slots()
+    if props.layout == "paper" or props.layout == "rail" then return 4 end
+    if props.layout == "floating" then return 5 end
+    return 6
+end
 
 items = {}
 direction = "right"
@@ -29,7 +47,7 @@ local previous_active = nil
 
 effect(function()
     local occupied = {}
-    local highest = SLOTS
+    local highest = default_slots()
     local current_active = wm.active_workspace
     if wm.available then
         for _, workspace in wm.workspaces do
@@ -189,4 +207,30 @@ function onLeave() end
             transform: scale(1);
         }
     }
+
+    .compact {
+        height: fit;
+        padding: 0;
+        gap: 4px;
+        border: 0;
+        background-image: none;
+        box-shadow: none;
+        backdrop-filter: none;
+        transform: none;
+    }
+
+    .ws-compact { width: 22px; height: 22px; }
+    .ws-compact.ws-active { width: 28px; background-image: none; background-color: var(--color-primary); }
+    .ws-numbered {
+        width: 22px;
+        justify-content: center;
+        align-items: center;
+        color: var(--color-on-surface);
+        background: transparent;
+        font-size: 12px;
+    }
+    .ws-numbered.ws-active { color: var(--color-primary); font-weight: 700; }
+    .rail { flex-direction: column; gap: 6px; }
+    .ws-rail { width: 24px; height: 22px; background: var(--color-secondary); }
+    .ws-rail.ws-active { width: 24px; height: 34px; background: var(--color-primary); }
 </style>

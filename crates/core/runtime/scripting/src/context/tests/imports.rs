@@ -473,15 +473,16 @@ end
 fn require_resolves_mesh_i18n_library_alias() {
     let caps = CapabilitySet::from_ids(["locale.read"]);
     let mut ctx = ScriptContext::new("@mesh/i18n-test", caps).unwrap();
-    ctx.set_i18n_translations(HashMap::from([(
-        "nav.volume".to_string(),
-        "Volume".to_string(),
-    )]));
+    ctx.set_i18n_translations(HashMap::from([
+        ("nav.volume".into(), "Volume".into()),
+        ("7".into(), "Sound level {level}".into()),
+    ]));
     ctx.load_script(
         r#"
 function init()
     local i18n = require("mesh.i18n")
     label = i18n.t("nav.volume")
+    detail = i18n.t(7, {level = 55})
 end
 "#,
     )
@@ -490,6 +491,10 @@ end
     ctx.call_init().unwrap();
 
     assert_eq!(ctx.state.get("label"), Some(serde_json::json!("Volume")));
+    assert_eq!(
+        ctx.state.get("detail"),
+        Some(serde_json::json!("Sound level 55"))
+    );
     assert!(ctx.drain_localized_misses().is_empty());
 }
 

@@ -1,14 +1,21 @@
+<props>
+{
+    compact = { type = "bool", default = false },
+    rail = { type = "bool", default = false },
+}
+</props>
+
 <template>
-    <row class="status">
-        <row class="status-pill status-chip" title={t("status.language_title")} aria-label={t("status.language", { language = language })}>
+    <row class="status" class:compact={props.compact} class:rail={props.rail}>
+        <row hidden={props.rail} class="status-pill status-chip language" class:compact-pill={props.compact} title={t("status.language_title")} aria-label={t("status.language", { language = language })}>
             <icon class="status-glyph" name="input-keyboard" size="13" />
             <text class="status-label">{language}</text>
         </row>
-        <row class="status-pill status-round" title={network_label} aria-label={network_label}>
+        <row class="status-pill status-round" class:compact-pill={props.compact} title={network_label} aria-label={network_label}>
             <icon class="status-glyph" name={network_glyph} size="14" />
         </row>
         <button
-            class="status-pill status-chip status-chip-btn"
+            class="status-pill status-chip status-chip-btn" class:compact-pill={props.compact}
             onclick={onToggleMute}
             onscroll={onVolumeScroll}
             ontwofingerscroll={onVolumeScroll}
@@ -17,15 +24,15 @@
             aria-label={volume_label}
         >
             <icon class="status-glyph" name={volume_glyph} size="14" />
-            <text class="status-label">{volume_text}</text>
+            <text class="status-label" hidden={props.rail}>{volume_text}</text>
         </button>
-        <row class="status-pill status-chip status-battery" class:status-battery-low={battery_low} title={battery_label} aria-label={battery_label}>
-            <icon class="status-glyph status-glyph-dark" name={battery_glyph} size="13" />
-            <text class="status-label status-label-dark" hidden={not battery_show}>{battery_text}</text>
+        <row class="status-pill status-chip status-battery" class:rail-battery={props.rail} class:compact-pill={props.compact} class:status-battery-low={battery_low} title={battery_label} aria-label={battery_label}>
+            <icon class="status-glyph status-glyph-dark" class:compact-battery-text={props.compact} name={battery_glyph} size="13" />
+            <text class="status-label status-label-dark" class:compact-battery-text={props.compact} class:compact-low-text={props.compact and battery_low} hidden={not battery_show}>{battery_text}</text>
         </row>
-        <button class="status-pill status-round control-trigger" ref="glassControls" title={t("controls.title")} aria-label={t("controls.title")} aria-haspopup="true">
+        <button class="status-pill status-round control-trigger" class:compact-pill={props.compact} ref="glassControls" title={t("controls.title")} aria-label={t("controls.title")} aria-haspopup="true">
             <icon class="status-glyph" name="settings" size="16" />
-            <ControlCenter />
+            <ControlCenter rail={props.rail} />
         </button>
     </row>
 </template>
@@ -141,6 +148,7 @@ end
 
 <style>
     .status {
+        --status-foreground: var(--glass-text);
         height: 100%;
         align-items: center;
         gap: 8px;
@@ -149,7 +157,7 @@ end
     .status-pill {
         height: 36px;
         align-items: center;
-        border-radius: 999px;
+        border-radius: var(--glass-radius-bar);
         border: 1px solid var(--glass-rim);
         background-image: var(--glass-surface-pill);
         box-shadow: var(--glass-shadow-pill);
@@ -187,7 +195,7 @@ end
     .status-glyph {
         width: 20px;
         height: 20px;
-        color: var(--glass-text);
+        color: var(--status-foreground);
     }
 
     .status-glyph-dark {
@@ -200,7 +208,7 @@ end
         height: 20px;
         font-size: 13px;
         font-weight: 600;
-        color: var(--glass-text);
+        color: var(--status-foreground);
     }
 
     .status-label-dark {
@@ -243,4 +251,23 @@ end
         transform: scale(var(--animation-scale-press));
         transition-duration: var(--animation-duration-fast);
     }
+
+    .compact { height: fit; gap: 3px; }
+    .status-pill.compact-pill {
+        height: 26px;
+        padding: 0 5px;
+        gap: 4px;
+        border: 0;
+        background-image: none;
+        box-shadow: none;
+        backdrop-filter: none;
+        transform: none;
+    }
+    .compact-pill.status-round { width: 26px; }
+    .compact-battery-text { color: var(--status-foreground); }
+    .compact-low-text { color: var(--color-error); }
+    button.compact-pill:hover { background: var(--glass-hover); }
+
+    .rail { flex-direction: column; --status-foreground: var(--color-inverse-on-surface); }
+    .compact-pill.rail-battery { flex-direction: column; height: fit; }
 </style>

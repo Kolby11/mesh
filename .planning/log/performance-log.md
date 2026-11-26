@@ -10487,3 +10487,211 @@ Run medians for the first screencopy showing the fill move were
 288–303 ms before, 244–321 ms with the thumb change alone, and 85–88 ms
 with release-only audio updates and the fixed thumb. This includes screencopy
 latency. The measurement used a live pointer replay outside the test suite.
+
+## 2026-11-26 — Text-only translation hits
+
+Luau `t()` passes a borrowed catalog string directly to the VM for plain
+labels and builds a localized diagnostic record on an absent key. Compiled
+template lookups use the borrowed module translator before constructing a
+diagnostic record. Both paths preserve the resolved label and the visible
+missing-key marker.
+
+**Measured.** Release, AMD Ryzen 7 7840HS, `settings_translation_hit_workload`.
+Each sample runs 1,500 batches of 160 distinct plain labels from the shipped
+Slovak Settings catalog (240,000 successful lookups). Four runs each recorded
+five alternating before/after pairs after one warm-up pair. Times below are
+ranges of run medians.
+
+| Lookup path | Before | After | Speedup |
+| --- | --- | --- | --- |
+| Luau calling the i18n library | 93.11–95.16 ms | 70.89–73.05 ms | 1.28–1.32× |
+| Compiled-template translation store | 64.51–66.43 ms | 19.03–19.51 ms | 3.37–3.49× |
+
+The first implementation measured 1.23× on the Luau path and missed the
+1.25× gate. Plain lookups gained the remaining margin by skipping the
+entry-locale lookup and reusing an empty argument map. Both
+`luau_translation_hit_speedup` and `template_translation_hit_speedup` passed
+the 1.25× gate in all four final runs. Locale and scripting release library
+suites passed 33 and 412 tests.
+
+## 2026-11-26 — Share template loop locals
+
+Heaptrack on an exploratory release Glass launch attributed 89.75 MB at
+peak to JSON tree clones. The largest stacks passed through loop-local
+capture during hidden-surface prewarm. Each rendered iteration now shares
+one immutable locals snapshot across binding evaluation and retained
+nodes. A fixed-shape keyed refresh shares the new snapshot among the
+changed item's bindings and updates the index once per item. Handler
+binding copies the referenced locals.
+
+**Measured.** Release CLI on a Ryzen 7 7840HS, Hyprland 0.56.2, one
+2880 × 1800 output. Three interleaved pairs per workload used fresh shell
+processes with a private configuration, state directory, and IPC socket.
+Memory is process RSS from `/proc/<pid>/smaps_rollup`, in MiB.
+
+| Workload | Before | After |
+| --- | ---: | ---: |
+| Single nested-list surface, settled, CPU/SHM | 143.4–143.5 | 87.6–87.9 |
+| Glass, eight seconds after IPC startup, GPU | 430.2–573.0 | 439.3–505.9 |
+| Glass, after five Settings and dashboard open/close cycles, GPU | 513.3–624.6 | 461.0–521.7 |
+
+The nested fixture renders 16 groups of 12 keyed rows, eight text nodes
+with three bound attributes per row, and six string payload fields per
+item. Its private anonymous PSS was 102.9–103.0 MiB before and
+47.2–47.5 MiB after. The Glass replay used the same saved Glass profile
+with the Tapedeck theme and 3000 × 2002 wallpaper in every run. Each show
+was held for 0.8 s, followed by a 0.45 s hide interval, with a final
+four-second settling window. Finished RSS fell by 4.9–158.7 MiB in the
+individual pairs. Frontend and provider initialization timeouts varied
+between Glass runs, so the workload gives a range for the live session.
+The reported 1.1 GB peak remains unverified.
+
+`keyed_list_handler_write_during_input_patches_and_rebinds_item_handlers`
+now gates snapshot sharing on initial render and after an item update.
+It also checks that a refreshed handler receives the new item value.
+The release build and 52 focused tests passed, covering keyed lists with
+retained verification and the shipped Glass surface suite.
+
+## 2026-11-26 — Reclaim idle heap pages
+
+An exploratory Glass run with 20 rounds of Settings, dashboard, wallpaper
+picker and radial launcher open/close cycles settled at 665.5 MiB RSS. A
+separate six-round diagnostic asked glibc to trim after the panels closed
+and RSS dropped from 593.1 to 520.9 MiB in the same process. The diagnostic
+call took 13.7 ms.
+
+On glibc, startup, prewarm, and committed surface visibility changes now
+schedule a heap trim on a blocking worker. A two-second delay coalesces
+visibility changes and the shell waits for an idle turn with at least
+50 ms of scheduler slack before submitting the work.
+
+**Measured.** Release CLI on the Ryzen 7 7840HS, Hyprland 0.56.2, one
+2880 × 1800 output, GPU presentation. Three interleaved pairs used the
+saved Glass profile and wallpaper from the template-locals measurement.
+Each run started with eight seconds of idle time and then four rounds
+of opening and closing Settings, dashboard, wallpaper picker and radial
+launcher. Each show lasted 0.8 s with a 0.45 s hide interval. RSS below is
+from `/proc/<pid>/smaps_rollup` in MiB.
+
+| Sample | Before | After |
+| --- | ---: | ---: |
+| Startup idle | 429.7–500.0 | 414.7–482.9 |
+| At the end of the final hide interval | 551.9–648.5 | 558.3–632.9 |
+| Four seconds later | 551.9–648.5 | 523.1–591.5 |
+| RSS returned during those four seconds | -0.02–0.00 | 35.16–42.35 |
+
+Provider and component startup varied, so the same-process post-close
+comparison isolates the observable reclamation. Each updated run logged
+two successful trims, one at startup and one after the panel burst.
+Worker calls took 2.3–7.0 ms. These measurements cover settled RSS.
+The 1.1 GB report remains unverified. A separate exploratory profile
+switch was rejected by the fixture's recorder capability approval.
+
+The GPU-enabled release CLI built successfully. Eleven release scheduler
+tests passed. Live replay verification checked the number of trim passes
+and the reduction within each updated run.
+
+## 2026-11-26 — Reuse decoded wallpaper pixels
+
+An unfiltered, square-cornered wallpaper can draw directly from the decoded
+image when the draw aligns with the output pixel grid and neither source
+dimension exceeds its output dimension by more than 20%. The direct draw uses
+the existing centered cover fit and mipmap sampling. Effects, scaled or
+fractionally translated draws, and oversized sources use the prepared path.
+The per-axis allowance bounds the nominal mipmapped upload size relative to
+the output-sized CPU raster and texture it replaces.
+
+**Measured.** Ryzen 7 7840HS, Hyprland 0.56.2, release CLI with the earlier
+template and allocator changes. The fixture mounted the shipped Glass wallpaper
+as the sole surface, with a 3000 × 2002 JPEG on one 2880 × 1800 output.
+Three fresh interleaved pairs per renderer used private config, state and IPC.
+RSS was sampled from `/proc/<pid>/smaps_rollup` after twelve seconds.
+
+| Renderer | Before RSS (MiB) | After RSS (MiB) | Paired RSS reduction (MiB) |
+| --- | ---: | ---: | ---: |
+| GPU | 212.21–212.41 | 193.39–193.67 | 18.70–18.92 |
+| CPU/SHM | 148.87–149.21 | 129.14–129.30 | 19.71–19.96 |
+
+Separate GPU heaptrack captures showed the 19.8 MiB output raster on the
+old path and its removal on the direct path. The source image and mipmaps
+were present in both captures. These are static-wallpaper process
+measurements.
+
+`plain_wallpaper_reuses_source_pixels_and_preserves_cover_fit` gates the
+empty prepared cache and compares translucent crop, minification and
+magnification pixels to the old prepared path with a one-level tolerance.
+It also checks fallback for oversized sources and transformed draws. Ten
+release backdrop tests and the existing `glass_raster_profile` gate passed.
+
+## 2026-11-26 — Promoted popup input, keyed lifetime and backend ingress
+
+Promoted popup input uses retained geometry and translates incoming points.
+Authored events retain popup-local positions and bounds. In the release
+`popup_input_preparation_profile`, six paired samples of 500 pointer preparations
+against a 2,113-node popup took 974–1,285 ms with subtree copying and
+80–90 µs with coordinate translation. This measures input preparation only,
+outside hit testing, Luau dispatch and painting.
+
+Keyed structural reconciliation unmounts removed instances in child-first
+order and drops their tasks, caches and interned keys. The release
+`keyed_component_churn_retires_runtimes_memos_and_tasks` gate ran 128
+insert/remove rounds with eight new keys per round, taking 0.98–1.09 s in
+three runs. After each removal the surface held one runtime and interned key,
+with zero child memo entries or deadlines. The previous lifecycle retained
+the removed contexts. Counts measure live objects, independent of allocator RSS.
+
+Backend bridges reserve space at the final shell inbox and replace adjacent
+snapshots for one provider incarnation in place. Ordered messages keep their
+position and wait for capacity. Frontend observers share the normalized
+payload in both service proxies and script state. In release, three paused
+consumer runs of `backend_ingress_coalesces_paused_snapshot_bursts_and_backpressures_results`
+held one queued snapshot per 1k, 10k and 100k update burst, versus one queued
+message per update in the former bridge. Send times for the three sizes were
+0.48–0.52 ms, 3.98–8.35 ms and 39.40–54.15 ms. The same gate filled all 256
+ordered slots, proved the next result waited, then checked delivery order
+after draining. This fixture measures queue occupancy and send time, without
+isolating RSS or input-to-presentation latency.
+
+## 2026-11-26 — Restore retained Appearance scrolling
+
+Opacity groups and hidden subtrees in the redesigned settings content had
+blocked retained scroll scopes. Replay now handles isolated groups in content
+coordinates, keeps their command spans balanced and admits uniform gradients
+beneath the viewport. An eligible raster shift keeps viewport damage out of
+the full-repaint heuristic, while presentation still receives the full
+moved rectangle. Sampled or varying backdrops keep ordinary replay.
+
+Three alternating release pairs of `d9_settings_scroll_frame_gate` opened
+Appearance with the expanded resource lists on a 920 × 900 fixture at scale
+1. Each sample drove 60 touchpad frames and 30 momentum frames at 16 ms.
+The earlier binary shifted zero frames and measured 3.91–4.66 ms p50 and
+4.94–5.60 ms p90. The candidate shifted 59 of 60 finger frames and 21
+momentum frames on each run, with 1.02–1.27 ms p50 and 1.44–1.60 ms p90.
+`settings_scroll_shifted_fraction` exceeded its 90% floor. The pixel-parity
+fixture compared the retained result with a full CPU paint.
+The Liquid Glass variant also ran; its varying backdrop kept ordinary replay.
+
+## 2026-11-27 — Scope scene-cache admission to each target
+
+Each parent and promoted surface now owns its paint resource consumer.
+Scene admission checks that consumer's pending work, and completion repaints
+the requesting target. The renderer regression verifies independent
+admission, invalidation and pixel parity across two consumers.
+
+Three release runs of `dock_scene_cache_while_settings_loads_wallpaper_previews`
+drove 30 hover frames of the 1920 × 180 Liquid Glass dock with ten pinned
+tiles while a 920 × 900 Settings fixture had three PNG preview rasters pending.
+Each mode started with an empty scene cache and a separate set of previews.
+The global check recorded 1,620 node pictures and reused zero on each run.
+Target-scoped admission recorded 1,358–1,418 and reused 202–262. Total CPU
+workload time ranged 141–173 ms for the global check and 150–186 ms for scoped
+admission. The ranges overlap and the separate preview files introduce
+variance, so these samples establish cache reuse during loading. Compositor
+latency remains unmeasured.
+
+Release `resource_completion_fanout_profile` used 32 consumers, eight loads
+shared by two consumers per batch, and 1,000 batches. Three alternating pairs
+measured 1.10–1.56 ms without pending counts and 1.05–1.12 ms with counts.
+Each mode produced exactly 2,000 repaints. This is subscription and
+completion overhead during loading. Unchanged idle-frame overhead remains
+open.

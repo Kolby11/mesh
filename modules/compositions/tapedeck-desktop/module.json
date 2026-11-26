@@ -1,0 +1,61 @@
+{
+  "name": "@mesh/tapedeck-desktop",
+  "version": "0.1.0",
+  "description": "Tapedeck desktop with a bevelled taskbar and a bottom application shelf.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "composition",
+    "extends": "@mesh/glass",
+    "uses": {
+      "modules": {
+        "@mesh/tapedeck": ">=0.1.0",
+        "@mesh/level-osd": ">=0.1.0"
+      }
+    },
+    "compose": {
+      "resources": {
+        "theme": "@mesh/tapedeck"
+      },
+      "settings": {
+        "@mesh/glass-bar": {
+          "props": {
+            "global": {
+              "desktop_layout": "tapedeck"
+            }
+          }
+        },
+        "@mesh/glass-dock": {
+          "props": {
+            "global": {
+              "desktop_layout": "tapedeck"
+            }
+          }
+        },
+        "@mesh/glass-widgets": {
+          "props": {
+            "global": {
+              "desktop_layout": "tapedeck"
+            }
+          }
+        },
+        "@mesh/glass-notifications#default": {
+          "surface": {
+            "anchor": "right"
+          }
+        },
+        "@mesh/glass-notifications": {
+          "props": {
+            "global": {
+              "right_aligned": true
+            }
+          }
+        }
+      },
+      "roots": {
+        "@mesh/level-osd#default": {
+          "module": "@mesh/level-osd"
+        }
+      }
+    }
+  }
+}

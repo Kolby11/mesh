@@ -56,9 +56,10 @@ Rules:
   list's spacer boxes are `aria-hidden`.
 - State attributes (`aria-pressed`, `checked`, `selected`, `expanded`) bind
   reactively like any attribute.
-- A `<popover>` trigger (its `anchor-ref` target) is `expanded` exactly while
-  a popover anchored to it is open; this overrides an authored
-  `aria-expanded`, so triggers do not restate it.
+- A `<popover>` trigger (its `anchor-ref` target) exposes `expanded=true`
+  when any anchored popover is open and `expanded=false` when all are closed.
+  This overrides authored `aria-expanded` and includes popovers hidden from
+  the semantic tree, such as those promoted to a child surface.
 - All author-facing text is localizable ([07](07-i18n.md)) — accessible
   names go through the same catalogs as visible strings.
 - Surface roots declare `mesh.accessibility: { role, label }` in the

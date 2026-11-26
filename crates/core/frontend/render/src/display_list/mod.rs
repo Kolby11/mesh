@@ -1488,18 +1488,33 @@ impl RetainedDisplayList {
                     continue;
                 };
                 match command.kind {
-                    DisplayPaintCommandKind::PushScrollContent => nested.push(index),
-                    DisplayPaintCommandKind::PopScrollContent => {
-                        if let Some(start) = nested.pop() {
+                    DisplayPaintCommandKind::PushScrollContent
+                    | DisplayPaintCommandKind::PushCompositingLayer
+                    | DisplayPaintCommandKind::PushFilterLayer => nested.push(index),
+                    DisplayPaintCommandKind::PopScrollContent if nested.is_empty() => {
+                        scope.pop = index;
+                        scopes.extend(open.take());
+                    }
+                    DisplayPaintCommandKind::PopScrollContent
+                    | DisplayPaintCommandKind::PopCompositingLayer
+                    | DisplayPaintCommandKind::PopFilterLayer => {
+                        if let Some(start) = nested.pop()
+                            && nested.is_empty()
+                        {
                             let bounds = plan
                                 .topology
                                 .commands
                                 .get(start)
-                                .map_or(DamageRect::default(), command_bounds);
+                                .map_or(DamageRect::default(), |command| {
+                                    let clip = command.clip;
+                                    DamageRect {
+                                        x: clip.x.max(0) as u32,
+                                        y: clip.y.max(0) as u32,
+                                        width: clip.width.max(0) as u32,
+                                        height: clip.height.max(0) as u32,
+                                    }
+                                });
                             scope.entries.push((start, index + 1, bounds));
-                        } else {
-                            scope.pop = index;
-                            scopes.extend(open.take());
                         }
                     }
                     _ if nested.is_empty() => {

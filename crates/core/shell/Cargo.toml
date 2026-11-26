@@ -47,6 +47,9 @@ slotmap = { workspace = true }
 smallvec = "1"
 rayon = { workspace = true }
 
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+libc = { workspace = true }
+
 [dev-dependencies]
 mesh-core-frontend-runtime = { workspace = true, features = ["test-support"] }
 libc = { workspace = true }

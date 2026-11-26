@@ -547,7 +547,10 @@ impl Shell {
         let mut requests = VecDeque::new();
         let mut component_failures = Vec::new();
         match event {
-            ServiceEvent::Updated { service, .. } => {
+            ServiceEvent::Updated { service, payload, .. } => {
+                let shared = std::cell::LazyCell::new(|| {
+                    mesh_core_frontend_shell_adapter::SharedServicePayload::new(payload)
+                });
                 let service_name = crate::shell::service::service_name_from_interface_cow(service);
                 let interface = canonical_interface_name_cow(service);
                 let generation = self
@@ -587,7 +590,7 @@ impl Shell {
                     if runtime.component.observes_service_event(event) {
                         match runtime
                             .component
-                            .handle_service_event_with_generation(event, generation)
+                            .handle_shared_service_update(event, generation, &shared)
                         {
                             Ok(emitted) => {
                                 requests.extend(runtime.effect_origin().attribute(emitted))
@@ -597,7 +600,7 @@ impl Shell {
                     } else {
                         runtime
                             .component
-                            .cache_service_payload_with_generation(event, generation);
+                            .cache_shared_service_update(event, generation, &shared);
                     }
                 }
                 if let Some(subscribers) = update_services.get(service_name.as_ref()) {
@@ -612,7 +615,7 @@ impl Shell {
                             component_epochs[component_index] = epoch;
                             match runtime
                                 .component
-                                .handle_service_event_with_generation(event, generation)
+                                .handle_shared_service_update(event, generation, &shared)
                             {
                                 Ok(emitted) => {
                                     requests.extend(runtime.effect_origin().attribute(emitted))
@@ -637,7 +640,7 @@ impl Shell {
                             component_epochs[component_index] = epoch;
                             runtime
                                 .component
-                                .cache_service_payload_with_generation(event, generation);
+                                .cache_shared_service_update(event, generation, &shared);
                         }
                     }
                 }

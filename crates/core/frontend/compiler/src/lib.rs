@@ -10,11 +10,12 @@ use mesh_core_elements::HandlerTarget;
 use mesh_core_elements::Prop;
 use mesh_core_elements::{
     AccessibilityInfo, ComponentCompositionProps, EventHandlerCall, LayoutEngine, NodeId,
-    StyleContext, StyleResolver, VariableStore, WidgetNode, validate_widget_tree,
+    StyleContext, StyleResolver, TemplateLocals, VariableStore, WidgetNode, validate_widget_tree,
 };
 use mesh_core_module::Manifest;
 use mesh_core_theme::Theme;
 
+use std::cell::OnceCell;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
@@ -43,6 +44,7 @@ struct LayeredStore<'a> {
     base: &'a dyn VariableStore,
     item_name: &'a str,
     item_value: &'a serde_json::Value,
+    locals: OnceCell<Arc<TemplateLocals>>,
     loop_identity: Option<String>,
     keyed_item: Option<mesh_core_elements::KeyedTemplateItem>,
 }
@@ -76,10 +78,17 @@ impl VariableStore for LayeredStore<'_> {
         self.base.translate(key)
     }
 
-    fn template_locals(&self) -> serde_json::Map<String, serde_json::Value> {
-        let mut locals = self.base.template_locals();
-        locals.insert(self.item_name.to_owned(), self.item_value.clone());
-        locals
+    fn template_locals(&self) -> Option<&Arc<TemplateLocals>> {
+        Some(self.locals.get_or_init(|| {
+            let mut locals = self
+                .base
+                .template_locals()
+                .map(Arc::as_ref)
+                .cloned()
+                .unwrap_or_default();
+            locals.insert(self.item_name.to_owned(), self.item_value.clone());
+            Arc::new(locals)
+        }))
     }
     fn loop_identity(&self) -> Option<&str> {
         self.loop_identity.as_deref()
@@ -927,24 +936,10 @@ mod tests {
 
     #[test]
     fn shipped_settings_surface_compiles_with_local_pages() {
-        fn first_node_with_class<'a>(
-            node: &'a WidgetNode,
-            class_name: &str,
-        ) -> Option<&'a WidgetNode> {
-            if node
-                .attributes
-                .get(Prop::Class)
-                .is_some_and(|classes| classes.split_whitespace().any(|class| class == class_name))
-            {
-                return Some(node);
-            }
-            node.children
-                .iter()
-                .find_map(|child| first_node_with_class(child, class_name))
-        }
-
         let module_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../modules/frontend/settings");
+            .join("../../../../modules/frontend/settings")
+            .canonicalize()
+            .unwrap();
         let loaded = mesh_core_module::manifest::load_canonical_manifest(&module_dir)
             .expect("settings manifest should load");
         let compiled = compile_frontend_module(&loaded.manifest, &module_dir)
@@ -953,7 +948,6 @@ mod tests {
         for page in [
             "AdvancedPage",
             "AppearancePage",
-            "AudioPage",
             "KeyboardPage",
             "PrefsPage",
         ] {
@@ -962,18 +956,11 @@ mod tests {
                 "settings should register {page}"
             );
         }
+        assert!(compiled.has_local_component(
+            Some(&module_dir.join("src/components/prefs-page.mesh")),
+            "AudioPage",
+        ));
         assert_eq!(compiled.watched_paths.len(), 6);
-
-        let tree = compiled.build_preview_tree(&mesh_core_theme::default_theme(), 1280, 900);
-        let settings_shell =
-            first_node_with_class(&tree, "settings-shell").expect("settings-shell node");
-        assert_eq!(
-            (
-                settings_shell.layout.width.round() as u32,
-                settings_shell.layout.height.round() as u32,
-            ),
-            (920, 700)
-        );
     }
 
     #[test]

@@ -1,35 +1,6 @@
 <template>
     <column class="settings-page" hidden={hidden}>
         <column class="settings-section">
-            <text class="settings-section-title">Layout customization</text>
-            <text class="settings-section-copy">Arrange components inside regions exposed by shell modules.</text>
-            <GlassButton label="Open layout editor" onclick={openCompositionEditor} />
-        </column>
-
-        <column class="settings-section">
-            <text class="settings-section-title">{t('advanced.active_providers')}</text>
-            <text class="settings-section-copy">{providers_count .. t(providers_summary) .. providers_notice_separator .. t(provider_notice)}</text>
-            {#if #provider_rows > 0}
-            <list class="settings-list" label={t('advanced.active_backend_providers')}>
-                {#for row in provider_rows}
-                    <list-item class="settings-card">
-                        <column class="settings-card-copy">
-                            <text class="settings-card-title">{row.interface}</text>
-                            <text class="settings-card-meta">{row.provider}</text>
-                        </column>
-                        <GlassButton label={t('advanced.next_provider')} onclick={onProviderNext(row.interface, row.provider)} hidden={row.action_hidden} />
-                    </list-item>
-                {/for}
-            </list>
-            {:else}
-            <empty-state class="settings-empty-state">
-                <text class="settings-card-title">{t('advanced.no_active_bindings')}</text>
-                <text class="settings-section-copy">{t('advanced.bindings_waiting')}</text>
-            </empty-state>
-            {/if}
-        </column>
-
-        <column class="settings-section">
             <row class="settings-section-head">
                 <column class="settings-card-copy">
                     <text class="settings-section-title">{t('advanced.installed_modules')}</text>
@@ -80,6 +51,35 @@
                 <text class="settings-section-copy">{t('advanced.clear_filter')}</text>
             </empty-state>
             {/if}
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">{t('advanced.active_providers')}</text>
+            <text class="settings-section-copy">{providers_count .. t(providers_summary) .. providers_notice_separator .. t(provider_notice)}</text>
+            {#if #provider_rows > 0}
+            <list class="settings-list" label={t('advanced.active_backend_providers')}>
+                {#for row in provider_rows}
+                    <list-item class="settings-card">
+                        <column class="settings-card-copy">
+                            <text class="settings-card-title">{row.interface}</text>
+                            <text class="settings-card-meta">{row.provider}</text>
+                        </column>
+                        <GlassButton label={t('advanced.next_provider')} onclick={onProviderNext(row.interface, row.provider)} hidden={row.action_hidden} />
+                    </list-item>
+                {/for}
+            </list>
+            {:else}
+            <empty-state class="settings-empty-state">
+                <text class="settings-card-title">{t('advanced.no_active_bindings')}</text>
+                <text class="settings-section-copy">{t('advanced.bindings_waiting')}</text>
+            </empty-state>
+            {/if}
+        </column>
+
+        <column class="settings-section">
+            <text class="settings-section-title">Layout customization</text>
+            <text class="settings-section-copy">Arrange components inside regions exposed by shell modules.</text>
+            <GlassButton label="Open layout editor" onclick={openCompositionEditor} />
         </column>
 
         <column class="settings-section">

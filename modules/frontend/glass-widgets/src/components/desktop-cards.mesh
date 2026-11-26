@@ -1,0 +1,104 @@
+<props>
+{
+    layout = { type = "enum", options = { "floating", "paper", "tapedeck", "rail" }, default = "floating" },
+}
+</props>
+
+<template>
+    <row class="canvas" class:paper={props.layout == "paper"} class:retro={props.layout == "tapedeck"} class:rail={props.layout == "rail"}>
+        {#if props.layout == "rail"}
+            <WeatherCard card_width="380px" card_height="248px" />
+        {/if}
+        {#if props.layout == "floating" or props.layout == "paper"}
+            <column class="clock" class:paper-clock={props.layout == "paper"}>
+                <text class="date">{date}</text>
+                <text class="time" class:paper-time={props.layout == "paper"}>{clock}</text>
+                <text class="forecast" hidden={forecast == ""}>{forecast}</text>
+            </column>
+        {/if}
+        {#if props.layout ~= "paper"}
+            <MediaCard card_width={props.layout == "rail" and "380px" or "360px"} />
+        {/if}
+    </row>
+</template>
+
+<script lang="luau">
+local MediaCard = require("./media-card.mesh")
+local WeatherCard = require("./weather-card.mesh")
+local weather = require("mesh.weather")
+local t = import("mesh.i18n", "t")
+
+clock = ""
+date = ""
+forecast = ""
+
+local function tick()
+    local now = os.time()
+    clock = mesh.locale.format_time(now, "short")
+    date = mesh.locale.format_date(now, "full")
+end
+
+effect(function()
+    if weather.available and weather.temperature ~= nil then
+        local parts = {tostring(math.round(weather.temperature)) .. " °" .. (weather.unit or "C")}
+        if weather.condition and weather.condition ~= "" then
+            parts[#parts + 1] = t("weather." .. weather.condition)
+        end
+        if weather.location and weather.location ~= "" then
+            parts[#parts + 1] = weather.location
+        end
+        forecast = table.concat(parts, " · ")
+    else
+        forecast = ""
+    end
+end)
+
+if props.layout == "floating" or props.layout == "paper" then
+    tick()
+    task.spawn(function()
+        while true do
+            task.sleep(1000)
+            tick()
+        end
+    end)
+end
+</script>
+
+<style>
+    .canvas {
+        width: 100%;
+        padding-inline: 40px;
+        gap: 16px;
+        flex-direction: column;
+        align-items: flex-start;
+        background: transparent;
+    }
+
+    .clock {
+        width: 360px;
+        max-width: 100%;
+        padding: 16px 18px;
+        gap: 4px;
+        border: var(--glass-border-width) solid var(--glass-rim);
+        border-radius: var(--glass-radius-card);
+        background-image: var(--glass-surface-panel);
+        box-shadow: var(--glass-shadow-card);
+        backdrop-filter: var(--glass-backdrop-card);
+        color: var(--glass-text);
+    }
+
+    .date { font-size: 13px; font-weight: 700; color: var(--glass-text-muted); }
+    .time { height: 76px; font-size: 64px; font-family: var(--typography-family-brand); line-height: 1.15; }
+    .forecast { color: var(--glass-text-muted); }
+
+    .paper { padding-inline: 56px; }
+    .paper-clock { padding: 0; border: 0; background-image: none; box-shadow: none; backdrop-filter: none; }
+    .paper-time { height: 114px; font-size: 96px; }
+    .retro { padding-inline: 32px; }
+    .rail { padding-inline: 14px 94px; flex-direction: row; flex-wrap: wrap; gap: 24px; }
+
+    @container (max-width: 800px) {
+        .canvas { padding-inline: 20px; }
+        .rail { padding-inline: 14px 16px; }
+    }
+</style>

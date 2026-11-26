@@ -1,12 +1,19 @@
+<props>
+{
+    side = { type = "enum", options = { "bottom", "right" }, default = "bottom" },
+}
+</props>
+
 <template>
     <popover
         open={open}
         class="menu-shell"
         aria-label="Switch shell"
         anchor-ref="profileButton"
-        anchor="bottom"
-        gravity="bottom"
-        offset-y="8"
+        anchor={props.side}
+        gravity={props.side}
+        offset-x={props.side == "right" and 8 or 0}
+        offset-y={props.side == "bottom" and 8 or 0}
         open-on="click"
     >
         <column class="menu">

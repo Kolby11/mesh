@@ -71,8 +71,7 @@ impl FrontendSurfaceComponent {
             return None;
         }
         let host_instance_key = self.instance_keys.borrow_mut().intern(host_instance_key);
-        let loop_identity =
-            loop_identity.map(|identity| self.instance_keys.borrow_mut().intern(identity));
+        let loop_identity = loop_identity.map(std::sync::Arc::from);
         let mut occurrences = self.composition_occurrences.borrow_mut();
         let next = occurrences
             .entry((host_instance_key, source_ordinal, loop_identity))

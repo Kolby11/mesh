@@ -347,10 +347,10 @@ pub(super) fn parse_attributes_runtime(
                 expression,
                 call_binding,
             } => {
-                let mut locals = state
-                    .map(VariableStore::template_locals)
-                    .unwrap_or_default();
-                locals.retain(|name, _| expression.referenced_identifiers().contains(name));
+                let locals = state
+                    .and_then(VariableStore::template_locals)
+                    .map(Arc::as_ref);
+                let locals = super::expr_eval::handler_locals(locals, expression);
                 let target = if let Some(composition) = composition {
                     composition.bind_handler_expression(
                         instance_key,

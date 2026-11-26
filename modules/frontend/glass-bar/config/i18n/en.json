@@ -1,4 +1,10 @@
 {
+  "desktop.apps": "Applications",
+  "notifications.title": "Notifications",
+  "notifications.clear": "Clear all",
+  "notifications.dnd": "Do not disturb",
+  "notifications.empty": "No notifications",
+  "notifications.dismiss": "Dismiss notification",
   "controls.title": "Quick controls",
   "controls.eyebrow": "CONTROL CENTER",
   "controls.welcome": "Make yourself at home",

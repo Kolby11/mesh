@@ -1,10 +1,12 @@
 <props>
 {
+    desktop_layout = { type = "enum", options = { "widgets", "floating", "paper", "tapedeck", "rail" }, default = "widgets" },
     top_offset = { type = "size", default = "360px", label = "Distance from the top of the screen" },
 }
 </props>
 
 <template>
+    {#if props.desktop_layout == "widgets"}
     <row ref="widgetDesktop" class="desk" class:desk-resized={media_width > 0 or weather_width > 0}>
         <box class="gap-left" class:gap-resized={media_width > 0 or weather_width > 0} />
         <column class="slot slot-media" class:slot-media-default={media_display_width == 0} style:--desktop-widget-width={media_display_width > 0 and tostring(media_display_width) .. "px" or nil}>
@@ -25,9 +27,16 @@
         </box>
         <box class="gap-right" class:gap-resized={media_width > 0 or weather_width > 0} />
     </row>
+    {:else}
+        <row class="canvas-surface" class:canvas-paper={props.desktop_layout == "paper"}
+            class:canvas-retro={props.desktop_layout == "tapedeck"} class:canvas-rail={props.desktop_layout == "rail"}>
+            <DesktopCards layout={props.desktop_layout} />
+        </row>
+    {/if}
 </template>
 
 <script lang="luau">
+local DesktopCards = require("./components/desktop-cards.mesh")
 local MediaCard = require("./components/media-card.mesh")
 local WeatherCard = require("./components/weather-card.mesh")
 local Spectrum = require("./components/spectrum.mesh")
@@ -91,6 +100,16 @@ end
 </script>
 
 <style>
+    .canvas-surface {
+        width: 100%;
+        margin-top: 32px;
+        exclusive-zone: none;
+        background: transparent;
+    }
+    .canvas-paper { margin-top: 50px; }
+    .canvas-retro { margin-top: 96px; }
+    .canvas-rail { margin-top: 30px; }
+
     /* Flexible outer gaps preserve the reference's off-centre composition
     while the compact layout stacks the cards before they can overlap. */
     .desk {

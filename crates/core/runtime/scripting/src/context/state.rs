@@ -273,107 +273,66 @@ impl ScriptState {
     }
 
     /// Set a host-produced reactive value using its precomputed fingerprint.
-    /// Unchanged values are rejected before cloning large JSON payloads or
-    /// running a recursive equality comparison.
     pub fn set_with_fingerprint(&mut self, name: &str, value: &Value, fingerprint: u64) {
-        if let Some(proxy) = self.proxies.get(name)
-            && let Some(setter) = &proxy.setter
-        {
-            (setter)(value.clone());
-            return;
-        }
-        if self
-            .host_value_fingerprints
-            .get(name)
-            .is_some_and(|previous| *previous == fingerprint)
-        {
-            return;
-        }
-
-        self.variables
-            .insert(name.to_owned(), Arc::new(value.clone()));
-        self.host_value_fingerprints
-            .insert(name.to_owned(), fingerprint);
-        self.dirty = true;
-        self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
-        self.mutation_generation = self.mutation_generation.wrapping_add(1);
-        self.cached_snapshot
-            .get_mut()
-            .expect("snapshot cache poisoned")
-            .take();
+        self.set_fingerprinted_value(name, fingerprint, true, || Arc::new(value.clone()));
     }
 
-    /// Install a host-produced value the owning runtime has been observed not
-    /// to read, keeping it correct for a later first read without claiming the
-    /// runtime changed.
-    ///
-    /// Service capabilities are declared per module, so every component
-    /// instance of that module is handed every payload the module may read —
-    /// including instances whose template and script never mention the
-    /// service. Treating those writes as mutations marks the instance dirty
-    /// and advances the generation its render memoization keys on, so an
-    /// unrelated 1 Hz service poll re-instantiates subtrees that cannot have
-    /// changed. The value is still installed; only the reactivity is withheld.
+    /// Install a host value without advancing the runtime's reactive generation.
     pub fn set_unobserved_value_with_fingerprint(
         &mut self,
         name: &str,
         value: &Value,
         fingerprint: u64,
     ) {
-        if let Some(proxy) = self.proxies.get(name)
-            && let Some(setter) = &proxy.setter
-        {
-            (setter)(value.clone());
-            return;
-        }
-        if self
-            .host_value_fingerprints
-            .get(name)
-            .is_some_and(|previous| *previous == fingerprint)
-        {
-            return;
-        }
-
-        self.variables
-            .insert(name.to_owned(), Arc::new(value.clone()));
-        self.host_value_fingerprints
-            .insert(name.to_owned(), fingerprint);
-        self.cached_snapshot
-            .get_mut()
-            .expect("snapshot cache poisoned")
-            .take();
+        self.set_fingerprinted_value(name, fingerprint, false, || Arc::new(value.clone()));
     }
 
-    /// Lazily construct a host-produced reactive value only when its
-    /// fingerprint differs from the installed value. Returns whether the value
-    /// was installed, so hosts can mirror a changed value elsewhere (into a
-    /// Luau `_ENV`, say) without repeating the fingerprint comparison.
+    /// Install an immutable host snapshot shared by multiple runtimes.
+    pub fn set_shared_value_with_fingerprint(
+        &mut self,
+        name: &str,
+        value: &Arc<Value>,
+        fingerprint: u64,
+        observed: bool,
+    ) {
+        self.set_fingerprinted_value(name, fingerprint, observed, || Arc::clone(value));
+    }
+
+    /// Construct a reactive host value only if its fingerprint has changed.
+    /// Returns whether the value was installed or forwarded to a proxy setter.
     pub fn set_with_fingerprint_lazy(
         &mut self,
         name: &str,
         fingerprint: u64,
         value: impl FnOnce() -> Value,
     ) -> bool {
+        self.set_fingerprinted_value(name, fingerprint, true, || Arc::new(value()))
+    }
+
+    fn set_fingerprinted_value(
+        &mut self,
+        name: &str,
+        fingerprint: u64,
+        observed: bool,
+        value: impl FnOnce() -> Arc<Value>,
+    ) -> bool {
         if let Some(proxy) = self.proxies.get(name)
             && let Some(setter) = &proxy.setter
         {
-            (setter)(value());
+            (setter)(Arc::unwrap_or_clone(value()));
             return true;
         }
-        if self
-            .host_value_fingerprints
-            .get(name)
-            .is_some_and(|previous| *previous == fingerprint)
-        {
+        if self.host_value_fingerprints.get(name) == Some(&fingerprint) {
             return false;
         }
 
-        self.variables.insert(name.to_owned(), Arc::new(value()));
-        self.host_value_fingerprints
-            .insert(name.to_owned(), fingerprint);
-        self.dirty = true;
-        self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
-        self.mutation_generation = self.mutation_generation.wrapping_add(1);
+        self.variables.insert(name.to_owned(), value());
+        self.host_value_fingerprints.insert(name.to_owned(), fingerprint);
+        if observed {
+            self.dirty = true;
+            self.snapshot_generation = self.snapshot_generation.wrapping_add(1);
+            self.mutation_generation = self.mutation_generation.wrapping_add(1);
+        }
         self.cached_snapshot
             .get_mut()
             .expect("snapshot cache poisoned")
@@ -732,11 +691,16 @@ impl VariableStore for LocaleBoundState<'_, '_> {
     }
 
     fn translate(&self, key: &str) -> Option<String> {
+        if let Some(text) = self.translator.translate(key) {
+            return Some(text.to_owned());
+        }
         let resolution = self.translator.resolve(key, None);
         if resolution.missing
             && let Some(localized_misses) = &self.localized_misses
         {
-            localized_misses.lock().unwrap().push(resolution.clone());
+            let text = resolution.text.clone();
+            localized_misses.lock().unwrap().push(resolution);
+            return Some(text);
         }
         Some(resolution.text)
     }

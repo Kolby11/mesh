@@ -128,6 +128,9 @@ impl VirtualRange {
     }
 }
 
+#[doc(hidden)]
+pub type TemplateLocals = serde_json::Map<String, serde_json::Value>;
+
 pub trait VariableStore {
     fn get(&self, name: &str) -> Option<serde_json::Value>;
     fn get_ref<'a>(&'a self, name: &str) -> Option<&'a serde_json::Value> {
@@ -140,8 +143,8 @@ pub trait VariableStore {
         let _ = key;
         None
     }
-    fn template_locals(&self) -> serde_json::Map<String, serde_json::Value> {
-        serde_json::Map::new()
+    fn template_locals(&self) -> Option<&std::sync::Arc<TemplateLocals>> {
+        None
     }
     /// Stable identity inherited from a keyed `{#for}` iteration, if any.
     fn loop_identity(&self) -> Option<&str> {

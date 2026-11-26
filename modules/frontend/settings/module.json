@@ -16,6 +16,7 @@
         "mesh.keybinds": ">=1.0"
       },
       "optionalInterfaces": {
+        "mesh.wallpapers": ">=1.0",
         "mesh.network": ">=1.0",
         "mesh.bluetooth": ">=1.0",
         "mesh.device": ">=1.0",
@@ -52,6 +53,7 @@
         "locale.read",
         "locale.write",
         "service.theme.control",
+        "service.wallpapers.read",
         "service.settings.read",
         "service.settings.control",
         "service.packages.read",

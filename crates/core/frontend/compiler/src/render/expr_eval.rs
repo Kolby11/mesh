@@ -20,12 +20,16 @@ pub(super) fn evaluate_template_expression(
         return serde_json::Value::Null;
     };
 
+    let empty_locals = serde_json::Map::new();
+    let locals = || {
+        state
+            .template_locals()
+            .map(Arc::as_ref)
+            .unwrap_or(&empty_locals)
+    };
     if let Some(composition) = composition
-        && let Some(result) = composition.evaluate_template_expression(
-            instance_key,
-            &compiled,
-            &state.template_locals(),
-        )
+        && let Some(result) =
+            composition.evaluate_template_expression(instance_key, &compiled, locals())
     {
         state.record_template_service_reads(&result.service_reads);
         return result.value;
@@ -49,7 +53,7 @@ pub(super) fn evaluate_template_expression(
             }
         }
         context
-            .evaluate_compiled_template_expression(&compiled, &state.template_locals())
+            .evaluate_compiled_template_expression(&compiled, locals())
             .map(|(value, _)| value)
             .unwrap_or(serde_json::Value::Null)
     }
@@ -63,6 +67,17 @@ pub(super) fn template_value_to_string(value: serde_json::Value) -> String {
         serde_json::Value::String(value) => value,
         other => other.to_string(),
     }
+}
+
+pub(super) fn handler_locals(
+    locals: Option<&mesh_core_elements::TemplateLocals>,
+    expression: &mesh_core_expression::CompiledExpression,
+) -> mesh_core_elements::TemplateLocals {
+    expression
+        .referenced_identifiers()
+        .iter()
+        .filter_map(|name| Some((name.clone(), locals?.get(name)?.clone())))
+        .collect()
 }
 
 pub(crate) fn collect_component_tags(nodes: &[TemplateNode], tags: &mut Vec<String>) {

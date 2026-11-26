@@ -102,8 +102,8 @@ end
         width: fit;
         padding: 26px;
         gap: 22px;
-        border-radius: 34px;
-        border: 1px solid var(--glass-rim);
+        border-radius: var(--glass-radius-window);
+        border: var(--glass-border-width) solid var(--glass-rim);
         background-image: var(--glass-surface-panel);
         box-shadow: var(--glass-shadow-card);
         backdrop-filter: var(--glass-backdrop-panel);

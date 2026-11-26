@@ -1,0 +1,86 @@
+<template>
+    <row class="osd">
+        <icon class="level-icon" name={glyph} size="24" aria-hidden="true" />
+        <progress class="level-meter" value={muted and 0 or level} max="100" aria-label={t(label)} />
+        <text class="level-value">{muted and t("muted") or tostring(level) .. "%"}</text>
+    </row>
+</template>
+
+<script lang="luau">
+local t = import("mesh.i18n", "t")
+local audio = require("mesh.audio")
+local brightness = require("mesh.brightness")
+local volume = require("@mesh/volume-presentation/volume")
+local SURFACE = "@mesh/level-osd"
+local timer
+local last_volume, last_mute, last_brightness
+
+glyph = "audio-volume-high"
+label = "volume"
+level = 0
+muted = false
+
+local function show(kind, icon, value, is_muted)
+    label, glyph, level, muted = kind, icon, value, is_muted
+    if not timer then
+        mesh.shell.show_surface(SURFACE)
+    else
+        task.cancel(timer)
+    end
+    timer = task.delay(1600, function()
+        timer = nil
+        mesh.shell.hide_surface(SURFACE)
+    end)
+end
+
+effect(function()
+    if not audio.available then
+        last_volume, last_mute = nil, nil
+        return
+    end
+    local value, mute = volume.percent(audio.percent), audio.muted == true
+    if last_volume ~= nil and (last_volume ~= value or last_mute ~= mute) then
+        show("volume", volume.icon(value, mute), value, mute)
+    end
+    last_volume, last_mute = value, mute
+end)
+
+effect(function()
+    if not brightness.available then
+        last_brightness = nil
+        return
+    end
+    local value = math.clamp(math.round(brightness.level or 0), 0, 100)
+    if last_brightness ~= nil and last_brightness ~= value then
+        show("brightness", "display-brightness-high", value, false)
+    end
+    last_brightness = value
+end)
+</script>
+
+<style>
+    .osd {
+        width: 320px;
+        max-width: 100%;
+        height: 54px;
+        margin-bottom: 14px;
+        padding: 10px 16px;
+        gap: 12px;
+        align-items: center;
+        exclusive-zone: none;
+        border: var(--glass-border-width) solid var(--glass-rim);
+        border-radius: var(--glass-radius-card);
+        background-image: var(--glass-surface-panel);
+        backdrop-filter: var(--glass-backdrop-panel);
+        box-shadow: var(--glass-shadow-card);
+        color: var(--glass-text);
+        transition: opacity var(--animation-duration-short) var(--animation-curves-bezier-standard);
+    }
+
+    .osd.mesh-surface-exiting { opacity: 0; }
+    .level-icon { color: var(--glass-text); }
+    .level-value { min-width: 40px; font-weight: 700; text-align: right; }
+    .level-meter { flex-grow: 1; height: 8px; }
+    .level-meter::track { background: var(--color-surface-container-highest); border-radius: var(--glass-radius-control); }
+    .level-meter::fill { background: var(--color-primary); border-radius: var(--glass-radius-control); }
+</style>

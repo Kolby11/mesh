@@ -11,8 +11,8 @@ state = { available = true, recording = false, started_at = 0, output = "" }
 local source = nil
 local last_output = ""
 
-local function videos_dir()
-    local result = mesh.exec("sh", { "-c", "d=\"${XDG_VIDEOS_DIR:-$HOME/Videos}/Recordings\"; mkdir -p \"$d\" && printf '%s' \"$d\"" })
+local function allocate_output()
+    local result = mesh.exec("sh", { "-c", "d=\"${XDG_VIDEOS_DIR:-$HOME/Videos}/Recordings\"; mkdir -p -- \"$d\" && out=$(mktemp -d -- \"$d/recording-XXXXXXXX\") && printf '%s/recording.mp4' \"$out\"" })
     return result.success and (result.stdout or "") ~= "" and result.stdout or nil
 end
 
@@ -62,12 +62,10 @@ function on_command_toggle(self)
         local result = mesh.exec("pkill", { "-INT", "-x", "wf-recorder" })
         return { ok = result.success, error = result.stderr }
     end
-    local dir = videos_dir()
-    if not dir then
-        return { ok = false, error = "no videos directory" }
+    local path = allocate_output()
+    if not path then
+        return { ok = false, error = "could not allocate recording output" }
     end
-    local stamp = tostring(os.time())
-    local path = dir .. "/recording-" .. stamp .. ".mp4"
     source = mesh.exec_stream("wf-recorder", { "-f", path }) or nil
     if not source then
         return { ok = false, error = "wf-recorder failed to start" }

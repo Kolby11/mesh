@@ -61,7 +61,7 @@ pub(super) fn collect_child_surface_requests_with_diagnostics(
 
     let is_popover = source_element_tag(node) == "popover";
     // A closed popover maps no surface, so nothing inside it can anchor one.
-    if is_popover && !popover_is_open(node) && !std::ptr::eq(root, node) {
+    if is_popover && !node.is_popover_open() && !std::ptr::eq(root, node) {
         return;
     }
     if is_popover && let Some(node_key) = node.mesh_key() {
@@ -79,7 +79,7 @@ pub(super) fn collect_child_surface_requests_with_diagnostics(
         };
         if let Some(placement) = placement {
             let (popover_trigger, trigger_is_valid) =
-                if let Some(reference) = popover_anchor_reference(node) {
+                if let Some(reference) = node.popover_anchor_reference() {
                     (
                         Some(PopoverTriggerReference {
                             reference: reference.to_string(),
@@ -277,7 +277,6 @@ pub(super) fn bounds_to_i32_rect(bounds: (f32, f32, f32, f32)) -> (i32, i32, i32
     (left, top, (right - left).max(1), (bottom - top).max(1))
 }
 
-#[cfg(test)]
 pub(super) fn translate_child_surface_input(
     input: ComponentInput,
     origin_x: f32,
@@ -304,6 +303,22 @@ pub(super) fn translate_child_surface_input(
             y: y + origin_y,
             dx,
             dy,
+        },
+        ComponentInput::TwoFingerScroll { x, y, dx, dy } => ComponentInput::TwoFingerScroll {
+            x: x + origin_x,
+            y: y + origin_y,
+            dx,
+            dy,
+        },
+        ComponentInput::TouchDown { id, x, y } => ComponentInput::TouchDown {
+            id,
+            x: x + origin_x,
+            y: y + origin_y,
+        },
+        ComponentInput::TouchMove { id, x, y } => ComponentInput::TouchMove {
+            id,
+            x: x + origin_x,
+            y: y + origin_y,
         },
         other => other,
     }

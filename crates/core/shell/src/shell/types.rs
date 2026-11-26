@@ -45,6 +45,7 @@ pub(super) const COMPONENT_FAILURES_BEFORE_QUARANTINE: u32 = 3;
 pub(super) struct SurfaceTarget {
     pub(super) surface_id: SurfaceId,
     pub(super) paint_buffer: Option<SurfaceCanvas>,
+    pub(super) resource_paints: mesh_core_render::ResourcePaintConsumer,
     pub(super) last_surface_config: Option<SurfaceConfig>,
     pub(super) surface_size_policy: LayerSurfaceSizePolicy,
     /// Last surface size resolved by shell/presentation without requiring a
@@ -79,6 +80,7 @@ impl SurfaceTarget {
         Self {
             surface_id,
             paint_buffer: None,
+            resource_paints: mesh_core_render::ResourcePaintConsumer::with_pending_tracking(),
             last_surface_config: None,
             surface_size_policy,
             known_surface_size: None,
@@ -134,7 +136,6 @@ pub(super) struct ComponentRuntime {
     /// Immutable identity of the component, equal to its parent surface id.
     pub(super) surface_id: SurfaceId,
     pub(super) component: Box<dyn ShellComponent>,
-    pub(super) resource_paints: mesh_core_render::ResourcePaintConsumer,
     /// Every `.mesh` source path that contributes to this component
     /// (entrypoint + locally imported sub-components), with each file's
     /// last-seen mtime. The hot-reload watcher recompiles when *any* of
@@ -316,7 +317,6 @@ impl ComponentRuntime {
             surface_id,
             component,
             source_paths,
-            resource_paints: Default::default(),
             mounted: false,
             failure_count: 0,
             quarantined: false,
@@ -492,6 +492,7 @@ pub(super) struct SettingsWatchState {
 
 #[derive(Debug)]
 pub(super) enum ShellMessage {
+    BackendIngress(std::sync::Arc<super::backend::ingress::BackendIngressEntry>),
     BackendServiceUpdate {
         interface: String,
         provider_id: String,

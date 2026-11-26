@@ -18,14 +18,14 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 
 ---
 
-- [ ] Settings pages and shell surfaces: add the controls that have no backend yet (Wi-Fi static IP/DNS and metered connections, Bluetooth per-device rename, per-app sound routing, keyboard layouts, screen reader, sticky keys, banner position, notification grouping, lock-screen content, privacy indicators, default apps, startup apps, device rename); build the lock screen, OSD and window switcher. [Design](../.planning/todos/pending/2026-11-08-settings-and-shell-surfaces.md).
-- [ ] Verify the Nocturne, Paper, Tapedeck and Bubblegum packs in a running shell, reconcile the rest of Liquid Glass with its canvas board, and add the bevel/offset-shadow part tokens Tapedeck and Bubblegum need beyond `--glass-shadow-pill`. [Design](../.planning/todos/pending/2026-11-08-settings-and-shell-surfaces.md).
-- [ ] Measure consumer-scoped scene-cache overhead on unchanged frames and scope cache admission to relevant pending resources; admission still waits for unrelated jobs.
+- [ ] Settings pages and shell surfaces: add the controls that have no backend yet (Wi-Fi static IP/DNS and metered connections, Bluetooth per-device rename, per-app sound routing, keyboard layouts, screen reader, sticky keys, banner position, notification grouping, lock-screen content, privacy indicators, default apps, startup apps, device rename); build the session lock screen and window switcher. [Design](../.planning/todos/pending/2026-11-08-settings-and-shell-surfaces.md).
+- [ ] Finish the remaining shell artboard details: Bubblegum's desktop calendar and task cards, Paper's agenda, Tapedeck's file shortcuts, and the context-menu and dialog treatments. Calendar events and tasks need providers. [Design](../.planning/todos/pending/2026-11-08-settings-and-shell-surfaces.md).
+- [ ] Measure per-target resource-tracking overhead on unchanged, idle frames. The dock profile covers hover during Settings preview loading.
 - [ ] Validate independent text size and shell scale in a running shell, including controls, profile switching, popup geometry and accessibility. [Design](../.planning/todos/pending/2026-11-06-shell-scaling.md).
 - [ ] Measure end-to-end theme, font-family and size changes across visible surfaces and resource readiness, including compositor presentation feedback; preserve valid retained work and final-value correctness.
 - [ ] Implement the Material reference shell (`08-material-desktop`): editable desktop widget grid, widget picker, editing toolbar, side rail and dock, with a composition/profile and token-based theme. [Design](../.planning/todos/pending/2026-10-27-reference-shells.md).
 - [ ] Give `@mesh/material` its own composition once `08-material-desktop` lands; the theme recommends `@mesh/desk` until then.
-- [ ] Update the Settings and style-fixture tests that still expect glass panels under the solid themes (`clicking_a_theme_card_repaints_settings_in_the_new_theme_in_one_frame`, `settings_glass_surfaces_follow_the_active_theme_palette`, two `style::tests::fixtures` colours); the themes moved to Material surfaces on 2026-10-29 and the expected looks are undecided.
+- [ ] Reconcile the two `style::tests::fixtures` colours with the solid themes’ current semantic palettes.
 - [ ] **Styleable control parts:** add scrollbar (`::track`, `::thumb`) and input (`::placeholder`, `::caret`, `::selection`) parts; the renderer still hardcodes their looks, and neither fits the child-node model. [Design](../.planning/todos/pending/2026-10-29-control-parts.md).
 - [ ] Animate the slider value itself (thumb glide on click-to-jump and keyboard steps), as `switch` glides with its thumb's `margin` transition; a drag must not trail the pointer, so the glide needs to skip pointer-driven changes.
 - [ ] Isolate hyprglass/compositor GPU cost during widget resize; native-namespace replay confirms plugin draws and removes parent rebuilds, but plugin stage timers remain disabled and display latency is unmeasured.
@@ -34,18 +34,13 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Make cross-slot composition moves atomic or revision-bound with recovery; the editor removes the source before an uncorrelated later target insertion. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Avoid rebuilding service-observation and diagnostic snapshots on unchanged frontend frames; scroll and animation frames still scan all embedded runtimes. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Remove the production-only cost of the test-only forward service-dependency map and unused Settings audio label writes; preserve reverse lookups and locale behavior. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/10-frontend-compiler-and-host.md).
-- [ ] Bound retained runtime work for removed keyed children; unique-key churn currently retains contexts, timers and memo state after their rendered instances disappear. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/10-frontend-compiler-and-host.md).
 - [ ] Retain bounded ready SVG rasters with linked-resource freshness; external-resource SVG results are consumed once and rerasterize on later independent paints. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/12-rendering-and-paint.md).
 - [ ] Invalidate wallpaper preview caches by source freshness and retry repaired failures; path-only entries currently keep stale thumbnails, colors and panoramas. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/11-luau-runtime-and-sandbox.md).
 - [ ] Keep backend blob leases attached to the last accepted state until a replacement commits; constructing an aborted or rejected candidate can release blobs still referenced by consumers.
 - [ ] Serialize managed hypridle configuration writes and launches; a poll and a setting change can overlap while the host write is suspended.
-- [ ] Give recorder attempts unique output paths; the current seconds-only timestamp allows two attempts in the same second to reuse a file.
-- [ ] Bound backend ingress through the final shell consumer; bridges currently drain bounded producer queues into an unbounded inbox before coalescing. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/15-shell-core-and-orchestration.md).
 - [ ] Dispatch sourced effects returned by bound-state publication and rollback; hidden components currently run and drain effects whose shell requests are then discarded. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/15-shell-core-and-orchestration.md).
 - [ ] Validate exact backlog-item removal in the claimed feature commit and share runner policy; both launchers currently check mutable worktree state and accept multiple removals. [Audit](../.planning/codebase/audits/2026-11-06-whole-codebase/sections/16-developer-and-authoring-tools.md).
-- [ ] Interpolate icon axes in transitions. Their computed values now follow the cascade and update immediately when the style changes. [Contract](spec/05-icons.md#7-variable-axes--style-tokens).
 - [ ] Invalidate cached style rule indexes when rules change in place; pointer and length reuse can retain old declarations. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
-- [ ] Derive popover trigger expansion even when a closed popup is hidden; semantic publication currently leaves conflicting authored state in place. [Audit](../.planning/codebase/audits/2026-10-29-whole-codebase/sections/08-ui-element-core.md).
 - [ ] Bound command pipe capture and shutdown when descendants outlive the direct child; retained pipes can block worker cleanup. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Review and consolidate the unused public config diagnostic model and redundant settings accessors; repository consumers use the newer settings contracts. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/sections/01-core-foundation-contracts.md).
 - [ ] Make fork rebases recoverable across partial writes and baseline replacement; failures can leave edits and upstream records out of sync. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
@@ -58,7 +53,6 @@ are from the retired milestone scheme and are kept only as rough sequencing.
 - [ ] Share theme style-rule lowering between global and module scopes; duplicated token, default and selector logic can drift. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Align icon coverage advice with live alias, dash fallback and owner-scoped resolution; advice can report gaps for icons that resolve. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Resolve icon overrides through MESH pack-qualified mappings; current override lookup treats targets as file or XDG assets. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
-- [ ] Include override-only font roles in renderer alias projection; registry resolution and rendered `font-family` can disagree. [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 - [ ] Evaluate `style:` directive expressions once without marking the binding as a function call; wrapping the value in an inline function made binding patches visit every target (`binding_patch_visits_no_target_discovery`). [Audit](../.planning/codebase/audits/2026-10-27-whole-codebase/INTERIM.md).
 
 - [ ] Build interchangeable shell compositions, configurable `.mesh` components and independently switchable themes that can realize the diverse [shell references](reference/shells/); the full range is not yet available.
@@ -314,6 +308,7 @@ The items below are local fixes. The large wins are the
 [change-proportional frame pipeline](#change-proportional-frame-pipeline--next-implementation-priority)
 at the top of this file; prefer it over further single-pass scoping.
 
+- [ ] Capture the reported shell memory peak in its original workload. The release Glass replay covers startup and short surface-visibility cycles.
 - [ ] Sibling `{#if}` branches that each produce a node sit at the same child position and so share node identity
       (id, key, transitions, hover, focus, caches). In Settings, swapping lazily built pages made the engine animate
       the old page's laid-out size into the new, not-yet-laid-out nodes: a 435 → 0 width transition read its own
@@ -345,10 +340,6 @@ From the 2026-11-11 code scan; none is measured. The fixed part of that scan is 
 - [ ] Every service event settles effects on all hidden components (`deliver_service_event` tail), whether or
       not they received it. Settle only the components that did, once timer and IPC writes are shown to settle
       elsewhere.
-- [ ] `{#for}` bodies deep-clone the loop locals for each bound attribute and text expression
-      (`LayeredStore::template_locals`). Share one snapshot per item.
-- [ ] `t()` builds a full `LocalizedTextResolution` (provenance, key and fallback clones) on every hit; build it
-      only on a miss.
 - [ ] `synchronize_callback_references` re-evaluates every bound reference handler after each state sync, one per
       `{#for}` row. Needs a gate that still sees raw function globals reassigned in `_ENV`.
 - [ ] Measure the compositor-side cost saved by reusing `wl_buffer`s per GPU target; the client-paced

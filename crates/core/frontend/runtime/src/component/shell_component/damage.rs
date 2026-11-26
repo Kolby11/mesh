@@ -28,6 +28,7 @@ pub(super) fn select_effective_damage(
         &[],
         surface,
         requires_tree_rebuild,
+        false,
         &extra_damage,
         &tooltip_damage,
         Vec::new(),
@@ -39,6 +40,7 @@ pub(super) fn select_effective_damage_rects(
     base_damage: &[DamageRect],
     surface: DamageRect,
     requires_tree_rebuild: bool,
+    can_shift_viewport: bool,
     extra_damage: &[DamageRect],
     tooltip_damage: &[DamageRect],
     mut rects: Vec<DamageRect>,
@@ -72,6 +74,10 @@ pub(super) fn select_effective_damage_rects(
     let damage_area = damage_rects_area(&rects);
     let policy = if !tooltip_damage.is_empty() {
         DisplayListRepaintPolicy::FullSurface
+    } else if can_shift_viewport && !has_extra_damage_sources {
+        // The full viewport is presentation damage. A successful shift
+        // repaints only its exposed strips and anchored edges.
+        DisplayListRepaintPolicy::MinimalDamage
     } else {
         select_damage_policy(
             metrics,

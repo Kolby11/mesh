@@ -213,12 +213,14 @@ exit accelerates so it stays visible instead of vanishing in its first frame. */
     width: 300px;
     gap: var(--spacing-sm);
     padding: var(--spacing-md);
-    border-radius: var(--radius-xl);
-    background: var(--color-surface-container);
+    border-radius: var(--glass-radius-window);
+    background-image: var(--glass-surface-panel);
+    backdrop-filter: var(--glass-backdrop-panel);
+    box-shadow: var(--glass-shadow-card);
     color: var(--color-on-surface);
-    border-width: 1px;
+    border-width: var(--glass-border-width);
     border-style: solid;
-    border-color: var(--color-outline-variant);
+    border-color: var(--glass-rim);
 }
 
 .qs-header {

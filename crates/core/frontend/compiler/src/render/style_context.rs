@@ -1,6 +1,6 @@
 use mesh_core_component::PropsBlock;
 use mesh_core_component::style::{StyleRule, StyleValue, prop_variable_key};
-use mesh_core_elements::{StyleResolver, StyleRuleIndex, VariableStore};
+use mesh_core_elements::{StyleResolver, StyleRuleIndex, TemplateLocals, VariableStore};
 use serde_json;
 
 use super::*;
@@ -162,7 +162,7 @@ pub fn props_settings_schema(block: Option<&PropsBlock>) -> Option<serde_json::V
 
 pub(super) struct BoundTemplateStore<'a> {
     pub base: &'a dyn VariableStore,
-    pub locals: Option<&'a serde_json::Map<String, serde_json::Value>>,
+    pub locals: Option<&'a Arc<TemplateLocals>>,
 }
 
 impl VariableStore for BoundTemplateStore<'_> {
@@ -181,8 +181,8 @@ impl VariableStore for BoundTemplateStore<'_> {
         }
         keys
     }
-    fn template_locals(&self) -> serde_json::Map<String, serde_json::Value> {
-        self.locals.cloned().unwrap_or_default()
+    fn template_locals(&self) -> Option<&Arc<TemplateLocals>> {
+        self.locals
     }
     fn virtual_window(&self, list_id: &str) -> Option<mesh_core_elements::VirtualRange> {
         self.base.virtual_window(list_id)
@@ -255,7 +255,7 @@ impl VariableStore for TrackingVariableStore<'_> {
     fn translate(&self, key: &str) -> Option<String> {
         self.inner.translate(key)
     }
-    fn template_locals(&self) -> serde_json::Map<String, serde_json::Value> {
+    fn template_locals(&self) -> Option<&Arc<TemplateLocals>> {
         self.inner.template_locals()
     }
     fn loop_identity(&self) -> Option<&str> {

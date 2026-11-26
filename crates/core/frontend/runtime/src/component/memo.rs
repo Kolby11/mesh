@@ -214,6 +214,8 @@ impl FrontendSurfaceComponent {
         marks_before: MemoEffectMarks,
         node: &mut WidgetNode,
     ) {
+        let instance = self.instance_keys.borrow_mut().intern(instance_key);
+        node.set_memo_instance(instance.clone());
         if self.portal_state_writes.get() != marks_before.portal {
             // A nested surface portal published visibility state during this
             // build; that write must re-run on every build, so the subtree is
@@ -224,9 +226,8 @@ impl FrontendSurfaceComponent {
         let Some(subtree_generation) = self.runtime_subtree_generation(instance_key) else {
             return;
         };
-        node.set_memo_instance(self.instance_keys.borrow_mut().intern(instance_key));
         self.component_memo.borrow_mut().insert(
-            self.instance_keys.borrow_mut().intern(instance_key),
+            instance,
             ComponentMemoEntry {
                 props_fingerprint,
                 container_bits: (container_width.to_bits(), container_height.to_bits()),

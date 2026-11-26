@@ -77,6 +77,8 @@ keyframe_compilations_per_instance       upper      1.00      0
 expression_parser_worker_speedup         lower      1.20      0
 cached_icu_formatter_speedup             lower      2.00      0
 cached_date_time_formatter_speedup       lower      2.00      0
+luau_translation_hit_speedup               lower      1.25      0
+template_translation_hit_speedup           lower      1.25      0
 prepared_theme_details_speedup           lower      2.00      0
 bounded_theme_projection_speedup         lower      1.05      0
 inline_theme_projection_speedup            lower      1.05      0

@@ -108,9 +108,12 @@ impl SceneNodeCache {
         self.metrics.recorded_operations += recording.picture.approximate_op_count();
         // A placeholder or stand-in prepared before an asynchronous completion
         // must never hide the final asset behind an unchanged node identity.
-        if super::resources_pending()
+        let completion = crate::surface::completion_snapshot();
+        let pending = completion.pending_requests()
+            .map_or_else(super::resources_pending, |count| count != 0);
+        if pending
             || completion_epoch.0 != super::resource_completion_epoch()
-            || completion_epoch.1 != crate::surface::completion_snapshot()
+            || completion_epoch.1 != completion
         {
             return;
         }

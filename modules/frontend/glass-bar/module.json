@@ -13,12 +13,14 @@
         "mesh.power": ">=1.0"
       },
       "optionalInterfaces": {
+        "mesh.apps": ">=1.0",
         "mesh.media": ">=1.0",
         "mesh.settings": ">=1.0",
         "mesh.weather": ">=1.0",
         "mesh.network": ">=1.0",
         "mesh.recorder": ">=1.0",
-        "mesh.brightness": ">=1.0"
+        "mesh.brightness": ">=1.0",
+        "mesh.notifications": ">=1.0"
       },
       "resources": {
         "icons": [
@@ -29,6 +31,8 @@
         "shell.surface",
         "theme.read",
         "locale.read",
+        "service.apps.read",
+        "service.apps.launch",
         "service.wm.read",
         "service.wm.control",
         "service.audio.read",
@@ -42,9 +46,12 @@
         "service.recorder.control",
         "service.settings.read",
         "service.brightness.read",
-        "service.brightness.control"
+        "service.brightness.control",
+        "service.notifications.read",
+        "service.notifications.control"
       ],
       "modules": {
+        "@mesh/app-launcher": ">=0.1.0",
         "@mesh/glass-material": ">=0.1.0",
         "@mesh/profile-switcher": ">=0.1.0",
         "@mesh/volume-presentation": ">=0.1.0"

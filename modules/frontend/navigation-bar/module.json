@@ -27,6 +27,14 @@
       ]
     },
     "entry": "src/main.mesh",
+    "theme": {
+      "tokens": {
+        "navigation.frame.radius": "var(--radius-lg)",
+        "navigation.frame.height": "40px",
+        "navigation.frame.margin": "8px 8px 0",
+        "navigation.frame.shadow": "none"
+      }
+    },
     "surface": {
       "anchor": "top",
       "layer": "top",

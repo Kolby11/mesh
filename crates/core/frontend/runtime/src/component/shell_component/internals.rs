@@ -599,14 +599,14 @@ impl FrontendSurfaceComponent {
 }
 
 pub(super) fn open_popover(node: &WidgetNode) -> Option<&WidgetNode> {
-    if source_element_tag(node) == "popover" && popover_is_open(node) {
+    if source_element_tag(node) == "popover" && node.is_popover_open() {
         return Some(node);
     }
     node.children.iter().find_map(open_popover)
 }
 
 pub(super) fn contains_open_popover(node: &WidgetNode) -> bool {
-    (source_element_tag(node) == "popover" && popover_is_open(node))
+    (source_element_tag(node) == "popover" && node.is_popover_open())
         || node.children.iter().any(contains_open_popover)
 }
 

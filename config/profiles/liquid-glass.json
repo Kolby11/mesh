@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 3,
+  "revision": 1,
+  "from": {
+    "module": "@mesh/liquid-glass-desktop"
+  },
+  "roots": {},
+  "backgroundServices": [],
+  "providers": {},
+  "resources": {},
+  "nodeSlots": {},
+  "settings": {
+    "shell": {
+      "theme": {
+        "active": "@mesh/liquid-glass:liquid-glass"
+      }
+    }
+  }
+}

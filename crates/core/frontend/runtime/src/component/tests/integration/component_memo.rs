@@ -453,6 +453,49 @@ items = { { label = "first" }, { label = "second" } }
 }
 
 #[test]
+fn keyed_component_churn_retires_runtimes_memos_and_tasks() {
+    let mut component = memo_surface(
+        r#"
+<template>
+    {#for id in items key={id}}<Child />{/for}
+</template>
+<script lang="luau">
+local Child = require("./components/child.mesh")
+items = {}
+</script>
+"#,
+        &[("Child", r#"
+<template><text content="{value}" /></template>
+<script lang="luau">
+value = 0
+function mount() task.delay(60000, function() value += 1 end) end
+</script>
+"#)],
+    );
+    let set_items = |component: &mut FrontendSurfaceComponent, items: Vec<usize>| {
+        component.runtimes.lock().unwrap().get_mut(PARENT_ID).unwrap()
+            .script_ctx.set_member_state("items", serde_json::json!(items)).unwrap();
+        rebuild(component, 160, 80);
+    };
+    rebuild(&mut component, 160, 80);
+    let started = std::time::Instant::now();
+    for round in 0..128 {
+        set_items(&mut component, (round * 8..round * 8 + 8).collect());
+        assert_eq!(component.runtimes.lock().unwrap().len(), 9);
+        assert_eq!(component.component_memo.borrow().len(), 8);
+        assert!(component.next_script_task_deadline().is_some());
+        set_items(&mut component, Vec::new());
+        assert_eq!(component.runtimes.lock().unwrap().len(), 1);
+        assert!(component.component_memo.borrow().is_empty());
+        assert_eq!(component.instance_keys.borrow().keys.len(), 1);
+        assert_eq!(component.next_script_task_deadline(), None);
+    }
+    set_items(&mut component, vec![0]);
+    assert!(component.next_script_task_deadline().is_some());
+    eprintln!("128 insert/remove rounds with 8 unique children each: {:?}", started.elapsed());
+}
+
+#[test]
 fn keyed_loop_components_keep_memo_identity_after_reorder() {
     let mut component = memo_surface(
         r#"

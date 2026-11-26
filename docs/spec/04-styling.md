@@ -255,12 +255,24 @@ values. Glass components consume those hooks for blur, refraction and dispersion
 the active theme can tune each tier in its family block. Liquid Glass and both
 Frutiger Aero modes provide overrides.
 
-Settings uses separate material tokens for the outer panel, sidebar, grouped
-cards, dividers, switches and stepper buttons. The Liquid Glass panel and sidebar
-let the compositor-blurred desktop show through. Reduce transparency replaces
-the panel gradient with the opaque color supplied by `--glass-settings-solid`
-and masks the glass tier backdrop filters. Turning it off reveals the current
-glass strength, including any changes made while the mask was active.
+Settings uses separate material tokens for its window, toolbar, sidebar,
+grouped cards, dividers, switches and stepper buttons. The Settings, launcher,
+notification and quick-settings surfaces share the family's window, card,
+control and border tokens. Nocturne, Paper, Tapedeck, Bubblegum and Liquid
+Glass provide their own values. Tapedeck uses sharp corners, paired outer
+shadows and a raised control gradient for the bevel. Bubblegum uses wider
+outlines and offset shadows. Settings requests the design’s 1280 × 880
+window size and wraps paired cards into one column at narrow sizes. Tapedeck
+uses a compact title bar.
+
+Liquid Glass uses a dark translucent panel with a lighter card tint. Reduce
+transparency replaces the Settings panel gradient with the opaque color
+supplied by `--glass-settings-solid` and masks the glass tier backdrop
+filters. Turning it off restores the current glass strength.
+
+The wallpaper module exposes `--wallpaper-base`, `--wallpaper-glow-primary`
+and `--wallpaper-glow-secondary`. The three gradients paint when the shell has
+no configured backdrop image. The backdrop image takes precedence when set.
 
 ### 4.2 Theme tuning and component internals
 
@@ -837,6 +849,10 @@ the predicted origin. Only background-layer surfaces retain the image route
 
 Desktop widgets and glass above windows follow the real backdrop without a
 wallpaper-image offset.
+
+Plain wallpaper draws can sample the decoded image directly when the source
+fits the output's pixel budget and the draw aligns with the output pixel grid.
+The output still uses the same centered cover fit.
 
 **Compositor glass.** Real refraction of what lies behind a non-background
 surface can only be drawn by the compositor. On Hyprland the third-party

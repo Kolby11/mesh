@@ -1,0 +1,37 @@
+{
+  "name": "@mesh/level-osd",
+  "version": "0.1.0",
+  "description": "Briefly shows the current volume or brightness when it changes.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "entry": "src/main.mesh",
+    "surface": {
+      "anchor": "bottom",
+      "layer": "overlay",
+      "keyboard_mode": "none",
+      "visible_on_start": false
+    },
+    "uses": {
+      "optionalInterfaces": {
+        "mesh.audio": ">=1.0",
+        "mesh.brightness": ">=1.0"
+      },
+      "modules": {
+        "@mesh/glass-material": ">=0.1.0",
+        "@mesh/volume-presentation": ">=0.1.0"
+      },
+      "resources": {
+        "icons": ["@mesh/icons-material-symbols"]
+      },
+      "capabilities": ["locale.read", "service.audio.read", "service.brightness.read", "shell.surface"]
+    },
+    "i18n": { "defaultLocale": "en" },
+    "contributes": {
+      "i18n": [
+        { "id": "en", "locale": "en", "path": "config/i18n/en.json" },
+        { "id": "sk", "locale": "sk", "path": "config/i18n/sk.json" }
+      ]
+    }
+  }
+}

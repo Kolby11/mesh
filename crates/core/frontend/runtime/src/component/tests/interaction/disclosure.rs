@@ -407,10 +407,21 @@ fn a_compositor_dismissal_closes_the_disclosure() {
 #[test]
 fn an_open_popover_expands_its_trigger_and_hides_its_tooltip() {
     let mut component = host(&disclosure_popover("hover"));
-    let closed_border = first_node_by_class(tree(&component), "trigger")
-        .expect("trigger")
-        .computed_style
-        .border_width;
+    let trigger = first_node_by_class(tree(&component), "trigger").expect("trigger");
+    let closed_border = trigger.computed_style.border_width;
+    let expanded = |component: &FrontendSurfaceComponent| {
+        let tree = tree(component);
+        let trigger = first_node_by_class(tree, "trigger").expect("trigger");
+        mesh_core_elements::AccessibilityTree::publish(tree)
+            .nodes
+            .into_iter()
+            .find(|node| node.id == trigger.id)
+            .expect("trigger semantics")
+            .info
+            .state
+            .expanded
+    };
+    assert_eq!(expanded(&component), Some(false));
 
     hover(&mut component, "trigger");
 
@@ -424,20 +435,14 @@ fn an_open_popover_expands_its_trigger_and_hides_its_tooltip() {
         component.hovered_tooltip, None,
         "the open popover hides the tip"
     );
-    let trigger_id = trigger.id;
-    let semantics = mesh_core_elements::AccessibilityTree::publish(tree(&component));
-    let trigger_semantics = semantics
-        .nodes
-        .iter()
-        .find(|node| node.id == trigger_id)
-        .expect("trigger semantics");
-    assert_eq!(trigger_semantics.info.state.expanded, Some(true));
+    assert_eq!(expanded(&component), Some(true));
 
     hover(&mut component, "spacer");
     expire_hover_intent(&mut component);
     let trigger = first_node_by_class(tree(&component), "trigger").expect("trigger");
     assert!(!trigger.state.contains(NodeState::EXPANDED));
     assert_eq!(trigger.computed_style.border_width, closed_border);
+    assert_eq!(expanded(&component), Some(false));
 }
 
 #[test]

@@ -84,10 +84,13 @@ impl Shell {
         mesh_core_render::poll_glyph_raster_jobs();
         mesh_core_render::poll_image_decode_jobs();
         for runtime in &mut self.components {
-            if runtime.resource_paints.take_ready() {
-                runtime.component.request_paint();
-                for child in &mut runtime.children {
+            if runtime.parent.resource_paints.take_ready() {
+                runtime.component.request_resource_paint(None);
+            }
+            for child in &mut runtime.children {
+                if child.target.resource_paints.take_ready() {
                     child.last_paint_generation = None;
+                    runtime.component.request_resource_paint(Some(&child.node_key));
                 }
             }
         }
@@ -181,7 +184,7 @@ impl Shell {
             if !self.components[index].component.wants_render() {
                 continue;
             }
-            let _resource_scope = self.components[index].resource_paints.enter();
+            let _resource_scope = self.components[index].parent.resource_paints.enter();
             let surface_id = self.components[index].surface_id.clone();
             let visible = self.surface_is_effectively_visible(&surface_id);
             if !visible
@@ -1740,7 +1743,7 @@ impl Shell {
                 .shared_reference_aliases_for_module(self.components[index].component.id()),
         );
         let started = std::time::Instant::now();
-        let _resource_scope = self.components[index].resource_paints.enter();
+        let _resource_scope = self.components[index].parent.resource_paints.enter();
         let result =
             self.components[index]
                 .component

@@ -417,6 +417,12 @@ the contract inline:
 }
 ```
 
+**Shipped — backend delivery.** Full state snapshots are replaceable while
+queued for the same provider incarnation. Command results, named events and
+lifecycle notifications remain ordered and separate adjacent snapshots.
+The backend-to-shell queue applies backpressure when its ordered backlog
+fills.
+
 **Shipped — command coalescing.** A method may declare
 `"coalesce": { "key": ["device_id"] }` to replace queued invocations only when
 all named top-level arguments match. Key names must be unique declared method

@@ -175,6 +175,7 @@ impl FrontendSurfaceComponent {
             return Ok(Vec::new());
         }
 
+        self.child_hover_interactive = None;
         let tree = self
             .last_tree
             .take()
@@ -186,6 +187,30 @@ impl FrontendSurfaceComponent {
             "input dispatch must not replace the retained tree"
         );
         self.last_tree = Some(tree);
+        self.end_held_tree_dispatch(held);
+        result
+    }
+
+    pub(in crate::component) fn dispatch_child_surface_input(
+        &mut self,
+        root: &WidgetNode,
+        offset: (f32, f32),
+        input: ComponentInput,
+    ) -> Result<Vec<CoreRequest>, ComponentError> {
+        if !self.visible {
+            return Ok(Vec::new());
+        }
+        let tree = self.last_tree.take();
+        let held = self.begin_held_tree_dispatch();
+        self.child_input_offset = Some(offset);
+        let left = matches!(input, ComponentInput::PointerLeave);
+        let result = self.handle_component_input_with_tree(root, input);
+        self.child_hover_interactive = Some(
+            !left && self.pointer_event_target_key(root, self.hovered_pos.0, self.hovered_pos.1)
+                .is_some(),
+        );
+        self.child_input_offset = None;
+        self.last_tree = tree;
         self.end_held_tree_dispatch(held);
         result
     }
@@ -793,12 +818,13 @@ impl FrontendSurfaceComponent {
                 }
                 // The pointer left the whole surface — fire pointerleave/mouseleave
                 // on everything that was hovered so popovers can close themselves.
+                let (x, y) = self.child_input_offset.unwrap_or_default();
                 let leave_requests = self.dispatch_hover_transition_handlers(
                     tree,
                     &previous_event_path,
                     &[],
-                    0.0,
-                    0.0,
+                    x,
+                    y,
                 )?;
                 if !leave_requests.is_empty() {
                     return Ok(leave_requests);

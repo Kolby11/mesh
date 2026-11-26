@@ -115,16 +115,6 @@ impl DisclosureRegistry {
     }
 }
 
-pub(super) fn popover_is_open(node: &WidgetNode) -> bool {
-    node.attributes.get(Prop::Open).is_some_and(|value| {
-        let value = value.trim();
-        !(value.is_empty()
-            || value == "0"
-            || value.eq_ignore_ascii_case("false")
-            || value.eq_ignore_ascii_case("none"))
-    })
-}
-
 impl FrontendSurfaceComponent {
     /// Whether `node` is a promoted popover wrapper whose popover is closed
     /// and not playing an entrance or exit. Such a subtree is neither painted
@@ -134,30 +124,13 @@ impl FrontendSurfaceComponent {
         node.is_promoted_popover()
             && node.children.first().is_some_and(|popover| {
                 source_element_tag(popover) == "popover"
-                    && !popover_is_open(popover)
+                    && !popover.is_popover_open()
                     && popover.mesh_key().is_none_or(|key| {
                         !self.closing_child_keys.contains(key)
                             && !self.entering_child_keys.contains(key)
                     })
             })
     }
-}
-
-pub(super) fn popover_anchor_reference(popover: &WidgetNode) -> Option<&str> {
-    [
-        Prop::AnchorRef,
-        Prop::AnchorTarget,
-        Prop::AnchorElement,
-        Prop::Target,
-    ]
-    .into_iter()
-    .find_map(|name| {
-        popover
-            .attributes
-            .get(name)
-            .map(|value| value.trim())
-            .filter(|value| !value.is_empty())
-    })
 }
 
 /// Whether `node` is the element an `anchor-ref` names: its key, `ref`, `id`,
@@ -208,13 +181,14 @@ impl FrontendSurfaceComponent {
         let mut previous = std::mem::take(&mut self.disclosures.entries);
         let mut newly_open_triggers = Vec::new();
         for popover in popovers {
-            let Some(trigger_key) = popover_anchor_reference(popover)
+            let Some(trigger_key) = popover
+                .popover_anchor_reference()
                 .and_then(|reference| find_key_by_reference(tree, reference))
             else {
                 continue;
             };
             let key = popover.mesh_key().expect("collected popovers have keys");
-            let open = popover_is_open(popover);
+            let open = popover.is_popover_open();
             let carried = previous.remove(key);
             if open && !carried.as_ref().is_some_and(|disclosure| disclosure.open) {
                 newly_open_triggers.push(trigger_key.to_string());
@@ -487,7 +461,7 @@ impl FrontendSurfaceComponent {
                     node.children.first()
                 }
             })
-            .filter(|popover| source_element_tag(popover) == "popover" && popover_is_open(popover))
+            .filter(|popover| source_element_tag(popover) == "popover" && popover.is_popover_open())
             .and_then(WidgetNode::mesh_key)
             .map(str::to_owned)
         else {

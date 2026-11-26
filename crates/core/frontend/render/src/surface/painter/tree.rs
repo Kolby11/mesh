@@ -939,6 +939,12 @@ impl FrontendRenderEngine {
         {
             cache.borrow_mut().metrics.live_commands += 1;
         }
+        let content_paint_clip = if command.node.in_scroll_content {
+            let (_, dx, dy) = session.scroll_replay.expect("balanced scroll replay scope");
+            local_clip_for(AffineTransform::translation(dx, dy), 1.0, paint_clip)
+        } else {
+            paint_clip
+        };
         // Layer scope commands are bookkeeping, not drawing: a push runs even
         // when its region is outside the damage clip or its node is filtered
         // out of this pass, because dropping it would either leave the pop
@@ -1089,7 +1095,7 @@ impl FrontendRenderEngine {
                 return;
             }
             DisplayPaintCommandKind::PushCompositingLayer => {
-                let bounds = intersect_clip(paint_clip, scaled_display_clip(command.clip, scale));
+                let bounds = intersect_clip(content_paint_clip, scaled_display_clip(command.clip, scale));
                 self.execute_painter_commands_in_session(
                     session,
                     &[PainterCommand::PushLayer(PainterLayer::isolated(
@@ -1140,14 +1146,8 @@ impl FrontendRenderEngine {
         if paint_nodes.is_some_and(|nodes| !nodes.contains(&command.node.id)) {
             return;
         }
-        let paint_clip = if command.node.in_scroll_content {
-            let (_, dx, dy) = session.scroll_replay.expect("balanced scroll replay scope");
-            local_clip_for(AffineTransform::translation(dx, dy), 1.0, paint_clip)
-        } else {
-            paint_clip
-        };
         let command_clip = scaled_display_clip(command.clip, scale);
-        let clip = intersect_clip(paint_clip, command_clip);
+        let clip = intersect_clip(content_paint_clip, command_clip);
         if clip.width <= 0 || clip.height <= 0 {
             return;
         }

@@ -422,8 +422,22 @@ tooltip {
    shadows stay below it, so each shape gets its own glass edge. */
 @module "@mesh/glass-material" {
   :root {
+    --glass-shadow-group: 0 4px 14px #00041073;
+    --glass-control-shadow: none;
+    --glass-control-rim: #ffffff2e;
+    --glass-settings-selected-text: #ffffff;
+    --glass-settings-toolbar: #ffffff0d;
+    --glass-settings-row-padding: 13px;
+    --glass-settings-heading-weight: 650;
+    --glass-settings-heading-size: 26px;
+    --glass-border-width: 1px;
+    --glass-radius-bar: 16px;
+    --glass-radius-switch: 99px;
+    --glass-radius-control: 12px;
+    --glass-radius-card: 18px;
+    --glass-radius-window: 24px;
     --glass-hover: #ffffff2e;
-    --glass-rim: #ffffff70;
+    --glass-rim: #ffffff2e;
     --glass-rim-hover: #ffffff99;
     --glass-text: #ffffff;
     --glass-text-muted: #ffffffcc;
@@ -457,33 +471,48 @@ tooltip {
     --glass-surface-focused: linear-gradient(to bottom, #ffffff3d, #ffffff1a);
     --glass-surface-battery: linear-gradient(to bottom, #ffffffe6, #e6eefcb3);
     --glass-surface-battery-low: linear-gradient(to bottom, #ff8f86e6, #e2463ccc);
-    --glass-surface-control: linear-gradient(to bottom, #4aa3ff4d, #0a84ff33);
+    --glass-surface-control: linear-gradient(to bottom, #ffffff28, #ffffff17);
     --glass-shadow-pill: 0 4px 14px #00081f08;
-    --glass-shadow-card: 0 18px 48px #00081f08;
+    --glass-shadow-card: 0 30px 80px #000000aa;
     --glass-shadow-dock: 0 -6px 24px #00081f08;
     --glass-shadow-lens: 0 4px 12px #00081f08;
     --glass-shadow-artwork: 0 8px 22px #00081f66;
     --glass-text-on-error: #ffffff;
-    --glass-surface-panel: linear-gradient(to bottom, #b8c5df30, #09122240);
-    /* Keep enough tint for dark labels even over a black backdrop. */
-    --glass-settings-surface: linear-gradient(150deg, #f5fbffbe, #dce9f69e);
-    --glass-settings-solid: #e4eef8;
-    --glass-settings-sidebar: #e4f1ff26;
-    --glass-settings-text: #182637;
-    --glass-settings-text-muted: #1f2b39;
-    --glass-settings-inset: #f8fcff58;
-    --glass-settings-rim: #334b6426;
-    --glass-settings-divider: #334b6444;
-    --glass-settings-selected: linear-gradient(to bottom, #edf7ffa8, #a4ccfa94);
-    --glass-settings-switch-track: color-mix(in srgb, var(--glass-settings-text) 48%, transparent);
-    --glass-settings-switch-thumb: #f7fbff;
-    --glass-settings-step-fill: color-mix(in srgb, var(--glass-settings-text) 10%, transparent);
-    --glass-settings-step-hover: color-mix(in srgb, var(--glass-settings-text) 20%, transparent);
+    --glass-surface-panel: linear-gradient(to bottom, #1a2234cc, #101623b8);
+    --glass-settings-surface: linear-gradient(to bottom, #1a2234cc, #101623b8);
+    --glass-settings-solid: #141a28;
+    --glass-settings-sidebar: #ffffff0d;
+    --glass-settings-text: #f4f7fc;
+    --glass-settings-text-muted: #cdd5e8;
+    --glass-settings-inset: #ffffff17;
+    --glass-settings-rim: #ffffff2e;
+    --glass-settings-divider: #ffffff2e;
+    --glass-settings-selected: linear-gradient(#0a84ff59, #0a84ff59);
+    --glass-settings-switch-track: #ffffff33;
+    --glass-settings-switch-thumb: #f4f7fc;
+    --glass-settings-step-fill: #ffffff22;
+    --glass-settings-step-hover: #ffffff33;
     --glass-backdrop-pill: blur(2px) refract(0px 0px);
     --glass-backdrop-card: blur(2px) refract(0px 0px);
     --glass-backdrop-dock: blur(2px) refract(0px 0px);
     --glass-backdrop-panel: blur(4px) refract(0px 0px);
     --glass-backdrop-flare: blur(2px) refract(0px 0px);
     --glass-backdrop-lens: refract(0px 0px);
+  }
+}
+
+@module "@mesh/glass-wallpaper" {
+  :root {
+    --wallpaper-base: linear-gradient(160deg, #0b1030, #07101f);
+    --wallpaper-glow-primary: radial-gradient(ellipse at 20% 20%, #2b6cff, transparent 60%);
+    --wallpaper-glow-secondary: radial-gradient(ellipse at 85% 75%, #a14bff, transparent 55%);
+  }
+}
+
+@module "@mesh/navigation-bar" {
+  :root {
+    --navigation-frame-height: 46px;
+    --navigation-frame-margin: 12px 14px 0;
+    --navigation-frame-radius: 16px;
   }
 }

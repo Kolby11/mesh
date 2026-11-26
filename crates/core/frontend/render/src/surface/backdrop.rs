@@ -11,9 +11,9 @@
 use mesh_core_elements::VisualFilter;
 use mesh_core_elements::style::Corners;
 use skia_safe::{
-    AlphaType, Canvas, ClipOp, ColorType, Data, FilterMode, ISize, ImageInfo, Matrix, MipmapMode,
-    Paint, RRect, Rect, RuntimeEffect, SamplingOptions, Shader, TileMode, image_filters, images,
-    runtime_effect::ChildPtr, surfaces,
+    AlphaType, Canvas, ClipOp, ColorType, Contains, Data, FilterMode, ISize, ImageInfo, Matrix,
+    MipmapMode, Paint, RRect, Rect, RuntimeEffect, SamplingOptions, Shader, TileMode, image_filters,
+    images, runtime_effect::ChildPtr, surfaces,
 };
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -114,6 +114,60 @@ fn decode(path: &Path) -> Result<skia_safe::Image, String> {
 }
 
 impl BackdropSource {
+    fn cover_fit(&self, width: i32, height: i32) -> Rect {
+        let (iw, ih) = (self.image.width() as f32, self.image.height() as f32);
+        let scale = (width as f32 / iw).max(height as f32 / ih);
+        let (dw, dh) = (iw * scale, ih * scale);
+        Rect::from_xywh(
+            (width as f32 - dw) / 2.0,
+            (height as f32 - dh) / 2.0,
+            dw,
+            dh,
+        )
+    }
+
+    fn draw_plain(
+        &self,
+        canvas: &Canvas,
+        rect: Rect,
+        output: (i32, i32),
+        origin: (f32, f32),
+    ) -> bool {
+        // The 20% per-axis allowance bounds mipmapped pixels below the
+        // combined pixel count of the prepared raster and its upload.
+        if i64::from(self.image.width()) * 5 > i64::from(output.0) * 6
+            || i64::from(self.image.height()) * 5 > i64::from(output.1) * 6
+            || origin.0.fract() != 0.0
+            || origin.1.fract() != 0.0
+            || !Rect::from_xywh(-origin.0, -origin.1, output.0 as f32, output.1 as f32)
+                .contains(rect)
+        {
+            return false;
+        }
+        let transform = canvas.local_to_device_as_3x3();
+        if !transform.is_translate()
+            || transform.translate_x().fract() != 0.0
+            || transform.translate_y().fract() != 0.0
+        {
+            return false;
+        }
+        let dst = self
+            .cover_fit(output.0, output.1)
+            .with_offset((-origin.0, -origin.1));
+        crate::prepared_scene::retain_image(&self.image);
+        let saved = canvas.save();
+        canvas.clip_rect(rect, None, false);
+        canvas.draw_image_rect_with_sampling_options(
+            &self.image,
+            None,
+            dst,
+            SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear),
+            &Paint::default(),
+        );
+        canvas.restore_to_count(saved);
+        true
+    }
+
     /// The source cover-fit to a `width` x `height` device output and blurred
     /// by `blur` device pixels, built once per key. A blurred copy may be
     /// smaller than the output; callers scale it up to `width` x `height`.
@@ -151,15 +205,7 @@ impl BackdropSource {
         // ratio that `draw_refraction` inverts; rounding the copy size up must
         // not shift the image.
         canvas.scale((copy_w as f32 / width as f32, copy_h as f32 / height as f32));
-        let (iw, ih) = (self.image.width() as f32, self.image.height() as f32);
-        let scale = (width as f32 / iw).max(height as f32 / ih);
-        let (dw, dh) = (iw * scale, ih * scale);
-        let dst = Rect::from_xywh(
-            (width as f32 - dw) / 2.0,
-            (height as f32 - dh) / 2.0,
-            dw,
-            dh,
-        );
+        let dst = self.cover_fit(width, height);
         let mut paint = Paint::default();
         if blur > 0.0 {
             // Image-filter sigma is local; the canvas scale maps it into the copy.
@@ -350,6 +396,13 @@ pub(crate) fn draw_refraction(
     if output_w <= 0 || output_h <= 0 || rect.is_empty() {
         return false;
     }
+    if filter.blur_radius <= 0.0
+        && is_unrefracted(filter)
+        && radii == Corners::zero()
+        && source.draw_plain(canvas, rect, (output_w, output_h), frame.origin)
+    {
+        return true;
+    }
     let Some(prepared) = source.prepared(output_w, output_h, filter.blur_radius) else {
         return false;
     };
@@ -467,6 +520,10 @@ fn rim_width(filter: VisualFilter) -> f32 {
     }
 }
 
+fn is_unrefracted(filter: VisualFilter) -> bool {
+    filter.refract_edge <= 0.0 && filter.dispersion <= 0.0 && filter.grain <= 0.0
+}
+
 fn draw_backdrop(
     canvas: &Canvas,
     rect: Rect,
@@ -476,7 +533,7 @@ fn draw_backdrop(
 ) -> bool {
     // With no rim or dispersion the lens evaluates to the input shader,
     // including its alpha. Wallpaper must not pay for an SDF per output pixel.
-    let shader = if filter.refract_edge <= 0.0 && filter.dispersion <= 0.0 && filter.grain <= 0.0 {
+    let shader = if is_unrefracted(filter) {
         backdrop
     } else {
         let Some(shader) = lens_shader(rect, radii, filter, backdrop) else {

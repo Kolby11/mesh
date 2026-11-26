@@ -3490,6 +3490,14 @@ impl Shell {
         visible: bool,
     ) -> Result<VecDeque<SourcedRequest>, ShellRunError> {
         self.invalidate_debug_snapshot_cache();
+        if self
+            .core
+            .surfaces
+            .get(&surface_id)
+            .is_some_and(|state| state.visible != visible)
+        {
+            self.schedule_heap_reclaim();
+        }
         if !visible {
             let is_window = self
                 .surfaces

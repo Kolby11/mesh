@@ -6,7 +6,15 @@
     "apiVersion": "0.1",
     "kind": "ui",
     "uses": {
+      "interfaces": { "mesh.theme": ">=1.0" },
       "capabilities": ["shell.surface", "theme.read"]
+    },
+    "theme": {
+      "tokens": {
+        "wallpaper.base": "none",
+        "wallpaper.glow.primary": "none",
+        "wallpaper.glow.secondary": "none"
+      }
     },
     "entry": "src/main.mesh",
     "surface": {

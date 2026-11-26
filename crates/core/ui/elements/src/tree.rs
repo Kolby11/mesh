@@ -426,7 +426,7 @@ impl std::hash::Hash for TextSelection {
 pub struct TemplateBindings {
     /// The component instance whose script state the expressions read.
     pub instance_key: Arc<str>,
-    pub locals: Option<Arc<serde_json::Map<String, serde_json::Value>>>,
+    pub locals: Option<Arc<crate::TemplateLocals>>,
     pub keyed_item: Option<KeyedTemplateItem>,
     /// `(attribute, expression)` for every non-handler `name={expression}`.
     pub attributes: Vec<(crate::AttrKey, String)>,
@@ -621,7 +621,47 @@ impl DoubleEndedIterator for PaintOrderChildren<'_> {
     }
 }
 
+pub(crate) fn popover_open(attributes: &AttributeMap) -> bool {
+    attributes.get(Prop::Open).is_some_and(|value| {
+        let value = value.trim();
+        !(value.is_empty()
+            || value == "0"
+            || value.eq_ignore_ascii_case("false")
+            || value.eq_ignore_ascii_case("none"))
+    })
+}
+
 impl WidgetNode {
+    /// Resolve the authored trigger reference of an inline or lowered popover.
+    pub fn popover_anchor_reference(&self) -> Option<&str> {
+        let source = self
+            .attributes
+            .get(Prop::DataMeshElement)
+            .map(String::as_str)
+            .unwrap_or(self.tag.as_str());
+        if source != "popover" {
+            return None;
+        }
+        [
+            Prop::AnchorRef,
+            Prop::AnchorTarget,
+            Prop::AnchorElement,
+            Prop::Target,
+        ]
+        .into_iter()
+        .find_map(|name| {
+            self.attributes
+                .get(name)
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+        })
+    }
+
+    /// Whether the popover's authored `open` value requests disclosure.
+    pub fn is_popover_open(&self) -> bool {
+        popover_open(&self.attributes)
+    }
+
     /// Explicitly closed disclosure containers take no space and expose no targets.
     /// An omitted `open` preserves always-visible structural containers.
     pub fn is_closed_container(&self) -> bool {

@@ -2322,6 +2322,86 @@ mod tests {
         assert_eq!(renderer.cache_metrics().layout_misses, 3);
     }
 
+    #[test]
+    fn override_only_font_role_uses_the_committed_face_for_layout_and_paint() {
+        use mesh_core_resources::{FontFrontendBindings, FontRegistry};
+        use std::collections::BTreeSet;
+
+        let _resources = crate::resource_state_test_lock();
+        let mut database = fontdb::Database::new();
+        database.load_system_fonts();
+        let families: BTreeSet<_> = database
+            .faces()
+            .filter_map(|face| face.families.first().map(|(family, _)| family.clone()))
+            .collect();
+        let renderer = TextRenderer::new();
+        renderer.set_font_database(database);
+        let sample = "Wide WWW text iii";
+        let measure = |family| renderer.measure(sample, family, 18.0, None);
+        let paint = |family| {
+            let mut pixels = PixelBuffer::new(240, 40);
+            renderer.render_clipped(
+                sample,
+                family,
+                18.0,
+                400,
+                1.2,
+                TextAlign::Left,
+                Color::WHITE,
+                &mut pixels,
+                0,
+                0,
+                (0, 0, 240, 40),
+                None,
+            );
+            pixels
+        };
+        let module = "@test/front";
+        let role = "preview-editorial";
+        let fallback = paint(role);
+        let samples = || {
+            families.iter().filter_map(|family| {
+                let pixels = paint(family);
+                pixels
+                    .data()
+                    .chunks_exact(4)
+                    .any(|pixel| pixel[3] != 0)
+                    .then_some((family, pixels))
+            })
+        };
+        let (author_family, author_pixels) = samples()
+            .find(|(_, pixels)| pixels.data() != fallback.data())
+            .expect("a text face visually distinct from the fallback");
+        let author_size = measure(author_family);
+        let (user_family, user_pixels) = samples()
+            .find(|(family, pixels)| {
+                pixels.data() != author_pixels.data() && measure(family) != author_size
+            })
+            .expect("a text face with different pixels and measurements");
+        let user_size = measure(user_family);
+        let mut registry = FontRegistry::new(families.iter().cloned());
+        let mut binding = FontFrontendBindings::default();
+        binding
+            .author_overrides
+            .insert(role.into(), author_family.clone());
+        for (user_override, expected_size, expected_pixels) in [
+            (None, author_size, &author_pixels),
+            (Some(user_family), user_size, &user_pixels),
+            (None, author_size, &author_pixels),
+        ] {
+            binding.user_overrides = user_override
+                .map(|family| [(role.into(), family.clone())].into())
+                .unwrap_or_default();
+            registry
+                .set_frontend_bindings(vec![(module.into(), binding.clone())])
+                .unwrap();
+            renderer
+                .set_font_aliases((*registry.shared_reference_aliases_for_module(module)).clone());
+            assert_eq!(measure(role), expected_size);
+            assert_eq!(paint(role).data(), expected_pixels.data());
+        }
+    }
+
     // cargo test -p mesh-core-render --release -- alternating_font_alias_surfaces_profile --ignored --nocapture
     #[test]
     #[ignore = "release-only font-alias surface alternation profile"]

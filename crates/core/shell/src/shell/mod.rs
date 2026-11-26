@@ -725,6 +725,8 @@ pub struct Shell {
     /// that change its inputs reconcile immediately; the loop only needs a
     /// bounded catch-all.
     next_watch_reconcile: std::time::Instant,
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    heap_reclaim_at: Option<std::time::Instant>,
     file_watcher_active: bool,
     debug: DebugOverlayState,
     /// Generation of shell-owned state represented by debug telemetry. The
@@ -753,6 +755,7 @@ pub struct Shell {
     transfer_owned_keyboard_modes: HashMap<SurfaceId, mesh_core_wayland::KeyboardMode>,
     service_handlers: HashMap<String, mpsc::Sender<ServiceCommandMsg>>,
     backend_runtimes: HashMap<String, BackendRuntimeSlot>,
+    backend_ingress: backend::ingress::BackendIngress,
     pending_backend_runtimes: HashMap<String, PendingBackendRuntime>,
     pending_resource_preparation: Option<profile::PendingResourcePreparation>,
     pending_profile_switch: Option<profile::PendingProfileSwitch>,

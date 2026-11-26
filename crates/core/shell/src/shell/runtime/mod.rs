@@ -42,12 +42,41 @@ pub(in crate::shell) struct PendingProfileWrite {
 const MAX_SHELL_MESSAGE_DRAIN_PER_FRAME: usize = 256;
 const DEV_WINDOW_POLL_SLEEP: Duration = Duration::from_millis(16);
 const NO_PROGRESS_RENDER_RETRY: Duration = Duration::from_millis(16);
-/// Hidden surfaces are prewarmed only once startup has settled, and only when
-/// the loop expects to sleep at least this long.
 const SURFACE_PREWARM_DELAY: Duration = Duration::from_secs(1);
-const SURFACE_PREWARM_IDLE: Duration = Duration::from_millis(50);
+const IDLE_MAINTENANCE_MIN_SLEEP: Duration = Duration::from_millis(50);
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+const HEAP_RECLAIM_DELAY: Duration = Duration::from_secs(2);
 
 impl Shell {
+    fn schedule_heap_reclaim(&mut self) {
+        #[cfg(all(target_os = "linux", target_env = "gnu"))]
+        {
+            self.heap_reclaim_at = Some(std::time::Instant::now() + HEAP_RECLAIM_DELAY);
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    fn reclaim_heap_when_idle(&mut self, runtime: &Runtime, sleep: Duration) -> Duration {
+        let Some(reclaim_at) = self.heap_reclaim_at else {
+            return sleep;
+        };
+        if sleep < IDLE_MAINTENANCE_MIN_SLEEP {
+            return sleep;
+        }
+        let remaining = reclaim_at.saturating_duration_since(std::time::Instant::now());
+        if !remaining.is_zero() {
+            return sleep.min(remaining);
+        }
+        self.heap_reclaim_at = None;
+        runtime.spawn_blocking(|| {
+            let started = std::time::Instant::now();
+            // SAFETY: glibc's malloc_trim is thread-safe and takes no pointers.
+            let released = unsafe { libc::malloc_trim(0) } != 0;
+            tracing::debug!(released, elapsed = ?started.elapsed(), "reclaimed idle heap pages");
+        });
+        sleep
+    }
+
     /// Contain one component's failure at the shell boundary. Component
     /// effects are only appended after a successful callback, so an error
     /// discards the failed batch while sibling components continue running.
@@ -324,7 +353,7 @@ impl Shell {
         }
         for runtime in &self.components {
             if runtime.quarantined
-                || (!runtime.component.wants_render() && !runtime.resource_paints.is_ready())
+                || (!runtime.component.wants_render() && !runtime.targets().any(|target| target.resource_paints.is_ready()))
             {
                 continue;
             }
@@ -447,14 +476,15 @@ impl Shell {
                         .is_some_and(|seen| seen != resource_revision)
             });
             let compositor_redraw = self.compositor_redraw_ready(runtime);
+            let resource_paint_ready = runtime.targets().any(|target| target.resource_paints.is_ready());
             if !runtime.component.wants_render()
-                && !runtime.resource_paints.is_ready()
+                && !resource_paint_ready
                 && !resource_revision_changed
                 && !compositor_redraw
             {
                 return false;
             }
-            if !runtime.resource_paints.is_ready()
+            if !resource_paint_ready
                 && !resource_revision_changed
                 && !compositor_redraw
                 && let Some(ready) = self.animation_children_ready(runtime)
@@ -588,6 +618,7 @@ impl Shell {
             );
 
             let prewarm_after = std::time::Instant::now() + SURFACE_PREWARM_DELAY;
+            self.schedule_heap_reclaim();
             while !self.core.shutting_down {
                 self.reap_completed_backend_tasks();
                 let loop_started = std::time::Instant::now();
@@ -640,14 +671,17 @@ impl Shell {
                 let mut deadline = self.next_runtime_sleep(shell_message_backlog_likely);
                 // One hidden surface per idle turn, so input arriving meanwhile
                 // waits for at most one paint.
-                if deadline >= SURFACE_PREWARM_IDLE
+                if deadline >= IDLE_MAINTENANCE_MIN_SLEEP
                     && loop_started >= prewarm_after
                     && self.prewarm_hidden_surface()?
                 {
+                    self.schedule_heap_reclaim();
                     deadline = self
                         .next_runtime_sleep(shell_message_backlog_likely)
-                        .min(SURFACE_PREWARM_IDLE);
+                        .min(IDLE_MAINTENANCE_MIN_SLEEP);
                 }
+                #[cfg(all(target_os = "linux", target_env = "gnu"))]
+                let deadline = self.reclaim_heap_when_idle(&runtime, deadline);
                 #[cfg(test)]
                 let deadline = self.clamp_to_replay_wake(deadline);
                 if self.presentation_engine.supports_blocking_dispatch() {
@@ -744,6 +778,7 @@ impl Shell {
         }
 
         self.advance_shutdown_phase(ShellShutdownPhase::StoppingProviders);
+        self.backend_ingress.close();
         self.shutdown_backend_runtimes(runtime);
         self.backend_supervision.clear();
 
@@ -864,8 +899,13 @@ impl Shell {
             }
             return Ok(());
         }
+        let message = match message {
+            ShellMessage::BackendIngress(entry) => entry.take(),
+            message => message,
+        };
         let message_started = self.profiling_enabled().then(std::time::Instant::now);
         let trigger_kind = match &message {
+            ShellMessage::BackendIngress(_) => unreachable!("ingress entry must be drained"),
             ShellMessage::BackendServiceUpdate { .. } => "backend_service_update",
             ShellMessage::BackendLifecycle { .. } => "backend_lifecycle",
             ShellMessage::BackendCommandResult { .. } => "backend_command_result",
@@ -884,6 +924,7 @@ impl Shell {
             ShellMessage::GraphCandidateLoaded { .. } => "graph_candidate_loaded",
         };
         match message {
+            ShellMessage::BackendIngress(_) => unreachable!("ingress entry must be drained"),
             ShellMessage::BackendServiceUpdate {
                 interface,
                 provider_id,
@@ -1621,6 +1662,10 @@ struct CoalescedShellMessages {
 
 impl CoalescedShellMessages {
     fn push(&mut self, message: ShellMessage) {
+        let message = match message {
+            ShellMessage::BackendIngress(entry) => entry.take(),
+            message => message,
+        };
         if let ShellMessage::FilesystemChanged { generation, paths } = &message {
             if let Some(index) = self.filesystem_change_generations.get(generation).copied() {
                 if let ShellMessage::FilesystemChanged {

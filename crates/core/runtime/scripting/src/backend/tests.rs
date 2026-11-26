@@ -1374,17 +1374,36 @@ fn bundled_recorder_announces_only_successful_owned_recordings() {
         "../../../../modules/backend/wf-recorder/src/main.luau",
     ))
     .unwrap();
-    ctx.ensure_lua()
-        .unwrap()
-        .load(
-            r#"
-videos = "/videos"
+    let videos = temp_storage_root("recorder output");
+    let lua = ctx.ensure_lua().unwrap().clone();
+    let videos_for_command = videos.clone();
+    let run_shell = lua
+        .create_function(move |lua, command: String| {
+            let output = std::process::Command::new("sh")
+                .args(["-c", &command])
+                .env("XDG_VIDEOS_DIR", &videos_for_command)
+                .output()
+                .map_err(mlua::Error::external)?;
+            let result = lua.create_table()?;
+            result.set("success", output.status.success())?;
+            result.set("stdout", lua.create_string(&output.stdout)?)?;
+            Ok(result)
+        })
+        .unwrap();
+    lua.globals().set("run_shell", run_shell).unwrap();
+    lua.load(
+        r#"
 launches = 0
 saved = {}
-mesh.exec = function(program)
-    return { success = program == "sh", stdout = videos }
+os = { time = function() return 42 end }
+mesh.exec = function(program, args)
+    if program == "sh" then
+        return run_shell(args[2])
+    end
+    return { success = false }
 end
-mesh.exec_stream = function(program)
+mesh.exec_stream = function(program, args)
+    assert(program == "wf-recorder" and args[1] == "-f")
     launches += 1
     return { id = launches, program = program }
 end
@@ -1393,9 +1412,9 @@ function deliver_exit(id, success)
     on_stream_event(self, { type = "exited", stream = { id = id }, success = success })
 end
 "#,
-        )
-        .exec()
-        .unwrap();
+    )
+    .exec()
+    .unwrap();
     ctx.call_init().unwrap();
     assert!(ctx.has_stream_event_handler());
     let lua = ctx.ensure_lua().unwrap().clone();
@@ -1411,13 +1430,22 @@ end
     exit.call::<()>((1, true)).unwrap();
     assert_eq!(saved.get::<String>(1).unwrap(), saved_path);
 
-    lua.globals().set("videos", "/other-videos").unwrap();
     let second = ctx
         .run_command_finished("toggle", &serde_json::json!({}))
         .unwrap()
         .state
         .unwrap();
     assert_ne!(first["output"], second["output"]);
+    assert_eq!(first["started_at"], second["started_at"]);
+    for output in [saved_path, second["output"].as_str().unwrap()] {
+        let path = std::path::Path::new(output);
+        assert_eq!(path.extension().unwrap(), "mp4");
+        assert!(path.parent().unwrap().is_dir());
+        assert_eq!(
+            path.parent().unwrap().parent().unwrap(),
+            videos.join("Recordings")
+        );
+    }
     exit.call::<()>((1, true)).unwrap();
     let recording = ctx.take_service_state_snapshot().unwrap().unwrap();
     assert_eq!(recording["recording"], true);
@@ -1427,6 +1455,7 @@ end
     assert_eq!(stopped["recording"], false);
     assert_eq!(stopped["output"], saved_path);
     assert_eq!(saved.raw_len(), 1);
+    std::fs::remove_dir_all(videos).unwrap();
 }
 
 #[test]

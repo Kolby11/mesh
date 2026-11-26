@@ -2,8 +2,8 @@
 
 Backlog: the "Settings pages and shell surfaces" item in
 [`docs/BACKLOG.md`](../../../docs/BACKLOG.md).
-Design canvas: <https://claude.ai/artifact/3bgtVEKxDojXhcD8m33ksY> — four
-themes (Nocturne, Paper, Tapedeck, Bubblegum), each with a desktop, lock
+Design canvas: <https://claude.ai/artifact/3bgtVEKxDojXhcD8m33ksY> — five
+themes (Nocturne, Paper, Tapedeck, Bubblegum, Liquid Glass), each with a desktop, lock
 screen, quick settings, notification centre, launcher, overlays, component kit
 and 17 settings pages. The first board maps every page to its backing service.
 
@@ -36,14 +36,17 @@ ships, built only from token-driven components so any theme restyles it.
 
 ## Shell surfaces
 
-Exist: desktop bar/dock, quick settings, notification centre, power menu.
-Extend: launcher, popover-based context menu/tooltip/dialog.
-New: lock screen (session-lock surface), volume/brightness OSD, window
-switcher.
+The five desktop profiles compose the floating panel and shelf, menu strip,
+taskbar, or side rails. They share quick settings, notification center,
+application launcher, power controls and a volume/brightness OSD.
+Remaining desktop cards include the Bubblegum calendar and tasks, Paper agenda,
+and Tapedeck file shortcuts. Context menus and dialogs need their artboard
+treatments. The session lock screen and window switcher still need shell
+integration.
 
 ## Order
 
-1. Land the token pass: the four theme packs against the component kit.
+1. Extend the component kit across the remaining board-specific layouts.
 2. Pages that need no new service (Accessibility, Notifications policy, Apps).
 3. Contracts for Display, Pointer, Bluetooth, Session, then their pages.
-4. Lock screen, OSD, window switcher.
+4. Lock screen and window switcher.

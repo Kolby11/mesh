@@ -20,9 +20,9 @@
   --animation-opacity-disabled: 0.38;
   --animation-scale-hover: 1.02;
   --animation-scale-press: 0.98;
-  --effect-backdrop-blur-surface-radius: 20px;
+  --effect-backdrop-blur-surface-radius: 0px;
   --effect-backdrop-blur-popup-radius: 14px;
-  --effect-backdrop-blur-surface-background: #efe9db5c;
+  --effect-backdrop-blur-surface-background: #f6f2e8;
   --effect-backdrop-blur-popup-background: #f0eadc47;
   --base16-base00: #efe9db;
   --base16-base01: #f6f2e8;
@@ -361,6 +361,24 @@ tooltip {
    blur region. */
 @module "@mesh/glass-material" {
   :root {
+    --glass-shadow-card: 0 18px 40px #3a2f1a33;
+    --glass-control-shadow: none;
+    --glass-control-rim: #d9d0ba;
+    --glass-rim: #d9d0ba;
+    --glass-settings-selected-text: #0f3322;
+    --glass-settings-divider: #d9d0ba;
+    --glass-settings-rim: #d9d0ba;
+    --glass-settings-toolbar: #fbf9f3;
+    --glass-settings-sidebar: #f6f2e8;
+    --glass-settings-row-padding: 13px;
+    --glass-settings-heading-weight: 500;
+    --glass-settings-heading-size: 32px;
+    --glass-border-width: 1px;
+    --glass-radius-bar: 6px;
+    --glass-radius-switch: 99px;
+    --glass-radius-control: 6px;
+    --glass-radius-card: 8px;
+    --glass-radius-window: 10px;
     --glass-surface-pill: linear-gradient(#e8e0cd, #e8e0cd);
     --glass-surface-recording: linear-gradient(#f6d2cf, #f6d2cf);
     --glass-surface-weather: linear-gradient(#f0eadc, #f0eadc);
@@ -368,19 +386,19 @@ tooltip {
     --glass-surface-dock: linear-gradient(#e8e0cd, #e8e0cd);
     --glass-surface-flare: linear-gradient(#ddd3bc, #ddd3bc);
     --glass-surface-lens: linear-gradient(#ddd3bc, #ddd3bc);
-    --glass-surface-panel: linear-gradient(#f0eadc, #f0eadc);
+    --glass-surface-panel: linear-gradient(#fbf9f3, #fbf9f3);
     --glass-surface-focused: linear-gradient(#cfe6d8, #cfe6d8);
     --glass-surface-battery: linear-gradient(#cfe6d8, #cfe6d8);
     --glass-surface-battery-low: linear-gradient(#f6d2cf, #f6d2cf);
-    --glass-surface-control: linear-gradient(#f3d5cb, #f3d5cb);
+    --glass-surface-control: linear-gradient(#e8e0cd, #e8e0cd);
     --glass-surface-active: linear-gradient(#2c6a4d, #2c6a4d);
     --glass-fill-subtle: #ddd3bc;
     --glass-fill-occupied: #f3d5cb;
     --glass-fill-inset: #f6f2e8;
     --glass-fill-artwork: #ddd3bc;
     --glass-meter-track: #ddd3bc;
-    --glass-settings-surface: linear-gradient(#f0eadc, #f0eadc);
-    --glass-settings-inset: #f6f2e8;
+    --glass-settings-surface: linear-gradient(#fbf9f3, #fbf9f3);
+    --glass-settings-inset: #f0eadc;
     --glass-settings-selected: linear-gradient(#cfe6d8, #cfe6d8);
     --glass-control-fill-selected: linear-gradient(#cfe6d8, #cfe6d8);
     --glass-control-fill-primary: linear-gradient(#2c6a4d, #2c6a4d);
@@ -395,5 +413,22 @@ tooltip {
     --glass-backdrop-lens: none;
     --glass-shadow-pill: none;
     --glass-shadow-lens: none;
+  }
+}
+
+@module "@mesh/glass-wallpaper" {
+  :root {
+    --wallpaper-base: linear-gradient(to bottom, #d9cfb6, #c9bd9f);
+    --wallpaper-glow-primary: radial-gradient(ellipse at 80% 10%, #e6dcc4, transparent 60%);
+    --wallpaper-glow-secondary: none;
+  }
+}
+
+@module "@mesh/navigation-bar" {
+  :root {
+    --navigation-frame-height: 34px;
+    --navigation-frame-margin: 0;
+    --navigation-frame-radius: 0px;
+    --navigation-frame-shadow: 0 1px 0 #8e8675;
   }
 }

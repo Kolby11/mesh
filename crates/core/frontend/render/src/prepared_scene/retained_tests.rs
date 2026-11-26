@@ -201,35 +201,38 @@ fn resource_completion_invalidates_only_its_consumer_scene() {
     let engine = FrontendRenderEngine::new();
     let mut list = RetainedDisplayList::default();
     list.update(&tree(16), 256, 256, true, true);
-    let first = crate::ResourcePaintConsumer::default();
-    let second = crate::ResourcePaintConsumer::default();
+    let first = crate::ResourcePaintConsumer::with_pending_tracking();
+    let second = crate::ResourcePaintConsumer::with_pending_tracking();
     let mut a = SceneCanvas::new(512, 512).unwrap();
     let mut b = SceneCanvas::new(512, 512).unwrap();
-    {
-        let _scope = first.enter();
-        record(&engine, &list, &mut a, 1.0, None);
-    }
-    {
-        let _scope = second.enter();
-        record(&engine, &list, &mut b, 1.0, None);
-    }
     let mut pending = crate::surface::PendingResourceConsumers::default();
     {
         let _scope = second.enter();
         pending.insert(1);
+        record(&engine, &list, &mut b, 1.0, None);
+        record(&engine, &list, &mut b, 1.0, None);
+        assert_eq!(b.preparation_metrics().reused_nodes, 0);
+    }
+    {
+        let _scope = first.enter();
+        record(&engine, &list, &mut a, 1.0, None);
+        let picture = record(&engine, &list, &mut a, 1.0, None);
+        assert_eq!(a.preparation_metrics().reused_nodes, 17);
+        assert_full_parity(&engine, &list, &picture, 1.0);
     }
     pending.remove(&1).notify();
-    let picture = {
+    {
         let _scope = first.enter();
-        record(&engine, &list, &mut a, 1.0, None)
-    };
-    assert_eq!(a.preparation_metrics().reused_nodes, 17);
-    assert_full_parity(&engine, &list, &picture, 1.0);
+        record(&engine, &list, &mut a, 1.0, None);
+        assert_eq!(a.preparation_metrics().reused_nodes, 17);
+    }
     {
         let _scope = second.enter();
         record(&engine, &list, &mut b, 1.0, None);
+        assert_eq!(b.preparation_metrics().recorded_nodes, 17);
+        record(&engine, &list, &mut b, 1.0, None);
+        assert_eq!(b.preparation_metrics().reused_nodes, 17);
     }
-    assert_eq!(b.preparation_metrics().recorded_nodes, 17);
 }
 
 #[test]

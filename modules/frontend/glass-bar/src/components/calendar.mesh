@@ -1,5 +1,9 @@
+<props>
+{ rail = { type = "bool", default = false } }
+</props>
+
 <template>
-    <popover class="calendar-shell" open={open} anchor-ref="glassCalendar" anchor="bottom" gravity="bottom" offset-y="12" open-on="click" grab="click" onopenchange={onOpenChange} aria-label={t("calendar.title")}>
+    <popover class="calendar-shell" open={open} anchor-ref="glassCalendar" anchor={props.rail and "right" or "bottom"} gravity={props.rail and "right" or "bottom"} offset-x={props.rail and 12 or 0} offset-y={props.rail and 0 or 12} open-on="click" grab="click" onopenchange={onOpenChange} aria-label={t("calendar.title")}>
         <column class="calendar">
             <text class="today-label">{today_label}</text>
             <row class="month-heading">

@@ -1,0 +1,73 @@
+{
+  "name": "@mesh/bubblegum-desktop",
+  "version": "0.1.0",
+  "description": "Bubblegum desktop with a left workspace rail and a right application rail.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "composition",
+    "extends": "@mesh/glass",
+    "uses": {
+      "modules": {
+        "@mesh/bubblegum": ">=0.1.0",
+        "@mesh/level-osd": ">=0.1.0"
+      }
+    },
+    "compose": {
+      "resources": {
+        "theme": "@mesh/bubblegum"
+      },
+      "settings": {
+        "@mesh/glass-bar": {
+          "props": {
+            "global": {
+              "desktop_layout": "rail"
+            }
+          }
+        },
+        "@mesh/glass-dock": {
+          "props": {
+            "global": {
+              "desktop_layout": "rail"
+            }
+          }
+        },
+        "@mesh/glass-widgets": {
+          "props": {
+            "global": {
+              "desktop_layout": "rail"
+            }
+          }
+        },
+        "@mesh/glass-bar#default": {
+          "surface": {
+            "anchor": "left"
+          }
+        },
+        "@mesh/glass-dock#default": {
+          "surface": {
+            "anchor": "right",
+            "center": true
+          }
+        },
+        "@mesh/glass-notifications#default": {
+          "surface": {
+            "anchor": "right"
+          }
+        },
+        "@mesh/glass-notifications": {
+          "props": {
+            "global": {
+              "right_aligned": true,
+              "right_inset": "108px"
+            }
+          }
+        }
+      },
+      "roots": {
+        "@mesh/level-osd#default": {
+          "module": "@mesh/level-osd"
+        }
+      }
+    }
+  }
+}

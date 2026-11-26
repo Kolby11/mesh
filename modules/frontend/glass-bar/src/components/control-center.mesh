@@ -1,5 +1,9 @@
+<props>
+{ rail = { type = "bool", default = false } }
+</props>
+
 <template>
-    <popover class="control-shell" open={open} anchor-ref="glassControls" anchor="bottom" gravity="bottom" offset-y="12" open-on="click" grab="click" aria-label={t("controls.title")}>
+    <popover class="control-shell" open={open} anchor-ref="glassControls" anchor={props.rail and "right" or "bottom"} gravity={props.rail and "right" or "bottom"} offset-x={props.rail and 12 or 0} offset-y={props.rail and 0 or 12} open-on="click" grab="click" aria-label={t("controls.title")}>
         <column class="panel">
             <row class="heading">
                 <column class="heading-copy">
@@ -108,17 +112,17 @@ end
     .control-shell.mesh-surface-entering { opacity: 0; transform: translateY(-14px) scale(0.94); }
     .control-shell.mesh-surface-exiting { opacity: 0; transform: translateY(-8px) scale(0.96); transition-duration: var(--animation-duration-fast); }
     .panel {
-        width: 364px; padding: 24px; gap: 20px; border-radius: 28px;
-        border: 1px solid var(--glass-rim); background-image: var(--glass-surface-panel);
+        width: 364px; padding: 24px; gap: 20px; border-radius: var(--glass-radius-window);
+        border: var(--glass-border-width) solid var(--glass-rim); background-image: var(--glass-surface-panel);
         box-shadow: var(--glass-shadow-card); backdrop-filter: var(--glass-backdrop-panel);
     }
     .heading { width: 100%; align-items: center; gap: 12px; }
     .heading-copy { flex-grow: 1; gap: 5px; }
     .eyebrow { height: 16px; font-size: 10px; font-weight: 600; color: var(--glass-text-muted); }
     .heading-title { height: 24px; font-size: 17px; font-weight: 600; color: var(--glass-text-heading); }
-    .round-button { width: 36px; height: 36px; padding: 0; justify-content: center; align-items: center; border-radius: 999px; background: var(--glass-fill-inset); }
+    .round-button { width: 36px; height: 36px; padding: 0; justify-content: center; align-items: center; border-radius: var(--glass-radius-control); background: var(--glass-fill-inset); }
     .tiles { width: 100%; gap: 12px; }
-    .connection { flex-direction: column; flex-grow: 1; flex-basis: 0; min-width: 0; height: 112px; padding: 14px; gap: 7px; border-radius: 20px; align-items: flex-start; border: 1px solid var(--glass-rim-inset); background: var(--glass-fill-inset); }
+    .connection { flex-direction: column; flex-grow: 1; flex-basis: 0; min-width: 0; height: 112px; padding: 14px; gap: 7px; border-radius: var(--glass-radius-card); align-items: flex-start; border: 1px solid var(--glass-rim-inset); background: var(--glass-fill-inset); }
     .connection-active { background-image: var(--glass-surface-control); border-color: var(--glass-rim-accent); }
     .connection-icon { width: 25px; height: 25px; color: var(--glass-text); }
     .tile-title { height: 20px; font-size: 13px; font-weight: 600; color: var(--glass-text-heading); }

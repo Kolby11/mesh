@@ -1,10 +1,56 @@
 # Status
 
-**Updated:** 2026-11-25
+**Updated:** 2026-11-27
 
 Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and measurements live in [`log/`](log/README.md).
 
 ## Now
+
+- Parent and promoted surfaces now admit scene recordings based on their own
+  pending resources. The dock reused recordings during Settings wallpaper
+  preview loads. [Measurements](log/performance-log.md#2026-11-27--scope-scene-cache-admission-to-each-target).
+
+- Popup input uses retained geometry, keyed child instances retire after
+  removal, and backend ingress bounds ordered messages while coalescing state.
+  The release pointer, lifecycle and burst checks passed.
+  [Measurements](log/performance-log.md#2026-11-26--promoted-popup-input-keyed-lifetime-and-backend-ingress).
+
+- Expanded Appearance lists retain their scrolling content and shift pixels
+  on uniform backdrops. The release workload shifted 59 of 60 finger frames.
+  [Measurements](log/performance-log.md#2026-11-26--restore-retained-appearance-scrolling).
+
+- Plain wallpaper reuses decoded pixels on eligible outputs. The backdrop
+  tests and raster gate passed. [Memory measurements](log/performance-log.md#2026-11-26--reuse-decoded-wallpaper-pixels).
+
+- The glibc shell returns free heap pages during idle turns after startup
+  and surface visibility changes. [Memory measurements](log/performance-log.md#2026-11-26--reclaim-idle-heap-pages).
+
+- The five Settings & Shell designs have selectable desktop profiles with
+  matching themes, artboard-specific panels and shelves, and a shared volume
+  and brightness overlay. The backlog tracks the remaining lock, window
+  switcher, desktop-card and overlay designs.
+
+- Template bindings share a locals snapshot per loop item. The keyed-list and
+  Glass release suites passed. [Memory measurements](log/performance-log.md#2026-11-26--share-template-loop-locals).
+
+- Luau and compiled-template translation hits skip diagnostic record
+  construction. The Settings label workload passed both relative performance
+  checks. [Measurements](log/performance-log.md#2026-11-26--text-only-translation-hits).
+
+- Settings follows the exported sidebar order and page-specific card layouts.
+  Appearance opens with theme previews, compact controls and wallpaper tiles
+  when the provider has previews. Paired cards wrap at narrow sizes.
+
+- Direct `font-family` values resolve roles declared only in the surface
+  module's font overrides. The renderer regression checks shaping and pixels
+  across author and user override changes.
+
+- Numeric icon fill, weight, grade and optical size support CSS transitions.
+  Axis endpoints that use the font's default apply immediately.
+
+- Popover semantics derive trigger expansion from hidden and promoted popovers.
+  Recording attempts reserve distinct output directories before starting the
+  recorder.
 
 - Named render sources support independent offscreen layout and explicit
   imports from children mounted on the same surface. The integration test
@@ -34,8 +80,6 @@ Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and measurem
   A synthetic EGL DMA-BUF import with an acquire fence passed locally.
   [Design](todos/pending/2026-11-25-native-window-capture.md).
 
-- Continue scoped backlog correctness work after subprocess startup ordering, masked-input selection mapping and completed backend task retirement and Advanced Settings optimistic reconciliation; fixes and focused regressions are complete.
-
 - Address independent correctness defects from the recent audit in scoped waves, prioritizing input, rendering and backend lifecycle. Keep shared tracking changes centralized.
 - Continue the incomplete whole-codebase audit and reconcile its coverage.
 - Measure performance candidates against representative workloads before changing them; tackle larger architectural features through their linked designs and dependencies.
@@ -45,7 +89,5 @@ Open work lives in [`docs/BACKLOG.md`](../docs/BACKLOG.md); history and measurem
 - D1 compound-table write tracking remains deferred pending supported runtime observation.
 - GPU panel recorded-scene parity exceeds its pixel budget on the baseline; NVIDIA and other compositor imports remain unchecked live.
 - Default-parallel shell checks have intermittent fractional-layout and debug Surfaces assertions; isolated reruns and the complete two-thread run have passed.
-- The Settings material-policy test fails its Liquid Glass panel gradient
-  assertion on clean `e399e827` and the correctness wave.
 - The Settings debug integration test fails its expected audio volume request
   on clean `e399e827` and the programmable rendering changes.

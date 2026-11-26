@@ -53,6 +53,13 @@ pub(crate) struct ResourceCompletionSnapshot {
     generation: u64,
 }
 
+impl ResourceCompletionSnapshot {
+    pub(crate) fn pending_requests(&self) -> Option<usize> {
+        let pending = self.consumer.as_ref()?.pending.as_ref()?;
+        Some(pending.load(Ordering::Acquire))
+    }
+}
+
 impl PartialEq for ResourceCompletionSnapshot {
     fn eq(&self, other: &Self) -> bool {
         self.generation == other.generation

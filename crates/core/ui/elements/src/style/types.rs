@@ -1308,6 +1308,10 @@ macro_rules! for_each_transition_property {
             background_color,
             border_color,
             color,
+            icon_fill,
+            icon_weight,
+            icon_grade,
+            icon_optical_size,
             width,
             height,
             min_width,
@@ -1341,6 +1345,10 @@ pub struct TransitionProperties {
     pub background_color: bool,
     pub border_color: bool,
     pub color: bool,
+    pub icon_fill: bool,
+    pub icon_weight: bool,
+    pub icon_grade: bool,
+    pub icon_optical_size: bool,
     pub width: bool,
     pub height: bool,
     pub min_width: bool,
@@ -1385,6 +1393,10 @@ impl TransitionProperties {
             background_color: true,
             border_color: true,
             color: true,
+            icon_fill: true,
+            icon_weight: true,
+            icon_grade: true,
+            icon_optical_size: true,
             width: true,
             height: true,
             min_width: true,
@@ -1460,6 +1472,10 @@ impl TransitionProperties {
             "opacity" => properties.opacity = true,
             "background" | "background-color" => properties.background_color = true,
             "color" => properties.color = true,
+            "--icon-fill" => properties.icon_fill = true,
+            "--icon-weight" => properties.icon_weight = true,
+            "--icon-grade" => properties.icon_grade = true,
+            "--icon-optical-size" => properties.icon_optical_size = true,
             "width" => properties.width = true,
             "height" => properties.height = true,
             "min-width" => properties.min_width = true,
@@ -1545,6 +1561,22 @@ impl TransitionProperties {
 
     pub fn animates_color(self) -> bool {
         self.all || self.color
+    }
+
+    pub fn animates_icon_fill(self) -> bool {
+        self.all || self.icon_fill
+    }
+
+    pub fn animates_icon_weight(self) -> bool {
+        self.all || self.icon_weight
+    }
+
+    pub fn animates_icon_grade(self) -> bool {
+        self.all || self.icon_grade
+    }
+
+    pub fn animates_icon_optical_size(self) -> bool {
+        self.all || self.icon_optical_size
     }
 
     pub fn animates_width(self) -> bool {
@@ -1662,6 +1694,10 @@ impl TransitionProperties {
             || self.background_color
             || self.border_color
             || self.color
+            || self.icon_fill
+            || self.icon_weight
+            || self.icon_grade
+            || self.icon_optical_size
             || self.transform
         {
             return AnimationPropertyBucket::PaintOnly;

@@ -29,6 +29,10 @@ pub struct AnimatableStyle {
     pub background_color: Color,
     pub border_color: Color,
     pub color: Color,
+    pub icon_fill: Option<f32>,
+    pub icon_weight: Option<f32>,
+    pub icon_grade: Option<f32>,
+    pub icon_optical_size: Option<f32>,
     pub width: Dimension,
     pub height: Dimension,
     pub min_width: Dimension,
@@ -77,6 +81,10 @@ impl AnimatableStyle {
             background_color: s.background_color,
             border_color: s.border_color,
             color: s.color,
+            icon_fill: s.icon_fill,
+            icon_weight: s.icon_weight,
+            icon_grade: s.icon_grade,
+            icon_optical_size: s.icon_optical_size,
             width: s.width,
             height: s.height,
             min_width: s.min_width,
@@ -165,6 +173,10 @@ impl AnimatableStyle {
         s.background_color = self.background_color;
         s.border_color = self.border_color;
         s.color = self.color;
+        s.icon_fill = self.icon_fill;
+        s.icon_weight = self.icon_weight;
+        s.icon_grade = self.icon_grade;
+        s.icon_optical_size = self.icon_optical_size;
         s.width = self.width;
         s.height = self.height;
         s.min_width = self.min_width;
@@ -229,6 +241,26 @@ impl AnimatableStyle {
                 desired.border_color,
             ),
             color: pick(props.animates_color(), previous.color, desired.color),
+            icon_fill: pick(
+                props.animates_icon_fill(),
+                previous.icon_fill,
+                desired.icon_fill,
+            ),
+            icon_weight: pick(
+                props.animates_icon_weight(),
+                previous.icon_weight,
+                desired.icon_weight,
+            ),
+            icon_grade: pick(
+                props.animates_icon_grade(),
+                previous.icon_grade,
+                desired.icon_grade,
+            ),
+            icon_optical_size: pick(
+                props.animates_icon_optical_size(),
+                previous.icon_optical_size,
+                desired.icon_optical_size,
+            ),
             width: pick(props.animates_width(), previous.width, desired.width),
             height: pick(props.animates_height(), previous.height, desired.height),
             min_width: pick(
@@ -337,6 +369,11 @@ impl AnimatableStyle {
                 && self.background_color != other.background_color)
             || (props.animates_border_color() && self.border_color != other.border_color)
             || (props.animates_color() && self.color != other.color)
+            || (props.animates_icon_fill() && self.icon_fill != other.icon_fill)
+            || (props.animates_icon_weight() && self.icon_weight != other.icon_weight)
+            || (props.animates_icon_grade() && self.icon_grade != other.icon_grade)
+            || (props.animates_icon_optical_size()
+                && self.icon_optical_size != other.icon_optical_size)
             || (props.animates_width() && self.width != other.width)
             || (props.animates_height() && self.height != other.height)
             || (props.animates_min_width() && self.min_width != other.min_width)
@@ -377,6 +414,10 @@ impl AnimatableStyle {
             background_color,
             border_color,
             color,
+            icon_fill,
+            icon_weight,
+            icon_grade,
+            icon_optical_size,
             width,
             height,
             min_width,
@@ -437,6 +478,14 @@ impl Interpolate for AnimatableStyle {
             background_color: self.background_color.lerp(other.background_color, progress),
             border_color: self.border_color.lerp(other.border_color, progress),
             color: self.color.lerp(other.color, progress),
+            icon_fill: lerp_icon_axis(self.icon_fill, other.icon_fill, progress),
+            icon_weight: lerp_icon_axis(self.icon_weight, other.icon_weight, progress),
+            icon_grade: lerp_icon_axis(self.icon_grade, other.icon_grade, progress),
+            icon_optical_size: lerp_icon_axis(
+                self.icon_optical_size,
+                other.icon_optical_size,
+                progress,
+            ),
             width: lerp_dimension(self.width, other.width, progress),
             height: lerp_dimension(self.height, other.height, progress),
             min_width: lerp_dimension(self.min_width, other.min_width, progress),
@@ -808,6 +857,18 @@ impl TransitionAnimator {
             }
             _ => resolved,
         };
+        // A missing axis uses a font-specific default. Only numeric pairs
+        // provide an interpolation start.
+        let previous_displayed = AnimatableStyle {
+            icon_fill: icon_axis_start(previous_displayed.icon_fill, desired.icon_fill),
+            icon_weight: icon_axis_start(previous_displayed.icon_weight, desired.icon_weight),
+            icon_grade: icon_axis_start(previous_displayed.icon_grade, desired.icon_grade),
+            icon_optical_size: icon_axis_start(
+                previous_displayed.icon_optical_size,
+                desired.icon_optical_size,
+            ),
+            ..previous_displayed
+        };
         node.computed_style.animated_sample = false;
         let entry_count = node.computed_style.transitions.len();
 
@@ -1045,6 +1106,15 @@ fn lerp_option_f32(from: Option<f32>, to: Option<f32>, progress: f32) -> Option<
     }
 }
 
+fn icon_axis_start(from: Option<f32>, to: Option<f32>) -> Option<f32> {
+    to.map(|target| from.unwrap_or(target))
+}
+
+fn lerp_icon_axis(from: Option<f32>, to: Option<f32>, progress: f32) -> Option<f32> {
+    from.zip(to)
+        .map_or(to, |(from, to)| Some(from.lerp(to, progress)))
+}
+
 fn lerp_box_shadow(from: BoxShadow, to: BoxShadow, progress: f32) -> BoxShadow {
     BoxShadow {
         offset_x: from.offset_x.lerp(to.offset_x, progress),
@@ -1160,6 +1230,62 @@ mod tests {
             properties,
             ..TransitionStyle::default()
         }
+    }
+
+    #[test]
+    fn icon_axes_follow_independent_timelines_and_keep_font_defaults() {
+        let mut animator = TransitionAnimator::new();
+        let mut icon = WidgetNode::new("icon");
+        icon.set_mesh_key("icon");
+        icon.computed_style.transitions = vec![
+            entry(100, TransitionProperties::of_property("--icon-fill")),
+            entry(200, TransitionProperties::of_property("--icon-weight")),
+            entry(100, TransitionProperties::of_property("--icon-grade")),
+            entry(
+                200,
+                TransitionProperties::of_property("--icon-optical-size"),
+            ),
+        ];
+        for transition in &mut icon.computed_style.transitions {
+            transition.easing = mesh_core_elements::TransitionEasing::Linear;
+        }
+        icon.computed_style.icon_fill = Some(0.0);
+        icon.computed_style.icon_weight = Some(400.0);
+        icon.computed_style.icon_optical_size = Some(20.0);
+        let previous = AnimatableStyle::from_node(&icon);
+        icon.computed_style.icon_fill = Some(1.0);
+        icon.computed_style.icon_weight = Some(600.0);
+        icon.computed_style.icon_grade = Some(50.0);
+        icon.computed_style.icon_optical_size = Some(40.0);
+        let key = icon.id;
+        let start = Instant::now();
+        assert!(animator.step_node(key, &mut icon, previous, start));
+        assert_eq!(icon.computed_style.icon_grade, Some(50.0));
+
+        let half_fill = start + Duration::from_millis(50);
+        assert!(animator.apply(&mut icon, half_fill));
+        assert_eq!(icon.computed_style.icon_fill, Some(0.5));
+        assert_eq!(icon.computed_style.icon_weight, Some(450.0));
+        assert_eq!(icon.computed_style.icon_optical_size, Some(25.0));
+
+        let previous = AnimatableStyle::from_node(&icon);
+        restyle(&mut icon, |style| {
+            style.icon_fill = Some(1.0);
+            style.icon_weight = Some(600.0);
+            style.icon_grade = Some(150.0);
+            style.icon_optical_size = None;
+        });
+        assert!(animator.step_node(key, &mut icon, previous, half_fill));
+        assert_eq!(icon.computed_style.icon_optical_size, None);
+        assert!(animator.apply(&mut icon, start + Duration::from_millis(100)));
+        assert_eq!(icon.computed_style.icon_fill, Some(1.0));
+        assert_eq!(icon.computed_style.icon_weight, Some(500.0));
+        assert_eq!(icon.computed_style.icon_grade, Some(100.0));
+
+        assert!(!animator.apply(&mut icon, start + Duration::from_millis(200)));
+        assert_eq!(icon.computed_style.icon_weight, Some(600.0));
+        assert_eq!(icon.computed_style.icon_grade, Some(150.0));
+        assert_eq!(icon.computed_style.icon_optical_size, None);
     }
 
     #[test]
@@ -1787,6 +1913,10 @@ mod tests {
             background_color: Color::TRANSPARENT,
             border_color: Color::TRANSPARENT,
             color: Color::TRANSPARENT,
+            icon_fill: None,
+            icon_weight: None,
+            icon_grade: None,
+            icon_optical_size: None,
             width: Dimension::Px(10.0),
             height: Dimension::Px(10.0),
             min_width: Dimension::Auto,

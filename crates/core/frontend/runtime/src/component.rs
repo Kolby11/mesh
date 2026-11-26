@@ -1,6 +1,6 @@
 use crate::service::{
     ServiceCapabilities, apply_service_update_with_name,
-    apply_service_update_with_name_and_fingerprint, script_events_to_requests_at,
+    apply_shared_service_update, script_events_to_requests_at,
     seed_service_context, service_capabilities, typed_effects_to_requests_at,
 };
 use mesh_core_surface_config::{SurfaceLayoutSettings, resolve_frontend_module_settings_with_props};
@@ -41,7 +41,7 @@ mod virtual_list;
 pub(crate) use catalog::{
     FrontendCatalog, FrontendCatalogHandle, SharedCompiledFrontendModule,
 };
-use disclosure::{DisclosureRegistry, popover_anchor_reference, popover_is_open};
+use disclosure::DisclosureRegistry;
 #[cfg(test)]
 pub(crate) use input::KeybindResolutionSource;
 use input::ResolvedSurfaceShortcut;
@@ -136,7 +136,7 @@ fn update_cached_service_payload(
     update_cached_service_payload_with_generation(
         cache,
         service_name,
-        payload,
+        &Arc::new(payload.clone()),
         fingerprint,
         "<cached>",
         0,
@@ -146,7 +146,7 @@ fn update_cached_service_payload(
 fn update_cached_service_payload_with_generation(
     cache: &mut HashMap<String, CachedServicePayload>,
     service_name: &str,
-    payload: &serde_json::Value,
+    payload: &Arc<serde_json::Value>,
     fingerprint: u64,
     source_module: &str,
     generation: u64,
@@ -157,7 +157,7 @@ fn update_cached_service_payload_with_generation(
             return Some(previous);
         }
         if cached.fingerprint != fingerprint {
-            cached.value = Arc::new(payload.clone());
+            cached.value = Arc::clone(payload);
             cached.fingerprint = fingerprint;
         }
         if generation != 0 {
@@ -170,7 +170,7 @@ fn update_cached_service_payload_with_generation(
     cache.insert(
         service_name.to_owned(),
         CachedServicePayload {
-            value: Arc::new(payload.clone()),
+            value: Arc::clone(payload),
             fingerprint,
             generation,
             source_module: source_module.to_owned(),
@@ -213,6 +213,7 @@ fn update_last_service_trace(
 #[derive(Default)]
 struct InstanceKeyInterner {
     keys: HashSet<Arc<str>>,
+    keyed: HashSet<Arc<str>>,
     scratch: String,
 }
 
@@ -343,6 +344,9 @@ impl InstanceKeyInterner {
         }
         let key: Arc<str> = Arc::from(self.scratch.as_str());
         self.keys.insert(Arc::clone(&key));
+        if loop_identity.is_some() || self.keyed.contains(host) {
+            self.keyed.insert(Arc::clone(&key));
+        }
         key
     }
 
@@ -360,6 +364,9 @@ impl InstanceKeyInterner {
         }
         let key: Arc<str> = Arc::from(self.scratch.as_str());
         self.keys.insert(Arc::clone(&key));
+        if self.keyed.contains(host) {
+            self.keyed.insert(Arc::clone(&key));
+        }
         key
     }
 }
@@ -961,6 +968,8 @@ pub struct FrontendSurfaceComponent {
     previous_slider_values: HashMap<NodeId, f32>,
     interaction_snapshot_valid: bool,
     hovered_pos: (f32, f32),
+    child_input_offset: Option<(f32, f32)>,
+    child_hover_interactive: Option<bool>,
     hover_start: Option<std::time::Instant>,
     tooltip_visible: bool,
     /// Bounding box of the currently hovered element: (left, top, right, bottom).
@@ -1508,6 +1517,8 @@ impl FrontendSurfaceComponent {
             previous_slider_values: HashMap::new(),
             interaction_snapshot_valid: false,
             hovered_pos: (0.0, 0.0),
+            child_input_offset: None,
+            child_hover_interactive: None,
             hover_start: None,
             tooltip_visible: false,
             hovered_element_bounds: None,
@@ -2028,7 +2039,8 @@ impl FrontendSurfaceComponent {
     /// the retained display list describes the live tree. Any pending change
     /// can move or add nodes the list has not seen.
     pub(super) fn painted_extents(&self) -> Option<PaintedBounds<'_>> {
-        let settled = !self.dirty
+        let settled = self.child_input_offset.is_none()
+            && !self.dirty
             && !self.style_only_dirty
             && !self.animation_only_dirty
             && !self.next_frame_only_dirty

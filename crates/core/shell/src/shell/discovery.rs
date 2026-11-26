@@ -1874,6 +1874,8 @@ impl Shell {
             next_shell_settings_reload_check: now,
             next_frontend_reload_check: now,
             next_watch_reconcile: now,
+            #[cfg(all(target_os = "linux", target_env = "gnu"))]
+            heap_reclaim_at: None,
             file_watcher_active: false,
             debug: DebugOverlayState::default(),
             debug_snapshot_generation: 0,
@@ -1891,6 +1893,7 @@ impl Shell {
             transfer_owned_keyboard_modes: HashMap::new(),
             service_handlers: HashMap::new(),
             backend_runtimes: HashMap::new(),
+            backend_ingress: Default::default(),
             pending_backend_runtimes: HashMap::new(),
             pending_resource_preparation: None,
             pending_profile_switch: None,

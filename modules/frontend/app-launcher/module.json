@@ -1,0 +1,45 @@
+{
+  "name": "@mesh/app-launcher",
+  "version": "0.1.0",
+  "description": "Searchable application launcher popover for shell bars and shelves.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "ui",
+    "entry": "src/main.mesh",
+    "uses": {
+      "interfaces": {
+        "mesh.apps": ">=1.0"
+      },
+      "modules": {
+        "@mesh/glass-material": ">=0.1.0"
+      },
+      "resources": {
+        "icons": [
+          "@mesh/icons-material-symbols"
+        ]
+      },
+      "capabilities": [
+        "locale.read",
+        "service.apps.read",
+        "service.apps.launch"
+      ]
+    },
+    "i18n": {
+      "defaultLocale": "en"
+    },
+    "contributes": {
+      "i18n": [
+        {
+          "id": "en",
+          "locale": "en",
+          "path": "config/i18n/en.json"
+        },
+        {
+          "id": "sk",
+          "locale": "sk",
+          "path": "config/i18n/sk.json"
+        }
+      ]
+    }
+  }
+}

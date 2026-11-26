@@ -1,0 +1,61 @@
+{
+  "name": "@mesh/paper-desktop",
+  "version": "0.1.0",
+  "description": "Paper desktop with a thin menu strip and a compact application shelf.",
+  "mesh": {
+    "apiVersion": "0.1",
+    "kind": "composition",
+    "extends": "@mesh/glass",
+    "uses": {
+      "modules": {
+        "@mesh/paper": ">=0.1.0",
+        "@mesh/level-osd": ">=0.1.0"
+      }
+    },
+    "compose": {
+      "resources": {
+        "theme": "@mesh/paper"
+      },
+      "settings": {
+        "@mesh/glass-bar": {
+          "props": {
+            "global": {
+              "desktop_layout": "paper"
+            }
+          }
+        },
+        "@mesh/glass-dock": {
+          "props": {
+            "global": {
+              "desktop_layout": "paper"
+            }
+          }
+        },
+        "@mesh/glass-widgets": {
+          "props": {
+            "global": {
+              "desktop_layout": "paper"
+            }
+          }
+        },
+        "@mesh/glass-notifications#default": {
+          "surface": {
+            "anchor": "right"
+          }
+        },
+        "@mesh/glass-notifications": {
+          "props": {
+            "global": {
+              "right_aligned": true
+            }
+          }
+        }
+      },
+      "roots": {
+        "@mesh/level-osd#default": {
+          "module": "@mesh/level-osd"
+        }
+      }
+    }
+  }
+}

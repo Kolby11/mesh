@@ -1,4 +1,24 @@
+<props>
+{
+    compact = { type = "bool", default = false },
+    rail = { type = "bool", default = false },
+    lcd = { type = "bool", default = false },
+}
+</props>
+
 <template>
+    {#if props.compact}
+        <button class="clock-compact" class:clock-rail={props.rail} class:clock-lcd={props.lcd}
+            ref="glassCalendar" title={full_label} aria-label={full_label} aria-haspopup="true">
+            {#if props.rail}
+                <text>{hours}</text>
+                <text>{minutes}</text>
+            {:else}
+                <text>{compact_label}</text>
+            {/if}
+            <Calendar rail={props.rail} />
+        </button>
+    {:else}
     <row class="clock-group">
         <button class="pill pill-clock" ref="glassCalendar" title={full_label} aria-label={full_label}>
             <text class="big">{hours}</text>
@@ -17,6 +37,7 @@
             </column>
         </row>
     </row>
+    {/if}
 </template>
 
 <script lang="luau">
@@ -38,6 +59,7 @@ day = "--"
 weekday = ""
 month = ""
 full_label = ""
+compact_label = ""
 
 local function date(pattern, now)
     local ok, value = pcall(os.date, pattern, now)
@@ -58,7 +80,9 @@ local function tick()
     day = date("%d", now)
     weekday = string.upper(date("%a", now))
     month = string.upper(date("%b", now))
-    full_label = mesh.locale.format_date(now, "full") .. " " .. mesh.locale.format_time(now)
+    local time = mesh.locale.format_time(now)
+    full_label = mesh.locale.format_date(now, "full") .. " " .. time
+    compact_label = mesh.locale.format_date(now, "short") .. "  " .. time
 end
 
 effect(function()
@@ -74,6 +98,28 @@ end)
 </script>
 
 <style>
+    .clock-compact {
+        flex-shrink: 0;
+        height: 26px;
+        padding-inline: 8px;
+        align-items: center;
+        justify-content: center;
+        color: var(--glass-text);
+        background: transparent;
+        font-size: 13px;
+        font-weight: 700;
+    }
+
+    .clock-compact:hover { background: var(--glass-hover); }
+    .clock-rail { flex-direction: column; height: 36px; padding: 0 8px; color: var(--color-inverse-on-surface); }
+    .clock-lcd {
+        font-family: var(--typography-family-plain);
+        background: var(--color-inverse-surface);
+        color: var(--color-inverse-on-surface);
+        border-radius: 0;
+        box-shadow: inset 1px 1px 0 var(--glass-rim-inset);
+    }
+
     .clock-group {
         height: 100%;
         align-items: center;

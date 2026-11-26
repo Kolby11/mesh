@@ -11,7 +11,7 @@
         "exec.argv:wf-recorder:[\"-f\",\"*\"]",
         "exec.argv:pkill:[\"-INT\",\"-x\",\"wf-recorder\"]",
         "exec.argv:pgrep:[\"-x\",\"wf-recorder\"]",
-        "exec.argv:sh:[\"-c\",\"d=\\\"${XDG_VIDEOS_DIR:-$HOME/Videos}/Recordings\\\"; mkdir -p \\\"$d\\\" && printf '%s' \\\"$d\\\"\"]"
+        "exec.argv:sh:[\"-c\",\"d=\\\"${XDG_VIDEOS_DIR:-$HOME/Videos}/Recordings\\\"; mkdir -p -- \\\"$d\\\" && out=$(mktemp -d -- \\\"$d/recording-XXXXXXXX\\\") && printf '%s/recording.mp4' \\\"$out\\\"\"]"
       ],
       "binaries": [
         {

@@ -116,10 +116,11 @@ function onPoweroff() confirm("poweroff", session.poweroff) end
         top: 6px;
         padding: 10px;
         gap: 10px;
-        border-radius: 28px;
-        border: 1px solid var(--glass-rim);
+        border-radius: var(--glass-radius-window);
+        border: var(--glass-border-width) solid var(--glass-rim);
         background-image: var(--glass-surface-panel);
         backdrop-filter: var(--glass-backdrop-panel);
+        box-shadow: var(--glass-shadow-card);
         opacity: 0;
         transform: translateX(96px);
         transition: transform 220ms var(--animation-curves-bezier-emphasized-decelerate),
@@ -137,7 +138,7 @@ function onPoweroff() confirm("poweroff", session.poweroff) end
         padding: 0;
         justify-content: center;
         align-items: center;
-        border-radius: 24px;
+        border-radius: var(--glass-radius-control);
         border: 1px solid var(--glass-control-rim);
         background-color: var(--glass-fill-lens);
         background-image: var(--glass-surface-control);

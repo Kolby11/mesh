@@ -521,8 +521,15 @@ fn shipped_glass_material_resolves_and_paints_under_every_theme_mode() {
                     assert_eq!(style.color, Color::from_css(&foreground).unwrap());
                     match declaration.id.as_str() {
                         "tapedeck" => {
-                            assert!(style.box_shadow.inset);
-                            assert_eq!(style.additional_box_shadows.len(), 3);
+                            assert!(!style.box_shadow.inset);
+                            assert_eq!(style.box_shadow.offset_x, 1.0);
+                            assert_eq!(style.box_shadow.offset_y, 1.0);
+                            assert_eq!(style.box_shadow.blur_radius, 0.0);
+                            assert_eq!(style.additional_box_shadows.len(), 1);
+                            let highlight = style.additional_box_shadows[0];
+                            assert_eq!(highlight.offset_x, -1.0);
+                            assert_eq!(highlight.offset_y, -1.0);
+                            assert_eq!(highlight.color, Color::WHITE);
                         }
                         "bubblegum" => {
                             assert_eq!(style.box_shadow.offset_x, 2.0);
